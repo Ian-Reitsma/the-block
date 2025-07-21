@@ -225,23 +225,32 @@ if ! command -v cargo-make &>/dev/null; then
 fi
 
 # --------------------------------------------------------------------
-# 6. Mojo SDK (optional)
+# 6. Modular MAX/Mojo via pixi (2025+)
 # --------------------------------------------------------------------
-MOJO_INSTALL_OK=true
-if ! command -v mojo &>/dev/null; then
-  cecho cyan "   → Installing Mojo SDK (optional)…"
-  if ! curl -s https://get.magic.modular.com | sh -s -- --accept-license --default; then
-    cecho yellow "[WARN] Mojo/Magic install failed (network or Modular down). Skipping Mojo setup."
-    MOJO_INSTALL_OK=false
-  else
-    export MODULAR_HOME="$HOME/.modular"
-    export PATH="$MODULAR_HOME/pkg/packages.modular.com_mojo/bin:$PATH"
+MODULAR_OK=true
+if ! command -v max &>/dev/null && ! command -v mojo &>/dev/null; then
+  cecho cyan "   → Installing Modular MAX/Mojo stack using pixi…"
+  if ! command -v pixi &>/dev/null; then
+    cecho blue "   → pixi not found, installing…"
+    curl -fsSL https://pixi.sh/install.sh | bash
+    export PATH="$HOME/.pixi/bin:$PATH"
   fi
+  if [[ ! -f pixi.toml ]]; then
+    cecho blue "   → Initializing pixi environment for Modular…"
+    pixi init the-block -c https://conda.modular.com/max-nightly/ -c conda-forge || MODULAR_OK=false
+  fi
+  cecho blue "   → Adding Modular (max, mojo, etc) to pixi env…"
+  pixi add modular || MODULAR_OK=false
+  cecho blue "   → Adding openai to pixi env (optional)…"
+  pixi add openai || true
+  cecho cyan "   → Activating pixi environment…"
+  pixi shell || MODULAR_OK=false
 fi
 
-if ! $MOJO_INSTALL_OK; then
-  cecho yellow "[WARN] Mojo is not installed. You may need to run the installer manually when networking is ready."
+if ! $MODULAR_OK; then
+  cecho yellow "[WARN] Modular stack install failed or network is down. You may need to run manually with a working connection."
 fi
+
 
 
 [[ -f requirements.txt ]] || echo "# placeholder" > requirements.txt

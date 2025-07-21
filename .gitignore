@@ -1,0 +1,8 @@
+env/
+.emv/
+venv/
+.venv/
+.DE_Store
+.vscode/
+*.pyc
+__pycache__/
