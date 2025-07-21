@@ -1,0 +1,12 @@
+[workspace]
+authors = ["Ian-Reitsma <ginge425@gmail.com>"]
+channels = ["https://conda.modular.com/max-nightly", "conda-forge"]
+name = "the-block"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+modular = ">=25.5.0.dev2025072105,<26"
+openai = ">=1.97.0,<2"
