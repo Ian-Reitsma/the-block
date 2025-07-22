@@ -4,6 +4,13 @@ use std::collections::HashMap;
 use blake3;
 use std::convert::TryInto;
 use hex;
+use sled::{Db, IVec};
+use serde::{Serialize, Deserialize};
+use bincode;
+
+const BLOCK_REWARD_CONSUMER: u64 = 50;
+const BLOCK_REWARD_INDUSTRIAL: u64 = 50;
+
 
 
 // === Basic types ===
@@ -26,7 +33,7 @@ pub struct Account {
 }
 
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Transaction {
     #[pyo3(get)]
     pub from: String,
@@ -41,7 +48,7 @@ pub struct Transaction {
 }
 
 #[pyclass]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Block {
     #[pyo3(get)]
     pub index: u64,
@@ -62,17 +69,27 @@ pub struct Blockchain {
     #[pyo3(get, set)]
     pub difficulty: u64,
     pub mempool: Vec<Transaction>,
+    db: Db,
 }
 
 #[pymethods]
 impl Blockchain {
     #[new]
     pub fn new() -> Self {
+        let db = sled::open("chain_db").expect("DB open");
+        let chain: Vec<Block> = db
+            .get("chain")
+            .ok()
+            .flatten()
+            .map(|ivec: IVec| bincode::deserialize(&ivec).unwrap())
+            .unwrap_or_default();
+
         Blockchain {
-            chain: Vec::new(),
+            chain,
             accounts: HashMap::new(),
             difficulty: 1_000_000,
             mempool: Vec::new(),
+            db,
         }
     }
 
@@ -168,7 +185,14 @@ impl Blockchain {
         self.chain.last().unwrap().hash.clone()
     };
 
-    let txs = self.mempool.clone();
+    let mut txs = vec![Transaction {
+        from: "0".repeat(34),
+        to: "miner".to_string(),  // TODO: real miner addr
+        amount_consumer: BLOCK_REWARD_CONSUMER,
+        amount_industrial: BLOCK_REWARD_INDUSTRIAL,
+        fee: 0,
+    }];
+    txs.extend(self.mempool.clone());
     self.mempool.clear();
 
     let mut nonce = 0u64;
@@ -176,7 +200,6 @@ impl Blockchain {
         let hash = calculate_hash(index, &prev_hash, nonce, &txs);
         let hash_bytes = hex_to_bytes(&hash);
         let zeros = leading_zero_bits(&hash_bytes);
-        // Removed: if nonce % 1000 == 0 { println!("Nonce: {}, leading zeros: {}", nonce, zeros); }
         if zeros >= self.difficulty as u32 {
             let block = Block {
                 index,
@@ -186,11 +209,38 @@ impl Blockchain {
                 hash,
             };
             self.chain.push(block.clone());
+            for tx in &block.transactions {
+                // If not present, create receiver
+                let receiver = self.accounts.entry(tx.to.clone()).or_insert(Account {
+                    address: tx.to.clone(),
+                    balance: TokenBalance {
+                        consumer: 0,
+                        industrial: 0,
+                    },
+                });
+                receiver.balance.consumer += tx.amount_consumer;
+                receiver.balance.industrial += tx.amount_industrial;
+
+                // If not coinbase, subtract from sender
+                if tx.from != "0".repeat(34) {
+                    if let Some(sender) = self.accounts.get_mut(&tx.from) {
+                        sender.balance.consumer = sender.balance.consumer.saturating_sub(tx.amount_consumer + tx.fee);
+                        sender.balance.industrial = sender.balance.industrial.saturating_sub(tx.amount_industrial + tx.fee);
+                    }
+                }
+            }
+            // persist chain
+            self.db
+                .insert("chain", bincode::serialize(&self.chain).unwrap())
+                .unwrap();
+            self.db.flush().unwrap();
+
             return Ok(block);
         }
         nonce = nonce.checked_add(1).ok_or_else(|| PyValueError::new_err("Nonce overflow"))?;
     }
 }
+
 
 
 
