@@ -1,0 +1,13 @@
+[package]
+name = "the_block"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+pyo3 = { version = "0.18", features = ["extension-module"] }
+blake3 = "1.3"
+hex = "0.4"
+
+[lib]
+name = "the_block"
+crate-type = ["cdylib"]

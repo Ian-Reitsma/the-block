@@ -7,3 +7,9 @@ venv/
 .vscode/
 *.pyc
 __pycache__/
+
+
+# Added by cargo
+
+/target
+.bootstrap_partial
