@@ -10,35 +10,21 @@ touch "$PARTIAL_RUN_FLAG"
 cleanup() {
   if [[ -f "$PARTIAL_RUN_FLAG" ]]; then
     cecho red "[ABORTED] Cleaning up partial bootstrap/build artifacts..."
-      # Remove partial build artifacts (native builds)
       [[ -d build ]] && rm -rf build && cecho yellow "  → Removed ./build directory"
       [[ -d dist ]] && rm -rf dist && cecho yellow "  → Removed ./dist directory"
       [[ -d __pycache__ ]] && rm -rf __pycache__ && cecho yellow "  → Removed Python __pycache__"
       [[ -d .pytest_cache ]] && rm -rf .pytest_cache && cecho yellow "  → Removed .pytest_cache"
       [[ -d node_modules && ! -s package.json ]] && rm -rf node_modules && cecho yellow "  → Removed node_modules (no package.json found)"
       [[ -d .mypy_cache ]] && rm -rf .mypy_cache && cecho yellow "  → Removed .mypy_cache"
-
-      # Remove temporary files left by failed/partial CMake
       [[ -f CMakeCache.txt ]] && rm -f CMakeCache.txt && cecho yellow "  → Removed CMakeCache.txt"
       [[ -d CMakeFiles ]] && rm -rf CMakeFiles && cecho yellow "  → Removed CMakeFiles directory"
-
-      # Remove .venv if it was just created and pip install failed (could add flag logic for even safer handling)
-      # [[ -d .venv && ! -f requirements.txt ]] && rm -rf .venv && cecho yellow "  → Removed .venv (created in partial run, no requirements.txt found)"
-
-      # Remove pip wheel/temp files
       [[ -d pip-wheel-metadata ]] && rm -rf pip-wheel-metadata && cecho yellow "  → Removed pip wheel metadata"
       [[ -d .tox ]] && rm -rf .tox && cecho yellow "  → Removed .tox environment"
-
-      # Clean up lock files if the bootstrap was interrupted
       [[ -f poetry.lock && ! -f pyproject.toml ]] && rm -f poetry.lock && cecho yellow "  → Removed poetry.lock (orphaned)"
       [[ -f package-lock.json && ! -f package.json ]] && rm -f package-lock.json && cecho yellow "  → Removed package-lock.json (orphaned)"
       [[ -f pnpm-lock.yaml && ! -f package.json ]] && rm -f pnpm-lock.yaml && cecho yellow "  → Removed pnpm-lock.yaml (orphaned)"
       [[ -f yarn.lock && ! -f package.json ]] && rm -f yarn.lock && cecho yellow "  → Removed yarn.lock (orphaned)"
-
-      # If you want, you can clean up logs:
       [[ -f bootstrap.log ]] && rm -f bootstrap.log && cecho yellow "  → Removed bootstrap.log"
-      
-      # Optional: Docker cleanup (if you use Docker in the script and label containers)
       if [[ -n "${CI:-}" && -n "$(command -v docker)" ]]; then
         cecho yellow "Cleaning up Docker containers/images from interrupted bootstrap..."
         docker ps -aq --filter "label=the-block-bootstrap" | xargs -r docker rm -f
@@ -52,7 +38,6 @@ trap cleanup SIGINT SIGTERM ERR
 
 # ---- Color Echo Helper ----
 cecho() {
-  # Usage: cecho COLOR "your message"
   local color="$1"; shift
   case "$color" in
     red) color="31";;
@@ -70,10 +55,9 @@ if [[ ! "$SHELL" =~ (bash|zsh)$ ]]; then
 fi
 
 APP_NAME="the-block"
-REQUIRED_PYTHON="3.12.3"       # Pin for exact version via pyenv if needed
-REQUIRED_NODE="20"             # Node LTS major version
+REQUIRED_PYTHON="3.12.3"
+REQUIRED_NODE="20"
 NVM_VERSION="0.39.7"
-MOJO_VERSION_MIN="0.6.0"
 
 cecho cyan "==> [$APP_NAME] Universal Bootstrap"
 
@@ -145,7 +129,6 @@ elif command -v conda &>/dev/null && conda info --envs | grep -q '3\.12'; then
   cecho cyan "   → Using Python 3.12 from Conda environment."
   PY_BIN="$(conda run which python)"
 else
-  # pyenv fallback, will self-install if not present
   if ! command -v pyenv &>/dev/null; then
     cecho yellow "   → Installing pyenv (user mode)…"
     curl https://pyenv.run | bash
@@ -166,7 +149,7 @@ else
 fi
 
 if [[ ! -d .venv ]]; then
-  cecho cyan "   → Creating venv with Python $REQUIRED_PYTHON…"
+  cecho cyan "   → Creating venv with Python $REQUIRED_PYTHON"
   "$PY_BIN" -m venv .venv
 fi
 source .venv/bin/activate
@@ -208,49 +191,35 @@ if ! command -v pnpm &>/dev/null; then
 fi
 
 # --------------------------------------------------------------------
-# 5. Rust tool-chain (+ just, cargo-make)
+# 5. Rust tool-chain (+ just, cargo-make, maturin)
 # --------------------------------------------------------------------
+if [[ ! -d .venv ]]; then
+  cecho cyan "   → Creating venv with Python $REQUIRED_PYTHON"
+  "$PY_BIN" -m venv .venv
+fi
+source .venv/bin/activate
+
+python -m pip install --upgrade pip setuptools wheel
+
+# Install maturin from pip to avoid cargo build issues
+pip install --upgrade maturin
+
+# --- Rust toolchain, just, cargo-make installs ---
 if ! command -v cargo &>/dev/null; then
   cecho cyan "   → Installing Rust…"
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   source "$HOME/.cargo/env"
 fi
+
 if ! command -v just &>/dev/null; then
   cecho cyan "   → Installing just (Rust task runner)…"
   cargo install just || true
 fi
+
 if ! command -v cargo-make &>/dev/null; then
   cecho cyan "   → Installing cargo-make (Rust build runner)…"
   cargo install cargo-make || true
 fi
-
-# --------------------------------------------------------------------
-# 6. Modular MAX/Mojo via pixi (2025+)
-# --------------------------------------------------------------------
-MODULAR_OK=true
-if ! command -v max &>/dev/null && ! command -v mojo &>/dev/null; then
-  cecho cyan "   → Installing Modular MAX/Mojo stack using pixi…"
-  if ! command -v pixi &>/dev/null; then
-    cecho blue "   → pixi not found, installing…"
-    curl -fsSL https://pixi.sh/install.sh | bash
-    export PATH="$HOME/.pixi/bin:$PATH"
-  fi
-  if [[ ! -f pixi.toml ]]; then
-    cecho blue "   → Initializing pixi environment for Modular…"
-    pixi init the-block -c https://conda.modular.com/max-nightly/ -c conda-forge || MODULAR_OK=false
-  fi
-  cecho blue "   → Adding Modular (max, mojo, etc) to pixi env…"
-  pixi add modular || MODULAR_OK=false
-  cecho blue "   → Adding openai to pixi env (optional)…"
-  pixi add openai || true
-  cecho cyan "   → Activating pixi environment…"
-  pixi shell || MODULAR_OK=false
-fi
-
-if ! $MODULAR_OK; then
-  cecho yellow "[WARN] Modular stack install failed or network is down. You may need to run manually with a working connection."
-fi
-
 
 
 [[ -f requirements.txt ]] || echo "# placeholder" > requirements.txt
@@ -259,7 +228,7 @@ fi
 [[ -f .pre-commit-config.yaml ]] || echo "# See https://pre-commit.com" > .pre-commit-config.yaml
 
 # --------------------------------------------------------------------
-# 7. Makefile/CMake/justfile (optional, best-effort build)
+# 6. Makefile/CMake/justfile (optional, best-effort build)
 # --------------------------------------------------------------------
 if [[ -f Makefile ]]; then
   cecho blue "   → Detected Makefile, running make (if present)…"
@@ -275,7 +244,7 @@ if [[ -f justfile || -f Justfile ]]; then
 fi
 
 # --------------------------------------------------------------------
-# 8. Python/Node deps (skip if missing)
+# 7. Python/Node deps (skip if missing)
 # --------------------------------------------------------------------
 if [[ -f requirements.txt ]]; then
   cecho blue "   → pip install -r requirements.txt"
@@ -306,14 +275,14 @@ else
 fi
 
 # --------------------------------------------------------------------
-# 9. Docker (warn but don’t fail)
+# 8. Docker (warn but don’t fail)
 # --------------------------------------------------------------------
 if ! command -v docker &>/dev/null; then
   cecho yellow "⚠  Docker not detected — devnet/CI features will be disabled."
 fi
 
 # --------------------------------------------------------------------
-# 10. Pre-commit (skip in CI/empty), direnv, pipx
+# 9. Pre-commit (skip in CI/empty), direnv, pipx
 # --------------------------------------------------------------------
 if [[ -f .pre-commit-config.yaml ]] && [[ "$IS_CI" == "false" ]]; then
   cecho blue "   → Installing pre-commit hooks"
@@ -328,7 +297,7 @@ if command -v pipx &>/dev/null && [[ -f requirements.txt ]]; then
 fi
 
 # --------------------------------------------------------------------
-# 11. Misc: secrets, diagnostics, activation
+# 10. Misc: secrets, diagnostics, activation
 # --------------------------------------------------------------------
 if [[ -f .env ]] && grep -q 'changeme' .env; then
   cecho yellow "⚠  Replace placeholder secrets in .env before production use!"
@@ -339,7 +308,6 @@ cecho green "==> [$APP_NAME] bootstrap complete"
 cecho cyan "   Activate venv:   source .venv/bin/activate"
 command -v node   &>/dev/null && cecho green "   Node:   $(node -v)"
 command -v python &>/dev/null && cecho green "   Python: $(python -V)"
-command -v mojo   &>/dev/null && cecho green "   Mojo:   $(mojo --version)"
 command -v rustc  &>/dev/null && cecho green "   Rust:   $(rustc --version)"
 command -v cargo  &>/dev/null && cecho green "   Cargo:  $(cargo --version)"
 command -v conda  &>/dev/null && cecho green "   Conda:  $(conda --version)"
