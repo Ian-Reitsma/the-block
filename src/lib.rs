@@ -7,11 +7,27 @@ use hex;
 use sled::{Db, IVec};
 use serde::{Serialize, Deserialize};
 use bincode;
+use rand::rngs::OsRng;
+use rand::RngCore;
+use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
+
 
 const BLOCK_REWARD_CONSUMER: u64 = 50;
 const BLOCK_REWARD_INDUSTRIAL: u64 = 50;
 
-
+// === Helpers for ed25519 v2.x ([u8; 32], [u8; 64]) ===
+fn to_array_32(bytes: &[u8]) -> [u8; 32] {
+    bytes.try_into().expect("Expected 32 bytes")
+}
+fn to_array_64(bytes: &[u8]) -> [u8; 64] {
+    bytes.try_into().expect("Expected 64 bytes")
+}
+fn hex_to_bytes_vec(hex: &str) -> Vec<u8> {
+    hex::decode(hex).expect("Invalid hex string")
+}
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    hex::encode(bytes)
+}
 
 // === Basic types ===
 
@@ -45,6 +61,10 @@ pub struct Transaction {
     pub amount_industrial: u64,
     #[pyo3(get)]
     pub fee: u64,
+    #[pyo3(get, set)]
+    pub public_key: Vec<u8>,
+    #[pyo3(get, set)]
+    pub signature: Vec<u8>,
 }
 
 #[pyclass]
@@ -81,7 +101,7 @@ impl Blockchain {
             .get("chain")
             .ok()
             .flatten()
-            .map(|ivec: IVec| bincode::deserialize(&ivec).unwrap())
+            .and_then(|ivec: IVec| bincode::deserialize(&ivec).ok())
             .unwrap_or_default();
 
         Blockchain {
@@ -131,6 +151,8 @@ impl Blockchain {
         amount_consumer: u64,
         amount_industrial: u64,
         fee: u64,
+        public_key: Vec<u8>,
+        signature: Vec<u8>,
     ) -> PyResult<()> {
         let sender = self
             .accounts
@@ -141,6 +163,21 @@ impl Blockchain {
             || sender.balance.industrial < amount_industrial + fee
         {
             return Err(PyValueError::new_err("Insufficient balance"));
+        }
+
+        // Construct message for signature check
+        let mut msg = Vec::new();
+        msg.extend(from.as_bytes());
+        msg.extend(to.as_bytes());
+        msg.extend(&amount_consumer.to_le_bytes());
+        msg.extend(&amount_industrial.to_le_bytes());
+        msg.extend(&fee.to_le_bytes());
+
+        let pubkey = VerifyingKey::from_bytes(&to_array_32(&public_key))
+            .map_err(|_| PyValueError::new_err("Invalid public key"))?;
+        let sig = Signature::from_bytes(&to_array_64(&signature));
+        if pubkey.verify(&msg, &sig).is_err() {
+            return Err(PyValueError::new_err("Signature verification failed"));
         }
 
         sender.balance.consumer -= amount_consumer + fee;
@@ -162,6 +199,8 @@ impl Blockchain {
             amount_consumer,
             amount_industrial,
             fee,
+            public_key,
+            signature,
         };
         self.add_transaction_to_mempool(tx)?;
 
@@ -178,71 +217,70 @@ impl Blockchain {
     }
 
     pub fn mine_block(&mut self) -> PyResult<Block> {
-    let index = self.chain.len() as u64;
-    let prev_hash = if index == 0 {
-        "0".repeat(64)
-    } else {
-        self.chain.last().unwrap().hash.clone()
-    };
+        let index = self.chain.len() as u64;
+        let prev_hash = if index == 0 {
+            "0".repeat(64)
+        } else {
+            self.chain.last().unwrap().hash.clone()
+        };
 
-    let mut txs = vec![Transaction {
-        from: "0".repeat(34),
-        to: "miner".to_string(),  // TODO: real miner addr
-        amount_consumer: BLOCK_REWARD_CONSUMER,
-        amount_industrial: BLOCK_REWARD_INDUSTRIAL,
-        fee: 0,
-    }];
-    txs.extend(self.mempool.clone());
-    self.mempool.clear();
+        let mut txs = vec![Transaction {
+            from: "0".repeat(34),
+            to: "miner".to_string(),  // TODO: real miner addr
+            amount_consumer: BLOCK_REWARD_CONSUMER,
+            amount_industrial: BLOCK_REWARD_INDUSTRIAL,
+            fee: 0,
+            public_key: vec![],
+            signature: vec![],
+        }];
+        txs.extend(self.mempool.clone());
+        self.mempool.clear();
 
-    let mut nonce = 0u64;
-    loop {
-        let hash = calculate_hash(index, &prev_hash, nonce, &txs);
-        let hash_bytes = hex_to_bytes(&hash);
-        let zeros = leading_zero_bits(&hash_bytes);
-        if zeros >= self.difficulty as u32 {
-            let block = Block {
-                index,
-                previous_hash: prev_hash,
-                transactions: txs,
-                nonce,
-                hash,
-            };
-            self.chain.push(block.clone());
-            for tx in &block.transactions {
-                // If not present, create receiver
-                let receiver = self.accounts.entry(tx.to.clone()).or_insert(Account {
-                    address: tx.to.clone(),
-                    balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
-                    },
-                });
-                receiver.balance.consumer += tx.amount_consumer;
-                receiver.balance.industrial += tx.amount_industrial;
+        let mut nonce = 0u64;
+        loop {
+            let hash = calculate_hash(index, &prev_hash, nonce, &txs);
+            let hash_bytes = hex_to_bytes(&hash);
+            let zeros = leading_zero_bits(&hash_bytes);
+            if zeros >= self.difficulty as u32 {
+                let block = Block {
+                    index,
+                    previous_hash: prev_hash,
+                    transactions: txs,
+                    nonce,
+                    hash,
+                };
+                self.chain.push(block.clone());
+                for tx in &block.transactions {
+                    // If not present, create receiver
+                    let receiver = self.accounts.entry(tx.to.clone()).or_insert(Account {
+                        address: tx.to.clone(),
+                        balance: TokenBalance {
+                            consumer: 0,
+                            industrial: 0,
+                        },
+                    });
+                    receiver.balance.consumer += tx.amount_consumer;
+                    receiver.balance.industrial += tx.amount_industrial;
 
-                // If not coinbase, subtract from sender
-                if tx.from != "0".repeat(34) {
-                    if let Some(sender) = self.accounts.get_mut(&tx.from) {
-                        sender.balance.consumer = sender.balance.consumer.saturating_sub(tx.amount_consumer + tx.fee);
-                        sender.balance.industrial = sender.balance.industrial.saturating_sub(tx.amount_industrial + tx.fee);
+                    // If not coinbase, subtract from sender
+                    if tx.from != "0".repeat(34) {
+                        if let Some(sender) = self.accounts.get_mut(&tx.from) {
+                            sender.balance.consumer = sender.balance.consumer.saturating_sub(tx.amount_consumer + tx.fee);
+                            sender.balance.industrial = sender.balance.industrial.saturating_sub(tx.amount_industrial + tx.fee);
+                        }
                     }
                 }
+                // persist chain
+                self.db
+                    .insert("chain", bincode::serialize(&self.chain).unwrap())
+                    .unwrap();
+                self.db.flush().unwrap();
+
+                return Ok(block);
             }
-            // persist chain
-            self.db
-                .insert("chain", bincode::serialize(&self.chain).unwrap())
-                .unwrap();
-            self.db.flush().unwrap();
-
-            return Ok(block);
+            nonce = nonce.checked_add(1).ok_or_else(|| PyValueError::new_err("Nonce overflow"))?;
         }
-        nonce = nonce.checked_add(1).ok_or_else(|| PyValueError::new_err("Nonce overflow"))?;
     }
-}
-
-
-
 
     pub fn validate_block(&self, block: &Block) -> PyResult<bool> {
         let index = block.index;
@@ -290,6 +328,36 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
     hex::decode(hex).expect("Invalid hex string")
 }
 
+// === Ed25519 keygen/sign/verify - CORRECT FOR V2 ===
+
+#[pyfunction]
+pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
+    use rand::RngCore;
+    let mut rng = rand::rngs::OsRng;
+    let mut priv_bytes = [0u8; 32];
+    rng.fill_bytes(&mut priv_bytes);
+    let signing = SigningKey::from_bytes(&priv_bytes);
+    let verifying = signing.verifying_key();
+    (priv_bytes.to_vec(), verifying.to_bytes().to_vec())
+}
+
+#[pyfunction]
+pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> Vec<u8> {
+    let signing = SigningKey::from_bytes(&to_array_32(&private));
+    let sig: Signature = signing.sign(&message);
+    sig.to_bytes().to_vec()
+}
+
+#[pyfunction]
+pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -> bool {
+    let verifying = match VerifyingKey::from_bytes(&to_array_32(&public)) {
+        Ok(vk) => vk,
+        Err(_) => return false,
+    };
+    let sig = Signature::from_bytes(&to_array_64(&signature));
+    verifying.verify(&message, &sig).is_ok()
+}
+
 // === Python module ===
 
 #[pymodule]
@@ -299,6 +367,10 @@ fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Transaction>()?;
     m.add_class::<TokenBalance>()?;
+
+    m.add_function(pyo3::wrap_pyfunction!(generate_keypair, m)?)?;
+    m.add_function(pyo3::wrap_pyfunction!(sign_message, m)?)?;
+    m.add_function(pyo3::wrap_pyfunction!(verify_signature, m)?)?;
     Ok(())
 }
 
