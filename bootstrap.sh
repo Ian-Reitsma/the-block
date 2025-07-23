@@ -1,140 +1,177 @@
 #!/usr/bin/env bash
-# ====================================================================
-# the-block ▸ universal bootstrap (Linux • macOS • WSL2 • Codex/CI/empty-repo safe)
-# ====================================================================
-set -Eeuo pipefail
+# === ultimate bootstrap (never abort, always report, always suggest fix) ===
 
-PARTIAL_RUN_FLAG=".bootstrap_partial"
-touch "$PARTIAL_RUN_FLAG"
+if [[ -z "$BASH_VERSION" ]]; then
+  echo "This script must be run in bash. Run as: bash $0"
+  exit 1
+fi
 
-cleanup() {
-  if [[ -f "$PARTIAL_RUN_FLAG" ]]; then
-    cecho red "[ABORTED] Cleaning up partial bootstrap/build artifacts..."
-      [[ -d build ]] && rm -rf build && cecho yellow "  → Removed ./build directory"
-      [[ -d dist ]] && rm -rf dist && cecho yellow "  → Removed ./dist directory"
-      [[ -d __pycache__ ]] && rm -rf __pycache__ && cecho yellow "  → Removed Python __pycache__"
-      [[ -d .pytest_cache ]] && rm -rf .pytest_cache && cecho yellow "  → Removed .pytest_cache"
-      [[ -d node_modules && ! -s package.json ]] && rm -rf node_modules && cecho yellow "  → Removed node_modules (no package.json found)"
-      [[ -d .mypy_cache ]] && rm -rf .mypy_cache && cecho yellow "  → Removed .mypy_cache"
-      [[ -f CMakeCache.txt ]] && rm -f CMakeCache.txt && cecho yellow "  → Removed CMakeCache.txt"
-      [[ -d CMakeFiles ]] && rm -rf CMakeFiles && cecho yellow "  → Removed CMakeFiles directory"
-      [[ -d pip-wheel-metadata ]] && rm -rf pip-wheel-metadata && cecho yellow "  → Removed pip wheel metadata"
-      [[ -d .tox ]] && rm -rf .tox && cecho yellow "  → Removed .tox environment"
-      [[ -f poetry.lock && ! -f pyproject.toml ]] && rm -f poetry.lock && cecho yellow "  → Removed poetry.lock (orphaned)"
-      [[ -f package-lock.json && ! -f package.json ]] && rm -f package-lock.json && cecho yellow "  → Removed package-lock.json (orphaned)"
-      [[ -f pnpm-lock.yaml && ! -f package.json ]] && rm -f pnpm-lock.yaml && cecho yellow "  → Removed pnpm-lock.yaml (orphaned)"
-      [[ -f yarn.lock && ! -f package.json ]] && rm -f yarn.lock && cecho yellow "  → Removed yarn.lock (orphaned)"
-      [[ -f bootstrap.log ]] && rm -f bootstrap.log && cecho yellow "  → Removed bootstrap.log"
-      if [[ -n "${CI:-}" && -n "$(command -v docker)" ]]; then
-        cecho yellow "Cleaning up Docker containers/images from interrupted bootstrap..."
-        docker ps -aq --filter "label=the-block-bootstrap" | xargs -r docker rm -f
-        docker images -q --filter "label=the-block-bootstrap" | xargs -r docker rmi -f
-      fi
-    cecho red "[CLEANUP DONE] Exiting due to error/interruption."
+cecho() {
+  local color="$1"; shift
+  if [[ -t 1 ]]; then
+    case "$color" in
+      red) tput setaf 1;;
+      green) tput setaf 2;;
+      yellow) tput setaf 3;;
+      blue) tput setaf 4;;
+      cyan) tput setaf 6;;
+    esac
+    echo -e "$*"
+    tput sgr0
+  else
+    echo "$*"
   fi
 }
 
-trap cleanup SIGINT SIGTERM ERR
-
-# ---- Color Echo Helper ----
-cecho() {
-  local color="$1"; shift
-  case "$color" in
-    red) color="31";;
-    green) color="32";;
-    yellow) color="33";;
-    blue) color="34";;
-    cyan) color="36";;
-    *) color="0";;
-  esac
-  echo -e "\033[1;${color}m$*\033[0m"
-}
-
-if [[ ! "$SHELL" =~ (bash|zsh)$ ]]; then
-  cecho yellow "[WARN] Detected shell: $SHELL. This script is tested on Bash/Zsh. If you use Fish or tcsh, odd errors may occur."
-fi
+set -Euo pipefail
+IFS=$'\n\t'
 
 APP_NAME="the-block"
 REQUIRED_PYTHON="3.12.3"
 REQUIRED_NODE="20"
 NVM_VERSION="0.39.7"
+PARTIAL_RUN_FLAG=".bootstrap_partial"
+touch "$PARTIAL_RUN_FLAG"
 
-cecho cyan "==> [$APP_NAME] Universal Bootstrap"
+FAILED_STEPS=()
+SKIPPED_STEPS=()
+FIX_COMMANDS=()
+BROKEN_PYTHON=0
 
-# --------------------------------------------------------------------
-# 0. OS / arch / shell probe
-# --------------------------------------------------------------------
+trap 'cleanup; exit 1' SIGINT SIGTERM
+
+cleanup() {
+  if [[ -f "$PARTIAL_RUN_FLAG" ]]; then
+    cecho red "[ABORTED] Cleaning up partial bootstrap/build artifacts..."
+    for dir in build dist __pycache__ .pytest_cache .mypy_cache .tox CMakeFiles pip-wheel-metadata; do
+      [[ -d $dir ]] && rm -rf "$dir" && cecho yellow "  → Removed $dir"
+    done
+    for file in CMakeCache.txt poetry.lock package-lock.json pnpm-lock.yaml yarn.lock bootstrap.log; do
+      [[ -f $file && ! -f package.json ]] && rm -f "$file" && cecho yellow "  → Removed orphaned $file"
+    done
+    cecho red "[CLEANUP DONE] Exiting due to error/interruption."
+  fi
+}
+
+run_step() {
+  local desc="$1"; shift
+  cecho cyan "→ $desc"
+  set +e
+  "$@"
+  local status=$?
+  set -e
+  if [[ $status -ne 0 ]]; then
+    cecho red "   ✗ $desc failed (exit $status)"
+    FAILED_STEPS+=("$desc | $*")
+    return $status
+  else
+    cecho green "   ✓ ok"
+  fi
+}
+
+skip_step() {
+  local desc="$1"
+  cecho yellow "   → $desc skipped"
+  SKIPPED_STEPS+=("$desc")
+}
+
+# OS detection and guard
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
-IS_WSL=false
-IS_CI="${CI:-false}"
-[[ -f /proc/version ]] && grep -qi microsoft /proc/version && IS_WSL=true && cecho green "   → Running inside WSL2."
-[[ -n "${CODESPACES:-}" || -n "${GITPOD_WORKSPACE_ID:-}" || -n "${OPENAI_CLI_ENV:-}" ]] && IS_CI=true
 
-# --------------------------------------------------------------------
-# 1. .env example sync (skip if missing)
-# --------------------------------------------------------------------
+if [[ "$OS" =~ (mingw|msys|cygwin) ]]; then
+  cecho yellow "🪟  Native Windows shell detected."
+  cecho yellow "   ➤  This script is for Linux/macOS/WSL2. To bootstrap on native Windows:"
+  cecho yellow "      - Use Windows Subsystem for Linux 2 (WSL2) and run this script inside Ubuntu/Fedora/etc."
+  cecho yellow "      - Or use Git-Bash (with caveats: venv/rust/python interop is not fully supported)."
+  cecho yellow "      - For true native setup, run or adapt 'bootstrap.ps1' (PowerShell version, coming soon)."
+  cecho yellow "      - Install Python, Node, Rust, Maturin, and dependencies via Chocolatey or Scoop."
+  skip_step "Windows shell (not supported natively)"
+  rm -f "$PARTIAL_RUN_FLAG"
+  exit 0
+fi
+
+# Optionally, warn if user is on WSL1, which is not recommended:
+if grep -q "Microsoft" /proc/version 2>/dev/null && ! grep -q "WSL2" /proc/version 2>/dev/null; then
+  cecho yellow "⚠  Detected WSL1 (not WSL2). Upgrade to WSL2 for full compatibility and performance!"
+fi
+
+# .env sync (idempotent)
 if [[ -f .env.example ]]; then
   [[ -f .env ]] || cp .env.example .env
-  cecho blue "   → Verifying env keys…"
-  missing=$(comm -23 \
-    <(grep -v '^#' .env.example | grep -o '^[A-Za-z_][A-Za-z0-9_]*' | sort) \
-    <(grep -v '^#' .env 2>/dev/null | grep -o '^[A-Za-z_][A-Za-z0-9_]*' | sort)) || true
-  if [[ -n "${missing}" ]]; then
-    cecho yellow "      Adding missing keys from .env.example:"
-    for k in $missing; do
-      grep "^$k=" .env.example >> .env
-      cecho green "        + $k"
-    done
-  fi
+  missing=$(comm -23 <(grep -v '^#' .env.example | cut -d= -f1 | sort) <(grep -v '^#' .env | cut -d= -f1 | sort)) || true
+  for k in ${missing:-}; do grep "^$k=" .env.example >> .env; cecho green "   + added env key $k"; done
 else
   cecho yellow "   → No .env.example found, skipping env sync."
 fi
 
-# --------------------------------------------------------------------
-# 2. System build deps (warn but do not fail)
-# --------------------------------------------------------------------
-install_pkgs() {
-  if command -v apt-get &>/dev/null; then
-    timeout 60s sudo apt-get update || cecho red "[ERROR] apt-get update timed out after 60s; continuing anyway."
-    sudo apt-get install -y build-essential zlib1g-dev libffi-dev libssl-dev \
+# requirements.txt/package.json sanity
+if [[ -f requirements.txt ]]; then
+  if [[ ! -s requirements.txt ]] || ! grep -q '[^[:space:]]' requirements.txt; then
+    cecho yellow "   → requirements.txt present but empty; skipping pip install."
+    SKIPPED_STEPS+=("requirements.txt present but empty, pip install skipped")
+    rm -f requirements.txt
+  fi
+fi
+
+if [[ -f package.json ]]; then
+  if [[ ! -s package.json ]] || ! grep -q '{' package.json; then
+    cecho yellow "   → package.json present but empty/invalid; rewriting as '{}'."
+    echo '{}' > package.json
+    SKIPPED_STEPS+=("package.json fixed to valid '{}'")
+  elif ! node -e 'require("./package.json")' 2>/dev/null; then
+    cecho red "   → package.json is invalid JSON. Please fix it."
+    FAILED_STEPS+=("package.json invalid, npm will fail until corrected")
+    FIX_COMMANDS+=("echo '{}' > package.json  # fix package.json")
+  fi
+fi
+
+# system dependencies
+install_deps_apt() {
+  run_step "apt-get update" timeout 60s sudo apt-get update
+  run_step "apt-get install build deps" sudo apt-get install -y build-essential zlib1g-dev libffi-dev libssl-dev \
       libbz2-dev libreadline-dev libsqlite3-dev curl git jq lsof pkg-config \
-      python3 python3-venv python3-pip cmake make || true
-  elif command -v dnf &>/dev/null; then
-    sudo dnf install -y nodejs npm
-    sudo dnf install -y gcc gcc-c++ make openssl-devel zlib-devel readline-devel \
-      curl git jq lsof pkg-config cmake
-    sudo dnf install -y python3.12 python3.12-venv python3.12-pip python3.12-libs python3-virtualenv python3-pip
-    sudo dnf install -y sqlite-devel
-  elif [[ "$OS" == "darwin" ]]; then
-    if ! command -v brew &>/dev/null; then
-      cecho yellow "Homebrew not found — installing…"
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      eval "$(/opt/homebrew/bin/brew shellenv)" || true
-    fi
-    brew update || true
-    brew install git jq lsof pkg-config openssl@3 python@3.12 cmake make || true
-  else
-    cecho red "   → No supported system package manager; skipping system deps."
+      python3 python3-venv python3-pip cmake make
+}
+install_deps_dnf() {
+  run_step "dnf install nodejs/npm" sudo dnf install -y nodejs npm
+  run_step "dnf install build deps" sudo dnf install -y gcc gcc-c++ make openssl-devel zlib-devel readline-devel \
+      curl git jq lsof pkg-config cmake sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel
+  run_step "dnf install python3" sudo dnf install -y python3 python3-pip python3-virtualenv
+  if ! python3 --version 2>/dev/null | grep -q '3\.12'; then
+    cecho yellow "⚠  Fedora does not ship python3.12 as a separate package. You have: $(python3 --version)"
+    SKIPPED_STEPS+=("python3.12: Fedora ships only python3.x, not python3.12.x")
   fi
 }
-install_pkgs
+install_deps_brew() {
+  if ! command -v brew &>/dev/null; then
+    run_step "install Homebrew" /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  fi
+  run_step "brew update" brew update
+  run_step "brew install build deps" brew install git jq lsof pkg-config openssl@3 python@3.12 cmake make
+}
 
-# --------------------------------------------------------------------
-# 3. Python 3.12.x, auto-pyenv/conda fallback if not found
-# --------------------------------------------------------------------
+case "$OS" in
+  linux)  command -v apt-get &>/dev/null && install_deps_apt
+          command -v dnf     &>/dev/null && install_deps_dnf ;;
+  darwin) install_deps_brew ;;
+esac
+
+# python & venv, pyenv fallback
 PY_BIN=""
 if command -v python3.12 &>/dev/null; then
   PY_BIN="$(command -v python3.12)"
 elif python3 --version 2>/dev/null | grep -q '3\.12'; then
+  PY_BIN="$(command -v python3)"
+elif python3 --version 2>/dev/null | awk '{print $2}' | grep -qE '^3\.(1[2-9]|[2-9][0-9])'; then
   PY_BIN="$(command -v python3)"
 elif command -v conda &>/dev/null && conda info --envs | grep -q '3\.12'; then
   cecho cyan "   → Using Python 3.12 from Conda environment."
   PY_BIN="$(conda run which python)"
 else
   if ! command -v pyenv &>/dev/null; then
-    cecho yellow "   → Installing pyenv (user mode)…"
-    curl https://pyenv.run | bash
+    run_step "install pyenv" curl https://pyenv.run | bash
     export PATH="$HOME/.pyenv/bin:$PATH"
     eval "$(pyenv init -)"
     eval "$(pyenv virtualenv-init -)"
@@ -143,155 +180,115 @@ else
     eval "$(pyenv init -)"
     eval "$(pyenv virtualenv-init -)"
   fi
-  if ! pyenv versions --bare | grep -qx "$REQUIRED_PYTHON"; then
-    cecho blue "   → Building Python $REQUIRED_PYTHON with pyenv (may take a few min)…"
-    pyenv install -s "$REQUIRED_PYTHON"
-  fi
-  pyenv local "$REQUIRED_PYTHON"
+  # ----> ENSURE pyenv always available before every pyenv command <----
+  export PATH="$HOME/.pyenv/bin:$PATH"
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
+  run_step "pyenv install $REQUIRED_PYTHON" pyenv install -s "$REQUIRED_PYTHON"
+  export PATH="$HOME/.pyenv/bin:$PATH"
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
+  run_step "pyenv local $REQUIRED_PYTHON" pyenv local "$REQUIRED_PYTHON"
+  export PATH="$HOME/.pyenv/bin:$PATH"
+  eval "$(pyenv init -)"
+  eval "$(pyenv virtualenv-init -)"
   PY_BIN="$(pyenv which python)"
 fi
 
-if [[ ! -d .venv ]]; then
-  cecho cyan "   → Creating venv with Python $REQUIRED_PYTHON"
-  "$PY_BIN" -m venv .venv
-fi
+[[ -d .venv ]] || run_step "python -m venv" "$PY_BIN" -m venv .venv
 source .venv/bin/activate
-if command -v conda &>/dev/null && conda info --envs 2>/dev/null | grep -q '*'; then
-  ACTIVE_CONDA=$(conda info --envs | awk '/\*/ {print $1}')
-  if [[ -n "$ACTIVE_CONDA" && "$ACTIVE_CONDA" != "base" ]]; then
-    cecho yellow "[WARN] You are in Conda env: $ACTIVE_CONDA. To use .venv, run: 'conda deactivate' first."
+
+run_step "pip upgrade" python -m pip install --upgrade pip setuptools wheel
+
+# Python _sqlite3 build check
+if ! python -c 'import sqlite3' 2>/dev/null; then
+  cecho red "   → Python is missing sqlite3/_sqlite3 support. This WILL break pre-commit and pip tools."
+  BROKEN_PYTHON=1
+  if [[ "$OS" == "linux" && $(command -v dnf) ]]; then
+    cecho yellow "      [Fedora/RHEL]: Run: sudo dnf install sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel && pyenv uninstall $REQUIRED_PYTHON && pyenv install $REQUIRED_PYTHON"
+    FIX_COMMANDS+=("sudo dnf install sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel")
+    FIX_COMMANDS+=("export PATH=\"\$HOME/.pyenv/bin:\$PATH\"; eval \"\$(pyenv init -)\"; eval \"\$(pyenv virtualenv-init -)\"; pyenv uninstall $REQUIRED_PYTHON && PYTHON_CONFIGURE_OPTS='--without-tk' pyenv install $REQUIRED_PYTHON")
+  elif [[ "$OS" == "linux" && $(command -v apt-get) ]]; then
+    cecho yellow "      [Ubuntu/Debian]: Run: sudo apt-get install libsqlite3-dev && pyenv uninstall $REQUIRED_PYTHON && pyenv install $REQUIRED_PYTHON"
+    FIX_COMMANDS+=("sudo apt-get install libsqlite3-dev")
+    FIX_COMMANDS+=("export PATH=\"\$HOME/.pyenv/bin:\$PATH\"; eval \"\$(pyenv init -)\"; eval \"\$(pyenv virtualenv-init -)\"; pyenv uninstall $REQUIRED_PYTHON && pyenv install $REQUIRED_PYTHON")
   fi
-fi
-if command -v pyenv &>/dev/null && [[ "$(pyenv version-name)" != "$REQUIRED_PYTHON" ]]; then
-  cecho yellow "[WARN] pyenv is active but not set to $REQUIRED_PYTHON. Run: 'pyenv local $REQUIRED_PYTHON'."
+  SKIPPED_STEPS+=("Python missing sqlite3; re-install with headers to fix")
 fi
 
-python -m pip install --upgrade pip setuptools wheel
-
-# --------------------------------------------------------------------
-# 4. Node/NVM (+Yarn/pnpm support)
-# --------------------------------------------------------------------
+# Node/NVM, Yarn/pnpm globally
 export NVM_DIR="$HOME/.nvm"
-if [[ ! -s "$NVM_DIR/nvm.sh" ]]; then
-  cecho blue "   → Installing NVM $NVM_VERSION…"
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$NVM_VERSION/install.sh | bash
-fi
-# shellcheck source=/dev/null
+[[ -s "$NVM_DIR/nvm.sh" ]] || run_step "install nvm" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$NVM_VERSION/install.sh | bash
 source "$NVM_DIR/nvm.sh"
-if ! command -v node &>/dev/null || [[ "$(node -v)" != v$REQUIRED_NODE* ]]; then
-  cecho cyan "   → Installing Node.js $REQUIRED_NODE via nvm…"
-  nvm install $REQUIRED_NODE
-  nvm alias default $REQUIRED_NODE
-  nvm use $REQUIRED_NODE
-fi
-if ! command -v yarn &>/dev/null; then
-  cecho cyan "   → Installing yarn globally…"
-  npm install -g yarn || true
-fi
-if ! command -v pnpm &>/dev/null; then
-  cecho cyan "   → Installing pnpm globally…"
-  npm install -g pnpm || true
-fi
+command -v node &>/dev/null && [[ "$(node -v)" == v$REQUIRED_NODE* ]] || run_step "nvm install $REQUIRED_NODE" nvm install "$REQUIRED_NODE"
+run_step "nvm alias default" nvm alias default $REQUIRED_NODE
+run_step "nvm use $REQUIRED_NODE" nvm use $REQUIRED_NODE
+command -v yarn &>/dev/null || run_step "npm install -g yarn" npm install -g yarn
+command -v pnpm &>/dev/null || run_step "npm install -g pnpm" npm install -g pnpm
 
-# --------------------------------------------------------------------
-# 5. Rust tool-chain (+ just, cargo-make, maturin)
-# --------------------------------------------------------------------
-if [[ ! -d .venv ]]; then
-  cecho cyan "   → Creating venv with Python $REQUIRED_PYTHON"
-  "$PY_BIN" -m venv .venv
-fi
-source .venv/bin/activate
-
-python -m pip install --upgrade pip setuptools wheel
-
-# Install maturin from pip to avoid cargo build issues
-pip install --upgrade maturin
-
-# --- Rust toolchain, just, cargo-make installs ---
+# Rust toolchain, just, cargo-make, maturin
 if ! command -v cargo &>/dev/null; then
-  cecho cyan "   → Installing Rust…"
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  run_step "install Rust" curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   source "$HOME/.cargo/env"
 fi
+command -v just      &>/dev/null || run_step "cargo install just" cargo install just
+command -v cargo-make&>/dev/null || run_step "cargo install cargo-make" cargo install cargo-make
 
-if ! command -v just &>/dev/null; then
-  cecho cyan "   → Installing just (Rust task runner)…"
-  cargo install just || true
+# Only install maturin/pip if Python build is not broken
+if (( BROKEN_PYTHON == 0 )); then
+  run_step "pip install maturin" pip install --upgrade maturin
+else
+  skip_step "maturin/pip install (Python broken: sqlite3 missing)"
 fi
 
-if ! command -v cargo-make &>/dev/null; then
-  cecho cyan "   → Installing cargo-make (Rust build runner)…"
-  cargo install cargo-make || true
-fi
-
-
-[[ -f requirements.txt ]] || echo "# placeholder" > requirements.txt
-[[ -f README.md ]] || echo -e "# $APP_NAME\n\nBootstrap complete. Next steps:\n- Edit README\n- Push code\n" > README.md
-[[ -f package.json ]] || echo '{ "name": "the-block", "version": "0.1.0" }' > package.json
+# Skeleton files
+[[ -f requirements.txt ]]         || echo "# placeholder" > requirements.txt
+[[ -f README.md       ]]         || echo -e "# $APP_NAME\n\nBootstrap complete. Next steps:\n- Edit README\n- Push code\n" > README.md
+[[ -f package.json    ]]         || echo '{ "name": "the-block", "version": "0.1.0" }' > package.json
 [[ -f .pre-commit-config.yaml ]] || echo "# See https://pre-commit.com" > .pre-commit-config.yaml
 
-# --------------------------------------------------------------------
-# 6. Makefile/CMake/justfile (optional, best-effort build)
-# --------------------------------------------------------------------
-if [[ -f Makefile ]]; then
-  cecho blue "   → Detected Makefile, running make (if present)…"
-  make || cecho yellow "      (make failed or no default target, skipping)"
-fi
-if [[ -f CMakeLists.txt ]]; then
-  cecho blue "   → Detected CMake project, running cmake…"
-  mkdir -p build && cd build && cmake .. && make && cd .. || cecho yellow "      (cmake failed, skipping)"
-fi
-if [[ -f justfile || -f Justfile ]]; then
-  cecho blue "   → Detected justfile, running just (if present)…"
-  just || cecho yellow "      (just failed or no default target, skipping)"
-fi
+# Optional builds
+[[ -f Makefile       ]] && run_step "make" make
+[[ -f CMakeLists.txt ]] && run_step "cmake build" bash -c 'mkdir -p build && cd build && cmake .. && make'
+[[ -f justfile || -f Justfile ]] && run_step "just" just
 
-# --------------------------------------------------------------------
-# 7. Python/Node deps (skip if missing)
-# --------------------------------------------------------------------
-if [[ -f requirements.txt ]]; then
-  cecho blue "   → pip install -r requirements.txt"
-  pip install -r requirements.txt
-else
-  cecho yellow "   → No requirements.txt found, skipping Python deps."
-fi
-if [[ -f pyproject.toml ]] && command -v poetry &>/dev/null; then
-  cecho blue "   → poetry detected, running poetry install"
-  poetry install || true
-fi
-if [[ -f package.json ]]; then
-  if [[ -f pnpm-lock.yaml ]]; then
-    cecho green "Using pnpm (pnpm-lock.yaml present)"
-    pnpm install || true
-  elif [[ -f yarn.lock ]]; then
-    cecho green "Using yarn (yarn.lock present)"
-    yarn install || true
-  elif [[ -f package-lock.json ]]; then
-    cecho green "Using npm ci (package-lock.json present)"
-    npm ci || npm install
-  else
-    cecho yellow "No lockfile detected; running npm install (not reproducible!)"
-    npm install || true
+# Python/Node deps (all pip/poetry only if not broken)
+if (( BROKEN_PYTHON == 0 )); then
+  [[ -s requirements.txt ]] && run_step "pip install requirements" pip install -r requirements.txt
+  if [[ -f pyproject.toml ]] && command -v poetry &>/dev/null; then
+    run_step "poetry install" poetry install
+  fi
+  if [[ -f .pre-commit-config.yaml ]] && [[ "${CI:-}" == "" ]]; then
+    run_step "pip install pre-commit" pip install pre-commit
+    run_step "pre-commit install" pre-commit install
   fi
 else
-  cecho yellow "   → No package.json found, skipping Node deps."
+  skip_step "pip/poetry/pre-commit install (Python broken: sqlite3 missing)"
 fi
 
-# --------------------------------------------------------------------
-# 8. Docker (warn but don’t fail)
-# --------------------------------------------------------------------
+if [[ -f package.json && -s package.json ]]; then
+  if [[ -f pnpm-lock.yaml ]];  then run_step "pnpm install" pnpm install
+  elif [[ -f yarn.lock    ]];  then run_step "yarn install" yarn install
+  elif [[ -f package-lock.json ]]; then run_step "npm ci" npm ci || npm install
+  else run_step "npm install" npm install
+  fi
+else
+  cecho yellow "   → No valid package.json found or file is empty; skipping Node deps."
+  SKIPPED_STEPS+=("npm install skipped (no valid package.json)")
+fi
+if ! node -e 'require("./package.json")' 2>/dev/null; then
+  cecho red "   → package.json is STILL invalid after rewrite. Please fix it."
+  FAILED_STEPS+=("package.json invalid even after auto-fix")
+  FIX_COMMANDS+=("echo '{}' > package.json")
+fi
+
+# Docker check
 if ! command -v docker &>/dev/null; then
-  cecho yellow "⚠  Docker not detected — devnet/CI features will be disabled."
+  skip_step "Docker not detected (devnet/CI features skipped)"
 fi
 
-# --------------------------------------------------------------------
-# 9. Pre-commit (skip in CI/empty), direnv, pipx
-# --------------------------------------------------------------------
-if [[ -f .pre-commit-config.yaml ]] && [[ "$IS_CI" == "false" ]]; then
-  cecho blue "   → Installing pre-commit hooks"
-  pip install pre-commit
-  pre-commit install
-fi
+
+# direnv, pipx
 if command -v direnv &>/dev/null && [[ -f .envrc ]]; then
   cecho cyan "   → direnv detected; run 'direnv allow' if needed."
 fi
@@ -300,24 +297,61 @@ if command -v pipx &>/dev/null && [[ -f requirements.txt ]]; then
 fi
 
 # --------------------------------------------------------------------
-# 10. Misc: secrets, diagnostics, activation
+# 11. Build and install the Rust Python native extension (via maturin)
 # --------------------------------------------------------------------
+# Only build if Python is not broken, maturin is installed, and Cargo.toml exists (i.e. this is a Rust/PyO3 project)
+if (( BROKEN_PYTHON == 0 )) && command -v maturin &>/dev/null && [[ -f Cargo.toml ]]; then
+  run_step "maturin develop --release (build Python native module)" maturin develop --release
+else
+  skip_step "maturin develop (no maturin, no Cargo.toml, or Python is broken)"
+fi
+
+# Misc checks, diagnostics, output
 if [[ -f .env ]] && grep -q 'changeme' .env; then
   cecho yellow "⚠  Replace placeholder secrets in .env before production use!"
 fi
 
-# Diagnostic summary
 cecho green "==> [$APP_NAME] bootstrap complete"
 cecho cyan "   Activate venv:   source .venv/bin/activate"
-command -v node   &>/dev/null && cecho green "   Node:   $(node -v)"
-command -v python &>/dev/null && cecho green "   Python: $(python -V)"
-command -v rustc  &>/dev/null && cecho green "   Rust:   $(rustc --version)"
-command -v cargo  &>/dev/null && cecho green "   Cargo:  $(cargo --version)"
-command -v conda  &>/dev/null && cecho green "   Conda:  $(conda --version)"
-command -v just   &>/dev/null && cecho green "   Just:   $(just --version)"
-command -v docker &>/dev/null && cecho green "   Docker: $(docker --version)"
-command -v yarn   &>/dev/null && cecho green "   Yarn:   $(yarn -v)"
-command -v pnpm   &>/dev/null && cecho green "   pnpm:   $(pnpm -v)"
 
+for exe in python node cargo just docker yarn pnpm; do
+  if command -v $exe &>/dev/null; then
+    if [[ "$exe" == "python" ]]; then
+      cecho blue "   $($exe -V 2>&1 | head -n1)"
+    else
+      cecho blue "   $($exe --version 2>&1 | head -n1)"
+    fi
+  else
+    cecho yellow "   $exe not found"
+  fi
+done
+
+if (( ${#FAILED_STEPS[@]} )); then
+  cecho red "\n⚠  Some steps failed:"
+  for step in "${FAILED_STEPS[@]}"; do
+    cecho yellow "   - $step"
+  done
+  cecho cyan "Fix the above issues (commands shown), then re-run bootstrap or the failing commands manually."
+fi
+if (( ${#SKIPPED_STEPS[@]} )); then
+  cecho yellow "\n⚠  Some non-essential steps were skipped:"
+  for step in "${SKIPPED_STEPS[@]}"; do
+    cecho yellow "   - $step"
+  done
+fi
+if (( ${#FIX_COMMANDS[@]} )); then
+  cecho yellow "\nAuto-detected FIX COMMANDS (run these to repair common failures):"
+  for step in "${FIX_COMMANDS[@]}"; do
+    cecho blue "   $step"
+  done
+fi
+
+if (( BROKEN_PYTHON == 1 )); then
+  cecho red "\n************"
+  cecho red "YOUR PYTHON ENV IS BROKEN (NO SQLITE3):"
+  cecho yellow "To repair, run the following commands, then re-run bootstrap:"
+  for step in "${FIX_COMMANDS[@]}"; do cecho blue "   $step"; done
+  cecho red "************"
+fi
 rm -f "$PARTIAL_RUN_FLAG"
 exit 0
