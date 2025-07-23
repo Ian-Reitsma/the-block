@@ -101,8 +101,11 @@ install_pkgs() {
       libbz2-dev libreadline-dev libsqlite3-dev curl git jq lsof pkg-config \
       python3 python3-venv python3-pip cmake make || true
   elif command -v dnf &>/dev/null; then
+    sudo dnf install -y nodejs npm
     sudo dnf install -y gcc gcc-c++ make openssl-devel zlib-devel readline-devel \
-      curl git jq lsof pkg-config python3 python3-virtualenv python3-pip cmake || true
+      curl git jq lsof pkg-config cmake
+    sudo dnf install -y python3.12 python3.12-venv python3.12-pip python3.12-libs python3-virtualenv python3-pip
+    sudo dnf install -y sqlite-devel
   elif [[ "$OS" == "darwin" ]]; then
     if ! command -v brew &>/dev/null; then
       cecho yellow "Homebrew not found — installing…"
