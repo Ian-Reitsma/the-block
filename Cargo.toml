@@ -15,6 +15,9 @@ rand = "0.8"
 rand_core = "0.6"
 tempfile = "3"
 
+[dev-dependencies]
+proptest = "1"
+
 [lib]
 name = "the_block"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]

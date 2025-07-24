@@ -39,21 +39,21 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
 // === Data types ===
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct TokenBalance {
     #[pyo3(get, set)] pub consumer: u64,
     #[pyo3(get, set)] pub industrial: u64,
 }
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Account {
     #[pyo3(get)] pub address: String,
     #[pyo3(get)] pub balance: TokenBalance,
 }
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Transaction {
     #[pyo3(get)] pub from: String,
     #[pyo3(get)] pub to: String,
@@ -65,7 +65,7 @@ pub struct Transaction {
 }
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Block {
     #[pyo3(get)] pub index: u64,
     #[pyo3(get)] pub previous_hash: String,
@@ -409,12 +409,23 @@ impl Blockchain {
 
         Ok(())
     }
+}
+
+impl Blockchain {
+    /// Open the default ./chain_db path
+    pub fn new() -> Self {
+        Blockchain::open("chain_db").expect("DB open")
+    }
 
     #[allow(dead_code)]
     fn is_valid_chain_rust(chain: &[Block]) -> bool {
         for i in 0..chain.len() {
             let b = &chain[i];
-            let expected_prev = if i == 0 { "0".repeat(64) } else { chain[i-1].hash.clone() };
+            let expected_prev = if i == 0 {
+                "0".repeat(64)
+            } else {
+                chain[i - 1].hash.clone()
+            };
             if b.previous_hash != expected_prev {
                 return false;
             }
@@ -423,7 +434,7 @@ impl Blockchain {
                 return false;
             }
             let bytes = hex_to_bytes(&b.hash);
-            if leading_zero_bits(&bytes) < chain[0].index /* or difficulty */ {
+            if u64::from(leading_zero_bits(&bytes)) < chain[0].index /* or difficulty */ {
                 return false;
             }
             for tx in &b.transactions {
@@ -434,7 +445,10 @@ impl Blockchain {
                     msg.extend(&tx.amount_consumer.to_le_bytes());
                     msg.extend(&tx.amount_industrial.to_le_bytes());
                     msg.extend(&tx.fee.to_le_bytes());
-                    let vk = VerifyingKey::from_bytes(&to_array_32(&tx.public_key)).ok()?;
+                    let vk = match VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
+                        Ok(vk) => vk,
+                        Err(_) => return false,
+                    };
                     let sig = Signature::from_bytes(&to_array_64(&tx.signature));
                     if vk.verify(&msg, &sig).is_err() {
                         return false;

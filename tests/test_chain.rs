@@ -112,9 +112,9 @@ fn test_double_spend_is_rejected() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
 
-    let (priv, pubk) = generate_keypair();
+    let (privkey, pubk) = generate_keypair();
     let (amt_cons, amt_ind, fee) = (1_000_000_000_000_000, 1_000_000_000_000_000, 0);
-    let (pub_bytes, sig) = testutil::build_signed_tx(&priv, &pubk, "miner", "alice", amt_cons, amt_ind, fee);
+    let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", amt_cons, amt_ind, fee);
 
     let res = bc.submit_transaction(
         "miner".into(), "alice".into(),
@@ -154,9 +154,9 @@ fn test_fee_credit_to_miner() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
 
-    let (priv, pubk) = generate_keypair();
+    let (privkey, pubk) = generate_keypair();
     let fee = 7;
-    let (pub_bytes, sig) = testutil::build_signed_tx(&priv, &pubk, "miner", "alice", 1, 2, fee);
+    let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", 1, 2, fee);
 
     bc.submit_transaction("miner".into(), "alice".into(), 1, 2, fee, pub_bytes, sig).unwrap();
     let before = bc.get_account_balance("miner".into()).unwrap();
@@ -175,8 +175,8 @@ fn test_replay_attack_prevention() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
 
-    let (priv, pubk) = generate_keypair();
-    let (pub_bytes, sig) = testutil::build_signed_tx(&priv, &pubk, "miner", "alice", 5, 2, 0);
+    let (privkey, pubk) = generate_keypair();
+    let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", 5, 2, 0);
     bc.submit_transaction("miner".into(), "alice".into(), 5, 2, 0, pub_bytes.clone(), sig.clone()).unwrap();
     bc.mine_block("miner".into()).unwrap();
 
@@ -193,9 +193,9 @@ fn test_mempool_flush_on_block_mine() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
 
-    let (priv, pubk) = generate_keypair();
+    let (privkey, pubk) = generate_keypair();
     for _ in 0..100 {
-        let (pb, sig) = testutil::build_signed_tx(&priv, &pubk, "miner", "alice", 1, 1, 0);
+        let (pb, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", 1, 1, 0);
         let _ = bc.submit_transaction("miner".into(), "alice".into(), 1, 1, 0, pb, sig);
     }
     assert!(!bc.mempool.is_empty());
@@ -213,15 +213,15 @@ fn test_multithreaded_submit_and_mine() {
         chain.add_account("bob".into(), 0, 0).unwrap();
         chain.mine_block("miner".into()).unwrap();
     }
-    let (priv, pubk) = generate_keypair();
+    let (privkey, pubk) = generate_keypair();
 
     let handles: Vec<_> = (0..4).map(|_| {
         let bc = Arc::clone(&bc);
-        let priv = priv.clone();
+        let privkey = privkey.clone();
         let pubk = pubk.clone();
         thread::spawn(move || {
             for _ in 0..5 {
-                let (pb, sig) = testutil::build_signed_tx(&priv, &pubk, "miner", "bob", 1, 1, 0);
+                let (pb, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "bob", 1, 1, 0);
                 let mut chain = write_lock!(bc);
                 let _ = chain.submit_transaction("miner".into(), "bob".into(), 1, 1, 0, pb, sig);
                 let _ = chain.mine_block("miner".into());
@@ -306,8 +306,8 @@ fn test_chain_determinism() {
         bc.mine_block("miner".into()).unwrap();
     }
 
-    let (priv, pubk) = generate_keypair();
-    let (pub_bytes, sig) = testutil::build_signed_tx(&priv, &pubk, "miner", "miner", 1, 1, 0);
+    let (privkey, pubk) = generate_keypair();
+    let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "miner", 1, 1, 0);
     bc1.submit_transaction("miner".into(), "miner".into(), 1, 1, 0, pub_bytes.clone(), sig.clone()).unwrap();
     bc2.submit_transaction("miner".into(), "miner".into(), 1, 1, 0, pub_bytes, sig).unwrap();
 
