@@ -506,9 +506,6 @@ pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Account>()?;
     m.add_class::<Transaction>()?;
     m.add_class::<TokenBalance>()?;
-    m.add_function(wrap_pyfunction!(Blockchain::open, m)?)?;
-    m.add_function(wrap_pyfunction!(Blockchain::schema_version, m)?)?;
-    m.add_function(wrap_pyfunction!(Blockchain::persist_chain, m)?)?;
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signature, m)?)?;
