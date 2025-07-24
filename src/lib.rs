@@ -11,9 +11,15 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
 
+const MAX_SUPPLY_CONSUMER: u64 = 20_000_000_000_000;
+const MAX_SUPPLY_INDUSTRIAL: u64 = 20_000_000_000_000;
+const INITIAL_BLOCK_REWARD_CONSUMER: u64 = 60_000;
+const INITIAL_BLOCK_REWARD_INDUSTRIAL: u64 = 30_000;
+// Exponential decay: reward_n = reward_0 * DECAY_NUMERATOR / DECAY_DENOMINATOR per block
+const DECAY_NUMERATOR: u64 = 99995;      // Decays ~0.005%/block, adjust to tune
+const DECAY_DENOMINATOR: u64 = 100000;
 
-const BLOCK_REWARD_CONSUMER: u64 = 50;
-const BLOCK_REWARD_INDUSTRIAL: u64 = 50;
+
 
 // === Helpers for ed25519 v2.x ([u8; 32], [u8; 64]) ===
 fn to_array_32(bytes: &[u8]) -> [u8; 32] {
@@ -90,7 +96,18 @@ pub struct Blockchain {
     pub difficulty: u64,
     pub mempool: Vec<Transaction>,
     db: Db,
+    #[pyo3(get, set)]
+    pub emission_consumer: u64,
+    #[pyo3(get, set)]
+    pub emission_industrial: u64,
+    #[pyo3(get, set)]
+    pub block_reward_consumer: u64,
+    #[pyo3(get, set)]
+    pub block_reward_industrial: u64,
+    #[pyo3(get, set)]
+    pub block_height: u64,
 }
+
 
 #[pymethods]
 impl Blockchain {
@@ -110,9 +127,16 @@ impl Blockchain {
             difficulty: 1_000_000,
             mempool: Vec::new(),
             db,
+            emission_consumer: 0,
+            emission_industrial: 0,
+            block_reward_consumer: INITIAL_BLOCK_REWARD_CONSUMER,
+            block_reward_industrial: INITIAL_BLOCK_REWARD_INDUSTRIAL,
+            block_height: 0,
         }
     }
-
+    pub fn circulating_supply(&self) -> (u64, u64) {
+        (self.emission_consumer, self.emission_industrial)
+    }
     pub fn genesis_block(&mut self) -> PyResult<()> {
         let genesis = Block {
             index: 0,
@@ -121,7 +145,7 @@ impl Blockchain {
             nonce: 0,
             hash: "genesis_hash_placeholder".to_string(),
         };
-        self.chain.push(genesis);
+        self.block_height = 1;
         Ok(())
     }
 
@@ -224,15 +248,31 @@ impl Blockchain {
             self.chain.last().unwrap().hash.clone()
         };
 
+        // == BLOCK REWARD EMISSION LOGIC ==
+        let mut reward_consumer = self.block_reward_consumer;
+        let mut reward_industrial = self.block_reward_industrial;
+
+        // Cap logic
+        if self.emission_consumer + reward_consumer > MAX_SUPPLY_CONSUMER {
+            reward_consumer = MAX_SUPPLY_CONSUMER.saturating_sub(self.emission_consumer);
+        }
+        if self.emission_industrial + reward_industrial > MAX_SUPPLY_INDUSTRIAL {
+            reward_industrial = MAX_SUPPLY_INDUSTRIAL.saturating_sub(self.emission_industrial);
+        }
+
+        // Coinbase TX
         let mut txs = vec![Transaction {
             from: "0".repeat(34),
-            to: "miner".to_string(),  // TODO: real miner addr
-            amount_consumer: BLOCK_REWARD_CONSUMER,
-            amount_industrial: BLOCK_REWARD_INDUSTRIAL,
+            to: "miner".to_string(), // TODO: real miner addr
+            amount_consumer: reward_consumer,
+            amount_industrial: reward_industrial,
             fee: 0,
             public_key: vec![],
             signature: vec![],
         }];
+        // (rest unchanged:)
+        txs.extend(self.mempool.clone());
+        self.mempool.clear();
         txs.extend(self.mempool.clone());
         self.mempool.clear();
 
@@ -261,7 +301,7 @@ impl Blockchain {
                     });
                     receiver.balance.consumer += tx.amount_consumer;
                     receiver.balance.industrial += tx.amount_industrial;
-
+                
                     // If not coinbase, subtract from sender
                     if tx.from != "0".repeat(34) {
                         if let Some(sender) = self.accounts.get_mut(&tx.from) {
@@ -270,6 +310,15 @@ impl Blockchain {
                         }
                     }
                 }
+                
+                // === EMISSION/REWARD STATE UPDATE ===
+                self.emission_consumer = self.emission_consumer.saturating_add(reward_consumer);
+                self.emission_industrial = self.emission_industrial.saturating_add(reward_industrial);
+                self.block_height += 1;
+                
+                self.block_reward_consumer = (self.block_reward_consumer as u128 * DECAY_NUMERATOR as u128 / DECAY_DENOMINATOR as u128) as u64;
+                self.block_reward_industrial = (self.block_reward_industrial as u128 * DECAY_NUMERATOR as u128 / DECAY_DENOMINATOR as u128) as u64;
+                
                 // persist chain
                 self.db
                     .insert("chain", bincode::serialize(&self.chain).unwrap())

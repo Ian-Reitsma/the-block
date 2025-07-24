@@ -2,7 +2,7 @@ import the_block
 
 print("==> Initializing blockchain...")
 bc = the_block.Blockchain()
-bc.difficulty = 30
+bc.difficulty = 8
 print("Blockchain initialized. Difficulty set to 8.")
 
 print("\n==> Adding account 'miner'...")
@@ -61,3 +61,15 @@ print(f"Mined block index: {block.index}, hash: {block.hash}")
 print("\n==> Updated balances after mining:")
 print("miner:", bc.get_account_balance("miner").consumer, "(consumer)")
 print("alice:", bc.get_account_balance("alice").consumer, "(consumer)")
+print("\n==> Emission and reward state:")
+print(f"Block height: {bc.block_height}")
+print(f"Block reward (consumer): {bc.block_reward_consumer}")
+print(f"Block reward (industrial): {bc.block_reward_industrial}")
+em_cons, em_ind = bc.circulating_supply()
+print(f"Circulating supply: consumer={em_cons}, industrial={em_ind}")
+
+print("\n==> Mining several more blocks to see decay in action...")
+for i in range(4):
+    block = bc.mine_block()
+    print(f"Block {block.index}: reward={bc.block_reward_consumer}, emission={bc.circulating_supply()[0]}")
+
