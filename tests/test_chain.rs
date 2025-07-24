@@ -3,11 +3,19 @@
 #[macro_use]
 extern crate proptest;
 
-use the_block::{Blockchain, Block, generate_keypair, sign_message, verify_signature};
 use proptest::prelude::*;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::{fs, path::Path};
+use the_block::{generate_keypair, sign_message, verify_signature, Block, Blockchain};
+
+fn init() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        pyo3::prepare_freethreaded_python();
+    });
+    let _ = fs::remove_dir_all("chain_db");
+}
 
 // === Helper for signing transactions ===
 mod testutil {
@@ -34,10 +42,14 @@ mod testutil {
 
 // Convenience macros for locking
 macro_rules! write_lock {
-    ($lock:expr) => { $lock.write().unwrap() };
+    ($lock:expr) => {
+        $lock.write().unwrap()
+    };
 }
 macro_rules! read_lock {
-    ($lock:expr) => { $lock.read().unwrap() };
+    ($lock:expr) => {
+        $lock.read().unwrap()
+    };
 }
 
 // 1. Property-based: supply/balance never negative, never over cap
@@ -51,6 +63,7 @@ proptest! {
         amt_ind in 1u64..10_000,
         fee in 0u64..100,
     ) {
+        init();
         let mut bc = Blockchain::new();
         let miner = &miners[0];
         bc.add_account(miner.clone(), 0, 0).unwrap();
@@ -79,6 +92,7 @@ proptest! {
 // 2. Invalid signature rejected
 #[test]
 fn test_rejects_invalid_signature() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
@@ -86,7 +100,7 @@ fn test_rejects_invalid_signature() {
 
     let (_priv, pub_bytes) = generate_keypair();
     // sign with wrong key
-    let sig = sign_message(vec![0;32], {
+    let sig = sign_message(vec![0; 32], {
         let mut m = Vec::new();
         m.extend("miner".as_bytes());
         m.extend("alice".as_bytes());
@@ -97,9 +111,13 @@ fn test_rejects_invalid_signature() {
     });
 
     let res = bc.submit_transaction(
-        "miner".into(), "alice".into(),
-        1, 2, 0,
-        pub_bytes.clone(), sig
+        "miner".into(),
+        "alice".into(),
+        1,
+        2,
+        0,
+        pub_bytes.clone(),
+        sig,
     );
     assert!(res.is_err(), "Bad signature should be rejected");
 }
@@ -107,6 +125,7 @@ fn test_rejects_invalid_signature() {
 // 3. Double-spend / overspend is always rejected
 #[test]
 fn test_double_spend_is_rejected() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
@@ -114,12 +133,17 @@ fn test_double_spend_is_rejected() {
 
     let (privkey, pubk) = generate_keypair();
     let (amt_cons, amt_ind, fee) = (1_000_000_000_000_000, 1_000_000_000_000_000, 0);
-    let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", amt_cons, amt_ind, fee);
+    let (pub_bytes, sig) =
+        testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", amt_cons, amt_ind, fee);
 
     let res = bc.submit_transaction(
-        "miner".into(), "alice".into(),
-        amt_cons, amt_ind, fee,
-        pub_bytes, sig
+        "miner".into(),
+        "alice".into(),
+        amt_cons,
+        amt_ind,
+        fee,
+        pub_bytes,
+        sig,
     );
     assert!(res.is_err(), "Overspend should be rejected");
 }
@@ -127,6 +151,7 @@ fn test_double_spend_is_rejected() {
 // 4. Emission/Decay and Cap logic
 #[test]
 fn test_block_reward_decays_and_emission_caps() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
@@ -149,6 +174,7 @@ fn test_block_reward_decays_and_emission_caps() {
 // 5. Fee handling: miner receives all fees
 #[test]
 fn test_fee_credit_to_miner() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
@@ -158,7 +184,8 @@ fn test_fee_credit_to_miner() {
     let fee = 7;
     let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", 1, 2, fee);
 
-    bc.submit_transaction("miner".into(), "alice".into(), 1, 2, fee, pub_bytes, sig).unwrap();
+    bc.submit_transaction("miner".into(), "alice".into(), 1, 2, fee, pub_bytes, sig)
+        .unwrap();
     let before = bc.get_account_balance("miner".into()).unwrap();
     bc.mine_block("miner".into()).unwrap();
     let after = bc.get_account_balance("miner".into()).unwrap();
@@ -170,6 +197,7 @@ fn test_fee_credit_to_miner() {
 #[test]
 #[ignore = "Enable after adding nonce/txid"]
 fn test_replay_attack_prevention() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
@@ -177,8 +205,15 @@ fn test_replay_attack_prevention() {
 
     let (privkey, pubk) = generate_keypair();
     let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "alice", 5, 2, 0);
-    bc.submit_transaction("miner".into(), "alice".into(), 5, 2, 0, pub_bytes.clone(), sig.clone()).unwrap();
-    bc.mine_block("miner".into()).unwrap();
+    bc.submit_transaction(
+        "miner".into(),
+        "alice".into(),
+        5,
+        2,
+        0,
+        pub_bytes.clone(),
+        sig.clone(),
+    )
 
     // replay
     let res = bc.submit_transaction("miner".into(), "alice".into(), 5, 2, 0, pub_bytes, sig);
@@ -188,6 +223,7 @@ fn test_replay_attack_prevention() {
 // 7. Mempool flush on block mine
 #[test]
 fn test_mempool_flush_on_block_mine() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
@@ -206,6 +242,7 @@ fn test_mempool_flush_on_block_mine() {
 // 8. Concurrency: multi-threaded mempool/submit/mine
 #[test]
 fn test_multithreaded_submit_and_mine() {
+    init();
     let bc = Arc::new(RwLock::new(Blockchain::new()));
     {
         let mut chain = write_lock!(bc);
@@ -215,30 +252,37 @@ fn test_multithreaded_submit_and_mine() {
     }
     let (privkey, pubk) = generate_keypair();
 
-    let handles: Vec<_> = (0..4).map(|_| {
-        let bc = Arc::clone(&bc);
-        let privkey = privkey.clone();
-        let pubk = pubk.clone();
-        thread::spawn(move || {
-            for _ in 0..5 {
-                let (pb, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "bob", 1, 1, 0);
-                let mut chain = write_lock!(bc);
-                let _ = chain.submit_transaction("miner".into(), "bob".into(), 1, 1, 0, pb, sig);
-                let _ = chain.mine_block("miner".into());
-            }
+    let handles: Vec<_> = (0..4)
+        .map(|_| {
+            let bc = Arc::clone(&bc);
+            let privkey = privkey.clone();
+            let pubk = pubk.clone();
+            thread::spawn(move || {
+                for _ in 0..5 {
+                    let (pb, sig) =
+                        testutil::build_signed_tx(&privkey, &pubk, "miner", "bob", 1, 1, 0);
+                    let mut chain = write_lock!(bc);
+                    let _ =
+                        chain.submit_transaction("miner".into(), "bob".into(), 1, 1, 0, pb, sig);
+                    let _ = chain.mine_block("miner".into());
+                }
+            })
         })
-    }).collect();
+        .collect();
 
-    for h in handles { h.join().unwrap(); }
+        for h in handles {
+            h.join().unwrap();
+        }
 
     let miner = read_lock!(bc).get_account_balance("miner".into()).unwrap();
-    let bob   = read_lock!(bc).get_account_balance("bob".into()).unwrap();
+    let bob = read_lock!(bc).get_account_balance("bob".into()).unwrap();
     assert!(miner.consumer as i128 >= 0 && bob.consumer as i128 >= 0);
 }
 
 // 9. Corrupt block is rejected
 #[test]
 fn test_rejects_corrupt_block() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     let mut block = bc.mine_block("miner".into()).unwrap();
@@ -249,6 +293,7 @@ fn test_rejects_corrupt_block() {
 // 10. Persistence: reload chain, ensure round‐trip
 #[test]
 fn test_chain_persistence() {
+    init();
     let mut bc = Blockchain::new();
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
@@ -264,6 +309,7 @@ fn test_chain_persistence() {
 // 11. Fork/reorg resolution
 #[test]
 fn test_fork_and_reorg_resolution() {
+    init();
     let mut bc1 = Blockchain::new();
     let mut bc2 = Blockchain::new();
 
@@ -273,21 +319,28 @@ fn test_fork_and_reorg_resolution() {
     }
 
     // chain lengths diverge
-    for _ in 0..5 { bc1.mine_block("miner".into()).unwrap(); }
-    for _ in 0..10 { bc2.mine_block("miner".into()).unwrap(); }
+    for _ in 0..5 {
+        bc1.mine_block("miner".into()).unwrap();
+    }
+    for _ in 0..10 {
+        bc2.mine_block("miner".into()).unwrap();
+    }
 
     // import longer into shorter
     let longer = bc2.chain.clone();
     bc1.import_chain(longer).unwrap();
 
     assert_eq!(bc1.chain, bc2.chain);
-    assert_eq!(bc1.get_account_balance("miner".into()).unwrap().consumer,
-               bc2.get_account_balance("miner".into()).unwrap().consumer);
+    assert_eq!(
+        bc1.get_account_balance("miner".into()).unwrap().consumer,
+        bc2.get_account_balance("miner".into()).unwrap().consumer
+    );
 }
 
 // 12. Fuzz unicode & overflow addresses
 #[test]
 fn test_fuzz_unicode_and_overflow_addresses() {
+    init();
     let mut bc = Blockchain::new();
     let crazy = "矿工💎🚀𠜎𠜱𡃁𡈽".to_string();
     bc.add_account(crazy.clone(), u64::MAX, u64::MAX).unwrap();
@@ -299,6 +352,7 @@ fn test_fuzz_unicode_and_overflow_addresses() {
 // 13. Determinism: replay txs and check chain state
 #[test]
 fn test_chain_determinism() {
+    init();
     let mut bc1 = Blockchain::new();
     let mut bc2 = Blockchain::new();
     for bc in [&mut bc1, &mut bc2].iter_mut() {
@@ -308,8 +362,18 @@ fn test_chain_determinism() {
 
     let (privkey, pubk) = generate_keypair();
     let (pub_bytes, sig) = testutil::build_signed_tx(&privkey, &pubk, "miner", "miner", 1, 1, 0);
-    bc1.submit_transaction("miner".into(), "miner".into(), 1, 1, 0, pub_bytes.clone(), sig.clone()).unwrap();
-    bc2.submit_transaction("miner".into(), "miner".into(), 1, 1, 0, pub_bytes, sig).unwrap();
+    bc1.submit_transaction(
+        "miner".into(),
+        "miner".into(),
+        1,
+        1,
+        0,
+        pub_bytes.clone(),
+        sig.clone(),
+    )
+    .unwrap();
+    bc2.submit_transaction("miner".into(), "miner".into(), 1, 1, 0, pub_bytes, sig)
+        .unwrap();
 
     bc1.mine_block("miner".into()).unwrap();
     bc2.mine_block("miner".into()).unwrap();
@@ -321,17 +385,21 @@ fn test_chain_determinism() {
 #[test]
 #[ignore = "Enable after schema versioning/migration"]
 fn test_schema_upgrade_compatibility() {
+    init();
     let db_path = "test_chain_db_upgrade";
     let _ = fs::remove_dir_all(db_path);
 
     // simulate v0 layout
     #[derive(serde::Serialize, serde::Deserialize)]
-    struct OldChain { chain: Vec<Block> }
+    struct OldChain {
+        chain: Vec<Block>,
+    }
 
     {
         let db = sled::open(db_path).unwrap();
         let old = OldChain { chain: vec![] };
-        db.insert("chain", bincode::serialize(&old).unwrap()).unwrap();
+        db.insert("chain", bincode::serialize(&old).unwrap())
+            .unwrap();
         db.flush().unwrap();
     }
 

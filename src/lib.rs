@@ -1,16 +1,16 @@
-use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
-use pyo3::wrap_pyfunction;
-use std::collections::HashMap;
-use blake3;
-use std::convert::TryInto;
-use hex;
-use sled::Db;
-use serde::{Serialize, Deserialize};
 use bincode;
+use blake3;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use hex;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::wrap_pyfunction;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
+use serde::{Deserialize, Serialize};
+use sled::Db;
+use std::collections::HashMap;
+use std::convert::TryInto;
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -22,7 +22,7 @@ const MAX_SUPPLY_CONSUMER: u64 = 20_000_000_000_000;
 const MAX_SUPPLY_INDUSTRIAL: u64 = 20_000_000_000_000;
 const INITIAL_BLOCK_REWARD_CONSUMER: u64 = 60_000;
 const INITIAL_BLOCK_REWARD_INDUSTRIAL: u64 = 30_000;
-const DECAY_NUMERATOR: u64 = 99995;      // ~0.005% per block
+const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
 const DECAY_DENOMINATOR: u64 = 100000;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
@@ -41,51 +41,73 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct TokenBalance {
-    #[pyo3(get, set)] pub consumer: u64,
-    #[pyo3(get, set)] pub industrial: u64,
+    #[pyo3(get, set)]
+    pub consumer: u64,
+    #[pyo3(get, set)]
+    pub industrial: u64,
 }
 
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Account {
-    #[pyo3(get)] pub address: String,
-    #[pyo3(get)] pub balance: TokenBalance,
+    #[pyo3(get)]
+    pub address: String,
+    #[pyo3(get)]
+    pub balance: TokenBalance,
 }
 
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Transaction {
-    #[pyo3(get)] pub from: String,
-    #[pyo3(get)] pub to: String,
-    #[pyo3(get)] pub amount_consumer: u64,
-    #[pyo3(get)] pub amount_industrial: u64,
-    #[pyo3(get)] pub fee: u64,
-    #[pyo3(get, set)] pub public_key: Vec<u8>,
-    #[pyo3(get, set)] pub signature: Vec<u8>,
+    #[pyo3(get)]
+    pub from: String,
+    #[pyo3(get)]
+    pub to: String,
+    #[pyo3(get)]
+    pub amount_consumer: u64,
+    #[pyo3(get)]
+    pub amount_industrial: u64,
+    #[pyo3(get)]
+    pub fee: u64,
+    #[pyo3(get, set)]
+    pub public_key: Vec<u8>,
+    #[pyo3(get, set)]
+    pub signature: Vec<u8>,
 }
 
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Block {
-    #[pyo3(get)] pub index: u64,
-    #[pyo3(get)] pub previous_hash: String,
-    #[pyo3(get)] pub transactions: Vec<Transaction>,
-    #[pyo3(get)] pub nonce: u64,
-    #[pyo3(get)] pub hash: String,
+    #[pyo3(get)]
+    pub index: u64,
+    #[pyo3(get)]
+    pub previous_hash: String,
+    #[pyo3(get)]
+    pub transactions: Vec<Transaction>,
+    #[pyo3(get)]
+    pub nonce: u64,
+    #[pyo3(get)]
+    pub hash: String,
 }
 
 #[pyclass]
 pub struct Blockchain {
     pub chain: Vec<Block>,
     pub accounts: HashMap<String, Account>,
-    #[pyo3(get, set)] pub difficulty: u64,
+    #[pyo3(get, set)]
+    pub difficulty: u64,
     pub mempool: Vec<Transaction>,
     db: Db,
-    #[pyo3(get, set)] pub emission_consumer: u64,
-    #[pyo3(get, set)] pub emission_industrial: u64,
-    #[pyo3(get, set)] pub block_reward_consumer: u64,
-    #[pyo3(get, set)] pub block_reward_industrial: u64,
-    #[pyo3(get, set)] pub block_height: u64,
+    #[pyo3(get, set)]
+    pub emission_consumer: u64,
+    #[pyo3(get, set)]
+    pub emission_industrial: u64,
+    #[pyo3(get, set)]
+    pub block_reward_consumer: u64,
+    #[pyo3(get, set)]
+    pub block_reward_industrial: u64,
+    #[pyo3(get, set)]
+    pub block_height: u64,
 }
 
 #[pyclass]
@@ -106,7 +128,7 @@ impl Blockchain {
     /// Default Python constructor opens ./chain_db
     #[new]
     pub fn py_new() -> PyResult<Self> {
-        Self::open("chain_db")
+        Blockchain::open("chain_db")
     }
 
     #[staticmethod]
@@ -114,21 +136,33 @@ impl Blockchain {
         // exactly the same as `new()`, but open sled::open(path)
         let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {}", e)))?;
         let chain: Vec<Block> = db
-            .get(DB_CHAIN).ok().flatten()
+            .get(DB_CHAIN)
+            .ok()
+            .flatten()
             .and_then(|iv| bincode::deserialize(&iv).ok())
             .unwrap_or_default();
         let accounts: HashMap<String, Account> = db
-            .get(DB_ACCOUNTS).ok().flatten()
+            .get(DB_ACCOUNTS)
+            .ok()
+            .flatten()
             .and_then(|iv| bincode::deserialize(&iv).ok())
             .unwrap_or_default();
-        let (em_c, em_i, br_c, br_i, bh): (u64,u64,u64,u64,u64) = db
-            .get(DB_EMISSION).ok().flatten()
+        let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
+            .get(DB_EMISSION)
+            .ok()
+            .flatten()
             .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or((0,0, INITIAL_BLOCK_REWARD_CONSUMER, INITIAL_BLOCK_REWARD_INDUSTRIAL, 0));
+            .unwrap_or((
+                0,
+                0,
+                INITIAL_BLOCK_REWARD_CONSUMER,
+                INITIAL_BLOCK_REWARD_INDUSTRIAL,
+                0,
+            ));
         Ok(Blockchain {
             chain,
             accounts,
-            difficulty: 1_000_000,
+            difficulty: 8,
             mempool: Vec::new(),
             db,
             emission_consumer: em_c,
@@ -160,8 +194,12 @@ impl Blockchain {
         };
         let bytes = bincode::serialize(&disk)
             .map_err(|e| PyValueError::new_err(format!("Serialization error: {}", e)))?;
-        self.db.insert(DB_CHAIN, bytes).map_err(|e| PyValueError::new_err(format!("DB insert: {}", e)))?;
-        self.db.flush().map_err(|e| PyValueError::new_err(format!("DB flush: {}", e)))?;
+        self.db
+            .insert(DB_CHAIN, bytes)
+            .map_err(|e| PyValueError::new_err(format!("DB insert: {}", e)))?;
+        self.db
+            .flush()
+            .map_err(|e| PyValueError::new_err(format!("DB flush: {}", e)))?;
         Ok(())
     }
 
@@ -179,7 +217,9 @@ impl Blockchain {
         };
         self.chain.push(g);
         self.block_height = 1;
-        self.db.insert(DB_CHAIN, bincode::serialize(&self.chain).unwrap()).unwrap();
+        self.db
+            .insert(DB_CHAIN, bincode::serialize(&self.chain).unwrap())
+            .unwrap();
         self.db.flush().unwrap();
         Ok(())
     }
@@ -188,13 +228,20 @@ impl Blockchain {
         if self.accounts.contains_key(&address) {
             return Err(PyValueError::new_err("Account already exists"));
         }
-        let acc = Account { address: address.clone(), balance: TokenBalance { consumer, industrial } };
+        let acc = Account {
+            address: address.clone(),
+            balance: TokenBalance {
+                consumer,
+                industrial,
+            },
+        };
         self.accounts.insert(address, acc);
         Ok(())
     }
 
     pub fn get_account_balance(&self, address: String) -> PyResult<TokenBalance> {
-        self.accounts.get(&address)
+        self.accounts
+            .get(&address)
             .map(|a| a.balance.clone())
             .ok_or_else(|| PyValueError::new_err("Account not found"))
     }
@@ -209,10 +256,13 @@ impl Blockchain {
         public_key: Vec<u8>,
         signature: Vec<u8>,
     ) -> PyResult<()> {
-        let sender = self.accounts.get_mut(&from)
+        let sender = self
+            .accounts
+            .get_mut(&from)
             .ok_or_else(|| PyValueError::new_err("Sender not found"))?;
-        if sender.balance.consumer < amount_consumer + fee ||
-           sender.balance.industrial < amount_industrial + fee {
+        if sender.balance.consumer < amount_consumer + fee
+            || sender.balance.industrial < amount_industrial + fee
+        {
             return Err(PyValueError::new_err("Insufficient balance"));
         }
         let mut msg = Vec::new();
@@ -234,13 +284,22 @@ impl Blockchain {
 
         let recv = self.accounts.entry(to.clone()).or_insert(Account {
             address: to.clone(),
-            balance: TokenBalance { consumer: 0, industrial: 0 },
+            balance: TokenBalance {
+                consumer: 0,
+                industrial: 0,
+            },
         });
         recv.balance.consumer += amount_consumer;
         recv.balance.industrial += amount_industrial;
 
         self.mempool.push(Transaction {
-            from, to, amount_consumer, amount_industrial, fee, public_key, signature
+            from,
+            to,
+            amount_consumer,
+            amount_industrial,
+            fee,
+            public_key,
+            signature,
         });
         Ok(())
     }
@@ -295,13 +354,22 @@ impl Blockchain {
                 for tx in &txs {
                     if tx.from != "0".repeat(34) {
                         if let Some(s) = self.accounts.get_mut(&tx.from) {
-                            s.balance.consumer = s.balance.consumer.saturating_sub(tx.amount_consumer + tx.fee);
-                            s.balance.industrial = s.balance.industrial.saturating_sub(tx.amount_industrial + tx.fee);
+                            s.balance.consumer = s
+                                .balance
+                                .consumer
+                                .saturating_sub(tx.amount_consumer + tx.fee);
+                            s.balance.industrial = s
+                                .balance
+                                .industrial
+                                .saturating_sub(tx.amount_industrial + tx.fee);
                         }
                     }
                     let r = self.accounts.entry(tx.to.clone()).or_insert(Account {
                         address: tx.to.clone(),
-                        balance: TokenBalance { consumer: 0, industrial: 0 },
+                        balance: TokenBalance {
+                            consumer: 0,
+                            industrial: 0,
+                        },
                     });
                     r.balance.consumer += tx.amount_consumer;
                     r.balance.industrial += tx.amount_industrial;
@@ -310,13 +378,19 @@ impl Blockchain {
                 self.emission_consumer += reward_c;
                 self.emission_industrial += reward_i;
                 self.block_height += 1;
-                self.block_reward_consumer = ((self.block_reward_consumer as u128)
-                    * DECAY_NUMERATOR as u128 / DECAY_DENOMINATOR as u128) as u64;
-                self.block_reward_industrial = ((self.block_reward_industrial as u128)
-                    * DECAY_NUMERATOR as u128 / DECAY_DENOMINATOR as u128) as u64;
+                self.block_reward_consumer =
+                    ((self.block_reward_consumer as u128) * DECAY_NUMERATOR as u128
+                        / DECAY_DENOMINATOR as u128) as u64;
+                self.block_reward_industrial =
+                    ((self.block_reward_industrial as u128) * DECAY_NUMERATOR as u128
+                        / DECAY_DENOMINATOR as u128) as u64;
 
-                self.db.insert(DB_CHAIN, bincode::serialize(&self.chain).unwrap()).unwrap();
-                self.db.insert(DB_ACCOUNTS, bincode::serialize(&self.accounts).unwrap()).unwrap();
+                self.db
+                    .insert(DB_CHAIN, bincode::serialize(&self.chain).unwrap())
+                    .unwrap();
+                self.db
+                    .insert(DB_ACCOUNTS, bincode::serialize(&self.accounts).unwrap())
+                    .unwrap();
                 let state = (
                     self.emission_consumer,
                     self.emission_industrial,
@@ -324,12 +398,16 @@ impl Blockchain {
                     self.block_reward_industrial,
                     self.block_height,
                 );
-                self.db.insert(DB_EMISSION, bincode::serialize(&state).unwrap()).unwrap();
+                self.db
+                    .insert(DB_EMISSION, bincode::serialize(&state).unwrap())
+                    .unwrap();
                 self.db.flush().unwrap();
 
                 return Ok(block);
             }
-            nonce = nonce.checked_add(1).ok_or_else(|| PyValueError::new_err("Nonce overflow"))?;
+            nonce = nonce
+                .checked_add(1)
+                .ok_or_else(|| PyValueError::new_err("Nonce overflow"))?;
         }
     }
 
@@ -345,7 +423,12 @@ impl Blockchain {
             return Ok(false);
         }
 
-        let calc = calculate_hash(block.index, &block.previous_hash, block.nonce, &block.transactions);
+        let calc = calculate_hash(
+            block.index,
+            &block.previous_hash,
+            block.nonce,
+            &block.transactions,
+        );
         if calc != block.hash {
             return Ok(false);
         }
@@ -390,13 +473,22 @@ impl Blockchain {
                         return Err(PyValueError::new_err("Bad tx signature in chain"));
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.from) {
-                        s.balance.consumer = s.balance.consumer.saturating_sub(tx.amount_consumer + tx.fee);
-                        s.balance.industrial = s.balance.industrial.saturating_sub(tx.amount_industrial + tx.fee);
+                        s.balance.consumer = s
+                            .balance
+                            .consumer
+                            .saturating_sub(tx.amount_consumer + tx.fee);
+                        s.balance.industrial = s
+                            .balance
+                            .industrial
+                            .saturating_sub(tx.amount_industrial + tx.fee);
                     }
                 }
                 let r = self.accounts.entry(tx.to.clone()).or_insert(Account {
                     address: tx.to.clone(),
-                    balance: TokenBalance { consumer: 0, industrial: 0 },
+                    balance: TokenBalance {
+                        consumer: 0,
+                        industrial: 0,
+                    },
                 });
                 r.balance.consumer += tx.amount_consumer;
                 r.balance.industrial += tx.amount_industrial;
@@ -408,9 +500,11 @@ impl Blockchain {
             self.chain.push(block.clone());
             self.block_height += 1;
             self.block_reward_consumer = ((self.block_reward_consumer as u128)
-                * DECAY_NUMERATOR as u128 / DECAY_DENOMINATOR as u128) as u64;
+                * DECAY_NUMERATOR as u128
+                / DECAY_DENOMINATOR as u128) as u64;
             self.block_reward_industrial = ((self.block_reward_industrial as u128)
-                * DECAY_NUMERATOR as u128 / DECAY_DENOMINATOR as u128) as u64;
+                * DECAY_NUMERATOR as u128
+                / DECAY_DENOMINATOR as u128) as u64;
         }
 
         Ok(())
@@ -420,7 +514,43 @@ impl Blockchain {
 impl Blockchain {
     /// Open the default ./chain_db path
     pub fn new() -> Self {
-        Blockchain::open("chain_db").expect("DB open")
+        let db = sled::Config::new().temporary(true).open().expect("DB open");
+        let chain: Vec<Block> = db
+            .get(DB_CHAIN)
+            .ok()
+            .flatten()
+            .and_then(|iv| bincode::deserialize(&iv).ok())
+            .unwrap_or_default();
+        let accounts: HashMap<String, Account> = db
+            .get(DB_ACCOUNTS)
+            .ok()
+            .flatten()
+            .and_then(|iv| bincode::deserialize(&iv).ok())
+            .unwrap_or_default();
+        let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
+            .get(DB_EMISSION)
+            .ok()
+            .flatten()
+            .and_then(|iv| bincode::deserialize(&iv).ok())
+            .unwrap_or((
+                0,
+                0,
+                INITIAL_BLOCK_REWARD_CONSUMER,
+                INITIAL_BLOCK_REWARD_INDUSTRIAL,
+                0,
+            ));
+        Blockchain {
+            chain,
+            accounts,
+            difficulty: 8,
+            mempool: Vec::new(),
+            db,
+            emission_consumer: em_c,
+            emission_industrial: em_i,
+            block_reward_consumer: br_c,
+            block_reward_industrial: br_i,
+            block_height: bh,
+        }
     }
 
     #[allow(dead_code)]
@@ -440,7 +570,9 @@ impl Blockchain {
                 return false;
             }
             let bytes = hex_to_bytes(&b.hash);
-            if u64::from(leading_zero_bits(&bytes)) < chain[0].index /* or difficulty */ {
+            if u64::from(leading_zero_bits(&bytes)) < chain[0].index
+            /* or difficulty */
+            {
                 return false;
             }
             for tx in &b.transactions {

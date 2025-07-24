@@ -1,7 +1,11 @@
+import os
+import shutil
 import the_block
 
 def main():
     print("==> Initializing blockchain…")
+    if os.path.exists("chain_db"):
+        shutil.rmtree("chain_db")
     bc = the_block.Blockchain()
     bc.difficulty = 8
     print(f"Difficulty set to {bc.difficulty}\n")
