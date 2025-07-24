@@ -103,7 +103,13 @@ pub struct ChainDisk {
 
 #[pymethods]
 impl Blockchain {
+    /// Default Python constructor opens ./chain_db
     #[new]
+    pub fn py_new() -> PyResult<Self> {
+        Self::open("chain_db")
+    }
+
+    #[staticmethod]
     pub fn open(path: &str) -> PyResult<Self> {
         // exactly the same as `new()`, but open sled::open(path)
         let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {}", e)))?;
