@@ -7,7 +7,7 @@ use proptest::prelude::*;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::{fs, path::Path};
-use the_block::{generate_keypair, sign_message, verify_signature, Block, Blockchain};
+use the_block::{Blockchain, Block, generate_keypair, sign_message, verify_signature};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
