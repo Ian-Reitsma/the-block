@@ -1,75 +1,72 @@
 import the_block
 
-print("==> Initializing blockchain...")
-bc = the_block.Blockchain()
-bc.difficulty = 8
-print("Blockchain initialized. Difficulty set to 8.")
+def main():
+    print("==> Initializing blockchain…")
+    bc = the_block.Blockchain()
+    bc.difficulty = 8
+    print(f"Difficulty set to {bc.difficulty}\n")
 
-print("\n==> Adding account 'miner'...")
-bc.add_account("miner", 0, 0)
-balance = bc.get_account_balance("miner")
-print(f"'miner' account balance: consumer={balance.consumer}, industrial={balance.industrial}")
+    print("==> Adding accounts: 'miner' and 'alice'…")
+    bc.add_account("miner", 0, 0)
+    bc.add_account("alice", 0, 0)
+    print("Accounts added.\n")
 
-print("\n==> Generating ed25519 keypair...")
-priv, pub = the_block.generate_keypair()
-print(f"Private key (len={len(priv)}): {priv}")
-print(f"Public key (len={len(pub)}): {pub}")
+    print("==> Generating ed25519 keypair for miner…")
+    priv, pub = the_block.generate_keypair()
+    print(f"Private key length: {len(priv)}")
+    print(f"Public  key length: {len(pub)}\n")
 
-print("\n==> Signing and verifying a sample message...")
-msg = b"test transaction"
-sig = the_block.sign_message(priv, msg)
-verified = the_block.verify_signature(pub, msg, sig)
-print(f"Signature: {sig}")
-print(f"Signature valid? {'YES' if verified else 'NO'}")
+    print("==> Signing & verifying a sample message…")
+    msg = b"test transaction"
+    sig = the_block.sign_message(priv, msg)
+    assert the_block.verify_signature(pub, msg, sig), "Signature check failed"
+    print("Signature valid.\n")
 
-print("\n==> Adding recipient 'alice' and sending a transaction...")
-bc.add_account("alice", 0, 0)
+    print("==> Mining genesis block for 'miner'…")
+    block0 = bc.mine_block("miner")
+    print(f"Block {block0.index} mined, hash = {block0.hash}")
+    m0 = bc.get_account_balance("miner")
+    a0 = bc.get_account_balance("alice")
+    print(f"miner balance:    consumer={m0.consumer}, industrial={m0.industrial}")
+    print(f"alice balance:    consumer={a0.consumer}, industrial={a0.industrial}\n")
 
-# Build the *exact* message you pass to submit_transaction
-msg_tx = (
-    b"miner" +
-    b"alice" +
-    (0).to_bytes(8, "little") +
-    (0).to_bytes(8, "little") +
-    (0).to_bytes(8, "little")
-)
-sig_tx = the_block.sign_message(priv, msg_tx)
-try:
-    bc.submit_transaction(
-        "miner", "alice", 0, 0, 0,
-        list(pub),
-        list(sig_tx)
+    print("==> Submitting a real transaction: miner → alice (1 consumer, 2 industrial, fee=3)")
+    amt_cons, amt_ind, fee = 1, 2, 3
+    tx_msg = (
+        b"miner" +
+        b"alice" +
+        amt_cons.to_bytes(8, "little") +
+        amt_ind.to_bytes(8, "little") +
+        fee.to_bytes(8, "little")
     )
-    print("Transaction submitted!")
-except Exception as e:
-    print("Transaction failed:", e)
-sig_tx = the_block.sign_message(priv, msg_tx)
-try:
+    sig_tx = the_block.sign_message(priv, tx_msg)
     bc.submit_transaction(
-        "miner", "alice", 0, 0, 0,
-        list(pub),         # public_key as Vec<u8>
-        list(sig_tx)       # signature as Vec<u8>
+        "miner", "alice",
+        amt_cons, amt_ind, fee,
+        list(pub), list(sig_tx)
     )
-    print("Transaction submitted!")
-except Exception as e:
-    print("Transaction failed:", e)
+    print(f"Transaction queued (fee={fee}).\n")
 
-print("\n==> Mining a block...")
-block = bc.mine_block()
-print(f"Mined block index: {block.index}, hash: {block.hash}")
+    print("==> Mining next block for 'miner' (collecting fee)…")
+    block1 = bc.mine_block("miner")
+    print(f"Block {block1.index} mined, hash = {block1.hash}")
+    m1 = bc.get_account_balance("miner")
+    a1 = bc.get_account_balance("alice")
+    print(f"miner balance:    consumer={m1.consumer}, industrial={m1.industrial}")
+    print(f"alice balance:    consumer={a1.consumer}, industrial={a1.industrial}\n")
 
-print("\n==> Updated balances after mining:")
-print("miner:", bc.get_account_balance("miner").consumer, "(consumer)")
-print("alice:", bc.get_account_balance("alice").consumer, "(consumer)")
-print("\n==> Emission and reward state:")
-print(f"Block height: {bc.block_height}")
-print(f"Block reward (consumer): {bc.block_reward_consumer}")
-print(f"Block reward (industrial): {bc.block_reward_industrial}")
-em_cons, em_ind = bc.circulating_supply()
-print(f"Circulating supply: consumer={em_cons}, industrial={em_ind}")
+    print("==> Emission & reward state:")
+    print(f" Block height:               {bc.block_height}")
+    print(f" Current block reward:       {bc.block_reward_consumer} (consumer), {bc.block_reward_industrial} (industrial)")
+    em_c, em_i = bc.circulating_supply()
+    print(f" Circulating supply:         {em_c} (consumer), {em_i} (industrial)\n")
 
-print("\n==> Mining several more blocks to see decay in action...")
-for i in range(4):
-    block = bc.mine_block()
-    print(f"Block {block.index}: reward={bc.block_reward_consumer}, emission={bc.circulating_supply()[0]}")
+    print("==> Mining 4 more blocks to demonstrate decay…")
+    for _ in range(4):
+        blk = bc.mine_block("miner")
+        print(f" Block {blk.index}: next reward = {bc.block_reward_consumer} (consumer)")
 
+    print("\n✅ All operations completed successfully.")
+
+if __name__ == "__main__":
+    main()
