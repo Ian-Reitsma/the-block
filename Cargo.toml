@@ -13,6 +13,7 @@ hex = "0.4"
 ed25519-dalek = "2.2.0"
 rand = "0.8"
 rand_core = "0.6"
+tempfile = "3"
 
 [lib]
 name = "the_block"
