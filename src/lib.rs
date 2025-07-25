@@ -14,8 +14,10 @@ use std::convert::TryInto;
 
 pub mod transaction;
 pub use transaction::{
-    canonical_payload_bytes, sign_tx, verify_signed_tx, RawTxPayload, SignedTransaction,
+    canonical_payload_bytes, sign_tx_py as sign_tx, verify_signed_tx_py as verify_signed_tx,
+    RawTxPayload, SignedTransaction,
 };
+use transaction::{sign_tx_py, verify_signed_tx_py};
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -636,7 +638,7 @@ pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signature, m)?)?;
-    m.add_function(wrap_pyfunction!(sign_tx, m)?)?;
-    m.add_function(wrap_pyfunction!(verify_signed_tx, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     Ok(())
 }

@@ -35,14 +35,17 @@ impl RawTxPayload {
         fee: u64,
     ) -> Self {
         RawTxPayload {
-            from_,
-            to,
-            amount_consumer,
-            amount_industrial,
-            fee,
-        }
+            from_, to, amount_consumer, amount_industrial, fee
+            }
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={})",
+            self.from_, self.to, self.amount_consumer, self.amount_industrial, self.fee
+        )
     }
 }
+
 
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -65,6 +68,15 @@ impl SignedTransaction {
             signature,
         }
     }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{} bytes>)",
+            self.payload.__repr__(),
+            self.public_key.len(),
+            self.signature.len(),
+        )
+    }
 }
 
 impl SignedTransaction {
@@ -85,7 +97,7 @@ pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     conf.serialize(payload).unwrap()
 }
 
-pub fn sign_tx_internal(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransaction {
+pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransaction {
     let sk = SigningKey::from_bytes(&to_array_32(sk_bytes));
     let msg = {
         let mut m = DOMAIN_TAG.to_vec();
@@ -100,7 +112,7 @@ pub fn sign_tx_internal(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransa
     }
 }
 
-pub fn verify_signed_tx_internal(tx: &SignedTransaction) -> bool {
+pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
         if let Ok(vk) = VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
         let mut m = DOMAIN_TAG.to_vec();
         m.extend(canonical_payload_bytes(&tx.payload));
@@ -111,12 +123,12 @@ pub fn verify_signed_tx_internal(tx: &SignedTransaction) -> bool {
     }
 }
 
-#[pyfunction]
-pub fn sign_tx(sk_bytes: Vec<u8>, payload: RawTxPayload) -> SignedTransaction {
-    sign_tx_internal(&sk_bytes, &payload)
+#[pyfunction(name = "sign_tx")]
+pub fn sign_tx_py(sk_bytes: Vec<u8>, payload: RawTxPayload) -> SignedTransaction {
+    sign_tx(&sk_bytes, &payload)
 }
 
-#[pyfunction]
-pub fn verify_signed_tx(tx: SignedTransaction) -> bool {
-    verify_signed_tx_internal(&tx)
+#[pyfunction(name = "verify_signed_tx")]
+pub fn verify_signed_tx_py(tx: SignedTransaction) -> bool {
+    verify_signed_tx(&tx)
 }
