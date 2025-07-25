@@ -1,6 +1,193 @@
-# the-block
-block, the.
+# the‑block
 
-On Windows: Open PowerShell as Admin and run .\bootstrap.ps1 If you hit a build error for Rust/PyO3, run choco install visualstudio2022buildtools -y and reboot.
+> **A formally‑specified, dual‑token blockchain kernel written in Rust with first‑class Python bindings.**  Zero unsafe code, deterministic serialization, cross‑platform builds, one‑command bootstrap.
 
-On Linux/macOS/WSL2: Run bash ./bootstrap.sh
+---
+
+## Table of Contents
+
+1. [Why the‑block?](#why-the‑block)
+2. [Quick Start](#quick-start)
+3. [Installation & Bootstrap](#installation--bootstrap)
+4. [Build & Test Matrix](#build--test-matrix)
+5. [Using the Python Module](#using-the-python-module)
+6. [Architecture Primer](#architecture-primer)
+7. [Project Layout](#project-layout)
+8. [Contribution Guidelines](#contribution-guidelines)
+9. [Security Model](#security-model)
+10. [License](#license)
+
+---
+
+## Why the‑block?
+
+* **Dual‑Token Economics** – consumer & industrial coins emitted per block, supporting differentiated incentive layers.
+* **Ed25519 + BLAKE3** – modern cryptography with strict verification and domain separation.
+* **Rust first** – `#![forbid(unsafe_code)]`, MSRV 1.74, formally verifiable components.
+* **PyO3 bindings** – import and use the chain directly from Python for rapid prototyping, data‑science, or wallet scripting.
+* **One‑command bootstrap** – `bootstrap.sh`/`bootstrap.ps1` installs every prerequisite (Rust, Python 3.12, maturin, clippy, Node 20) and builds a development wheel.
+* **Deterministic state** – cross‑language tests guarantee every node serializes, signs, and hashes identically.
+* **CI‑first** – GitHub Actions matrix across Linux, macOS, and Windows (WSL) ensures builds stay green.
+
+---
+
+## Quick Start
+
+```bash
+# Unix/macOS
+bash ./bootstrap.sh          # installs toolchains + builds + tests + wheel
+python demo.py               # mines a few blocks & prints balances
+
+# Windows (PowerShell)
+./bootstrap.ps1              # run as admin to install VS Build Tools via choco
+python demo.py               # same demo
+```
+
+> Look for `🎉 demo completed` in the console—if you see it, the kernel, bindings, and demo all worked.
+
+---
+
+## Installation & Bootstrap
+
+| OS                   | Command                     | Notes                                                                                |
+| -------------------- | --------------------------- | ------------------------------------------------------------------------------------ |
+| **Linux/macOS/WSL2** | `bash ./bootstrap.sh`       | idempotent; safe to rerun; uses apt/dnf/homebrew detection                           |
+| **Windows 10/11**    | `./bootstrap.ps1` *(Admin)* | installs Rust, Python 3.12 (via pyenv‑win), VS 2022 Build Tools; reboots if required |
+
+Bootstrap steps:
+
+1. Install or update **Rust** toolchain (`rustup`, nightly optional).
+2. Install **Python 3.12** + headers, create `.venv`, and activate.
+3. `pip install maturin black pytest` into the venv.
+4. `cargo install maturin` (if missing) and build wheel via `maturin develop --release`.
+5. Optional: install **Node 20** via `nvm` (for tooling not yet in repo).
+6. Run `cargo fmt && cargo clippy && cargo test` to verify setup.
+
+> Need CUDA, Docker, or GPU?  Not here—this repo is CPU‑only and self‑contained.
+
+---
+
+## Build & Test Matrix
+
+| Task                       | Command                                                             | Expected Output                      |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------ |
+| Rust unit + property tests | `cargo test --release`                                              | All tests green                      |
+| PyO3 wheel (manylinux)     | `maturin build --release --features extension-module`               | `target/wheels/the_block-*.whl`      |
+| In‑place dev install       | `maturin develop --release`                                         | Module importable in current venv    |
+| Lint / Style               | `cargo fmt -- --check && cargo clippy --all-targets -- -D warnings` | No diffs / warnings                  |
+| Benchmarks                 | `cargo bench`                                                       | Criterion HTML in `target/criterion` |
+
+CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
+
+---
+
+## Using the Python Module
+
+```python
+from the_block import RawTxPayload, sign_tx, verify_signed_tx, mine_block
+from nacl.signing import SigningKey  # or use ed25519_dalek in Rust
+
+# 1 Generate keypair
+sk = SigningKey.generate()
+pk = sk.verify_key
+
+# 2 Create and sign a transaction
+payload = RawTxPayload(
+    from_ = pk.encode().hex(),
+    to    = "deadbeef" * 4,
+    amount_consumer   = 1_000,
+    amount_industrial = 0,
+    fee               = 10,
+    nonce             = 0,
+    memo              = b"hello‑world",
+)
+
+stx = sign_tx(sk.encode(), payload)
+assert verify_signed_tx(stx)
+
+# 3 Mine a block (CPU PoW)
+block = mine_block([stx])  # returns dict‑like Python object
+print(block["header"]["hash"])
+```
+
+All functions return Python‑native types (`dict`, `bytes`, `int`) for simplicity.
+
+---
+
+## Architecture Primer
+
+* **Hashing** – BLAKE3‑256 for both block and transaction IDs (32 bytes).
+* **Signature** – Ed25519 strict; signing bytes are `DOMAIN_TAG | bincode(payload)`.
+* **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
+* **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each.
+* **Storage** – sled key‑value DB; column families: `chain/`, `accounts/`, `mempool/`.
+* **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
+* **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
+
+> For a deeper dive, read `docs/signatures.md` and `AGENTS.md`.
+
+---
+
+## Project Layout
+
+```text
+src/
+  ├── lib.rs           # PyO3 module + re‑exports
+  ├── blockchain/      # blocks, headers, mining, validation
+  ├── crypto/          # hash, signature, canonical serialization
+  ├── storage/         # sled abstractions (accounts, chain, mempool)
+  └── utils/           # hex helpers, logging, config
+
+bootstrap.sh           # Unix setup script
+bootstrap.ps1          # Windows setup script
+
+tests/                 # Rust tests (unit + proptest)
+benches/               # Criterion benches
+demo.py                # Python end‑to‑end demo
+docs/                  # Markdown specs (rendered by mdBook)
+AGENTS.md              # Developer handbook (authoritative)
+```
+
+---
+
+## Contribution Guidelines
+
+1. **Fork & branch**: `git checkout -b feat/<topic>`.
+2. **Follow coding standards** (Rustfmt, Clippy, Black).
+3. **Write tests** for every PR; property tests if possible.
+4. **Update docs** (`AGENTS.md`, `docs/`) if behaviour or API changes.
+5. **Commit messages** follow Conventional Commits (`feat:`, `fix:`, `refactor:`).
+6. **Open PR**; fill template with *Summary*, *Testing*, and *Docs Updated?*.
+7. Pull‑request must pass **all CI checks** before merge.
+
+> 🛑  **Never** push directly to `main`.  Squash‑merge only.
+
+---
+
+## Security Model
+
+See [docs/signatures.md](docs/signatures.md) and [AGENTS.md](AGENTS.md#11-security--cryptography) for the full threat matrix.  Highlights:
+
+* **Domain separation** prevents cross‑network replay.
+* **Strict signature verification** eliminates malleability.
+* **No unsafe Rust** ensures memory safety.
+* **Checksummed, deterministic DB** protects state integrity.
+* **Fuzz tests** catch parsing edge‑cases before release.
+
+Report security issues privately via `security@the-block.dev` (PGP key in `docs/SECURITY.md`).
+
+---
+
+## License
+Copyright (c) 2025 IJR Enterprises, Inc. All rights reserved.
+THE-BLOCK and all proprietary innovations, algorithms, and blockchain mechanisms implemented in this repository
+are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope, 
+including the replication of design, consensus mechanisms, or novel features unique to THE-BLOCK, 
+requires prior written consent.
+
+This software and all blockchain-related code, protocols, and original documentation contained herein
+are the exclusive property of IJR Enterprises, Inc. Unauthorized reproduction, modification, 
+distribution, or use of any part of this blockchain system is strictly prohibited except as 
+expressly permitted by a written license from IJR Enterprises, Inc.
+
+For licensing or commercial inquiries, contact: ijr.ent.inc@gmail.com
