@@ -12,6 +12,13 @@ use sled::Db;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
+pub mod transaction;
+pub use transaction::{
+    canonical_payload_bytes, sign_tx_py as sign_tx, verify_signed_tx_py as verify_signed_tx,
+    RawTxPayload, SignedTransaction,
+};
+use transaction::{sign_tx_py, verify_signed_tx_py};
+
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
 const DB_ACCOUNTS: &str = "accounts";
@@ -26,10 +33,10 @@ const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
 const DECAY_DENOMINATOR: u64 = 100000;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
-fn to_array_32(bytes: &[u8]) -> [u8; 32] {
+pub(crate) fn to_array_32(bytes: &[u8]) -> [u8; 32] {
     bytes.try_into().expect("Expected 32 bytes")
 }
-fn to_array_64(bytes: &[u8]) -> [u8; 64] {
+pub(crate) fn to_array_64(bytes: &[u8]) -> [u8; 64] {
     bytes.try_into().expect("Expected 64 bytes")
 }
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
@@ -58,32 +65,13 @@ pub struct Account {
 
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
-pub struct Transaction {
-    #[pyo3(get)]
-    pub from: String,
-    #[pyo3(get)]
-    pub to: String,
-    #[pyo3(get)]
-    pub amount_consumer: u64,
-    #[pyo3(get)]
-    pub amount_industrial: u64,
-    #[pyo3(get)]
-    pub fee: u64,
-    #[pyo3(get, set)]
-    pub public_key: Vec<u8>,
-    #[pyo3(get, set)]
-    pub signature: Vec<u8>,
-}
-
-#[pyclass]
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Block {
     #[pyo3(get)]
     pub index: u64,
     #[pyo3(get)]
     pub previous_hash: String,
     #[pyo3(get)]
-    pub transactions: Vec<Transaction>,
+    pub transactions: Vec<SignedTransaction>,
     #[pyo3(get)]
     pub nonce: u64,
     #[pyo3(get)]
@@ -96,7 +84,7 @@ pub struct Blockchain {
     pub accounts: HashMap<String, Account>,
     #[pyo3(get, set)]
     pub difficulty: u64,
-    pub mempool: Vec<Transaction>,
+    pub mempool: Vec<SignedTransaction>,
     db: Db,
     #[pyo3(get, set)]
     pub emission_consumer: u64,
@@ -246,61 +234,41 @@ impl Blockchain {
             .ok_or_else(|| PyValueError::new_err("Account not found"))
     }
 
-    pub fn submit_transaction(
-        &mut self,
-        from: String,
-        to: String,
-        amount_consumer: u64,
-        amount_industrial: u64,
-        fee: u64,
-        public_key: Vec<u8>,
-        signature: Vec<u8>,
-    ) -> PyResult<()> {
+    pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
+        let sender_addr = tx.payload.from_.clone();
+        let receiver_addr = tx.payload.to.clone();
+
         let sender = self
             .accounts
-            .get_mut(&from)
+            .get_mut(&sender_addr)
             .ok_or_else(|| PyValueError::new_err("Sender not found"))?;
-        if sender.balance.consumer < amount_consumer + fee
-            || sender.balance.industrial < amount_industrial + fee
+        if sender.balance.consumer < tx.payload.amount_consumer + tx.payload.fee
+            || sender.balance.industrial < tx.payload.amount_industrial + tx.payload.fee
         {
             return Err(PyValueError::new_err("Insufficient balance"));
         }
-        let mut msg = Vec::new();
-        msg.extend(from.as_bytes());
-        msg.extend(to.as_bytes());
-        msg.extend(&amount_consumer.to_le_bytes());
-        msg.extend(&amount_industrial.to_le_bytes());
-        msg.extend(&fee.to_le_bytes());
 
-        let vk = VerifyingKey::from_bytes(&to_array_32(&public_key))
-            .map_err(|_| PyValueError::new_err("Invalid public key"))?;
-        let sig = Signature::from_bytes(&to_array_64(&signature));
-        if vk.verify(&msg, &sig).is_err() {
+        if !verify_signed_tx(tx.clone()) {
             return Err(PyValueError::new_err("Signature verification failed"));
         }
 
-        sender.balance.consumer -= amount_consumer + fee;
-        sender.balance.industrial -= amount_industrial + fee;
+        sender.balance.consumer -= tx.payload.amount_consumer + tx.payload.fee;
+        sender.balance.industrial -= tx.payload.amount_industrial + tx.payload.fee;
 
-        let recv = self.accounts.entry(to.clone()).or_insert(Account {
-            address: to.clone(),
-            balance: TokenBalance {
-                consumer: 0,
-                industrial: 0,
-            },
-        });
-        recv.balance.consumer += amount_consumer;
-        recv.balance.industrial += amount_industrial;
+        let recv = self
+            .accounts
+            .entry(receiver_addr.clone())
+            .or_insert(Account {
+                address: receiver_addr.clone(),
+                balance: TokenBalance {
+                    consumer: 0,
+                    industrial: 0,
+                },
+            });
+        recv.balance.consumer += tx.payload.amount_consumer;
+        recv.balance.industrial += tx.payload.amount_industrial;
 
-        self.mempool.push(Transaction {
-            from,
-            to,
-            amount_consumer,
-            amount_industrial,
-            fee,
-            public_key,
-            signature,
-        });
+        self.mempool.push(tx);
         Ok(())
     }
 
@@ -325,12 +293,14 @@ impl Blockchain {
             reward_i = MAX_SUPPLY_INDUSTRIAL - self.emission_industrial;
         }
 
-        let mut txs = vec![Transaction {
-            from: "0".repeat(34),
-            to: miner_addr.clone(),
-            amount_consumer: reward_c,
-            amount_industrial: reward_i,
-            fee: 0,
+        let mut txs = vec![SignedTransaction {
+            payload: RawTxPayload {
+                from_: "0".repeat(34),
+                to: miner_addr.clone(),
+                amount_consumer: reward_c,
+                amount_industrial: reward_i,
+                fee: 0,
+            },
             public_key: vec![],
             signature: vec![],
         }];
@@ -352,27 +322,30 @@ impl Blockchain {
                 self.chain.push(block.clone());
 
                 for tx in &txs {
-                    if tx.from != "0".repeat(34) {
-                        if let Some(s) = self.accounts.get_mut(&tx.from) {
+                    if tx.payload.from_ != "0".repeat(34) {
+                        if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             s.balance.consumer = s
                                 .balance
                                 .consumer
-                                .saturating_sub(tx.amount_consumer + tx.fee);
+                                .saturating_sub(tx.payload.amount_consumer + tx.payload.fee);
                             s.balance.industrial = s
                                 .balance
                                 .industrial
-                                .saturating_sub(tx.amount_industrial + tx.fee);
+                                .saturating_sub(tx.payload.amount_industrial + tx.payload.fee);
                         }
                     }
-                    let r = self.accounts.entry(tx.to.clone()).or_insert(Account {
-                        address: tx.to.clone(),
-                        balance: TokenBalance {
-                            consumer: 0,
-                            industrial: 0,
-                        },
-                    });
-                    r.balance.consumer += tx.amount_consumer;
-                    r.balance.industrial += tx.amount_industrial;
+                    let r = self
+                        .accounts
+                        .entry(tx.payload.to.clone())
+                        .or_insert(Account {
+                            address: tx.payload.to.clone(),
+                            balance: TokenBalance {
+                                consumer: 0,
+                                industrial: 0,
+                            },
+                        });
+                    r.balance.consumer += tx.payload.amount_consumer;
+                    r.balance.industrial += tx.payload.amount_industrial;
                 }
 
                 self.emission_consumer += reward_c;
@@ -459,43 +432,46 @@ impl Blockchain {
 
         for block in &new_chain {
             for tx in &block.transactions {
-                if tx.from != "0".repeat(34) {
+                if tx.payload.from_ != "0".repeat(34) {
                     let mut msg = Vec::new();
-                    msg.extend(tx.from.as_bytes());
-                    msg.extend(tx.to.as_bytes());
-                    msg.extend(&tx.amount_consumer.to_le_bytes());
-                    msg.extend(&tx.amount_industrial.to_le_bytes());
-                    msg.extend(&tx.fee.to_le_bytes());
+                    msg.extend(tx.payload.from_.as_bytes());
+                    msg.extend(tx.payload.to.as_bytes());
+                    msg.extend(&tx.payload.amount_consumer.to_le_bytes());
+                    msg.extend(&tx.payload.amount_industrial.to_le_bytes());
+                    msg.extend(&tx.payload.fee.to_le_bytes());
                     let vk = VerifyingKey::from_bytes(&to_array_32(&tx.public_key))
                         .map_err(|_| PyValueError::new_err("Invalid pubkey in chain"))?;
                     let sig = Signature::from_bytes(&to_array_64(&tx.signature));
                     if vk.verify(&msg, &sig).is_err() {
                         return Err(PyValueError::new_err("Bad tx signature in chain"));
                     }
-                    if let Some(s) = self.accounts.get_mut(&tx.from) {
+                    if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                         s.balance.consumer = s
                             .balance
                             .consumer
-                            .saturating_sub(tx.amount_consumer + tx.fee);
+                            .saturating_sub(tx.payload.amount_consumer + tx.payload.fee);
                         s.balance.industrial = s
                             .balance
                             .industrial
-                            .saturating_sub(tx.amount_industrial + tx.fee);
+                            .saturating_sub(tx.payload.amount_industrial + tx.payload.fee);
                     }
                 }
-                let r = self.accounts.entry(tx.to.clone()).or_insert(Account {
-                    address: tx.to.clone(),
-                    balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
-                    },
-                });
-                r.balance.consumer += tx.amount_consumer;
-                r.balance.industrial += tx.amount_industrial;
+                let r = self
+                    .accounts
+                    .entry(tx.payload.to.clone())
+                    .or_insert(Account {
+                        address: tx.payload.to.clone(),
+                        balance: TokenBalance {
+                            consumer: 0,
+                            industrial: 0,
+                        },
+                    });
+                r.balance.consumer += tx.payload.amount_consumer;
+                r.balance.industrial += tx.payload.amount_industrial;
             }
             if let Some(cb) = block.transactions.first() {
-                self.emission_consumer += cb.amount_consumer;
-                self.emission_industrial += cb.amount_industrial;
+                self.emission_consumer += cb.payload.amount_consumer;
+                self.emission_industrial += cb.payload.amount_industrial;
             }
             self.chain.push(block.clone());
             self.block_height += 1;
@@ -576,13 +552,13 @@ impl Blockchain {
                 return false;
             }
             for tx in &b.transactions {
-                if tx.from != "0".repeat(34) {
+                if tx.payload.from_ != "0".repeat(34) {
                     let mut msg = Vec::new();
-                    msg.extend(tx.from.as_bytes());
-                    msg.extend(tx.to.as_bytes());
-                    msg.extend(&tx.amount_consumer.to_le_bytes());
-                    msg.extend(&tx.amount_industrial.to_le_bytes());
-                    msg.extend(&tx.fee.to_le_bytes());
+                    msg.extend(tx.payload.from_.as_bytes());
+                    msg.extend(tx.payload.to.as_bytes());
+                    msg.extend(&tx.payload.amount_consumer.to_le_bytes());
+                    msg.extend(&tx.payload.amount_industrial.to_le_bytes());
+                    msg.extend(&tx.payload.fee.to_le_bytes());
                     let vk = match VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
                         Ok(vk) => vk,
                         Err(_) => return false,
@@ -611,17 +587,17 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
     count
 }
 
-fn calculate_hash(index: u64, prev: &str, nonce: u64, txs: &[Transaction]) -> String {
+fn calculate_hash(index: u64, prev: &str, nonce: u64, txs: &[SignedTransaction]) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&index.to_be_bytes());
     hasher.update(prev.as_bytes());
     hasher.update(&nonce.to_be_bytes());
     for tx in txs {
-        hasher.update(tx.from.as_bytes());
-        hasher.update(tx.to.as_bytes());
-        hasher.update(&tx.amount_consumer.to_le_bytes());
-        hasher.update(&tx.amount_industrial.to_le_bytes());
-        hasher.update(&tx.fee.to_le_bytes());
+        hasher.update(tx.payload.from_.as_bytes());
+        hasher.update(tx.payload.to.as_bytes());
+        hasher.update(&tx.payload.amount_consumer.to_le_bytes());
+        hasher.update(&tx.payload.amount_industrial.to_le_bytes());
+        hasher.update(&tx.payload.fee.to_le_bytes());
     }
     hasher.finalize().to_hex().to_string()
 }
@@ -656,10 +632,13 @@ pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Blockchain>()?;
     m.add_class::<Block>()?;
     m.add_class::<Account>()?;
-    m.add_class::<Transaction>()?;
+    m.add_class::<SignedTransaction>()?;
+    m.add_class::<RawTxPayload>()?;
     m.add_class::<TokenBalance>()?;
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signature, m)?)?;
+    m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     Ok(())
 }
