@@ -36,19 +36,14 @@ def main():
 
     print("==> Submitting a real transaction: miner → alice (1 consumer, 2 industrial, fee=3)")
     amt_cons, amt_ind, fee = 1, 2, 3
-    tx_msg = (
-        b"miner" +
-        b"alice" +
-        amt_cons.to_bytes(8, "little") +
-        amt_ind.to_bytes(8, "little") +
-        fee.to_bytes(8, "little")
+    payload = the_block.RawTxPayload(
+        from_="miner", to="alice",
+        amount_consumer=amt_cons,
+        amount_industrial=amt_ind,
+        fee=fee,
     )
-    sig_tx = the_block.sign_message(priv, tx_msg)
-    bc.submit_transaction(
-        "miner", "alice",
-        amt_cons, amt_ind, fee,
-        list(pub), list(sig_tx)
-    )
+    stx = the_block.sign_tx(list(priv), payload)
+    bc.submit_transaction(stx)
     print(f"Transaction queued (fee={fee}).\n")
 
     print("==> Mining next block for 'miner' (collecting fee)…")
