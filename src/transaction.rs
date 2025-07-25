@@ -58,11 +58,7 @@ pub struct SignedTransaction {
 #[pymethods]
 impl SignedTransaction {
     #[new]
-    pub fn new(
-        payload: RawTxPayload,
-        public_key: Vec<u8>,
-        signature: Vec<u8>,
-    ) -> Self {
+    pub fn new(payload: RawTxPayload, public_key: Vec<u8>, signature: Vec<u8>) -> Self {
         SignedTransaction {
             payload,
             public_key,
@@ -89,7 +85,7 @@ pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     conf.serialize(payload).unwrap()
 }
 
-pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransaction {
+pub fn sign_tx_internal(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransaction {
     let sk = SigningKey::from_bytes(&to_array_32(sk_bytes));
     let msg = {
         let mut m = DOMAIN_TAG.to_vec();
@@ -104,8 +100,8 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransaction {
     }
 }
 
-pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
-    if let Ok(vk) = VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
+pub fn verify_signed_tx_internal(tx: &SignedTransaction) -> bool {
+        if let Ok(vk) = VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
         let mut m = DOMAIN_TAG.to_vec();
         m.extend(canonical_payload_bytes(&tx.payload));
         let sig = Signature::from_bytes(&to_array_64(&tx.signature));
@@ -116,11 +112,11 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
 }
 
 #[pyfunction]
-pub fn py_sign_tx(sk_bytes: Vec<u8>, payload: RawTxPayload) -> SignedTransaction {
-    sign_tx(&sk_bytes, &payload)
+pub fn sign_tx(sk_bytes: Vec<u8>, payload: RawTxPayload) -> SignedTransaction {
+    sign_tx_internal(&sk_bytes, &payload)
 }
 
 #[pyfunction]
-pub fn py_verify_signed_tx(tx: SignedTransaction) -> bool {
-    verify_signed_tx(&tx)
+pub fn verify_signed_tx(tx: SignedTransaction) -> bool {
+    verify_signed_tx_internal(&tx)
 }

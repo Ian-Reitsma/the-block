@@ -14,8 +14,7 @@ use std::convert::TryInto;
 
 pub mod transaction;
 pub use transaction::{
-    canonical_payload_bytes, py_sign_tx as sign_tx, py_verify_signed_tx as verify_signed_tx,
-    RawTxPayload, SignedTransaction,
+    canonical_payload_bytes, sign_tx, verify_signed_tx, RawTxPayload, SignedTransaction,
 };
 
 // === Database keys ===
