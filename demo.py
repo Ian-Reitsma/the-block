@@ -41,6 +41,9 @@ def main():
         amount_consumer=amt_cons,
         amount_industrial=amt_ind,
         fee=fee,
+        fee_token=0,
+        nonce=0,
+        memo=b"",
     )
     stx = the_block.sign_tx(list(priv), payload)
     bc.submit_transaction(stx)

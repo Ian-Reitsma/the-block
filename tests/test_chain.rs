@@ -1,15 +1,10 @@
 // tests/test_chain.rs
 
-#[macro_use]
-extern crate proptest;
-
 use proptest::prelude::*;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::{fs, path::Path};
-use the_block::{
-    generate_keypair, sign_tx, verify_signature, Block, Blockchain, RawTxPayload, SignedTransaction,
-};
+use std::fs;
+use the_block::{generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -36,6 +31,9 @@ mod testutil {
             amount_consumer: consumer,
             amount_industrial: industrial,
             fee,
+            fee_token: 0,
+            nonce: 0,
+            memo: Vec::new(),
         };
         sign_tx(priv_key.to_vec(), payload.clone())
     }
@@ -106,6 +104,9 @@ fn test_rejects_invalid_signature() {
         amount_consumer: 1,
         amount_industrial: 2,
         fee: 0,
+        fee_token: 0,
+        nonce: 0,
+        memo: Vec::new(),
     };
     // sign with wrong key (priv_bad + 1)
     let mut wrong = priv_bad.clone();
@@ -189,7 +190,7 @@ fn test_replay_attack_prevention() {
 
     let (privkey, _pubk) = generate_keypair();
     let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 5, 2, 0);
-    bc.submit_transaction(tx.clone());
+    let _ = bc.submit_transaction(tx.clone());
 
     // replay
     let res = bc.submit_transaction(tx);

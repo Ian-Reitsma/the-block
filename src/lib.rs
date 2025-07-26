@@ -1,7 +1,4 @@
-use bincode;
-use blake3;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use hex;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -18,6 +15,8 @@ pub use transaction::{
     RawTxPayload, SignedTransaction,
 };
 use transaction::{sign_tx_py, verify_signed_tx_py};
+pub mod constants;
+pub use constants::{domain_tag, CHAIN_ID};
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -122,7 +121,7 @@ impl Blockchain {
     #[staticmethod]
     pub fn open(path: &str) -> PyResult<Self> {
         // exactly the same as `new()`, but open sled::open(path)
-        let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {}", e)))?;
+        let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
         let chain: Vec<Block> = db
             .get(DB_CHAIN)
             .ok()
@@ -181,13 +180,13 @@ impl Blockchain {
             block_height: self.block_height,
         };
         let bytes = bincode::serialize(&disk)
-            .map_err(|e| PyValueError::new_err(format!("Serialization error: {}", e)))?;
+            .map_err(|e| PyValueError::new_err(format!("Serialization error: {e}")))?;
         self.db
             .insert(DB_CHAIN, bytes)
-            .map_err(|e| PyValueError::new_err(format!("DB insert: {}", e)))?;
+            .map_err(|e| PyValueError::new_err(format!("DB insert: {e}")))?;
         self.db
             .flush()
-            .map_err(|e| PyValueError::new_err(format!("DB flush: {}", e)))?;
+            .map_err(|e| PyValueError::new_err(format!("DB flush: {e}")))?;
         Ok(())
     }
 
@@ -300,6 +299,9 @@ impl Blockchain {
                 amount_consumer: reward_c,
                 amount_industrial: reward_i,
                 fee: 0,
+                fee_token: 0,
+                nonce: 0,
+                memo: Vec::new(),
             },
             public_key: vec![],
             signature: vec![],
@@ -487,6 +489,12 @@ impl Blockchain {
     }
 }
 
+impl Default for Blockchain {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Blockchain {
     /// Open the default ./chain_db path
     pub fn new() -> Self {
@@ -627,6 +635,11 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
     false
 }
 
+#[pyfunction]
+pub fn chain_id_py() -> u32 {
+    CHAIN_ID
+}
+
 #[pymodule]
 pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Blockchain>()?;
@@ -638,6 +651,7 @@ pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signature, m)?)?;
+    m.add_function(wrap_pyfunction!(chain_id_py, m)?)?;
     m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     Ok(())

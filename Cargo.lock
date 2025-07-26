@@ -838,6 +838,7 @@ dependencies = [
  "blake3",
  "ed25519-dalek",
  "hex",
+ "once_cell",
  "proptest",
  "pyo3",
  "rand 0.8.5",
