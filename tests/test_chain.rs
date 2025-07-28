@@ -1,9 +1,9 @@
 // tests/test_chain.rs
 
 use proptest::prelude::*;
+use std::fs;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::fs;
 use the_block::{generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction};
 
 fn init() {
@@ -24,6 +24,7 @@ mod testutil {
         consumer: u64,
         industrial: u64,
         fee: u64,
+        nonce: u64,
     ) -> SignedTransaction {
         let payload = RawTxPayload {
             from_: from.to_string(),
@@ -32,10 +33,10 @@ mod testutil {
             amount_industrial: industrial,
             fee,
             fee_token: 0,
-            nonce: 0,
+            nonce,
             memo: Vec::new(),
         };
-        sign_tx(priv_key.to_vec(), payload.clone())
+        sign_tx(priv_key.to_vec(), payload.clone()).expect("valid key")
     }
 }
 
@@ -70,8 +71,8 @@ proptest! {
         bc.mine_block(miner.clone()).unwrap();
         let (priv_bytes, _pub_bytes) = generate_keypair();
 
-        for _ in 0..tx_count {
-            let tx = testutil::build_signed_tx(&priv_bytes, miner, &alice, amt_cons, amt_ind, fee);
+        for n in 0..tx_count {
+            let tx = testutil::build_signed_tx(&priv_bytes, miner, &alice, amt_cons, amt_ind, fee, n as u64 + 1);
             let _ = bc.submit_transaction(tx);
         }
 
@@ -111,7 +112,7 @@ fn test_rejects_invalid_signature() {
     // sign with wrong key (priv_bad + 1)
     let mut wrong = priv_bad.clone();
     wrong[0] ^= 0xFF;
-    let mut tx = sign_tx(wrong, payload.clone());
+    let mut tx = sign_tx(wrong, payload.clone()).expect("valid key");
     tx.public_key = pub_bytes.clone();
     let res = bc.submit_transaction(tx);
     assert!(res.is_err(), "Bad signature should be rejected");
@@ -128,7 +129,7 @@ fn test_double_spend_is_rejected() {
 
     let (privkey, _pubk) = generate_keypair();
     let (amt_cons, amt_ind, fee) = (1_000_000_000_000_000, 1_000_000_000_000_000, 0);
-    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", amt_cons, amt_ind, fee);
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", amt_cons, amt_ind, fee, 1);
 
     let res = bc.submit_transaction(tx);
     assert!(res.is_err(), "Overspend should be rejected");
@@ -168,7 +169,7 @@ fn test_fee_credit_to_miner() {
 
     let (privkey, _pubk) = generate_keypair();
     let fee = 7;
-    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 2, fee);
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 2, fee, 1);
 
     bc.submit_transaction(tx).unwrap();
     let before = bc.get_account_balance("miner".into()).unwrap();
@@ -189,7 +190,7 @@ fn test_replay_attack_prevention() {
     bc.mine_block("miner".into()).unwrap();
 
     let (privkey, _pubk) = generate_keypair();
-    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 5, 2, 0);
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 5, 2, 0, 1);
     let _ = bc.submit_transaction(tx.clone());
 
     // replay
@@ -207,13 +208,32 @@ fn test_mempool_flush_on_block_mine() {
     bc.mine_block("miner".into()).unwrap();
 
     let (privkey, _pubk) = generate_keypair();
-    for _ in 0..100 {
-        let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 0);
+    for n in 0..100 {
+        let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 0, n + 1);
         let _ = bc.submit_transaction(tx);
     }
     assert!(!bc.mempool.is_empty());
     bc.mine_block("miner".into()).unwrap();
     assert!(bc.mempool.is_empty());
+}
+
+// 8b. Duplicate transaction IDs in block are rejected
+#[test]
+fn test_duplicate_txid_rejected() {
+    init();
+    let mut bc = Blockchain::new();
+    bc.add_account("miner".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 0, 0).unwrap();
+    bc.mine_block("miner".into()).unwrap();
+
+    let (privkey, _pub) = generate_keypair();
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 0, 1);
+    bc.submit_transaction(tx1.clone()).unwrap();
+    let block = bc.mine_block("miner".into()).unwrap();
+
+    let mut bad_block = block.clone();
+    bad_block.transactions.push(tx1);
+    assert!(!bc.validate_block(&bad_block).unwrap());
 }
 
 // 8. Concurrency: multi-threaded mempool/submit/mine
@@ -234,8 +254,8 @@ fn test_multithreaded_submit_and_mine() {
             let bc = Arc::clone(&bc);
             let privkey = privkey.clone();
             thread::spawn(move || {
-                for _ in 0..5 {
-                    let tx = testutil::build_signed_tx(&privkey, "miner", "bob", 1, 1, 0);
+                for n in 0..5 {
+                    let tx = testutil::build_signed_tx(&privkey, "miner", "bob", 1, 1, 0, n + 1);
                     let mut chain = write_lock!(bc);
                     let _ = chain.submit_transaction(tx.clone());
                     let _ = chain.mine_block("miner".into());
@@ -335,7 +355,7 @@ fn test_chain_determinism() {
     }
 
     let (privkey, _pubk) = generate_keypair();
-    let tx1 = testutil::build_signed_tx(&privkey, "miner", "miner", 1, 1, 0);
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "miner", 1, 1, 0, 1);
     let tx2 = tx1.clone();
     bc1.submit_transaction(tx1).unwrap();
     bc2.submit_transaction(tx2).unwrap();
@@ -370,7 +390,7 @@ fn test_schema_upgrade_compatibility() {
 
     // open & auto‐migrate
     let mut bc = Blockchain::open(db_path).unwrap();
-    assert!(bc.schema_version() >= 1);
+    assert!(bc.schema_version() >= 2);
 
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
@@ -379,7 +399,7 @@ fn test_schema_upgrade_compatibility() {
     let db = sled::open(db_path).unwrap();
     let raw = db.get("chain").unwrap().unwrap();
     let disk: the_block::ChainDisk = bincode::deserialize(&raw).unwrap();
-    assert!(disk.schema_version >= 1);
+    assert!(disk.schema_version >= 2);
 
     let _ = fs::remove_dir_all(db_path);
 }
