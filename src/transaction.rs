@@ -3,6 +3,7 @@ use bincode::Options;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 #[pyclass]
@@ -102,6 +103,7 @@ impl SignedTransaction {
     pub fn id(&self) -> [u8; 32] {
         let mut hasher = blake3::Hasher::new();
         hasher.update(b"TX");
+        hasher.update(&[crate::constants::TX_VERSION]);
         let bytes = canonical_payload_bytes(&self.payload);
         hasher.update(&bytes);
         hasher.update(&self.public_key);
@@ -113,38 +115,45 @@ pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     bincode_config().serialize(payload).unwrap()
 }
 
-pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> SignedTransaction {
-    let sk = SigningKey::from_bytes(&to_array_32(sk_bytes));
+pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransaction> {
+    let sk_bytes = to_array_32(sk_bytes)?;
+    let sk = SigningKey::from_bytes(&sk_bytes);
     let msg = {
         let mut m = domain_tag().to_vec();
         m.extend(canonical_payload_bytes(payload));
         m
     };
     let sig = sk.sign(&msg);
-    SignedTransaction {
+    Some(SignedTransaction {
         payload: payload.clone(),
         public_key: sk.verifying_key().to_bytes().to_vec(),
         signature: sig.to_bytes().to_vec(),
-    }
+    })
 }
 
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
-    if let Ok(vk) = VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
-        let mut m = domain_tag().to_vec();
-        m.extend(canonical_payload_bytes(&tx.payload));
-        let sig = Signature::from_bytes(&to_array_64(&tx.signature));
-        vk.verify(&m, &sig).is_ok()
-    } else {
-        false
+    if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
+        if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+            let mut m = domain_tag().to_vec();
+            m.extend(canonical_payload_bytes(&tx.payload));
+            let sig = Signature::from_bytes(&sig_bytes);
+            return vk.verify(&m, &sig).is_ok();
+        }
     }
+    false
 }
 
 #[pyfunction(name = "sign_tx")]
-pub fn sign_tx_py(sk_bytes: Vec<u8>, payload: RawTxPayload) -> SignedTransaction {
-    sign_tx(&sk_bytes, &payload)
+pub fn sign_tx_py(sk_bytes: Vec<u8>, payload: RawTxPayload) -> PyResult<SignedTransaction> {
+    sign_tx(&sk_bytes, &payload).ok_or_else(|| PyValueError::new_err("Invalid private key length"))
 }
 
 #[pyfunction(name = "verify_signed_tx")]
 pub fn verify_signed_tx_py(tx: SignedTransaction) -> bool {
     verify_signed_tx(&tx)
+}
+
+#[pyfunction(name = "canonical_payload")]
+pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
+    canonical_payload_bytes(&payload)
 }

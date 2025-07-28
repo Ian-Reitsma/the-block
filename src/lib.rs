@@ -6,15 +6,15 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sled::Db;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 
 pub mod transaction;
 pub use transaction::{
-    canonical_payload_bytes, sign_tx_py as sign_tx, verify_signed_tx_py as verify_signed_tx,
-    RawTxPayload, SignedTransaction,
+    canonical_payload_bytes, canonical_payload_py as canonical_payload, sign_tx_py as sign_tx,
+    verify_signed_tx_py as verify_signed_tx, RawTxPayload, SignedTransaction,
 };
-use transaction::{sign_tx_py, verify_signed_tx_py};
+use transaction::{canonical_payload_py, sign_tx_py, verify_signed_tx_py};
 pub mod constants;
 pub use constants::{domain_tag, CHAIN_ID};
 
@@ -32,11 +32,11 @@ const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
 const DECAY_DENOMINATOR: u64 = 100000;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
-pub(crate) fn to_array_32(bytes: &[u8]) -> [u8; 32] {
-    bytes.try_into().expect("Expected 32 bytes")
+pub(crate) fn to_array_32(bytes: &[u8]) -> Option<[u8; 32]> {
+    bytes.try_into().ok()
 }
-pub(crate) fn to_array_64(bytes: &[u8]) -> [u8; 64] {
-    bytes.try_into().expect("Expected 64 bytes")
+pub(crate) fn to_array_64(bytes: &[u8]) -> Option<[u8; 64]> {
+    bytes.try_into().ok()
 }
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     hex::decode(hex).expect("Invalid hex string")
@@ -60,6 +60,15 @@ pub struct Account {
     pub address: String,
     #[pyo3(get)]
     pub balance: TokenBalance,
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub nonce: u64,
+    #[serde(default)]
+    pub pending_consumer: u64,
+    #[serde(default)]
+    pub pending_industrial: u64,
+    #[serde(default)]
+    pub pending_nonce: u64,
 }
 
 #[pyclass]
@@ -71,6 +80,9 @@ pub struct Block {
     pub previous_hash: String,
     #[pyo3(get)]
     pub transactions: Vec<SignedTransaction>,
+    #[pyo3(get)]
+    #[serde(default)]
+    pub difficulty: u64,
     #[pyo3(get)]
     pub nonce: u64,
     #[pyo3(get)]
@@ -84,6 +96,7 @@ pub struct Blockchain {
     #[pyo3(get, set)]
     pub difficulty: u64,
     pub mempool: Vec<SignedTransaction>,
+    pub mempool_set: std::collections::HashSet<(String, u64)>,
     db: Db,
     #[pyo3(get, set)]
     pub emission_consumer: u64,
@@ -151,6 +164,7 @@ impl Blockchain {
             accounts,
             difficulty: 8,
             mempool: Vec::new(),
+            mempool_set: HashSet::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,
@@ -164,7 +178,7 @@ impl Blockchain {
     #[getter]
     pub fn schema_version(&self) -> usize {
         // bump this if you ever change the on-disk format
-        1
+        2
     }
 
     /// Persist the entire chain + state under the current schema
@@ -199,6 +213,7 @@ impl Blockchain {
             index: 0,
             previous_hash: "0".repeat(64),
             transactions: vec![],
+            difficulty: self.difficulty,
             nonce: 0,
             hash: "genesis_hash_placeholder".to_string(),
         };
@@ -221,6 +236,10 @@ impl Blockchain {
                 consumer,
                 industrial,
             },
+            nonce: 0,
+            pending_consumer: 0,
+            pending_industrial: 0,
+            pending_nonce: 0,
         };
         self.accounts.insert(address, acc);
         Ok(())
@@ -235,38 +254,55 @@ impl Blockchain {
 
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
         let sender_addr = tx.payload.from_.clone();
-        let receiver_addr = tx.payload.to.clone();
+
+        if self
+            .mempool_set
+            .contains(&(sender_addr.clone(), tx.payload.nonce))
+        {
+            return Err(PyValueError::new_err("Duplicate transaction"));
+        }
 
         let sender = self
             .accounts
             .get_mut(&sender_addr)
             .ok_or_else(|| PyValueError::new_err("Sender not found"))?;
-        if sender.balance.consumer < tx.payload.amount_consumer + tx.payload.fee
-            || sender.balance.industrial < tx.payload.amount_industrial + tx.payload.fee
+        let (fee_c, fee_i) = match tx.payload.fee_token {
+            0 => (tx.payload.fee, 0),
+            1 => (0, tx.payload.fee),
+            2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
+            _ => return Err(PyValueError::new_err("Invalid fee_token")),
+        };
+        if tx.payload.fee >= (1u64 << 63) {
+            return Err(PyValueError::new_err("Fee too large"));
+        }
+
+        if sender
+            .balance
+            .consumer
+            .saturating_sub(sender.pending_consumer)
+            < tx.payload.amount_consumer + fee_c
+            || sender
+                .balance
+                .industrial
+                .saturating_sub(sender.pending_industrial)
+                < tx.payload.amount_industrial + fee_i
         {
             return Err(PyValueError::new_err("Insufficient balance"));
+        }
+
+        if tx.payload.nonce != sender.nonce + sender.pending_nonce + 1 {
+            return Err(PyValueError::new_err("Bad nonce"));
         }
 
         if !verify_signed_tx(tx.clone()) {
             return Err(PyValueError::new_err("Signature verification failed"));
         }
 
-        sender.balance.consumer -= tx.payload.amount_consumer + tx.payload.fee;
-        sender.balance.industrial -= tx.payload.amount_industrial + tx.payload.fee;
+        sender.pending_consumer += tx.payload.amount_consumer + fee_c;
+        sender.pending_industrial += tx.payload.amount_industrial + fee_i;
+        sender.pending_nonce += 1;
 
-        let recv = self
-            .accounts
-            .entry(receiver_addr.clone())
-            .or_insert(Account {
-                address: receiver_addr.clone(),
-                balance: TokenBalance {
-                    consumer: 0,
-                    industrial: 0,
-                },
-            });
-        recv.balance.consumer += tx.payload.amount_consumer;
-        recv.balance.industrial += tx.payload.amount_industrial;
-
+        self.mempool_set.insert((sender_addr, tx.payload.nonce));
         self.mempool.push(tx);
         Ok(())
     }
@@ -308,16 +344,18 @@ impl Blockchain {
         }];
         txs.extend(self.mempool.clone());
         self.mempool.clear();
+        self.mempool_set.clear();
 
         let mut nonce = 0u64;
         loop {
-            let hash = calculate_hash(index, &prev_hash, nonce, &txs);
+            let hash = calculate_hash(index, &prev_hash, nonce, self.difficulty, &txs);
             let bytes = hex_to_bytes(&hash);
             if leading_zero_bits(&bytes) >= self.difficulty as u32 {
                 let block = Block {
                     index,
                     previous_hash: prev_hash.clone(),
                     transactions: txs.clone(),
+                    difficulty: self.difficulty,
                     nonce,
                     hash: hash.clone(),
                 };
@@ -326,14 +364,20 @@ impl Blockchain {
                 for tx in &txs {
                     if tx.payload.from_ != "0".repeat(34) {
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
-                            s.balance.consumer = s
-                                .balance
-                                .consumer
-                                .saturating_sub(tx.payload.amount_consumer + tx.payload.fee);
-                            s.balance.industrial = s
-                                .balance
-                                .industrial
-                                .saturating_sub(tx.payload.amount_industrial + tx.payload.fee);
+                            let (fee_c, fee_i) = match tx.payload.fee_token {
+                                0 => (tx.payload.fee, 0),
+                                1 => (0, tx.payload.fee),
+                                2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
+                                _ => (0, 0),
+                            };
+                            let total_c = tx.payload.amount_consumer + fee_c;
+                            let total_i = tx.payload.amount_industrial + fee_i;
+                            s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
+                            s.balance.industrial = s.balance.industrial.saturating_sub(total_i);
+                            s.pending_consumer = s.pending_consumer.saturating_sub(total_c);
+                            s.pending_industrial = s.pending_industrial.saturating_sub(total_i);
+                            s.pending_nonce = s.pending_nonce.saturating_sub(1);
+                            s.nonce = tx.payload.nonce;
                         }
                     }
                     let r = self
@@ -345,9 +389,26 @@ impl Blockchain {
                                 consumer: 0,
                                 industrial: 0,
                             },
+                            nonce: 0,
+                            pending_consumer: 0,
+                            pending_industrial: 0,
+                            pending_nonce: 0,
                         });
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
+
+                    let (fee_c, fee_i) = match tx.payload.fee_token {
+                        0 => (tx.payload.fee, 0),
+                        1 => (0, tx.payload.fee),
+                        2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
+                        _ => (0, 0),
+                    };
+                    if let Some(miner) = self.accounts.get_mut(&miner_addr) {
+                        miner.balance.consumer += fee_c;
+                        miner.balance.industrial += fee_i;
+                    }
+                    self.mempool_set
+                        .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                 }
 
                 self.emission_consumer += reward_c;
@@ -398,10 +459,23 @@ impl Blockchain {
             return Ok(false);
         }
 
+        if block.difficulty != self.difficulty {
+            return Ok(false);
+        }
+
+        if block.transactions.is_empty() {
+            return Ok(false);
+        }
+
+        if block.transactions[0].payload.from_ != "0".repeat(34) {
+            return Ok(false);
+        }
+
         let calc = calculate_hash(
             block.index,
             &block.previous_hash,
             block.nonce,
+            block.difficulty,
             &block.transactions,
         );
         if calc != block.hash {
@@ -413,6 +487,26 @@ impl Blockchain {
             return Ok(false);
         }
 
+        let mut expected: HashMap<String, u64> = HashMap::new();
+        let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        for tx in &block.transactions {
+            if tx.payload.from_ != "0".repeat(34) {
+                let next = expected.entry(tx.payload.from_.clone()).or_insert_with(|| {
+                    self.accounts
+                        .get(&tx.payload.from_)
+                        .map(|a| a.nonce + 1)
+                        .unwrap_or(1)
+                });
+                if tx.payload.nonce != *next {
+                    return Ok(false);
+                }
+                *next += 1;
+            }
+            if !seen.insert(tx.id()) {
+                return Ok(false);
+            }
+        }
+
         Ok(true)
     }
 
@@ -420,7 +514,7 @@ impl Blockchain {
         if new_chain.len() <= self.chain.len() {
             return Err(PyValueError::new_err("Incoming chain not longer"));
         }
-        if !Self::is_valid_chain_rust(&new_chain) {
+        if !Self::is_valid_chain_rust(&new_chain, self.difficulty as u32) {
             return Err(PyValueError::new_err("Invalid incoming chain"));
         }
 
@@ -433,29 +527,41 @@ impl Blockchain {
         self.block_height = 0;
 
         for block in &new_chain {
+            let miner_addr = block
+                .transactions
+                .first()
+                .map(|tx| tx.payload.to.clone())
+                .unwrap_or_default();
             for tx in &block.transactions {
                 if tx.payload.from_ != "0".repeat(34) {
-                    let mut msg = Vec::new();
-                    msg.extend(tx.payload.from_.as_bytes());
-                    msg.extend(tx.payload.to.as_bytes());
-                    msg.extend(&tx.payload.amount_consumer.to_le_bytes());
-                    msg.extend(&tx.payload.amount_industrial.to_le_bytes());
-                    msg.extend(&tx.payload.fee.to_le_bytes());
-                    let vk = VerifyingKey::from_bytes(&to_array_32(&tx.public_key))
+                    let pk = to_array_32(&tx.public_key)
+                        .ok_or_else(|| PyValueError::new_err("Invalid pubkey in chain"))?;
+                    let vk = VerifyingKey::from_bytes(&pk)
                         .map_err(|_| PyValueError::new_err("Invalid pubkey in chain"))?;
-                    let sig = Signature::from_bytes(&to_array_64(&tx.signature));
+                    let sig_bytes = to_array_64(&tx.signature)
+                        .ok_or_else(|| PyValueError::new_err("Invalid signature in chain"))?;
+                    let sig = Signature::from_bytes(&sig_bytes);
+                    let mut msg = domain_tag().to_vec();
+                    msg.extend(canonical_payload_bytes(&tx.payload));
                     if vk.verify(&msg, &sig).is_err() {
                         return Err(PyValueError::new_err("Bad tx signature in chain"));
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
+                        let (fee_c, fee_i) = match tx.payload.fee_token {
+                            0 => (tx.payload.fee, 0),
+                            1 => (0, tx.payload.fee),
+                            2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
+                            _ => (0, 0),
+                        };
                         s.balance.consumer = s
                             .balance
                             .consumer
-                            .saturating_sub(tx.payload.amount_consumer + tx.payload.fee);
+                            .saturating_sub(tx.payload.amount_consumer + fee_c);
                         s.balance.industrial = s
                             .balance
                             .industrial
-                            .saturating_sub(tx.payload.amount_industrial + tx.payload.fee);
+                            .saturating_sub(tx.payload.amount_industrial + fee_i);
+                        s.nonce = tx.payload.nonce;
                     }
                 }
                 let r = self
@@ -467,9 +573,24 @@ impl Blockchain {
                             consumer: 0,
                             industrial: 0,
                         },
+                        nonce: 0,
+                        pending_consumer: 0,
+                        pending_industrial: 0,
+                        pending_nonce: 0,
                     });
                 r.balance.consumer += tx.payload.amount_consumer;
                 r.balance.industrial += tx.payload.amount_industrial;
+
+                let (fee_c, fee_i) = match tx.payload.fee_token {
+                    0 => (tx.payload.fee, 0),
+                    1 => (0, tx.payload.fee),
+                    2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
+                    _ => (0, 0),
+                };
+                if let Some(miner) = self.accounts.get_mut(&miner_addr) {
+                    miner.balance.consumer += fee_c;
+                    miner.balance.industrial += fee_i;
+                }
             }
             if let Some(cb) = block.transactions.first() {
                 self.emission_consumer += cb.payload.amount_consumer;
@@ -528,6 +649,7 @@ impl Blockchain {
             accounts,
             difficulty: 8,
             mempool: Vec::new(),
+            mempool_set: HashSet::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,
@@ -538,7 +660,7 @@ impl Blockchain {
     }
 
     #[allow(dead_code)]
-    fn is_valid_chain_rust(chain: &[Block]) -> bool {
+    fn is_valid_chain_rust(chain: &[Block], difficulty: u32) -> bool {
         for i in 0..chain.len() {
             let b = &chain[i];
             let expected_prev = if i == 0 {
@@ -549,32 +671,61 @@ impl Blockchain {
             if b.previous_hash != expected_prev {
                 return false;
             }
-            let calc = calculate_hash(b.index, &b.previous_hash, b.nonce, &b.transactions);
+            if b.difficulty != difficulty as u64 {
+                return false;
+            }
+            if b.transactions.is_empty() {
+                return false;
+            }
+            if b.transactions[0].payload.from_ != "0".repeat(34) {
+                return false;
+            }
+            let calc = calculate_hash(
+                b.index,
+                &b.previous_hash,
+                b.nonce,
+                b.difficulty,
+                &b.transactions,
+            );
             if calc != b.hash {
                 return false;
             }
             let bytes = hex_to_bytes(&b.hash);
-            if u64::from(leading_zero_bits(&bytes)) < chain[0].index
-            /* or difficulty */
-            {
+            if leading_zero_bits(&bytes) < difficulty {
                 return false;
             }
+            let mut expected_nonce: HashMap<String, u64> = HashMap::new();
+            let mut seen: HashSet<[u8; 32]> = HashSet::new();
             for tx in &b.transactions {
                 if tx.payload.from_ != "0".repeat(34) {
-                    let mut msg = Vec::new();
-                    msg.extend(tx.payload.from_.as_bytes());
-                    msg.extend(tx.payload.to.as_bytes());
-                    msg.extend(&tx.payload.amount_consumer.to_le_bytes());
-                    msg.extend(&tx.payload.amount_industrial.to_le_bytes());
-                    msg.extend(&tx.payload.fee.to_le_bytes());
-                    let vk = match VerifyingKey::from_bytes(&to_array_32(&tx.public_key)) {
+                    let pk = match to_array_32(&tx.public_key) {
+                        Some(p) => p,
+                        None => return false,
+                    };
+                    let vk = match VerifyingKey::from_bytes(&pk) {
                         Ok(vk) => vk,
                         Err(_) => return false,
                     };
-                    let sig = Signature::from_bytes(&to_array_64(&tx.signature));
-                    if vk.verify(&msg, &sig).is_err() {
+                    let sig_bytes = match to_array_64(&tx.signature) {
+                        Some(b) => b,
+                        None => return false,
+                    };
+                    let sig = Signature::from_bytes(&sig_bytes);
+                    let mut bytes = domain_tag().to_vec();
+                    bytes.extend(canonical_payload_bytes(&tx.payload));
+                    if vk.verify(&bytes, &sig).is_err() {
                         return false;
                     }
+                    let next = expected_nonce
+                        .entry(tx.payload.from_.clone())
+                        .or_insert_with(|| tx.payload.nonce);
+                    if tx.payload.nonce != *next {
+                        return false;
+                    }
+                    *next += 1;
+                }
+                if !seen.insert(tx.id()) {
+                    return false;
                 }
             }
         }
@@ -595,17 +746,20 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
     count
 }
 
-fn calculate_hash(index: u64, prev: &str, nonce: u64, txs: &[SignedTransaction]) -> String {
+fn calculate_hash(
+    index: u64,
+    prev: &str,
+    nonce: u64,
+    difficulty: u64,
+    txs: &[SignedTransaction],
+) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&index.to_be_bytes());
     hasher.update(prev.as_bytes());
     hasher.update(&nonce.to_be_bytes());
+    hasher.update(&difficulty.to_le_bytes());
     for tx in txs {
-        hasher.update(tx.payload.from_.as_bytes());
-        hasher.update(tx.payload.to.as_bytes());
-        hasher.update(&tx.payload.amount_consumer.to_le_bytes());
-        hasher.update(&tx.payload.amount_industrial.to_le_bytes());
-        hasher.update(&tx.payload.fee.to_le_bytes());
+        hasher.update(&tx.id());
     }
     hasher.finalize().to_hex().to_string()
 }
@@ -621,16 +775,20 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
 }
 
 #[pyfunction]
-pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> Vec<u8> {
-    let sk = SigningKey::from_bytes(&to_array_32(&private));
-    sk.sign(&message).to_bytes().to_vec()
+pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> PyResult<Vec<u8>> {
+    let sk_bytes =
+        to_array_32(&private).ok_or_else(|| PyValueError::new_err("Invalid private key length"))?;
+    let sk = SigningKey::from_bytes(&sk_bytes);
+    Ok(sk.sign(&message).to_bytes().to_vec())
 }
 
 #[pyfunction]
 pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -> bool {
-    if let Ok(vk) = VerifyingKey::from_bytes(&to_array_32(&public)) {
-        let sig = Signature::from_bytes(&to_array_64(&signature));
-        return vk.verify(&message, &sig).is_ok();
+    if let (Some(pk), Some(sig_bytes)) = (to_array_32(&public), to_array_64(&signature)) {
+        if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+            let sig = Signature::from_bytes(&sig_bytes);
+            return vk.verify(&message, &sig).is_ok();
+        }
     }
     false
 }
@@ -654,5 +812,6 @@ pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chain_id_py, m)?)?;
     m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
+    m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
     Ok(())
 }
