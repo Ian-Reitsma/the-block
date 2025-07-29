@@ -53,6 +53,7 @@
 ├── bootstrap.ps1         # PowerShell bootstrap (Windows)
 ├── docs/                 # Spec & design docs (rendered by mdBook)
 │   └── signatures.md     # Canonical serialization & domain‑separation spec
+│   └── detailed_updates.md  # granular change log for auditors
 ├── .github/workflows/    # CI definitions (GitHub Actions)
 └── AGENTS.md             # ← You are here
 ```
@@ -129,13 +130,15 @@ Run all locally via:
 
 ## 7 · Continuous Integration
 
-CI is GitHub Actions; each push/PR runs **five** jobs:
+CI is GitHub Actions; each push/PR runs **seven** jobs:
 
-1. **Lint** — `cargo fmt -- --check` + `black --check`.
+1. **Lint** — `cargo fmt -- --check` + `black --check` + `ruff check .`.
 2. **Build Matrix** — Linux/macOS/Windows in debug & release.
-3. **Tests** — `cargo test --release` + `pytest`.
-4. **Fuzz Smoke** — 1 k iterations per target to catch obvious regressions.
-5. **Wheel Build** — `maturin build` and `auditwheel show` to confirm manylinux compliance.
+3. **Tests** — `cargo test --all --release` + `pytest`.
+4. **Cargo Audit** — `cargo audit -q` must report zero vulnerabilities.
+5. **Udeps** — `cargo +nightly udeps --all-targets` ensures no unused dependencies.
+6. **Fuzz Smoke** — 1 k iterations per target to catch obvious regressions.
+7. **Wheel Build** — `maturin build` and `auditwheel show` to confirm manylinux compliance.
 
 Badge status must stay green on `main`.  Failing `main` blocks all merges.
 
@@ -223,7 +226,7 @@ pub struct SignedTransaction {
 ### 10.3 Consensus & Mining
 
 * **PoW**: BLAKE3‑based, adjustable `difficulty_target`, 1‑second block aim.
-* **Dual‑Token** emission: consumer vs industrial coinbase split enforced in `block.header.mint`.
+* **Dual‑Token** emission: consumer vs industrial coinbase split enforced via `block.coinbase_consumer` and `block.coinbase_industrial`. All amount fields use the `TokenAmount` newtype to prevent accidental raw arithmetic.
 * **Block validation** order: header → PoW → tx roots → each tx (sig → stateless → stateful).
 
 ---

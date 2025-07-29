@@ -44,6 +44,43 @@ fn hex_to_bytes(hex: &str) -> Vec<u8> {
 
 // === Data types ===
 
+/// Chain-wide token unit.
+///
+/// See `AGENTS.md` §10.3. All monetary values in consensus code use this
+/// wrapper to make a future switch to `u128` trivial and to forbid accidental
+/// arithmetic on raw integers.
+#[pyclass]
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct TokenAmount(pub u64);
+
+#[pymethods]
+impl TokenAmount {
+    #[new]
+    pub fn py_new(v: u64) -> Self {
+        Self(v)
+    }
+    #[getter]
+    pub fn value(&self) -> u64 {
+        self.0
+    }
+}
+
+impl TokenAmount {
+    pub fn new(v: u64) -> Self {
+        Self(v)
+    }
+    pub fn get(self) -> u64 {
+        self.0
+    }
+    pub fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+    pub fn saturating_sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
+}
+
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct TokenBalance {
@@ -71,6 +108,8 @@ pub struct Account {
     pub pending_nonce: u64,
 }
 
+/// Per-block ledger entry. `coinbase_*` mirrors the first transaction
+/// but is the canonical source for light clients.
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Block {
@@ -87,6 +126,14 @@ pub struct Block {
     pub nonce: u64,
     #[pyo3(get)]
     pub hash: String,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Canonical consumer reward recorded in the header. Must match tx[0].
+    pub coinbase_consumer: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Canonical industrial reward recorded in the header. Must match tx[0].
+    pub coinbase_industrial: TokenAmount,
 }
 
 #[pyclass]
@@ -103,9 +150,9 @@ pub struct Blockchain {
     #[pyo3(get, set)]
     pub emission_industrial: u64,
     #[pyo3(get, set)]
-    pub block_reward_consumer: u64,
+    pub block_reward_consumer: TokenAmount,
     #[pyo3(get, set)]
-    pub block_reward_industrial: u64,
+    pub block_reward_industrial: TokenAmount,
     #[pyo3(get, set)]
     pub block_height: u64,
 }
@@ -118,8 +165,8 @@ pub struct ChainDisk {
     pub accounts: HashMap<String, Account>,
     pub emission_consumer: u64,
     pub emission_industrial: u64,
-    pub block_reward_consumer: u64,
-    pub block_reward_industrial: u64,
+    pub block_reward_consumer: TokenAmount,
+    pub block_reward_industrial: TokenAmount,
     pub block_height: u64,
 }
 
@@ -133,32 +180,109 @@ impl Blockchain {
 
     #[staticmethod]
     pub fn open(path: &str) -> PyResult<Self> {
-        // exactly the same as `new()`, but open sled::open(path)
+        // Open an existing database and auto-migrate to schema v3.
+        // See `docs/detailed_updates.md` for layout history.
         let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
-        let chain: Vec<Block> = db
-            .get(DB_CHAIN)
-            .ok()
-            .flatten()
-            .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or_default();
-        let accounts: HashMap<String, Account> = db
-            .get(DB_ACCOUNTS)
-            .ok()
-            .flatten()
-            .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or_default();
-        let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
-            .get(DB_EMISSION)
-            .ok()
-            .flatten()
-            .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or((
-                0,
-                0,
-                INITIAL_BLOCK_REWARD_CONSUMER,
-                INITIAL_BLOCK_REWARD_INDUSTRIAL,
-                0,
-            ));
+        let (chain, accounts, em_c, em_i, br_c, br_i, bh) =
+            if let Some(raw) = db.get(DB_CHAIN).ok().flatten() {
+                match bincode::deserialize::<ChainDisk>(&raw) {
+                    Ok(disk) => {
+                        if disk.schema_version > 3 {
+                            return Err(PyValueError::new_err("DB schema too new"));
+                        }
+                        if disk.schema_version < 3 {
+                            let migrated = ChainDisk {
+                                schema_version: 3,
+                                ..disk
+                            };
+                            db.insert(DB_CHAIN, bincode::serialize(&migrated).unwrap())
+                                .unwrap();
+                            // Drop legacy column families after migrating to consolidated ChainDisk
+                            let _ = db.remove(DB_ACCOUNTS);
+                            let _ = db.remove(DB_EMISSION);
+                            (
+                                migrated.chain,
+                                migrated.accounts,
+                                migrated.emission_consumer,
+                                migrated.emission_industrial,
+                                migrated.block_reward_consumer,
+                                migrated.block_reward_industrial,
+                                migrated.block_height,
+                            )
+                        } else {
+                            (
+                                disk.chain,
+                                disk.accounts,
+                                disk.emission_consumer,
+                                disk.emission_industrial,
+                                disk.block_reward_consumer,
+                                disk.block_reward_industrial,
+                                disk.block_height,
+                            )
+                        }
+                    }
+                    Err(_) => {
+                        let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
+                        let accounts: HashMap<String, Account> = db
+                            .get(DB_ACCOUNTS)
+                            .ok()
+                            .flatten()
+                            .and_then(|iv| bincode::deserialize(&iv).ok())
+                            .unwrap_or_default();
+                        let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
+                            .get(DB_EMISSION)
+                            .ok()
+                            .flatten()
+                            .and_then(|iv| bincode::deserialize(&iv).ok())
+                            .unwrap_or((
+                                0,
+                                0,
+                                INITIAL_BLOCK_REWARD_CONSUMER,
+                                INITIAL_BLOCK_REWARD_INDUSTRIAL,
+                                0,
+                            ));
+                        let mut new_chain = chain.clone();
+                        for b in &mut new_chain {
+                            b.coinbase_consumer = TokenAmount::new(0);
+                            b.coinbase_industrial = TokenAmount::new(0);
+                        }
+                        let disk_new = ChainDisk {
+                            schema_version: 3,
+                            chain: new_chain.clone(),
+                            accounts: accounts.clone(),
+                            emission_consumer: em_c,
+                            emission_industrial: em_i,
+                            block_reward_consumer: TokenAmount::new(br_c),
+                            block_reward_industrial: TokenAmount::new(br_i),
+                            block_height: bh,
+                        };
+                        db.insert(DB_CHAIN, bincode::serialize(&disk_new).unwrap())
+                            .unwrap();
+                        // Remove legacy shard keys; all state now in ChainDisk
+                        let _ = db.remove(DB_ACCOUNTS);
+                        let _ = db.remove(DB_EMISSION);
+                        (
+                            disk_new.chain,
+                            disk_new.accounts,
+                            disk_new.emission_consumer,
+                            disk_new.emission_industrial,
+                            disk_new.block_reward_consumer,
+                            disk_new.block_reward_industrial,
+                            disk_new.block_height,
+                        )
+                    }
+                }
+            } else {
+                (
+                    Vec::new(),
+                    HashMap::new(),
+                    0,
+                    0,
+                    TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
+                    TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
+                    0,
+                )
+            };
         Ok(Blockchain {
             chain,
             accounts,
@@ -177,8 +301,9 @@ impl Blockchain {
     /// Return the on-disk schema version
     #[getter]
     pub fn schema_version(&self) -> usize {
-        // bump this if you ever change the on-disk format
-        2
+        // Bump this constant whenever the serialized `ChainDisk` format changes.
+        // Older binaries must refuse to open newer databases.
+        3
     }
 
     /// Persist the entire chain + state under the current schema
@@ -198,6 +323,9 @@ impl Blockchain {
         self.db
             .insert(DB_CHAIN, bytes)
             .map_err(|e| PyValueError::new_err(format!("DB insert: {e}")))?;
+        // ensure no legacy column families linger on disk
+        let _ = self.db.remove(DB_ACCOUNTS);
+        let _ = self.db.remove(DB_EMISSION);
         self.db
             .flush()
             .map_err(|e| PyValueError::new_err(format!("DB flush: {e}")))?;
@@ -216,6 +344,9 @@ impl Blockchain {
             difficulty: self.difficulty,
             nonce: 0,
             hash: "genesis_hash_placeholder".to_string(),
+            // genesis carries zero reward; fields included for stable hashing
+            coinbase_consumer: TokenAmount::new(0),
+            coinbase_industrial: TokenAmount::new(0),
         };
         self.chain.push(g);
         self.block_height = 1;
@@ -319,21 +450,30 @@ impl Blockchain {
             self.chain.last().unwrap().hash.clone()
         };
 
+        // apply decay first so reward reflects current height
+        self.block_reward_consumer = TokenAmount::new(
+            ((self.block_reward_consumer.0 as u128 * DECAY_NUMERATOR as u128)
+                / DECAY_DENOMINATOR as u128) as u64,
+        );
+        self.block_reward_industrial = TokenAmount::new(
+            ((self.block_reward_industrial.0 as u128 * DECAY_NUMERATOR as u128)
+                / DECAY_DENOMINATOR as u128) as u64,
+        );
         let mut reward_c = self.block_reward_consumer;
         let mut reward_i = self.block_reward_industrial;
-        if self.emission_consumer + reward_c > MAX_SUPPLY_CONSUMER {
-            reward_c = MAX_SUPPLY_CONSUMER - self.emission_consumer;
+        if self.emission_consumer + reward_c.0 > MAX_SUPPLY_CONSUMER {
+            reward_c = TokenAmount::new(MAX_SUPPLY_CONSUMER - self.emission_consumer);
         }
-        if self.emission_industrial + reward_i > MAX_SUPPLY_INDUSTRIAL {
-            reward_i = MAX_SUPPLY_INDUSTRIAL - self.emission_industrial;
+        if self.emission_industrial + reward_i.0 > MAX_SUPPLY_INDUSTRIAL {
+            reward_i = TokenAmount::new(MAX_SUPPLY_INDUSTRIAL - self.emission_industrial);
         }
 
-        let mut txs = vec![SignedTransaction {
+        let coinbase = SignedTransaction {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
                 to: miner_addr.clone(),
-                amount_consumer: reward_c,
-                amount_industrial: reward_i,
+                amount_consumer: reward_c.0,
+                amount_industrial: reward_i.0,
                 fee: 0,
                 fee_token: 0,
                 nonce: 0,
@@ -341,24 +481,37 @@ impl Blockchain {
             },
             public_key: vec![],
             signature: vec![],
-        }];
+        };
+        let mut txs = vec![coinbase.clone()];
         txs.extend(self.mempool.clone());
         self.mempool.clear();
         self.mempool_set.clear();
+        let mut block = Block {
+            index,
+            previous_hash: prev_hash.clone(),
+            transactions: txs.clone(),
+            difficulty: self.difficulty,
+            nonce: 0,
+            hash: String::new(),
+            coinbase_consumer: reward_c,
+            coinbase_industrial: reward_i,
+        };
 
         let mut nonce = 0u64;
         loop {
-            let hash = calculate_hash(index, &prev_hash, nonce, self.difficulty, &txs);
+            let hash = calculate_hash(
+                index,
+                &prev_hash,
+                nonce,
+                self.difficulty,
+                reward_c,
+                reward_i,
+                &txs,
+            );
             let bytes = hex_to_bytes(&hash);
             if leading_zero_bits(&bytes) >= self.difficulty as u32 {
-                let block = Block {
-                    index,
-                    previous_hash: prev_hash.clone(),
-                    transactions: txs.clone(),
-                    difficulty: self.difficulty,
-                    nonce,
-                    hash: hash.clone(),
-                };
+                block.nonce = nonce;
+                block.hash = hash.clone();
                 self.chain.push(block.clone());
 
                 for tx in &txs {
@@ -411,32 +564,12 @@ impl Blockchain {
                         .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                 }
 
-                self.emission_consumer += reward_c;
-                self.emission_industrial += reward_i;
+                self.emission_consumer += reward_c.0;
+                self.emission_industrial += reward_i.0;
                 self.block_height += 1;
-                self.block_reward_consumer =
-                    ((self.block_reward_consumer as u128) * DECAY_NUMERATOR as u128
-                        / DECAY_DENOMINATOR as u128) as u64;
-                self.block_reward_industrial =
-                    ((self.block_reward_industrial as u128) * DECAY_NUMERATOR as u128
-                        / DECAY_DENOMINATOR as u128) as u64;
 
-                self.db
-                    .insert(DB_CHAIN, bincode::serialize(&self.chain).unwrap())
-                    .unwrap();
-                self.db
-                    .insert(DB_ACCOUNTS, bincode::serialize(&self.accounts).unwrap())
-                    .unwrap();
-                let state = (
-                    self.emission_consumer,
-                    self.emission_industrial,
-                    self.block_reward_consumer,
-                    self.block_reward_industrial,
-                    self.block_height,
-                );
-                self.db
-                    .insert(DB_EMISSION, bincode::serialize(&state).unwrap())
-                    .unwrap();
+                self.persist_chain()?;
+
                 self.db.flush().unwrap();
 
                 return Ok(block);
@@ -476,6 +609,8 @@ impl Blockchain {
             &block.previous_hash,
             block.nonce,
             block.difficulty,
+            block.coinbase_consumer,
+            block.coinbase_industrial,
             &block.transactions,
         );
         if calc != block.hash {
@@ -484,6 +619,12 @@ impl Blockchain {
 
         let b = hex_to_bytes(&block.hash);
         if leading_zero_bits(&b) < self.difficulty as u32 {
+            return Ok(false);
+        }
+
+        if block.transactions[0].payload.amount_consumer != block.coinbase_consumer.0
+            || block.transactions[0].payload.amount_industrial != block.coinbase_industrial.0
+        {
             return Ok(false);
         }
 
@@ -522,8 +663,8 @@ impl Blockchain {
         self.accounts.clear();
         self.emission_consumer = 0;
         self.emission_industrial = 0;
-        self.block_reward_consumer = INITIAL_BLOCK_REWARD_CONSUMER;
-        self.block_reward_industrial = INITIAL_BLOCK_REWARD_INDUSTRIAL;
+        self.block_reward_consumer = TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER);
+        self.block_reward_industrial = TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL);
         self.block_height = 0;
 
         for block in &new_chain {
@@ -593,17 +734,25 @@ impl Blockchain {
                 }
             }
             if let Some(cb) = block.transactions.first() {
-                self.emission_consumer += cb.payload.amount_consumer;
-                self.emission_industrial += cb.payload.amount_industrial;
+                if cb.payload.amount_consumer != block.coinbase_consumer.0
+                    || cb.payload.amount_industrial != block.coinbase_industrial.0
+                {
+                    // reject forks that tamper with recorded coinbase totals
+                    return Err(PyValueError::new_err("Coinbase mismatch"));
+                }
             }
+            self.block_reward_consumer = TokenAmount::new(
+                ((self.block_reward_consumer.0 as u128 * DECAY_NUMERATOR as u128)
+                    / DECAY_DENOMINATOR as u128) as u64,
+            );
+            self.block_reward_industrial = TokenAmount::new(
+                ((self.block_reward_industrial.0 as u128 * DECAY_NUMERATOR as u128)
+                    / DECAY_DENOMINATOR as u128) as u64,
+            );
+            self.emission_consumer += block.coinbase_consumer.0;
+            self.emission_industrial += block.coinbase_industrial.0;
             self.chain.push(block.clone());
             self.block_height += 1;
-            self.block_reward_consumer = ((self.block_reward_consumer as u128)
-                * DECAY_NUMERATOR as u128
-                / DECAY_DENOMINATOR as u128) as u64;
-            self.block_reward_industrial = ((self.block_reward_industrial as u128)
-                * DECAY_NUMERATOR as u128
-                / DECAY_DENOMINATOR as u128) as u64;
         }
 
         Ok(())
@@ -620,30 +769,59 @@ impl Blockchain {
     /// Open the default ./chain_db path
     pub fn new() -> Self {
         let db = sled::Config::new().temporary(true).open().expect("DB open");
-        let chain: Vec<Block> = db
-            .get(DB_CHAIN)
-            .ok()
-            .flatten()
-            .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or_default();
-        let accounts: HashMap<String, Account> = db
-            .get(DB_ACCOUNTS)
-            .ok()
-            .flatten()
-            .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or_default();
-        let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
-            .get(DB_EMISSION)
-            .ok()
-            .flatten()
-            .and_then(|iv| bincode::deserialize(&iv).ok())
-            .unwrap_or((
-                0,
-                0,
-                INITIAL_BLOCK_REWARD_CONSUMER,
-                INITIAL_BLOCK_REWARD_INDUSTRIAL,
-                0,
-            ));
+        let (chain, accounts, em_c, em_i, br_c, br_i, bh) =
+            if let Some(raw) = db.get(DB_CHAIN).ok().flatten() {
+                if let Ok(disk) = bincode::deserialize::<ChainDisk>(&raw) {
+                    (
+                        disk.chain,
+                        disk.accounts,
+                        disk.emission_consumer,
+                        disk.emission_industrial,
+                        disk.block_reward_consumer,
+                        disk.block_reward_industrial,
+                        disk.block_height,
+                    )
+                } else {
+                    let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
+                    let accounts: HashMap<String, Account> = db
+                        .get(DB_ACCOUNTS)
+                        .ok()
+                        .flatten()
+                        .and_then(|iv| bincode::deserialize(&iv).ok())
+                        .unwrap_or_default();
+                    let (em_c, em_i, br_c_u64, br_i_u64, bh): (u64, u64, u64, u64, u64) = db
+                        .get(DB_EMISSION)
+                        .ok()
+                        .flatten()
+                        .and_then(|iv| bincode::deserialize(&iv).ok())
+                        .unwrap_or((
+                            0,
+                            0,
+                            INITIAL_BLOCK_REWARD_CONSUMER,
+                            INITIAL_BLOCK_REWARD_INDUSTRIAL,
+                            0,
+                        ));
+                    (
+                        chain,
+                        accounts,
+                        em_c,
+                        em_i,
+                        TokenAmount::new(br_c_u64),
+                        TokenAmount::new(br_i_u64),
+                        bh,
+                    )
+                }
+            } else {
+                (
+                    Vec::new(),
+                    HashMap::new(),
+                    0,
+                    0,
+                    TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
+                    TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
+                    0,
+                )
+            };
         Blockchain {
             chain,
             accounts,
@@ -680,11 +858,18 @@ impl Blockchain {
             if b.transactions[0].payload.from_ != "0".repeat(34) {
                 return false;
             }
+            if b.transactions[0].payload.amount_consumer != b.coinbase_consumer.0
+                || b.transactions[0].payload.amount_industrial != b.coinbase_industrial.0
+            {
+                return false;
+            }
             let calc = calculate_hash(
                 b.index,
                 &b.previous_hash,
                 b.nonce,
                 b.difficulty,
+                b.coinbase_consumer,
+                b.coinbase_industrial,
                 &b.transactions,
             );
             if calc != b.hash {
@@ -746,18 +931,24 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
     count
 }
 
+/// Deterministic block hashing as per `docs/detailed_updates.md`.
+/// Field order is fixed; all integers are little-endian.
 fn calculate_hash(
     index: u64,
     prev: &str,
     nonce: u64,
     difficulty: u64,
+    coin_c: TokenAmount,
+    coin_i: TokenAmount,
     txs: &[SignedTransaction],
 ) -> String {
     let mut hasher = blake3::Hasher::new();
-    hasher.update(&index.to_be_bytes());
+    hasher.update(&index.to_le_bytes());
     hasher.update(prev.as_bytes());
-    hasher.update(&nonce.to_be_bytes());
+    hasher.update(&nonce.to_le_bytes());
     hasher.update(&difficulty.to_le_bytes());
+    hasher.update(&coin_c.0.to_le_bytes());
+    hasher.update(&coin_i.0.to_le_bytes());
     for tx in txs {
         hasher.update(&tx.id());
     }
@@ -799,7 +990,7 @@ pub fn chain_id_py() -> u32 {
 }
 
 #[pymodule]
-pub fn the_block(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Blockchain>()?;
     m.add_class::<Block>()?;
     m.add_class::<Account>()?;
