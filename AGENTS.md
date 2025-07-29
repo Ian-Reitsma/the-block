@@ -279,4 +279,13 @@ Further reading: `docs/consensus.md`, `docs/signatures.md`, and `/design/whitepa
 
 ---
 
+## Disclaimer
+
+This repository is provided **for educational purposes only**. It implements a
+toy blockchain kernel to demonstrate consensus and cryptography concepts. It is
+not a production system, nor does it represent an invitation to deploy a real
+cryptocurrency. Review the license carefully before use.
+
+---
+
 **Remember:** *Every line of code must be explainable by a corresponding line in this document or the linked specs.*  If not, write the spec first.

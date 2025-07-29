@@ -1,10 +1,14 @@
 // tests/test_chain.rs
+//
+// Integration tests covering chain invariants and edge cases.
 
 use proptest::prelude::*;
 use std::fs;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use the_block::{generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction, TokenAmount};
+use the_block::{
+    generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
+};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
