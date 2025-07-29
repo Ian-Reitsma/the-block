@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use std::fs;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use the_block::{generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction};
+use the_block::{generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction, TokenAmount};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -151,11 +151,23 @@ fn test_block_reward_decays_and_emission_caps() {
 
     // simulate cap hit
     bc.emission_consumer = 20_000_000_000_000;
-    bc.block_reward_consumer = 100;
+    bc.block_reward_consumer = TokenAmount::new(100);
     let block = bc.mine_block("miner".into()).unwrap();
     assert_eq!(block.transactions[0].payload.amount_consumer, 0);
     let (em_cons, _) = bc.circulating_supply();
     assert!(em_cons <= 20_000_000_000_000);
+}
+
+// 4b. Coinbase reward recorded in block
+#[test]
+fn test_coinbase_reward_recorded() {
+    init();
+    let mut bc = Blockchain::new();
+    bc.add_account("miner".into(), 0, 0).unwrap();
+    let block = bc.mine_block("miner".into()).unwrap();
+    let cb = &block.transactions[0];
+    assert_eq!(block.coinbase_consumer.0, cb.payload.amount_consumer);
+    assert_eq!(block.coinbase_industrial.0, cb.payload.amount_industrial);
 }
 
 // 5. Fee handling: miner receives all fees
@@ -331,6 +343,29 @@ fn test_fork_and_reorg_resolution() {
     );
 }
 
+// 11b. Import rejects fork with mutated reward field
+#[test]
+fn test_import_reward_mismatch() {
+    init();
+    let mut bc1 = Blockchain::new();
+    let mut bc2 = Blockchain::new();
+    for bc in [&mut bc1, &mut bc2].iter_mut() {
+        bc.add_account("miner".into(), 0, 0).unwrap();
+        bc.mine_block("miner".into()).unwrap();
+    }
+    for _ in 0..3 {
+        bc1.mine_block("miner".into()).unwrap();
+    }
+    for _ in 0..6 {
+        bc2.mine_block("miner".into()).unwrap();
+    }
+    let mut fork = bc2.chain.clone();
+    let idx = fork.len() - 3;
+    fork[idx].coinbase_consumer = TokenAmount::new(fork[idx].coinbase_consumer.0 + 1);
+    fork[idx].coinbase_industrial = TokenAmount::new(fork[idx].coinbase_industrial.0 + 1);
+    assert!(bc1.import_chain(fork).is_err());
+}
+
 // 12. Fuzz unicode & overflow addresses
 #[test]
 fn test_fuzz_unicode_and_overflow_addresses() {
@@ -390,7 +425,7 @@ fn test_schema_upgrade_compatibility() {
 
     // open & auto‐migrate
     let mut bc = Blockchain::open(db_path).unwrap();
-    assert!(bc.schema_version() >= 2);
+    assert!(bc.schema_version() >= 3);
 
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.mine_block("miner".into()).unwrap();
@@ -399,7 +434,7 @@ fn test_schema_upgrade_compatibility() {
     let db = sled::open(db_path).unwrap();
     let raw = db.get("chain").unwrap().unwrap();
     let disk: the_block::ChainDisk = bincode::deserialize(&raw).unwrap();
-    assert!(disk.schema_version >= 2);
+    assert!(disk.schema_version >= 3);
 
     let _ = fs::remove_dir_all(db_path);
 }

@@ -27,8 +27,8 @@
 * **PyO3 bindings** – import and use the chain directly from Python for rapid prototyping, data‑science, or wallet scripting.
 * **One‑command bootstrap** – `bootstrap.sh`/`bootstrap.ps1` installs every prerequisite (Rust, Python 3.12, maturin, clippy, Node 20) and builds a development wheel.
 * **Deterministic state** – cross‑language tests guarantee every node serializes, signs, and hashes identically.
+* **Schema versioned DB** – the node refuses to open newer databases without explicit migration, preventing silent corruption.
 * **CI‑first** – GitHub Actions matrix across Linux, macOS, and Windows (WSL) ensures builds stay green.
-
 ---
 
 ## Quick Start
@@ -69,13 +69,16 @@ Bootstrap steps:
 
 ## Build & Test Matrix
 
-| Task                       | Command                                                             | Expected Output                      |
-| -------------------------- | ------------------------------------------------------------------- | ------------------------------------ |
-| Rust unit + property tests | `cargo test --release`                                              | All tests green                      |
-| PyO3 wheel (manylinux)     | `maturin build --release --features extension-module`               | `target/wheels/the_block-*.whl`      |
-| In‑place dev install       | `maturin develop --release`                                         | Module importable in current venv    |
-| Lint / Style               | `cargo fmt -- --check && cargo clippy --all-targets -- -D warnings` | No diffs / warnings                  |
-| Benchmarks                 | `cargo bench`                                                       | Criterion HTML in `target/criterion` |
+| Task | Command | Expected Output |
+| --- | --- | --- |
+| Rust unit + property tests | `cargo test --all --release` | All tests green |
+| PyO3 wheel (manylinux) | `maturin build --release --features extension-module` | `target/wheels/the_block-*.whl` |
+| In-place dev install | `maturin develop --release` | Module importable in current venv |
+| Lint / Style | `cargo fmt -- --check && cargo clippy --all-targets -- -D warnings` | No diffs / warnings |
+| Security audit | `cargo audit -q` | Zero vulnerabilities |
+| Dead-code check | `cargo +nightly udeps --all-targets` | No unused dependencies |
+| Ruff lint | `ruff check .` | No Python lint errors |
+| Benchmarks | `cargo bench` | Criterion HTML in `target/criterion` |
 
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
 
@@ -119,7 +122,7 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 * **Hashing** – BLAKE3‑256 for both block and transaction IDs (32 bytes).
 * **Signature** – Ed25519 strict; signing bytes are `DOMAIN_TAG | bincode(payload)`.
 * **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
-* **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each.
+* **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each. The header records `coinbase_consumer` and `coinbase_industrial` using a `TokenAmount` wrapper so light clients can audit supply without replaying the chain.
 * **Storage** – sled key‑value DB; column families: `chain/`, `accounts/`, `mempool/`.
 * **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
 * **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
@@ -145,6 +148,7 @@ tests/                 # Rust tests (unit + proptest)
 benches/               # Criterion benches
 demo.py                # Python end‑to‑end demo
 docs/                  # Markdown specs (rendered by mdBook)
+docs/detailed_updates.md  # in-depth change log for auditors
 AGENTS.md              # Developer handbook (authoritative)
 ```
 

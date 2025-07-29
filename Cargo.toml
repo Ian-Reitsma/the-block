@@ -4,7 +4,7 @@
  edition = "2021"
  
  [dependencies]
- pyo3 = { version = "0.18", default-features = false, features = ["macros"], optional = false }
+pyo3 = { version = "0.24.2", default-features = false, features = ["macros"], optional = false }
  serde = { version = "1.0", features = ["derive"] }
  bincode = "1.3"
  blake3 = "1"
