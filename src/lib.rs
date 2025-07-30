@@ -161,6 +161,11 @@ pub struct Block {
     pub coinbase_industrial: TokenAmount,
 }
 
+/// In-memory representation of the chain state and associated accounts.
+///
+/// `Blockchain` exposes high level methods for transaction submission,
+/// mining, and persistence. It backs the Python API used throughout the
+/// demo script and tests.
 #[pyclass]
 pub struct Blockchain {
     pub chain: Vec<Block>,
@@ -980,6 +985,10 @@ fn calculate_hash(
     hasher.finalize().to_hex().to_string()
 }
 
+/// Generate a new Ed25519 keypair.
+///
+/// Returns the private and public key as raw byte vectors. The keys are
+/// suitable for both transaction signing and simple message authentication.
 #[pyfunction]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng;
@@ -990,6 +999,9 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     (priv_bytes.to_vec(), vk.to_bytes().to_vec())
 }
 
+/// Sign an arbitrary message with a 32-byte Ed25519 private key.
+///
+/// The returned signature is a 64-byte array in raw form.
 #[pyfunction]
 pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> PyResult<Vec<u8>> {
     let sk_bytes =
@@ -998,6 +1010,7 @@ pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> PyResult<Vec<u8>> {
     Ok(sk.sign(&message).to_bytes().to_vec())
 }
 
+/// Verify a message signature produced by [`sign_message`].
 #[pyfunction]
 pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -> bool {
     if let (Some(pk), Some(sig_bytes)) = (to_array_32(&public), to_array_64(&signature)) {
@@ -1009,6 +1022,7 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
     false
 }
 
+/// Return the integer network identifier used in domain separation.
 #[pyfunction]
 pub fn chain_id_py() -> u32 {
     CHAIN_ID
