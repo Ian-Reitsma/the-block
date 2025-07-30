@@ -111,10 +111,12 @@ impl SignedTransaction {
     }
 }
 
+/// Serialize a [`RawTxPayload`] using the project's canonical bincode settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     bincode_config().serialize(payload).unwrap()
 }
 
+/// Produce a signed transaction from raw bytes of a private key and payload.
 pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransaction> {
     let sk_bytes = to_array_32(sk_bytes)?;
     let sk = SigningKey::from_bytes(&sk_bytes);
@@ -131,6 +133,7 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
     })
 }
 
+/// Verify the Ed25519 signature inside a [`SignedTransaction`].
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
     if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
         if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
@@ -144,16 +147,19 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
 }
 
 #[pyfunction(name = "sign_tx")]
+/// Python wrapper for [`sign_tx`], raising ``ValueError`` on key size mismatch.
 pub fn sign_tx_py(sk_bytes: Vec<u8>, payload: RawTxPayload) -> PyResult<SignedTransaction> {
     sign_tx(&sk_bytes, &payload).ok_or_else(|| PyValueError::new_err("Invalid private key length"))
 }
 
 #[pyfunction(name = "verify_signed_tx")]
+/// Python wrapper for [`verify_signed_tx`]. Returns ``True`` on success.
 pub fn verify_signed_tx_py(tx: SignedTransaction) -> bool {
     verify_signed_tx(&tx)
 }
 
 #[pyfunction(name = "canonical_payload")]
+/// Python helper returning canonical bytes for a payload.
 pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
     canonical_payload_bytes(&payload)
 }
