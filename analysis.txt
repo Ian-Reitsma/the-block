@@ -29,4 +29,11 @@ This file summarizes the signature integration and protocol hardening.
 ### Developer Notes
 - Run `maturin develop --release` after Rust changes to refresh the Python extension.
 - `cargo clippy --all-targets -- -D warnings` and `cargo test --release` must pass.
-- `.venv/bin/python demo.py` demonstrates key generation, signing, mining and runs end-to-end.
+ - `.venv/bin/python demo.py` demonstrates key generation, signing, mining and runs end-to-end.
+
+---
+
+## Disclaimer
+
+`the-block` is experimental research software. Nothing in this document should
+be interpreted as financial advice or a production readiness guarantee.

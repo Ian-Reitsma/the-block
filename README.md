@@ -46,6 +46,13 @@ python demo.py               # same demo
 
 > Look for `🎉 demo completed` in the console—if you see it, the kernel, bindings, and demo all worked.
 
+## Disclaimer
+
+This repository is a **research prototype**. Running the demo does **not** create
+or transfer any real cryptocurrency. Nothing herein constitutes financial advice
+or an invitation to invest. Use the code at your own risk and review the license
+terms carefully.
+
 ---
 
 ## Installation & Bootstrap

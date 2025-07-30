@@ -1,3 +1,8 @@
+//! Core blockchain implementation with Python bindings.
+//!
+//! Exposes a minimal proof-of-work chain with dual-token economics. See
+//! `AGENTS.md` for the high-level specification.
+
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -32,13 +37,18 @@ const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
 const DECAY_DENOMINATOR: u64 = 100000;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
+/// Converts a byte slice into a fixed 32-byte array, returning `None` on length
+/// mismatch.
 pub(crate) fn to_array_32(bytes: &[u8]) -> Option<[u8; 32]> {
     bytes.try_into().ok()
 }
+/// Converts a byte slice into a fixed 64-byte array, returning `None` on length
+/// mismatch.
 pub(crate) fn to_array_64(bytes: &[u8]) -> Option<[u8; 64]> {
     bytes.try_into().ok()
 }
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
+    // Utility used by tests and examples
     hex::decode(hex).expect("Invalid hex string")
 }
 
@@ -63,6 +73,21 @@ impl TokenAmount {
     #[getter]
     pub fn value(&self) -> u64 {
         self.0
+    }
+    fn __int__(&self) -> u64 {
+        self.0
+    }
+    fn __repr__(&self) -> String {
+        format!("{}", self.0)
+    }
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
+
+impl std::fmt::Display for TokenAmount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
