@@ -328,6 +328,13 @@ impl Blockchain {
         })
     }
 
+    #[staticmethod]
+    pub fn with_difficulty(path: &str, difficulty: u64) -> PyResult<Self> {
+        let mut bc = Blockchain::open(path)?;
+        bc.difficulty = difficulty;
+        Ok(bc)
+    }
+
     /// Return the on-disk schema version
     #[getter]
     pub fn schema_version(&self) -> usize {

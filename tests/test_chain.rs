@@ -252,6 +252,42 @@ fn test_duplicate_txid_rejected() {
     assert!(!bc.validate_block(&bad_block).unwrap());
 }
 
+// 8c. Strict nonce and pending balance handling
+#[test]
+fn test_pending_nonce_and_balances() {
+    init();
+    let mut bc = Blockchain::new();
+    bc.add_account("miner".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 0, 0).unwrap();
+    bc.mine_block("miner".into()).unwrap();
+
+    let (privkey, _pub) = generate_keypair();
+    // first tx with nonce 1
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 2, 3, 1, 1);
+    bc.submit_transaction(tx1).unwrap();
+    // gap nonce is rejected
+    let gap = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 3);
+    assert!(bc.submit_transaction(gap).is_err());
+    // sequential nonce succeeds
+    let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 2);
+    bc.submit_transaction(tx2).unwrap();
+
+    let sender = bc.accounts.get("miner").unwrap();
+    assert_eq!(sender.pending_nonce, 2);
+    assert!(sender.pending_consumer > 0);
+    assert!(sender.pending_industrial > 0);
+
+    // overspend beyond effective balance fails
+    let huge = testutil::build_signed_tx(&privkey, "miner", "alice", u64::MAX / 2, 0, 0, 3);
+    assert!(bc.submit_transaction(huge).is_err());
+
+    bc.mine_block("miner".into()).unwrap();
+    let sender = bc.accounts.get("miner").unwrap();
+    assert_eq!(sender.pending_nonce, 0);
+    assert_eq!(sender.pending_consumer, 0);
+    assert_eq!(sender.pending_industrial, 0);
+}
+
 // 8. Concurrency: multi-threaded mempool/submit/mine
 #[test]
 fn test_multithreaded_submit_and_mine() {

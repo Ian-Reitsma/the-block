@@ -13,3 +13,5 @@ __pycache__/
 
 /target
 .bootstrap_partial
+.hooks/
+xtask/target/

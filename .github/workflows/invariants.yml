@@ -1,0 +1,25 @@
+name: invariants-status
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        id: vars
+        run: |
+          cargo test --quiet && echo "status=passing" >> "$GITHUB_OUTPUT"
+      - uses: emibcn/badge-action@v2
+        with:
+          label: pending-invariants
+          status: ${{ steps.vars.outputs.status }}
+          color: ${{ steps.vars.outputs.status == 'passing' && 'green' || 'red' }}
+          path: .github/badges/pending.svg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: badge
+          path: .github/badges/pending.svg

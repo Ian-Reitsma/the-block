@@ -5,15 +5,16 @@ transactions are signed, and blocks are mined. Explanatory text is
 printed at each step so no prior blockchain knowledge is required.
 
 This script exercises the same production-grade APIs used by real
-nodes, illustrating how wallet software can interact with the chain.
-"""
-=======
-"""Interactive demo showing basic blockchain operations."""
+nodes, illustrating how wallet software can interact with the chain."""
 
 import os
 import shutil
+import sys
+
+from typing import Tuple
 
 import the_block
+
 
 def explain(text: str) -> None:
     """Pretty printer used throughout the walkthrough."""
@@ -27,24 +28,23 @@ def main() -> None:
         shutil.rmtree("chain_db")
 
     explain(f"Network chain ID: {the_block.chain_id_py()}")
-    bc = the_block.Blockchain()
-    # Lower difficulty for quick demo runs
-    bc.difficulty = 8
+    bc = the_block.Blockchain.with_difficulty("chain_db", 8)
     explain(
         "A fresh database is ready. Difficulty controls how many leading zero bits a block hash must have."
     )
     explain(f"Difficulty set to {bc.difficulty}\n")
 
-
     print("==> Adding accounts: 'miner' and 'alice'…")
     # Each account maintains separate consumer and industrial balances
-    
+
     bc.add_account("miner", 0, 0)
     bc.add_account("alice", 0, 0)
     explain("Accounts track two balances: consumer and industrial tokens.\n")
 
     print("==> Generating ed25519 keypair for miner…")
 
+    priv: bytes
+    pub: bytes
     priv, pub = the_block.generate_keypair()
     explain(f"Private key bytes: {len(priv)}, public key bytes: {len(pub)}\n")
 
@@ -120,4 +120,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except AssertionError as exc:
+        print(f"Assertion failed: {exc}")
+        sys.exit(1)
