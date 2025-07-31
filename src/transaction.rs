@@ -116,7 +116,8 @@ impl SignedTransaction {
     }
 }
 
-/// Serializes a payload using the project's canonical bincode settings.
+
+/// Serialize a [`RawTxPayload`] using the project's canonical bincode settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     bincode_config().serialize(payload).unwrap()
 }
@@ -139,8 +140,8 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
     })
 }
 
-/// Verifies a signed transaction. Returns `true` if the signature and encoding
-/// are valid.
+
+/// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
     if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
         if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
@@ -155,18 +156,21 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
 
 /// Python wrapper for [`sign_tx`]. Raises `ValueError` on invalid key length.
 #[pyfunction(name = "sign_tx")]
+/// Python wrapper for [`sign_tx`], raising ``ValueError`` on key size mismatch.
 pub fn sign_tx_py(sk_bytes: Vec<u8>, payload: RawTxPayload) -> PyResult<SignedTransaction> {
     sign_tx(&sk_bytes, &payload).ok_or_else(|| PyValueError::new_err("Invalid private key length"))
 }
 
 /// Python wrapper for [`verify_signed_tx`].
 #[pyfunction(name = "verify_signed_tx")]
+/// Python wrapper for [`verify_signed_tx`]. Returns ``True`` on success.
 pub fn verify_signed_tx_py(tx: SignedTransaction) -> bool {
     verify_signed_tx(&tx)
 }
 
 /// Python-accessible canonical payload serializer.
 #[pyfunction(name = "canonical_payload")]
+/// Python helper returning canonical bytes for a payload.
 pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
     canonical_payload_bytes(&payload)
 }
