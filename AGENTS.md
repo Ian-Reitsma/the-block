@@ -94,6 +94,12 @@ The script installs/upgrades:
 4. **Node** (optional) via **nvm** `20.x`.
 5. Native build deps (`libssl‑dev`, `pkg‑config`, `clang`, …); script autodetects OS/package‑manager.
 
+All developers must install the repo's `githooks/pre-commit` hook to ensure the virtualenv is active before committing:
+
+```bash
+ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
+```
+
 > **Tip:** After any `.rs` or `Cargo.toml` change, run `maturin develop --release` to rebuild and re‑install the Python module in‑place.
 
 ---

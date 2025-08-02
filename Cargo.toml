@@ -1,7 +1,8 @@
- [package]
- name = "the_block"
- version = "0.1.0"
- edition = "2021"
+[package]
+name = "the_block"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
  
  [dependencies]
 pyo3 = { version = "0.24.2", default-features = false, features = ["macros"], optional = false }
@@ -16,8 +17,12 @@ pyo3 = { version = "0.24.2", default-features = false, features = ["macros"], op
  tempfile = "3"
  once_cell = "1"
  
- [features]
- extension-module = ["pyo3/extension-module"]
+[features]
+extension-module = ["pyo3/extension-module"]
+
+
+[tool.maturin]
+features = ["extension-module"]
 
  [dev-dependencies]
  proptest = "1"

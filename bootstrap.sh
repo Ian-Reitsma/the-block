@@ -197,6 +197,10 @@ fi
 
 [[ -d .venv ]] || run_step "python -m venv" "$PY_BIN" -m venv .venv
 source .venv/bin/activate
+if [[ -z "${VIRTUAL_ENV:-}" || "$(which python)" != "$(pwd)/.venv/bin/python" ]]; then
+  cecho red "Python interpreter mismatch. Activate the project's venv first."
+  exit 1
+fi
 
 run_step "pip upgrade" python -m pip install --upgrade pip setuptools wheel
 
