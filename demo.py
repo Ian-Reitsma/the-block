@@ -79,7 +79,7 @@ def main() -> None:
         amount_consumer=amt_cons,
         amount_industrial=amt_ind,
         fee=fee,
-        fee_token=0,
+        fee_selector=0,
         nonce=1,
         memo=b"",
     )

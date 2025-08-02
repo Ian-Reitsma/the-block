@@ -2,7 +2,10 @@
 /// to prevent cross-network replay.
 pub const CHAIN_ID: u32 = 1;
 /// Transaction version byte hashed into each `SignedTransaction::id`.
-pub const TX_VERSION: u8 = 1;
+pub const TX_VERSION: u8 = 2;
+
+/// Fee specification version for runtime compatibility checks.
+pub const FEE_SPEC_VERSION: u32 = 2;
 
 use bincode::Options;
 use once_cell::sync::Lazy;
@@ -11,7 +14,7 @@ use once_cell::sync::Lazy;
 pub fn domain_tag() -> &'static [u8] {
     static TAG: Lazy<[u8; 16]> = Lazy::new(|| {
         let mut buf = [0u8; 16];
-        let prefix = b"THE_BLOCKv1|"; // 12 bytes
+        let prefix = b"THE_BLOCKv2|"; // 12 bytes
         buf[..prefix.len()].copy_from_slice(prefix);
         buf[prefix.len()..prefix.len() + 4].copy_from_slice(&CHAIN_ID.to_le_bytes());
         buf

@@ -4,8 +4,8 @@ This file summarizes the signature integration and protocol hardening.
 - Domain tag now encodes `CHAIN_ID` as little-endian bytes and is fixed 16 bytes long.
 - Bincode configuration is cached using `once_cell` to avoid reallocation.
 - `SignedTransaction::id` includes a version byte: `blake3(b"TX" | [TX_VERSION] | canonical_payload | public_key)`.
-- Transactions carry `fee_token` and `nonce`; nonce monotonicity is enforced on submission.
-- Fee routing credits the miner based on `fee_token` selection and deducts the same from the sender.
+- Transactions carry `fee_selector` and `nonce`; nonce monotonicity is enforced on submission.
+- Fee routing credits the miner based on `fee_selector` selection and deducts the same from the sender.
 - Blocks embed a `difficulty` field and validation now checks the header value matches the network target.
 - Account struct stores pending debit totals so multiple mempool transactions cannot overspend.
 - Mempool deduplicates on `(sender, nonce)` and balances are debited only once during mining.

@@ -18,7 +18,7 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ### Accounts & Transactions
 * `Account` maintains balances, nonce and pending totals to prevent overspending.
 * `RawTxPayload` → `SignedTransaction` using Ed25519 signatures. The canonical signing bytes are `domain_tag || bincode(payload)`.
-* Transactions include a `fee_token` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
+* Transactions include a `fee_selector` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
 
 ### Storage
 * Persistent state lives in a sled database (`chain_db`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
@@ -37,7 +37,7 @@ The following tasks are ordered from highest urgency to longer‑term milestones
    - Reject any submitted transaction whose nonce is not exactly `account.nonce + 1`.
    - Track `pending_consumer`, `pending_industrial` and `pending_nonce` to lock funds in the mempool so double spends cannot occur.
 2. **Fee Routing & Overflow Clamp**
-   - Enforce the fee routing equations documented in `analysis.txt`. Split fees according to `fee_token` and cap `fee < 2^63` to avoid `div_ceil` overflow.
+   - Enforce the fee routing equations documented in `analysis.txt`. Split fees according to `fee_selector` and cap `fee < 2^63` to avoid `div_ceil` overflow.
 3. **Difficulty Field Verification**
    - Include `difficulty` in the block header hash and verify that `block.difficulty` equals the network target for the given height.
 4. **In‑Block Nonce Continuity**

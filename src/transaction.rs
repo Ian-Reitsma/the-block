@@ -25,7 +25,7 @@ pub struct RawTxPayload {
     #[pyo3(get, set)]
     pub fee: u64,
     #[pyo3(get, set)]
-    pub fee_token: u8,
+    pub fee_selector: u8,
     #[pyo3(get, set)]
     pub nonce: u64,
     #[pyo3(get, set)]
@@ -42,7 +42,7 @@ impl RawTxPayload {
         amount_consumer: u64,
         amount_industrial: u64,
         fee: u64,
-        fee_token: u8,
+        fee_selector: u8,
         nonce: u64,
         memo: Vec<u8>,
     ) -> Self {
@@ -52,20 +52,20 @@ impl RawTxPayload {
             amount_consumer,
             amount_industrial,
             fee,
-            fee_token,
+            fee_selector,
             nonce,
             memo,
         }
     }
     fn __repr__(&self) -> String {
         format!(
-            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, fee_token={}, nonce={}, memo_len={})",
+            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, fee_selector={}, nonce={}, memo_len={})",
             self.from_,
             self.to,
             self.amount_consumer,
             self.amount_industrial,
             self.fee,
-            self.fee_token,
+            self.fee_selector,
             self.nonce,
             self.memo.len(),
         )
@@ -116,7 +116,6 @@ impl SignedTransaction {
     }
 }
 
-
 /// Serialize a [`RawTxPayload`] using the project's canonical bincode settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     bincode_config().serialize(payload).unwrap()
@@ -139,7 +138,6 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
         signature: sig.to_bytes().to_vec(),
     })
 }
-
 
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {

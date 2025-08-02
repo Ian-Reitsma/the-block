@@ -22,6 +22,8 @@ pub use transaction::{
 use transaction::{canonical_payload_py, sign_tx_py, verify_signed_tx_py};
 pub mod constants;
 pub use constants::{domain_tag, CHAIN_ID};
+pub mod fee;
+pub use fee::{decompose as fee_decompose, FeeError};
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -434,15 +436,8 @@ impl Blockchain {
             .accounts
             .get_mut(&sender_addr)
             .ok_or_else(|| PyValueError::new_err("Sender not found"))?;
-        let (fee_c, fee_i) = match tx.payload.fee_token {
-            0 => (tx.payload.fee, 0),
-            1 => (0, tx.payload.fee),
-            2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-            _ => return Err(PyValueError::new_err("Invalid fee_token")),
-        };
-        if tx.payload.fee >= (1u64 << 63) {
-            return Err(PyValueError::new_err("Fee too large"));
-        }
+        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         if sender
             .balance
@@ -512,7 +507,7 @@ impl Blockchain {
                 amount_consumer: reward_c.0,
                 amount_industrial: reward_i.0,
                 fee: 0,
-                fee_token: 0,
+                fee_selector: 0,
                 nonce: 0,
                 memo: Vec::new(),
             },
@@ -554,12 +549,9 @@ impl Blockchain {
                 for tx in &txs {
                     if tx.payload.from_ != "0".repeat(34) {
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
-                            let (fee_c, fee_i) = match tx.payload.fee_token {
-                                0 => (tx.payload.fee, 0),
-                                1 => (0, tx.payload.fee),
-                                2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                                _ => (0, 0),
-                            };
+                            let (fee_c, fee_i) =
+                                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                    .unwrap_or((0, 0));
                             let total_c = tx.payload.amount_consumer + fee_c;
                             let total_i = tx.payload.amount_industrial + fee_i;
                             s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
@@ -587,12 +579,9 @@ impl Blockchain {
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
 
-                    let (fee_c, fee_i) = match tx.payload.fee_token {
-                        0 => (tx.payload.fee, 0),
-                        1 => (0, tx.payload.fee),
-                        2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                        _ => (0, 0),
-                    };
+                    let (fee_c, fee_i) =
+                        crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                            .unwrap_or((0, 0));
                     if let Some(miner) = self.accounts.get_mut(&miner_addr) {
                         miner.balance.consumer += fee_c;
                         miner.balance.industrial += fee_i;
@@ -725,12 +714,9 @@ impl Blockchain {
                         return Err(PyValueError::new_err("Bad tx signature in chain"));
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
-                        let (fee_c, fee_i) = match tx.payload.fee_token {
-                            0 => (tx.payload.fee, 0),
-                            1 => (0, tx.payload.fee),
-                            2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                            _ => (0, 0),
-                        };
+                        let (fee_c, fee_i) =
+                            crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                .unwrap_or((0, 0));
                         s.balance.consumer = s
                             .balance
                             .consumer
@@ -759,12 +745,8 @@ impl Blockchain {
                 r.balance.consumer += tx.payload.amount_consumer;
                 r.balance.industrial += tx.payload.amount_industrial;
 
-                let (fee_c, fee_i) = match tx.payload.fee_token {
-                    0 => (tx.payload.fee, 0),
-                    1 => (0, tx.payload.fee),
-                    2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                    _ => (0, 0),
-                };
+                let (fee_c, fee_i) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                    .unwrap_or((0, 0));
                 if let Some(miner) = self.accounts.get_mut(&miner_addr) {
                     miner.balance.consumer += fee_c;
                     miner.balance.industrial += fee_i;
@@ -1050,5 +1032,6 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
     Ok(())
 }
