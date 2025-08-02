@@ -36,7 +36,7 @@ mod testutil {
             amount_consumer: consumer,
             amount_industrial: industrial,
             fee,
-            fee_token: 0,
+            fee_selector: 0,
             nonce,
             memo: Vec::new(),
         };
@@ -109,7 +109,7 @@ fn test_rejects_invalid_signature() {
         amount_consumer: 1,
         amount_industrial: 2,
         fee: 0,
-        fee_token: 0,
+        fee_selector: 0,
         nonce: 0,
         memo: Vec::new(),
     };
