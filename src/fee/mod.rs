@@ -30,7 +30,7 @@ pub fn decompose(selector: u8, fee: u64) -> Result<(u64, u64), FeeError> {
         1 => Ok((0, fee)),
         2 => {
             let fee128 = fee as u128;
-            let ct = ((fee128 + 1) / 2) as u64;
+            let ct = fee128.div_ceil(2) as u64;
             let it = (fee128 / 2) as u64;
             Ok((ct, it))
         }

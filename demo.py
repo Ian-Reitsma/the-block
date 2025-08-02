@@ -11,8 +11,6 @@ import os
 import shutil
 import sys
 
-from typing import Tuple
-
 import the_block
 
 

@@ -656,18 +656,30 @@ impl Blockchain {
 
         let mut expected: HashMap<String, u64> = HashMap::new();
         let mut seen: HashSet<[u8; 32]> = HashSet::new();
+
+        let mut counts: HashMap<String, u64> = HashMap::new();
         for tx in &block.transactions {
             if tx.payload.from_ != "0".repeat(34) {
-                let next = expected.entry(tx.payload.from_.clone()).or_insert_with(|| {
-                    self.accounts
-                        .get(&tx.payload.from_)
-                        .map(|a| a.nonce + 1)
-                        .unwrap_or(1)
-                });
+                *counts.entry(tx.payload.from_.clone()).or_insert(0) += 1;
+            }
+        }
+        for (addr, count) in counts {
+            let start = self
+                .accounts
+                .get(&addr)
+                .map(|a| a.nonce)
+                .unwrap_or(0)
+                .saturating_sub(count);
+            expected.insert(addr, start);
+        }
+
+        for tx in &block.transactions {
+            if tx.payload.from_ != "0".repeat(34) {
+                let next = expected.entry(tx.payload.from_.clone()).or_insert(0);
+                *next += 1;
                 if tx.payload.nonce != *next {
                     return Ok(false);
                 }
-                *next += 1;
             }
             if !seen.insert(tx.id()) {
                 return Ok(false);
