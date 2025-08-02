@@ -1,5 +1,4 @@
 # the‑block
-![Pending-Invariants](https://raw.githubusercontent.com/the-block/the-block/main/.github/badges/pending.svg)
 
 > **A formally‑specified, dual‑token blockchain kernel written in Rust with first‑class Python bindings.**  Zero unsafe code, deterministic serialization, cross‑platform builds, one‑command bootstrap.
 > Built from day one for real-world deployment; every example uses the same APIs shipped to production nodes.
