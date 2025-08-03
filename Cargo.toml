@@ -25,9 +25,13 @@ extension-module = ["pyo3/extension-module"]
 [tool.maturin]
 features = ["extension-module"]
 
- [dev-dependencies]
+[dev-dependencies]
  proptest = "1"
+
+[build-dependencies]
+blake3 = "1"
+regex = "1"
  
- [lib]
+[lib]
  name = "the_block"
  crate-type = ["cdylib", "rlib"]

@@ -136,7 +136,7 @@ install_deps_apt() {
 install_deps_dnf() {
   run_step "dnf install nodejs/npm" sudo dnf install -y nodejs npm
   run_step "dnf install build deps" sudo dnf install -y gcc gcc-c++ make openssl-devel zlib-devel readline-devel \
-      curl git jq lsof pkg-config cmake sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel
+      curl git jq lsof pkg-config patch cmake sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel
   run_step "dnf install python3" sudo dnf install -y python3 python3-pip python3-virtualenv
   if ! python3 --version 2>/dev/null | grep -q '3\.12'; then
     cecho yellow "⚠  Fedora does not ship python3.12 as a separate package. You have: $(python3 --version)"
@@ -197,7 +197,8 @@ fi
 
 [[ -d .venv ]] || run_step "python -m venv" "$PY_BIN" -m venv .venv
 source .venv/bin/activate
-if [[ -z "${VIRTUAL_ENV:-}" || "$(which python)" != "$(pwd)/.venv/bin/python" ]]; then
+hash -r
+if [[ -z "${VIRTUAL_ENV:-}" || "$(command -v python)" != "$(pwd)/.venv/bin/python" ]]; then
   cecho red "Python interpreter mismatch. Activate the project's venv first."
   exit 1
 fi

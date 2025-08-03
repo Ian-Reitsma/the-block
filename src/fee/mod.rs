@@ -7,6 +7,8 @@ use pyo3::prelude::*;
 use thiserror::Error;
 
 /// Maximum fee allowed before admission.
+///
+/// Defined by consensus – see `CONSENSUS.md` §"Fee Routing".
 pub const MAX_FEE: u64 = (1u64 << 63) - 1;
 
 /// Errors that can occur during fee decomposition.
