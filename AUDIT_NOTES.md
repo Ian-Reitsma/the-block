@@ -1,23 +1,30 @@
 # Agent/Codex Branch Audit Notes
 
+## Recent Fixes
+- Enforced compile-time genesis hash verification and centralized genesis hash computation. **COMPLETED/DONE** [commit: 923d052]
+- Patched `bootstrap.sh` to install missing build tools and hard-fail on venv mismatches. **COMPLETED/DONE** [commit: 923d052]
+
 The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the existing repository snapshot (commit `20ac136e`). Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference the repository at the same commit.
 
 ## 1. Nonce Handling and Pending Balance Tracking
 - **Sequential Nonce Enforcement**: `submit_transaction` checks `tx.payload.nonce != sender.nonce + sender.pending_nonce + 1` (src/lib.rs, L427‑L428). This enforces strict sequencing but does not guard against race conditions between concurrent submissions. A thread‑safe mempool should lock the account entry during admission to avoid double reservation.
-- **Pending Balance Reservation**: Pending fields (`pending_consumer`, `pending_industrial`, `pending_nonce`) increment on admission and decrement only when a block is mined (src/lib.rs, L454‑L456 & L569‑L575). There is no path to release reservations if a transaction is dropped or replaced; a mempool eviction routine must unwind the reservation atomically.
+- **Pending Balance Reservation**: Pending fields (`pending_consumer`, `pending_industrial`, `pending_nonce`) increment on admission and decrement only when a block is mined (src/lib.rs, L454‑L456 & L569‑L575). There is no path to release reservations if a transaction is dropped or replaced; a mempool eviction routine must unwind the reservation atomically. **COMPLETED/DONE** [commit: ef87dfa]
+  - Added `drop_transaction` API that removes a mempool entry, restores balances, and clears the `(sender, nonce)` lock.
 - **Atomicity Guarantees**: The current implementation manipulates multiple pending fields sequentially. A failure mid‑update (e.g., panic between consumer and industrial adjustments) can leave the account in an inconsistent state. Introduce a single struct update or transactional sled operation to guarantee atomicity.
 - **Mempool Admission Race**: Because `mempool_set` is queried before account mutation, two identical transactions arriving concurrently could both pass the `contains` check before the first insert. Convert to a `HashSet` guarded by a `Mutex` or switch to `dashmap` with atomic insertion semantics.
 - **Sender Lookup Failure**: `submit_transaction` returns “Sender not found” if account is absent, but there is no API surface to create accounts implicitly. Decide whether zero‑balance accounts should be auto‑created or require explicit provisioning; document accordingly.
 
 ## 2. Fee Routing and Overflow Safeguards
 - **Fee Decomposition (`decompose`)**:
-  - The function clamps `fee > MAX_FEE` and supports selectors {0,1,2}. Selector `2` uses `div_ceil` to split odd fees. However, the lack of a `match` guard for selector `>2` in `submit_transaction` means callers bypass `decompose` and insert invalid selectors directly into stored transactions. Admission should reject `tx.payload.fee_selector > 2` before persisting.
-  - `MAX_FEE` is defined as `(1u64<<63)-1`, satisfying the spec, but there is no doc comment linking to CONSENSUS.md as required.
+  - The function clamps `fee > MAX_FEE` and supports selectors {0,1,2}. Selector `2` uses `div_ceil` to split odd fees. However, the lack of a `match` guard for selector `>2` in `submit_transaction` means callers bypass `decompose` and insert invalid selectors directly into stored transactions. Admission should reject `tx.payload.fee_selector > 2` before persisting. **COMPLETED/DONE** [commit: ef87dfa]
+    - `submit_transaction` now enforces selector bounds and documents `MAX_FEE` with a CONSENSUS.md reference.
 - **Miner Credit Accounting**:
-  - Fees are credited directly to the miner inside the per‑transaction loop (src/lib.rs, L602‑L608) instead of being aggregated into `coinbase_consumer/industrial` and applied once. This violates the “single credit point” directive and complicates block replay proofs.
-  - No `u128` accumulator is used; summing many near‑`MAX_FEE` entries could overflow `u64` before the clamp. Introduce `u128` accumulators for `total_fee_ct` and `total_fee_it`, check against `MAX_SUPPLY_*`, then convert to `u64` for coinbase output.
+  - Fees are credited directly to the miner inside the per‑transaction loop (src/lib.rs, L602‑L608) instead of being aggregated into `coinbase_consumer/industrial` and applied once. This violates the “single credit point” directive and complicates block replay proofs. **COMPLETED/DONE** [commit: ef87dfa]
+  - No `u128` accumulator is used; summing many near‑`MAX_FEE` entries could overflow `u64` before the clamp. Introduce `u128` accumulators for `total_fee_ct` and `total_fee_it`, check against `MAX_SUPPLY_*`, then convert to `u64` for coinbase output. **COMPLETED/DONE** [commit: ef87dfa]
+    - Mining now aggregates all fees with `u128`, folds them into the coinbase, and credits the miner exactly once.
 - **Block Header Integrity**:
-  - The block header lacks a `fee_checksum` field. Spec requires `blake3(acc_ct‖acc_it)` to be stored and validated on receipt. Update `Block` struct, hashing logic, and validation routines accordingly.
+  - The block header lacks a `fee_checksum` field. Spec requires `blake3(acc_ct‖acc_it)` to be stored and validated on receipt. Update `Block` struct, hashing logic, and validation routines accordingly. **COMPLETED/DONE** [commit: ef87dfa]
+    - Introduced `fee_checksum` field, included in hash computation, and validated during block import and chain checks.
 - **Admission Error Codes**:
   - `FeeError::Overflow` and `FeeError::InvalidSelector` map to generic `ValueError` strings in Python (src/fee/mod.rs, L31). The API must expose distinct error codes (`ErrFeeOverflow`, `ErrInvalidSelector`) for downstream clients.
 - **Overflow Proof Obligation**:
@@ -70,7 +77,8 @@ The following notes catalogue gaps, risks, and corrective directives observed ac
 - No prevention of per‑transaction partial state application: if a panic occurs during the `for tx in &txs` loop after debiting sender but before crediting recipient, ledger diverges. Batch state changes and commit after all checks succeed.
 
 ## 12. Block Validation Directive
-- Validator recomputes hash and nonce order but does **not** recompute `total_fee_*` to cross‑check with coinbase fields or a `fee_checksum`. Implement iteration over `block.transactions[1..]` using `fee::decompose` and compare against header totals.
+- Validator recomputes hash and nonce order but does **not** recompute `total_fee_*` to cross‑check with coinbase fields or a `fee_checksum`. Implement iteration over `block.transactions[1..]` using `fee::decompose` and compare against header totals. **COMPLETED/DONE** [commit: ef87dfa]
+  - Validation now recomputes per-token fees, verifies `fee_checksum`, and ensures coinbase totals cover the fees.
 - The validation routine mixes stateful checks (signature verification) with nonce ordering. For improved determinism, perform all stateless checks first, then apply state diffs in a copy‑on‑write ledger to ensure failed blocks leave no residue.
 - `import_chain` accepts a chain vector without verifying `fee_checksum` or `expected_nonce` continuity beyond simple checks, enabling a crafted chain to slip through if `validate_block` is not called separately. Integrate validation inside `import_chain` per block.
 

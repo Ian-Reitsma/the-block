@@ -3,3 +3,11 @@ if [[ "$(which python)" != "$(git rev-parse --show-toplevel)/.venv/bin/python" ]
   echo "Pre-commit: activate the repo virtualenv first" >&2
   exit 1
 fi
+
+# Ensure every COMPLETED/DONE item in AUDIT_NOTES.md references a commit hash
+if grep -q "COMPLETED/DONE" AUDIT_NOTES.md; then
+  if rg -n "COMPLETED/DONE(?!.*\[commit: [0-9a-f]{7}\])" -P AUDIT_NOTES.md >/dev/null; then
+    echo "Pre-commit: Missing commit hash in AUDIT_NOTES.md" >&2
+    exit 1
+  fi
+fi
