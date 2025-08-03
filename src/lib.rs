@@ -1,3 +1,8 @@
+#![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::pedantic)]
+
 //! Core blockchain implementation with Python bindings.
 //!
 //! Exposes a minimal proof-of-work chain with dual-token economics. See
@@ -20,9 +25,12 @@ pub use transaction::{
     verify_signed_tx_py as verify_signed_tx, RawTxPayload, SignedTransaction,
 };
 use transaction::{canonical_payload_py, sign_tx_py, verify_signed_tx_py};
+pub mod consensus;
 pub mod constants;
-pub use constants::{domain_tag, CHAIN_ID, GENESIS_HASH};
+pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
 pub mod fee;
+pub mod hash_genesis;
+pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, FeeError};
 
 // === Database keys ===
@@ -462,7 +470,7 @@ impl Blockchain {
     }
 
     pub fn genesis_block(&mut self) -> PyResult<()> {
-        let mut g = Block {
+        let g = Block {
             index: 0,
             previous_hash: "0".repeat(64),
             transactions: vec![],
@@ -472,10 +480,8 @@ impl Blockchain {
             coinbase_consumer: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
-            hash: String::new(),
+            hash: GENESIS_HASH.to_string(),
         };
-        g.hash = crate::constants::calculate_genesis_hash();
-        assert_eq!(g.hash, GENESIS_HASH);
         self.chain.push(g);
         self.block_height = 1;
         self.db
@@ -618,9 +624,16 @@ impl Blockchain {
             reward_i = TokenAmount::new(MAX_SUPPLY_INDUSTRIAL - self.emission_industrial);
         }
 
+        let mut pending = self.mempool.clone();
+        pending.sort_unstable_by(|a, b| {
+            a.payload
+                .from_
+                .cmp(&b.payload.from_)
+                .then(a.payload.nonce.cmp(&b.payload.nonce))
+        });
         let mut fee_acc_c: u128 = 0;
         let mut fee_acc_i: u128 = 0;
-        for tx in &self.mempool {
+        for tx in &pending {
             if let Ok((fc, fi)) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
                 fee_acc_c += fc as u128;
                 fee_acc_i += fi as u128;
@@ -659,7 +672,7 @@ impl Blockchain {
             signature: vec![],
         };
         let mut txs = vec![coinbase.clone()];
-        txs.extend(self.mempool.clone());
+        txs.extend(pending);
         self.mempool.clear();
         self.mempool_set.clear();
         let mut block = Block {
@@ -1248,18 +1261,19 @@ fn calculate_hash(
     fee_checksum: &str,
     txs: &[SignedTransaction],
 ) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&index.to_le_bytes());
-    hasher.update(prev.as_bytes());
-    hasher.update(&nonce.to_le_bytes());
-    hasher.update(&difficulty.to_le_bytes());
-    hasher.update(&coin_c.0.to_le_bytes());
-    hasher.update(&coin_i.0.to_le_bytes());
-    hasher.update(fee_checksum.as_bytes());
-    for tx in txs {
-        hasher.update(&tx.id());
-    }
-    hasher.finalize().to_hex().to_string()
+    let ids: Vec<[u8; 32]> = txs.iter().map(|tx| tx.id()).collect();
+    let id_refs: Vec<&[u8]> = ids.iter().map(|v| v.as_ref()).collect();
+    let enc = crate::hashlayout::BlockEncoder {
+        index,
+        prev,
+        nonce,
+        difficulty,
+        coin_c: coin_c.0,
+        coin_i: coin_i.0,
+        fee_checksum,
+        tx_ids: &id_refs,
+    };
+    enc.hash()
 }
 
 /// Generate a new Ed25519 keypair.
