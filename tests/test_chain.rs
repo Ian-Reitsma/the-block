@@ -1,3 +1,5 @@
+#![cfg(feature = "fuzzy")]
+
 // tests/test_chain.rs
 //
 // Integration tests covering chain invariants and edge cases.

@@ -4,10 +4,17 @@ if [[ "$(which python)" != "$(git rev-parse --show-toplevel)/.venv/bin/python" ]
   exit 1
 fi
 
-# Ensure every COMPLETED/DONE item in AUDIT_NOTES.md references a commit hash
+# Ensure every COMPLETED/DONE item in AUDIT_NOTES.md references a real commit hash
 if grep -q "COMPLETED/DONE" AUDIT_NOTES.md; then
-  if rg -n "COMPLETED/DONE(?!.*\[commit: [0-9a-f]{7}\])" -P AUDIT_NOTES.md >/dev/null; then
+  shas=$(awk '/COMPLETED\/DONE/ { if (match($0, /\[commit: ([0-9a-f]{7,})\]/, a)) print a[1]; else { print ""; exit 1 } }' AUDIT_NOTES.md)
+  if [[ -z "$shas" ]]; then
     echo "Pre-commit: Missing commit hash in AUDIT_NOTES.md" >&2
     exit 1
   fi
+  for sha in $shas; do
+    if ! git cat-file -e "$sha"^{commit} 2>/dev/null; then
+      echo "Pre-commit: commit $sha not found" >&2
+      exit 1
+    fi
+  done
 fi

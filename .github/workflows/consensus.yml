@@ -1,0 +1,54 @@
+name: consensus-guard
+on:
+  pull_request:
+
+jobs:
+  guard:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Diff consensus constants
+        run: |
+          set -e
+          git fetch origin ${{ github.event.pull_request.base.sha }}:base
+          if ! git diff --quiet base -- 'src/**/*.{rs,toml}' '*.md'; then
+            labels=$(jq -r '.pull_request.labels[].name' "$GITHUB_EVENT_PATH")
+            commits=$(git log --format=%B base..HEAD)
+            if ! echo "$labels" | grep -q BREAKING-CONSENSUS && ! echo "$commits" | grep -q 'BREAKING-CONSENSUS:'; then
+              echo "Consensus files modified without BREAKING-CONSENSUS label/footer" >&2
+              exit 1
+            fi
+          fi
+      - name: Lockfile drift
+        run: |
+          cargo metadata --locked > /tmp/locked
+          cargo metadata > /tmp/unlocked
+          diff /tmp/locked /tmp/unlocked
+      - name: Audit notes commit hashes
+        run: |
+          if grep -q "COMPLETED/DONE" AUDIT_NOTES.md; then
+            awk '/COMPLETED\/DONE/ { if (match($0, /\[commit: ([0-9a-f]{7,})\]/, a)) print a[1]; else { print ""; exit 1 } }' AUDIT_NOTES.md | while read sha; do git cat-file -e "$sha"^{commit} 2>/dev/null || { echo "missing commit $sha" >&2; exit 1; }; done
+          fi
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: cargo deny
+        run: cargo deny check -c deny.toml
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-geiger
+      - name: cargo geiger
+        run: cargo geiger --all --skip build
+      - name: cargo test
+        run: cargo test --all-features
+      - name: minimal versions
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo +nightly update -Z minimal-versions
+          cargo +nightly build --no-default-features --all-targets
+          git diff --exit-code Cargo.lock
+      - name: cross build
+        run: cargo build --target=aarch64-unknown-linux-musl
