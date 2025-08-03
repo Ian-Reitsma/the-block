@@ -17,17 +17,18 @@ rand_core = "0.6"
 tempfile = "3"
 once_cell = "1"
 thiserror = "1"
+proptest = { version = "1", optional = true }
  
 [features]
-extension-module = ["pyo3/extension-module"]
-
+fuzzy = ["proptest"]
 
 [tool.maturin]
-features = ["extension-module"]
+features = ["pyo3/extension-module"]
 
- [dev-dependencies]
- proptest = "1"
+[dev-dependencies]
+
+[build-dependencies]
  
- [lib]
+[lib]
  name = "the_block"
  crate-type = ["cdylib", "rlib"]

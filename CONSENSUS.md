@@ -62,3 +62,7 @@ fee_component_T ≤ 2^63 − 1
 
 See [`ECONOMICS.md`](ECONOMICS.md#inv-fee-02) for the algebraic proof.
 
+## Genesis Hash
+
+The `GENESIS_HASH` constant is asserted at compile time against the hash derived from the canonical block encoding. Any change to this value or to the genesis block layout constitutes a hard fork and must be recorded in `GENESIS_HISTORY.md`.
+

@@ -1,0 +1,22 @@
+[bans]
+deny = ["*"]
+
+[licenses]
+unlicensed = "deny"
+
+[skip]
+crates = [
+  "blake3",
+  "ed25519-dalek",
+  "sled",
+  "pyo3",
+  "serde",
+  "bincode",
+  "hex",
+  "rand",
+  "rand_core",
+  "tempfile",
+  "once_cell",
+  "thiserror",
+  "proptest"
+]

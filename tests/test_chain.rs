@@ -1,3 +1,5 @@
+#![cfg(feature = "fuzzy")]
+
 // tests/test_chain.rs
 //
 // Integration tests covering chain invariants and edge cases.
@@ -252,6 +254,26 @@ fn test_duplicate_txid_rejected() {
     assert!(!bc.validate_block(&bad_block).unwrap());
 }
 
+// 8d. Duplicate (sender, nonce) pairs in block are rejected
+#[test]
+fn test_duplicate_sender_nonce_rejected_in_block() {
+    init();
+    let mut bc = Blockchain::new();
+    bc.add_account("miner".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 0, 0).unwrap();
+    bc.mine_block("miner".into()).unwrap();
+
+    let (privkey, _pub) = generate_keypair();
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 0, 1);
+    bc.submit_transaction(tx1.clone()).unwrap();
+    let block = bc.mine_block("miner".into()).unwrap();
+
+    let mut bad_block = block.clone();
+    let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 2, 0, 0, 1);
+    bad_block.transactions.push(tx2);
+    assert!(!bc.validate_block(&bad_block).unwrap());
+}
+
 // 8c. Strict nonce and pending balance handling
 #[test]
 fn test_pending_nonce_and_balances() {
@@ -286,6 +308,42 @@ fn test_pending_nonce_and_balances() {
     assert_eq!(sender.pending_nonce, 0);
     assert_eq!(sender.pending_consumer, 0);
     assert_eq!(sender.pending_industrial, 0);
+}
+
+// 8e. Dropping a transaction releases pending reservations
+#[test]
+fn test_drop_transaction_releases_pending() {
+    init();
+    let mut bc = Blockchain::new();
+    bc.add_account("miner".into(), 5, 5).unwrap();
+    bc.add_account("alice".into(), 0, 0).unwrap();
+    let (privkey, _pub) = generate_keypair();
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 1);
+    bc.submit_transaction(tx).unwrap();
+    assert_eq!(bc.accounts.get("miner").unwrap().pending_nonce, 1);
+    bc.drop_transaction("miner".into(), 1).unwrap();
+    let sender = bc.accounts.get("miner").unwrap();
+    assert_eq!(sender.pending_nonce, 0);
+    assert_eq!(sender.pending_consumer, 0);
+    assert_eq!(sender.pending_industrial, 0);
+    assert!(bc.mempool.is_empty());
+}
+
+// 8f. Fee checksum must match computed totals
+#[test]
+fn test_fee_checksum_enforced() {
+    init();
+    let mut bc = Blockchain::new();
+    bc.add_account("miner".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 0, 0).unwrap();
+    bc.mine_block("miner".into()).unwrap();
+    let (privkey, _pub) = generate_keypair();
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 2, 1);
+    bc.submit_transaction(tx).unwrap();
+    let mut block = bc.mine_block("miner".into()).unwrap();
+    assert!(bc.validate_block(&block).unwrap());
+    block.fee_checksum = "00".repeat(32);
+    assert!(!bc.validate_block(&block).unwrap());
 }
 
 // 8. Concurrency: multi-threaded mempool/submit/mine
