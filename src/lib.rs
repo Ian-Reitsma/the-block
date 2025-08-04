@@ -15,8 +15,10 @@ use pyo3::wrap_pyfunction;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sled::Db;
 use std::collections::{HashMap, HashSet};
+use dashmap::DashMap;
+mod simple_db;
+use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
 
 pub mod transaction;
@@ -186,8 +188,7 @@ pub struct Blockchain {
     pub accounts: HashMap<String, Account>,
     #[pyo3(get, set)]
     pub difficulty: u64,
-    pub mempool: Vec<SignedTransaction>,
-    pub mempool_set: std::collections::HashSet<(String, u64)>,
+    pub mempool: DashMap<(String, u64), SignedTransaction>,
     db: Db,
     #[pyo3(get, set)]
     pub emission_consumer: u64,
@@ -226,7 +227,7 @@ impl Blockchain {
     pub fn open(path: &str) -> PyResult<Self> {
         // Open an existing database and auto-migrate to schema v3.
         // See `docs/detailed_updates.md` for layout history.
-        let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
+        let mut db = Db::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
         let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) = if let Some(raw) =
             db.get(DB_CHAIN).ok().flatten()
         {
@@ -413,8 +414,7 @@ impl Blockchain {
             chain,
             accounts,
             difficulty: 8,
-            mempool: Vec::new(),
-            mempool_set: HashSet::new(),
+            mempool: DashMap::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,
@@ -440,7 +440,7 @@ impl Blockchain {
     }
 
     /// Persist the entire chain + state under the current schema
-    pub fn persist_chain(&self) -> PyResult<()> {
+    pub fn persist_chain(&mut self) -> PyResult<()> {
         let disk = ChainDisk {
             schema_version: self.schema_version(),
             chain: self.chain.clone(),
@@ -520,10 +520,7 @@ impl Blockchain {
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
         let sender_addr = tx.payload.from_.clone();
 
-        if self
-            .mempool_set
-            .contains(&(sender_addr.clone(), tx.payload.nonce))
-        {
+        if self.mempool.contains_key(&(sender_addr.clone(), tx.payload.nonce)) {
             return Err(PyValueError::new_err("Duplicate transaction"));
         }
 
@@ -564,19 +561,12 @@ impl Blockchain {
         sender.pending_industrial += tx.payload.amount_industrial + fee_i;
         sender.pending_nonce += 1;
 
-        self.mempool_set.insert((sender_addr, tx.payload.nonce));
-        self.mempool.push(tx);
+        self.mempool.insert((sender_addr, tx.payload.nonce), tx);
         Ok(())
     }
 
     pub fn drop_transaction(&mut self, sender: String, nonce: u64) -> PyResult<()> {
-        if let Some(pos) = self
-            .mempool
-            .iter()
-            .position(|t| t.payload.from_ == sender && t.payload.nonce == nonce)
-        {
-            let tx = self.mempool.swap_remove(pos);
-            self.mempool_set.remove(&(sender.clone(), nonce));
+        if let Some((_, tx)) = self.mempool.remove(&(sender.clone(), nonce)) {
             if let Some(acc) = self.accounts.get_mut(&sender) {
                 if let Ok((fee_c, fee_i)) =
                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
@@ -624,7 +614,8 @@ impl Blockchain {
             reward_i = TokenAmount::new(MAX_SUPPLY_INDUSTRIAL - self.emission_industrial);
         }
 
-        let mut pending = self.mempool.clone();
+        let mut pending: Vec<SignedTransaction> =
+            self.mempool.iter().map(|e| e.value().clone()).collect();
         pending.sort_unstable_by(|a, b| {
             a.payload
                 .from_
@@ -674,7 +665,6 @@ impl Blockchain {
         let mut txs = vec![coinbase.clone()];
         txs.extend(pending);
         self.mempool.clear();
-        self.mempool_set.clear();
         let mut block = Block {
             index,
             previous_hash: prev_hash.clone(),
@@ -738,8 +728,7 @@ impl Blockchain {
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
 
-                    self.mempool_set
-                        .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
+                    self.mempool.remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                 }
 
                 let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
@@ -1033,7 +1022,7 @@ impl Default for Blockchain {
 impl Blockchain {
     /// Open the default ./chain_db path
     pub fn new() -> Self {
-        let db = sled::Config::new().temporary(true).open().expect("DB open");
+        let db = Db::open("temp").expect("DB open");
         let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) =
             if let Some(raw) = db.get(DB_CHAIN).ok().flatten() {
                 if let Ok(disk) = bincode::deserialize::<ChainDisk>(&raw) {
@@ -1111,8 +1100,7 @@ impl Blockchain {
             chain,
             accounts,
             difficulty: 8,
-            mempool: Vec::new(),
-            mempool_set: HashSet::new(),
+            mempool: DashMap::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,

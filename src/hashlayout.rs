@@ -39,8 +39,9 @@ impl<'a> BlockEncoder<'a> {
 
     /// Const variant used for compile-time genesis hash calculation.
     pub const fn const_hash(&self) -> &'static str {
-        "92fc0fbacb748ac4b7bb561b677ab24bc5561e8e61d406728b90490d56754167"
+        GENESIS_HASH
     }
 }
 
 pub const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+pub const GENESIS_HASH: &str = include_str!(concat!(env!("OUT_DIR"), "/genesis_hash.txt"));

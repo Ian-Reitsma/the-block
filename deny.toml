@@ -1,5 +1,4 @@
 [advisories]
-db-urls = ["https://github.com/RustSec/advisory-db?rev=c62e71ad8c5256ffa3cafbb1a8c687db60869e98"]
+db-path = "advisory-db"
 git-fetch-with-cli = true
-ignore = ["RUSTSEC-2024-0384"]
 
