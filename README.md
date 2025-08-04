@@ -69,7 +69,8 @@ Bootstrap steps:
 3. `pip install maturin black pytest` into the venv.
 4. `cargo install maturin` (if missing) and build wheel via `maturin develop --release`.
 5. Optional: install **Node 20** via `nvm` (for tooling not yet in repo).
-6. Run `cargo fmt && cargo clippy && cargo test` to verify setup.
+6. Run `cargo test --all --release`, `.venv/bin/python -m pytest`, and
+   `.venv/bin/python demo.py` to verify the toolchain and bindings.
 
 > Need CUDA, Docker, or GPU?  Not here—this repo is CPU‑only and self‑contained.
 
@@ -80,13 +81,10 @@ Bootstrap steps:
 | Task | Command | Expected Output |
 | --- | --- | --- |
 | Rust unit + property tests | `cargo test --all --release` | All tests green |
-| PyO3 wheel (manylinux) | `maturin build --release --features extension-module` | `target/wheels/the_block-*.whl` |
-| In-place dev install | `maturin develop --release` | Module importable in current venv |
-| Lint / Style | `cargo fmt -- --check && cargo clippy --all-targets -- -D warnings` | No diffs / warnings |
-| Security audit | `cargo audit -q` | Zero vulnerabilities |
-| Dead-code check | `cargo +nightly udeps --all-targets` | No unused dependencies |
-| Ruff lint | `ruff check .` | No Python lint errors |
-| Benchmarks | `cargo bench` | Criterion HTML in `target/criterion` |
+| In-place dev install | `maturin develop --release` | Module importable in venv |
+| Python tests | `.venv/bin/python -m pytest` | All tests pass |
+| End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` |
+| Lint / Style | `cargo fmt -- --check` | No diffs |
 
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
 
