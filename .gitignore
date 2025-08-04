@@ -13,3 +13,9 @@ __pycache__/
 
 /target
 .bootstrap_partial
+.hooks/
+xtask/target/
+# RustSec advisory database cache
+# NPM lockfile is generated for optional tooling; ignore to keep repo deterministic
+# See AGENTS.md §4 for Node tooling policy.
+package-lock.json

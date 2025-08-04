@@ -18,10 +18,14 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ### Accounts & Transactions
 * `Account` maintains balances, nonce and pending totals to prevent overspending.
 * `RawTxPayload` → `SignedTransaction` using Ed25519 signatures. The canonical signing bytes are `domain_tag || bincode(payload)`.
-* Transactions include a `fee_token` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
+* Transactions include a `fee_selector` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
 
 ### Storage
-* Persistent state lives in a sled database (`chain_db`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
+* Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
+
+### Schema Migrations & Invariants
+* Bump `ChainDisk.schema_version` for any on-disk format change and supply a lossless migration routine with tests.
+* Each migration must preserve [`INV-FEE-01`](ECONOMICS.md#inv-fee-01) and [`INV-FEE-02`](ECONOMICS.md#inv-fee-02); update `docs/schema_migrations/` with the new invariants.
 
 ### Python Demo
 * `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output.
@@ -37,7 +41,7 @@ The following tasks are ordered from highest urgency to longer‑term milestones
    - Reject any submitted transaction whose nonce is not exactly `account.nonce + 1`.
    - Track `pending_consumer`, `pending_industrial` and `pending_nonce` to lock funds in the mempool so double spends cannot occur.
 2. **Fee Routing & Overflow Clamp**
-   - Enforce the fee routing equations documented in `analysis.txt`. Split fees according to `fee_token` and cap `fee < 2^63` to avoid `div_ceil` overflow.
+   - Enforce the fee routing equations documented in `analysis.txt`. Split fees according to `fee_selector` and cap `fee < 2^63` to avoid `div_ceil` overflow.
 3. **Difficulty Field Verification**
    - Include `difficulty` in the block header hash and verify that `block.difficulty` equals the network target for the given height.
 4. **In‑Block Nonce Continuity**
@@ -54,7 +58,7 @@ The following tasks are ordered from highest urgency to longer‑term milestones
 ## 3. Mid‑Term Milestones
 After the immediate patches above, focus shifts toward networking and user tooling.
 
-1. **Persistent Storage Refinements** – abstract sled behind a trait so alternative databases or snapshots can be plugged in.
+1. **Persistent Storage Refinements** – swap in a real database backend; `SimpleDb` is a temporary stub.
 2. **P2P Networking** – design a simple protocol (libp2p recommended) for block and transaction gossip. Implement longest‑chain sync and fork resolution.
 3. **CLI / RPC API** – expose node controls via command‑line and/or HTTP so multiple nodes can be orchestrated in tests.
 4. **Dynamic Difficulty Retarget** – adjust `difficulty` based on moving average block times to maintain the target interval.
@@ -71,7 +75,10 @@ Once networking is stable, the project aims to become a modular research platfor
 
 ## 5. Key Principles for Contributors
 
-* **Every commit must pass** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all --release`, and `pytest`.
+* **Every commit must pass** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test --all --release`, and `pytest`.
+* Failing `clippy` does not change runtime behaviour; it flags style,
+  documentation, or potential bug risks.
 * **No code without spec** – if the behavior is not described in `AGENTS.md` or this supplement, document it first.
 * **Explain your reasoning** in PR summaries. Future agents must be able to trace design decisions from docs → commit → code.
 * **Educational Only** – reiterate that this repository does not create real tokens or investment opportunities. The project is a learning platform.

@@ -1,0 +1,4 @@
+[advisories]
+db-path = "advisory-db"
+git-fetch-with-cli = true
+

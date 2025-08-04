@@ -1,17 +1,25 @@
+#![forbid(unsafe_code)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::pedantic)]
+
 //! Core blockchain implementation with Python bindings.
 //!
 //! Exposes a minimal proof-of-work chain with dual-token economics. See
 //! `AGENTS.md` for the high-level specification.
 
+use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
+use pyo3::PyTypeInfo;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sled::Db;
 use std::collections::{HashMap, HashSet};
+mod simple_db;
+use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
 
 pub mod transaction;
@@ -20,8 +28,13 @@ pub use transaction::{
     verify_signed_tx_py as verify_signed_tx, RawTxPayload, SignedTransaction,
 };
 use transaction::{canonical_payload_py, sign_tx_py, verify_signed_tx_py};
+pub mod consensus;
 pub mod constants;
-pub use constants::{domain_tag, CHAIN_ID};
+pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
+pub mod fee;
+pub mod hash_genesis;
+pub mod hashlayout;
+pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -34,7 +47,7 @@ const MAX_SUPPLY_INDUSTRIAL: u64 = 20_000_000_000_000;
 const INITIAL_BLOCK_REWARD_CONSUMER: u64 = 60_000;
 const INITIAL_BLOCK_REWARD_INDUSTRIAL: u64 = 30_000;
 const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
-const DECAY_DENOMINATOR: u64 = 100000;
+const DECAY_DENOMINATOR: u64 = 100_000;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
 /// Converts a byte slice into a fixed 32-byte array, returning `None` on length
@@ -159,6 +172,10 @@ pub struct Block {
     #[serde(default)]
     /// Canonical industrial reward recorded in the header. Must match tx[0].
     pub coinbase_industrial: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// blake3(total_fee_ct || total_fee_it) in hex
+    pub fee_checksum: String,
 }
 
 /// In-memory representation of the chain state and associated accounts.
@@ -172,8 +189,7 @@ pub struct Blockchain {
     pub accounts: HashMap<String, Account>,
     #[pyo3(get, set)]
     pub difficulty: u64,
-    pub mempool: Vec<SignedTransaction>,
-    pub mempool_set: std::collections::HashSet<(String, u64)>,
+    pub mempool: DashMap<(String, u64), SignedTransaction>,
     db: Db,
     #[pyo3(get, set)]
     pub emission_consumer: u64,
@@ -212,113 +228,194 @@ impl Blockchain {
     pub fn open(path: &str) -> PyResult<Self> {
         // Open an existing database and auto-migrate to schema v3.
         // See `docs/detailed_updates.md` for layout history.
-        let db = sled::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
-        let (chain, accounts, em_c, em_i, br_c, br_i, bh) =
-            if let Some(raw) = db.get(DB_CHAIN).ok().flatten() {
-                match bincode::deserialize::<ChainDisk>(&raw) {
-                    Ok(disk) => {
-                        if disk.schema_version > 3 {
-                            return Err(PyValueError::new_err("DB schema too new"));
-                        }
-                        if disk.schema_version < 3 {
-                            let migrated = ChainDisk {
-                                schema_version: 3,
-                                ..disk
-                            };
-                            db.insert(DB_CHAIN, bincode::serialize(&migrated).unwrap())
-                                .unwrap();
-                            // Drop legacy column families after migrating to consolidated ChainDisk
-                            let _ = db.remove(DB_ACCOUNTS);
-                            let _ = db.remove(DB_EMISSION);
-                            (
-                                migrated.chain,
-                                migrated.accounts,
-                                migrated.emission_consumer,
-                                migrated.emission_industrial,
-                                migrated.block_reward_consumer,
-                                migrated.block_reward_industrial,
-                                migrated.block_height,
-                            )
-                        } else {
-                            (
-                                disk.chain,
-                                disk.accounts,
-                                disk.emission_consumer,
-                                disk.emission_industrial,
-                                disk.block_reward_consumer,
-                                disk.block_reward_industrial,
-                                disk.block_height,
-                            )
-                        }
+        let mut db = Db::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
+        let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) = if let Some(raw) =
+            db.get(DB_CHAIN).ok().flatten()
+        {
+            match bincode::deserialize::<ChainDisk>(&raw) {
+                Ok(disk) => {
+                    if disk.schema_version > 3 {
+                        return Err(PyValueError::new_err("DB schema too new"));
                     }
-                    Err(_) => {
-                        let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
-                        let accounts: HashMap<String, Account> = db
-                            .get(DB_ACCOUNTS)
-                            .ok()
-                            .flatten()
-                            .and_then(|iv| bincode::deserialize(&iv).ok())
-                            .unwrap_or_default();
-                        let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
-                            .get(DB_EMISSION)
-                            .ok()
-                            .flatten()
-                            .and_then(|iv| bincode::deserialize(&iv).ok())
-                            .unwrap_or((
-                                0,
-                                0,
-                                INITIAL_BLOCK_REWARD_CONSUMER,
-                                INITIAL_BLOCK_REWARD_INDUSTRIAL,
-                                0,
-                            ));
-                        let mut new_chain = chain.clone();
-                        for b in &mut new_chain {
-                            b.coinbase_consumer = TokenAmount::new(0);
-                            b.coinbase_industrial = TokenAmount::new(0);
+                    if disk.schema_version < 3 {
+                        let mut migrated_chain = disk.chain.clone();
+                        for b in &mut migrated_chain {
+                            if let Some(cb) = b.transactions.first() {
+                                b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
+                                b.coinbase_industrial =
+                                    TokenAmount::new(cb.payload.amount_industrial);
+                            }
+                            let mut fc: u128 = 0;
+                            let mut fi: u128 = 0;
+                            for tx in b.transactions.iter().skip(1) {
+                                if let Ok((c, i)) =
+                                    crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                {
+                                    fc += c as u128;
+                                    fi += i as u128;
+                                }
+                            }
+                            let fc_u64 = u64::try_from(fc).unwrap_or(0);
+                            let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                            let mut h = blake3::Hasher::new();
+                            h.update(&fc_u64.to_le_bytes());
+                            h.update(&fi_u64.to_le_bytes());
+                            b.fee_checksum = h.finalize().to_hex().to_string();
+                            b.hash = calculate_hash(
+                                b.index,
+                                &b.previous_hash,
+                                b.nonce,
+                                b.difficulty,
+                                b.coinbase_consumer,
+                                b.coinbase_industrial,
+                                &b.fee_checksum,
+                                &b.transactions,
+                            );
                         }
-                        let disk_new = ChainDisk {
+                        let migrated = ChainDisk {
                             schema_version: 3,
-                            chain: new_chain.clone(),
-                            accounts: accounts.clone(),
-                            emission_consumer: em_c,
-                            emission_industrial: em_i,
-                            block_reward_consumer: TokenAmount::new(br_c),
-                            block_reward_industrial: TokenAmount::new(br_i),
-                            block_height: bh,
+                            chain: migrated_chain,
+                            ..disk
                         };
-                        db.insert(DB_CHAIN, bincode::serialize(&disk_new).unwrap())
+                        db.insert(DB_CHAIN, bincode::serialize(&migrated).unwrap())
                             .unwrap();
-                        // Remove legacy shard keys; all state now in ChainDisk
                         let _ = db.remove(DB_ACCOUNTS);
                         let _ = db.remove(DB_EMISSION);
                         (
-                            disk_new.chain,
-                            disk_new.accounts,
-                            disk_new.emission_consumer,
-                            disk_new.emission_industrial,
-                            disk_new.block_reward_consumer,
-                            disk_new.block_reward_industrial,
-                            disk_new.block_height,
+                            migrated.chain,
+                            migrated.accounts,
+                            migrated.emission_consumer,
+                            migrated.emission_industrial,
+                            migrated.block_reward_consumer,
+                            migrated.block_reward_industrial,
+                            migrated.block_height,
+                        )
+                    } else {
+                        (
+                            disk.chain,
+                            disk.accounts,
+                            disk.emission_consumer,
+                            disk.emission_industrial,
+                            disk.block_reward_consumer,
+                            disk.block_reward_industrial,
+                            disk.block_height,
                         )
                     }
                 }
-            } else {
-                (
-                    Vec::new(),
-                    HashMap::new(),
-                    0,
-                    0,
-                    TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
-                    TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
-                    0,
-                )
-            };
+                Err(_) => {
+                    let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
+                    let accounts: HashMap<String, Account> = db
+                        .get(DB_ACCOUNTS)
+                        .ok()
+                        .flatten()
+                        .and_then(|iv| bincode::deserialize(&iv).ok())
+                        .unwrap_or_default();
+                    let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
+                        .get(DB_EMISSION)
+                        .ok()
+                        .flatten()
+                        .and_then(|iv| bincode::deserialize(&iv).ok())
+                        .unwrap_or((
+                            0,
+                            0,
+                            INITIAL_BLOCK_REWARD_CONSUMER,
+                            INITIAL_BLOCK_REWARD_INDUSTRIAL,
+                            0,
+                        ));
+                    let mut migrated_chain = chain.clone();
+                    for b in &mut migrated_chain {
+                        if let Some(cb) = b.transactions.first() {
+                            b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
+                            b.coinbase_industrial = TokenAmount::new(cb.payload.amount_industrial);
+                        }
+                        let mut fc: u128 = 0;
+                        let mut fi: u128 = 0;
+                        for tx in b.transactions.iter().skip(1) {
+                            if let Ok((c, i)) =
+                                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                            {
+                                fc += c as u128;
+                                fi += i as u128;
+                            }
+                        }
+                        let fc_u64 = u64::try_from(fc).unwrap_or(0);
+                        let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                        let mut h = blake3::Hasher::new();
+                        h.update(&fc_u64.to_le_bytes());
+                        h.update(&fi_u64.to_le_bytes());
+                        b.fee_checksum = h.finalize().to_hex().to_string();
+                        b.hash = calculate_hash(
+                            b.index,
+                            &b.previous_hash,
+                            b.nonce,
+                            b.difficulty,
+                            b.coinbase_consumer,
+                            b.coinbase_industrial,
+                            &b.fee_checksum,
+                            &b.transactions,
+                        );
+                    }
+                    let disk_new = ChainDisk {
+                        schema_version: 3,
+                        chain: migrated_chain,
+                        accounts: accounts.clone(),
+                        emission_consumer: em_c,
+                        emission_industrial: em_i,
+                        block_reward_consumer: TokenAmount::new(br_c),
+                        block_reward_industrial: TokenAmount::new(br_i),
+                        block_height: bh,
+                    };
+                    db.insert(DB_CHAIN, bincode::serialize(&disk_new).unwrap())
+                        .unwrap();
+                    let _ = db.remove(DB_ACCOUNTS);
+                    let _ = db.remove(DB_EMISSION);
+                    (
+                        disk_new.chain,
+                        disk_new.accounts,
+                        disk_new.emission_consumer,
+                        disk_new.emission_industrial,
+                        disk_new.block_reward_consumer,
+                        disk_new.block_reward_industrial,
+                        disk_new.block_height,
+                    )
+                }
+            }
+        } else {
+            (
+                Vec::new(),
+                HashMap::new(),
+                0,
+                0,
+                TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
+                TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
+                0,
+            )
+        };
+        for b in &mut chain {
+            if b.fee_checksum.is_empty() {
+                let mut fc: u128 = 0;
+                let mut fi: u128 = 0;
+                for tx in b.transactions.iter().skip(1) {
+                    if let Ok((c, i)) =
+                        crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                    {
+                        fc += c as u128;
+                        fi += i as u128;
+                    }
+                }
+                let fc_u64 = u64::try_from(fc).unwrap_or(0);
+                let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                let mut h = blake3::Hasher::new();
+                h.update(&fc_u64.to_le_bytes());
+                h.update(&fi_u64.to_le_bytes());
+                b.fee_checksum = h.finalize().to_hex().to_string();
+            }
+        }
         Ok(Blockchain {
             chain,
             accounts,
             difficulty: 8,
-            mempool: Vec::new(),
-            mempool_set: HashSet::new(),
+            mempool: DashMap::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,
@@ -326,6 +423,13 @@ impl Blockchain {
             block_reward_industrial: br_i,
             block_height: bh,
         })
+    }
+
+    #[staticmethod]
+    pub fn with_difficulty(path: &str, difficulty: u64) -> PyResult<Self> {
+        let mut bc = Blockchain::open(path)?;
+        bc.difficulty = difficulty;
+        Ok(bc)
     }
 
     /// Return the on-disk schema version
@@ -337,7 +441,7 @@ impl Blockchain {
     }
 
     /// Persist the entire chain + state under the current schema
-    pub fn persist_chain(&self) -> PyResult<()> {
+    pub fn persist_chain(&mut self) -> PyResult<()> {
         let disk = ChainDisk {
             schema_version: self.schema_version(),
             chain: self.chain.clone(),
@@ -373,10 +477,11 @@ impl Blockchain {
             transactions: vec![],
             difficulty: self.difficulty,
             nonce: 0,
-            hash: "genesis_hash_placeholder".to_string(),
             // genesis carries zero reward; fields included for stable hashing
             coinbase_consumer: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
+            fee_checksum: "0".repeat(64),
+            hash: GENESIS_HASH.to_string(),
         };
         self.chain.push(g);
         self.block_height = 1;
@@ -387,6 +492,10 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Add a new account with starting balances.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the account already exists.
     pub fn add_account(&mut self, address: String, consumer: u64, industrial: u64) -> PyResult<()> {
         if self.accounts.contains_key(&address) {
             return Err(PyValueError::new_err("Account already exists"));
@@ -406,36 +515,41 @@ impl Blockchain {
         Ok(())
     }
 
-    pub fn get_account_balance(&self, address: String) -> PyResult<TokenBalance> {
+    /// Return the balance for an account.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the account is not found.
+    pub fn get_account_balance(&self, address: &str) -> PyResult<TokenBalance> {
         self.accounts
-            .get(&address)
+            .get(address)
             .map(|a| a.balance.clone())
             .ok_or_else(|| PyValueError::new_err("Account not found"))
     }
 
+    /// Submit a signed transaction to the mempool.
+    ///
+    /// # Errors
+    /// Returns a [`PyValueError`] if validation fails or the sender is missing.
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
         let sender_addr = tx.payload.from_.clone();
 
         if self
-            .mempool_set
-            .contains(&(sender_addr.clone(), tx.payload.nonce))
+            .mempool
+            .contains_key(&(sender_addr.clone(), tx.payload.nonce))
         {
             return Err(PyValueError::new_err("Duplicate transaction"));
+        }
+
+        if tx.payload.fee_selector > 2 {
+            return Err(PyValueError::new_err("Invalid fee selector"));
         }
 
         let sender = self
             .accounts
             .get_mut(&sender_addr)
             .ok_or_else(|| PyValueError::new_err("Sender not found"))?;
-        let (fee_c, fee_i) = match tx.payload.fee_token {
-            0 => (tx.payload.fee, 0),
-            1 => (0, tx.payload.fee),
-            2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-            _ => return Err(PyValueError::new_err("Invalid fee_token")),
-        };
-        if tx.payload.fee >= (1u64 << 63) {
-            return Err(PyValueError::new_err("Fee too large"));
-        }
+        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
         if sender
             .balance
@@ -463,16 +577,49 @@ impl Blockchain {
         sender.pending_industrial += tx.payload.amount_industrial + fee_i;
         sender.pending_nonce += 1;
 
-        self.mempool_set.insert((sender_addr, tx.payload.nonce));
-        self.mempool.push(tx);
+        self.mempool.insert((sender_addr, tx.payload.nonce), tx);
         Ok(())
     }
 
+    /// Remove a pending transaction and release reserved balances.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the transaction is absent.
+    pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> PyResult<()> {
+        if let Some((_, tx)) = self.mempool.remove(&(sender.to_string(), nonce)) {
+            if let Some(acc) = self.accounts.get_mut(sender) {
+                if let Ok((fee_c, fee_i)) =
+                    crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                {
+                    let total_c = tx.payload.amount_consumer + fee_c;
+                    let total_i = tx.payload.amount_industrial + fee_i;
+                    acc.pending_consumer = acc.pending_consumer.saturating_sub(total_c);
+                    acc.pending_industrial = acc.pending_industrial.saturating_sub(total_i);
+                    acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                }
+            }
+            Ok(())
+        } else {
+            Err(PyValueError::new_err("Transaction not found"))
+        }
+    }
+
+    #[must_use]
     pub fn current_chain_length(&self) -> usize {
         self.chain.len()
     }
 
-    pub fn mine_block(&mut self, miner_addr: String) -> PyResult<Block> {
+    /// Mine a new block and credit rewards to `miner_addr`.
+    ///
+    /// # Errors
+    /// Returns a [`PyValueError`] if fee or nonce calculations overflow, or if
+    /// persisting the chain fails.
+    ///
+    /// # Panics
+    /// Panics if miner balance overflows or if the underlying database flush
+    /// fails.
+    #[allow(clippy::too_many_lines)]
+    pub fn mine_block(&mut self, miner_addr: &str) -> PyResult<Block> {
         let index = self.chain.len() as u64;
         let prev_hash = if index == 0 {
             "0".repeat(64)
@@ -498,14 +645,48 @@ impl Blockchain {
             reward_i = TokenAmount::new(MAX_SUPPLY_INDUSTRIAL - self.emission_industrial);
         }
 
+        let mut pending: Vec<SignedTransaction> =
+            self.mempool.iter().map(|e| e.value().clone()).collect();
+        pending.sort_unstable_by(|a, b| {
+            a.payload
+                .from_
+                .cmp(&b.payload.from_)
+                .then(a.payload.nonce.cmp(&b.payload.nonce))
+        });
+        let mut fee_acc_c: u128 = 0;
+        let mut fee_acc_i: u128 = 0;
+        for tx in &pending {
+            if let Ok((fc, fi)) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                fee_acc_c += fc as u128;
+                fee_acc_i += fi as u128;
+            }
+        }
+        let fee_c_u64 =
+            u64::try_from(fee_acc_c).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let fee_i_u64 =
+            u64::try_from(fee_acc_i).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let cb_c = reward_c
+            .0
+            .checked_add(fee_c_u64)
+            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+        let cb_i = reward_i
+            .0
+            .checked_add(fee_i_u64)
+            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+
+        let mut fee_hasher = blake3::Hasher::new();
+        fee_hasher.update(&fee_c_u64.to_le_bytes());
+        fee_hasher.update(&fee_i_u64.to_le_bytes());
+        let fee_checksum = fee_hasher.finalize().to_hex().to_string();
+
         let coinbase = SignedTransaction {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
-                to: miner_addr.clone(),
-                amount_consumer: reward_c.0,
-                amount_industrial: reward_i.0,
+                to: miner_addr.to_owned(),
+                amount_consumer: cb_c,
+                amount_industrial: cb_i,
                 fee: 0,
-                fee_token: 0,
+                fee_selector: 0,
                 nonce: 0,
                 memo: Vec::new(),
             },
@@ -513,9 +694,8 @@ impl Blockchain {
             signature: vec![],
         };
         let mut txs = vec![coinbase.clone()];
-        txs.extend(self.mempool.clone());
+        txs.extend(pending);
         self.mempool.clear();
-        self.mempool_set.clear();
         let mut block = Block {
             index,
             previous_hash: prev_hash.clone(),
@@ -523,8 +703,9 @@ impl Blockchain {
             difficulty: self.difficulty,
             nonce: 0,
             hash: String::new(),
-            coinbase_consumer: reward_c,
-            coinbase_industrial: reward_i,
+            coinbase_consumer: TokenAmount::new(cb_c),
+            coinbase_industrial: TokenAmount::new(cb_i),
+            fee_checksum: fee_checksum.clone(),
         };
 
         let mut nonce = 0u64;
@@ -534,8 +715,9 @@ impl Blockchain {
                 &prev_hash,
                 nonce,
                 self.difficulty,
-                reward_c,
-                reward_i,
+                TokenAmount::new(cb_c),
+                TokenAmount::new(cb_i),
+                &fee_checksum,
                 &txs,
             );
             let bytes = hex_to_bytes(&hash);
@@ -544,15 +726,12 @@ impl Blockchain {
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
 
-                for tx in &txs {
+                for tx in txs.iter().skip(1) {
                     if tx.payload.from_ != "0".repeat(34) {
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
-                            let (fee_c, fee_i) = match tx.payload.fee_token {
-                                0 => (tx.payload.fee, 0),
-                                1 => (0, tx.payload.fee),
-                                2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                                _ => (0, 0),
-                            };
+                            let (fee_c, fee_i) =
+                                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                    .unwrap_or((0, 0));
                             let total_c = tx.payload.amount_consumer + fee_c;
                             let total_i = tx.payload.amount_industrial + fee_i;
                             s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
@@ -580,19 +759,34 @@ impl Blockchain {
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
 
-                    let (fee_c, fee_i) = match tx.payload.fee_token {
-                        0 => (tx.payload.fee, 0),
-                        1 => (0, tx.payload.fee),
-                        2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                        _ => (0, 0),
-                    };
-                    if let Some(miner) = self.accounts.get_mut(&miner_addr) {
-                        miner.balance.consumer += fee_c;
-                        miner.balance.industrial += fee_i;
-                    }
-                    self.mempool_set
+                    self.mempool
                         .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                 }
+
+                let miner = self
+                    .accounts
+                    .entry(miner_addr.to_owned())
+                    .or_insert(Account {
+                        address: miner_addr.to_owned(),
+                        balance: TokenBalance {
+                            consumer: 0,
+                            industrial: 0,
+                        },
+                        nonce: 0,
+                        pending_consumer: 0,
+                        pending_industrial: 0,
+                        pending_nonce: 0,
+                    });
+                miner.balance.consumer = miner
+                    .balance
+                    .consumer
+                    .checked_add(cb_c)
+                    .expect("miner consumer overflow");
+                miner.balance.industrial = miner
+                    .balance
+                    .industrial
+                    .checked_add(cb_i)
+                    .expect("miner industrial overflow");
 
                 self.emission_consumer += reward_c.0;
                 self.emission_industrial += reward_i.0;
@@ -641,6 +835,7 @@ impl Blockchain {
             block.difficulty,
             block.coinbase_consumer,
             block.coinbase_industrial,
+            &block.fee_checksum,
             &block.transactions,
         );
         if calc != block.hash {
@@ -660,22 +855,60 @@ impl Blockchain {
 
         let mut expected: HashMap<String, u64> = HashMap::new();
         let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        let mut seen_nonce: HashSet<(String, u64)> = HashSet::new();
+        let mut fee_tot_c: u128 = 0;
+        let mut fee_tot_i: u128 = 0;
+
+        let mut counts: HashMap<String, u64> = HashMap::new();
+        for tx in block.transactions.iter().skip(1) {
+            if tx.payload.from_ != "0".repeat(34) {
+                *counts.entry(tx.payload.from_.clone()).or_insert(0) += 1;
+            }
+            match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                Ok((fc, fi)) => {
+                    fee_tot_c += fc as u128;
+                    fee_tot_i += fi as u128;
+                }
+                Err(_) => return Ok(false),
+            }
+        }
+        for (addr, count) in counts {
+            let start = self
+                .accounts
+                .get(&addr)
+                .map(|a| a.nonce)
+                .unwrap_or(0)
+                .saturating_sub(count);
+            expected.insert(addr, start);
+        }
+
         for tx in &block.transactions {
             if tx.payload.from_ != "0".repeat(34) {
-                let next = expected.entry(tx.payload.from_.clone()).or_insert_with(|| {
-                    self.accounts
-                        .get(&tx.payload.from_)
-                        .map(|a| a.nonce + 1)
-                        .unwrap_or(1)
-                });
+                let next = expected.entry(tx.payload.from_.clone()).or_insert(0);
+                *next += 1;
                 if tx.payload.nonce != *next {
                     return Ok(false);
                 }
-                *next += 1;
+                if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
+                    return Ok(false);
+                }
             }
             if !seen.insert(tx.id()) {
                 return Ok(false);
             }
+        }
+        let mut h = blake3::Hasher::new();
+        let fc_u64 = u64::try_from(fee_tot_c).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let fi_u64 = u64::try_from(fee_tot_i).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        h.update(&fc_u64.to_le_bytes());
+        h.update(&fi_u64.to_le_bytes());
+        if h.finalize().to_hex().to_string() != block.fee_checksum {
+            return Ok(false);
+        }
+        let cb_c = block.coinbase_consumer.0 as u128;
+        let cb_i = block.coinbase_industrial.0 as u128;
+        if cb_c < fee_tot_c || cb_i < fee_tot_i {
+            return Ok(false);
         }
 
         Ok(true)
@@ -703,7 +936,9 @@ impl Blockchain {
                 .first()
                 .map(|tx| tx.payload.to.clone())
                 .unwrap_or_default();
-            for tx in &block.transactions {
+            let mut fee_tot_c: u128 = 0;
+            let mut fee_tot_i: u128 = 0;
+            for tx in block.transactions.iter().skip(1) {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = to_array_32(&tx.public_key)
                         .ok_or_else(|| PyValueError::new_err("Invalid pubkey in chain"))?;
@@ -718,12 +953,9 @@ impl Blockchain {
                         return Err(PyValueError::new_err("Bad tx signature in chain"));
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
-                        let (fee_c, fee_i) = match tx.payload.fee_token {
-                            0 => (tx.payload.fee, 0),
-                            1 => (0, tx.payload.fee),
-                            2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                            _ => (0, 0),
-                        };
+                        let (fee_c, fee_i) =
+                            crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                .unwrap_or((0, 0));
                         s.balance.consumer = s
                             .balance
                             .consumer
@@ -733,6 +965,8 @@ impl Blockchain {
                             .industrial
                             .saturating_sub(tx.payload.amount_industrial + fee_i);
                         s.nonce = tx.payload.nonce;
+                        fee_tot_c += fee_c as u128;
+                        fee_tot_i += fee_i as u128;
                     }
                 }
                 let r = self
@@ -751,18 +985,43 @@ impl Blockchain {
                     });
                 r.balance.consumer += tx.payload.amount_consumer;
                 r.balance.industrial += tx.payload.amount_industrial;
-
-                let (fee_c, fee_i) = match tx.payload.fee_token {
-                    0 => (tx.payload.fee, 0),
-                    1 => (0, tx.payload.fee),
-                    2 => (tx.payload.fee.div_ceil(2), tx.payload.fee / 2),
-                    _ => (0, 0),
-                };
-                if let Some(miner) = self.accounts.get_mut(&miner_addr) {
-                    miner.balance.consumer += fee_c;
-                    miner.balance.industrial += fee_i;
-                }
             }
+            let mut h = blake3::Hasher::new();
+            let fc_u64 =
+                u64::try_from(fee_tot_c).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            let fi_u64 =
+                u64::try_from(fee_tot_i).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            h.update(&fc_u64.to_le_bytes());
+            h.update(&fi_u64.to_le_bytes());
+            if h.finalize().to_hex().to_string() != block.fee_checksum {
+                return Err(PyValueError::new_err("Fee checksum mismatch"));
+            }
+            let cb_c = block.coinbase_consumer.0 as u128;
+            let cb_i = block.coinbase_industrial.0 as u128;
+            if cb_c < fee_tot_c || cb_i < fee_tot_i {
+                return Err(PyValueError::new_err("Fee mismatch"));
+            }
+            let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
+                address: miner_addr.clone(),
+                balance: TokenBalance {
+                    consumer: 0,
+                    industrial: 0,
+                },
+                nonce: 0,
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+            });
+            miner.balance.consumer = miner
+                .balance
+                .consumer
+                .checked_add(block.coinbase_consumer.0)
+                .expect("miner consumer overflow");
+            miner.balance.industrial = miner
+                .balance
+                .industrial
+                .checked_add(block.coinbase_industrial.0)
+                .expect("miner industrial overflow");
             if let Some(cb) = block.transactions.first() {
                 if cb.payload.amount_consumer != block.coinbase_consumer.0
                     || cb.payload.amount_industrial != block.coinbase_industrial.0
@@ -798,8 +1057,8 @@ impl Default for Blockchain {
 impl Blockchain {
     /// Open the default ./chain_db path
     pub fn new() -> Self {
-        let db = sled::Config::new().temporary(true).open().expect("DB open");
-        let (chain, accounts, em_c, em_i, br_c, br_i, bh) =
+        let db = Db::open("temp").expect("DB open");
+        let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) =
             if let Some(raw) = db.get(DB_CHAIN).ok().flatten() {
                 if let Ok(disk) = bincode::deserialize::<ChainDisk>(&raw) {
                     (
@@ -852,12 +1111,31 @@ impl Blockchain {
                     0,
                 )
             };
+        for b in &mut chain {
+            if b.fee_checksum.is_empty() {
+                let mut fc: u128 = 0;
+                let mut fi: u128 = 0;
+                for tx in b.transactions.iter().skip(1) {
+                    if let Ok((c, i)) =
+                        crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                    {
+                        fc += c as u128;
+                        fi += i as u128;
+                    }
+                }
+                let fc_u64 = u64::try_from(fc).unwrap_or(0);
+                let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                let mut h = blake3::Hasher::new();
+                h.update(&fc_u64.to_le_bytes());
+                h.update(&fi_u64.to_le_bytes());
+                b.fee_checksum = h.finalize().to_hex().to_string();
+            }
+        }
         Blockchain {
             chain,
             accounts,
             difficulty: 8,
-            mempool: Vec::new(),
-            mempool_set: HashSet::new(),
+            mempool: DashMap::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,
@@ -900,6 +1178,7 @@ impl Blockchain {
                 b.difficulty,
                 b.coinbase_consumer,
                 b.coinbase_industrial,
+                &b.fee_checksum,
                 &b.transactions,
             );
             if calc != b.hash {
@@ -911,7 +1190,10 @@ impl Blockchain {
             }
             let mut expected_nonce: HashMap<String, u64> = HashMap::new();
             let mut seen: HashSet<[u8; 32]> = HashSet::new();
-            for tx in &b.transactions {
+            let mut seen_nonce: HashSet<(String, u64)> = HashSet::new();
+            let mut fee_tot_c: u128 = 0;
+            let mut fee_tot_i: u128 = 0;
+            for tx in b.transactions.iter().skip(1) {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = match to_array_32(&tx.public_key) {
                         Some(p) => p,
@@ -938,10 +1220,39 @@ impl Blockchain {
                         return false;
                     }
                     *next += 1;
+                    if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
+                        return false;
+                    }
                 }
                 if !seen.insert(tx.id()) {
                     return false;
                 }
+                match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                    Ok((fc, fi)) => {
+                        fee_tot_c += fc as u128;
+                        fee_tot_i += fi as u128;
+                    }
+                    Err(_) => return false,
+                }
+            }
+            let mut h = blake3::Hasher::new();
+            let fc_u64 = match u64::try_from(fee_tot_c) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            let fi_u64 = match u64::try_from(fee_tot_i) {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            h.update(&fc_u64.to_le_bytes());
+            h.update(&fi_u64.to_le_bytes());
+            if h.finalize().to_hex().to_string() != b.fee_checksum {
+                return false;
+            }
+            let cb_c = b.coinbase_consumer.0 as u128;
+            let cb_i = b.coinbase_industrial.0 as u128;
+            if cb_c < fee_tot_c || cb_i < fee_tot_i {
+                return false;
             }
         }
         true
@@ -970,19 +1281,22 @@ fn calculate_hash(
     difficulty: u64,
     coin_c: TokenAmount,
     coin_i: TokenAmount,
+    fee_checksum: &str,
     txs: &[SignedTransaction],
 ) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(&index.to_le_bytes());
-    hasher.update(prev.as_bytes());
-    hasher.update(&nonce.to_le_bytes());
-    hasher.update(&difficulty.to_le_bytes());
-    hasher.update(&coin_c.0.to_le_bytes());
-    hasher.update(&coin_i.0.to_le_bytes());
-    for tx in txs {
-        hasher.update(&tx.id());
-    }
-    hasher.finalize().to_hex().to_string()
+    let ids: Vec<[u8; 32]> = txs.iter().map(|tx| tx.id()).collect();
+    let id_refs: Vec<&[u8]> = ids.iter().map(|v| v.as_ref()).collect();
+    let enc = crate::hashlayout::BlockEncoder {
+        index,
+        prev,
+        nonce,
+        difficulty,
+        coin_c: coin_c.0,
+        coin_i: coin_i.0,
+        fee_checksum,
+        tx_ids: &id_refs,
+    };
+    enc.hash()
 }
 
 /// Generate a new Ed25519 keypair.
@@ -1043,5 +1357,11 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
+    m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
+    m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
+    m.add(
+        "ErrInvalidSelector",
+        fee::ErrInvalidSelector::type_object(m.py()),
+    )?;
     Ok(())
 }

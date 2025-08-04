@@ -17,12 +17,11 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Python API** – Module definition uses `Bound<PyModule>` in accordance with `pyo3` 0.24.2.
 - **TokenAmount Display** – Added `__repr__`, `__str__`, and `Display` trait implementations
   so amounts print as plain integers in both Python and Rust logs.
+- **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
+- **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 
 For the full rationale see `analysis.txt` and the commit history.
 
 ---
 
-## Disclaimer
-
-This log accompanies a prototype project. It outlines implementation changes for
-educational review only and should not be interpreted as financial guidance.
+See [README.md#disclaimer](../README.md#disclaimer) for licensing and risk notices.

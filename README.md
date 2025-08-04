@@ -131,7 +131,7 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 * **Signature** – Ed25519 strict; signing bytes are `DOMAIN_TAG | bincode(payload)`.
 * **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
 * **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each. The header records `coinbase_consumer` and `coinbase_industrial` using a `TokenAmount` wrapper so light clients can audit supply without replaying the chain.
-* **Storage** – sled key‑value DB; column families: `chain/`, `accounts/`, `mempool/`.
+* **Storage** – in-memory SimpleDb; prototype does not persist to disk.
 * **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
 * **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
 
@@ -146,7 +146,6 @@ src/
   ├── lib.rs           # PyO3 module + re‑exports
   ├── blockchain/      # blocks, headers, mining, validation
   ├── crypto/          # hash, signature, canonical serialization
-  ├── storage/         # sled abstractions (accounts, chain, mempool)
   └── utils/           # hex helpers, logging, config
 
 bootstrap.sh           # Unix setup script
@@ -190,10 +189,16 @@ Report security issues privately via `security@the-block.dev` (PGP key in `docs/
 
 ---
 
+## Disclaimer
+
+This software is an experimental blockchain kernel for research and development. It is not investment advice and comes with no warranty. Use at your own risk.
+
+---
+
 ## License
 Copyright (c) 2025 IJR Enterprises, Inc. All rights reserved.
 THE-BLOCK and all proprietary innovations, algorithms, and blockchain mechanisms implemented in this repository
-are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope, 
+are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope,
 including the replication of design, consensus mechanisms, or novel features unique to THE-BLOCK, 
 requires prior written consent.
 
