@@ -66,3 +66,7 @@ See [`ECONOMICS.md`](ECONOMICS.md#inv-fee-02) for the algebraic proof.
 
 The `GENESIS_HASH` constant is asserted at compile time against the hash derived from the canonical block encoding. Any change to this value or to the genesis block layout constitutes a hard fork and must be recorded in `GENESIS_HISTORY.md`.
 
+## Mempool Semantics
+
+`Blockchain::mempool` is backed by a lock-free `DashMap` keyed by `(sender, nonce)`. `submit_transaction`, `drop_transaction`, and `mine_block` may run concurrently without leaking reservations.
+

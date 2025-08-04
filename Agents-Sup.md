@@ -21,7 +21,7 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Transactions include a `fee_selector` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
 
 ### Storage
-* Persistent state lives in a sled database (`chain_db`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
+* Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
 
 ### Python Demo
 * `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output.
@@ -54,7 +54,7 @@ The following tasks are ordered from highest urgency to longer‑term milestones
 ## 3. Mid‑Term Milestones
 After the immediate patches above, focus shifts toward networking and user tooling.
 
-1. **Persistent Storage Refinements** – abstract sled behind a trait so alternative databases or snapshots can be plugged in.
+1. **Persistent Storage Refinements** – swap in a real database backend; `SimpleDb` is a temporary stub.
 2. **P2P Networking** – design a simple protocol (libp2p recommended) for block and transaction gossip. Implement longest‑chain sync and fork resolution.
 3. **CLI / RPC API** – expose node controls via command‑line and/or HTTP so multiple nodes can be orchestrated in tests.
 4. **Dynamic Difficulty Retarget** – adjust `difficulty` based on moving average block times to maintain the target interval.

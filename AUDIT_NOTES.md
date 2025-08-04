@@ -10,7 +10,7 @@ The following notes catalogue gaps, risks, and corrective directives observed ac
 - **Sequential Nonce Enforcement**: `submit_transaction` checks `tx.payload.nonce != sender.nonce + sender.pending_nonce + 1` (src/lib.rs, L427‑L428). This enforces strict sequencing but does not guard against race conditions between concurrent submissions. A thread‑safe mempool should lock the account entry during admission to avoid double reservation.
 - **Pending Balance Reservation**: Pending fields (`pending_consumer`, `pending_industrial`, `pending_nonce`) increment on admission and decrement only when a block is mined (src/lib.rs, L454‑L456 & L569‑L575). There is no path to release reservations if a transaction is dropped or replaced; a mempool eviction routine must unwind the reservation atomically. **COMPLETED/DONE** [commit: ef87dfa]
   - Added `drop_transaction` API that removes a mempool entry, restores balances, and clears the `(sender, nonce)` lock.
-- **Atomicity Guarantees**: The current implementation manipulates multiple pending fields sequentially. A failure mid‑update (e.g., panic between consumer and industrial adjustments) can leave the account in an inconsistent state. Introduce a single struct update or transactional sled operation to guarantee atomicity.
+- **Atomicity Guarantees**: The current implementation manipulates multiple pending fields sequentially. A failure mid‑update (e.g., panic between consumer and industrial adjustments) can leave the account in an inconsistent state. Introduce a single struct update or transactional storage operation to guarantee atomicity.
 - **Mempool Admission Race**: Because `mempool_set` is queried before account mutation, two identical transactions arriving concurrently could both pass the `contains` check before the first insert. Convert to a `HashSet` guarded by a `Mutex` or switch to `dashmap` with atomic insertion semantics.
 - **Sender Lookup Failure**: `submit_transaction` returns “Sender not found” if account is absent, but there is no API surface to create accounts implicitly. Decide whether zero‑balance accounts should be auto‑created or require explicit provisioning; document accordingly.
 
@@ -140,7 +140,7 @@ These notes should guide subsequent contributors in elevating the branch to the 
 ## 23. Future-Proofing and Design Debt
 - `TokenAmount` uses `u64`; migrating to `u128` later may break serialized formats despite wrapper. Define big-endian encoding or explicit versioning to ease transition.
 - Difficulty retargeting (mid-term milestone) will require storing per-block timestamps. Current `Block` struct lacks a timestamp field; adding it now simplifies future upgrades.
-- No abstraction over persistence layer yet; start by defining a `Storage` trait to decouple sled usage, aligning with mid-term goal of storage swaps.
+- No abstraction over persistence layer yet; start by defining a `Storage` trait to decouple the in-memory stub from future backends.
 
 ## 24. Documentation Cross-References
 - `docs/detailed_updates.md` is referenced in code comments (e.g., `calculate_hash`), but file does not exist in repo. Either add the document or update comments to point to existing specs.

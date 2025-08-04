@@ -44,7 +44,6 @@
 │   ├── lib.rs            # Public kernel API (PyO3 + native)
 │   ├── blockchain/       # consensus, mining, validation
 │   ├── crypto/           # ed25519, blake3, canonical serialization
-│   ├── storage/          # sled wrappers + abstractions
 │   └── utils/            # misc helpers (logging, hex, etc.)
 ├── tests/                # Rust integration + property tests (proptest)
 ├── benches/              # Criterion benchmarks
@@ -171,7 +170,7 @@ Badge status must stay green on `main`.  Failing `main` blocks all merges.
 
 ```
 feat: add merkle accumulator for block receipts
-fix: handle sled I/O error on DB reopen
+fix: handle DB reopen error
 refactor(crypto): replace blake2 with blake3
 ```
 
@@ -234,6 +233,8 @@ pub struct SignedTransaction {
 * **PoW**: BLAKE3‑based, adjustable `difficulty_target`, 1‑second block aim.
 * **Dual‑Token** emission: consumer vs industrial coinbase split enforced via `block.coinbase_consumer` and `block.coinbase_industrial`. All amount fields use the `TokenAmount` newtype to prevent accidental raw arithmetic.
 * **Block validation** order: header → PoW → tx roots → each tx (sig → stateless → stateful).
+* **Genesis hash** is computed at build time from the canonical block encoding and checked at compile time.
+* **Mempool** uses a lock‑free `DashMap`; `submit_transaction`, `drop_transaction`, and `mine_block` can run concurrently.
 
 ---
 
@@ -244,7 +245,7 @@ pub struct SignedTransaction {
 | Replay across networks | Domain tag with `chain_id` embedded in sign bytes         |
 | Serialization mismatch | Cross‑lang determinism test; CI blocks PR if bytes differ |
 | Signature malleability | `verify_strict`; rejects non‑canonical sigs               |
-| DB corruption          | sled with `checksum = true`; unit test crash‑recovery     |
+| DB corruption          | in-memory storage; no on-disk state                        |
 | Unsafe code            | `#![forbid(unsafe_code)]`; CI gate                        |
 
 All cryptographic code is dependency‑pinned; update via dedicated “crypto‑upgrade” PRs.
@@ -253,9 +254,8 @@ All cryptographic code is dependency‑pinned; update via dedicated “crypto‑
 
 ## 12 · Persistence & State
 
-* **sled** as embedded DB; all column families prefixed (`b"chain/", b"accounts/", …`).
-* Write‑ahead log and flush every *N* blocks (config default = 1; tests use in‑mem DB).
-* Backups: `scripts/db_snapshot.sh <path>` dumps compressed snapshot; deterministic restore verified in CI.
+* **Storage** is an in-memory map; data is ephemeral and written to disk via higher-level tooling.
+* No built-in snapshot/backups yet; persistence layer open for future work.
 
 ---
 
@@ -279,7 +279,7 @@ If the playbook fails, open an issue with *exact* cmd + full output.
 * **MSRV** — *Minimum Supported Rust Version*.
 * **PoW** — Proof of Work; see `docs/consensus.md`.
 * **PyO3** — Rust ↔ Python FFI layer enabling native extension modules.
-* **sled** — Lock‑free embedded key‑value store used for on‑disk state.
+* **SimpleDb** — in-memory key-value map powering prototype state management.
 
 Further reading: `docs/consensus.md`, `docs/signatures.md`, and `/design/whitepaper.pdf` (WIP).
 

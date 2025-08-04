@@ -131,7 +131,7 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 * **Signature** – Ed25519 strict; signing bytes are `DOMAIN_TAG | bincode(payload)`.
 * **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
 * **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each. The header records `coinbase_consumer` and `coinbase_industrial` using a `TokenAmount` wrapper so light clients can audit supply without replaying the chain.
-* **Storage** – sled key‑value DB; column families: `chain/`, `accounts/`, `mempool/`.
+* **Storage** – in-memory SimpleDb; prototype does not persist to disk.
 * **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
 * **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
 
@@ -146,7 +146,6 @@ src/
   ├── lib.rs           # PyO3 module + re‑exports
   ├── blockchain/      # blocks, headers, mining, validation
   ├── crypto/          # hash, signature, canonical serialization
-  ├── storage/         # sled abstractions (accounts, chain, mempool)
   └── utils/           # hex helpers, logging, config
 
 bootstrap.sh           # Unix setup script

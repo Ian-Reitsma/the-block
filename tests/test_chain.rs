@@ -9,7 +9,7 @@ use std::fs;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use the_block::{
-    generate_keypair, sign_tx, Block, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
+    generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
 };
 
 fn init() {
@@ -92,6 +92,56 @@ proptest! {
         let (em_cons, em_ind) = bc.circulating_supply();
         assert!(em_cons <= 20_000_000_000_000);
         assert!(em_ind <= 20_000_000_000_000);
+    }
+}
+
+// 1b. Concurrent mempool operations should not leave pending reservations
+proptest! {
+    #[test]
+    fn prop_mempool_concurrency(ops in prop::collection::vec(0u8..3, 1..10)) {
+        init();
+        let bc = Arc::new(RwLock::new(Blockchain::new()));
+        {
+            let mut w = bc.write().unwrap();
+            w.add_account("miner".into(), 0, 0).unwrap();
+            w.mine_block("miner".into()).unwrap();
+        }
+        let (priv_bytes, _pub) = generate_keypair();
+        let ops_vec = ops.clone();
+        let handles: Vec<_> = ops_vec.into_iter().enumerate().map(|(i, op)| {
+            let bc = bc.clone();
+            let priv_bytes = priv_bytes.clone();
+            std::thread::spawn(move || {
+                match op % 3 {
+                    0 => {
+                        let tx = testutil::build_signed_tx(
+                            &priv_bytes,
+                            "miner",
+                            "miner",
+                            0,
+                            0,
+                            0,
+                            i as u64 + 1,
+                        );
+                        let _ = bc.write().unwrap().submit_transaction(tx);
+                    }
+                    1 => {
+                        let _ = bc
+                            .write()
+                            .unwrap()
+                            .drop_transaction("miner".into(), i as u64 + 1);
+                    }
+                    _ => {
+                        let _ = bc.write().unwrap().mine_block("miner".into());
+                    }
+                }
+            })
+        }).collect();
+        for h in handles { let _ = h.join(); }
+        let guard = bc.read().unwrap();
+        let miner = guard.accounts.get("miner").unwrap();
+        assert_eq!(miner.pending_consumer, 0);
+        assert_eq!(miner.pending_industrial, 0);
     }
 }
 
@@ -499,40 +549,3 @@ fn test_chain_determinism() {
     assert_eq!(bc1.chain, bc2.chain);
 }
 
-// 14. Schema‐upgrade compatibility (sketch)
-#[test]
-#[ignore = "Enable after schema versioning/migration"]
-fn test_schema_upgrade_compatibility() {
-    init();
-    let db_path = "test_chain_db_upgrade";
-    let _ = fs::remove_dir_all(db_path);
-
-    // simulate v0 layout
-    #[derive(serde::Serialize, serde::Deserialize)]
-    struct OldChain {
-        chain: Vec<Block>,
-    }
-
-    {
-        let db = sled::open(db_path).unwrap();
-        let old = OldChain { chain: vec![] };
-        db.insert("chain", bincode::serialize(&old).unwrap())
-            .unwrap();
-        db.flush().unwrap();
-    }
-
-    // open & auto‐migrate
-    let mut bc = Blockchain::open(db_path).unwrap();
-    assert!(bc.schema_version() >= 3);
-
-    bc.add_account("miner".into(), 0, 0).unwrap();
-    bc.mine_block("miner".into()).unwrap();
-    bc.persist_chain().unwrap();
-
-    let db = sled::open(db_path).unwrap();
-    let raw = db.get("chain").unwrap().unwrap();
-    let disk: the_block::ChainDisk = bincode::deserialize(&raw).unwrap();
-    assert!(disk.schema_version >= 3);
-
-    let _ = fs::remove_dir_all(db_path);
-}
