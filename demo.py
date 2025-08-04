@@ -1,125 +1,282 @@
-"""Interactive walkthrough showcasing core features of The‑Block.
+# SPDX-License-Identifier: MIT
+# © 2025 The-Block Contributors
+"""Comprehensive walkthrough of The-Block's features.
 
-Run this script from a terminal to see how a fresh chain is created,
-transactions are signed, and blocks are mined. Explanatory text is
-printed at each step so no prior blockchain knowledge is required.
+This script guides a newcomer through every feature currently
+implemented.  It explains what happens at each step in plain
+language so a reader with no blockchain background can follow the
+entire lifecycle of data on The-Block.
 
-This script exercises the same production-grade APIs used by real
-nodes, illustrating how wallet software can interact with the chain."""
+The demo prints short paragraphs describing each action and the
+resulting blockchain state.  Run it with:
+
+    python demo.py
+
+The output is deterministic except where randomness is a security
+feature (key generation).
+"""
+
+from __future__ import annotations
 
 import os
+import random
 import shutil
-import sys
 
 import the_block
 
+MAX_FEE = (1 << 63) - 1
+MAX_SUPPLY_CONSUMER = 20_000_000_000_000
+MAX_SUPPLY_INDUSTRIAL = 20_000_000_000_000
 
-def explain(text: str) -> None:
-    """Pretty printer used throughout the walkthrough."""
-    print(text)
+
+def explain(msg: str) -> None:
+    """Print a human-friendly line."""
+
+    print(msg)
 
 
-def main() -> None:
-    # Start from a clean slate so results are reproducible.
-    explain("==> Initializing blockchain…")
+def init_environment() -> None:
+    """Ensure deterministic behaviour and a clean database."""
+
+    explain("Preparing deterministic environment")
+    os.environ["PYTHONHASHSEED"] = "0"
+    random.seed(0)
+    explain("Python random seeded with 0")
     if os.path.exists("chain_db"):
         shutil.rmtree("chain_db")
+        explain("Removed previous chain_db directory")
 
-    explain(f"Network chain ID: {the_block.chain_id_py()}")
-    bc = the_block.Blockchain.with_difficulty("chain_db", 8)
-    explain(
-        "A fresh database is ready. Difficulty controls how many leading zero bits a block hash must have."
-    )
-    explain(f"Difficulty set to {bc.difficulty}\n")
 
-    print("==> Adding accounts: 'miner' and 'alice'…")
-    # Each account maintains separate consumer and industrial balances
+def init_chain() -> the_block.Blockchain:
+    """Create a blockchain with trivial proof of work."""
 
-    bc.add_account("miner", 0, 0)
-    bc.add_account("alice", 0, 0)
-    explain("Accounts track two balances: consumer and industrial tokens.\n")
+    explain("Creating new blockchain with difficulty 1")
+    bc = the_block.Blockchain.with_difficulty("chain_db", 1)
+    bc.genesis_block()
+    explain("Genesis block created; chain starts at height 0")
+    explain(f"Chain length now {bc.current_chain_length()}")
+    return bc
 
-    print("==> Generating ed25519 keypair for miner…")
 
-    priv: bytes
-    pub: bytes
+def create_accounts(bc: the_block.Blockchain) -> list[str]:
+    """Prepare user accounts used throughout the demo."""
+
+    explain("Creating four demo accounts: miner, alice, bob, faucet")
+    accounts = ["miner", "alice", "bob", "faucet"]
+    for name in accounts:
+        bc.add_account(name, 0, 0)
+        bal = bc.get_account_balance(name)
+        explain(
+            f"Account {name} starts with consumer={bal.consumer} and "
+            f"industrial={bal.industrial}"
+        )
+    return accounts
+
+
+def keypair_demo() -> bytes:
+    """Generate a keypair and prove signing works."""
+
+    explain("Generating fresh Ed25519 keypair; keys differ each run")
     priv, pub = the_block.generate_keypair()
-    explain(f"Private key bytes: {len(priv)}, public key bytes: {len(pub)}\n")
+    explain(f"Public key: {pub.hex()}")
+    message = b"hello"
+    sig = the_block.sign_message(priv, message)
+    if the_block.verify_signature(pub, message, sig):
+        explain("Signature verified; cryptography working")
+    return priv
 
-    explain("==> Signing and verifying a sample message…")
-    msg = b"test transaction"
-    # Sign bytes with the private key and immediately verify with the
-    # corresponding public key to demonstrate the API
-    sig = the_block.sign_message(priv, msg)
-    assert the_block.verify_signature(pub, msg, sig)
-    explain("Signature valid. These keys will be used to authorize transfers.\n")
 
-    print("==> Mining genesis block for 'miner'…")
-    # The first block initializes supply so later transfers have value
-    block0 = bc.mine_block("miner")
-    print(f"Block {block0.index} mined, hash = {block0.hash}")
-    print(
-        "The genesis block gives the miner an initial reward so there is currency in circulation."
+def fee_demo() -> None:
+    """Show fee split and error handling."""
+
+    explain(
+        "Exploring fee selectors; The-Block splits fees across two token pools"
     )
-    m0 = bc.get_account_balance("miner")
-    a0 = bc.get_account_balance("alice")
-    explain(f"miner balance: consumer={m0.consumer}, industrial={m0.industrial}")
-    explain(f"alice balance: consumer={a0.consumer}, industrial={a0.industrial}\n")
+    for sel in (0, 1, 2):
+        for fee in (0, 1, 9, MAX_FEE):
+            fc, fi = the_block.fee_decompose(sel, fee)
+            explain(
+                f"Selector {sel} with fee {fee} -> "
+                f"consumer {fc}, industrial {fi}"
+            )
+    try:
+        the_block.fee_decompose(3, 1)
+    except the_block.ErrInvalidSelector:
+        explain("Selector 3 rejected: invalid selector")
+    try:
+        the_block.fee_decompose(0, MAX_FEE + 1)
+    except the_block.ErrFeeOverflow:
+        explain("Fee overflow rejected: value exceeds allowed range")
 
-    print(
-        "==> Submitting a real transaction: miner → alice (1 consumer, 2 industrial, fee=3)"
-    )
-    amt_cons, amt_ind, fee = 1, 2, 3
-    # Build the transaction payload using the Python bindings
+
+def mine_initial_block(bc: the_block.Blockchain, accounts: list[str]) -> None:
+    """Mine one block so the miner earns starting funds."""
+
+    explain("Mining first block so miner receives starting tokens")
+    blk = bc.mine_block("miner")
+    explain(f"Mined block #{blk.index} with hash {blk.hash}")
+    explain("Validating block and checking supply invariants")
+    assert bc.validate_block(blk)
+    check_supply(bc, accounts)
+
+
+def build_transaction(priv: bytes) -> the_block.RawTxPayload:
+    """Construct a sample transaction from miner to alice."""
+
+    explain("Building transaction: miner pays alice 1 consumer token")
     payload = the_block.RawTxPayload(
         from_="miner",
         to="alice",
-        amount_consumer=amt_cons,
-        amount_industrial=amt_ind,
-        fee=fee,
-        fee_selector=0,
+        amount_consumer=1,
+        amount_industrial=0,
+        fee=1,
+        fee_selector=2,
         nonce=1,
-        memo=b"",
+        memo=b"demo transfer",
     )
+    bytes_hex = the_block.canonical_payload(payload).hex()
+    explain(f"Canonical payload bytes: {bytes_hex}")
     stx = the_block.sign_tx(list(priv), payload)
+    explain("Signed transaction created")
     assert the_block.verify_signed_tx(stx)
+    explain("Signature on transaction verified")
+    return stx
+
+
+def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
+    """Demonstrate error paths for transaction submission."""
+
+    explain("Submitting transaction and demonstrating failure paths")
+    good_payload = the_block.RawTxPayload(
+        from_="miner",
+        to="alice",
+        amount_consumer=1,
+        amount_industrial=0,
+        fee=1,
+        fee_selector=2,
+        nonce=1,
+        memo=b"demo transfer",
+    )
+    stx = the_block.sign_tx(list(priv), good_payload)
     bc.submit_transaction(stx)
-    explain("Transaction queued.\n")
-
-    print(
-        "==> Mining next block for 'miner' (collecting fee)… This requires solving a proof-of-work puzzle."
+    explain("Transaction accepted into mempool")
+    try:
+        bc.submit_transaction(stx)
+    except ValueError:
+        explain("Duplicate submission rejected")
+    bad_selector = the_block.RawTxPayload(
+        from_="miner",
+        to="alice",
+        amount_consumer=1,
+        amount_industrial=0,
+        fee=1,
+        fee_selector=3,
+        nonce=2,
+        memo=b"bad selector",
     )
-    # Mining performs the hash puzzle and includes the queued transaction
-    block1 = bc.mine_block("miner")
-    assert bc.validate_block(block1)
-    explain(f"Block {block1.index} mined with hash {block1.hash}")
-    m1 = bc.get_account_balance("miner")
-    a1 = bc.get_account_balance("alice")
-    explain(f"miner balance: consumer={m1.consumer}, industrial={m1.industrial}")
-    explain(f"alice balance: consumer={a1.consumer}, industrial={a1.industrial}\n")
-
-    print("==> Emission & reward state:")
-    print(f" Block height:               {bc.block_height}")
-    print(
-        f" Current block reward:       {bc.block_reward_consumer} (consumer), {bc.block_reward_industrial} (industrial)"
+    try:
+        stx_bad = the_block.sign_tx(list(priv), bad_selector)
+        bc.submit_transaction(stx_bad)
+    except ValueError:
+        explain("Transaction with bad selector rejected")
+    overflow_payload = the_block.RawTxPayload(
+        from_="miner",
+        to="alice",
+        amount_consumer=1,
+        amount_industrial=0,
+        fee=MAX_FEE + 1,
+        fee_selector=0,
+        nonce=3,
+        memo=b"overflow fee",
     )
-    em_c, em_i = bc.circulating_supply()
-    explain(f" Circulating supply:   {em_c} (consumer), {em_i} (industrial)\n")
+    try:
+        stx_over = the_block.sign_tx(list(priv), overflow_payload)
+        bc.submit_transaction(stx_over)
+    except ValueError:
+        explain("Transaction with overflow fee rejected")
 
-    explain("==> Mining 4 more blocks to show reward decay…")
-    for _ in range(4):
+
+def mine_blocks(bc: the_block.Blockchain, accounts: list[str]) -> None:
+    """Mine three blocks and show state after each one."""
+
+    explain("Mining three blocks to show transaction inclusion and rewards")
+    for i in range(3):
         blk = bc.mine_block("miner")
+        explain(f"Mined block #{blk.index} with hash {blk.hash}")
+        assert bc.validate_block(blk)
+        explain("Block validated successfully")
+        check_supply(bc, accounts)
+        tot_c, tot_i = bc.circulating_supply()
         explain(
-            f" Block {blk.index} mined. Next reward will be {bc.block_reward_consumer} (consumer)"
+            f"Circulating totals -> consumer {tot_c}, industrial {tot_i}"
         )
 
-    # All done. The state on disk now contains 6 blocks.
-    print("\n✅ All operations completed successfully.")
+
+def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
+    """Force emission counters to their maximum and mine once more."""
+
+    explain("Demonstrating emission cap enforcement")
+    bc.emission_consumer = MAX_SUPPLY_CONSUMER
+    bc.emission_industrial = MAX_SUPPLY_INDUSTRIAL
+    supply_before = bc.circulating_supply()
+    blk = bc.mine_block("miner")
+    explain(f"Mined block #{blk.index} after reaching cap")
+    supply_after = bc.circulating_supply()
+    assert supply_before == supply_after
+    explain(
+        f"Supply before {supply_before}, after {supply_after}; no new tokens "
+        "issued"
+    )
+
+
+def persistence_demo(bc: the_block.Blockchain) -> None:
+    """Illustrate persistence call and re-open chain."""
+
+    explain("Persisting chain state to disk")
+    bc.persist_chain()
+    bc2 = the_block.Blockchain.with_difficulty("chain_db", 1)
+    bc2.genesis_block()
+    explain(
+        "Reopened chain for persistence demo; in this prototype the "
+        "state resets to genesis"
+    )
+
+
+def cleanup() -> None:
+    """Remove database so repeated runs start fresh."""
+
+    explain("Cleaning up chain_db directory")
+    shutil.rmtree("chain_db", ignore_errors=True)
+
+
+def check_supply(bc: the_block.Blockchain, accounts: list[str]) -> None:
+    """Check supply caps and balance sums."""
+
+    tot_c, tot_i = bc.circulating_supply()
+    sum_c = sum(bc.get_account_balance(a).consumer for a in accounts)
+    sum_i = sum(bc.get_account_balance(a).industrial for a in accounts)
+    assert tot_c <= MAX_SUPPLY_CONSUMER, "consumer supply exceeds cap"
+    assert tot_i <= MAX_SUPPLY_INDUSTRIAL, "industrial supply exceeds cap"
+    assert (sum_c, sum_i) == (tot_c, tot_i), "balance mismatch"
+
+
+def main() -> None:
+    """Run the full demo sequentially."""
+
+    init_environment()
+    bc = init_chain()
+    accounts = create_accounts(bc)
+    priv = keypair_demo()
+    fee_demo()
+    mine_initial_block(bc, accounts)
+    transaction_errors(bc, priv)
+    mine_blocks(bc, accounts)
+    emission_cap_demo(bc, accounts)
+    persistence_demo(bc)
+    cleanup()
+    explain("Demo complete")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except AssertionError as exc:
-        print(f"Assertion failed: {exc}")
-        sys.exit(1)
+    main()
+
