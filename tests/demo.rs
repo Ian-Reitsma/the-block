@@ -6,4 +6,3 @@ fn demo_runs_clean() {
         .expect("spawn demo");
     assert!(status.success());
 }
-

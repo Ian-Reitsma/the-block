@@ -11,8 +11,7 @@ fn main() {
     }
 
     // Compute genesis hash at build time so tests can assert it at compile time.
-    const ZERO_HASH: &str =
-        "0000000000000000000000000000000000000000000000000000000000000000";
+    const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
     let mut h = Hasher::new();
     h.update(&0u64.to_le_bytes()); // index
     h.update(ZERO_HASH.as_bytes()); // prev
@@ -21,7 +20,7 @@ fn main() {
     h.update(&0u64.to_le_bytes()); // coin_c
     h.update(&0u64.to_le_bytes()); // coin_i
     h.update(ZERO_HASH.as_bytes()); // fee checksum
-    // no tx ids in genesis
+                                    // no tx ids in genesis
     let digest = h.finalize().to_hex().to_string();
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR missing");
