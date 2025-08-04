@@ -10,7 +10,9 @@ pub struct SimpleDb {
 
 impl SimpleDb {
     pub fn open(_path: &str) -> io::Result<Self> {
-        Ok(Self { map: HashMap::new() })
+        Ok(Self {
+            map: HashMap::new(),
+        })
     }
 
     pub fn get(&self, key: &str) -> io::Result<Option<Vec<u8>>> {
