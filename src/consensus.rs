@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! consensus {
-    ($vis:vis const $name:ident : $ty:ty = $expr:expr; $reason:expr) => {
+    ($vis:vis const $name:ident : $ty:ty = $expr:expr, $reason:expr) => {
         #[doc = $reason]
         $vis const $name: $ty = $expr;
     };
@@ -8,12 +8,18 @@ macro_rules! consensus {
 
 use crate::hash_genesis;
 
-consensus!(pub const CHAIN_ID: u32 = 1; "chain identifier for signatures");
-consensus!(pub const TX_VERSION: u8 = 2; "transaction version byte");
-consensus!(pub const FEE_SPEC_VERSION: u32 = 2; "fee specification version");
+consensus!(
+    pub const CHAIN_ID: u32 = 1,
+    "chain identifier for signatures"
+);
+consensus!(pub const TX_VERSION: u8 = 2, "transaction version byte");
+consensus!(
+    pub const FEE_SPEC_VERSION: u32 = 2,
+    "fee specification version"
+);
 consensus!(
     pub const GENESIS_HASH: &str =
-        "92fc0fbacb748ac4b7bb561b677ab24bc5561e8e61d406728b90490d56754167";
+        "92fc0fbacb748ac4b7bb561b677ab24bc5561e8e61d406728b90490d56754167",
     "hard-coded genesis block hash"
 );
 

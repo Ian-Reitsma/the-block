@@ -113,7 +113,11 @@ ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 | Audit + Clippy         | `cargo clippy --all-targets -- -D warnings`           | zero warnings allowed                |
 | Benchmarks             | `cargo bench`                                         | Criterion HTML in `target/criterion` |
 
-> **CI will fail** any PR that leaves `clippy` warnings, `rustfmt` diffs, or test failures.
+> Clippy checks style and potential bugs; failing pedantic lints does not
+> affect runtime behaviour but leaves technical debt.
+>
+> **CI will fail** any PR that leaves `clippy` warnings, `rustfmt` diffs, or
+> test failures.
 
 ---
 
@@ -285,13 +289,6 @@ Further reading: `docs/consensus.md`, `docs/signatures.md`, and `/design/whitepa
 
 ---
 
-## Disclaimer
+See [README.md#disclaimer](README.md#disclaimer) for project disclaimer and licensing terms.
 
-This repository is provided **for educational purposes only**. It implements a
-toy blockchain kernel to demonstrate consensus and cryptography concepts. It is
-not a production system, nor does it represent an invitation to deploy a real
-cryptocurrency. Review the license carefully before use.
-
----
-
-**Remember:** *Every line of code must be explainable by a corresponding line in this document or the linked specs.*  If not, write the spec first.
+**Remember:** *Every line of code must be explainable by a corresponding line in this document or the linked specs.* If not, write the spec first.

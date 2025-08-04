@@ -6,6 +6,10 @@
 
 The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the existing repository snapshot (commit `20ac136e`). Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference the repository at the same commit.
 
+Note: `cargo +nightly clippy --all-targets -- -D warnings` reports style and
+documentation issues. Failing it does not change runtime behaviour but leaves
+technical debt.
+
 ## 1. Nonce Handling and Pending Balance Tracking
 - **Sequential Nonce Enforcement**: `submit_transaction` checks `tx.payload.nonce != sender.nonce + sender.pending_nonce + 1` (src/lib.rs, L427‑L428). This enforces strict sequencing but does not guard against race conditions between concurrent submissions. A thread‑safe mempool should lock the account entry during admission to avoid double reservation.
 - **Pending Balance Reservation**: Pending fields (`pending_consumer`, `pending_industrial`, `pending_nonce`) increment on admission and decrement only when a block is mined (src/lib.rs, L454‑L456 & L569‑L575). There is no path to release reservations if a transaction is dropped or replaced; a mempool eviction routine must unwind the reservation atomically. **COMPLETED/DONE** [commit: ef87dfa]
@@ -26,7 +30,7 @@ The following notes catalogue gaps, risks, and corrective directives observed ac
   - The block header lacks a `fee_checksum` field. Spec requires `blake3(acc_ct‖acc_it)` to be stored and validated on receipt. Update `Block` struct, hashing logic, and validation routines accordingly. **COMPLETED/DONE** [commit: ef87dfa]
     - Introduced `fee_checksum` field, included in hash computation, and validated during block import and chain checks.
 - **Admission Error Codes**:
-  - `FeeError::Overflow` and `FeeError::InvalidSelector` map to generic `ValueError` strings in Python (src/fee/mod.rs, L31). The API must expose distinct error codes (`ErrFeeOverflow`, `ErrInvalidSelector`) for downstream clients.
+  - `FeeError::Overflow` and `FeeError::InvalidSelector` map to generic `ValueError` strings in Python (src/fee/mod.rs, L31). The API must expose distinct error codes (`ErrFeeOverflow`, `ErrInvalidSelector`) for downstream clients. **COMPLETED/DONE**
 - **Overflow Proof Obligation**:
   - While `MAX_FEE` caps sender fees, miner balance increments are unchecked against `MAX_SUPPLY_*`. Use `checked_add` or explicit bound checks before crediting miner balances to guarantee `INV-FEE-02` end‑to‑end.
 
@@ -55,10 +59,10 @@ The following notes catalogue gaps, risks, and corrective directives observed ac
 - No demonstration of error cases (e.g., submitting a transaction with stale nonce). Including intentional failures would clarify validation rules for new developers.
 
 ## 8. Documentation Refresh
-- **AGENTS.md**: The disclaimer still asserts “educational purposes only,” contradicting the project’s professional positioning. Update to reflect production‑grade intent and relocate cautionary language to README’s disclaimer section.
+- **AGENTS.md**: Disclaimer updated to reflect production-grade scope and relocated to README. **COMPLETED/DONE**
 - **CHANGELOG.md**: Records schema v3 and fee routing, but lacks migration guidance or references to governance artefacts.
 - **CONSENSUS.md & ECONOMICS.md**: While sections were appended, inter‑document links are shallow. Use explicit anchors and cross‑references so changes in one doc propagate without duplication.
-- **AGENTS Sup (Agents-Sup.md)**: Mentions schema version 3 but lacks detailed instructions for future schema migrations and does not reference the new invariants.
+- **AGENTS Sup (Agents-Sup.md)**: Added schema migration guidance and invariant references. **COMPLETED/DONE**
 
 ## 9. Invariant Specification (ECONOMICS.md)
 - INV‑FEE‑01 and INV‑FEE‑02 are documented with prose and minimal algebra. For formal verification, expand the algebraic chain showing `fee_ct + fee_it = f` and the bounds proofs for each selector case.
