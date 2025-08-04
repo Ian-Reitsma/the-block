@@ -8,6 +8,7 @@
 //! Exposes a minimal proof-of-work chain with dual-token economics. See
 //! `AGENTS.md` for the high-level specification.
 
+use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -16,7 +17,6 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use dashmap::DashMap;
 mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
@@ -46,7 +46,7 @@ const MAX_SUPPLY_INDUSTRIAL: u64 = 20_000_000_000_000;
 const INITIAL_BLOCK_REWARD_CONSUMER: u64 = 60_000;
 const INITIAL_BLOCK_REWARD_INDUSTRIAL: u64 = 30_000;
 const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
-const DECAY_DENOMINATOR: u64 = 100000;
+const DECAY_DENOMINATOR: u64 = 100_000;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
 /// Converts a byte slice into a fixed 32-byte array, returning `None` on length
@@ -491,6 +491,10 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Add a new account with starting balances.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the account already exists.
     pub fn add_account(&mut self, address: String, consumer: u64, industrial: u64) -> PyResult<()> {
         if self.accounts.contains_key(&address) {
             return Err(PyValueError::new_err("Account already exists"));
@@ -510,17 +514,28 @@ impl Blockchain {
         Ok(())
     }
 
-    pub fn get_account_balance(&self, address: String) -> PyResult<TokenBalance> {
+    /// Return the balance for an account.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the account is not found.
+    pub fn get_account_balance(&self, address: &str) -> PyResult<TokenBalance> {
         self.accounts
-            .get(&address)
+            .get(address)
             .map(|a| a.balance.clone())
             .ok_or_else(|| PyValueError::new_err("Account not found"))
     }
 
+    /// Submit a signed transaction to the mempool.
+    ///
+    /// # Errors
+    /// Returns a [`PyValueError`] if validation fails or the sender is missing.
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
         let sender_addr = tx.payload.from_.clone();
 
-        if self.mempool.contains_key(&(sender_addr.clone(), tx.payload.nonce)) {
+        if self
+            .mempool
+            .contains_key(&(sender_addr.clone(), tx.payload.nonce))
+        {
             return Err(PyValueError::new_err("Duplicate transaction"));
         }
 
@@ -565,9 +580,13 @@ impl Blockchain {
         Ok(())
     }
 
-    pub fn drop_transaction(&mut self, sender: String, nonce: u64) -> PyResult<()> {
-        if let Some((_, tx)) = self.mempool.remove(&(sender.clone(), nonce)) {
-            if let Some(acc) = self.accounts.get_mut(&sender) {
+    /// Remove a pending transaction and release reserved balances.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the transaction is absent.
+    pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> PyResult<()> {
+        if let Some((_, tx)) = self.mempool.remove(&(sender.to_string(), nonce)) {
+            if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_c, fee_i)) =
                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
                 {
@@ -584,11 +603,22 @@ impl Blockchain {
         }
     }
 
+    #[must_use]
     pub fn current_chain_length(&self) -> usize {
         self.chain.len()
     }
 
-    pub fn mine_block(&mut self, miner_addr: String) -> PyResult<Block> {
+    /// Mine a new block and credit rewards to `miner_addr`.
+    ///
+    /// # Errors
+    /// Returns a [`PyValueError`] if fee or nonce calculations overflow, or if
+    /// persisting the chain fails.
+    ///
+    /// # Panics
+    /// Panics if miner balance overflows or if the underlying database flush
+    /// fails.
+    #[allow(clippy::too_many_lines)]
+    pub fn mine_block(&mut self, miner_addr: &str) -> PyResult<Block> {
         let index = self.chain.len() as u64;
         let prev_hash = if index == 0 {
             "0".repeat(64)
@@ -651,7 +681,7 @@ impl Blockchain {
         let coinbase = SignedTransaction {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
-                to: miner_addr.clone(),
+                to: miner_addr.to_owned(),
                 amount_consumer: cb_c,
                 amount_industrial: cb_i,
                 fee: 0,
@@ -728,20 +758,24 @@ impl Blockchain {
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
 
-                    self.mempool.remove(&(tx.payload.from_.clone(), tx.payload.nonce));
+                    self.mempool
+                        .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                 }
 
-                let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
-                    address: miner_addr.clone(),
-                    balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
-                    },
-                    nonce: 0,
-                    pending_consumer: 0,
-                    pending_industrial: 0,
-                    pending_nonce: 0,
-                });
+                let miner = self
+                    .accounts
+                    .entry(miner_addr.to_owned())
+                    .or_insert(Account {
+                        address: miner_addr.to_owned(),
+                        balance: TokenBalance {
+                            consumer: 0,
+                            industrial: 0,
+                        },
+                        nonce: 0,
+                        pending_consumer: 0,
+                        pending_industrial: 0,
+                        pending_nonce: 0,
+                    });
                 miner.balance.consumer = miner
                     .balance
                     .consumer
