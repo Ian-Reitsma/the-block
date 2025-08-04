@@ -27,6 +27,8 @@ import the_block
 MAX_FEE = (1 << 63) - 1
 MAX_SUPPLY_CONSUMER = 20_000_000_000_000
 MAX_SUPPLY_INDUSTRIAL = 20_000_000_000_000
+DECAY_NUMERATOR = 99_995
+DECAY_DENOMINATOR = 100_000
 
 
 def explain(msg: str) -> None:
@@ -213,20 +215,31 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str]) -> None:
 
 
 def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
-    """Force emission counters to their maximum and mine once more."""
+    """Reach the emission cap on the final mined block."""
 
     explain("Demonstrating emission cap enforcement")
-    bc.emission_consumer = MAX_SUPPLY_CONSUMER
-    bc.emission_industrial = MAX_SUPPLY_INDUSTRIAL
+    next_c = (bc.block_reward_consumer.value * DECAY_NUMERATOR) // DECAY_DENOMINATOR
+    next_i = (bc.block_reward_industrial.value * DECAY_NUMERATOR) // DECAY_DENOMINATOR
+    sum_c = sum(bc.get_account_balance(a).consumer for a in accounts)
+    sum_i = sum(bc.get_account_balance(a).industrial for a in accounts)
+    bc.emission_consumer = MAX_SUPPLY_CONSUMER - next_c
+    bc.emission_industrial = MAX_SUPPLY_INDUSTRIAL - next_i
+    filler_c = bc.emission_consumer - sum_c
+    filler_i = bc.emission_industrial - sum_i
+    bc.add_account("cap_filler", filler_c, filler_i)
+    accounts.append("cap_filler")
     supply_before = bc.circulating_supply()
     blk = bc.mine_block("miner")
-    explain(f"Mined block #{blk.index} after reaching cap")
+    explain(f"Mined block #{blk.index} reaching cap")
     supply_after = bc.circulating_supply()
-    assert supply_before == supply_after
-    explain(
-        f"Supply before {supply_before}, after {supply_after}; no new tokens "
-        "issued"
+    assert supply_after == (
+        MAX_SUPPLY_CONSUMER,
+        MAX_SUPPLY_INDUSTRIAL,
     )
+    explain(
+        f"Supply before {supply_before}, after {supply_after}; cap reached"
+    )
+    check_supply(bc, accounts)
 
 
 def persistence_demo(bc: the_block.Blockchain) -> None:
