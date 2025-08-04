@@ -51,8 +51,10 @@ relate printed output to blockchain concepts.
      total circulating supply after the reward is issued.
 
 9. **Emission cap**
-   - Manually sets emission counters to their maximum and mines once
-     more, proving no new tokens are minted once the cap is hit.
+   - Sets emission counters to one reward shy of their caps and mines a
+     final block so the supply reaches, but does not exceed, the limit.
+   - Calls `check_supply()` to assert the sum of all balances equals the
+     circulating totals.
 
 10. **Persistence**
     - Calls `persist_chain()` and reopens a chain to illustrate how the
