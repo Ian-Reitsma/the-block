@@ -53,8 +53,8 @@ fn mempool_order_invariant() {
     chain_b.submit_transaction(tx2).unwrap();
     chain_b.submit_transaction(tx1).unwrap();
 
-    chain_a.mine_block("miner".into()).unwrap();
-    chain_b.mine_block("miner".into()).unwrap();
+    chain_a.mine_block("miner").unwrap();
+    chain_b.mine_block("miner").unwrap();
 
     assert_eq!(
         chain_a.chain.last().unwrap().hash,
