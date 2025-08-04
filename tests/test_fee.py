@@ -1,4 +1,5 @@
-from the_block import fee_decompose
+import pytest
+from the_block import ErrFeeOverflow, ErrInvalidSelector, fee_decompose
 
 
 def test_fee_split_cases():
@@ -8,16 +9,8 @@ def test_fee_split_cases():
 
 
 def test_fee_errors():
-    try:
+    with pytest.raises(ErrInvalidSelector):
         fee_decompose(3, 1)
-    except ValueError:
-        pass
-    else:
-        assert False, "expected ValueError for invalid selector"
 
-    try:
-        fee_decompose(0, (1 << 63))
-    except ValueError:
-        pass
-    else:
-        assert False, "expected ValueError for overflow"
+    with pytest.raises(ErrFeeOverflow):
+        fee_decompose(0, 1 << 63)

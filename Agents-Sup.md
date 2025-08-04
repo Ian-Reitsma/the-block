@@ -23,6 +23,10 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ### Storage
 * Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
 
+### Schema Migrations & Invariants
+* Bump `ChainDisk.schema_version` for any on-disk format change and supply a lossless migration routine with tests.
+* Each migration must preserve [`INV-FEE-01`](ECONOMICS.md#inv-fee-01) and [`INV-FEE-02`](ECONOMICS.md#inv-fee-02); update `docs/schema_migrations/` with the new invariants.
+
 ### Python Demo
 * `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output.
 
@@ -71,7 +75,10 @@ Once networking is stable, the project aims to become a modular research platfor
 
 ## 5. Key Principles for Contributors
 
-* **Every commit must pass** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test --all --release`, and `pytest`.
+* **Every commit must pass** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test --all --release`, and `pytest`.
+* Failing `clippy` does not change runtime behaviour; it flags style,
+  documentation, or potential bug risks.
 * **No code without spec** – if the behavior is not described in `AGENTS.md` or this supplement, document it first.
 * **Explain your reasoning** in PR summaries. Future agents must be able to trace design decisions from docs → commit → code.
 * **Educational Only** – reiterate that this repository does not create real tokens or investment opportunities. The project is a learning platform.

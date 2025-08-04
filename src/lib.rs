@@ -13,6 +13,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
+use pyo3::PyTypeInfo;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -33,7 +34,7 @@ pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VER
 pub mod fee;
 pub mod hash_genesis;
 pub mod hashlayout;
-pub use fee::{decompose as fee_decompose, FeeError};
+pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -1357,5 +1358,10 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
+    m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
+    m.add(
+        "ErrInvalidSelector",
+        fee::ErrInvalidSelector::type_object(m.py()),
+    )?;
     Ok(())
 }

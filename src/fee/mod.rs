@@ -2,9 +2,11 @@
 //!
 //! Implements selector-based fee decomposition as per CONSENSUS.md.
 
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
+use pyo3::{create_exception, exceptions::PyException, prelude::*};
 use thiserror::Error;
+
+create_exception!(fee, ErrFeeOverflow, PyException);
+create_exception!(fee, ErrInvalidSelector, PyException);
 
 /// Maximum fee allowed before admission.
 ///
@@ -43,5 +45,8 @@ pub fn decompose(selector: u8, fee: u64) -> Result<(u64, u64), FeeError> {
 /// Python wrapper for [`decompose`].
 #[pyfunction(name = "fee_decompose")]
 pub fn decompose_py(selector: u8, fee: u64) -> PyResult<(u64, u64)> {
-    decompose(selector, fee).map_err(|e| PyValueError::new_err(e.to_string()))
+    decompose(selector, fee).map_err(|e| match e {
+        FeeError::InvalidSelector => ErrInvalidSelector::new_err("invalid selector"),
+        FeeError::Overflow => ErrFeeOverflow::new_err("fee overflow"),
+    })
 }

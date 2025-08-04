@@ -189,10 +189,16 @@ Report security issues privately via `security@the-block.dev` (PGP key in `docs/
 
 ---
 
+## Disclaimer
+
+This software is an experimental blockchain kernel for research and development. It is not investment advice and comes with no warranty. Use at your own risk.
+
+---
+
 ## License
 Copyright (c) 2025 IJR Enterprises, Inc. All rights reserved.
 THE-BLOCK and all proprietary innovations, algorithms, and blockchain mechanisms implemented in this repository
-are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope, 
+are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope,
 including the replication of design, consensus mechanisms, or novel features unique to THE-BLOCK, 
 requires prior written consent.
 
