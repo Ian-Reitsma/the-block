@@ -39,7 +39,7 @@ The following tasks are ordered from highest urgency to longer‑term milestones
 
 1. **Nonce Enforcement & Pending Ledger**
    - Reject any submitted transaction whose nonce is not exactly `account.nonce + 1`.
-   - Track `pending_consumer`, `pending_industrial` and `pending_nonce` to lock funds in the mempool so double spends cannot occur.
+   - Track `pending.consumer`, `pending.industrial` and `pending.nonce` to lock funds in the mempool so double spends cannot occur.
 2. **Fee Routing & Overflow Clamp**
    - Enforce the fee routing equations documented in `analysis.txt`. Split fees according to `fee_selector` and cap `fee < 2^63` to avoid `div_ceil` overflow.
 3. **Difficulty Field Verification**

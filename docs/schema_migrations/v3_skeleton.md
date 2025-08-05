@@ -2,7 +2,7 @@
 
 This placeholder outlines the required steps for upgrading an existing node to schema_version = 3.
 
-1. Scan all accounts and initialize the `pending_consumer`, `pending_industrial`, and `pending_nonce` fields to zero.
+1. Scan all accounts and initialize `pending.consumer`, `pending.industrial`, and `pending.nonce` to zero.
 2. Walk the mempool bucket and accumulate per-account reservations.
 3. Write the new state to a shadow database, then atomically swap directories.
 

@@ -41,11 +41,11 @@ const fn assert_genesis_hash() {
 const _: () = assert_genesis_hash();
 
 use bincode::Options;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// Returns the 16-byte domain separation tag used in all signing operations.
 pub fn domain_tag() -> &'static [u8] {
-    static TAG: Lazy<[u8; 16]> = Lazy::new(|| {
+    static TAG: LazyLock<[u8; 16]> = LazyLock::new(|| {
         let mut buf = [0u8; 16];
         let prefix = b"THE_BLOCKv2|"; // 12 bytes
         buf[..prefix.len()].copy_from_slice(prefix);
@@ -60,7 +60,7 @@ pub fn bincode_config() -> bincode::config::WithOtherEndian<
     bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>,
     bincode::config::LittleEndian,
 > {
-    static CFG: Lazy<
+    static CFG: LazyLock<
         bincode::config::WithOtherEndian<
             bincode::config::WithOtherIntEncoding<
                 bincode::DefaultOptions,
@@ -68,7 +68,7 @@ pub fn bincode_config() -> bincode::config::WithOtherEndian<
             >,
             bincode::config::LittleEndian,
         >,
-    > = Lazy::new(|| {
+    > = LazyLock::new(|| {
         bincode::DefaultOptions::new()
             .with_fixint_encoding()
             .with_little_endian()

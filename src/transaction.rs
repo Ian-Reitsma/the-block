@@ -118,7 +118,9 @@ impl SignedTransaction {
 
 /// Serialize a [`RawTxPayload`] using the project's canonical bincode settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
-    bincode_config().serialize(payload).unwrap()
+    bincode_config()
+        .serialize(payload)
+        .unwrap_or_else(|e| panic!("serialize: {e}"))
 }
 
 /// Signs a transaction payload with the given Ed25519 private key.

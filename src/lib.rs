@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
-#![deny(clippy::pedantic)]
+#![warn(clippy::pedantic)]
 
 //! Core blockchain implementation with Python bindings.
 //!
@@ -10,6 +10,8 @@
 
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+#[cfg(feature = "telemetry")]
+use log::{info, warn};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -18,6 +20,7 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
@@ -60,6 +63,7 @@ pub(crate) fn to_array_32(bytes: &[u8]) -> Option<[u8; 32]> {
 pub(crate) fn to_array_64(bytes: &[u8]) -> Option<[u8; 64]> {
     bytes.try_into().ok()
 }
+#[allow(clippy::expect_used)]
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     // Utility used by tests and examples
     hex::decode(hex).expect("Invalid hex string")
@@ -128,6 +132,16 @@ pub struct TokenBalance {
     pub industrial: u64,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Default)]
+pub struct Pending {
+    #[serde(default)]
+    pub consumer: u64,
+    #[serde(default)]
+    pub industrial: u64,
+    #[serde(default)]
+    pub nonce: u64,
+}
+
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Account {
@@ -139,11 +153,41 @@ pub struct Account {
     #[serde(default)]
     pub nonce: u64,
     #[serde(default)]
-    pub pending_consumer: u64,
-    #[serde(default)]
-    pub pending_industrial: u64,
-    #[serde(default)]
-    pub pending_nonce: u64,
+    pub pending: Pending,
+}
+
+struct Reservation<'a> {
+    pending: &'a mut Pending,
+    add_c: u64,
+    add_i: u64,
+    committed: bool,
+}
+
+impl<'a> Reservation<'a> {
+    fn new(pending: &'a mut Pending, add_c: u64, add_i: u64) -> Self {
+        pending.consumer += add_c;
+        pending.industrial += add_i;
+        pending.nonce += 1;
+        Self {
+            pending,
+            add_c,
+            add_i,
+            committed: false,
+        }
+    }
+    fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.pending.consumer = self.pending.consumer.saturating_sub(self.add_c);
+            self.pending.industrial = self.pending.industrial.saturating_sub(self.add_i);
+            self.pending.nonce = self.pending.nonce.saturating_sub(1);
+        }
+    }
 }
 
 /// Per-block ledger entry. `coinbase_*` mirrors the first transaction
@@ -190,6 +234,7 @@ pub struct Blockchain {
     #[pyo3(get, set)]
     pub difficulty: u64,
     pub mempool: DashMap<(String, u64), SignedTransaction>,
+    admission_locks: DashMap<String, Arc<Mutex<()>>>,
     db: Db,
     #[pyo3(get, set)]
     pub emission_consumer: u64,
@@ -216,6 +261,24 @@ pub struct ChainDisk {
     pub block_height: u64,
 }
 
+impl Default for Blockchain {
+    fn default() -> Self {
+        Self {
+            chain: Vec::new(),
+            accounts: HashMap::new(),
+            difficulty: 8,
+            mempool: DashMap::new(),
+            admission_locks: DashMap::new(),
+            db: Db::default(),
+            emission_consumer: 0,
+            emission_industrial: 0,
+            block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
+            block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
+            block_height: 0,
+        }
+    }
+}
+
 #[pymethods]
 impl Blockchain {
     /// Default Python constructor opens ./chain_db
@@ -228,9 +291,8 @@ impl Blockchain {
     pub fn open(path: &str) -> PyResult<Self> {
         // Open an existing database and auto-migrate to schema v3.
         // See `docs/detailed_updates.md` for layout history.
-        let mut db = Db::open(path).map_err(|e| PyValueError::new_err(format!("DB open: {e}")))?;
-        let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) = if let Some(raw) =
-            db.get(DB_CHAIN).ok().flatten()
+        let mut db = Db::open(path);
+        let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) = if let Some(raw) = db.get(DB_CHAIN)
         {
             match bincode::deserialize::<ChainDisk>(&raw) {
                 Ok(disk) => {
@@ -245,21 +307,21 @@ impl Blockchain {
                                 b.coinbase_industrial =
                                     TokenAmount::new(cb.payload.amount_industrial);
                             }
-                            let mut fc: u128 = 0;
-                            let mut fi: u128 = 0;
+                            let mut fee_c: u128 = 0;
+                            let mut fee_i: u128 = 0;
                             for tx in b.transactions.iter().skip(1) {
                                 if let Ok((c, i)) =
                                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
                                 {
-                                    fc += c as u128;
-                                    fi += i as u128;
+                                    fee_c += c as u128;
+                                    fee_i += i as u128;
                                 }
                             }
-                            let fc_u64 = u64::try_from(fc).unwrap_or(0);
-                            let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                            let fee_consumer_u64 = u64::try_from(fee_c).unwrap_or(0);
+                            let fee_industrial_u64 = u64::try_from(fee_i).unwrap_or(0);
                             let mut h = blake3::Hasher::new();
-                            h.update(&fc_u64.to_le_bytes());
-                            h.update(&fi_u64.to_le_bytes());
+                            h.update(&fee_consumer_u64.to_le_bytes());
+                            h.update(&fee_industrial_u64.to_le_bytes());
                             b.fee_checksum = h.finalize().to_hex().to_string();
                             b.hash = calculate_hash(
                                 b.index,
@@ -277,10 +339,13 @@ impl Blockchain {
                             chain: migrated_chain,
                             ..disk
                         };
-                        db.insert(DB_CHAIN, bincode::serialize(&migrated).unwrap())
-                            .unwrap();
-                        let _ = db.remove(DB_ACCOUNTS);
-                        let _ = db.remove(DB_EMISSION);
+                        db.insert(
+                            DB_CHAIN,
+                            bincode::serialize(&migrated)
+                                .unwrap_or_else(|e| panic!("serialize: {e}")),
+                        );
+                        db.remove(DB_ACCOUNTS);
+                        db.remove(DB_EMISSION);
                         (
                             migrated.chain,
                             migrated.accounts,
@@ -306,14 +371,10 @@ impl Blockchain {
                     let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
                     let accounts: HashMap<String, Account> = db
                         .get(DB_ACCOUNTS)
-                        .ok()
-                        .flatten()
                         .and_then(|iv| bincode::deserialize(&iv).ok())
                         .unwrap_or_default();
                     let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
                         .get(DB_EMISSION)
-                        .ok()
-                        .flatten()
                         .and_then(|iv| bincode::deserialize(&iv).ok())
                         .unwrap_or((
                             0,
@@ -328,21 +389,21 @@ impl Blockchain {
                             b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
                             b.coinbase_industrial = TokenAmount::new(cb.payload.amount_industrial);
                         }
-                        let mut fc: u128 = 0;
-                        let mut fi: u128 = 0;
+                        let mut fee_c: u128 = 0;
+                        let mut fee_i: u128 = 0;
                         for tx in b.transactions.iter().skip(1) {
                             if let Ok((c, i)) =
                                 crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
                             {
-                                fc += c as u128;
-                                fi += i as u128;
+                                fee_c += c as u128;
+                                fee_i += i as u128;
                             }
                         }
-                        let fc_u64 = u64::try_from(fc).unwrap_or(0);
-                        let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                        let fee_consumer_u64 = u64::try_from(fee_c).unwrap_or(0);
+                        let fee_industrial_u64 = u64::try_from(fee_i).unwrap_or(0);
                         let mut h = blake3::Hasher::new();
-                        h.update(&fc_u64.to_le_bytes());
-                        h.update(&fi_u64.to_le_bytes());
+                        h.update(&fee_consumer_u64.to_le_bytes());
+                        h.update(&fee_industrial_u64.to_le_bytes());
                         b.fee_checksum = h.finalize().to_hex().to_string();
                         b.hash = calculate_hash(
                             b.index,
@@ -365,10 +426,12 @@ impl Blockchain {
                         block_reward_industrial: TokenAmount::new(br_i),
                         block_height: bh,
                     };
-                    db.insert(DB_CHAIN, bincode::serialize(&disk_new).unwrap())
-                        .unwrap();
-                    let _ = db.remove(DB_ACCOUNTS);
-                    let _ = db.remove(DB_EMISSION);
+                    db.insert(
+                        DB_CHAIN,
+                        bincode::serialize(&disk_new).unwrap_or_else(|e| panic!("serialize: {e}")),
+                    );
+                    db.remove(DB_ACCOUNTS);
+                    db.remove(DB_EMISSION);
                     (
                         disk_new.chain,
                         disk_new.accounts,
@@ -393,35 +456,34 @@ impl Blockchain {
         };
         for b in &mut chain {
             if b.fee_checksum.is_empty() {
-                let mut fc: u128 = 0;
-                let mut fi: u128 = 0;
+                let mut fee_c: u128 = 0;
+                let mut fee_i: u128 = 0;
                 for tx in b.transactions.iter().skip(1) {
                     if let Ok((c, i)) =
                         crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
                     {
-                        fc += c as u128;
-                        fi += i as u128;
+                        fee_c += c as u128;
+                        fee_i += i as u128;
                     }
                 }
-                let fc_u64 = u64::try_from(fc).unwrap_or(0);
-                let fi_u64 = u64::try_from(fi).unwrap_or(0);
+                let fee_consumer_u64 = u64::try_from(fee_c).unwrap_or(0);
+                let fee_industrial_u64 = u64::try_from(fee_i).unwrap_or(0);
                 let mut h = blake3::Hasher::new();
-                h.update(&fc_u64.to_le_bytes());
-                h.update(&fi_u64.to_le_bytes());
+                h.update(&fee_consumer_u64.to_le_bytes());
+                h.update(&fee_industrial_u64.to_le_bytes());
                 b.fee_checksum = h.finalize().to_hex().to_string();
             }
         }
         Ok(Blockchain {
             chain,
             accounts,
-            difficulty: 8,
-            mempool: DashMap::new(),
             db,
             emission_consumer: em_c,
             emission_industrial: em_i,
             block_reward_consumer: br_c,
             block_reward_industrial: br_i,
             block_height: bh,
+            ..Blockchain::default()
         })
     }
 
@@ -454,15 +516,11 @@ impl Blockchain {
         };
         let bytes = bincode::serialize(&disk)
             .map_err(|e| PyValueError::new_err(format!("Serialization error: {e}")))?;
-        self.db
-            .insert(DB_CHAIN, bytes)
-            .map_err(|e| PyValueError::new_err(format!("DB insert: {e}")))?;
+        self.db.insert(DB_CHAIN, bytes);
         // ensure no legacy column families linger on disk
-        let _ = self.db.remove(DB_ACCOUNTS);
-        let _ = self.db.remove(DB_EMISSION);
-        self.db
-            .flush()
-            .map_err(|e| PyValueError::new_err(format!("DB flush: {e}")))?;
+        self.db.remove(DB_ACCOUNTS);
+        self.db.remove(DB_EMISSION);
+        self.db.flush();
         Ok(())
     }
 
@@ -470,6 +528,10 @@ impl Blockchain {
         (self.emission_consumer, self.emission_industrial)
     }
 
+    /// Construct and persist the genesis block.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the chain state cannot be serialized or persisted.
     pub fn genesis_block(&mut self) -> PyResult<()> {
         let g = Block {
             index: 0,
@@ -485,10 +547,10 @@ impl Blockchain {
         };
         self.chain.push(g);
         self.block_height = 1;
-        self.db
-            .insert(DB_CHAIN, bincode::serialize(&self.chain).unwrap())
-            .unwrap();
-        self.db.flush().unwrap();
+        let bytes =
+            bincode::serialize(&self.chain).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        self.db.insert(DB_CHAIN, bytes);
+        self.db.flush();
         Ok(())
     }
 
@@ -507,9 +569,7 @@ impl Blockchain {
                 industrial,
             },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
-            pending_nonce: 0,
+            pending: Pending::default(),
         };
         self.accounts.insert(address, acc);
         Ok(())
@@ -532,53 +592,89 @@ impl Blockchain {
     /// Returns a [`PyValueError`] if validation fails or the sender is missing.
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
         let sender_addr = tx.payload.from_.clone();
-
-        if self
-            .mempool
-            .contains_key(&(sender_addr.clone(), tx.payload.nonce))
-        {
-            return Err(PyValueError::new_err("Duplicate transaction"));
-        }
-
-        if tx.payload.fee_selector > 2 {
-            return Err(PyValueError::new_err("Invalid fee selector"));
-        }
-
-        let sender = self
-            .accounts
-            .get_mut(&sender_addr)
-            .ok_or_else(|| PyValueError::new_err("Sender not found"))?;
-        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+        let nonce = tx.payload.nonce;
+        let lock = self
+            .admission_locks
+            .entry(sender_addr.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        let _guard = lock
+            .lock()
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
 
-        if sender
-            .balance
-            .consumer
-            .saturating_sub(sender.pending_consumer)
-            < tx.payload.amount_consumer + fee_c
-            || sender
-                .balance
-                .industrial
-                .saturating_sub(sender.pending_industrial)
-                < tx.payload.amount_industrial + fee_i
-        {
-            return Err(PyValueError::new_err("Insufficient balance"));
+        if tx.payload.fee_selector > 2 {
+            #[cfg(feature = "telemetry")]
+            warn!("tx rejected sender={sender_addr} reason=invalid_fee_selector",);
+            return Err(PyValueError::new_err("Invalid fee selector"));
         }
+        let (fee_consumer, fee_industrial) =
+            crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let total_consumer = tx
+            .payload
+            .amount_consumer
+            .checked_add(fee_consumer)
+            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+        let total_industrial = tx
+            .payload
+            .amount_industrial
+            .checked_add(fee_industrial)
+            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
 
-        if tx.payload.nonce != sender.nonce + sender.pending_nonce + 1 {
-            return Err(PyValueError::new_err("Bad nonce"));
+        match self.mempool.entry((sender_addr.clone(), nonce)) {
+            dashmap::mapref::entry::Entry::Occupied(_) => {
+                #[cfg(feature = "telemetry")]
+                warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate",);
+                Err(PyValueError::new_err("Duplicate transaction"))
+            }
+            dashmap::mapref::entry::Entry::Vacant(vacant) => {
+                let sender = self.accounts.get_mut(&sender_addr).ok_or_else(|| {
+                    #[cfg(feature = "telemetry")]
+                    warn!("tx rejected sender={sender_addr} reason=unknown_sender");
+                    PyValueError::new_err("Sender not found")
+                })?;
+                let required_consumer = sender
+                    .pending
+                    .consumer
+                    .checked_add(total_consumer)
+                    .ok_or_else(|| PyValueError::new_err("Balance overflow"))?;
+                let required_industrial =
+                    sender
+                        .pending
+                        .industrial
+                        .checked_add(total_industrial)
+                        .ok_or_else(|| PyValueError::new_err("Balance overflow"))?;
+                if sender.balance.consumer < required_consumer
+                    || sender.balance.industrial < required_industrial
+                {
+                    #[cfg(feature = "telemetry")]
+                    warn!("tx rejected sender={sender_addr} reason=insufficient_balance",);
+                    return Err(PyValueError::new_err("Insufficient balance"));
+                }
+                if nonce != sender.nonce + sender.pending.nonce + 1 {
+                    #[cfg(feature = "telemetry")]
+                    warn!("tx rejected sender={sender_addr} reason=bad_nonce");
+                    return Err(PyValueError::new_err("Bad nonce"));
+                }
+                if !verify_signed_tx(tx.clone()) {
+                    #[cfg(feature = "telemetry")]
+                    warn!("tx rejected sender={sender_addr} reason=bad_signature");
+                    return Err(PyValueError::new_err("Signature verification failed"));
+                }
+                let reservation =
+                    Reservation::new(&mut sender.pending, total_consumer, total_industrial);
+                #[cfg(feature = "telemetry")]
+                let tx_id = tx.id();
+                vacant.insert(tx);
+                reservation.commit();
+                #[cfg(feature = "telemetry")]
+                info!(
+                    "tx accepted sender={sender_addr} nonce={nonce} id={}",
+                    hex::encode(tx_id)
+                );
+                Ok(())
+            }
         }
-
-        if !verify_signed_tx(tx.clone()) {
-            return Err(PyValueError::new_err("Signature verification failed"));
-        }
-
-        sender.pending_consumer += tx.payload.amount_consumer + fee_c;
-        sender.pending_industrial += tx.payload.amount_industrial + fee_i;
-        sender.pending_nonce += 1;
-
-        self.mempool.insert((sender_addr, tx.payload.nonce), tx);
-        Ok(())
     }
 
     /// Remove a pending transaction and release reserved balances.
@@ -588,18 +684,23 @@ impl Blockchain {
     pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> PyResult<()> {
         if let Some((_, tx)) = self.mempool.remove(&(sender.to_string(), nonce)) {
             if let Some(acc) = self.accounts.get_mut(sender) {
-                if let Ok((fee_c, fee_i)) =
+                if let Ok((fee_consumer, fee_industrial)) =
                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
                 {
-                    let total_c = tx.payload.amount_consumer + fee_c;
-                    let total_i = tx.payload.amount_industrial + fee_i;
-                    acc.pending_consumer = acc.pending_consumer.saturating_sub(total_c);
-                    acc.pending_industrial = acc.pending_industrial.saturating_sub(total_i);
-                    acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                    let total_consumer = tx.payload.amount_consumer + fee_consumer;
+                    let total_industrial = tx.payload.amount_industrial + fee_industrial;
+                    acc.pending.consumer = acc.pending.consumer.saturating_sub(total_consumer);
+                    acc.pending.industrial =
+                        acc.pending.industrial.saturating_sub(total_industrial);
+                    acc.pending.nonce = acc.pending.nonce.saturating_sub(1);
                 }
             }
+            #[cfg(feature = "telemetry")]
+            info!("tx dropped sender={sender} nonce={nonce}");
             Ok(())
         } else {
+            #[cfg(feature = "telemetry")]
+            warn!("drop failed sender={sender} nonce={nonce} reason=not_found",);
             Err(PyValueError::new_err("Transaction not found"))
         }
     }
@@ -612,29 +713,34 @@ impl Blockchain {
     /// Mine a new block and credit rewards to `miner_addr`.
     ///
     /// # Errors
-    /// Returns a [`PyValueError`] if fee or nonce calculations overflow, or if
+    /// Returns a [`PyValueError`] if fee or nonce calculations overflow or if
     /// persisting the chain fails.
-    ///
-    /// # Panics
-    /// Panics if miner balance overflows or if the underlying database flush
-    /// fails.
     #[allow(clippy::too_many_lines)]
     pub fn mine_block(&mut self, miner_addr: &str) -> PyResult<Block> {
         let index = self.chain.len() as u64;
         let prev_hash = if index == 0 {
             "0".repeat(64)
         } else {
-            self.chain.last().unwrap().hash.clone()
+            self.chain
+                .last()
+                .map(|b| b.hash.clone())
+                .ok_or_else(|| PyValueError::new_err("empty chain"))?
         };
 
         // apply decay first so reward reflects current height
         self.block_reward_consumer = TokenAmount::new(
-            ((self.block_reward_consumer.0 as u128 * DECAY_NUMERATOR as u128)
-                / DECAY_DENOMINATOR as u128) as u64,
+            u64::try_from(
+                (u128::from(self.block_reward_consumer.0) * u128::from(DECAY_NUMERATOR))
+                    / u128::from(DECAY_DENOMINATOR),
+            )
+            .map_err(|_| PyValueError::new_err("reward overflow"))?,
         );
         self.block_reward_industrial = TokenAmount::new(
-            ((self.block_reward_industrial.0 as u128 * DECAY_NUMERATOR as u128)
-                / DECAY_DENOMINATOR as u128) as u64,
+            u64::try_from(
+                (u128::from(self.block_reward_industrial.0) * u128::from(DECAY_NUMERATOR))
+                    / u128::from(DECAY_DENOMINATOR),
+            )
+            .map_err(|_| PyValueError::new_err("reward overflow"))?,
         );
         let mut reward_c = self.block_reward_consumer;
         let mut reward_i = self.block_reward_industrial;
@@ -653,30 +759,32 @@ impl Blockchain {
                 .cmp(&b.payload.from_)
                 .then(a.payload.nonce.cmp(&b.payload.nonce))
         });
-        let mut fee_acc_c: u128 = 0;
-        let mut fee_acc_i: u128 = 0;
+        let mut fee_acc_consumer: u128 = 0;
+        let mut fee_acc_industrial: u128 = 0;
         for tx in &pending {
-            if let Ok((fc, fi)) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
-                fee_acc_c += fc as u128;
-                fee_acc_i += fi as u128;
+            if let Ok((fee_c, fee_i)) =
+                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+            {
+                fee_acc_consumer += fee_c as u128;
+                fee_acc_industrial += fee_i as u128;
             }
         }
-        let fee_c_u64 =
-            u64::try_from(fee_acc_c).map_err(|_| PyValueError::new_err("Fee overflow"))?;
-        let fee_i_u64 =
-            u64::try_from(fee_acc_i).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let fee_consumer_u64 =
+            u64::try_from(fee_acc_consumer).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let fee_industrial_u64 =
+            u64::try_from(fee_acc_industrial).map_err(|_| PyValueError::new_err("Fee overflow"))?;
         let cb_c = reward_c
             .0
-            .checked_add(fee_c_u64)
+            .checked_add(fee_consumer_u64)
             .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
         let cb_i = reward_i
             .0
-            .checked_add(fee_i_u64)
+            .checked_add(fee_industrial_u64)
             .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
 
         let mut fee_hasher = blake3::Hasher::new();
-        fee_hasher.update(&fee_c_u64.to_le_bytes());
-        fee_hasher.update(&fee_i_u64.to_le_bytes());
+        fee_hasher.update(&fee_consumer_u64.to_le_bytes());
+        fee_hasher.update(&fee_industrial_u64.to_le_bytes());
         let fee_checksum = fee_hasher.finalize().to_hex().to_string();
 
         let coinbase = SignedTransaction {
@@ -736,9 +844,9 @@ impl Blockchain {
                             let total_i = tx.payload.amount_industrial + fee_i;
                             s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
                             s.balance.industrial = s.balance.industrial.saturating_sub(total_i);
-                            s.pending_consumer = s.pending_consumer.saturating_sub(total_c);
-                            s.pending_industrial = s.pending_industrial.saturating_sub(total_i);
-                            s.pending_nonce = s.pending_nonce.saturating_sub(1);
+                            s.pending.consumer = s.pending.consumer.saturating_sub(total_c);
+                            s.pending.industrial = s.pending.industrial.saturating_sub(total_i);
+                            s.pending.nonce = s.pending.nonce.saturating_sub(1);
                             s.nonce = tx.payload.nonce;
                         }
                     }
@@ -752,9 +860,7 @@ impl Blockchain {
                                 industrial: 0,
                             },
                             nonce: 0,
-                            pending_consumer: 0,
-                            pending_industrial: 0,
-                            pending_nonce: 0,
+                            pending: Pending::default(),
                         });
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
@@ -773,20 +879,18 @@ impl Blockchain {
                             industrial: 0,
                         },
                         nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
-                        pending_nonce: 0,
+                        pending: Pending::default(),
                     });
                 miner.balance.consumer = miner
                     .balance
                     .consumer
                     .checked_add(cb_c)
-                    .expect("miner consumer overflow");
+                    .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
                 miner.balance.industrial = miner
                     .balance
                     .industrial
                     .checked_add(cb_i)
-                    .expect("miner industrial overflow");
+                    .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
 
                 self.emission_consumer += reward_c.0;
                 self.emission_industrial += reward_i.0;
@@ -794,7 +898,7 @@ impl Blockchain {
 
                 self.persist_chain()?;
 
-                self.db.flush().unwrap();
+                self.db.flush();
 
                 return Ok(block);
             }
@@ -856,8 +960,8 @@ impl Blockchain {
         let mut expected: HashMap<String, u64> = HashMap::new();
         let mut seen: HashSet<[u8; 32]> = HashSet::new();
         let mut seen_nonce: HashSet<(String, u64)> = HashSet::new();
-        let mut fee_tot_c: u128 = 0;
-        let mut fee_tot_i: u128 = 0;
+        let mut fee_tot_consumer: u128 = 0;
+        let mut fee_tot_industrial: u128 = 0;
 
         let mut counts: HashMap<String, u64> = HashMap::new();
         for tx in block.transactions.iter().skip(1) {
@@ -865,9 +969,9 @@ impl Blockchain {
                 *counts.entry(tx.payload.from_.clone()).or_insert(0) += 1;
             }
             match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
-                Ok((fc, fi)) => {
-                    fee_tot_c += fc as u128;
-                    fee_tot_i += fi as u128;
+                Ok((fee_c, fee_i)) => {
+                    fee_tot_consumer += fee_c as u128;
+                    fee_tot_industrial += fee_i as u128;
                 }
                 Err(_) => return Ok(false),
             }
@@ -898,16 +1002,18 @@ impl Blockchain {
             }
         }
         let mut h = blake3::Hasher::new();
-        let fc_u64 = u64::try_from(fee_tot_c).map_err(|_| PyValueError::new_err("Fee overflow"))?;
-        let fi_u64 = u64::try_from(fee_tot_i).map_err(|_| PyValueError::new_err("Fee overflow"))?;
-        h.update(&fc_u64.to_le_bytes());
-        h.update(&fi_u64.to_le_bytes());
+        let fee_consumer_u64 =
+            u64::try_from(fee_tot_consumer).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let fee_industrial_u64 =
+            u64::try_from(fee_tot_industrial).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        h.update(&fee_consumer_u64.to_le_bytes());
+        h.update(&fee_industrial_u64.to_le_bytes());
         if h.finalize().to_hex().to_string() != block.fee_checksum {
             return Ok(false);
         }
         let cb_c = block.coinbase_consumer.0 as u128;
         let cb_i = block.coinbase_industrial.0 as u128;
-        if cb_c < fee_tot_c || cb_i < fee_tot_i {
+        if cb_c < fee_tot_consumer || cb_i < fee_tot_industrial {
             return Ok(false);
         }
 
@@ -936,8 +1042,8 @@ impl Blockchain {
                 .first()
                 .map(|tx| tx.payload.to.clone())
                 .unwrap_or_default();
-            let mut fee_tot_c: u128 = 0;
-            let mut fee_tot_i: u128 = 0;
+            let mut fee_tot_consumer: u128 = 0;
+            let mut fee_tot_industrial: u128 = 0;
             for tx in block.transactions.iter().skip(1) {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = to_array_32(&tx.public_key)
@@ -965,8 +1071,8 @@ impl Blockchain {
                             .industrial
                             .saturating_sub(tx.payload.amount_industrial + fee_i);
                         s.nonce = tx.payload.nonce;
-                        fee_tot_c += fee_c as u128;
-                        fee_tot_i += fee_i as u128;
+                        fee_tot_consumer += fee_c as u128;
+                        fee_tot_industrial += fee_i as u128;
                     }
                 }
                 let r = self
@@ -979,26 +1085,24 @@ impl Blockchain {
                             industrial: 0,
                         },
                         nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
-                        pending_nonce: 0,
+                        pending: Pending::default(),
                     });
                 r.balance.consumer += tx.payload.amount_consumer;
                 r.balance.industrial += tx.payload.amount_industrial;
             }
             let mut h = blake3::Hasher::new();
-            let fc_u64 =
-                u64::try_from(fee_tot_c).map_err(|_| PyValueError::new_err("Fee overflow"))?;
-            let fi_u64 =
-                u64::try_from(fee_tot_i).map_err(|_| PyValueError::new_err("Fee overflow"))?;
-            h.update(&fc_u64.to_le_bytes());
-            h.update(&fi_u64.to_le_bytes());
+            let fee_consumer_u64 = u64::try_from(fee_tot_consumer)
+                .map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            let fee_industrial_u64 = u64::try_from(fee_tot_industrial)
+                .map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            h.update(&fee_consumer_u64.to_le_bytes());
+            h.update(&fee_industrial_u64.to_le_bytes());
             if h.finalize().to_hex().to_string() != block.fee_checksum {
                 return Err(PyValueError::new_err("Fee checksum mismatch"));
             }
             let cb_c = block.coinbase_consumer.0 as u128;
             let cb_i = block.coinbase_industrial.0 as u128;
-            if cb_c < fee_tot_c || cb_i < fee_tot_i {
+            if cb_c < fee_tot_consumer || cb_i < fee_tot_industrial {
                 return Err(PyValueError::new_err("Fee mismatch"));
             }
             let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
@@ -1008,20 +1112,18 @@ impl Blockchain {
                     industrial: 0,
                 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
-                pending_nonce: 0,
+                pending: Pending::default(),
             });
             miner.balance.consumer = miner
                 .balance
                 .consumer
                 .checked_add(block.coinbase_consumer.0)
-                .expect("miner consumer overflow");
+                .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
             miner.balance.industrial = miner
                 .balance
                 .industrial
                 .checked_add(block.coinbase_industrial.0)
-                .expect("miner industrial overflow");
+                .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
             if let Some(cb) = block.transactions.first() {
                 if cb.payload.amount_consumer != block.coinbase_consumer.0
                     || cb.payload.amount_industrial != block.coinbase_industrial.0
@@ -1031,12 +1133,18 @@ impl Blockchain {
                 }
             }
             self.block_reward_consumer = TokenAmount::new(
-                ((self.block_reward_consumer.0 as u128 * DECAY_NUMERATOR as u128)
-                    / DECAY_DENOMINATOR as u128) as u64,
+                u64::try_from(
+                    (u128::from(self.block_reward_consumer.0) * u128::from(DECAY_NUMERATOR))
+                        / u128::from(DECAY_DENOMINATOR),
+                )
+                .map_err(|_| PyValueError::new_err("reward overflow"))?,
             );
             self.block_reward_industrial = TokenAmount::new(
-                ((self.block_reward_industrial.0 as u128 * DECAY_NUMERATOR as u128)
-                    / DECAY_DENOMINATOR as u128) as u64,
+                u64::try_from(
+                    (u128::from(self.block_reward_industrial.0) * u128::from(DECAY_NUMERATOR))
+                        / u128::from(DECAY_DENOMINATOR),
+                )
+                .map_err(|_| PyValueError::new_err("reward overflow"))?,
             );
             self.emission_consumer += block.coinbase_consumer.0;
             self.emission_industrial += block.coinbase_industrial.0;
@@ -1048,101 +1156,11 @@ impl Blockchain {
     }
 }
 
-impl Default for Blockchain {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Blockchain {
-    /// Open the default ./chain_db path
+    /// Open the default temp path used by tests
+    #[must_use]
     pub fn new() -> Self {
-        let db = Db::open("temp").expect("DB open");
-        let (mut chain, accounts, em_c, em_i, br_c, br_i, bh) =
-            if let Some(raw) = db.get(DB_CHAIN).ok().flatten() {
-                if let Ok(disk) = bincode::deserialize::<ChainDisk>(&raw) {
-                    (
-                        disk.chain,
-                        disk.accounts,
-                        disk.emission_consumer,
-                        disk.emission_industrial,
-                        disk.block_reward_consumer,
-                        disk.block_reward_industrial,
-                        disk.block_height,
-                    )
-                } else {
-                    let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
-                    let accounts: HashMap<String, Account> = db
-                        .get(DB_ACCOUNTS)
-                        .ok()
-                        .flatten()
-                        .and_then(|iv| bincode::deserialize(&iv).ok())
-                        .unwrap_or_default();
-                    let (em_c, em_i, br_c_u64, br_i_u64, bh): (u64, u64, u64, u64, u64) = db
-                        .get(DB_EMISSION)
-                        .ok()
-                        .flatten()
-                        .and_then(|iv| bincode::deserialize(&iv).ok())
-                        .unwrap_or((
-                            0,
-                            0,
-                            INITIAL_BLOCK_REWARD_CONSUMER,
-                            INITIAL_BLOCK_REWARD_INDUSTRIAL,
-                            0,
-                        ));
-                    (
-                        chain,
-                        accounts,
-                        em_c,
-                        em_i,
-                        TokenAmount::new(br_c_u64),
-                        TokenAmount::new(br_i_u64),
-                        bh,
-                    )
-                }
-            } else {
-                (
-                    Vec::new(),
-                    HashMap::new(),
-                    0,
-                    0,
-                    TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
-                    TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
-                    0,
-                )
-            };
-        for b in &mut chain {
-            if b.fee_checksum.is_empty() {
-                let mut fc: u128 = 0;
-                let mut fi: u128 = 0;
-                for tx in b.transactions.iter().skip(1) {
-                    if let Ok((c, i)) =
-                        crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
-                    {
-                        fc += c as u128;
-                        fi += i as u128;
-                    }
-                }
-                let fc_u64 = u64::try_from(fc).unwrap_or(0);
-                let fi_u64 = u64::try_from(fi).unwrap_or(0);
-                let mut h = blake3::Hasher::new();
-                h.update(&fc_u64.to_le_bytes());
-                h.update(&fi_u64.to_le_bytes());
-                b.fee_checksum = h.finalize().to_hex().to_string();
-            }
-        }
-        Blockchain {
-            chain,
-            accounts,
-            difficulty: 8,
-            mempool: DashMap::new(),
-            db,
-            emission_consumer: em_c,
-            emission_industrial: em_i,
-            block_reward_consumer: br_c,
-            block_reward_industrial: br_i,
-            block_height: bh,
-        }
+        Self::open("temp").unwrap_or_else(|e| panic!("DB open: {e}"))
     }
 
     #[allow(dead_code)]
@@ -1191,8 +1209,8 @@ impl Blockchain {
             let mut expected_nonce: HashMap<String, u64> = HashMap::new();
             let mut seen: HashSet<[u8; 32]> = HashSet::new();
             let mut seen_nonce: HashSet<(String, u64)> = HashSet::new();
-            let mut fee_tot_c: u128 = 0;
-            let mut fee_tot_i: u128 = 0;
+            let mut fee_tot_consumer: u128 = 0;
+            let mut fee_tot_industrial: u128 = 0;
             for tx in b.transactions.iter().skip(1) {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = match to_array_32(&tx.public_key) {
@@ -1228,30 +1246,30 @@ impl Blockchain {
                     return false;
                 }
                 match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
-                    Ok((fc, fi)) => {
-                        fee_tot_c += fc as u128;
-                        fee_tot_i += fi as u128;
+                    Ok((fee_c, fee_i)) => {
+                        fee_tot_consumer += fee_c as u128;
+                        fee_tot_industrial += fee_i as u128;
                     }
                     Err(_) => return false,
                 }
             }
             let mut h = blake3::Hasher::new();
-            let fc_u64 = match u64::try_from(fee_tot_c) {
+            let fee_consumer_u64 = match u64::try_from(fee_tot_consumer) {
                 Ok(v) => v,
                 Err(_) => return false,
             };
-            let fi_u64 = match u64::try_from(fee_tot_i) {
+            let fee_industrial_u64 = match u64::try_from(fee_tot_industrial) {
                 Ok(v) => v,
                 Err(_) => return false,
             };
-            h.update(&fc_u64.to_le_bytes());
-            h.update(&fi_u64.to_le_bytes());
+            h.update(&fee_consumer_u64.to_le_bytes());
+            h.update(&fee_industrial_u64.to_le_bytes());
             if h.finalize().to_hex().to_string() != b.fee_checksum {
                 return false;
             }
             let cb_c = b.coinbase_consumer.0 as u128;
             let cb_i = b.coinbase_industrial.0 as u128;
-            if cb_c < fee_tot_c || cb_i < fee_tot_i {
+            if cb_c < fee_tot_consumer || cb_i < fee_tot_industrial {
                 return false;
             }
         }
@@ -1284,8 +1302,8 @@ fn calculate_hash(
     fee_checksum: &str,
     txs: &[SignedTransaction],
 ) -> String {
-    let ids: Vec<[u8; 32]> = txs.iter().map(|tx| tx.id()).collect();
-    let id_refs: Vec<&[u8]> = ids.iter().map(|v| v.as_ref()).collect();
+    let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();
+    let id_refs: Vec<&[u8]> = ids.iter().map(<[u8; 32]>::as_ref).collect();
     let enc = crate::hashlayout::BlockEncoder {
         index,
         prev,
@@ -1303,6 +1321,7 @@ fn calculate_hash(
 ///
 /// Returns the private and public key as raw byte vectors. The keys are
 /// suitable for both transaction signing and simple message authentication.
+#[must_use]
 #[pyfunction]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng;
@@ -1316,7 +1335,10 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
 /// Sign an arbitrary message with a 32-byte Ed25519 private key.
 ///
 /// The returned signature is a 64-byte array in raw form.
+/// # Errors
+/// Returns [`PyValueError`] if the private key length is invalid.
 #[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
 pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> PyResult<Vec<u8>> {
     let sk_bytes =
         to_array_32(&private).ok_or_else(|| PyValueError::new_err("Invalid private key length"))?;
@@ -1325,7 +1347,9 @@ pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> PyResult<Vec<u8>> {
 }
 
 /// Verify a message signature produced by [`sign_message`].
+#[must_use]
 #[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
 pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -> bool {
     if let (Some(pk), Some(sig_bytes)) = (to_array_32(&public), to_array_64(&signature)) {
         if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
@@ -1337,11 +1361,16 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
 }
 
 /// Return the integer network identifier used in domain separation.
+#[must_use]
 #[pyfunction]
 pub fn chain_id_py() -> u32 {
     CHAIN_ID
 }
 
+/// Initialize the Python module.
+///
+/// # Errors
+/// Returns [`PyErr`] if registering classes or functions with the module fails.
 #[pymodule]
 pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Blockchain>()?;

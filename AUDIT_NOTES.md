@@ -12,7 +12,7 @@ technical debt.
 
 ## 1. Nonce Handling and Pending Balance Tracking
 - **Sequential Nonce Enforcement**: `submit_transaction` checks `tx.payload.nonce != sender.nonce + sender.pending_nonce + 1` (src/lib.rs, L427‑L428). This enforces strict sequencing but does not guard against race conditions between concurrent submissions. A thread‑safe mempool should lock the account entry during admission to avoid double reservation.
-- **Pending Balance Reservation**: Pending fields (`pending_consumer`, `pending_industrial`, `pending_nonce`) increment on admission and decrement only when a block is mined (src/lib.rs, L454‑L456 & L569‑L575). There is no path to release reservations if a transaction is dropped or replaced; a mempool eviction routine must unwind the reservation atomically. **COMPLETED/DONE** [commit: ef87dfa]
+- **Pending Balance Reservation**: Pending fields (`pending.consumer`, `pending.industrial`, `pending.nonce`) increment on admission and decrement only when a block is mined (src/lib.rs, L454‑L456 & L569‑L575). There is no path to release reservations if a transaction is dropped or replaced; a mempool eviction routine must unwind the reservation atomically. **COMPLETED/DONE** [commit: ef87dfa]
   - Added `drop_transaction` API that removes a mempool entry, restores balances, and clears the `(sender, nonce)` lock.
 - **Atomicity Guarantees**: The current implementation manipulates multiple pending fields sequentially. A failure mid‑update (e.g., panic between consumer and industrial adjustments) can leave the account in an inconsistent state. Introduce a single struct update or transactional storage operation to guarantee atomicity.
 - **Mempool Admission Race**: Because `mempool_set` is queried before account mutation, two identical transactions arriving concurrently could both pass the `contains` check before the first insert. Convert to a `HashSet` guarded by a `Mutex` or switch to `dashmap` with atomic insertion semantics.
@@ -72,7 +72,7 @@ technical debt.
 ## 10. Admission Pipeline Hardening
 - `submit_transaction` conflates all admission errors into generic `ValueError` without machine‑readable codes. Define distinct error enums (`InsufficientCT`, `InsufficientIT`, `FeeOverflow`, `InvalidSelector`) and surface them through PyO3 to keep API stability.
 - The function does not log the reservation event despite the spec (“fee_lock: sender=..., ct=.., it=..”). Integrate structured logging for observability.
-- Balance checks call `saturating_sub(sender.pending_consumer)` which silently wraps on underflow; replace with explicit comparison to avoid masking bugs.
+- Balance checks call `saturating_sub(sender.pending.consumer)` which silently wraps on underflow; replace with explicit comparison to avoid masking bugs.
 - The admission path does not verify that amounts plus fees stay below `MAX_SUPPLY_*`, risking overflow during mining even if individual balances are capped.
 
 ## 11. Miner‑Side Accounting Directive

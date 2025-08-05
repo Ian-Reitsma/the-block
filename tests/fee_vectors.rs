@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use the_block::fee::decompose;
