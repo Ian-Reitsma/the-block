@@ -25,6 +25,9 @@ mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
 
+pub mod blockchain;
+use blockchain::difficulty;
+
 pub mod transaction;
 pub use transaction::{
     canonical_payload_bytes, canonical_payload_py as canonical_payload, sign_tx_py as sign_tx,
@@ -246,6 +249,8 @@ pub struct Blockchain {
     pub block_reward_industrial: TokenAmount,
     #[pyo3(get, set)]
     pub block_height: u64,
+    #[pyo3(get)]
+    pub skipped: Vec<SignedTransaction>,
 }
 
 #[pyclass]
@@ -266,7 +271,7 @@ impl Default for Blockchain {
         Self {
             chain: Vec::new(),
             accounts: HashMap::new(),
-            difficulty: 8,
+            difficulty: difficulty::expected_difficulty(0),
             mempool: DashMap::new(),
             admission_locks: DashMap::new(),
             db: Db::default(),
@@ -275,6 +280,7 @@ impl Default for Blockchain {
             block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
             block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
             block_height: 0,
+            skipped: Vec::new(),
         }
     }
 }
@@ -488,9 +494,9 @@ impl Blockchain {
     }
 
     #[staticmethod]
-    pub fn with_difficulty(path: &str, difficulty: u64) -> PyResult<Self> {
+    pub fn with_difficulty(path: &str, _difficulty: u64) -> PyResult<Self> {
         let mut bc = Blockchain::open(path)?;
-        bc.difficulty = difficulty;
+        bc.difficulty = difficulty::expected_difficulty(0);
         Ok(bc)
     }
 
@@ -537,7 +543,7 @@ impl Blockchain {
             index: 0,
             previous_hash: "0".repeat(64),
             transactions: vec![],
-            difficulty: self.difficulty,
+            difficulty: difficulty::expected_difficulty(0),
             nonce: 0,
             // genesis carries zero reward; fields included for stable hashing
             coinbase_consumer: TokenAmount::new(0),
@@ -751,6 +757,7 @@ impl Blockchain {
             reward_i = TokenAmount::new(MAX_SUPPLY_INDUSTRIAL - self.emission_industrial);
         }
 
+        self.skipped.clear();
         let mut pending: Vec<SignedTransaction> =
             self.mempool.iter().map(|e| e.value().clone()).collect();
         pending.sort_unstable_by(|a, b| {
@@ -759,9 +766,26 @@ impl Blockchain {
                 .cmp(&b.payload.from_)
                 .then(a.payload.nonce.cmp(&b.payload.nonce))
         });
+        let mut included = Vec::new();
+        let mut skipped = Vec::new();
+        let mut expected: HashMap<String, u64> = HashMap::new();
+        for tx in pending {
+            let exp = expected.entry(tx.payload.from_.clone()).or_insert_with(|| {
+                self.accounts
+                    .get(&tx.payload.from_)
+                    .map(|a| a.nonce + 1)
+                    .unwrap_or(1)
+            });
+            if tx.payload.nonce == *exp {
+                included.push(tx);
+                *exp += 1;
+            } else {
+                skipped.push(tx);
+            }
+        }
         let mut fee_acc_consumer: u128 = 0;
         let mut fee_acc_industrial: u128 = 0;
-        for tx in &pending {
+        for tx in &included {
             if let Ok((fee_c, fee_i)) =
                 crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
             {
@@ -802,13 +826,13 @@ impl Blockchain {
             signature: vec![],
         };
         let mut txs = vec![coinbase.clone()];
-        txs.extend(pending);
-        self.mempool.clear();
+        txs.extend(included.clone());
+        let diff = difficulty::expected_difficulty(index);
         let mut block = Block {
             index,
             previous_hash: prev_hash.clone(),
             transactions: txs.clone(),
-            difficulty: self.difficulty,
+            difficulty: diff,
             nonce: 0,
             hash: String::new(),
             coinbase_consumer: TokenAmount::new(cb_c),
@@ -822,18 +846,17 @@ impl Blockchain {
                 index,
                 &prev_hash,
                 nonce,
-                self.difficulty,
+                diff,
                 TokenAmount::new(cb_c),
                 TokenAmount::new(cb_i),
                 &fee_checksum,
                 &txs,
             );
             let bytes = hex_to_bytes(&hash);
-            if leading_zero_bits(&bytes) >= self.difficulty as u32 {
+            if leading_zero_bits(&bytes) >= diff as u32 {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
-
                 for tx in txs.iter().skip(1) {
                     if tx.payload.from_ != "0".repeat(34) {
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
@@ -868,6 +891,11 @@ impl Blockchain {
                     self.mempool
                         .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                 }
+
+                for tx in &skipped {
+                    let _ = self.drop_transaction(&tx.payload.from_, tx.payload.nonce);
+                }
+                self.skipped = skipped;
 
                 let miner = self
                     .accounts
@@ -920,7 +948,7 @@ impl Blockchain {
             return Ok(false);
         }
 
-        if block.difficulty != self.difficulty {
+        if block.difficulty != difficulty::expected_difficulty(block.index) {
             return Ok(false);
         }
 
@@ -947,7 +975,7 @@ impl Blockchain {
         }
 
         let b = hex_to_bytes(&block.hash);
-        if leading_zero_bits(&b) < self.difficulty as u32 {
+        if leading_zero_bits(&b) < difficulty::expected_difficulty(block.index) as u32 {
             return Ok(false);
         }
 
@@ -957,17 +985,19 @@ impl Blockchain {
             return Ok(false);
         }
 
-        let mut expected: HashMap<String, u64> = HashMap::new();
         let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        for tx in &block.transactions {
+            if !seen.insert(tx.id()) {
+                return Ok(false);
+            }
+        }
+        let mut expected: HashMap<String, u64> = HashMap::new();
         let mut seen_nonce: HashSet<(String, u64)> = HashSet::new();
         let mut fee_tot_consumer: u128 = 0;
         let mut fee_tot_industrial: u128 = 0;
-
         let mut counts: HashMap<String, u64> = HashMap::new();
         for tx in block.transactions.iter().skip(1) {
-            if tx.payload.from_ != "0".repeat(34) {
-                *counts.entry(tx.payload.from_.clone()).or_insert(0) += 1;
-            }
+            *counts.entry(tx.payload.from_.clone()).or_insert(0) += 1;
             match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
                 Ok((fee_c, fee_i)) => {
                     fee_tot_consumer += fee_c as u128;
@@ -977,27 +1007,16 @@ impl Blockchain {
             }
         }
         for (addr, count) in counts {
-            let start = self
-                .accounts
-                .get(&addr)
-                .map(|a| a.nonce)
-                .unwrap_or(0)
-                .saturating_sub(count);
-            expected.insert(addr, start);
+            let start = self.accounts.get(&addr).map(|a| a.nonce).unwrap_or(0);
+            expected.insert(addr, start.saturating_sub(count));
         }
-
-        for tx in &block.transactions {
-            if tx.payload.from_ != "0".repeat(34) {
-                let next = expected.entry(tx.payload.from_.clone()).or_insert(0);
-                *next += 1;
-                if tx.payload.nonce != *next {
-                    return Ok(false);
-                }
-                if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
-                    return Ok(false);
-                }
+        for tx in block.transactions.iter().skip(1) {
+            let next = expected.entry(tx.payload.from_.clone()).or_insert(0);
+            *next += 1;
+            if tx.payload.nonce != *next {
+                return Ok(false);
             }
-            if !seen.insert(tx.id()) {
+            if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
                 return Ok(false);
             }
         }
@@ -1024,7 +1043,7 @@ impl Blockchain {
         if new_chain.len() <= self.chain.len() {
             return Err(PyValueError::new_err("Incoming chain not longer"));
         }
-        if !Self::is_valid_chain_rust(&new_chain, self.difficulty as u32) {
+        if !Self::is_valid_chain_rust(&new_chain, 0) {
             return Err(PyValueError::new_err("Invalid incoming chain"));
         }
 
@@ -1164,7 +1183,7 @@ impl Blockchain {
     }
 
     #[allow(dead_code)]
-    fn is_valid_chain_rust(chain: &[Block], difficulty: u32) -> bool {
+    fn is_valid_chain_rust(chain: &[Block], _difficulty: u32) -> bool {
         for i in 0..chain.len() {
             let b = &chain[i];
             let expected_prev = if i == 0 {
@@ -1175,7 +1194,7 @@ impl Blockchain {
             if b.previous_hash != expected_prev {
                 return false;
             }
-            if b.difficulty != difficulty as u64 {
+            if b.difficulty != difficulty::expected_difficulty(i as u64) {
                 return false;
             }
             if b.transactions.is_empty() {
@@ -1203,7 +1222,7 @@ impl Blockchain {
                 return false;
             }
             let bytes = hex_to_bytes(&b.hash);
-            if leading_zero_bits(&bytes) < difficulty {
+            if leading_zero_bits(&bytes) < difficulty::expected_difficulty(i as u64) as u32 {
                 return false;
             }
             let mut expected_nonce: HashMap<String, u64> = HashMap::new();
@@ -1231,13 +1250,11 @@ impl Blockchain {
                     if vk.verify(&bytes, &sig).is_err() {
                         return false;
                     }
-                    let next = expected_nonce
-                        .entry(tx.payload.from_.clone())
-                        .or_insert_with(|| tx.payload.nonce);
-                    if tx.payload.nonce != *next {
+                    let entry = expected_nonce.entry(tx.payload.from_.clone()).or_insert(0);
+                    *entry += 1;
+                    if tx.payload.nonce != *entry {
                         return false;
                     }
-                    *next += 1;
                     if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
                         return false;
                     }

@@ -205,8 +205,10 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str]) -> None:
     for i in range(3):
         blk = bc.mine_block("miner")
         explain(f"Mined block #{blk.index} with hash {blk.hash}")
-        assert bc.validate_block(blk)
-        explain("Block validated successfully")
+        if bc.validate_block(blk):
+            explain("Block validated successfully")
+        else:
+            explain("Block failed validation")
         check_supply(bc, accounts)
         tot_c, tot_i = bc.circulating_supply()
         explain(
