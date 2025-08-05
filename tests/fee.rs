@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use the_block::fee::{decompose, FeeError, MAX_FEE};
 
 #[test]

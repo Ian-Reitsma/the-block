@@ -1,4 +1,5 @@
 #![cfg(feature = "fuzzy")]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 // tests/test_chain.rs
 //
@@ -140,8 +141,8 @@ proptest! {
         for h in handles { let _ = h.join(); }
         let guard = bc.read().unwrap();
         let miner = guard.accounts.get("miner").unwrap();
-        assert_eq!(miner.pending_consumer, 0);
-        assert_eq!(miner.pending_industrial, 0);
+        assert_eq!(miner.pending.consumer, 0);
+        assert_eq!(miner.pending.industrial, 0);
     }
 }
 
@@ -345,9 +346,9 @@ fn test_pending_nonce_and_balances() {
     bc.submit_transaction(tx2).unwrap();
 
     let sender = bc.accounts.get("miner").unwrap();
-    assert_eq!(sender.pending_nonce, 2);
-    assert!(sender.pending_consumer > 0);
-    assert!(sender.pending_industrial > 0);
+    assert_eq!(sender.pending.nonce, 2);
+    assert!(sender.pending.consumer > 0);
+    assert!(sender.pending.industrial > 0);
 
     // overspend beyond effective balance fails
     let huge = testutil::build_signed_tx(&privkey, "miner", "alice", u64::MAX / 2, 0, 0, 3);
@@ -355,9 +356,9 @@ fn test_pending_nonce_and_balances() {
 
     bc.mine_block("miner").unwrap();
     let sender = bc.accounts.get("miner").unwrap();
-    assert_eq!(sender.pending_nonce, 0);
-    assert_eq!(sender.pending_consumer, 0);
-    assert_eq!(sender.pending_industrial, 0);
+    assert_eq!(sender.pending.nonce, 0);
+    assert_eq!(sender.pending.consumer, 0);
+    assert_eq!(sender.pending.industrial, 0);
 }
 
 // 8e. Dropping a transaction releases pending reservations
@@ -370,12 +371,12 @@ fn test_drop_transaction_releases_pending() {
     let (privkey, _pub) = generate_keypair();
     let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 1);
     bc.submit_transaction(tx).unwrap();
-    assert_eq!(bc.accounts.get("miner").unwrap().pending_nonce, 1);
+    assert_eq!(bc.accounts.get("miner").unwrap().pending.nonce, 1);
     bc.drop_transaction("miner", 1).unwrap();
     let sender = bc.accounts.get("miner").unwrap();
-    assert_eq!(sender.pending_nonce, 0);
-    assert_eq!(sender.pending_consumer, 0);
-    assert_eq!(sender.pending_industrial, 0);
+    assert_eq!(sender.pending.nonce, 0);
+    assert_eq!(sender.pending.consumer, 0);
+    assert_eq!(sender.pending.industrial, 0);
     assert!(bc.mempool.is_empty());
 }
 
