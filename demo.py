@@ -237,7 +237,7 @@ def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
         MAX_SUPPLY_INDUSTRIAL,
     )
     explain(
-        f"Supply before {supply_before}, after {supply_after}; cap reached"
+        f"Supply before {supply_before}, after {supply_after}; remaining emission consumed, cap reached"
     )
     check_supply(bc, accounts)
 
