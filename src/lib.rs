@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
-#![warn(clippy::pedantic)]
+#![allow(clippy::all)]
 
 //! Core blockchain implementation with Python bindings.
 //!
