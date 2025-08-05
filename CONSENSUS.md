@@ -70,3 +70,5 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 
 `Blockchain::mempool` is backed by a lock-free `DashMap` keyed by `(sender, nonce)`. `submit_transaction`, `drop_transaction`, and `mine_block` may run concurrently without leaking reservations.
 
+Transactions from unknown senders are rejected. Nodes must provision accounts via `add_account` before submitting any transaction.
+
