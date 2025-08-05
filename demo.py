@@ -164,7 +164,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
     explain("Transaction accepted into mempool")
     try:
         bc.submit_transaction(stx)
-    except ValueError:
+    except the_block.ErrDuplicateTx:
         explain("Duplicate submission rejected")
     bad_selector = the_block.RawTxPayload(
         from_="miner",
@@ -179,7 +179,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
     try:
         stx_bad = the_block.sign_tx(list(priv), bad_selector)
         bc.submit_transaction(stx_bad)
-    except ValueError:
+    except the_block.ErrInvalidSelector:
         explain("Transaction with bad selector rejected")
     overflow_payload = the_block.RawTxPayload(
         from_="miner",
@@ -194,7 +194,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
     try:
         stx_over = the_block.sign_tx(list(priv), overflow_payload)
         bc.submit_transaction(stx_over)
-    except ValueError:
+    except the_block.ErrFeeOverflow:
         explain("Transaction with overflow fee rejected")
 
 

@@ -11,6 +11,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
+    TxAdmissionError,
 };
 
 fn init() {
@@ -163,7 +164,7 @@ fn test_rejects_invalid_signature() {
         amount_industrial: 2,
         fee: 0,
         fee_selector: 0,
-        nonce: 0,
+        nonce: 1,
         memo: Vec::new(),
     };
     // sign with wrong key (priv_bad + 1)
@@ -172,7 +173,7 @@ fn test_rejects_invalid_signature() {
     let mut tx = sign_tx(wrong, payload.clone()).expect("valid key");
     tx.public_key = pub_bytes.clone();
     let res = bc.submit_transaction(tx);
-    assert!(res.is_err(), "Bad signature should be rejected");
+    assert!(matches!(res, Err(TxAdmissionError::BadSignature)));
 }
 
 // 3. Double-spend / overspend is always rejected
@@ -189,7 +190,7 @@ fn test_double_spend_is_rejected() {
     let tx = testutil::build_signed_tx(&privkey, "miner", "alice", amt_cons, amt_ind, fee, 1);
 
     let res = bc.submit_transaction(tx);
-    assert!(res.is_err(), "Overspend should be rejected");
+    assert!(matches!(res, Err(TxAdmissionError::InsufficientBalance)));
 }
 
 // 4. Emission/Decay and Cap logic
@@ -264,7 +265,7 @@ fn test_replay_attack_prevention() {
 
     // replay
     let res = bc.submit_transaction(tx);
-    assert!(res.is_err());
+    assert!(matches!(res, Err(TxAdmissionError::Duplicate)));
 }
 
 // 7. Mempool flush on block mine
@@ -340,7 +341,7 @@ fn test_pending_nonce_and_balances() {
     bc.submit_transaction(tx1).unwrap();
     // gap nonce is rejected
     let gap = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 3);
-    assert!(bc.submit_transaction(gap).is_err());
+    assert!(matches!(bc.submit_transaction(gap), Err(TxAdmissionError::BadNonce)));
     // sequential nonce succeeds
     let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 2);
     bc.submit_transaction(tx2).unwrap();
@@ -352,7 +353,7 @@ fn test_pending_nonce_and_balances() {
 
     // overspend beyond effective balance fails
     let huge = testutil::build_signed_tx(&privkey, "miner", "alice", u64::MAX / 2, 0, 0, 3);
-    assert!(bc.submit_transaction(huge).is_err());
+    assert!(matches!(bc.submit_transaction(huge), Err(TxAdmissionError::InsufficientBalance)));
 
     bc.mine_block("miner").unwrap();
     let sender = bc.accounts.get("miner").unwrap();
