@@ -12,10 +12,11 @@ use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 #[cfg(feature = "telemetry")]
 use log::{info, warn};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 use pyo3::PyTypeInfo;
+use pyo3::create_exception;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -24,6 +25,7 @@ use std::sync::{Arc, Mutex};
 mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
+use thiserror::Error;
 
 pub mod blockchain;
 use blockchain::difficulty;
@@ -41,6 +43,55 @@ pub mod fee;
 pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
+
+// === Transaction admission errors ===
+
+#[derive(Debug, Error, PartialEq)]
+pub enum TxAdmissionError {
+    #[error("unknown sender")]
+    UnknownSender,
+    #[error("insufficient balance")]
+    InsufficientBalance,
+    #[error("bad nonce")]
+    BadNonce,
+    #[error("invalid selector")]
+    InvalidSelector,
+    #[error("bad signature")]
+    BadSignature,
+    #[error("duplicate transaction")]
+    Duplicate,
+    #[error("transaction not found")]
+    NotFound,
+    #[error("balance overflow")]
+    BalanceOverflow,
+    #[error("fee overflow")]
+    FeeOverflow,
+}
+
+create_exception!(the_block, ErrUnknownSender, PyException);
+create_exception!(the_block, ErrInsufficientBalance, PyException);
+create_exception!(the_block, ErrBadNonce, PyException);
+create_exception!(the_block, ErrBadSignature, PyException);
+create_exception!(the_block, ErrDuplicateTx, PyException);
+create_exception!(the_block, ErrTxNotFound, PyException);
+
+impl From<TxAdmissionError> for PyErr {
+    fn from(e: TxAdmissionError) -> Self {
+        match e {
+            TxAdmissionError::UnknownSender => ErrUnknownSender::new_err("unknown sender"),
+            TxAdmissionError::InsufficientBalance => {
+                ErrInsufficientBalance::new_err("insufficient balance")
+            }
+            TxAdmissionError::BadNonce => ErrBadNonce::new_err("bad nonce"),
+            TxAdmissionError::InvalidSelector => ErrInvalidSelector::new_err("invalid selector"),
+            TxAdmissionError::BadSignature => ErrBadSignature::new_err("bad signature"),
+            TxAdmissionError::Duplicate => ErrDuplicateTx::new_err("duplicate transaction"),
+            TxAdmissionError::NotFound => ErrTxNotFound::new_err("transaction not found"),
+            TxAdmissionError::BalanceOverflow => PyValueError::new_err("balance overflow"),
+            TxAdmissionError::FeeOverflow => ErrFeeOverflow::new_err("fee overflow"),
+        }
+    }
+}
 
 // === Database keys ===
 const DB_CHAIN: &str = "chain";
@@ -595,8 +646,8 @@ impl Blockchain {
     /// Submit a signed transaction to the mempool.
     ///
     /// # Errors
-    /// Returns a [`PyValueError`] if validation fails or the sender is missing.
-    pub fn submit_transaction(&mut self, tx: SignedTransaction) -> PyResult<()> {
+    /// Returns [`TxAdmissionError`] if validation fails or the sender is missing.
+    pub fn submit_transaction(&mut self, tx: SignedTransaction) -> Result<(), TxAdmissionError> {
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
         let lock = self
@@ -604,68 +655,68 @@ impl Blockchain {
             .entry(sender_addr.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
-        let _guard = lock
-            .lock()
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let _guard = lock.lock().map_err(|_| TxAdmissionError::UnknownSender)?;
 
         if tx.payload.fee_selector > 2 {
             #[cfg(feature = "telemetry")]
-            warn!("tx rejected sender={sender_addr} reason=invalid_fee_selector",);
-            return Err(PyValueError::new_err("Invalid fee selector"));
+            warn!("tx rejected sender={sender_addr} nonce={nonce} reason=invalid_selector");
+            return Err(TxAdmissionError::InvalidSelector);
         }
         let (fee_consumer, fee_industrial) =
             crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
-                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                .map_err(|e| match e {
+                    FeeError::InvalidSelector => TxAdmissionError::InvalidSelector,
+                    FeeError::Overflow => TxAdmissionError::FeeOverflow,
+                })?;
         let total_consumer = tx
             .payload
             .amount_consumer
             .checked_add(fee_consumer)
-            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+            .ok_or(TxAdmissionError::FeeOverflow)?;
         let total_industrial = tx
             .payload
             .amount_industrial
             .checked_add(fee_industrial)
-            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+            .ok_or(TxAdmissionError::FeeOverflow)?;
 
         match self.mempool.entry((sender_addr.clone(), nonce)) {
             dashmap::mapref::entry::Entry::Occupied(_) => {
                 #[cfg(feature = "telemetry")]
-                warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate",);
-                Err(PyValueError::new_err("Duplicate transaction"))
+                warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                Err(TxAdmissionError::Duplicate)
             }
             dashmap::mapref::entry::Entry::Vacant(vacant) => {
                 let sender = self.accounts.get_mut(&sender_addr).ok_or_else(|| {
                     #[cfg(feature = "telemetry")]
-                    warn!("tx rejected sender={sender_addr} reason=unknown_sender");
-                    PyValueError::new_err("Sender not found")
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
+                    TxAdmissionError::UnknownSender
                 })?;
                 let required_consumer = sender
                     .pending
                     .consumer
                     .checked_add(total_consumer)
-                    .ok_or_else(|| PyValueError::new_err("Balance overflow"))?;
-                let required_industrial =
-                    sender
-                        .pending
-                        .industrial
-                        .checked_add(total_industrial)
-                        .ok_or_else(|| PyValueError::new_err("Balance overflow"))?;
+                    .ok_or(TxAdmissionError::BalanceOverflow)?;
+                let required_industrial = sender
+                    .pending
+                    .industrial
+                    .checked_add(total_industrial)
+                    .ok_or(TxAdmissionError::BalanceOverflow)?;
                 if sender.balance.consumer < required_consumer
                     || sender.balance.industrial < required_industrial
                 {
                     #[cfg(feature = "telemetry")]
-                    warn!("tx rejected sender={sender_addr} reason=insufficient_balance",);
-                    return Err(PyValueError::new_err("Insufficient balance"));
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
+                    return Err(TxAdmissionError::InsufficientBalance);
                 }
                 if nonce != sender.nonce + sender.pending.nonce + 1 {
                     #[cfg(feature = "telemetry")]
-                    warn!("tx rejected sender={sender_addr} reason=bad_nonce");
-                    return Err(PyValueError::new_err("Bad nonce"));
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_nonce");
+                    return Err(TxAdmissionError::BadNonce);
                 }
                 if !verify_signed_tx(tx.clone()) {
                     #[cfg(feature = "telemetry")]
-                    warn!("tx rejected sender={sender_addr} reason=bad_signature");
-                    return Err(PyValueError::new_err("Signature verification failed"));
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
+                    return Err(TxAdmissionError::BadSignature);
                 }
                 let reservation =
                     Reservation::new(&mut sender.pending, total_consumer, total_industrial);
@@ -674,10 +725,7 @@ impl Blockchain {
                 vacant.insert(tx);
                 reservation.commit();
                 #[cfg(feature = "telemetry")]
-                info!(
-                    "tx accepted sender={sender_addr} nonce={nonce} id={}",
-                    hex::encode(tx_id)
-                );
+                info!("tx accepted sender={sender_addr} nonce={nonce} reason=accepted id={}", hex::encode(tx_id));
                 Ok(())
             }
         }
@@ -686,8 +734,8 @@ impl Blockchain {
     /// Remove a pending transaction and release reserved balances.
     ///
     /// # Errors
-    /// Returns [`PyValueError`] if the transaction is absent.
-    pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> PyResult<()> {
+    /// Returns [`TxAdmissionError::NotFound`] if the transaction is absent.
+    pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> Result<(), TxAdmissionError> {
         if let Some((_, tx)) = self.mempool.remove(&(sender.to_string(), nonce)) {
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
@@ -702,12 +750,12 @@ impl Blockchain {
                 }
             }
             #[cfg(feature = "telemetry")]
-            info!("tx dropped sender={sender} nonce={nonce}");
+            info!("tx dropped sender={sender} nonce={nonce} reason=dropped");
             Ok(())
         } else {
             #[cfg(feature = "telemetry")]
-            warn!("drop failed sender={sender} nonce={nonce} reason=not_found",);
-            Err(PyValueError::new_err("Transaction not found"))
+            warn!("drop failed sender={sender} nonce={nonce} reason=not_found");
+            Err(TxAdmissionError::NotFound)
         }
     }
 
@@ -1409,5 +1457,14 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "ErrInvalidSelector",
         fee::ErrInvalidSelector::type_object(m.py()),
     )?;
+    m.add("ErrUnknownSender", ErrUnknownSender::type_object(m.py()))?;
+    m.add(
+        "ErrInsufficientBalance",
+        ErrInsufficientBalance::type_object(m.py()),
+    )?;
+    m.add("ErrBadNonce", ErrBadNonce::type_object(m.py()))?;
+    m.add("ErrBadSignature", ErrBadSignature::type_object(m.py()))?;
+    m.add("ErrDuplicateTx", ErrDuplicateTx::type_object(m.py()))?;
+    m.add("ErrTxNotFound", ErrTxNotFound::type_object(m.py()))?;
     Ok(())
 }
