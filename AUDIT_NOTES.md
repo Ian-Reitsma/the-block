@@ -66,7 +66,7 @@ technical debt.
 
 ## 9. Invariant Specification (ECONOMICS.md)
 - INV‑FEE‑01 and INV‑FEE‑02 are documented with prose and minimal algebra. For formal verification, expand the algebraic chain showing `fee_ct + fee_it = f` and the bounds proofs for each selector case.
-- `$comment` in `spec/fee_v2.schema.json` references ECONOMICS.md lines 11‑20 and 22‑30. These line numbers will drift; replace with named anchors or commit hashes to maintain traceability.
+- `$comment` in `spec/fee_v2.schema.json` references `ECONOMICS.md#inv-fee-01` and `#inv-fee-02` via named anchors to avoid drift.
 - Provide explicit quantification over blocks and transactions in the invariants to reduce ambiguity for F★ translators.
 
 ## 10. Admission Pipeline Hardening

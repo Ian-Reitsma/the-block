@@ -194,15 +194,22 @@ This software is an experimental blockchain kernel for research and development.
 ---
 
 ## License
-Copyright (c) 2025 IJR Enterprises, Inc. All rights reserved.
-THE-BLOCK and all proprietary innovations, algorithms, and blockchain mechanisms implemented in this repository
-are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope,
-including the replication of design, consensus mechanisms, or novel features unique to THE-BLOCK, 
-requires prior written consent.
 
-This software and all blockchain-related code, protocols, and original documentation contained herein
-are the exclusive property of IJR Enterprises, Inc. Unauthorized reproduction, modification, 
-distribution, or use of any part of this blockchain system is strictly prohibited except as 
-expressly permitted by a written license from IJR Enterprises, Inc.
+Copyright 2025 IJR Enterprises, Inc.
 
-For licensing or commercial inquiries, contact: ijr.ent.inc@gmail.com
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this project except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the [LICENSE](LICENSE) for the specific language
+governing permissions and limitations under the License.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in this project by you, as defined in the
+[LICENSE](LICENSE), shall be licensed as described above, without any
+additional terms or conditions.

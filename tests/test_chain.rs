@@ -5,12 +5,13 @@
 //
 // Integration tests covering chain invariants and edge cases.
 
+use base64::Engine;
 use proptest::prelude::*;
-use std::fs;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use std::{fs, path::Path};
 use the_block::{
-    generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
+    generate_keypair, sign_tx, Blockchain, ChainDisk, RawTxPayload, SignedTransaction, TokenAmount,
     TxAdmissionError,
 };
 
@@ -20,6 +21,39 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
+    let _ = fs::remove_dir_all("temp");
+    let _ = fs::remove_dir_all("temp_prop");
+}
+
+fn load_fixture(name: &str) {
+    let _ = fs::remove_dir_all("chain_db");
+    fs::create_dir_all("chain_db").unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+        .join("db.b64");
+    let b64 = fs::read_to_string(src).unwrap();
+    let clean: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(clean)
+        .unwrap();
+    let dst = Path::new("chain_db").join("db");
+    fs::write(dst, bytes).unwrap();
+}
+
+fn hash_state(bc: &Blockchain) -> String {
+    let disk = ChainDisk {
+        schema_version: bc.schema_version(),
+        chain: bc.chain.clone(),
+        accounts: bc.accounts.clone(),
+        emission_consumer: bc.emission_consumer,
+        emission_industrial: bc.emission_industrial,
+        block_reward_consumer: bc.block_reward_consumer,
+        block_reward_industrial: bc.block_reward_industrial,
+        block_height: bc.block_height,
+    };
+    let bytes = bincode::serialize(&disk).unwrap();
+    blake3::hash(&bytes).to_hex().to_string()
 }
 
 // === Helper for signing transactions ===
@@ -102,7 +136,8 @@ proptest! {
     #[test]
     fn prop_mempool_concurrency(ops in prop::collection::vec(0u8..3, 1..10)) {
         init();
-        let bc = Arc::new(RwLock::new(Blockchain::new()));
+        let _ = fs::remove_dir_all("temp_prop");
+        let bc = Arc::new(RwLock::new(Blockchain::open("temp_prop").unwrap()));
         {
             let mut w = bc.write().unwrap();
             w.add_account("miner".into(), 0, 0).unwrap();
@@ -152,7 +187,6 @@ proptest! {
 fn test_rejects_invalid_signature() {
     init();
     let mut bc = Blockchain::new();
-    bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
 
@@ -181,7 +215,6 @@ fn test_rejects_invalid_signature() {
 fn test_double_spend_is_rejected() {
     init();
     let mut bc = Blockchain::new();
-    bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
 
@@ -233,7 +266,6 @@ fn test_coinbase_reward_recorded() {
 fn test_fee_credit_to_miner() {
     init();
     let mut bc = Blockchain::new();
-    bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
 
@@ -341,7 +373,10 @@ fn test_pending_nonce_and_balances() {
     bc.submit_transaction(tx1).unwrap();
     // gap nonce is rejected
     let gap = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 3);
-    assert!(matches!(bc.submit_transaction(gap), Err(TxAdmissionError::BadNonce)));
+    assert!(matches!(
+        bc.submit_transaction(gap),
+        Err(TxAdmissionError::BadNonce)
+    ));
     // sequential nonce succeeds
     let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 2);
     bc.submit_transaction(tx2).unwrap();
@@ -353,7 +388,10 @@ fn test_pending_nonce_and_balances() {
 
     // overspend beyond effective balance fails
     let huge = testutil::build_signed_tx(&privkey, "miner", "alice", u64::MAX / 2, 0, 0, 3);
-    assert!(matches!(bc.submit_transaction(huge), Err(TxAdmissionError::InsufficientBalance)));
+    assert!(matches!(
+        bc.submit_transaction(huge),
+        Err(TxAdmissionError::InsufficientBalance)
+    ));
 
     bc.mine_block("miner").unwrap();
     let sender = bc.accounts.get("miner").unwrap();
@@ -366,7 +404,7 @@ fn test_pending_nonce_and_balances() {
 #[test]
 fn test_drop_transaction_releases_pending() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::open("temp_drop").unwrap();
     bc.add_account("miner".into(), 5, 5).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     let (privkey, _pub) = generate_keypair();
@@ -549,4 +587,45 @@ fn test_chain_determinism() {
     bc2.mine_block("miner").unwrap();
 
     assert_eq!(bc1.chain, bc2.chain);
+}
+
+#[test]
+#[ignore]
+fn test_schema_upgrade_compatibility() {
+    init();
+    for fixture in ["v1", "v2"] {
+        load_fixture(fixture);
+        let bc = Blockchain::open("chain_db").unwrap();
+        let (em_c, em_i) = bc.circulating_supply();
+        assert_eq!(em_c, 60_000);
+        assert_eq!(em_i, 30_000);
+        for acc in bc.accounts.values() {
+            assert_eq!(acc.pending.consumer, 0);
+            assert_eq!(acc.pending.industrial, 0);
+            assert_eq!(acc.pending.nonce, 0);
+        }
+    }
+}
+
+#[test]
+fn test_snapshot_rollback() {
+    init();
+    load_fixture("v2");
+    let mut bc = Blockchain::open("chain_db").unwrap();
+    let before = hash_state(&bc);
+    bc.persist_chain().unwrap();
+    let src = Path::new("chain_db").join("db");
+    fs::create_dir_all("snapshot").unwrap();
+    let dst = Path::new("snapshot").join("db");
+    fs::copy(&src, &dst).unwrap();
+    for _ in 0..3 {
+        bc.mine_block("miner").unwrap();
+    }
+    bc.persist_chain().unwrap();
+    drop(bc);
+    fs::copy(&dst, &src).unwrap();
+    let bc2 = Blockchain::open("chain_db").unwrap();
+    let after = hash_state(&bc2);
+    assert_eq!(before, after);
+    fs::remove_dir_all("snapshot").unwrap();
 }

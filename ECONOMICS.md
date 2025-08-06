@@ -8,7 +8,7 @@
 - **Fee Base (f)** — raw `u64` supplied by the sender; admission enforces `f < 2^63`.
 - **Fee Allocation Vector (Δf_miner, Δf_sender)** — ordered pair of per‑token balance deltas applied at commit time.
 
-## Invariant INV-FEE-01 — Supply Neutrality
+## Invariant INV-FEE-01 — Supply Neutrality <a id="inv-fee-01"></a>
 
 For every block `B` and token `T ∈ {CT, IT}`:
 
@@ -19,7 +19,7 @@ For every block `B` and token `T ∈ {CT, IT}`:
 
 When `ν = 2`, let `f = 2k + r` with `r ∈ {0,1}`. The decomposition yields `fee_ct = k + r` and `fee_it = k`. Thus `fee_ct + fee_it = 2k + r = f`, preserving total supply even when `f` is odd.
 
-## Invariant INV-FEE-02 — Overflow Safety
+## Invariant INV-FEE-02 — Overflow Safety <a id="inv-fee-02"></a>
 
 For every transaction `tx` and token class `T`:
 

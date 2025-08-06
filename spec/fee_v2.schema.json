@@ -10,5 +10,15 @@
   },
   "required": ["selector", "fee", "fee_ct", "fee_it"],
   "additionalProperties": false,
-  "$comment": "INV-FEE-01 see ECONOMICS.md lines 11-20; INV-FEE-02 see ECONOMICS.md lines 22-30"
+  "examples": [
+    {"selector": 2, "fee": 100, "fee_ct": 50, "fee_it": 50},
+    {
+      "selector": 3,
+      "fee": 1,
+      "fee_ct": 0,
+      "fee_it": 1,
+      "$comment": "invalid selector: must be <=2"
+    }
+  ],
+  "$comment": "INV-FEE-01/02 see ECONOMICS.md#inv-fee-01/#inv-fee-02"
 }

@@ -28,6 +28,7 @@ features = ["pyo3/extension-module"]
 
 [dev-dependencies]
 logtest = "2"
+base64 = "0.22"
 
 [build-dependencies]
 blake3 = "1"

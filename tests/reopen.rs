@@ -24,8 +24,6 @@ fn open_mine_reopen() {
     }
 
     let mut bc = Blockchain::open("chain_db").unwrap();
-    bc.add_account("a".into(), 10, 10).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
     let payload = RawTxPayload {
         from_: "a".into(),
         to: "b".into(),
