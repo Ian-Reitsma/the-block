@@ -4,7 +4,6 @@ use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTrans
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    let _ = fs::remove_dir_all("temp");
     pyo3::prepare_freethreaded_python();
 }
 

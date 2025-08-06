@@ -148,6 +148,10 @@ CI is GitHub Actions; each push/PR runs **seven** jobs:
 5. **Udeps** — `cargo +nightly udeps --all-targets` ensures no unused dependencies.
 6. **Fuzz Smoke** — 1 k iterations per target to catch obvious regressions.
 7. **Wheel Build** — `maturin build` and `auditwheel show` to confirm manylinux compliance.
+8. **Isolation** — each test uses `unique_path` so every `Blockchain` instance
+   writes to a fresh temp directory and removes it on drop.
+9. **Replay Guard** — `test_replay_attack_prevention` exercises the
+   `(sender, nonce)` dedup logic; duplicates must be rejected.
 
 Badge status must stay green on `main`.  Failing `main` blocks all merges.
 
@@ -249,7 +253,8 @@ pub struct SignedTransaction {
 | Replay across networks | Domain tag with `chain_id` embedded in sign bytes         |
 | Serialization mismatch | Cross‑lang determinism test; CI blocks PR if bytes differ |
 | Signature malleability | `verify_strict`; rejects non‑canonical sigs               |
-| DB corruption          | in-memory storage; no on-disk state                        |
+| DB corruption          | per-run temp dirs cleaned on drop prevent leftover state |
+| Duplicate (sender, nonce) | HashSet guard rejects repeats; replay test active     |
 | Unsafe code            | `#![forbid(unsafe_code)]`; CI gate                        |
 
 All cryptographic code is dependency‑pinned; update via dedicated “crypto‑upgrade” PRs.
@@ -258,7 +263,10 @@ All cryptographic code is dependency‑pinned; update via dedicated “crypto‑
 
 ## 12 · Persistence & State
 
-* **Storage** is an in-memory map; data is ephemeral and written to disk via higher-level tooling.
+* **Storage** is an in-memory map; data is ephemeral and written to disk via
+  higher-level tooling.
+* `Blockchain::new()` allocates a fresh temp directory per instance and deletes
+  it on drop; tests call `unique_path()` to avoid state leakage.
 * No built-in snapshot/backups yet; persistence layer open for future work.
 
 ---
