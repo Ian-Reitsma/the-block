@@ -9,7 +9,6 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
-    let _ = fs::remove_dir_all("temp");
 }
 
 #[test]

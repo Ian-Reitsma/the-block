@@ -7,6 +7,7 @@
 
 use base64::Engine;
 use proptest::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::{fs, path::Path};
@@ -21,13 +22,17 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
-    let _ = fs::remove_dir_all("temp");
-    let _ = fs::remove_dir_all("temp_prop");
 }
 
-fn load_fixture(name: &str) {
-    let _ = fs::remove_dir_all("chain_db");
-    fs::create_dir_all("chain_db").unwrap();
+fn unique_path(prefix: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
+}
+
+fn load_fixture(name: &str) -> String {
+    let dir = unique_path("chain_db");
+    fs::create_dir_all(&dir).unwrap();
     let src = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
@@ -37,8 +42,9 @@ fn load_fixture(name: &str) {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(clean)
         .unwrap();
-    let dst = Path::new("chain_db").join("db");
-    fs::write(dst, bytes).unwrap();
+    let dst = Path::new(&dir).join("db");
+    fs::write(&dst, bytes).unwrap();
+    dir
 }
 
 fn hash_state(bc: &Blockchain) -> String {
@@ -133,52 +139,56 @@ proptest! {
 
 // 1b. Concurrent mempool operations should not leave pending reservations
 proptest! {
-    #[test]
-    fn prop_mempool_concurrency(ops in prop::collection::vec(0u8..3, 1..10)) {
-        init();
-        let _ = fs::remove_dir_all("temp_prop");
-        let bc = Arc::new(RwLock::new(Blockchain::open("temp_prop").unwrap()));
-        {
-            let mut w = bc.write().unwrap();
-            w.add_account("miner".into(), 0, 0).unwrap();
-            w.mine_block("miner").unwrap();
-        }
-        let (priv_bytes, _pub) = generate_keypair();
-        let ops_vec = ops.clone();
-        let handles: Vec<_> = ops_vec.into_iter().enumerate().map(|(i, op)| {
-            let bc = bc.clone();
-            let priv_bytes = priv_bytes.clone();
-            std::thread::spawn(move || {
-                match op % 3 {
-                    0 => {
-                        let tx = testutil::build_signed_tx(
-                            &priv_bytes,
-                            "miner",
-                            "miner",
-                            0,
-                            0,
-                            0,
-                            i as u64 + 1,
-                        );
-                        let _ = bc.write().unwrap().submit_transaction(tx);
-                    }
-                    1 => {
-                        let _ = bc
-                            .write()
-                            .unwrap()
-                            .drop_transaction("miner", i as u64 + 1);
-                    }
-                    _ => {
-                        let _ = bc.write().unwrap().mine_block("miner");
-                    }
-                }
-            })
-        }).collect();
-        for h in handles { let _ = h.join(); }
+  #[test]
+  fn prop_mempool_concurrency(ops in prop::collection::vec(0u8..3, 1..10)) {
+      init();
+      let path = unique_path("temp_prop");
+      let _ = fs::remove_dir_all(&path);
+      let bc = Arc::new(RwLock::new(Blockchain::open(&path).unwrap()));
+      {
+          let mut w = bc.write().unwrap();
+          w.add_account("miner".into(), 0, 0).unwrap();
+          w.mine_block("miner").unwrap();
+      }
+      let (priv_bytes, _pub) = generate_keypair();
+      let ops_vec = ops.clone();
+      let handles: Vec<_> = ops_vec.into_iter().enumerate().map(|(i, op)| {
+          let bc = bc.clone();
+          let priv_bytes = priv_bytes.clone();
+          std::thread::spawn(move || {
+              match op % 3 {
+                  0 => {
+                      let tx = testutil::build_signed_tx(
+                          &priv_bytes,
+                          "miner",
+                          "miner",
+                          0,
+                          0,
+                          0,
+                          i as u64 + 1,
+                      );
+                      let _ = bc.write().unwrap().submit_transaction(tx);
+                  }
+                  1 => {
+                      let _ = bc
+                          .write()
+                          .unwrap()
+                          .drop_transaction("miner", i as u64 + 1);
+                  }
+                  _ => {
+                      let _ = bc.write().unwrap().mine_block("miner");
+                  }
+              }
+          })
+      }).collect();
+      for h in handles { let _ = h.join(); }
         let guard = bc.read().unwrap();
         let miner = guard.accounts.get("miner").unwrap();
         assert_eq!(miner.pending.consumer, 0);
         assert_eq!(miner.pending.industrial, 0);
+        drop(guard);
+        drop(bc);
+        let _ = fs::remove_dir_all(&path);
     }
 }
 
@@ -281,9 +291,8 @@ fn test_fee_credit_to_miner() {
     assert!(after.consumer >= before.consumer + fee);
 }
 
-// 6. Replay attack prevention (stubbed)
+// 6. Replay attack prevention
 #[test]
-#[ignore = "Enable after adding nonce/txid"]
 fn test_replay_attack_prevention() {
     init();
     let mut bc = Blockchain::new();
@@ -594,8 +603,8 @@ fn test_chain_determinism() {
 fn test_schema_upgrade_compatibility() {
     init();
     for fixture in ["v1", "v2"] {
-        load_fixture(fixture);
-        let bc = Blockchain::open("chain_db").unwrap();
+        let path = load_fixture(fixture);
+        let bc = Blockchain::open(&path).unwrap();
         let (em_c, em_i) = bc.circulating_supply();
         assert_eq!(em_c, 60_000);
         assert_eq!(em_i, 30_000);
@@ -610,11 +619,11 @@ fn test_schema_upgrade_compatibility() {
 #[test]
 fn test_snapshot_rollback() {
     init();
-    load_fixture("v2");
-    let mut bc = Blockchain::open("chain_db").unwrap();
+    let path = load_fixture("v2");
+    let mut bc = Blockchain::open(&path).unwrap();
     let before = hash_state(&bc);
     bc.persist_chain().unwrap();
-    let src = Path::new("chain_db").join("db");
+    let src = Path::new(&path).join("db");
     fs::create_dir_all("snapshot").unwrap();
     let dst = Path::new("snapshot").join("db");
     fs::copy(&src, &dst).unwrap();
@@ -624,7 +633,7 @@ fn test_snapshot_rollback() {
     bc.persist_chain().unwrap();
     drop(bc);
     fs::copy(&dst, &src).unwrap();
-    let bc2 = Blockchain::open("chain_db").unwrap();
+    let bc2 = Blockchain::open(&path).unwrap();
     let after = hash_state(&bc2);
     assert_eq!(before, after);
     fs::remove_dir_all("snapshot").unwrap();

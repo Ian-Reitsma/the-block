@@ -86,6 +86,9 @@ Bootstrap steps:
 | End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` |
 | Lint / Style | `cargo fmt -- --check` | No diffs |
 
+All tests run in isolated temp directories via `unique_path`, preventing state
+leakage between cases. Paths are removed once the chain drops.
+
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
 
 ---
@@ -129,7 +132,8 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 * **Signature** – Ed25519 strict; signing bytes are `DOMAIN_TAG | bincode(payload)`.
 * **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
 * **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each. The header records `coinbase_consumer` and `coinbase_industrial` using a `TokenAmount` wrapper so light clients can audit supply without replaying the chain.
-* **Storage** – in-memory SimpleDb; prototype does not persist to disk.
+* **Storage** – in-memory `SimpleDb` backed by a per-run temp directory.
+  `Blockchain::new` removes the directory on drop so state never leaks across tests.
 * **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
 * **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
 

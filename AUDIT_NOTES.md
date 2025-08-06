@@ -3,6 +3,9 @@
 ## Recent Fixes
 - Enforced compile-time genesis hash verification and centralized genesis hash computation. **COMPLETED/DONE** [commit: e10b9cb]
 - Patched `bootstrap.sh` to install missing build tools and hard-fail on venv mismatches. **COMPLETED/DONE** [commit: e10b9cb]
+- Isolated chain state into per-test temp directories and cleaned them on drop;
+  replay attack prevention test now asserts duplicate `(sender, nonce)` pairs are
+  rejected. **COMPLETED/DONE**
 
 The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the existing repository snapshot (commit `20ac136e`). Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference the repository at the same commit.
 

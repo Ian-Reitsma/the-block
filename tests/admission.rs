@@ -6,7 +6,6 @@ use the_block::{
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    let _ = fs::remove_dir_all("temp");
     pyo3::prepare_freethreaded_python();
 }
 

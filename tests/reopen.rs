@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
 
 fn init() {
@@ -8,22 +9,29 @@ fn init() {
     ONCE.call_once(|| {
         pyo3::prepare_freethreaded_python();
     });
-    let _ = fs::remove_dir_all("chain_db");
+}
+
+fn unique_path(prefix: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
 }
 
 #[test]
 fn open_mine_reopen() {
     init();
     let (priv_a, _) = generate_keypair();
+    let path = unique_path("chain_db");
+    let _ = fs::remove_dir_all(&path);
 
     {
-        let mut bc = Blockchain::open("chain_db").unwrap();
+        let mut bc = Blockchain::open(&path).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
     }
 
-    let mut bc = Blockchain::open("chain_db").unwrap();
+    let mut bc = Blockchain::open(&path).unwrap();
     let payload = RawTxPayload {
         from_: "a".into(),
         to: "b".into(),

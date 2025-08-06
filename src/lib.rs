@@ -1300,10 +1300,15 @@ impl Blockchain {
 }
 
 impl Blockchain {
-    /// Open the default temp path used by tests
+    /// Open an isolated temp path used by tests
     #[must_use]
     pub fn new() -> Self {
-        Self::open("temp").unwrap_or_else(|e| panic!("DB open: {e}"))
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let path = format!("temp/{id}");
+        let _ = std::fs::remove_dir_all(&path);
+        Self::open(&path).unwrap_or_else(|e| panic!("DB open: {e}"))
     }
 
     #[allow(dead_code)]
