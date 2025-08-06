@@ -133,7 +133,8 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 * **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
 * **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each. The header records `coinbase_consumer` and `coinbase_industrial` using a `TokenAmount` wrapper so light clients can audit supply without replaying the chain.
 * **Storage** – in-memory `SimpleDb` backed by a per-run temp directory.
-  `Blockchain::new` removes the directory on drop so state never leaks across tests.
+  `Blockchain::new(path)` removes the directory on drop so state never leaks
+  across tests.
 * **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
 * **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
 

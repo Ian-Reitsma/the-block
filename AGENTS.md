@@ -265,8 +265,9 @@ All cryptographic code is dependency‑pinned; update via dedicated “crypto‑
 
 * **Storage** is an in-memory map; data is ephemeral and written to disk via
   higher-level tooling.
-* `Blockchain::new()` allocates a fresh temp directory per instance and deletes
-  it on drop; tests call `unique_path()` to avoid state leakage.
+* `Blockchain` stores its backing `path` and its `Drop` impl removes that
+  directory. `Blockchain::new(path)` expects a unique temp directory; tests call
+  `unique_path()` to avoid state leakage.
 * No built-in snapshot/backups yet; persistence layer open for future work.
 
 ---

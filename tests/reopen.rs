@@ -29,6 +29,8 @@ fn open_mine_reopen() {
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
+        // Keep the database directory for the reopen but close handles cleanly.
+        bc.path.clear();
     }
 
     let mut bc = Blockchain::open(&path).unwrap();

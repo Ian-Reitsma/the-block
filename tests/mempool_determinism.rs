@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
 
 fn init() {
@@ -9,6 +10,12 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
+}
+
+fn unique_path(prefix: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
 }
 
 #[test]
@@ -43,8 +50,8 @@ fn mempool_order_invariant() {
         sign_tx(priv_b.to_vec(), payload).unwrap()
     };
 
-    let mut chain_a = Blockchain::new();
-    let mut chain_b = Blockchain::new();
+    let mut chain_a = Blockchain::new(&unique_path("temp_mempool"));
+    let mut chain_b = Blockchain::new(&unique_path("temp_mempool"));
     for bc in [&mut chain_a, &mut chain_b].iter_mut() {
         bc.add_account("a".into(), 10, 10).unwrap();
         bc.add_account("b".into(), 10, 10).unwrap();

@@ -24,6 +24,11 @@ fn init() {
     let _ = fs::remove_dir_all("chain_db");
 }
 
+/// Generate a unique path segment for test directories.
+///
+/// The segment is relative and should be wrapped with `Path::new`/`PathBuf`
+/// before use so platform-specific separators (Linux/macOS) are handled
+/// correctly.
 fn unique_path(prefix: &str) -> String {
     static COUNT: AtomicUsize = AtomicUsize::new(0);
     let id = COUNT.fetch_add(1, Ordering::Relaxed);
@@ -112,7 +117,7 @@ proptest! {
         fee in 0u64..100,
     ) {
         init();
-        let mut bc = Blockchain::new();
+        let mut bc = Blockchain::new(&unique_path("temp_chain"));
         let miner = &miners[0];
         bc.add_account(miner.clone(), 0, 0).unwrap();
         bc.add_account(alice.clone(), 0, 0).unwrap();
@@ -196,7 +201,7 @@ proptest! {
 #[test]
 fn test_rejects_invalid_signature() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
 
@@ -224,7 +229,7 @@ fn test_rejects_invalid_signature() {
 #[test]
 fn test_double_spend_is_rejected() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
 
@@ -240,7 +245,7 @@ fn test_double_spend_is_rejected() {
 #[test]
 fn test_block_reward_decays_and_emission_caps() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
     let mut last = bc.block_reward_consumer;
@@ -263,7 +268,7 @@ fn test_block_reward_decays_and_emission_caps() {
 #[test]
 fn test_coinbase_reward_recorded() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     let block = bc.mine_block("miner").unwrap();
     let cb = &block.transactions[0];
@@ -275,7 +280,7 @@ fn test_coinbase_reward_recorded() {
 #[test]
 fn test_fee_credit_to_miner() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
 
@@ -295,7 +300,7 @@ fn test_fee_credit_to_miner() {
 #[test]
 fn test_replay_attack_prevention() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -313,7 +318,7 @@ fn test_replay_attack_prevention() {
 #[test]
 fn test_mempool_flush_on_block_mine() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -332,7 +337,7 @@ fn test_mempool_flush_on_block_mine() {
 #[test]
 fn test_duplicate_txid_rejected() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -351,7 +356,7 @@ fn test_duplicate_txid_rejected() {
 #[test]
 fn test_duplicate_sender_nonce_rejected_in_block() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -371,7 +376,7 @@ fn test_duplicate_sender_nonce_rejected_in_block() {
 #[test]
 fn test_pending_nonce_and_balances() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -432,7 +437,7 @@ fn test_drop_transaction_releases_pending() {
 #[test]
 fn test_fee_checksum_enforced() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -449,7 +454,7 @@ fn test_fee_checksum_enforced() {
 #[test]
 fn test_multithreaded_submit_and_mine() {
     init();
-    let bc = Arc::new(RwLock::new(Blockchain::new()));
+    let bc = Arc::new(RwLock::new(Blockchain::new(&unique_path("temp_chain"))));
     {
         let mut chain = write_lock!(bc);
         chain.add_account("miner".into(), 0, 0).unwrap();
@@ -486,7 +491,7 @@ fn test_multithreaded_submit_and_mine() {
 #[test]
 fn test_rejects_corrupt_block() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     let mut block = bc.mine_block("miner").unwrap();
     block.hash = "deadbeef".repeat(8);
@@ -497,13 +502,13 @@ fn test_rejects_corrupt_block() {
 #[test]
 fn test_chain_persistence() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
     let before = bc.get_account_balance("miner").unwrap();
     drop(bc);
 
-    let bc2 = Blockchain::new();
+    let bc2 = Blockchain::new(&unique_path("temp_chain"));
     if let Ok(after) = bc2.get_account_balance("miner") {
         assert_eq!(before.consumer, after.consumer);
     }
@@ -513,8 +518,8 @@ fn test_chain_persistence() {
 #[test]
 fn test_fork_and_reorg_resolution() {
     init();
-    let mut bc1 = Blockchain::new();
-    let mut bc2 = Blockchain::new();
+    let mut bc1 = Blockchain::new(&unique_path("temp_chain"));
+    let mut bc2 = Blockchain::new(&unique_path("temp_chain"));
 
     for bc in [&mut bc1, &mut bc2].iter_mut() {
         bc.add_account("miner".into(), 0, 0).unwrap();
@@ -544,9 +549,10 @@ fn test_fork_and_reorg_resolution() {
 #[test]
 fn test_import_reward_mismatch() {
     init();
-    let mut bc1 = Blockchain::new();
-    let mut bc2 = Blockchain::new();
+    let mut bc1 = Blockchain::new(&unique_path("temp_chain"));
+    let mut bc2 = Blockchain::new(&unique_path("temp_chain"));
     for bc in [&mut bc1, &mut bc2].iter_mut() {
+        assert!(bc.get_account_balance("miner").is_err());
         bc.add_account("miner".into(), 0, 0).unwrap();
         bc.mine_block("miner").unwrap();
     }
@@ -567,7 +573,7 @@ fn test_import_reward_mismatch() {
 #[test]
 fn test_fuzz_unicode_and_overflow_addresses() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_chain"));
     let crazy = "矿工💎🚀𠜎𠜱𡃁𡈽".to_string();
     bc.add_account(crazy.clone(), u64::MAX, u64::MAX).unwrap();
     let bal = bc.get_account_balance(&crazy).unwrap();
@@ -579,8 +585,8 @@ fn test_fuzz_unicode_and_overflow_addresses() {
 #[test]
 fn test_chain_determinism() {
     init();
-    let mut bc1 = Blockchain::new();
-    let mut bc2 = Blockchain::new();
+    let mut bc1 = Blockchain::new(&unique_path("temp_chain"));
+    let mut bc2 = Blockchain::new(&unique_path("temp_chain"));
     for bc in [&mut bc1, &mut bc2].iter_mut() {
         bc.add_account("miner".into(), 0, 0).unwrap();
         bc.mine_block("miner").unwrap();
@@ -599,7 +605,6 @@ fn test_chain_determinism() {
 }
 
 #[test]
-#[ignore]
 fn test_schema_upgrade_compatibility() {
     init();
     for fixture in ["v1", "v2"] {
@@ -623,18 +628,23 @@ fn test_snapshot_rollback() {
     let mut bc = Blockchain::open(&path).unwrap();
     let before = hash_state(&bc);
     bc.persist_chain().unwrap();
-    let src = Path::new(&path).join("db");
-    fs::create_dir_all("snapshot").unwrap();
-    let dst = Path::new("snapshot").join("db");
-    fs::copy(&src, &dst).unwrap();
+    let src_db = Path::new(&path).join("db");
+    let snapshot_dir = unique_path("snapshot");
+    fs::create_dir_all(&snapshot_dir).unwrap();
+    // `Path::join` normalizes separators so the test works on Linux and macOS.
+    let snapshot_db = Path::new(&snapshot_dir).join("db");
+    fs::copy(&src_db, &snapshot_db).unwrap();
     for _ in 0..3 {
         bc.mine_block("miner").unwrap();
     }
     bc.persist_chain().unwrap();
+    // Clear the path so drop closes the DB without deleting the fixture dir.
+    bc.path.clear();
     drop(bc);
-    fs::copy(&dst, &src).unwrap();
+    fs::copy(&snapshot_db, &src_db).unwrap();
     let bc2 = Blockchain::open(&path).unwrap();
     let after = hash_state(&bc2);
     assert_eq!(before, after);
-    fs::remove_dir_all("snapshot").unwrap();
+    drop(bc2);
+    fs::remove_dir_all(&snapshot_dir).unwrap();
 }

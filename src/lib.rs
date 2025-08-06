@@ -324,6 +324,8 @@ pub struct Blockchain {
     pub mempool: DashMap<(String, u64), SignedTransaction>,
     admission_locks: DashMap<String, Arc<Mutex<()>>>,
     db: Db,
+    #[pyo3(get)]
+    pub path: String,
     #[pyo3(get, set)]
     pub emission_consumer: u64,
     #[pyo3(get, set)]
@@ -343,13 +345,21 @@ pub struct Blockchain {
 #[pyclass]
 #[derive(Serialize, Deserialize)]
 pub struct ChainDisk {
+    #[serde(default)]
     pub schema_version: usize,
+    #[serde(default)]
     pub chain: Vec<Block>,
+    #[serde(default)]
     pub accounts: HashMap<String, Account>,
+    #[serde(default)]
     pub emission_consumer: u64,
+    #[serde(default)]
     pub emission_industrial: u64,
+    #[serde(default)]
     pub block_reward_consumer: TokenAmount,
+    #[serde(default)]
     pub block_reward_industrial: TokenAmount,
+    #[serde(default)]
     pub block_height: u64,
 }
 
@@ -362,6 +372,7 @@ impl Default for Blockchain {
             mempool: DashMap::new(),
             admission_locks: DashMap::new(),
             db: Db::default(),
+            path: String::new(),
             emission_consumer: 0,
             emission_industrial: 0,
             block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
@@ -390,7 +401,7 @@ impl Blockchain {
             db.get(DB_CHAIN)
         {
             match bincode::deserialize::<ChainDisk>(&raw) {
-                Ok(disk) => {
+                Ok(mut disk) => {
                     if disk.schema_version > 3 {
                         return Err(PyValueError::new_err("DB schema too new"));
                     }
@@ -429,10 +440,30 @@ impl Blockchain {
                                 &b.transactions,
                             );
                         }
+                        let mut em_c = 0u64;
+                        let mut em_i = 0u64;
+                        for b in &migrated_chain {
+                            em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                            em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                        }
+                        let bh = migrated_chain.len() as u64;
                         let migrated = ChainDisk {
                             schema_version: 3,
                             chain: migrated_chain,
-                            ..disk
+                            accounts: disk.accounts,
+                            emission_consumer: em_c,
+                            emission_industrial: em_i,
+                            block_reward_consumer: if disk.block_reward_consumer.get() == 0 {
+                                TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER)
+                            } else {
+                                disk.block_reward_consumer
+                            },
+                            block_reward_industrial: if disk.block_reward_industrial.get() == 0 {
+                                TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL)
+                            } else {
+                                disk.block_reward_industrial
+                            },
+                            block_height: bh,
                         };
                         db.insert(
                             DB_CHAIN,
@@ -451,6 +482,25 @@ impl Blockchain {
                             migrated.block_height,
                         )
                     } else {
+                        if disk.emission_consumer == 0
+                            && disk.emission_industrial == 0
+                            && !disk.chain.is_empty()
+                        {
+                            let mut em_c = 0u64;
+                            let mut em_i = 0u64;
+                            for b in &disk.chain {
+                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                            }
+                            disk.emission_consumer = em_c;
+                            disk.emission_industrial = em_i;
+                            disk.block_height = disk.chain.len() as u64;
+                            db.insert(
+                                DB_CHAIN,
+                                bincode::serialize(&disk)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
+                        }
                         (
                             disk.chain,
                             disk.accounts,
@@ -468,15 +518,13 @@ impl Blockchain {
                         .get(DB_ACCOUNTS)
                         .and_then(|iv| bincode::deserialize(&iv).ok())
                         .unwrap_or_default();
-                    let (em_c, em_i, br_c, br_i, bh): (u64, u64, u64, u64, u64) = db
+                    let (br_c, br_i): (u64, u64) = db
                         .get(DB_EMISSION)
-                        .and_then(|iv| bincode::deserialize(&iv).ok())
+                        .and_then(|iv| bincode::deserialize::<(u64, u64, u64, u64, u64)>(&iv).ok())
+                        .map(|(_em_c, _em_i, br_c, br_i, _bh)| (br_c, br_i))
                         .unwrap_or((
-                            0,
-                            0,
                             INITIAL_BLOCK_REWARD_CONSUMER,
                             INITIAL_BLOCK_REWARD_INDUSTRIAL,
-                            0,
                         ));
                     let mut migrated_chain = chain.clone();
                     for b in &mut migrated_chain {
@@ -511,6 +559,13 @@ impl Blockchain {
                             &b.transactions,
                         );
                     }
+                    let mut em_c = 0u64;
+                    let mut em_i = 0u64;
+                    for b in &migrated_chain {
+                        em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                        em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                    }
+                    let bh = migrated_chain.len() as u64;
                     let disk_new = ChainDisk {
                         schema_version: 3,
                         chain: migrated_chain,
@@ -568,17 +623,16 @@ impl Blockchain {
         for acc in accounts.values_mut() {
             acc.pending = Pending::default();
         }
-        let mut bc = Blockchain {
-            chain,
-            accounts,
-            db,
-            emission_consumer: em_c,
-            emission_industrial: em_i,
-            block_reward_consumer: br_c,
-            block_reward_industrial: br_i,
-            block_height: bh,
-            ..Blockchain::default()
-        };
+        let mut bc = Blockchain::default();
+        bc.path = path.to_string();
+        bc.chain = chain;
+        bc.accounts = accounts;
+        bc.db = db;
+        bc.emission_consumer = em_c;
+        bc.emission_industrial = em_i;
+        bc.block_reward_consumer = br_c;
+        bc.block_reward_industrial = br_i;
+        bc.block_height = bh;
         for tx in bc.mempool.iter() {
             if let Some(acc) = bc.accounts.get_mut(&tx.payload.from_) {
                 if let Ok((fee_consumer, fee_industrial)) =
@@ -1300,15 +1354,11 @@ impl Blockchain {
 }
 
 impl Blockchain {
-    /// Open an isolated temp path used by tests
+    /// Open an isolated path used by tests
     #[must_use]
-    pub fn new() -> Self {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let id = NEXT.fetch_add(1, Ordering::Relaxed);
-        let path = format!("temp/{id}");
-        let _ = std::fs::remove_dir_all(&path);
-        Self::open(&path).unwrap_or_else(|e| panic!("DB open: {e}"))
+    pub fn new(path: &str) -> Self {
+        let _ = std::fs::remove_dir_all(path);
+        Self::open(path).unwrap_or_else(|e| panic!("DB open: {e}"))
     }
 
     #[allow(dead_code)]
@@ -1422,6 +1472,12 @@ impl Blockchain {
             }
         }
         true
+    }
+}
+
+impl Drop for Blockchain {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
 
