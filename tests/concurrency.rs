@@ -1,10 +1,17 @@
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
+}
+
+fn unique_path(prefix: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -32,7 +39,8 @@ fn build_signed_tx(
 #[test]
 fn concurrent_duplicate_submission() {
     init();
-    let bc = Arc::new(RwLock::new(Blockchain::new()));
+    let path = unique_path("temp_concurrency");
+    let bc = Arc::new(RwLock::new(Blockchain::new(&path)));
     bc.write()
         .unwrap()
         .add_account("alice".into(), 5, 0)

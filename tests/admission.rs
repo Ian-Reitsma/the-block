@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
@@ -7,6 +8,12 @@ use the_block::{
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
+}
+
+fn unique_path(prefix: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -34,7 +41,7 @@ fn build_signed_tx(
 #[test]
 fn rejects_unknown_sender() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_admission"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "miner", 1, 0, 0, 1);
@@ -44,7 +51,7 @@ fn rejects_unknown_sender() {
 #[test]
 fn mine_block_skips_nonce_gaps() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_admission"));
     bc.add_account("miner".into(), 10, 10).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -60,7 +67,7 @@ fn mine_block_skips_nonce_gaps() {
 #[test]
 fn validate_block_rejects_nonce_gap() {
     init();
-    let bc = Blockchain::new();
+    let bc = Blockchain::new(&unique_path("temp_admission"));
     let (sk, _pk) = generate_keypair();
     let tx1 = build_signed_tx(&sk, "miner", "alice", 0, 0, 0, 1);
     let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 0, 3);
@@ -140,7 +147,7 @@ fn validate_block_rejects_nonce_gap() {
 #[test]
 fn validate_block_rejects_wrong_difficulty() {
     init();
-    let mut bc = Blockchain::new();
+    let mut bc = Blockchain::new(&unique_path("temp_admission"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     let mut block = bc.mine_block("miner").unwrap();
     block.difficulty += 1;

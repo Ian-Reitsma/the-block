@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fs, io::Read, path::Path};
 /// Minimal file-backed key-value store emulating the subset of `sled::Db`
 /// used by the project. Data is serialized via `bincode` to `<path>/db` on
 /// `flush()` and deserialized on open. This is sufficient for tests that rely
@@ -14,7 +14,28 @@ impl SimpleDb {
         let db_path = Path::new(path).join("db");
         let map = fs::read(&db_path)
             .ok()
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| {
+                bincode::deserialize(&b).ok().or_else(|| {
+                    use std::io::Cursor;
+                    let mut cur = Cursor::new(&b);
+                    let count: u64 = bincode::deserialize_from(&mut cur).ok()?;
+                    if count == 0 {
+                        return None;
+                    }
+                    let key_len: u64 = bincode::deserialize_from(&mut cur).ok()?;
+                    let mut key = vec![0u8; key_len as usize];
+                    cur.read_exact(&mut key).ok()?;
+                    if key != b"chain" {
+                        return None;
+                    }
+                    let val_len: u64 = bincode::deserialize_from(&mut cur).ok()?;
+                    let mut val = vec![0u8; val_len as usize];
+                    cur.read_exact(&mut val).ok()?;
+                    let mut m = HashMap::new();
+                    m.insert("chain".to_string(), val);
+                    Some(m)
+                })
+            })
             .unwrap_or_default();
         Self {
             map,

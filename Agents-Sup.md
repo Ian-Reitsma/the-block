@@ -23,8 +23,9 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ### Storage
 * Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the
   chain, account map and emission counters. Schema version = 3.
-* `Blockchain::new()` now allocates a unique temp directory per instance and removes it
-  on drop. Tests should call `unique_path()` to avoid cross-test leakage.
+* `Blockchain` tracks its `path` and its `Drop` impl removes the directory.
+  `Blockchain::new(path)` expects a unique temp directory; tests use
+  `unique_path()` to avoid cross-test leakage.
 
 ### Schema Migrations & Invariants
 * Bump `ChainDisk.schema_version` for any on-disk format change and supply a lossless migration routine with tests.
