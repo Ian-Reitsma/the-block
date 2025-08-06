@@ -15,6 +15,10 @@ __pycache__/
 .bootstrap_partial
 .hooks/
 xtask/target/
+# Local chain state
+chain_db/
+# Temporary snapshot directories
+snapshot/
 # RustSec advisory database cache
 # NPM lockfile is generated for optional tooling; ignore to keep repo deterministic
 # See AGENTS.md §4 for Node tooling policy.

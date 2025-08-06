@@ -66,7 +66,7 @@ fn validate_block_rejects_nonce_gap() {
     let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 0, 3);
     let index = 0u64;
     let prev = "0".repeat(64);
-    let diff = the_block::blockchain::difficulty::expected_difficulty(index);
+    let diff = the_block::blockchain::difficulty::expected_difficulty(index, bc.difficulty);
     let reward_c = bc.block_reward_consumer.0;
     let reward_i = bc.block_reward_industrial.0;
     let fee_checksum = {

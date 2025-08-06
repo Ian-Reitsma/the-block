@@ -21,7 +21,10 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Transactions include a `fee_selector` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
 
 ### Storage
-* Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the chain, account map and emission counters. Schema version = 3.
+* Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the
+  chain, account map and emission counters. Schema version = 3.
+* `Blockchain::new()` now allocates a unique temp directory per instance and removes it
+  on drop. Tests should call `unique_path()` to avoid cross-test leakage.
 
 ### Schema Migrations & Invariants
 * Bump `ChainDisk.schema_version` for any on-disk format change and supply a lossless migration routine with tests.
@@ -31,7 +34,11 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output.
 
 ### Tests
-* Rust property tests under `tests/test_chain.rs` validate invariants (balances never negative, reward decay, duplicate TxID rejection, etc.).
+* Rust property tests under `tests/test_chain.rs` validate invariants (balances never
+  negative, reward decay, duplicate TxID rejection, etc.).
+* Fixtures create isolated directories via `unique_path()` and clean them after
+  execution so runs remain hermetic.
+* `test_replay_attack_prevention` asserts duplicate `(sender, nonce)` pairs are rejected.
 * `tests/test_interop.py` confirms Python and Rust encode transactions identically.
 
 ## 2. Immediate Next Steps

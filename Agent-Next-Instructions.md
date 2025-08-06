@@ -17,6 +17,8 @@ re‑implement:
    distinct error codes surfaced via PyO3.
 3. **Documentation refresh**: disclaimer relocation, `Agents-Sup.md`, and
    schema guidance.
+4. **Temp DB isolation** for tests; `Blockchain::new` creates per-run directories
+   and `test_replay_attack_prevention` enforces `(sender, nonce)` dedup.
 
 ---
 

@@ -19,6 +19,11 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   so amounts print as plain integers in both Python and Rust logs.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
+- **Test Harness Isolation** – `Blockchain::new` now provisions a unique temp directory per
+  instance and removes it on drop. Fixtures call `unique_path` so parallel tests cannot
+  interfere.
+- **Replay Guard Test** – Reactivated `test_replay_attack_prevention` to prove duplicates
+  with the same `(sender, nonce)` are rejected.
 
 For the full rationale see `analysis.txt` and the commit history.
 

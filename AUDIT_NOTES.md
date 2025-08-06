@@ -3,6 +3,9 @@
 ## Recent Fixes
 - Enforced compile-time genesis hash verification and centralized genesis hash computation. **COMPLETED/DONE** [commit: e10b9cb]
 - Patched `bootstrap.sh` to install missing build tools and hard-fail on venv mismatches. **COMPLETED/DONE** [commit: e10b9cb]
+- Isolated chain state into per-test temp directories and cleaned them on drop;
+  replay attack prevention test now asserts duplicate `(sender, nonce)` pairs are
+  rejected. **COMPLETED/DONE**
 
 The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the existing repository snapshot (commit `20ac136e`). Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference the repository at the same commit.
 
@@ -66,7 +69,7 @@ technical debt.
 
 ## 9. Invariant Specification (ECONOMICS.md)
 - INV‑FEE‑01 and INV‑FEE‑02 are documented with prose and minimal algebra. For formal verification, expand the algebraic chain showing `fee_ct + fee_it = f` and the bounds proofs for each selector case.
-- `$comment` in `spec/fee_v2.schema.json` references ECONOMICS.md lines 11‑20 and 22‑30. These line numbers will drift; replace with named anchors or commit hashes to maintain traceability.
+- `$comment` in `spec/fee_v2.schema.json` references `ECONOMICS.md#inv-fee-01` and `#inv-fee-02` via named anchors to avoid drift.
 - Provide explicit quantification over blocks and transactions in the invariants to reduce ambiguity for F★ translators.
 
 ## 10. Admission Pipeline Hardening

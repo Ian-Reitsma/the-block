@@ -86,6 +86,9 @@ Bootstrap steps:
 | End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` |
 | Lint / Style | `cargo fmt -- --check` | No diffs |
 
+All tests run in isolated temp directories via `unique_path`, preventing state
+leakage between cases. Paths are removed once the chain drops.
+
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
 
 ---
@@ -129,7 +132,8 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 * **Signature** – Ed25519 strict; signing bytes are `DOMAIN_TAG | bincode(payload)`.
 * **Consensus** – simple PoW with adjustable `difficulty_target`.  Future milestones add proof‑of‑service weight.
 * **Dual‑Token** – each block’s coinbase emits consumer vs industrial supply; max supply = 20 M each. The header records `coinbase_consumer` and `coinbase_industrial` using a `TokenAmount` wrapper so light clients can audit supply without replaying the chain.
-* **Storage** – in-memory SimpleDb; prototype does not persist to disk.
+* **Storage** – in-memory `SimpleDb` backed by a per-run temp directory.
+  `Blockchain::new` removes the directory on drop so state never leaks across tests.
 * **Fuzzing** – `cargo fuzz run verify_sig` defends against malformed signatures.
 * **Extensibility** – modular crates (`crypto`, `blockchain`, `storage`); WASM host planned for smart contracts.
 
@@ -194,15 +198,22 @@ This software is an experimental blockchain kernel for research and development.
 ---
 
 ## License
-Copyright (c) 2025 IJR Enterprises, Inc. All rights reserved.
-THE-BLOCK and all proprietary innovations, algorithms, and blockchain mechanisms implemented in this repository
-are protected intellectual property of IJR Enterprises, Inc. Use outside of the Apache 2.0 license scope,
-including the replication of design, consensus mechanisms, or novel features unique to THE-BLOCK, 
-requires prior written consent.
 
-This software and all blockchain-related code, protocols, and original documentation contained herein
-are the exclusive property of IJR Enterprises, Inc. Unauthorized reproduction, modification, 
-distribution, or use of any part of this blockchain system is strictly prohibited except as 
-expressly permitted by a written license from IJR Enterprises, Inc.
+Copyright 2025 IJR Enterprises, Inc.
 
-For licensing or commercial inquiries, contact: ijr.ent.inc@gmail.com
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this project except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied. See the [LICENSE](LICENSE) for the specific language
+governing permissions and limitations under the License.
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in this project by you, as defined in the
+[LICENSE](LICENSE), shall be licensed as described above, without any
+additional terms or conditions.
