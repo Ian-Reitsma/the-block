@@ -29,7 +29,7 @@ fn mempool_order_invariant() {
             to: "b".into(),
             amount_consumer: 1,
             amount_industrial: 1,
-            fee: 0,
+            fee: 1000,
             fee_selector: 0,
             nonce: 1,
             memo: Vec::new(),
@@ -42,7 +42,7 @@ fn mempool_order_invariant() {
             to: "a".into(),
             amount_consumer: 1,
             amount_industrial: 1,
-            fee: 0,
+            fee: 1000,
             fee_selector: 0,
             nonce: 1,
             memo: Vec::new(),
@@ -53,8 +53,8 @@ fn mempool_order_invariant() {
     let mut chain_a = Blockchain::new(&unique_path("temp_mempool"));
     let mut chain_b = Blockchain::new(&unique_path("temp_mempool"));
     for bc in [&mut chain_a, &mut chain_b].iter_mut() {
-        bc.add_account("a".into(), 10, 10).unwrap();
-        bc.add_account("b".into(), 10, 10).unwrap();
+        bc.add_account("a".into(), 10_000, 10_000).unwrap();
+        bc.add_account("b".into(), 10_000, 10_000).unwrap();
     }
 
     chain_a.submit_transaction(tx1.clone()).unwrap();

@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
+    TxAdmissionError,
 };
 
 fn init() {
@@ -44,7 +45,7 @@ fn rejects_unknown_sender() {
     let mut bc = Blockchain::new(&unique_path("temp_admission"));
     bc.add_account("miner".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "alice", "miner", 1, 0, 0, 1);
+    let tx = build_signed_tx(&sk, "alice", "miner", 1, 0, 1000, 1);
     assert!(bc.submit_transaction(tx).is_err());
 }
 
@@ -56,7 +57,7 @@ fn mine_block_skips_nonce_gaps() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "miner", "alice", 1, 1, 0, 5);
+    let tx = build_signed_tx(&sk, "miner", "alice", 1, 1, 1000, 5);
     bc.mempool.insert(("miner".into(), 5), tx.clone());
     let block = bc.mine_block("miner").unwrap();
     assert_eq!(block.transactions.len(), 1); // only coinbase
@@ -69,8 +70,8 @@ fn validate_block_rejects_nonce_gap() {
     init();
     let bc = Blockchain::new(&unique_path("temp_admission"));
     let (sk, _pk) = generate_keypair();
-    let tx1 = build_signed_tx(&sk, "miner", "alice", 0, 0, 0, 1);
-    let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 0, 3);
+    let tx1 = build_signed_tx(&sk, "miner", "alice", 0, 0, 1000, 1);
+    let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 1000, 3);
     let index = 0u64;
     let prev = "0".repeat(64);
     let diff = the_block::blockchain::difficulty::expected_difficulty(index, bc.difficulty);
@@ -142,6 +143,31 @@ fn validate_block_rejects_nonce_gap() {
         fee_checksum,
     };
     assert!(!bc.validate_block(&block).unwrap());
+}
+
+#[test]
+fn rejects_fee_below_min() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_fee"));
+    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("b".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx = build_signed_tx(&sk, "a", "b", 1, 0, 0, 1);
+    assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::FeeTooLow));
+}
+
+#[test]
+fn mempool_full_rejects() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_full"));
+    bc.max_mempool_size = 1;
+    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("b".into(), 10_000, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx1 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 1);
+    let tx2 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 2);
+    bc.submit_transaction(tx1).unwrap();
+    assert_eq!(bc.submit_transaction(tx2), Err(TxAdmissionError::MempoolFull));
 }
 
 #[test]

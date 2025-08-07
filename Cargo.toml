@@ -18,10 +18,12 @@ thiserror = "1"
 proptest = { version = "1", optional = true }
 dashmap = "5"
 log = { version = "0.4", optional = true, features = ["kv_unstable"] }
+serde_json = { version = "1", optional = true }
 
 [features]
 fuzzy = ["proptest"]
 telemetry = ["log"]
+telemetry-json = ["telemetry", "serde_json"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

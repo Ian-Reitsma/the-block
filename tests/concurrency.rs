@@ -43,12 +43,12 @@ fn concurrent_duplicate_submission() {
     let bc = Arc::new(RwLock::new(Blockchain::new(&path)));
     bc.write()
         .unwrap()
-        .add_account("alice".into(), 5, 0)
+        .add_account("alice".into(), 10_000, 0)
         .unwrap();
     bc.write().unwrap().add_account("bob".into(), 0, 0).unwrap();
     bc.write().unwrap().mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 0, 1);
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     let tx_clone = tx.clone();
     let bc1 = Arc::clone(&bc);
     let bc2 = Arc::clone(&bc);

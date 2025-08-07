@@ -211,7 +211,7 @@ fn test_rejects_invalid_signature() {
         to: "alice".into(),
         amount_consumer: 1,
         amount_industrial: 2,
-        fee: 0,
+        fee: 1000,
         fee_selector: 0,
         nonce: 1,
         memo: Vec::new(),

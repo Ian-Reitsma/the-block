@@ -39,7 +39,7 @@ fn open_mine_reopen() {
         to: "b".into(),
         amount_consumer: 1,
         amount_industrial: 1,
-        fee: 0,
+        fee: 1000,
         fee_selector: 0,
         nonce: 1,
         memo: Vec::new(),

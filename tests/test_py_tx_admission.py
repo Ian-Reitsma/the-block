@@ -15,7 +15,7 @@ def test_unknown_sender(tmp_path):
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
-        fee=0,
+        fee=1000,
         fee_selector=0,
         nonce=1,
         memo=b"",
@@ -27,7 +27,7 @@ def test_unknown_sender(tmp_path):
 
 def test_bad_nonce(tmp_path):
     bc = make_bc(tmp_path / "nonce")
-    bc.add_account("miner", 10, 0)
+    bc.add_account("miner", 10_000, 0)
     bc.add_account("alice", 0, 0)
     priv, _ = the_block.generate_keypair()
     payload = the_block.RawTxPayload(
@@ -35,7 +35,7 @@ def test_bad_nonce(tmp_path):
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
-        fee=0,
+        fee=1000,
         fee_selector=0,
         nonce=2,
         memo=b"",
@@ -55,7 +55,7 @@ def test_insufficient_balance(tmp_path):
         to="alice",
         amount_consumer=10,
         amount_industrial=0,
-        fee=0,
+        fee=1000,
         fee_selector=0,
         nonce=1,
         memo=b"",

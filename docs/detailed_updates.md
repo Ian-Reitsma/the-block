@@ -25,6 +25,10 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   parallel tests cannot interfere.
 - **Replay Guard Test** – Reactivated `test_replay_attack_prevention` to prove duplicates
   with the same `(sender, nonce)` are rejected.
+- **Mempool Hardening** – Admission now uses an atomic size counter and binary
+  heap to evict the lowest-priority transaction ordered by
+  `(fee_per_byte, timestamp_ticks, tx_hash)`. Entry timestamps are stored as
+  monotonic `u128` ticks.
 
 For the full rationale see `analysis.txt` and the commit history.
 
