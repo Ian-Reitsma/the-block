@@ -98,3 +98,33 @@ fn cross_thread_fuzz() {
     }
     assert!(bc.read().unwrap().mempool.len() <= 32);
 }
+
+// Ensure mempool cap is respected even under heavy concurrency.
+// CONSENSUS.md §10.3
+#[test]
+fn cap_race_respects_limit() {
+    init();
+    let path = unique_path("temp_cap_race");
+    let mut bc = Blockchain::new(&path);
+    bc.max_mempool_size = 32;
+    bc.max_pending_per_account = 64;
+    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.mine_block("alice").unwrap();
+    let (sk, _pk) = generate_keypair();
+    let bc = Arc::new(RwLock::new(bc));
+    let handles: Vec<_> = (0..64)
+        .map(|i| {
+            let bc_cl = Arc::clone(&bc);
+            let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, i as u64 + 1);
+            std::thread::spawn(move || {
+                let _ = bc_cl.write().unwrap().submit_transaction(tx);
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    let guard = bc.read().unwrap();
+    assert!(guard.mempool.len() <= guard.max_mempool_size);
+}

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
@@ -365,7 +365,8 @@ pub struct Block {
 #[derive(Clone)]
 pub struct MempoolEntry {
     pub tx: SignedTransaction,
-    pub timestamp: Instant,
+    /// UNIX timestamp in milliseconds when the tx entered the mempool
+    pub timestamp_millis: u64,
 }
 
 /// In-memory representation of the chain state and associated accounts.
@@ -383,6 +384,7 @@ pub struct Blockchain {
     pub mempool: DashMap<(String, u64), MempoolEntry>,
     mempool_size: std::sync::atomic::AtomicUsize,
     mempool_mutex: Mutex<()>,
+    orphan_counter: std::sync::atomic::AtomicUsize,
     #[pyo3(get, set)]
     pub max_mempool_size: usize,
     #[pyo3(get, set)]
@@ -430,6 +432,16 @@ pub struct ChainDisk {
     pub block_reward_industrial: TokenAmount,
     #[serde(default)]
     pub block_height: u64,
+    #[serde(default)]
+    pub mempool: Vec<MempoolEntryDisk>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MempoolEntryDisk {
+    pub sender: String,
+    pub nonce: u64,
+    pub tx: SignedTransaction,
+    pub timestamp_millis: u64,
 }
 
 impl Default for Blockchain {
@@ -441,6 +453,7 @@ impl Default for Blockchain {
             mempool: DashMap::new(),
             mempool_size: std::sync::atomic::AtomicUsize::new(0),
             mempool_mutex: Mutex::new(()),
+            orphan_counter: std::sync::atomic::AtomicUsize::new(0),
             max_mempool_size: 1024,
             min_fee_per_byte: 1,
             tx_ttl: 1800,
@@ -515,15 +528,15 @@ impl Blockchain {
 
     #[staticmethod]
     pub fn open(path: &str) -> PyResult<Self> {
-        // Open an existing database and auto-migrate to schema v3.
+        // Open an existing database and auto-migrate to schema v4.
         // See `docs/detailed_updates.md` for layout history.
         let mut db = Db::open(path);
-        let (mut chain, mut accounts, em_c, em_i, br_c, br_i, bh) = if let Some(raw) =
+        let (mut chain, mut accounts, em_c, em_i, br_c, br_i, bh, mempool_disk) = if let Some(raw) =
             db.get(DB_CHAIN)
         {
             match bincode::deserialize::<ChainDisk>(&raw) {
                 Ok(mut disk) => {
-                    if disk.schema_version > 3 {
+                    if disk.schema_version > 4 {
                         return Err(PyValueError::new_err("DB schema too new"));
                     }
                     if disk.schema_version < 3 {
@@ -585,6 +598,7 @@ impl Blockchain {
                                 disk.block_reward_industrial
                             },
                             block_height: bh,
+                            mempool: Vec::new(),
                         };
                         db.insert(
                             DB_CHAIN,
@@ -601,6 +615,7 @@ impl Blockchain {
                             migrated.block_reward_consumer,
                             migrated.block_reward_industrial,
                             migrated.block_height,
+                            migrated.mempool,
                         )
                     } else {
                         if disk.emission_consumer == 0
@@ -630,6 +645,7 @@ impl Blockchain {
                             disk.block_reward_consumer,
                             disk.block_reward_industrial,
                             disk.block_height,
+                            disk.mempool,
                         )
                     }
                 }
@@ -696,6 +712,7 @@ impl Blockchain {
                         block_reward_consumer: TokenAmount::new(br_c),
                         block_reward_industrial: TokenAmount::new(br_i),
                         block_height: bh,
+                        mempool: Vec::new(),
                     };
                     db.insert(
                         DB_CHAIN,
@@ -711,6 +728,7 @@ impl Blockchain {
                         disk_new.block_reward_consumer,
                         disk_new.block_reward_industrial,
                         disk_new.block_height,
+                        disk_new.mempool,
                     )
                 }
             }
@@ -723,6 +741,7 @@ impl Blockchain {
                 TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
                 TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
                 0,
+                Vec::new(),
             )
         };
         for b in &mut chain {
@@ -756,6 +775,13 @@ impl Blockchain {
         bc.block_reward_consumer = br_c;
         bc.block_reward_industrial = br_i;
         bc.block_height = bh;
+        for e in mempool_disk {
+            bc.mempool.insert(
+                (e.sender.clone(), e.nonce),
+                MempoolEntry { tx: e.tx, timestamp_millis: e.timestamp_millis },
+            );
+            bc.inc_mempool_size();
+        }
         for entry in bc.mempool.iter() {
             let tx = &entry.value().tx;
             if let Some(acc) = bc.accounts.get_mut(&tx.payload.from_) {
@@ -769,6 +795,8 @@ impl Blockchain {
                 }
             }
         }
+        #[cfg(feature = "telemetry")]
+        let _span = tracing::span!(tracing::Level::TRACE, "startup_rebuild").entered();
         bc.purge_expired();
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
@@ -805,11 +833,21 @@ impl Blockchain {
     pub fn schema_version(&self) -> usize {
         // Bump this constant whenever the serialized `ChainDisk` format changes.
         // Older binaries must refuse to open newer databases.
-        3
+        4
     }
 
     /// Persist the entire chain + state under the current schema
     pub fn persist_chain(&mut self) -> PyResult<()> {
+        let mempool: Vec<MempoolEntryDisk> = self
+            .mempool
+            .iter()
+            .map(|e| MempoolEntryDisk {
+                sender: e.key().0.clone(),
+                nonce: e.key().1,
+                tx: e.value().tx.clone(),
+                timestamp_millis: e.value().timestamp_millis,
+            })
+            .collect();
         let disk = ChainDisk {
             schema_version: self.schema_version(),
             chain: self.chain.clone(),
@@ -819,6 +857,7 @@ impl Blockchain {
             block_reward_consumer: self.block_reward_consumer,
             block_reward_industrial: self.block_reward_industrial,
             block_height: self.block_height,
+            mempool,
         };
         let bytes = bincode::serialize(&disk)
             .map_err(|e| PyValueError::new_err(format!("Serialization error: {e}")))?;
@@ -900,10 +939,11 @@ impl Blockchain {
         self.purge_expired();
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
-        let _pool_guard = self
-            .mempool_mutex
-            .lock()
-            .map_err(|_| TxAdmissionError::LockPoisoned)?;
+        let _pool_guard = self.mempool_mutex.lock().map_err(|_| {
+            #[cfg(feature = "telemetry")]
+            telemetry::LOCK_POISON_TOTAL.inc();
+            TxAdmissionError::LockPoisoned
+        })?;
         let lock = self
             .admission_locks
             .entry(sender_addr.clone())
@@ -913,11 +953,17 @@ impl Blockchain {
         let lock_guard = {
             let span =
                 tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender_addr);
-            span.in_scope(|| lock.lock())
-                .map_err(|_| TxAdmissionError::LockPoisoned)?
+            span.in_scope(|| lock.lock()).map_err(|_| {
+                telemetry::LOCK_POISON_TOTAL.inc();
+                TxAdmissionError::LockPoisoned
+            })?
         };
         #[cfg(not(feature = "telemetry"))]
-        let lock_guard = lock.lock().map_err(|_| TxAdmissionError::LockPoisoned)?;
+        let lock_guard = lock.lock().map_err(|_| {
+            #[cfg(feature = "telemetry")]
+            telemetry::LOCK_POISON_TOTAL.inc();
+            TxAdmissionError::LockPoisoned
+        })?;
 
         if tx.payload.fee_selector > 2 {
             #[cfg(feature = "telemetry-json")]
@@ -1152,7 +1198,10 @@ impl Blockchain {
                     let tx_id = tx.id();
                     vacant.insert(MempoolEntry {
                         tx,
-                        timestamp: Instant::now(),
+                        timestamp_millis: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_else(|e| panic!("time: {e}"))
+                            .as_millis() as u64,
                     });
                     guard.commit();
                     #[cfg(feature = "telemetry")]
@@ -1183,10 +1232,11 @@ impl Blockchain {
     /// # Errors
     /// Returns [`TxAdmissionError::NotFound`] if the transaction is absent.
     pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> Result<(), TxAdmissionError> {
-        let _pool_guard = self
-            .mempool_mutex
-            .lock()
-            .map_err(|_| TxAdmissionError::LockPoisoned)?;
+        let _pool_guard = self.mempool_mutex.lock().map_err(|_| {
+            #[cfg(feature = "telemetry")]
+            telemetry::LOCK_POISON_TOTAL.inc();
+            TxAdmissionError::LockPoisoned
+        })?;
         let lock = self
             .admission_locks
             .entry(sender.to_string())
@@ -1195,11 +1245,17 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         let _guard = {
             let span = tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender, nonce = nonce);
-            span.in_scope(|| lock.lock())
-                .map_err(|_| TxAdmissionError::LockPoisoned)?
+            span.in_scope(|| lock.lock()).map_err(|_| {
+                telemetry::LOCK_POISON_TOTAL.inc();
+                TxAdmissionError::LockPoisoned
+            })?
         };
         #[cfg(not(feature = "telemetry"))]
-        let _guard = lock.lock().map_err(|_| TxAdmissionError::LockPoisoned)?;
+        let _guard = lock.lock().map_err(|_| {
+            #[cfg(feature = "telemetry")]
+            telemetry::LOCK_POISON_TOTAL.inc();
+            TxAdmissionError::LockPoisoned
+        })?;
         if let Some((_, entry)) = self.mempool.remove(&(sender.to_string(), nonce)) {
             self.dec_mempool_size();
             let tx = entry.tx;
@@ -1216,6 +1272,10 @@ impl Blockchain {
                     acc.pending.nonces.remove(&nonce);
                 }
             }
+            if !self.accounts.contains_key(sender) {
+                self.orphan_counter
+                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            }
             #[cfg(feature = "telemetry-json")]
             log_event(log::Level::Info, "drop", sender, nonce, "dropped", None);
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1231,16 +1291,41 @@ impl Blockchain {
     }
 
     pub fn purge_expired(&mut self) {
-        let ttl = Duration::from_secs(self.tx_ttl);
-        let now = Instant::now();
-        let mut to_drop = Vec::new();
+        let ttl_ms = self.tx_ttl * 1000;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|e| panic!("time: {e}"))
+            .as_millis() as u64;
+        let mut expired = Vec::new();
+        let mut orphaned = Vec::new();
+        #[cfg(feature = "telemetry")]
+        let _span = tracing::span!(tracing::Level::TRACE, "eviction_sweep").entered();
         for entry in self.mempool.iter() {
-            if now.duration_since(entry.value().timestamp) > ttl {
-                to_drop.push((entry.key().0.clone(), entry.key().1));
+            let sender = &entry.key().0;
+            let nonce = entry.key().1;
+            if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
+                #[cfg(feature = "telemetry")]
+                telemetry::TTL_DROP_TOTAL.inc();
+                expired.push((sender.clone(), nonce));
+            } else if !self.accounts.contains_key(sender) {
+                self.orphan_counter
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                orphaned.push((sender.clone(), nonce));
             }
         }
-        for (sender, nonce) in to_drop {
+        for (sender, nonce) in expired {
             let _ = self.drop_transaction(&sender, nonce);
+        }
+        let size = self.mempool_size.load(std::sync::atomic::Ordering::SeqCst);
+        let orphans = self.orphan_counter.load(std::sync::atomic::Ordering::SeqCst);
+        if size > 0 && orphans * 2 > size {
+            #[cfg(feature = "telemetry")]
+            telemetry::ORPHAN_SWEEP_TOTAL.inc();
+            for (sender, nonce) in orphaned {
+                let _ = self.drop_transaction(&sender, nonce);
+            }
+            self.orphan_counter
+                .store(0, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -1390,7 +1475,38 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                // CONSENSUS.md §10.3: mempool mutations are guarded by mempool_mutex
+                let _pool_guard = self.mempool_mutex.lock().map_err(|_| {
+                    #[cfg(feature = "telemetry")]
+                    telemetry::LOCK_POISON_TOTAL.inc();
+                    PyValueError::new_err("Lock poisoned")
+                })?;
                 for tx in txs.iter().skip(1) {
+                    let lock = self
+                        .admission_locks
+                        .entry(tx.payload.from_.clone())
+                        .or_insert_with(|| Arc::new(Mutex::new(())))
+                        .clone();
+                    #[cfg(feature = "telemetry")]
+                    let _guard = {
+                        let span = tracing::span!(
+                            tracing::Level::TRACE,
+                            "admission_lock",
+                            sender = %tx.payload.from_,
+                            nonce = tx.payload.nonce
+                        );
+                        span.in_scope(|| lock.lock()).map_err(|_| {
+                            telemetry::LOCK_POISON_TOTAL.inc();
+                            PyValueError::new_err("Lock poisoned")
+                        })?
+                    };
+                    #[cfg(not(feature = "telemetry"))]
+                    let _guard = lock.lock().map_err(|_| {
+                        #[cfg(feature = "telemetry")]
+                        telemetry::LOCK_POISON_TOTAL.inc();
+                        PyValueError::new_err("Lock poisoned")
+                    })?;
+
                     if tx.payload.from_ != "0".repeat(34) {
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             let (fee_consumer, fee_industrial) =
@@ -1428,6 +1544,7 @@ impl Blockchain {
                         .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
                     self.dec_mempool_size();
                 }
+                drop(_pool_guard);
 
                 #[cfg(feature = "telemetry")]
                 for tx in &skipped {
@@ -1877,6 +1994,32 @@ impl Blockchain {
             .clone();
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         lock.clear_poison();
+    }
+
+    /// Internal testing hook: intentionally poison the global mempool mutex.
+    #[doc(hidden)]
+    pub fn poison_mempool(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self
+                .mempool_mutex
+                .lock()
+                .unwrap_or_else(|e| panic!("mempool lock: {e}"));
+            panic!("poison mempool");
+        }));
+    }
+
+    /// Internal testing hook: heal a previously poisoned mempool mutex.
+    #[doc(hidden)]
+    pub fn heal_mempool(&self) {
+        let guard = self.mempool_mutex.lock().unwrap_or_else(|e| e.into_inner());
+        self.mempool_mutex.clear_poison();
+        drop(guard);
+    }
+
+    #[doc(hidden)]
+    pub fn orphan_count(&self) -> usize {
+        self.orphan_counter
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 

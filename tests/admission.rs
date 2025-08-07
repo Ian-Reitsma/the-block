@@ -1,6 +1,6 @@
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, MempoolEntry, RawTxPayload, SignedTransaction,
@@ -63,7 +63,10 @@ fn mine_block_skips_nonce_gaps() {
         ("miner".into(), 5),
         MempoolEntry {
             tx: tx.clone(),
-            timestamp: Instant::now(),
+            timestamp_millis: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
         },
     );
     let block = bc.mine_block("miner").unwrap();

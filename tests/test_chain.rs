@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::{fs, path::Path};
+use the_block::hashlayout::BlockEncoder;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, ChainDisk, RawTxPayload, SignedTransaction, TokenAmount,
     TxAdmissionError,
@@ -566,6 +567,48 @@ fn test_import_reward_mismatch() {
     let idx = fork.len() - 3;
     fork[idx].coinbase_consumer = TokenAmount::new(fork[idx].coinbase_consumer.0 + 1);
     fork[idx].coinbase_industrial = TokenAmount::new(fork[idx].coinbase_industrial.0 + 1);
+    assert!(bc1.import_chain(fork).is_err());
+}
+
+// 11c. Import rejects chain with incorrect difficulty
+// Ensures import_chain runs full block validation, including difficulty check
+// per CONSENSUS.md §10.3.
+#[test]
+fn test_import_difficulty_mismatch() {
+    init();
+    let mut bc1 = Blockchain::new(&unique_path("temp_chain"));
+    let mut bc2 = Blockchain::new(&unique_path("temp_chain"));
+    for bc in [&mut bc1, &mut bc2].iter_mut() {
+        assert!(bc.get_account_balance("miner").is_err());
+        bc.add_account("miner".into(), 0, 0).unwrap();
+        bc.mine_block("miner").unwrap();
+    }
+    for _ in 0..3 {
+        bc1.mine_block("miner").unwrap();
+    }
+    for _ in 0..6 {
+        bc2.mine_block("miner").unwrap();
+    }
+    let mut fork = bc2.chain.clone();
+    let idx = fork.len() - 1;
+    fork[idx].difficulty += 1;
+    let ids: Vec<[u8; 32]> = fork[idx]
+        .transactions
+        .iter()
+        .map(SignedTransaction::id)
+        .collect();
+    let id_refs: Vec<&[u8]> = ids.iter().map(|h| h.as_ref()).collect();
+    let enc = BlockEncoder {
+        index: fork[idx].index,
+        prev: &fork[idx].previous_hash,
+        nonce: fork[idx].nonce,
+        difficulty: fork[idx].difficulty,
+        coin_c: fork[idx].coinbase_consumer.0,
+        coin_i: fork[idx].coinbase_industrial.0,
+        fee_checksum: &fork[idx].fee_checksum,
+        tx_ids: &id_refs,
+    };
+    fork[idx].hash = enc.hash();
     assert!(bc1.import_chain(fork).is_err());
 }
 
