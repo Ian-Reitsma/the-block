@@ -30,14 +30,14 @@ fn logs_accept_and_reject() {
         to: "b".into(),
         amount_consumer: 1,
         amount_industrial: 1,
-        fee: 0,
+        fee: 1000,
         fee_selector: 0,
         nonce: 1,
         memo: Vec::new(),
     };
     let tx = sign_tx(priv_a.to_vec(), payload).unwrap();
     let mut bc = Blockchain::new(&unique_path("temp_logging"));
-    bc.add_account("a".into(), 10, 10).unwrap();
+    bc.add_account("a".into(), 10_000, 10_000).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     assert!(bc.submit_transaction(tx.clone()).is_ok());
     assert!(logger.any(|r| r.args().contains("tx accepted")));

@@ -235,6 +235,7 @@ pub struct SignedTransaction {
 
 * `tx.id()` = `blake3(b"TX"|serialize(payload)|public_key)`.
 * Transactions **must** verify sig, fee, balance, nonce before entering mempool.
+* A minimum `fee_per_byte` of `1` is enforced; lower fees are rejected.
 
 ### 10.3 Consensus & Mining
 
@@ -242,7 +243,12 @@ pub struct SignedTransaction {
 * **Dual‑Token** emission: consumer vs industrial coinbase split enforced via `block.coinbase_consumer` and `block.coinbase_industrial`. All amount fields use the `TokenAmount` newtype to prevent accidental raw arithmetic.
 * **Block validation** order: header → PoW → tx roots → each tx (sig → stateless → stateful).
 * **Genesis hash** is computed at build time from the canonical block encoding and checked at compile time.
-* **Mempool** uses a lock‑free `DashMap`; `submit_transaction`, `drop_transaction`, and `mine_block` can run concurrently.
+* **Mempool** uses a lock‑free `DashMap` plus a binary heap for `O(log n)`
+  eviction. Transactions must pay at least the `fee_per_byte` floor and are
+  prioritized by `fee_per_byte` with a tie‑breaker on monotonic timestamp ticks
+  and transaction hash. The mempool enforces an atomic size cap (default 1024);
+  once full, new submissions evict the lowest priority entry. `submit_transaction`,
+  `drop_transaction`, and `mine_block` can run concurrently.
 
 ---
 

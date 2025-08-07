@@ -12,6 +12,8 @@ use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 #[cfg(feature = "telemetry")]
 use log::{info, warn};
+#[cfg(feature = "telemetry-json")]
+use serde_json::json;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
@@ -66,6 +68,10 @@ pub enum TxAdmissionError {
     BalanceOverflow,
     #[error("fee overflow")]
     FeeOverflow,
+    #[error("fee below minimum")]
+    FeeTooLow,
+    #[error("mempool full")]
+    MempoolFull,
 }
 
 create_exception!(the_block, ErrUnknownSender, PyException);
@@ -74,6 +80,8 @@ create_exception!(the_block, ErrBadNonce, PyException);
 create_exception!(the_block, ErrBadSignature, PyException);
 create_exception!(the_block, ErrDuplicateTx, PyException);
 create_exception!(the_block, ErrTxNotFound, PyException);
+create_exception!(the_block, ErrFeeTooLow, PyException);
+create_exception!(the_block, ErrMempoolFull, PyException);
 
 impl From<TxAdmissionError> for PyErr {
     fn from(e: TxAdmissionError) -> Self {
@@ -89,8 +97,24 @@ impl From<TxAdmissionError> for PyErr {
             TxAdmissionError::NotFound => ErrTxNotFound::new_err("transaction not found"),
             TxAdmissionError::BalanceOverflow => PyValueError::new_err("balance overflow"),
             TxAdmissionError::FeeOverflow => ErrFeeOverflow::new_err("fee overflow"),
+            TxAdmissionError::FeeTooLow => ErrFeeTooLow::new_err("fee below minimum"),
+            TxAdmissionError::MempoolFull => ErrMempoolFull::new_err("mempool full"),
         }
     }
+}
+
+#[cfg(feature = "telemetry-json")]
+fn log_event(level: log::Level, op: &str, sender: &str, nonce: u64, code: &str, fpb: Option<u64>) {
+    let mut obj = serde_json::Map::new();
+    obj.insert("op".into(), json!(op));
+    obj.insert("sender".into(), json!(sender));
+    obj.insert("nonce".into(), json!(nonce));
+    obj.insert("code".into(), json!(code));
+    if let Some(v) = fpb {
+        obj.insert("fpb".into(), json!(v));
+    }
+    let msg = serde_json::Value::Object(obj).to_string();
+    log::log!(level, "{}", msg);
 }
 
 // === Database keys ===
@@ -322,6 +346,11 @@ pub struct Blockchain {
     #[pyo3(get, set)]
     pub difficulty: u64,
     pub mempool: DashMap<(String, u64), SignedTransaction>,
+    mempool_size: std::sync::atomic::AtomicUsize,
+    #[pyo3(get, set)]
+    pub max_mempool_size: usize,
+    #[pyo3(get, set)]
+    pub min_fee_per_byte: u64,
     admission_locks: DashMap<String, Arc<Mutex<()>>>,
     db: Db,
     #[pyo3(get)]
@@ -370,6 +399,9 @@ impl Default for Blockchain {
             accounts: HashMap::new(),
             difficulty: difficulty::expected_difficulty(0, 1),
             mempool: DashMap::new(),
+            mempool_size: std::sync::atomic::AtomicUsize::new(0),
+            max_mempool_size: 1024,
+            min_fee_per_byte: 1,
             admission_locks: DashMap::new(),
             db: Db::default(),
             path: String::new(),
@@ -761,7 +793,16 @@ impl Blockchain {
         let lock_guard = lock.lock().map_err(|_| TxAdmissionError::UnknownSender)?;
 
         if tx.payload.fee_selector > 2 {
-            #[cfg(feature = "telemetry")]
+            #[cfg(feature = "telemetry-json")]
+            log_event(
+                log::Level::Warn,
+                "reject",
+                &sender_addr,
+                nonce,
+                "invalid_selector",
+                None,
+            );
+            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             warn!("tx rejected sender={sender_addr} nonce={nonce} reason=invalid_selector");
             return Err(TxAdmissionError::InvalidSelector);
         }
@@ -783,18 +824,61 @@ impl Blockchain {
             .checked_add(fee_industrial)
             .ok_or(TxAdmissionError::FeeOverflow)?;
 
+        // capacity check after basic validation
+        let size = self.mempool_size.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if size > self.max_mempool_size {
+            self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            #[cfg(feature = "telemetry-json")]
+            log_event(
+                log::Level::Warn,
+                "reject",
+                &sender_addr,
+                nonce,
+                "mempool_full",
+                None,
+            );
+            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+            warn!("tx rejected sender={sender_addr} nonce={nonce} reason=mempool_full");
+            return Err(TxAdmissionError::MempoolFull);
+        }
+
         match self.mempool.entry((sender_addr.clone(), nonce)) {
             dashmap::mapref::entry::Entry::Occupied(_) => {
                 #[cfg(feature = "telemetry")]
+                #[cfg(feature = "telemetry-json")]
+                log_event(
+                    log::Level::Warn,
+                    "reject",
+                    &sender_addr,
+                    nonce,
+                    "duplicate",
+                    None,
+                );
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 Err(TxAdmissionError::Duplicate)
             }
             dashmap::mapref::entry::Entry::Vacant(vacant) => {
-                let sender = self.accounts.get_mut(&sender_addr).ok_or_else(|| {
-                    #[cfg(feature = "telemetry")]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
-                    TxAdmissionError::UnknownSender
-                })?;
+                let sender = match self.accounts.get_mut(&sender_addr) {
+                    Some(s) => s,
+                    None => {
+                        #[cfg(feature = "telemetry")]
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "unknown_sender",
+                            None,
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        warn!("tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
+                        self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                        return Err(TxAdmissionError::UnknownSender);
+                    }
+                };
                 let required_consumer = sender
                     .pending
                     .consumer
@@ -809,17 +893,71 @@ impl Blockchain {
                     || sender.balance.industrial < required_industrial
                 {
                     #[cfg(feature = "telemetry")]
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "insufficient_balance",
+                        None,
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
+                    self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                     return Err(TxAdmissionError::InsufficientBalance);
                 }
                 if nonce != sender.nonce + sender.pending.nonce + 1 {
                     #[cfg(feature = "telemetry")]
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "bad_nonce",
+                        None,
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_nonce");
+                    self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                     return Err(TxAdmissionError::BadNonce);
+                }
+                // fee per byte check
+                let size = bincode::serialize(&tx)
+                    .map_err(|_| TxAdmissionError::FeeOverflow)?
+                    .len() as u64;
+                let fpb = if size == 0 { 0 } else { tx.payload.fee / size };
+                if fpb < self.min_fee_per_byte {
+                    #[cfg(feature = "telemetry")]
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "fee_too_low",
+                        Some(fee_per_byte),
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low");
+                    self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    return Err(TxAdmissionError::FeeTooLow);
                 }
                 if !verify_signed_tx(tx.clone()) {
                     #[cfg(feature = "telemetry")]
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "bad_signature",
+                        None,
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
+                     self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                     return Err(TxAdmissionError::BadSignature);
                 }
                 let guard = ReservationGuard::new(
@@ -832,7 +970,16 @@ impl Blockchain {
                 let tx_id = tx.id();
                 vacant.insert(tx);
                 guard.commit();
-                #[cfg(feature = "telemetry")]
+                #[cfg(feature = "telemetry-json")]
+                log_event(
+                    log::Level::Info,
+                    "admit",
+                    &sender_addr,
+                    nonce,
+                    "ok",
+                    Some(fee_per_byte),
+                );
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 info!(
                     "tx accepted sender={sender_addr} nonce={nonce} reason=accepted id={}",
                     hex::encode(tx_id)
@@ -854,6 +1001,7 @@ impl Blockchain {
             .clone();
         let _guard = lock.lock().map_err(|_| TxAdmissionError::UnknownSender)?;
         if let Some((_, tx)) = self.mempool.remove(&(sender.to_string(), nonce)) {
+            self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
@@ -866,11 +1014,29 @@ impl Blockchain {
                     acc.pending.nonce = acc.pending.nonce.saturating_sub(1);
                 }
             }
-            #[cfg(feature = "telemetry")]
+            #[cfg(feature = "telemetry-json")]
+            log_event(
+                log::Level::Info,
+                "drop",
+                sender,
+                nonce,
+                "dropped",
+                None,
+            );
+            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             info!("tx dropped sender={sender} nonce={nonce} reason=dropped");
             Ok(())
         } else {
-            #[cfg(feature = "telemetry")]
+            #[cfg(feature = "telemetry-json")]
+            log_event(
+                log::Level::Warn,
+                "drop",
+                sender,
+                nonce,
+                "not_found",
+                None,
+            );
+            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             warn!("drop failed sender={sender} nonce={nonce} reason=not_found");
             Err(TxAdmissionError::NotFound)
         }
@@ -1605,5 +1771,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrBadSignature", ErrBadSignature::type_object(m.py()))?;
     m.add("ErrDuplicateTx", ErrDuplicateTx::type_object(m.py()))?;
     m.add("ErrTxNotFound", ErrTxNotFound::type_object(m.py()))?;
+    m.add("ErrFeeTooLow", ErrFeeTooLow::type_object(m.py()))?;
+    m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
     Ok(())
 }

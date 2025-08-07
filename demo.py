@@ -7,6 +7,7 @@ import shutil
 import the_block
 
 MAX_FEE = (1 << 63) - 1
+BASE_FEE = 1_000
 MAX_SUPPLY_CONSUMER = 20_000_000_000_000
 MAX_SUPPLY_INDUSTRIAL = 20_000_000_000_000
 DECAY_NUMERATOR = 99_995
@@ -132,7 +133,7 @@ def build_transaction(priv: bytes) -> the_block.RawTxPayload:
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
-        fee=1,
+        fee=BASE_FEE,
         fee_selector=2,
         nonce=1,
         memo=b"demo transfer",
@@ -158,7 +159,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
-        fee=1,
+        fee=BASE_FEE,
         fee_selector=2,
         nonce=1,
         memo=b"demo transfer",
@@ -177,7 +178,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
-        fee=1,
+        fee=BASE_FEE,
         fee_selector=2,
         nonce=1,
         memo=b"stale nonce",
@@ -193,7 +194,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
-        fee=1,
+        fee=BASE_FEE,
         fee_selector=3,
         nonce=2,
         memo=b"bad selector",
@@ -220,7 +221,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
     except the_block.ErrFeeOverflow:
         explain("Transaction with overflow fee rejected")
     show_pending(bc, "miner", "alice")
-    fc, fi = the_block.fee_decompose(2, 1)
+    fc, fi = the_block.fee_decompose(2, BASE_FEE)
     exp_c = 1 + fc
     exp_i = fi
     miner_p = bc.accounts["miner"].pending
@@ -245,7 +246,7 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str], priv: bytes) -> N
             to="bob",
             amount_consumer=1,
             amount_industrial=0,
-            fee=1,
+            fee=BASE_FEE,
             fee_selector=2,
             nonce=i + 2,
             memo=b"block transfer",

@@ -68,7 +68,16 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 
 ## Mempool Semantics
 
-`Blockchain::mempool` is backed by a lock-free `DashMap` keyed by `(sender, nonce)`. `submit_transaction`, `drop_transaction`, and `mine_block` may run concurrently without leaking reservations.
+`Blockchain::mempool` is backed by a lock-free `DashMap` keyed by `(sender, nonce)`.
+A binary heap ordered by `(fee_per_byte DESC, timestamp_ticks ASC, tx_hash ASC)`
+provides `O(log n)` eviction. An atomic counter enforces a maximum size of 1024
+entries. Each transaction must pay at least the `min_fee_per_byte` (default `1`);
+lower fees yield `FeeTooLow`. When full, the lowest-priority entry is evicted
+and its reserved balances unwound atomically. `submit_transaction`,
+`drop_transaction`, and `mine_block` may run concurrently without leaking
+reservations. Each sender is limited to 16 pending transactions, and entries
+older than 30 minutes are purged on new submissions.
 
-Transactions from unknown senders are rejected. Nodes must provision accounts via `add_account` before submitting any transaction.
+Transactions from unknown senders are rejected. Nodes must provision accounts via
+`add_account` before submitting any transaction.
 
