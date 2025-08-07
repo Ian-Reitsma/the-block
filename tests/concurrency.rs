@@ -65,3 +65,36 @@ fn concurrent_duplicate_submission() {
     bc.write().unwrap().drop_transaction("alice", 1).unwrap();
     assert!(bc.read().unwrap().mempool.is_empty());
 }
+
+#[test]
+fn cross_thread_fuzz() {
+    init();
+    let path = unique_path("temp_fuzz");
+    let bc = Arc::new(RwLock::new(Blockchain::new(&path)));
+    let mut keys = Vec::new();
+    for i in 0..32 {
+        let name = format!("acc{i}");
+        bc.write()
+            .unwrap()
+            .add_account(name.clone(), 10_000, 10_000)
+            .unwrap();
+        let (sk, _pk) = generate_keypair();
+        keys.push((name, sk));
+    }
+    let handles: Vec<_> = keys
+        .into_iter()
+        .enumerate()
+        .map(|(i, (name, sk))| {
+            let bc_cl = Arc::clone(&bc);
+            let to = format!("acc{}", (i + 1) % 32);
+            std::thread::spawn(move || {
+                let tx = build_signed_tx(&sk, &name, &to, 1, 1, 1000, 1);
+                let _ = bc_cl.write().unwrap().submit_transaction(tx);
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    assert!(bc.read().unwrap().mempool.len() <= 32);
+}

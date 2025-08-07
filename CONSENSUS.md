@@ -75,9 +75,19 @@ entries. Each transaction must pay at least the `min_fee_per_byte` (default `1`)
 lower fees yield `FeeTooLow`. When full, the lowest-priority entry is evicted
 and its reserved balances unwound atomically. `submit_transaction`,
 `drop_transaction`, and `mine_block` may run concurrently without leaking
-reservations. Each sender is limited to 16 pending transactions, and entries
-older than 30 minutes are purged on new submissions.
+reservations. Each sender is limited to 16 pending transactions. Entries expire
+after `tx_ttl` seconds (default 1800) based on the admission timestamp and are
+purged on new submissions and at startup.
 
 Transactions from unknown senders are rejected. Nodes must provision accounts via
 `add_account` before submitting any transaction.
+
+### Capacity & Flags
+
+| Limit               | Default | CLI Flag                | Env Var                    |
+|---------------------|---------|------------------------|----------------------------|
+| Global entries      | 1024    | `--mempool-max`        | `TB_MEMPOOL_MAX`           |
+| Per-account entries | 16      | `--mempool-account-cap`| `TB_MEMPOOL_ACCOUNT_CAP`   |
+| TTL (seconds)       | 1800    | `--mempool-ttl`        | `TB_MEMPOOL_TTL_SECS`      |
+| Fee floor (fpb)     | 1       | `--min-fee-per-byte`   | `TB_MIN_FEE_PER_BYTE`      |
 

@@ -12,8 +12,6 @@ use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 #[cfg(feature = "telemetry")]
 use log::{info, warn};
-#[cfg(feature = "telemetry-json")]
-use serde_json::json;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
@@ -22,12 +20,20 @@ use pyo3::PyTypeInfo;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "telemetry-json")]
+use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
 use thiserror::Error;
+
+#[cfg(feature = "telemetry")]
+pub mod telemetry;
+#[cfg(feature = "telemetry")]
+pub use telemetry::gather as gather_metrics;
 
 pub mod blockchain;
 use blockchain::difficulty;
@@ -72,6 +78,10 @@ pub enum TxAdmissionError {
     FeeTooLow,
     #[error("mempool full")]
     MempoolFull,
+    #[error("lock poisoned")]
+    LockPoisoned,
+    #[error("pending limit reached")]
+    PendingLimitReached,
 }
 
 create_exception!(the_block, ErrUnknownSender, PyException);
@@ -82,6 +92,8 @@ create_exception!(the_block, ErrDuplicateTx, PyException);
 create_exception!(the_block, ErrTxNotFound, PyException);
 create_exception!(the_block, ErrFeeTooLow, PyException);
 create_exception!(the_block, ErrMempoolFull, PyException);
+create_exception!(the_block, ErrLockPoisoned, PyException);
+create_exception!(the_block, ErrPendingLimit, PyException);
 
 impl From<TxAdmissionError> for PyErr {
     fn from(e: TxAdmissionError) -> Self {
@@ -99,6 +111,10 @@ impl From<TxAdmissionError> for PyErr {
             TxAdmissionError::FeeOverflow => ErrFeeOverflow::new_err("fee overflow"),
             TxAdmissionError::FeeTooLow => ErrFeeTooLow::new_err("fee below minimum"),
             TxAdmissionError::MempoolFull => ErrMempoolFull::new_err("mempool full"),
+            TxAdmissionError::LockPoisoned => ErrLockPoisoned::new_err("lock poisoned"),
+            TxAdmissionError::PendingLimitReached => {
+                ErrPendingLimit::new_err("pending limit reached")
+            }
         }
     }
 }
@@ -222,6 +238,9 @@ pub struct Pending {
     #[pyo3(get)]
     #[serde(default)]
     pub nonce: u64,
+    #[pyo3(get)]
+    #[serde(default)]
+    pub nonces: HashSet<u64>,
 }
 
 #[pyclass]
@@ -243,18 +262,26 @@ struct Reservation<'a> {
     pending: &'a mut Pending,
     reserve_consumer: u64,
     reserve_industrial: u64,
+    nonce: u64,
     committed: bool,
 }
 
 impl<'a> Reservation<'a> {
-    fn new(pending: &'a mut Pending, reserve_consumer: u64, reserve_industrial: u64) -> Self {
+    fn new(
+        pending: &'a mut Pending,
+        reserve_consumer: u64,
+        reserve_industrial: u64,
+        nonce: u64,
+    ) -> Self {
         pending.consumer += reserve_consumer;
         pending.industrial += reserve_industrial;
         pending.nonce += 1;
+        pending.nonces.insert(nonce);
         Self {
             pending,
             reserve_consumer,
             reserve_industrial,
+            nonce,
             committed: false,
         }
     }
@@ -272,6 +299,7 @@ impl Drop for Reservation<'_> {
                 .industrial
                 .saturating_sub(self.reserve_industrial);
             self.pending.nonce = self.pending.nonce.saturating_sub(1);
+            self.pending.nonces.remove(&self.nonce);
         }
     }
 }
@@ -287,8 +315,9 @@ impl<'a> ReservationGuard<'a> {
         pending: &'a mut Pending,
         reserve_consumer: u64,
         reserve_industrial: u64,
+        nonce: u64,
     ) -> Self {
-        let reservation = Reservation::new(pending, reserve_consumer, reserve_industrial);
+        let reservation = Reservation::new(pending, reserve_consumer, reserve_industrial, nonce);
         Self {
             reservation: Some(reservation),
             _lock: lock,
@@ -333,6 +362,12 @@ pub struct Block {
     pub fee_checksum: String,
 }
 
+#[derive(Clone)]
+pub struct MempoolEntry {
+    pub tx: SignedTransaction,
+    pub timestamp: Instant,
+}
+
 /// In-memory representation of the chain state and associated accounts.
 ///
 /// `Blockchain` exposes high level methods for transaction submission,
@@ -345,12 +380,17 @@ pub struct Blockchain {
     pub accounts: HashMap<String, Account>,
     #[pyo3(get, set)]
     pub difficulty: u64,
-    pub mempool: DashMap<(String, u64), SignedTransaction>,
+    pub mempool: DashMap<(String, u64), MempoolEntry>,
     mempool_size: std::sync::atomic::AtomicUsize,
+    mempool_mutex: Mutex<()>,
     #[pyo3(get, set)]
     pub max_mempool_size: usize,
     #[pyo3(get, set)]
     pub min_fee_per_byte: u64,
+    #[pyo3(get, set)]
+    pub tx_ttl: u64,
+    #[pyo3(get, set)]
+    pub max_pending_per_account: usize,
     admission_locks: DashMap<String, Arc<Mutex<()>>>,
     db: Db,
     #[pyo3(get)]
@@ -400,8 +440,11 @@ impl Default for Blockchain {
             difficulty: difficulty::expected_difficulty(0, 1),
             mempool: DashMap::new(),
             mempool_size: std::sync::atomic::AtomicUsize::new(0),
+            mempool_mutex: Mutex::new(()),
             max_mempool_size: 1024,
             min_fee_per_byte: 1,
+            tx_ttl: 1800,
+            max_pending_per_account: 16,
             admission_locks: DashMap::new(),
             db: Db::default(),
             path: String::new(),
@@ -413,6 +456,52 @@ impl Default for Blockchain {
             skipped: Vec::new(),
             skipped_nonce_gap: 0,
         }
+    }
+}
+
+impl Blockchain {
+    #[cfg(feature = "telemetry")]
+    fn inc_mempool_size(&self) -> usize {
+        let size = self
+            .mempool_size
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1;
+        telemetry::MEMPOOL_SIZE.set(size as i64);
+        size
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    fn inc_mempool_size(&self) -> usize {
+        self.mempool_size
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn dec_mempool_size(&self) -> usize {
+        let size = self
+            .mempool_size
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+            - 1;
+        telemetry::MEMPOOL_SIZE.set(size as i64);
+        size
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    fn dec_mempool_size(&self) -> usize {
+        self.mempool_size
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+            - 1
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn record_admit(&self) {
+        telemetry::TX_ADMITTED_TOTAL.inc();
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn record_reject(&self) {
+        telemetry::TX_REJECTED_TOTAL.inc();
     }
 }
 
@@ -653,7 +742,9 @@ impl Blockchain {
             b.fee_checksum = h.finalize().to_hex().to_string();
         }
         for acc in accounts.values_mut() {
-            acc.pending = Pending::default();
+            acc.pending.consumer = 0;
+            acc.pending.industrial = 0;
+            acc.pending.nonce = acc.pending.nonces.len() as u64;
         }
         let mut bc = Blockchain::default();
         bc.path = path.to_string();
@@ -665,7 +756,8 @@ impl Blockchain {
         bc.block_reward_consumer = br_c;
         bc.block_reward_industrial = br_i;
         bc.block_height = bh;
-        for tx in bc.mempool.iter() {
+        for entry in bc.mempool.iter() {
+            let tx = &entry.value().tx;
             if let Some(acc) = bc.accounts.get_mut(&tx.payload.from_) {
                 if let Ok((fee_consumer, fee_industrial)) =
                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
@@ -673,7 +765,29 @@ impl Blockchain {
                     acc.pending.consumer += tx.payload.amount_consumer + fee_consumer;
                     acc.pending.industrial += tx.payload.amount_industrial + fee_industrial;
                     acc.pending.nonce += 1;
+                    acc.pending.nonces.insert(tx.payload.nonce);
                 }
+            }
+        }
+        bc.purge_expired();
+        if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
+            if let Ok(n) = v.parse() {
+                bc.max_mempool_size = n;
+            }
+        }
+        if let Ok(v) = std::env::var("TB_MIN_FEE_PER_BYTE") {
+            if let Ok(n) = v.parse() {
+                bc.min_fee_per_byte = n;
+            }
+        }
+        if let Ok(v) = std::env::var("TB_MEMPOOL_TTL_SECS") {
+            if let Ok(n) = v.parse() {
+                bc.tx_ttl = n;
+            }
+        }
+        if let Ok(v) = std::env::var("TB_MEMPOOL_ACCOUNT_CAP") {
+            if let Ok(n) = v.parse() {
+                bc.max_pending_per_account = n;
             }
         }
         Ok(bc)
@@ -783,14 +897,27 @@ impl Blockchain {
     /// # Errors
     /// Returns [`TxAdmissionError`] if validation fails or the sender is missing.
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> Result<(), TxAdmissionError> {
+        self.purge_expired();
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
+        let _pool_guard = self
+            .mempool_mutex
+            .lock()
+            .map_err(|_| TxAdmissionError::LockPoisoned)?;
         let lock = self
             .admission_locks
             .entry(sender_addr.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
-        let lock_guard = lock.lock().map_err(|_| TxAdmissionError::UnknownSender)?;
+        #[cfg(feature = "telemetry")]
+        let lock_guard = {
+            let span =
+                tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender_addr);
+            span.in_scope(|| lock.lock())
+                .map_err(|_| TxAdmissionError::LockPoisoned)?
+        };
+        #[cfg(not(feature = "telemetry"))]
+        let lock_guard = lock.lock().map_err(|_| TxAdmissionError::LockPoisoned)?;
 
         if tx.payload.fee_selector > 2 {
             #[cfg(feature = "telemetry-json")]
@@ -825,9 +952,11 @@ impl Blockchain {
             .ok_or(TxAdmissionError::FeeOverflow)?;
 
         // capacity check after basic validation
-        let size = self.mempool_size.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-        if size > self.max_mempool_size {
-            self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        if self.mempool_size.load(std::sync::atomic::Ordering::SeqCst) >= self.max_mempool_size {
+            #[cfg(feature = "telemetry")]
+            telemetry::EVICTIONS_TOTAL.inc();
+            #[cfg(feature = "telemetry")]
+            self.record_reject();
             #[cfg(feature = "telemetry-json")]
             log_event(
                 log::Level::Warn,
@@ -856,7 +985,11 @@ impl Blockchain {
                 );
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
-                self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                #[cfg(feature = "telemetry")]
+                {
+                    telemetry::DUP_TX_REJECT_TOTAL.inc();
+                    self.record_reject();
+                }
                 Err(TxAdmissionError::Duplicate)
             }
             dashmap::mapref::entry::Entry::Vacant(vacant) => {
@@ -874,8 +1007,11 @@ impl Blockchain {
                             None,
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                        warn!("tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
-                        self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                        warn!(
+                            "tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender"
+                        );
+                        #[cfg(feature = "telemetry")]
+                        self.record_reject();
                         return Err(TxAdmissionError::UnknownSender);
                     }
                 };
@@ -904,8 +1040,29 @@ impl Blockchain {
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
-                    self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    #[cfg(feature = "telemetry")]
+                    self.record_reject();
                     return Err(TxAdmissionError::InsufficientBalance);
+                }
+                if sender.pending.nonces.contains(&nonce) {
+                    #[cfg(feature = "telemetry")]
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "duplicate",
+                        None,
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                    #[cfg(feature = "telemetry")]
+                    {
+                        telemetry::DUP_TX_REJECT_TOTAL.inc();
+                        self.record_reject();
+                    }
+                    return Err(TxAdmissionError::Duplicate);
                 }
                 if nonce != sender.nonce + sender.pending.nonce + 1 {
                     #[cfg(feature = "telemetry")]
@@ -920,15 +1077,16 @@ impl Blockchain {
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_nonce");
-                    self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    #[cfg(feature = "telemetry")]
+                    self.record_reject();
                     return Err(TxAdmissionError::BadNonce);
                 }
                 // fee per byte check
                 let size = bincode::serialize(&tx)
                     .map_err(|_| TxAdmissionError::FeeOverflow)?
                     .len() as u64;
-                let fpb = if size == 0 { 0 } else { tx.payload.fee / size };
-                if fpb < self.min_fee_per_byte {
+                let fee_per_byte = if size == 0 { 0 } else { tx.payload.fee / size };
+                if fee_per_byte < self.min_fee_per_byte {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
@@ -941,7 +1099,11 @@ impl Blockchain {
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low");
-                    self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    #[cfg(feature = "telemetry")]
+                    {
+                        telemetry::FEE_FLOOR_REJECT_TOTAL.inc();
+                        self.record_reject();
+                    }
                     return Err(TxAdmissionError::FeeTooLow);
                 }
                 if !verify_signed_tx(tx.clone()) {
@@ -957,33 +1119,60 @@ impl Blockchain {
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
-                     self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    #[cfg(feature = "telemetry")]
+                    self.record_reject();
                     return Err(TxAdmissionError::BadSignature);
                 }
-                let guard = ReservationGuard::new(
-                    lock_guard,
-                    &mut sender.pending,
-                    total_consumer,
-                    total_industrial,
-                );
-                #[cfg(feature = "telemetry")]
-                let tx_id = tx.id();
-                vacant.insert(tx);
-                guard.commit();
-                #[cfg(feature = "telemetry-json")]
-                log_event(
-                    log::Level::Info,
-                    "admit",
-                    &sender_addr,
-                    nonce,
-                    "ok",
-                    Some(fee_per_byte),
-                );
-                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                info!(
-                    "tx accepted sender={sender_addr} nonce={nonce} reason=accepted id={}",
-                    hex::encode(tx_id)
-                );
+                if sender.pending.nonce as usize >= self.max_pending_per_account {
+                    #[cfg(feature = "telemetry")]
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "pending_limit",
+                        None,
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit");
+                    #[cfg(feature = "telemetry")]
+                    self.record_reject();
+                    return Err(TxAdmissionError::PendingLimitReached);
+                }
+                {
+                    let guard = ReservationGuard::new(
+                        lock_guard,
+                        &mut sender.pending,
+                        total_consumer,
+                        total_industrial,
+                        nonce,
+                    );
+                    #[cfg(feature = "telemetry")]
+                    let tx_id = tx.id();
+                    vacant.insert(MempoolEntry {
+                        tx,
+                        timestamp: Instant::now(),
+                    });
+                    guard.commit();
+                    #[cfg(feature = "telemetry")]
+                    self.record_admit();
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        log::Level::Info,
+                        "admit",
+                        &sender_addr,
+                        nonce,
+                        "ok",
+                        Some(fee_per_byte),
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                    info!(
+                        "tx accepted sender={sender_addr} nonce={nonce} reason=accepted id={}",
+                        hex::encode(tx_id)
+                    );
+                }
+                self.inc_mempool_size();
                 Ok(())
             }
         }
@@ -994,14 +1183,26 @@ impl Blockchain {
     /// # Errors
     /// Returns [`TxAdmissionError::NotFound`] if the transaction is absent.
     pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> Result<(), TxAdmissionError> {
+        let _pool_guard = self
+            .mempool_mutex
+            .lock()
+            .map_err(|_| TxAdmissionError::LockPoisoned)?;
         let lock = self
             .admission_locks
             .entry(sender.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
-        let _guard = lock.lock().map_err(|_| TxAdmissionError::UnknownSender)?;
-        if let Some((_, tx)) = self.mempool.remove(&(sender.to_string(), nonce)) {
-            self.mempool_size.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        #[cfg(feature = "telemetry")]
+        let _guard = {
+            let span = tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender, nonce = nonce);
+            span.in_scope(|| lock.lock())
+                .map_err(|_| TxAdmissionError::LockPoisoned)?
+        };
+        #[cfg(not(feature = "telemetry"))]
+        let _guard = lock.lock().map_err(|_| TxAdmissionError::LockPoisoned)?;
+        if let Some((_, entry)) = self.mempool.remove(&(sender.to_string(), nonce)) {
+            self.dec_mempool_size();
+            let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
                     crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
@@ -1012,33 +1213,34 @@ impl Blockchain {
                     acc.pending.industrial =
                         acc.pending.industrial.saturating_sub(total_industrial);
                     acc.pending.nonce = acc.pending.nonce.saturating_sub(1);
+                    acc.pending.nonces.remove(&nonce);
                 }
             }
             #[cfg(feature = "telemetry-json")]
-            log_event(
-                log::Level::Info,
-                "drop",
-                sender,
-                nonce,
-                "dropped",
-                None,
-            );
+            log_event(log::Level::Info, "drop", sender, nonce, "dropped", None);
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             info!("tx dropped sender={sender} nonce={nonce} reason=dropped");
             Ok(())
         } else {
             #[cfg(feature = "telemetry-json")]
-            log_event(
-                log::Level::Warn,
-                "drop",
-                sender,
-                nonce,
-                "not_found",
-                None,
-            );
+            log_event(log::Level::Warn, "drop", sender, nonce, "not_found", None);
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             warn!("drop failed sender={sender} nonce={nonce} reason=not_found");
             Err(TxAdmissionError::NotFound)
+        }
+    }
+
+    pub fn purge_expired(&mut self) {
+        let ttl = Duration::from_secs(self.tx_ttl);
+        let now = Instant::now();
+        let mut to_drop = Vec::new();
+        for entry in self.mempool.iter() {
+            if now.duration_since(entry.value().timestamp) > ttl {
+                to_drop.push((entry.key().0.clone(), entry.key().1));
+            }
+        }
+        for (sender, nonce) in to_drop {
+            let _ = self.drop_transaction(&sender, nonce);
         }
     }
 
@@ -1090,7 +1292,7 @@ impl Blockchain {
 
         self.skipped.clear();
         let mut pending: Vec<SignedTransaction> =
-            self.mempool.iter().map(|e| e.value().clone()).collect();
+            self.mempool.iter().map(|e| e.value().tx.clone()).collect();
         pending.sort_unstable_by(|a, b| {
             a.payload
                 .from_
@@ -1203,6 +1405,7 @@ impl Blockchain {
                             s.pending.industrial =
                                 s.pending.industrial.saturating_sub(total_industrial);
                             s.pending.nonce = s.pending.nonce.saturating_sub(1);
+                            s.pending.nonces.remove(&tx.payload.nonce);
                             s.nonce = tx.payload.nonce;
                         }
                     }
@@ -1223,6 +1426,7 @@ impl Blockchain {
 
                     self.mempool
                         .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
+                    self.dec_mempool_size();
                 }
 
                 #[cfg(feature = "telemetry")]
@@ -1647,6 +1851,35 @@ impl Drop for Blockchain {
     }
 }
 
+impl Blockchain {
+    /// Internal testing hook: intentionally poison the admission lock for `sender`.
+    #[doc(hidden)]
+    pub fn poison_lock(&self, sender: &str) {
+        let lock = self
+            .admission_locks
+            .entry(sender.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        let _ = std::thread::spawn(move || {
+            let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+            panic!("poison");
+        })
+        .join();
+    }
+
+    /// Internal testing hook: heal a previously poisoned lock so it can be used again.
+    #[doc(hidden)]
+    pub fn heal_lock(&self, sender: &str) {
+        let lock = self
+            .admission_locks
+            .entry(sender.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        lock.clear_poison();
+    }
+}
+
 fn leading_zero_bits(hash: &[u8]) -> u32 {
     let mut count = 0;
     for &b in hash {
@@ -1773,5 +2006,31 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrTxNotFound", ErrTxNotFound::type_object(m.py()))?;
     m.add("ErrFeeTooLow", ErrFeeTooLow::type_object(m.py()))?;
     m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
+    m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
+    m.add("ErrPendingLimit", ErrPendingLimit::type_object(m.py()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn reservation_rollback_on_panic(cons in 0u64..1000, ind in 0u64..1000) {
+            let mut pending = Pending::default();
+            let lock = Mutex::new(());
+            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+            let res = ReservationGuard::new(guard, &mut pending, cons, ind, 1);
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                drop(res);
+                panic!("boom");
+            }));
+            assert_eq!(pending.consumer, 0);
+            assert_eq!(pending.industrial, 0);
+            assert_eq!(pending.nonce, 0);
+            assert!(pending.nonces.is_empty());
+        }
+    }
 }

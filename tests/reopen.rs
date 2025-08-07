@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
+use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, TxAdmissionError};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -46,4 +46,45 @@ fn open_mine_reopen() {
     };
     let tx = sign_tx(priv_a.to_vec(), payload).unwrap();
     assert!(bc.submit_transaction(tx).is_ok());
+}
+
+#[test]
+fn replay_after_crash_is_duplicate() {
+    init();
+    let (sk, _pk) = generate_keypair();
+    let path = unique_path("replay_db");
+    let _ = fs::remove_dir_all(&path);
+    {
+        let mut bc = Blockchain::open(&path).unwrap();
+        bc.add_account("a".into(), 0, 0).unwrap();
+        bc.add_account("b".into(), 0, 0).unwrap();
+        bc.mine_block("a").unwrap();
+        let payload = RawTxPayload {
+            from_: "a".into(),
+            to: "b".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee: 1000,
+            fee_selector: 0,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        bc.submit_transaction(tx).unwrap();
+        bc.persist_chain().unwrap();
+        bc.path.clear();
+    }
+    let mut bc2 = Blockchain::open(&path).unwrap();
+    let payload = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1000,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    assert_eq!(bc2.submit_transaction(tx), Err(TxAdmissionError::Duplicate));
 }

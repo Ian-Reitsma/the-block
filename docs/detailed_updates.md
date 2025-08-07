@@ -29,6 +29,53 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   heap to evict the lowest-priority transaction ordered by
   `(fee_per_byte, timestamp_ticks, tx_hash)`. Entry timestamps are stored as
   monotonic `u128` ticks.
+- **Schema v4 Note** – Upcoming migration introduces per-account mempool caps
+  and TTL indexes; `Blockchain::open` rebuilds the mempool on startup and drops
+  expired or orphaned entries.
+- **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
+  and per-account pending limits are configurable via `TB_*` environment
+  variables. Expired transactions are purged on startup and new submissions.
+
+### Mempool State Chart
+
+```
+[submitted]
+    |
+    v
+[admitted] --> [mined]
+    |             ^
+    |             |
+    +--> [evicted]
+    |
+    +--> [expired]
+```
+
+### Admission Error Codes
+
+| Code                   | Meaning                                   |
+|------------------------|-------------------------------------------|
+| `ErrUnknownSender`     | sender not provisioned                    |
+| `ErrInsufficientBalance` | insufficient funds                     |
+| `ErrBadNonce`          | nonce mismatch                            |
+| `ErrInvalidSelector`   | fee selector out of range                 |
+| `ErrBadSignature`      | Ed25519 signature invalid                 |
+| `ErrDuplicateTx`       | `(sender, nonce)` already present         |
+| `ErrTxNotFound`        | transaction missing                       |
+| `ErrBalanceOverflow`   | balance addition overflow                 |
+| `ErrFeeOverflow`       | fee ≥ 2^63                                |
+| `ErrFeeTooLow`         | below `min_fee_per_byte`                  |
+| `ErrMempoolFull`       | capacity exceeded                         |
+| `ErrPendingLimit`      | per-account pending limit hit             |
+| `ErrLockPoisoned`      | mutex guard poisoned                      |
+
+### CLI & Environment Flags
+
+| Flag                    | Env Var                  | Effect                       |
+|-------------------------|--------------------------|------------------------------|
+| `--mempool-max`         | `TB_MEMPOOL_MAX`         | global mempool size cap      |
+| `--mempool-account-cap` | `TB_MEMPOOL_ACCOUNT_CAP` | per-account pending limit    |
+| `--mempool-ttl`         | `TB_MEMPOOL_TTL_SECS`    | entry time-to-live in seconds|
+| `--min-fee-per-byte`    | `TB_MIN_FEE_PER_BYTE`    | minimum fee per byte         |
 
 For the full rationale see `analysis.txt` and the commit history.
 

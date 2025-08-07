@@ -19,10 +19,13 @@ proptest = { version = "1", optional = true }
 dashmap = "5"
 log = { version = "0.4", optional = true, features = ["kv_unstable"] }
 serde_json = { version = "1", optional = true }
+prometheus = { version = "0.13", optional = true }
+once_cell = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
 
 [features]
 fuzzy = ["proptest"]
-telemetry = ["log"]
+telemetry = ["log", "prometheus", "tracing", "once_cell"]
 telemetry-json = ["telemetry", "serde_json"]
 
 [tool.maturin]
@@ -31,6 +34,7 @@ features = ["pyo3/extension-module"]
 [dev-dependencies]
 logtest = "2"
 base64 = "0.22"
+proptest = "1"
 
 [build-dependencies]
 blake3 = "1"

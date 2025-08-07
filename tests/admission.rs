@@ -1,9 +1,10 @@
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
-    generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TokenAmount,
-    TxAdmissionError,
+    generate_keypair, sign_tx, Blockchain, MempoolEntry, RawTxPayload, SignedTransaction,
+    TokenAmount, TxAdmissionError,
 };
 
 fn init() {
@@ -58,7 +59,13 @@ fn mine_block_skips_nonce_gaps() {
     bc.mine_block("miner").unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "miner", "alice", 1, 1, 1000, 5);
-    bc.mempool.insert(("miner".into(), 5), tx.clone());
+    bc.mempool.insert(
+        ("miner".into(), 5),
+        MempoolEntry {
+            tx: tx.clone(),
+            timestamp: Instant::now(),
+        },
+    );
     let block = bc.mine_block("miner").unwrap();
     assert_eq!(block.transactions.len(), 1); // only coinbase
     assert_eq!(bc.skipped.len(), 1);
@@ -167,7 +174,77 @@ fn mempool_full_rejects() {
     let tx1 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 1);
     let tx2 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 2);
     bc.submit_transaction(tx1).unwrap();
-    assert_eq!(bc.submit_transaction(tx2), Err(TxAdmissionError::MempoolFull));
+    assert_eq!(
+        bc.submit_transaction(tx2),
+        Err(TxAdmissionError::MempoolFull)
+    );
+}
+
+#[test]
+fn fee_per_byte_boundary() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_fpb"));
+    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.min_fee_per_byte = 5;
+    let (sk, _pk) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 0,
+        fee: 0,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx_tmp = sign_tx(sk.clone(), payload.clone()).unwrap();
+    let size = bincode::serialize(&tx_tmp).unwrap().len() as u64;
+    let mut low = payload.clone();
+    low.fee = size * bc.min_fee_per_byte - 1;
+    let tx_low = sign_tx(sk.clone(), low).unwrap();
+    assert_eq!(
+        bc.submit_transaction(tx_low),
+        Err(TxAdmissionError::FeeTooLow)
+    );
+    let mut ok = payload;
+    ok.fee = size * bc.min_fee_per_byte;
+    let tx_ok = sign_tx(sk, ok).unwrap();
+    assert_eq!(bc.submit_transaction(tx_ok), Ok(()));
+}
+
+#[test]
+fn lock_poisoned_error_and_recovery() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_poison"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    bc.poison_lock("alice");
+    assert_eq!(
+        bc.submit_transaction(tx.clone()),
+        Err(TxAdmissionError::LockPoisoned)
+    );
+    bc.heal_lock("alice");
+    assert_eq!(bc.submit_transaction(tx), Ok(()));
+}
+
+#[test]
+fn enforces_per_account_pending_limit() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_pending"));
+    bc.max_pending_per_account = 1;
+    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("b".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx1 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 1);
+    let tx2 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 2);
+    assert!(bc.submit_transaction(tx1).is_ok());
+    assert_eq!(
+        bc.submit_transaction(tx2),
+        Err(TxAdmissionError::PendingLimitReached)
+    );
 }
 
 #[test]
