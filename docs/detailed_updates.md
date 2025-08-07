@@ -18,7 +18,12 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Python API** – Module definition uses `Bound<PyModule>` in accordance with `pyo3` 0.24.2.
 - **TokenAmount Display** – Added `__repr__`, `__str__`, and `Display` trait implementations
   so amounts print as plain integers in both Python and Rust logs.
+- **Mempool Atomicity** – Introduced global `mempool_mutex` and 64‑thread cap
+  stress test ensuring size limit enforcement under concurrent submissions.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
+- **Telemetry Metrics** – Prometheus counters now track TTL expirations
+  (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), and orphan
+  sweeps (`orphan_sweep_total`).
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 - **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp
   directory per instance and removes it on drop. Fixtures call `unique_path` so
@@ -26,12 +31,13 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Replay Guard Test** – Reactivated `test_replay_attack_prevention` to prove duplicates
   with the same `(sender, nonce)` are rejected.
 - **Mempool Hardening** – Admission now uses an atomic size counter and binary
+- **Mempool Hardening** – Admission now uses an atomic size counter and binary
   heap to evict the lowest-priority transaction ordered by
-  `(fee_per_byte, timestamp_ticks, tx_hash)`. Entry timestamps are stored as
-  monotonic `u128` ticks.
-- **Schema v4 Note** – Upcoming migration introduces per-account mempool caps
-  and TTL indexes; `Blockchain::open` rebuilds the mempool on startup and drops
-  expired or orphaned entries.
+  `(fee_per_byte, timestamp_millis, tx_hash)`. Entry timestamps persist as
+  UNIX milliseconds.
+- **Schema v4 Note** – Migration serializes mempool contents with timestamps;
+  `Blockchain::open` rebuilds the mempool on startup and drops expired or
+  orphaned entries once `orphan_counter > mempool_size / 2`.
 - **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
   and per-account pending limits are configurable via `TB_*` environment
   variables. Expired transactions are purged on startup and new submissions.
@@ -67,6 +73,8 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 | `ErrMempoolFull`       | capacity exceeded                         |
 | `ErrPendingLimit`      | per-account pending limit hit             |
 | `ErrLockPoisoned`      | mutex guard poisoned                      |
+
+Drop path lock poisoning is covered by `drop_lock_poisoned_error_and_recovery`.
 
 ### CLI & Environment Flags
 

@@ -243,14 +243,15 @@ pub struct SignedTransaction {
 * **Dual‑Token** emission: consumer vs industrial coinbase split enforced via `block.coinbase_consumer` and `block.coinbase_industrial`. All amount fields use the `TokenAmount` newtype to prevent accidental raw arithmetic.
 * **Block validation** order: header → PoW → tx roots → each tx (sig → stateless → stateful).
 * **Genesis hash** is computed at build time from the canonical block encoding and checked at compile time.
-* **Mempool** uses a lock‑free `DashMap` plus a binary heap for `O(log n)`
-  eviction. Transactions must pay at least the `fee_per_byte` floor and are
-  prioritized by `fee_per_byte` with a tie‑breaker on monotonic timestamp ticks
-  and transaction hash. The mempool enforces an atomic size cap (default 1024);
-  once full, new submissions evict the lowest priority entry. `submit_transaction`,
-  `drop_transaction`, and `mine_block` can run concurrently. Orphaned or
-  expired transactions are purged on each submission and block import with
-  balances unreserved.
+* **Mempool** uses a `DashMap` plus a binary heap for `O(log n)`
+  eviction. All mutations acquire a global `mempool_mutex` followed by a
+  per-sender lock. Transactions must pay at least the `fee_per_byte` floor and
+  are prioritized by `fee_per_byte` with a tie‑breaker on persisted
+  `timestamp_millis` and transaction hash. The mempool enforces an atomic size
+  cap (default 1024); once full, new submissions evict the lowest priority
+  entry. Orphaned or expired transactions are purged on each submission and
+  block import with balances unreserved. Entry timestamps persist across
+  restarts and TTLs are enforced on startup.
 
   Admission surfaces distinct error codes:
 
@@ -272,6 +273,10 @@ pub struct SignedTransaction {
 
   Flags: `--mempool-max`/`TB_MEMPOOL_MAX`, `--mempool-account-cap`/`TB_MEMPOOL_ACCOUNT_CAP`,
   `--mempool-ttl`/`TB_MEMPOOL_TTL_SECS`, `--min-fee-per-byte`/`TB_MIN_FEE_PER_BYTE`.
+
+  Telemetry metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
+  `dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`, `orphan_sweep_total`.
+  Orphan sweeps trigger when `orphan_counter > mempool_size / 2` and reset the counter.
 
 ---
 

@@ -88,3 +88,37 @@ fn replay_after_crash_is_duplicate() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     assert_eq!(bc2.submit_transaction(tx), Err(TxAdmissionError::Duplicate));
 }
+
+#[test]
+fn ttl_expired_purged_on_restart() {
+    init();
+    let (sk, _pk) = generate_keypair();
+    let path = unique_path("replay_ttl");
+    let _ = fs::remove_dir_all(&path);
+    {
+        let mut bc = Blockchain::open(&path).unwrap();
+        bc.tx_ttl = 1;
+        bc.add_account("a".into(), 0, 0).unwrap();
+        bc.add_account("b".into(), 0, 0).unwrap();
+        bc.mine_block("a").unwrap();
+        let payload = RawTxPayload {
+            from_: "a".into(),
+            to: "b".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee: 1000,
+            fee_selector: 0,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        bc.submit_transaction(tx).unwrap();
+        if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+            entry.timestamp_millis = 0;
+        }
+        bc.persist_chain().unwrap();
+        bc.path.clear();
+    }
+    let bc2 = Blockchain::open(&path).unwrap();
+    assert!(bc2.mempool.is_empty());
+}

@@ -1,7 +1,8 @@
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use the_block::{
-    generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TxAdmissionError,
+    generate_keypair, sign_tx, telemetry, Blockchain, RawTxPayload, SignedTransaction,
+    TxAdmissionError,
 };
 
 fn init() {
@@ -93,4 +94,72 @@ fn fee_floor_enforced() {
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 0, 1);
     assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::FeeTooLow));
+}
+
+#[test]
+fn orphan_sweep_removes_missing_sender() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_orphan"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    bc.submit_transaction(tx).unwrap();
+    bc.accounts.remove("alice");
+    bc.purge_expired();
+    assert!(bc.mempool.is_empty());
+    #[cfg(feature = "telemetry")]
+    assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
+}
+
+#[test]
+fn orphan_ratio_triggers_rebuild() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_orphan_ratio"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    for n in 1..=3 {
+        let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, n);
+        bc.submit_transaction(tx).unwrap();
+    }
+    bc.accounts.remove("alice");
+    bc.purge_expired();
+    assert_eq!(bc.mempool.len(), 0);
+    assert_eq!(bc.orphan_count(), 0);
+}
+
+#[test]
+fn drop_lock_poisoned_error_and_recovery() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_drop_poison"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    bc.submit_transaction(tx).unwrap();
+    bc.poison_mempool();
+    assert_eq!(
+        bc.drop_transaction("alice", 1),
+        Err(TxAdmissionError::LockPoisoned)
+    );
+    bc.heal_mempool();
+    assert_eq!(bc.drop_transaction("alice", 1), Ok(()));
+}
+
+#[test]
+fn submit_lock_poisoned_error_and_recovery() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_submit_poison"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    bc.poison_mempool();
+    assert_eq!(
+        bc.submit_transaction(tx.clone()),
+        Err(TxAdmissionError::LockPoisoned)
+    );
+    bc.heal_mempool();
+    assert_eq!(bc.submit_transaction(tx), Ok(()));
 }
