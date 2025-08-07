@@ -248,7 +248,30 @@ pub struct SignedTransaction {
   prioritized by `fee_per_byte` with a tie‑breaker on monotonic timestamp ticks
   and transaction hash. The mempool enforces an atomic size cap (default 1024);
   once full, new submissions evict the lowest priority entry. `submit_transaction`,
-  `drop_transaction`, and `mine_block` can run concurrently.
+  `drop_transaction`, and `mine_block` can run concurrently. Orphaned or
+  expired transactions are purged on each submission and block import with
+  balances unreserved.
+
+  Admission surfaces distinct error codes:
+
+  | Code                  | Meaning                                   |
+  |-----------------------|-------------------------------------------|
+  | `ErrUnknownSender`    | sender not provisioned                    |
+  | `ErrInsufficientBalance` | insufficient funds                     |
+  | `ErrBadNonce`         | nonce mismatch                            |
+  | `ErrInvalidSelector`  | fee selector out of range                 |
+  | `ErrBadSignature`     | Ed25519 signature invalid                 |
+  | `ErrDuplicateTx`      | `(sender, nonce)` already present         |
+  | `ErrTxNotFound`       | transaction missing                       |
+  | `ErrBalanceOverflow`  | balance addition overflow                 |
+  | `ErrFeeOverflow`      | fee ≥ 2^63                                |
+  | `ErrFeeTooLow`        | below `min_fee_per_byte`                  |
+  | `ErrMempoolFull`      | capacity exceeded                         |
+  | `ErrPendingLimit`     | per-account pending limit hit             |
+  | `ErrLockPoisoned`     | mutex guard poisoned                      |
+
+  Flags: `--mempool-max`/`TB_MEMPOOL_MAX`, `--mempool-account-cap`/`TB_MEMPOOL_ACCOUNT_CAP`,
+  `--mempool-ttl`/`TB_MEMPOOL_TTL_SECS`, `--min-fee-per-byte`/`TB_MIN_FEE_PER_BYTE`.
 
 ---
 
