@@ -115,10 +115,52 @@ fn ttl_expired_purged_on_restart() {
         bc.submit_transaction(tx).unwrap();
         if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
             entry.timestamp_millis = 0;
+            entry.timestamp_ticks = 0;
         }
         bc.persist_chain().unwrap();
         bc.path.clear();
     }
     let bc2 = Blockchain::open(&path).unwrap();
     assert!(bc2.mempool.is_empty());
+}
+
+#[test]
+fn timestamp_ticks_persist_across_restart() {
+    init();
+    let (sk, _pk) = generate_keypair();
+    let path = unique_path("ticks_db");
+    let _ = fs::remove_dir_all(&path);
+    let first;
+    {
+        let mut bc = Blockchain::open(&path).unwrap();
+        bc.add_account("a".into(), 0, 0).unwrap();
+        bc.add_account("b".into(), 0, 0).unwrap();
+        bc.mine_block("a").unwrap();
+        let payload = RawTxPayload {
+            from_: "a".into(),
+            to: "b".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee: 1000,
+            fee_selector: 0,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        bc.submit_transaction(tx).unwrap();
+        first = bc
+            .mempool
+            .get(&("a".into(), 1))
+            .map(|e| e.timestamp_ticks)
+            .unwrap();
+        bc.persist_chain().unwrap();
+        bc.path.clear();
+    }
+    let bc2 = Blockchain::open(&path).unwrap();
+    let persisted = bc2
+        .mempool
+        .get(&("a".into(), 1))
+        .map(|e| e.timestamp_ticks)
+        .unwrap();
+    assert_eq!(first, persisted);
 }

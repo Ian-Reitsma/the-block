@@ -7,8 +7,9 @@
 - Breaking: database schema **v4** adds per-account mempool caps and TTL
   indexes; `Blockchain::open` rebuilds the mempool on startup dropping
   expired or orphaned entries.
-- Breaking: mempool entries persist `timestamp_millis`; schema v4 serializes
-  pending transactions and enforces TTL on restart.
+- Breaking: mempool entries persist admission timestamps (`timestamp_millis`
+  and monotonic `timestamp_ticks`); schema v4 serializes pending transactions
+  and enforces TTL on restart.
 - Fix: isolate temporary chain directories for tests and enable replay attack
   prevention to reject duplicate `(sender, nonce)` pairs.
 - Fix: enforce mempool capacity via atomic counter and `O(log n)` priority
@@ -24,15 +25,27 @@
   lock poisoning (`lock_poison_total`).
 - Feat: orphan sweeps rebuild heap when `orphan_counter > mempool_size / 2` and
   reset the counter; panic-inject test covers global mempool mutex.
+- Feat: rejection counters `invalid_selector_reject_total`,
+  `balance_overflow_reject_total`, and `drop_not_found_total` accompany
+  labelled `tx_rejected_total{reason=*}` metrics.
 - Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for Prometheus scrapes.
+- Feat: rejection counter `tx_rejected_total{reason=*}` and spans
+  `mempool_mutex`, `eviction_sweep`, `startup_rebuild` document drop reasons
+  and startup purge.
 - Test: add panic-inject harness covering drop path lock poisoning and recovery.
-- Test: add panic-inject harness for admission eviction to ensure no deadlock.
+- Test: add panic-inject harness for admission eviction proving full rollback
+  and advancing `lock_poison_total` and rejection counters.
 - Test: add admission panic hook verifying reservation rollback across steps.
 - Test: expand 32-thread fuzz harness with randomized nonces and fees over
   10k iterations to stress capacity and uniqueness invariants.
+- Test: add `flood_mempool_never_over_cap` regression verifying mempool cap
+  under threaded submission floods.
+- Test: `rejection_reasons` asserts telemetry for invalid selector, balance
+  overflow, and drop-not-found paths.
 - Feat: startup TTL purge logs `expired_drop_total`.
 - Doc: introduce `API_CHANGELOG.md` for Python error codes and telemetry endpoints.
 - Test: add unit test verifying mempool comparator priority order and regression for TTL expiry telemetry.
+- Test: `test_schema_upgrade_compatibility` migrates v1/v2/v3 disks to v4 with `timestamp_ticks` hydration and `ttl_expired_purged_on_restart` covers TTL purges across restarts.
 - Doc: refresh `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, and `AUDIT_NOTES.md` with authoritative next-step directives.
 
 ### CLI Flags

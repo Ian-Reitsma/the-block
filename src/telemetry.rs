@@ -1,5 +1,5 @@
 use once_cell::sync::Lazy;
-use prometheus::{Encoder, IntCounter, IntGauge, Registry, TextEncoder};
+use prometheus::{Encoder, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder};
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -51,9 +51,12 @@ pub static TX_ADMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static TX_REJECTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new("tx_rejected_total", "Total rejected transactions")
-        .unwrap_or_else(|e| panic!("counter: {e}"));
+pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("tx_rejected_total", "Total rejected transactions"),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -88,6 +91,42 @@ pub static ORPHAN_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "orphan_sweep_total",
         "Transactions dropped because the sender account is missing",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static INVALID_SELECTOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "invalid_selector_reject_total",
+        "Transactions rejected for invalid fee selector",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static BALANCE_OVERFLOW_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "balance_overflow_reject_total",
+        "Transactions rejected due to balance overflow",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "drop_not_found_total",
+        "drop_transaction failures for missing entries",
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY

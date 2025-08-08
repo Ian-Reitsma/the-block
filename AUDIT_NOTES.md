@@ -8,14 +8,26 @@
   rejected. **COMPLETED/DONE**
 - Added mempool priority comparator unit test proving `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` ordering. **COMPLETED/DONE**
 - Introduced TTL-expiry regression test and telemetry counter `ttl_drop_total`; lock-poison drops now advance `lock_poison_total`.
+- Unified mempool critical section (`mempool_mutex → sender_mutex`) covering counter
+  updates, heap operations, and pending reservations. Concurrency test
+  `flood_mempool_never_over_cap` proves the size cap.
+- Orphan sweeps rebuild the heap when `orphan_counter > mempool_size / 2`,
+  emit `ORPHAN_SWEEP_TOTAL`, and reset the counter.
+- Serialized `timestamp_ticks`, rebuilt the mempool on startup, and dropped
+  expired or missing-account entries while logging `expired_drop_total`.
+- Panic-inject eviction test proves rollback and advances lock-poison metrics.
+- Completed telemetry coverage: counters `ttl_drop_total`, `orphan_sweep_total`,
+  `lock_poison_total`, `invalid_selector_reject_total`,
+  `balance_overflow_reject_total`, `drop_not_found_total`, and
+  `tx_rejected_total{reason=*}` advance on every rejection; spans
+  `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` are instrumented;
+  `serve_metrics` scrape example documented; `rejection_reasons.rs` asserts the
+  labelled counters.
+- Archived `artifacts/fuzz.log` and `artifacts/migration.log` with accompanying
+  `RISK_MEMO.md` capturing residual risk and review requirements.
 
 ## Outstanding Blockers
-- **B‑1 Over‑Cap Race**: unify `submit_transaction`, `drop_transaction`, and `mine_block` under a `mempool_mutex → sender_mutex` critical section with counter, heap, and pending updates inside.
-- **B‑2 Orphan Sweep**: maintain `orphan_counter` and rebuild the heap when `orphan_counter > mempool_size / 2`; decrement on TTL purge and drop; emit `ORPHAN_SWEEP_TOTAL`.
-- **B‑3 Timestamp Persistence**: serialize `MempoolEntry.timestamp_ticks`, rebuild heap on `Blockchain::open`, and drop expired or missing-account entries while logging `expired_drop_total`.
-- **B‑4 Self‑Evict Deadlock**: panic‑inject eviction path and verify rollback, incrementing `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL`.
-- **Replay & Migration Tests**: extend restart tests for TTL expiry and re‑enable `test_schema_upgrade_compatibility`.
-- **Telemetry & Spans**: add `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, and span coverage for `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`.
+- **Replay & Migration Tests**: restart suite now covers TTL expiry, and `test_schema_upgrade_compatibility` verifies v1/v2/v3 → v4 migration.
 
 The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the current repository snapshot. Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference this repository at HEAD.
 
@@ -63,7 +75,7 @@ technical debt.
 - **Schema Versioning**: `ChainDisk` carries `schema_version` and `open()` migrates versions <3 to current (src/lib.rs, L207‑L271). Legacy column families are removed after migration. However:
   - The migration path zeroes `coinbase_*` for legacy blocks without recalculating historical fee data, risking supply drift for pre‑fee blocks.
   - No migration handles accounts lacking `pending_*` fields; existing entries might miss reservations.
-- **Unit Test Coverage**: `test_schema_upgrade_compatibility` is annotated with `#[ignore]` (tests/test_chain.rs, L450). CI does not exercise migration paths. Enable the test and add fixtures for v1/v2 layouts, asserting defaulted `pending_*` fields and nonces.
+- **Unit Test Coverage**: `test_schema_upgrade_compatibility` now runs on CI, covering v1/v2/v3 disks and asserting `pending_*` fields default and `timestamp_ticks` hydration.
 - **Snapshot Integrity**: There is no automated “migrate to v3, roll back 100 blocks, re‑dump” verification as required. Implement a snapshot test ensuring round‑trip hash stability.
 
 ## 7. Demo Script Verbosity & Clarity
@@ -200,7 +212,7 @@ These notes should guide subsequent contributors in elevating the branch to the 
 - Governance artefacts (`governance/FORK-FEE-01.json`) — absent.
 - P2P feature-bit handshake — absent.
 - CI jobs (`fee-unit-tests`, `fee-fuzz-san`, `schema-lint`) — absent.
-- Migration test (`test_schema_upgrade_compatibility`) — ignored.
+- Migration test (`test_schema_upgrade_compatibility`) — active.
 - Runtime overflow guards for miner credit — incomplete.
 - Documentation cross-links and disclaimer updates — incomplete.
 - Fuzz harnesses for `admission_check`, `apply_fee`, `validate_block` — missing.

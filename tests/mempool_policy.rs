@@ -85,6 +85,7 @@ fn ttl_expiry_purges_and_counts() {
     bc.submit_transaction(tx).unwrap();
     if let Some(mut entry) = bc.mempool.get_mut(&("alice".into(), 1)) {
         entry.timestamp_millis = 0;
+        entry.timestamp_ticks = 0;
     }
     #[cfg(feature = "telemetry")]
     telemetry::TTL_DROP_TOTAL.reset();
@@ -163,7 +164,12 @@ fn drop_lock_poisoned_error_and_recovery() {
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
-        assert_eq!(1, telemetry::TX_REJECTED_TOTAL.get());
+        assert_eq!(
+            1,
+            telemetry::TX_REJECTED_TOTAL
+                .with_label_values(&["lock_poison"])
+                .get()
+        );
     }
     bc.heal_mempool();
     assert_eq!(bc.drop_transaction("alice", 1), Ok(()));
@@ -190,7 +196,12 @@ fn submit_lock_poisoned_error_and_recovery() {
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
-        assert_eq!(1, telemetry::TX_REJECTED_TOTAL.get());
+        assert_eq!(
+            1,
+            telemetry::TX_REJECTED_TOTAL
+                .with_label_values(&["lock_poison"])
+                .get()
+        );
     }
     bc.heal_mempool();
     assert_eq!(bc.submit_transaction(tx), Ok(()));
@@ -261,14 +272,17 @@ fn comparator_orders_by_fee_expiry_hash() {
     let e1 = MempoolEntry {
         tx: tx1,
         timestamp_millis: 1,
+        timestamp_ticks: 1,
     };
     let e2 = MempoolEntry {
         tx: tx2.clone(),
         timestamp_millis: 1,
+        timestamp_ticks: 1,
     };
     let e3 = MempoolEntry {
         tx: tx3.clone(),
         timestamp_millis: 1,
+        timestamp_ticks: 1,
     };
     let mut entries = vec![e3, e2.clone(), e1];
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));

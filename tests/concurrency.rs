@@ -1,8 +1,8 @@
+use rand::Rng;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
-use rand::Rng;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -137,5 +137,40 @@ fn cap_race_respects_limit() {
         h.join().unwrap();
     }
     let guard = bc.read().unwrap();
+    assert!(guard.mempool.len() <= guard.max_mempool_size);
+}
+
+// Flood the mempool from many threads and track the peak size, ensuring the cap is never exceeded.
+// AGENTS.md §10.3
+#[test]
+fn flood_mempool_never_over_cap() {
+    init();
+    let path = unique_path("temp_flood_cap");
+    let mut bc = Blockchain::new(&path);
+    bc.max_mempool_size = 16;
+    bc.max_pending_per_account = 64;
+    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.mine_block("alice").unwrap();
+    let (sk, _pk) = generate_keypair();
+    let bc = Arc::new(RwLock::new(bc));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let handles: Vec<_> = (0..64)
+        .map(|i| {
+            let bc_cl = Arc::clone(&bc);
+            let peak_cl = Arc::clone(&peak);
+            let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, i as u64 + 1);
+            std::thread::spawn(move || {
+                let _ = bc_cl.write().unwrap().submit_transaction(tx);
+                let len = bc_cl.read().unwrap().mempool.len();
+                peak_cl.fetch_max(len, Ordering::SeqCst);
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    let guard = bc.read().unwrap();
+    assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size);
     assert!(guard.mempool.len() <= guard.max_mempool_size);
 }

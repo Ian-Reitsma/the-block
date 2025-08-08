@@ -18,21 +18,30 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Python API** – Module definition uses `Bound<PyModule>` in accordance with `pyo3` 0.24.2.
 - **TokenAmount Display** – Added `__repr__`, `__str__`, and `Display` trait implementations
   so amounts print as plain integers in both Python and Rust logs.
-- **Mempool Atomicity** – Introduced global `mempool_mutex` and 64‑thread cap
-  stress test ensuring size limit enforcement under concurrent submissions.
+- **Mempool Atomicity** – Unified `mempool_mutex → sender_mutex` critical
+  section; counter updates, heap ops, and pending balances execute inside the
+  lock. Regression tests (`cap_race_respects_limit` and
+  `flood_mempool_never_over_cap`) prove the size cap under threaded floods.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
 - **Telemetry Metrics** – Prometheus counters now track TTL expirations
-  (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), and orphan
-  sweeps (`orphan_sweep_total`).
+  (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), orphan
+  sweeps (`orphan_sweep_total`), invalid fee selectors
+  (`invalid_selector_reject_total`), balance overflows
+  (`balance_overflow_reject_total`), drop failures
+  (`drop_not_found_total`), and total rejections labelled by reason
+  (`tx_rejected_total{reason=*}`).
 - **Metrics HTTP Exporter** – `serve_metrics(addr)` spawns a lightweight server
   that returns `gather_metrics()` output. A sample `curl` scrape is shown below.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
   telemetry counters.
 - **Panic Tests** – Admission path includes panic-inject steps for rollback and
-  eviction uses a separate harness to verify lock recovery.
+  eviction uses a separate harness (`eviction_panic_rolls_back`) to verify lock
+  recovery and metric increments.
+- **Schema Migration Tests** – `test_schema_upgrade_compatibility` exercises v1/v2/v3 disks upgrading to v4 with `timestamp_ticks` hydration; `ttl_expired_purged_on_restart` proves TTL expiry across restarts.
 - **Tracing Spans** – `mempool_mutex` emits sender, nonce, fee-per-byte and
-  current `mempool_size` alongside existing `eviction_sweep` and
-  `startup_rebuild` spans for fine-grained profiling.
+  current `mempool_size`; `eviction_sweep` records `mempool_size` and
+  `orphan_counter`; `startup_rebuild` includes `expired_drop_total` for
+  fine-grained profiling.
 - **Admission Panic Property Test** – `admission_panic_rolls_back_all_steps`
   injects panics before and after reservation and proves pending state and
   mempool remain clean.
@@ -43,7 +52,8 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 Example scrape with Prometheus format:
 
 ```bash
-curl -s localhost:9000/metrics | grep mempool_size
+curl -s localhost:9000/metrics \
+  | grep -E 'mempool_size|orphan_sweep_total|invalid_selector_reject_total|tx_rejected_total'
 ```
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 - **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp
@@ -64,10 +74,14 @@ curl -s localhost:9000/metrics | grep mempool_size
   `tx_rejected_total` increment on poisoned lock paths.
 - **Orphan Sweep Metrics** – `orphan_sweep_removes_missing_sender` confirms
   `orphan_sweep_total` rises when missing-account entries are swept.
+- **Rejection Reason Metrics** – `rejection_reasons` regression suite asserts
+  `invalid_selector_reject_total`, `balance_overflow_reject_total`, and
+  `drop_not_found_total` alongside the labelled `tx_rejected_total` entries.
 - **Schema v4 Note** – Migration serializes mempool contents with timestamps;
-  `Blockchain::open` rebuilds the mempool on startup and drops expired or
-  orphaned entries once `orphan_counter > mempool_size / 2`. Startup purge logs
-  `expired_drop_total` for visibility.
+  `Blockchain::open` rebuilds the mempool on startup, encoding both
+  `timestamp_millis` and `timestamp_ticks` per entry, then drops expired or
+  missing-account entries once `orphan_counter > mempool_size / 2`. Startup
+  purge logs `expired_drop_total` for visibility.
 - **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
   and per-account pending limits are configurable via `TB_*` environment
   variables. Expired transactions are purged on startup and new submissions.

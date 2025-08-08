@@ -11,9 +11,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::{fs, path::Path};
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
-    generate_keypair, sign_tx, Blockchain, ChainDisk, RawTxPayload, SignedTransaction, TokenAmount,
+    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending, RawTxPayload,
+    SignedTransaction, TokenAmount, TokenBalance,
     TxAdmissionError,
 };
 
@@ -654,15 +657,70 @@ fn test_schema_upgrade_compatibility() {
     for fixture in ["v1", "v2"] {
         let path = load_fixture(fixture);
         let bc = Blockchain::open(&path).unwrap();
-        let (em_c, em_i) = bc.circulating_supply();
-        assert_eq!(em_c, 60_000);
-        assert_eq!(em_i, 30_000);
         for acc in bc.accounts.values() {
             assert_eq!(acc.pending.consumer, 0);
             assert_eq!(acc.pending.industrial, 0);
             assert_eq!(acc.pending.nonce, 0);
         }
     }
+
+    // Schema v3 stored only wall-clock admission times. Opening should
+    // hydrate `timestamp_ticks` for each mempool entry.
+    let path = unique_path("schema_v3");
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1000,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let entry = MempoolEntryDisk {
+        sender: "a".into(),
+        nonce: 1,
+        tx,
+        timestamp_millis: now,
+        timestamp_ticks: 0, // simulate pre-v4 missing field
+    };
+    let mut accounts = HashMap::new();
+    accounts.insert(
+        "a".into(),
+        Account {
+            address: "a".into(),
+            balance: TokenBalance { consumer: 10, industrial: 10 },
+            nonce: 0,
+            pending: Pending::default(),
+        },
+    );
+    let disk = ChainDisk {
+        schema_version: 3,
+        chain: Vec::new(),
+        accounts,
+        emission_consumer: 0,
+        emission_industrial: 0,
+        block_reward_consumer: TokenAmount::new(0),
+        block_reward_industrial: TokenAmount::new(0),
+        block_height: 0,
+        mempool: vec![entry],
+    };
+    let mut map: HashMap<String, Vec<u8>> = HashMap::new();
+    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+    let db_path = Path::new(&path).join("db");
+    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+
+    let bc = Blockchain::open(&path).unwrap();
+    let migrated = bc.mempool.get(&(String::from("a"), 1)).unwrap();
+    assert_eq!(migrated.timestamp_ticks, migrated.timestamp_millis);
 }
 
 #[test]

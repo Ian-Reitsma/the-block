@@ -20,22 +20,34 @@ re‑implement:
 4. **Temp DB isolation** for tests; `Blockchain::new(path)` creates per-run
    directories and `test_replay_attack_prevention` enforces `(sender, nonce)`
    dedup.
-5. **Telemetry expansion**: HTTP metrics exporter, `ttl_drop_total`, `lock_poison_total`, and comparator ordering test for mempool priority.
+5. **Telemetry expansion**: HTTP metrics exporter, `ttl_drop_total`,
+   `lock_poison_total`, `orphan_sweep_total`,
+   `invalid_selector_reject_total`, `balance_overflow_reject_total`,
+   `drop_not_found_total`, `tx_rejected_total{reason=*}`, and span coverage
+   for `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`;
+   comparator ordering test for mempool priority.
+6. **Mempool atomicity**: global `mempool_mutex → sender_mutex` critical section with
+   counter updates, heap ops, and pending balances inside; orphan sweeps rebuild
+   the heap when `orphan_counter > mempool_size / 2` and emit `ORPHAN_SWEEP_TOTAL`.
+7. **Timestamp persistence & eviction proof**: mempool entries persist
+   `timestamp_ticks` for deterministic startup purge; panic-inject eviction test
+   proves lock-poison recovery.
 
 ---
 
 ## Current Status & Completion Estimate
 
-*Completion score: **52 / 100*** — robust single-node kernel with improved
+*Completion score: **56 / 100*** — robust single-node kernel with improved
 telemetry yet still lacking network and ops scaffolding.  See
-[Project Completion Snapshot](#project-completion-snapshot--52--100) for
+[Project Completion Snapshot](#project-completion-snapshot--56--100) for
 detail.
 
-* **Core consensus/state/tx logic** — 92 %: fee routing, nonce tracking, and
-  comparator ordering are in place; global atomicity still open.
-* **Database/persistence** — 60 %: schema v3 with migrations exists; timestamp
-  persistence and durable backend pending.
-* **Testing/validation** — 62 %: basic panic-inject and comparator tests live;
+* **Core consensus/state/tx logic** — 92 %: fee routing, nonce tracking,
+  comparator ordering, and global atomicity via `mempool_mutex →
+  sender_mutex` are in place.
+* **Database/persistence** — 65 %: schema v4 persists admission ticks; durable
+  backend pending.
+* **Testing/validation** — 68 %: admission and eviction panic tests in place;
   long-range fuzzing and migration property tests remain.
 * **Demo/docs** — 62 %: docs track new metrics but still lack cross-links and
   startup rebuild details.
@@ -61,33 +73,24 @@ detail.
 
 Treat the following as blockers. Implement each with atomic commits, exhaustive tests, and cross‑referenced documentation.
 
-1. **B‑1 Over‑Cap Race — Global Mempool Mutex**
-   - Wrap `submit_transaction`, `drop_transaction`, and `mine_block` in `mempool_mutex → sender_mutex` order.
-   - Include counter updates, heap operations, and pending balance/nonces within the critical section.
-   - Add concurrency tests proving `max_mempool_size` cannot be exceeded under load.
-2. **B‑2 Orphan Sweep Policy**
-   - Track `orphan_counter`; trigger heap rebuild when `orphan_counter > mempool_size / 2`.
-   - Decrement counter on TTL purge and drop paths; expose `ORPHAN_SWEEP_TOTAL` telemetry and document policy.
-3. **B‑3 Timestamp Persistence & Startup Purge**
-   - Persist `MempoolEntry.timestamp_ticks` (schema v4) and rebuild heap on startup.
-   - Run `purge_expired()` during `Blockchain::open`, dropping stale or missing‑account entries and logging `expired_drop_total`.
-   - Update `CONSENSUS.md` with encoding and startup purge procedure.
-4. **B‑4 Self‑Evict Deadlock Test**
-   - Add panic‑inject harness forcing eviction mid‑admission; ensure full rollback and no deadlock.
-   - Increment `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL{reason=lock_poison}` on every induced failure.
-5. **Deterministic Eviction & Replay Tests**
+1. **Deterministic Eviction & Replay Tests**
    - Existing comparator test must remain; extend to stable ordering after heap rebuild.
-   - Extend `replay_after_crash_is_duplicate` to cover TTL expiry across restart.
-   - Re‑enable `test_schema_upgrade_compatibility` verifying v3→v4 migration.
-6. **Telemetry & Logging Expansion**
-   - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, plus global `TX_REJECTED_TOTAL{reason=*}`.
-   - Instrument spans `mempool_mutex`, `eviction_sweep`, `startup_rebuild` capturing sender, nonce, fee_per_byte, mempool_size.
-   - Document scrape example for `serve_metrics` and span list in `docs/detailed_updates.md` and specs.
-7. **Test & Fuzz Matrix**
+   - `ttl_expired_purged_on_restart` exercises TTL expiry across restarts.
+   - `test_schema_upgrade_compatibility` verifies v1/v2/v3 → v4 migration.
+2. **Telemetry & Logging Expansion**
+   - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`,
+     `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
+     `DROP_NOT_FOUND_TOTAL`, plus global `TX_REJECTED_TOTAL{reason=*}` with
+     regression tests for each labelled rejection.
+   - Instrument spans `mempool_mutex`, `eviction_sweep`, `startup_rebuild`
+     capturing sender, nonce, fee_per_byte, mempool_size.
+   - Document scrape example for `serve_metrics` and span list in
+     `docs/detailed_updates.md` and specs.
+3. **Test & Fuzz Matrix**
    - Property tests injecting panics at each admission step verifying reservation rollback and metrics.
    - 32‑thread fuzz harness with random fees/nonces for ≥10 k iterations exercising cap and uniqueness.
    - Heap orphan stress test exceeding threshold and asserting rebuild metrics.
-8. **Documentation Synchronization**
+4. **Documentation Synchronization**
    - Update `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` for all of the above.
 
 ---
