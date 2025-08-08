@@ -43,35 +43,46 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * `tests/test_interop.py` confirms Python and Rust encode transactions identically.
 
 ## 2. Immediate Next Steps
-The following tasks are ordered from highest urgency to longer‑term milestones. Each new feature must come with unit tests, property tests where appropriate, and documentation updates.
+The following directives are mandatory before any feature expansion. Deliver each with exhaustive tests, telemetry, and cross‑referenced documentation.
 
-1. **Nonce Enforcement & Pending Ledger**
-   - Reject any submitted transaction whose nonce is not exactly `account.nonce + 1`.
-   - Track `pending.consumer`, `pending.industrial` and `pending.nonce` to lock funds in the mempool so double spends cannot occur.
-2. **Fee Routing & Overflow Clamp**
-   - Enforce the fee routing equations documented in `analysis.txt`. Split fees according to `fee_selector` and cap `fee < 2^63` to avoid `div_ceil` overflow.
-3. **Difficulty Field Verification**
-   - Include `difficulty` in the block header hash and verify that `block.difficulty` equals the network target for the given height.
-4. **In‑Block Nonce Continuity**
-   - When mining a block, ensure each sender’s transactions appear in strict nonce order with no gaps.
-5. **Mempool Deduplication**
-   - Maintain a `HashSet<(sender, nonce)>` to reject duplicate payloads and prevent replay spam.
-6. **Schema Version Bump and Migration Test**
-   - After modifying on‑disk formats, increment `ChainDisk.schema_version` and provide a migration path from older layouts. Add an explicit unit test that loads a v1/v2 database and upgrades it.
-7. **Demo Verbosity Enhancements**
-   - Expand `demo.py` logging to narrate each phase (keygen, genesis mining, transaction admission, block mining, state update, reward decay). Provide analogies and layman terminology.
-8. **Documentation Refresh**
-   - Keep `README.md`, `AGENTS.md`, and `docs/detailed_updates.md` synchronized with new behavior. Every consensus change must be explained in prose and referenced from the code.
+1. **B‑1 Over‑Cap Race — Global Mempool Mutex**
+   - Guard `submit_transaction`, `drop_transaction`, and `mine_block` with `mempool_mutex → sender_mutex`.
+   - Enclose counter updates, heap operations, and pending balance/nonce reservations in the critical section.
+   - Regression tests must prove `max_mempool_size` is never exceeded under concurrent submission or mining.
+2. **B‑2 Orphan Sweep Policy**
+   - Maintain `orphan_counter`; rebuild the heap when `orphan_counter > mempool_size / 2`.
+   - TTL purge and drop paths decrement the counter; emit `ORPHAN_SWEEP_TOTAL`.
+   - Document ratio and sweep behaviour in `CONSENSUS.md` and this supplement.
+3. **B‑3 Timestamp Persistence**
+   - Persist `MempoolEntry.timestamp_ticks` (schema v4) and rebuild the heap on `Blockchain::open`.
+   - Run `purge_expired` during startup, dropping stale or missing‑account entries and logging `expired_drop_total`.
+   - Update `CONSENSUS.md` with encoding details and migration guidance.
+4. **B‑4 Self‑Evict Deadlock Test**
+   - Add a panic‑inject harness that forces eviction mid‑admission to prove lock ordering and automatic rollback.
+   - Ensure `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL{reason=lock_poison}` advance together.
+5. **Deterministic Eviction & Replay Tests**
+   - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` for stable ordering.
+   - Extend replay tests to cover TTL expiry across restart and re‑enable `test_schema_upgrade_compatibility` for v3→v4.
+6. **Telemetry & Logging Expansion**
+   - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL` and a global `TX_REJECTED_TOTAL{reason=*}`.
+   - Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and current mempool size.
+   - Publish a `serve_metrics` curl example and span list in `docs/detailed_updates.md`.
+7. **Test & Fuzz Matrix**
+   - Property tests injecting panics at each admission step to guarantee reservation rollback.
+   - 32‑thread fuzz harness with random nonces/fees ≥10 k iterations validating cap, uniqueness, and eviction order.
+   - Heap orphan stress test: exceed threshold, trigger rebuild, assert ordering and metric increments.
+8. **Documentation Synchronization**
+   - Revise `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` to reflect every change above.
 
 ## 3. Mid‑Term Milestones
-After the immediate patches above, focus shifts toward networking and user tooling.
+Once the mempool and persistence layers satisfy the above directives, pursue features that build upon this foundation and depend on its determinism.
 
-1. **Persistent Storage Refinements** – swap in a real database backend; `SimpleDb` is a temporary stub.
-2. **P2P Networking** – design a simple protocol (libp2p recommended) for block and transaction gossip. Implement longest‑chain sync and fork resolution.
-3. **CLI / RPC API** – expose node controls via command‑line and/or HTTP so multiple nodes can be orchestrated in tests.
-4. **Dynamic Difficulty Retarget** – adjust `difficulty` based on moving average block times to maintain the target interval.
-5. **Enhanced Validation** – verify all incoming blocks and transactions from peers: signature checks, PoW target, nonce sequence, and fee accounting.
-6. **Testing & Visualization Tools** – provide integration tests that spin up two or more nodes and assert ledger equivalence. Add scripts to pretty‑print chain state for auditors.
+1. **Durable Storage Backend** – replace `SimpleDb` with a crash‑safe key‑value store. Timestamp persistence from B‑3 enables deterministic rebuilds.
+2. **P2P Networking & Sync** – design gossip and fork resolution protocols. A race‑free mempool and replay‑safe persistence are prerequisites.
+3. **Node API & Tooling** – expose CLI/RPC once telemetry counters and spans offer operational visibility for remote control.
+4. **Dynamic Difficulty Retargeting** – implement moving‑average difficulty; requires reliable timestamping and startup rebuild.
+5. **Enhanced Validation & Security** – extend panic‑inject and fuzz coverage to network inputs, enforcing signature, nonce, and fee invariants across peers.
+6. **Testing & Visualization Tools** – multi‑node integration tests and dashboards leveraging the telemetry emitted above.
 
 ## 4. Long‑Term Vision
 Once networking is stable, the project aims to become a modular research platform for advanced consensus and resource sharing.

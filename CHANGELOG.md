@@ -24,10 +24,16 @@
   lock poisoning (`lock_poison_total`).
 - Feat: orphan sweeps rebuild heap when `orphan_counter > mempool_size / 2` and
   reset the counter; panic-inject test covers global mempool mutex.
+- Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for Prometheus scrapes.
 - Test: add panic-inject harness covering drop path lock poisoning and recovery.
 - Test: add panic-inject harness for admission eviction to ensure no deadlock.
+- Test: add admission panic hook verifying reservation rollback across steps.
+- Test: expand 32-thread fuzz harness with randomized nonces and fees over
+  10k iterations to stress capacity and uniqueness invariants.
 - Feat: startup TTL purge logs `expired_drop_total`.
 - Doc: introduce `API_CHANGELOG.md` for Python error codes and telemetry endpoints.
+- Test: add unit test verifying mempool comparator priority order and regression for TTL expiry telemetry.
+- Doc: refresh `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, and `AUDIT_NOTES.md` with authoritative next-step directives.
 
 ### CLI Flags
 

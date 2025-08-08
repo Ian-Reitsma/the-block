@@ -10,8 +10,10 @@
 
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+#[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+use log::info;
 #[cfg(feature = "telemetry")]
-use log::{info, warn};
+use log::warn;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
@@ -35,6 +37,8 @@ use thiserror::Error;
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
 pub use telemetry::gather as gather_metrics;
+#[cfg(feature = "telemetry")]
+pub use telemetry::serve as serve_metrics;
 
 pub mod blockchain;
 use blockchain::difficulty;
@@ -417,6 +421,7 @@ pub struct Blockchain {
     mempool_mutex: Mutex<()>,
     orphan_counter: std::sync::atomic::AtomicUsize,
     panic_on_evict: std::sync::atomic::AtomicBool,
+    panic_on_admit: std::sync::atomic::AtomicI32,
     #[pyo3(get, set)]
     pub max_mempool_size: usize,
     #[pyo3(get, set)]
@@ -487,6 +492,7 @@ impl Default for Blockchain {
             mempool_mutex: Mutex::new(()),
             orphan_counter: std::sync::atomic::AtomicUsize::new(0),
             panic_on_evict: std::sync::atomic::AtomicBool::new(false),
+            panic_on_admit: std::sync::atomic::AtomicI32::new(-1),
             max_mempool_size: 1024,
             min_fee_per_byte: 1,
             tx_ttl: 1800,
@@ -1006,13 +1012,17 @@ impl Blockchain {
             );
             span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
                 TxAdmissionError::LockPoisoned
             })?
         };
         #[cfg(not(feature = "telemetry"))]
         let _pool_guard = self.mempool_mutex.lock().map_err(|_| {
             #[cfg(feature = "telemetry")]
-            telemetry::LOCK_POISON_TOTAL.inc();
+            {
+                telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
+            }
             TxAdmissionError::LockPoisoned
         })?;
         let lock = self
@@ -1020,21 +1030,32 @@ impl Blockchain {
             .entry(sender_addr.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
+        let panic_step = self
+            .panic_on_admit
+            .swap(-1, std::sync::atomic::Ordering::SeqCst);
+
         #[cfg(feature = "telemetry")]
         let lock_guard = {
             let span =
                 tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender_addr);
             span.in_scope(|| lock.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
                 TxAdmissionError::LockPoisoned
             })?
         };
         #[cfg(not(feature = "telemetry"))]
         let lock_guard = lock.lock().map_err(|_| {
             #[cfg(feature = "telemetry")]
-            telemetry::LOCK_POISON_TOTAL.inc();
+            {
+                telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
+            }
             TxAdmissionError::LockPoisoned
         })?;
+        if panic_step == 0 {
+            panic!("admission panic");
+        }
 
         if tx.payload.fee_selector > 2 {
             #[cfg(feature = "telemetry-json")]
@@ -1330,7 +1351,10 @@ impl Blockchain {
                         total_industrial,
                         nonce,
                     );
-                    #[cfg(feature = "telemetry")]
+                    if panic_step == 1 {
+                        panic!("admission panic");
+                    }
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     let tx_id = tx.id();
                     vacant.insert(MempoolEntry {
                         tx,
@@ -1382,13 +1406,17 @@ impl Blockchain {
             );
             span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
                 TxAdmissionError::LockPoisoned
             })?
         };
         #[cfg(not(feature = "telemetry"))]
         let _pool_guard = self.mempool_mutex.lock().map_err(|_| {
             #[cfg(feature = "telemetry")]
-            telemetry::LOCK_POISON_TOTAL.inc();
+            {
+                telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
+            }
             TxAdmissionError::LockPoisoned
         })?;
         let lock = self
@@ -1401,13 +1429,17 @@ impl Blockchain {
             let span = tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender, nonce = nonce);
             span.in_scope(|| lock.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
                 TxAdmissionError::LockPoisoned
             })?
         };
         #[cfg(not(feature = "telemetry"))]
         let _guard = lock.lock().map_err(|_| {
             #[cfg(feature = "telemetry")]
-            telemetry::LOCK_POISON_TOTAL.inc();
+            {
+                telemetry::LOCK_POISON_TOTAL.inc();
+                self.record_reject();
+            }
             TxAdmissionError::LockPoisoned
         })?;
         if let Some((_, entry)) = self.mempool.remove(&(sender.to_string(), nonce)) {
@@ -2204,6 +2236,18 @@ impl Blockchain {
     pub fn panic_next_evict(&self) {
         self.panic_on_evict
             .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[doc(hidden)]
+    pub fn panic_in_admission_after(&self, step: i32) {
+        self.panic_on_admit
+            .store(step, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[doc(hidden)]
+    pub fn heal_admission(&self) {
+        self.panic_on_admit
+            .store(-1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

@@ -6,6 +6,8 @@ use the_block::{
     generate_keypair, sign_tx, Blockchain, MempoolEntry, RawTxPayload, SignedTransaction,
     TokenAmount, TxAdmissionError,
 };
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -224,11 +226,26 @@ fn lock_poisoned_error_and_recovery() {
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::LOCK_POISON_TOTAL.reset();
+        telemetry::TX_REJECTED_TOTAL.reset();
+    }
     bc.poison_lock("alice");
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::LOCK_POISON_TOTAL.reset();
+        telemetry::TX_REJECTED_TOTAL.reset();
+    }
     assert_eq!(
         bc.submit_transaction(tx.clone()),
         Err(TxAdmissionError::LockPoisoned)
     );
+    #[cfg(feature = "telemetry")]
+    {
+        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
+        assert_eq!(1, telemetry::TX_REJECTED_TOTAL.get());
+    }
     bc.heal_lock("alice");
     assert_eq!(bc.submit_transaction(tx), Ok(()));
 }
@@ -275,4 +292,28 @@ fn validate_block_rejects_wrong_difficulty() {
     };
     block.hash = enc.hash();
     assert!(!bc.validate_block(&block).unwrap());
+}
+
+#[test]
+fn admission_panic_rolls_back_all_steps() {
+    init();
+    let (sk, _pk) = generate_keypair();
+    for step in 0..2 {
+        let path = unique_path(&format!("temp_admission_panic_{step}"));
+        let mut bc = Blockchain::new(&path);
+        bc.add_account("alice".into(), 10_000, 0).unwrap();
+        bc.add_account("bob".into(), 0, 0).unwrap();
+        let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+        bc.panic_in_admission_after(step);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = bc.submit_transaction(tx.clone());
+        }));
+        assert!(res.is_err(), "admission step {step} should panic");
+        let acc = bc.accounts.get("alice").unwrap();
+        assert_eq!(acc.pending.nonce, 0);
+        assert_eq!(acc.pending.consumer, 0);
+        assert_eq!(acc.pending.industrial, 0);
+        assert!(acc.pending.nonces.is_empty());
+        assert!(bc.mempool.is_empty());
+    }
 }

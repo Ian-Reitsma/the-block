@@ -24,13 +24,21 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Telemetry Metrics** – Prometheus counters now track TTL expirations
   (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), and orphan
   sweeps (`orphan_sweep_total`).
+- **Metrics HTTP Exporter** – `serve_metrics(addr)` spawns a lightweight server
+  that returns `gather_metrics()` output. A sample `curl` scrape is shown below.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
   telemetry counters.
-- **Panic Tests** – Admission eviction path uses a panic-inject harness to
-  demonstrate lock recovery and rollback.
+- **Panic Tests** – Admission path includes panic-inject steps for rollback and
+  eviction uses a separate harness to verify lock recovery.
 - **Tracing Spans** – `mempool_mutex` emits sender, nonce, fee-per-byte and
   current `mempool_size` alongside existing `eviction_sweep` and
   `startup_rebuild` spans for fine-grained profiling.
+- **Admission Panic Property Test** – `admission_panic_rolls_back_all_steps`
+  injects panics before and after reservation and proves pending state and
+  mempool remain clean.
+- **Fuzz Harness Expansion** – `cross_thread_fuzz` now submits random nonces
+  and fees over 10k iterations per thread, checking capacity and pending nonce
+  uniqueness across 32 accounts.
 
 Example scrape with Prometheus format:
 
@@ -44,10 +52,18 @@ curl -s localhost:9000/metrics | grep mempool_size
 - **Replay Guard Test** – Reactivated `test_replay_attack_prevention` to prove duplicates
   with the same `(sender, nonce)` are rejected.
 - **Mempool Hardening** – Admission now uses an atomic size counter and binary
-- **Mempool Hardening** – Admission now uses an atomic size counter and binary
   heap to evict the lowest-priority transaction ordered by
   `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`. Entry timestamps persist as
   UNIX milliseconds.
+- **Comparator Proof** – Unit test `comparator_orders_by_fee_expiry_hash`
+  verifies the priority comparator (fee-per-byte, expiry, tx hash).
+- **TTL Drop Metrics** – Test `ttl_expiry_purges_and_counts` asserts
+  `ttl_drop_total` increments when expired transactions are purged.
+- **Lock Poison Metrics** – Tests `lock_poisoned_error_and_recovery` and
+  `drop_lock_poisoned_error_and_recovery` assert `lock_poison_total` and
+  `tx_rejected_total` increment on poisoned lock paths.
+- **Orphan Sweep Metrics** – `orphan_sweep_removes_missing_sender` confirms
+  `orphan_sweep_total` rises when missing-account entries are swept.
 - **Schema v4 Note** – Migration serializes mempool contents with timestamps;
   `Blockchain::open` rebuilds the mempool on startup and drops expired or
   orphaned entries once `orphan_counter > mempool_size / 2`. Startup purge logs

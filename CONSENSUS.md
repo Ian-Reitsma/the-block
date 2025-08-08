@@ -71,7 +71,15 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 `Blockchain::mempool` is backed by a `DashMap` keyed by `(sender, nonce)` with
 mutations guarded by a global `mempool_mutex`.
 A binary heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`
-provides `O(log n)` eviction. An atomic counter enforces a maximum size of 1024
+provides `O(log n)` eviction. Example ordering:
+
+| fee_per_byte | expires_at | tx_hash | rank |
+|-------------:|-----------:|--------:|-----:|
+|        2000  |          9 | 0x01…   | 1    |
+|        1000  |          8 | 0x02…   | 2    |
+|        1000  |          9 | 0x01…   | 3    |
+
+An atomic counter enforces a maximum size of 1024
 entries. Each transaction must pay at least the `min_fee_per_byte` (default `1`);
 lower fees yield `FeeTooLow`. When full, the lowest-priority entry is evicted
 and its reserved balances unwound atomically. All mutations acquire
@@ -87,8 +95,9 @@ Transactions from unknown senders are rejected. Nodes must provision accounts vi
 
 Telemetry counters exported: `mempool_size`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
-`lock_poison_total`, `orphan_sweep_total`. See `API_CHANGELOG.md` for
-Python error and telemetry endpoint history.
+`lock_poison_total`, `orphan_sweep_total`. `serve_metrics(addr)` exposes these
+metrics over HTTP; see `API_CHANGELOG.md` for Python error and telemetry
+endpoint history.
 
 ### Capacity & Flags
 

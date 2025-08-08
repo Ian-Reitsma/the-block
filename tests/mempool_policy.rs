@@ -74,16 +74,25 @@ fn eviction_via_drop_transaction() {
 }
 
 #[test]
-fn ttl_expiry_drops_transaction() {
+fn ttl_expiry_purges_and_counts() {
     init();
     let mut bc = Blockchain::new(&unique_path("temp_ttl"));
+    bc.tx_ttl = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx).unwrap();
-    bc.drop_transaction("alice", 1).unwrap();
+    if let Some(mut entry) = bc.mempool.get_mut(&("alice".into(), 1)) {
+        entry.timestamp_millis = 0;
+    }
+    #[cfg(feature = "telemetry")]
+    telemetry::TTL_DROP_TOTAL.reset();
+    let dropped = bc.purge_expired();
+    assert_eq!(1, dropped);
     assert!(bc.mempool.is_empty());
+    #[cfg(feature = "telemetry")]
+    assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
 }
 
 #[test]
@@ -107,6 +116,8 @@ fn orphan_sweep_removes_missing_sender() {
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx).unwrap();
     bc.accounts.remove("alice");
+    #[cfg(feature = "telemetry")]
+    telemetry::ORPHAN_SWEEP_TOTAL.reset();
     let _ = bc.purge_expired();
     assert!(bc.mempool.is_empty());
     #[cfg(feature = "telemetry")]
@@ -139,11 +150,21 @@ fn drop_lock_poisoned_error_and_recovery() {
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx).unwrap();
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::LOCK_POISON_TOTAL.reset();
+        telemetry::TX_REJECTED_TOTAL.reset();
+    }
     bc.poison_mempool();
     assert_eq!(
         bc.drop_transaction("alice", 1),
         Err(TxAdmissionError::LockPoisoned)
     );
+    #[cfg(feature = "telemetry")]
+    {
+        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
+        assert_eq!(1, telemetry::TX_REJECTED_TOTAL.get());
+    }
     bc.heal_mempool();
     assert_eq!(bc.drop_transaction("alice", 1), Ok(()));
 }
@@ -156,11 +177,21 @@ fn submit_lock_poisoned_error_and_recovery() {
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::LOCK_POISON_TOTAL.reset();
+        telemetry::TX_REJECTED_TOTAL.reset();
+    }
     bc.poison_mempool();
     assert_eq!(
         bc.submit_transaction(tx.clone()),
         Err(TxAdmissionError::LockPoisoned)
     );
+    #[cfg(feature = "telemetry")]
+    {
+        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
+        assert_eq!(1, telemetry::TX_REJECTED_TOTAL.get());
+    }
     bc.heal_mempool();
     assert_eq!(bc.submit_transaction(tx), Ok(()));
 }
@@ -188,6 +219,31 @@ fn eviction_panic_rolls_back() {
     assert_eq!(bc.mempool.len(), 0);
     bc.submit_transaction(tx2).unwrap();
     assert_eq!(bc.mempool.len(), 1);
+}
+
+#[test]
+fn admission_panic_rolls_back() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_admit_panic"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    for step in 0..2 {
+        let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+        bc.panic_in_admission_after(step);
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            bc.submit_transaction(tx.clone()).unwrap();
+        }));
+        assert!(res.is_err());
+        bc.heal_admission();
+        bc.heal_mempool();
+        bc.heal_lock("alice");
+        assert!(bc.mempool.is_empty());
+        let acc = bc.accounts.get("alice").unwrap();
+        assert_eq!(acc.pending.consumer, 0);
+        assert_eq!(acc.pending.nonce, 0);
+        assert!(acc.pending.nonces.is_empty());
+    }
 }
 
 #[test]

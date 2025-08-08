@@ -20,6 +20,7 @@
 12. [Persistence & State](#12-persistence--state)
 13. [Troubleshooting Playbook](#13-troubleshooting-playbook)
 14. [Glossary & References](#14-glossary--references)
+15. [Outstanding Blockers & Directives](#15-outstanding-blockers--directives)
 
 ---
 
@@ -247,7 +248,15 @@ pub struct SignedTransaction {
   eviction. All mutations acquire a global `mempool_mutex` followed by a
   per-sender lock. Transactions must pay at least the `fee_per_byte` floor and
   are prioritized by `fee_per_byte` (DESC), then `expires_at` (ASC), then
-  transaction hash (ASC). The mempool enforces an atomic size cap (default
+  transaction hash (ASC). Example comparator ordering:
+
+  | fee_per_byte | expires_at | tx_hash | priority |
+  |-------------:|-----------:|--------:|---------:|
+  |        2000  |          9 | 0x01…   | 1        |
+  |        1000  |          8 | 0x02…   | 2        |
+  |        1000  |          9 | 0x01…   | 3        |
+
+  The mempool enforces an atomic size cap (default
   1024); once full, new submissions evict the lowest priority entry.
   Orphaned or expired transactions are purged on each submission and
   block import with balances unreserved. Entry timestamps persist across
@@ -277,9 +286,13 @@ pub struct SignedTransaction {
   Telemetry metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
   `dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`, `orphan_sweep_total`.
   Telemetry spans: `mempool_mutex`, `admission_lock`, `eviction_sweep`, `startup_rebuild`.
+  `serve_metrics(addr)` starts a minimal HTTP exporter returning `gather_metrics()`
+  output; see `docs/detailed_updates.md` for a sample `curl` scrape.
   Orphan sweeps trigger when `orphan_counter > mempool_size / 2` and reset the counter.
   See `API_CHANGELOG.md` for Python error and telemetry endpoint history.
-  Panic-inject tests cover drop-path lock poisoning and self-eviction to prove recovery.
+  Panic-inject tests cover admission rollback and self-eviction to prove recovery.
+  A 32-thread fuzz harness submits random nonces and fees over 10k iterations
+  to stress capacity and pending nonce uniqueness.
 
 ---
 
@@ -332,6 +345,54 @@ If the playbook fails, open an issue with *exact* cmd + full output.
 * **SimpleDb** — in-memory key-value map powering prototype state management.
 
 Further reading: `docs/consensus.md`, `docs/signatures.md`, and `/design/whitepaper.pdf` (WIP).
+
+---
+
+## 15 · Outstanding Blockers & Directives
+
+The mempool, persistence, and observability subsystems remain partially implemented. The following items are **mandatory** before
+any testnet or production exposure. Each change **must** include tests, telemetry, and matching documentation updates.
+
+### B‑1 · Global Mempool Mutex
+- Wrap `submit_transaction`, `drop_transaction`, and `mine_block` in a `mempool_mutex → sender_mutex` critical section.
+- Counter updates, heap pushes/pops, and pending balance or nonce reservations belong inside this lock order.
+- Add concurrency tests proving the mempool cannot exceed `max_mempool_size` under load.
+
+### B‑2 · Orphan Sweep & Heap Rebuild
+- Maintain an `orphan_counter` and trigger a full heap rebuild when `orphan_counter > mempool_size / 2`.
+- TTL purges and drop paths must decrement the counter.
+- Emit `ORPHAN_SWEEP_TOTAL` telemetry and document ratio and policy in `CONSENSUS.md` and `AGENTS.md`.
+
+### B‑3 · Timestamp Persistence
+- Serialize `MempoolEntry.timestamp_ticks` in schema v4 and rebuild the heap during `Blockchain::open`.
+- Drop expired or missing-account entries on startup, logging `expired_drop_total`.
+- Update `CONSENSUS.md` with encoding details and migration notes.
+
+### B‑4 · Eviction Deadlock Proof
+- Provide a panic‑inject test that forces eviction mid‑admission to demonstrate lock ordering and full rollback.
+- Record `LOCK_POISON_TOTAL` and rejection reasons on every failure path.
+
+### B‑5 · Startup TTL Purge
+- Ensure `purge_expired()` runs during `Blockchain::open` and is covered by a restart test that proves `ttl_drop_total` advances.
+- Spec the startup purge behaviour and default telemetry in `CONSENSUS.md` and docs.
+
+### Deterministic Eviction & Replay Safety
+- Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` and prove ordering stability.
+- Extend replay tests to cover TTL expiry across restart and re‑enable `test_schema_upgrade_compatibility` for v3→v4 migrations.
+
+### Telemetry & Logging
+- Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
+- Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool size.
+- Document a `curl` scrape example for `serve_metrics` output in `docs/detailed_updates.md`.
+
+### Test & Fuzz Matrix
+- Property test: inject panics at each admission step to verify reservation rollback and heap invariants.
+- 32‑thread fuzz harness: random fees and nonces for ≥10 k iterations asserting capacity and per-account uniqueness.
+- Heap orphan stress test: exceed the orphan threshold, trigger rebuild, and assert ordering and metrics.
+
+### Documentation
+- Mirror these directives in `Agents-Sup.md`, `Agent-Next-Instructions.md`, and `AUDIT_NOTES.md`.
+- Keep `CHANGELOG.md` and `API_CHANGELOG.md` synchronized with new errors, metrics, and flags.
 
 ---
 

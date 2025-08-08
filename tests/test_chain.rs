@@ -63,6 +63,7 @@ fn hash_state(bc: &Blockchain) -> String {
         block_reward_consumer: bc.block_reward_consumer,
         block_reward_industrial: bc.block_reward_industrial,
         block_height: bc.block_height,
+        mempool: Vec::new(),
     };
     let bytes = bincode::serialize(&disk).unwrap();
     blake3::hash(&bytes).to_hex().to_string()

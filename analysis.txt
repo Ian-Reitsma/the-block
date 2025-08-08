@@ -9,6 +9,15 @@ This file summarizes the signature integration and protocol hardening.
 - Blocks embed a `difficulty` field and validation now checks the header value matches the network target.
 - Account struct stores pending debit totals so multiple mempool transactions cannot overspend.
 - Mempool deduplicates on `(sender, nonce)` and balances are debited only once during mining.
+- Comparator unit tests verify mempool ordering by `fee_per_byte`, `expires_at`, then `tx_hash` and TTL purges increment the `ttl_drop_total` metric.
+- Orphan sweep tests confirm missing-account transactions increment `orphan_sweep_total`.
+- Lock-poison harnesses assert `lock_poison_total` and `tx_rejected_total` on poisoned paths.
+- `serve_metrics` exports Prometheus text over HTTP and is exercised by a regression test.
+- Admission panic harness proves reservation rollback when submission panics mid-flight.
+- Admission panic property test validates rollback before and after
+  reservation, keeping mempool and pending sets empty.
+- Cross-thread fuzz harness randomizes nonces and fees over 10k iterations per
+  thread to stress capacity and uniqueness invariants.
 - Coinbase is enforced as the first transaction in every block.
 - All signature verification uses `domain_tag || canonical_payload` for deterministic hashing.
 - Blocks are rejected if any transaction ID appears more than once.
