@@ -246,12 +246,12 @@ pub struct SignedTransaction {
 * **Mempool** uses a `DashMap` plus a binary heap for `O(log n)`
   eviction. All mutations acquire a global `mempool_mutex` followed by a
   per-sender lock. Transactions must pay at least the `fee_per_byte` floor and
-  are prioritized by `fee_per_byte` with a tie‑breaker on persisted
-  `timestamp_millis` and transaction hash. The mempool enforces an atomic size
-  cap (default 1024); once full, new submissions evict the lowest priority
-  entry. Orphaned or expired transactions are purged on each submission and
+  are prioritized by `fee_per_byte` (DESC), then `expires_at` (ASC), then
+  transaction hash (ASC). The mempool enforces an atomic size cap (default
+  1024); once full, new submissions evict the lowest priority entry.
+  Orphaned or expired transactions are purged on each submission and
   block import with balances unreserved. Entry timestamps persist across
-  restarts and TTLs are enforced on startup.
+  restarts and TTLs are enforced on startup, logging `expired_drop_total`.
 
   Admission surfaces distinct error codes:
 
@@ -276,7 +276,10 @@ pub struct SignedTransaction {
 
   Telemetry metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
   `dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`, `orphan_sweep_total`.
+  Telemetry spans: `mempool_mutex`, `admission_lock`, `eviction_sweep`, `startup_rebuild`.
   Orphan sweeps trigger when `orphan_counter > mempool_size / 2` and reset the counter.
+  See `API_CHANGELOG.md` for Python error and telemetry endpoint history.
+  Panic-inject tests cover drop-path lock poisoning and self-eviction to prove recovery.
 
 ---
 

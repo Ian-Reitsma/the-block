@@ -12,7 +12,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct RawTxPayload {
     #[pyo3(get, set, name = "from")]
     pub from_: String,
@@ -73,7 +73,7 @@ impl RawTxPayload {
 }
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SignedTransaction {
     #[pyo3(get, set)]
     pub payload: RawTxPayload,

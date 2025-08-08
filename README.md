@@ -159,6 +159,7 @@ benches/               # Criterion benches
 demo.py                # Python end‑to‑end demo
 docs/                  # Markdown specs (rendered by mdBook)
 docs/detailed_updates.md  # in-depth change log for auditors
+API_CHANGELOG.md          # Python errors and telemetry endpoint history
 AGENTS.md              # Developer handbook (authoritative)
 ```
 
