@@ -27,6 +27,7 @@ fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
     MempoolEntry {
         tx,
         timestamp_millis: ts,
+        timestamp_ticks: ts,
     }
 }
 
@@ -55,4 +56,3 @@ fn comparator_orders_fee_then_expiry_then_hash() {
     assert_eq!(expected, mempool_cmp(&a, &b, ttl));
     assert_eq!(expected.reverse(), mempool_cmp(&b, &a, ttl));
 }
-

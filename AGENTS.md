@@ -246,9 +246,12 @@ pub struct SignedTransaction {
 * **Genesis hash** is computed at build time from the canonical block encoding and checked at compile time.
 * **Mempool** uses a `DashMap` plus a binary heap for `O(log n)`
   eviction. All mutations acquire a global `mempool_mutex` followed by a
-  per-sender lock. Transactions must pay at least the `fee_per_byte` floor and
-  are prioritized by `fee_per_byte` (DESC), then `expires_at` (ASC), then
-  transaction hash (ASC). Example comparator ordering:
+  per-sender lock. Counter updates, heap pushes/pops, and pending
+  balance/nonces execute inside this critical section, preserving the
+  invariant `mempool_size ≤ max_mempool_size`. Transactions must pay at
+  least the `fee_per_byte` floor and are prioritized by `fee_per_byte`
+  (DESC), then `expires_at` (ASC), then transaction hash (ASC). Example
+  comparator ordering:
 
   | fee_per_byte | expires_at | tx_hash | priority |
   |-------------:|-----------:|--------:|---------:|
@@ -280,19 +283,27 @@ pub struct SignedTransaction {
   | `ErrPendingLimit`     | per-account pending limit hit             |
   | `ErrLockPoisoned`     | mutex guard poisoned                      |
 
-  Flags: `--mempool-max`/`TB_MEMPOOL_MAX`, `--mempool-account-cap`/`TB_MEMPOOL_ACCOUNT_CAP`,
-  `--mempool-ttl`/`TB_MEMPOOL_TTL_SECS`, `--min-fee-per-byte`/`TB_MIN_FEE_PER_BYTE`.
+Flags: `--mempool-max`/`TB_MEMPOOL_MAX`, `--mempool-account-cap`/`TB_MEMPOOL_ACCOUNT_CAP`,
+`--mempool-ttl`/`TB_MEMPOOL_TTL_SECS`, `--min-fee-per-byte`/`TB_MIN_FEE_PER_BYTE`.
 
-  Telemetry metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
-  `dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`, `orphan_sweep_total`.
-  Telemetry spans: `mempool_mutex`, `admission_lock`, `eviction_sweep`, `startup_rebuild`.
-  `serve_metrics(addr)` starts a minimal HTTP exporter returning `gather_metrics()`
-  output; see `docs/detailed_updates.md` for a sample `curl` scrape.
-  Orphan sweeps trigger when `orphan_counter > mempool_size / 2` and reset the counter.
-  See `API_CHANGELOG.md` for Python error and telemetry endpoint history.
-  Panic-inject tests cover admission rollback and self-eviction to prove recovery.
-  A 32-thread fuzz harness submits random nonces and fees over 10k iterations
-  to stress capacity and pending nonce uniqueness.
+Telemetry metrics: `mempool_size`, `evictions_total`,
+`fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
+`lock_poison_total`, `orphan_sweep_total`,
+`tx_rejected_total{reason=*}`. Telemetry spans:
+`mempool_mutex` (sender, nonce, fpb, mempool_size),
+`admission_lock` (sender, nonce),
+`eviction_sweep` (mempool_size, orphan_counter),
+`startup_rebuild` (expired_drop_total).
+`serve_metrics(addr)` starts a minimal HTTP exporter returning
+`gather_metrics()` output; e.g. `curl -s localhost:9000/metrics |
+grep -E 'orphan_sweep_total|tx_rejected_total'`. Orphan sweeps trigger when
+`orphan_counter > mempool_size / 2` and reset the counter. See `API_CHANGELOG.md` for
+Python error and telemetry endpoint history. Regression test
+`flood_mempool_never_over_cap` floods submissions across threads to assert
+the size cap. Panic-inject tests cover admission rollback and
+self-eviction to prove recovery. A 32-thread fuzz harness submits random
+nonces and fees over 10k iterations to stress capacity and pending nonce
+uniqueness.
 
 ---
 
@@ -353,22 +364,23 @@ Further reading: `docs/consensus.md`, `docs/signatures.md`, and `/design/whitepa
 The mempool, persistence, and observability subsystems remain partially implemented. The following items are **mandatory** before
 any testnet or production exposure. Each change **must** include tests, telemetry, and matching documentation updates.
 
-### B‑1 · Global Mempool Mutex
-- Wrap `submit_transaction`, `drop_transaction`, and `mine_block` in a `mempool_mutex → sender_mutex` critical section.
-- Counter updates, heap pushes/pops, and pending balance or nonce reservations belong inside this lock order.
-- Add concurrency tests proving the mempool cannot exceed `max_mempool_size` under load.
+### B‑1 · Global Mempool Mutex — **COMPLETED**
+- `submit_transaction`, `drop_transaction`, and `mine_block` enter a
+  `mempool_mutex → sender_mutex` critical section with counter updates,
+  heap ops, and pending reservations inside. Regression test
+  `flood_mempool_never_over_cap` proves the cap.
 
-### B‑2 · Orphan Sweep & Heap Rebuild
-- Maintain an `orphan_counter` and trigger a full heap rebuild when `orphan_counter > mempool_size / 2`.
-- TTL purges and drop paths must decrement the counter.
-- Emit `ORPHAN_SWEEP_TOTAL` telemetry and document ratio and policy in `CONSENSUS.md` and `AGENTS.md`.
+### B‑2 · Orphan Sweep & Heap Rebuild — **COMPLETED**
+- An `orphan_counter` triggers a heap rebuild when
+  `orphan_counter > mempool_size / 2`. Purge and drop paths decrement the
+  counter and `ORPHAN_SWEEP_TOTAL` telemetry records each sweep.
 
-### B‑3 · Timestamp Persistence
+### B‑3 · Timestamp Persistence — **COMPLETED**
 - Serialize `MempoolEntry.timestamp_ticks` in schema v4 and rebuild the heap during `Blockchain::open`.
 - Drop expired or missing-account entries on startup, logging `expired_drop_total`.
 - Update `CONSENSUS.md` with encoding details and migration notes.
 
-### B‑4 · Eviction Deadlock Proof
+### B‑4 · Eviction Deadlock Proof — **COMPLETED**
 - Provide a panic‑inject test that forces eviction mid‑admission to demonstrate lock ordering and full rollback.
 - Record `LOCK_POISON_TOTAL` and rejection reasons on every failure path.
 
@@ -378,12 +390,12 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 
 ### Deterministic Eviction & Replay Safety
 - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` and prove ordering stability.
-- Extend replay tests to cover TTL expiry across restart and re‑enable `test_schema_upgrade_compatibility` for v3→v4 migrations.
+- Replay suite includes `ttl_expired_purged_on_restart` for TTL expiry and `test_schema_upgrade_compatibility` verifying v1/v2/v3 disks migrate to v4, hydrating `timestamp_ticks`.
 
 ### Telemetry & Logging
-- Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
+- Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and `DROP_NOT_FOUND_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
 - Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool size.
-- Document a `curl` scrape example for `serve_metrics` output in `docs/detailed_updates.md`.
+- Document a `curl` scrape example for `serve_metrics` output in `docs/detailed_updates.md` and keep `rejection_reasons.rs` exercising the labelled counters.
 
 ### Test & Fuzz Matrix
 - Property test: inject panics at each admission step to verify reservation rollback and heap invariants.

@@ -189,6 +189,26 @@ See [docs/signatures.md](docs/signatures.md) and [AGENTS.md](AGENTS.md#11-securi
 * **Checksummed, deterministic DB** protects state integrity.
 * **Fuzz tests** catch parsing edge‑cases before release.
 
+---
+
+## Telemetry & Metrics
+
+Prometheus counters and tracing spans expose mempool health and rejection
+reasons for ops tooling.
+
+```bash
+TB_TELEMETRY=1 ./target/release/the-block &
+curl -s localhost:9000/metrics \
+  | grep -E 'mempool_size|invalid_selector_reject_total|tx_rejected_total'
+```
+
+Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
+`dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`,
+`orphan_sweep_total`, `invalid_selector_reject_total`,
+`balance_overflow_reject_total`, `drop_not_found_total`, and
+`tx_rejected_total{reason=*}`. Spans `mempool_mutex`, `eviction_sweep`, and
+`startup_rebuild` annotate sender, nonce, fee-per-byte, and sweep details.
+
 Report security issues privately via `security@the-block.dev` (PGP key in `docs/SECURITY.md`).
 
 ---

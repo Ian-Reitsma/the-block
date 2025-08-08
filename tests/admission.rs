@@ -2,12 +2,12 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::hashlayout::BlockEncoder;
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, MempoolEntry, RawTxPayload, SignedTransaction,
     TokenAmount, TxAdmissionError,
 };
-#[cfg(feature = "telemetry")]
-use the_block::telemetry;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -69,6 +69,10 @@ fn mine_block_skips_nonce_gaps() {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis() as u64,
+            timestamp_ticks: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u64,
         },
     );
     let block = bc.mine_block("miner").unwrap();
@@ -244,7 +248,12 @@ fn lock_poisoned_error_and_recovery() {
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
-        assert_eq!(1, telemetry::TX_REJECTED_TOTAL.get());
+        assert_eq!(
+            1,
+            telemetry::TX_REJECTED_TOTAL
+                .with_label_values(&["lock_poison"])
+                .get()
+        );
     }
     bc.heal_lock("alice");
     assert_eq!(bc.submit_transaction(tx), Ok(()));

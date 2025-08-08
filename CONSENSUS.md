@@ -83,10 +83,15 @@ An atomic counter enforces a maximum size of 1024
 entries. Each transaction must pay at least the `min_fee_per_byte` (default `1`);
 lower fees yield `FeeTooLow`. When full, the lowest-priority entry is evicted
 and its reserved balances unwound atomically. All mutations acquire
-`mempool_mutex` before the per-sender lock to preserve atomicity. Each sender is
+`mempool_mutex` before the per-sender lock to preserve atomicity. Counter
+updates, heap pushes/pops, and pending balance/nonces occur within this order,
+guaranteeing `mempool_size ≤ max_mempool_size`. Each sender is
 limited to 16 pending transactions. Entries expire after `tx_ttl` seconds
 (default 1800) based on the persisted admission timestamp and are purged on new
-submissions and at startup, logging `expired_drop_total`. Transactions whose sender account has been removed
+submissions and at startup, logging `expired_drop_total`. Mempool entries encode
+both wall-clock milliseconds and monotonic `timestamp_ticks` in schema v4 so
+`Blockchain::open` can rebuild the heap deterministically and drop expired or
+missing-account entries while restoring `mempool_size`. Transactions whose sender account has been removed
 are counted in an `orphan_counter`; when `orphan_counter > mempool_size / 2` a
 sweep rebuilds the heap, drops all orphans, and resets the counter.
 
@@ -95,9 +100,12 @@ Transactions from unknown senders are rejected. Nodes must provision accounts vi
 
 Telemetry counters exported: `mempool_size`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
-`lock_poison_total`, `orphan_sweep_total`. `serve_metrics(addr)` exposes these
-metrics over HTTP; see `API_CHANGELOG.md` for Python error and telemetry
-endpoint history.
+`lock_poison_total`, `orphan_sweep_total`,
+`invalid_selector_reject_total`, `balance_overflow_reject_total`,
+`drop_not_found_total`, `tx_rejected_total{reason=*}`. `serve_metrics(addr)`
+exposes these metrics over HTTP; e.g. `curl -s localhost:9000/metrics | grep
+invalid_selector_reject_total`. See `API_CHANGELOG.md` for Python error and
+telemetry endpoint history.
 
 ### Capacity & Flags
 

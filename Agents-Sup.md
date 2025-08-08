@@ -27,6 +27,27 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   `Blockchain::new(path)` expects a unique temp directory; tests use
   `unique_path()` to avoid cross-test leakage.
 
+### Mempool Concurrency
+* A global `mempool_mutex` guards all mempool mutations before the per-sender
+  lock. Counter updates, heap pushes/pops, and pending balance/nonces are
+  executed inside this lock order, ensuring the invariant `mempool_size ≤
+  max_mempool_size`.
+* Entries referencing missing accounts increment an `orphan_counter`; once the
+  counter exceeds half the mempool, a sweep drops all orphans, emits
+  `ORPHAN_SWEEP_TOTAL`, and resets the counter.
+
+### Telemetry Metrics & Spans
+* Metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
+  `dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`,
+  `orphan_sweep_total`, `invalid_selector_reject_total`,
+  `balance_overflow_reject_total`, `drop_not_found_total`,
+  `tx_rejected_total{reason=*}`.
+* Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
+  `admission_lock` (sender, nonce), `eviction_sweep` (mempool_size,
+  orphan_counter), `startup_rebuild` (expired_drop_total).
+* `serve_metrics(addr)` exposes Prometheus text; e.g.
+  `curl -s localhost:9000/metrics | grep tx_rejected_total`.
+
 ### Schema Migrations & Invariants
 * Bump `ChainDisk.schema_version` for any on-disk format change and supply a lossless migration routine with tests.
 * Each migration must preserve [`INV-FEE-01`](ECONOMICS.md#inv-fee-01) and [`INV-FEE-02`](ECONOMICS.md#inv-fee-02); update `docs/schema_migrations/` with the new invariants.
@@ -45,33 +66,31 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ## 2. Immediate Next Steps
 The following directives are mandatory before any feature expansion. Deliver each with exhaustive tests, telemetry, and cross‑referenced documentation.
 
-1. **B‑1 Over‑Cap Race — Global Mempool Mutex**
-   - Guard `submit_transaction`, `drop_transaction`, and `mine_block` with `mempool_mutex → sender_mutex`.
-   - Enclose counter updates, heap operations, and pending balance/nonce reservations in the critical section.
-   - Regression tests must prove `max_mempool_size` is never exceeded under concurrent submission or mining.
-2. **B‑2 Orphan Sweep Policy**
-   - Maintain `orphan_counter`; rebuild the heap when `orphan_counter > mempool_size / 2`.
-   - TTL purge and drop paths decrement the counter; emit `ORPHAN_SWEEP_TOTAL`.
-   - Document ratio and sweep behaviour in `CONSENSUS.md` and this supplement.
-3. **B‑3 Timestamp Persistence**
+1. **B‑3 Timestamp Persistence** — *COMPLETED*
    - Persist `MempoolEntry.timestamp_ticks` (schema v4) and rebuild the heap on `Blockchain::open`.
    - Run `purge_expired` during startup, dropping stale or missing‑account entries and logging `expired_drop_total`.
    - Update `CONSENSUS.md` with encoding details and migration guidance.
-4. **B‑4 Self‑Evict Deadlock Test**
+2. **B‑4 Self‑Evict Deadlock Test** — *COMPLETED*
    - Add a panic‑inject harness that forces eviction mid‑admission to prove lock ordering and automatic rollback.
    - Ensure `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL{reason=lock_poison}` advance together.
-5. **Deterministic Eviction & Replay Tests**
+3. **Deterministic Eviction & Replay Tests**
    - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` for stable ordering.
-   - Extend replay tests to cover TTL expiry across restart and re‑enable `test_schema_upgrade_compatibility` for v3→v4.
-6. **Telemetry & Logging Expansion**
-   - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL` and a global `TX_REJECTED_TOTAL{reason=*}`.
-   - Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and current mempool size.
-   - Publish a `serve_metrics` curl example and span list in `docs/detailed_updates.md`.
-7. **Test & Fuzz Matrix**
+   - Replay tests cover TTL expiry across restart (`ttl_expired_purged_on_restart`) and `test_schema_upgrade_compatibility` validates v1/v2/v3 → v4 migration with `timestamp_ticks` hydration.
+4. **Telemetry & Logging Expansion**
+   - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`,
+     `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
+     `DROP_NOT_FOUND_TOTAL`, and a global
+     `TX_REJECTED_TOTAL{reason=*}`.
+   - Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`
+     capturing sender, nonce, fee_per_byte, and current mempool size.
+   - Publish a `serve_metrics` curl example and span list in
+     `docs/detailed_updates.md`; keep `rejection_reasons.rs` exercising the
+     labelled counters.
+5. **Test & Fuzz Matrix**
    - Property tests injecting panics at each admission step to guarantee reservation rollback.
    - 32‑thread fuzz harness with random nonces/fees ≥10 k iterations validating cap, uniqueness, and eviction order.
    - Heap orphan stress test: exceed threshold, trigger rebuild, assert ordering and metric increments.
-8. **Documentation Synchronization**
+6. **Documentation Synchronization**
    - Revise `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` to reflect every change above.
 
 ## 3. Mid‑Term Milestones
