@@ -70,7 +70,7 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 
 `Blockchain::mempool` is backed by a `DashMap` keyed by `(sender, nonce)` with
 mutations guarded by a global `mempool_mutex`.
-A binary heap ordered by `(fee_per_byte DESC, timestamp_millis ASC, tx_hash ASC)`
+A binary heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`
 provides `O(log n)` eviction. An atomic counter enforces a maximum size of 1024
 entries. Each transaction must pay at least the `min_fee_per_byte` (default `1`);
 lower fees yield `FeeTooLow`. When full, the lowest-priority entry is evicted
@@ -78,7 +78,7 @@ and its reserved balances unwound atomically. All mutations acquire
 `mempool_mutex` before the per-sender lock to preserve atomicity. Each sender is
 limited to 16 pending transactions. Entries expire after `tx_ttl` seconds
 (default 1800) based on the persisted admission timestamp and are purged on new
-submissions and at startup. Transactions whose sender account has been removed
+submissions and at startup, logging `expired_drop_total`. Transactions whose sender account has been removed
 are counted in an `orphan_counter`; when `orphan_counter > mempool_size / 2` a
 sweep rebuilds the heap, drops all orphans, and resets the counter.
 
@@ -87,7 +87,8 @@ Transactions from unknown senders are rejected. Nodes must provision accounts vi
 
 Telemetry counters exported: `mempool_size`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
-`lock_poison_total`, `orphan_sweep_total`.
+`lock_poison_total`, `orphan_sweep_total`. See `API_CHANGELOG.md` for
+Python error and telemetry endpoint history.
 
 ### Capacity & Flags
 

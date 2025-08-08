@@ -1,8 +1,10 @@
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 use the_block::{
-    generate_keypair, sign_tx, telemetry, Blockchain, RawTxPayload, SignedTransaction,
-    TxAdmissionError,
+    generate_keypair, mempool_cmp, sign_tx, Blockchain, MempoolEntry, RawTxPayload,
+    SignedTransaction, TxAdmissionError,
 };
 
 fn init() {
@@ -59,17 +61,16 @@ fn eviction_via_drop_transaction() {
     bc.max_mempool_size = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
-    let (sk, _pk) = generate_keypair();
-    let tx1 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
+    let (sk_a, _pk_a) = generate_keypair();
+    let (sk_b, _pk_b) = generate_keypair();
+    let tx1 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx1).unwrap();
-    let tx2 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 2);
-    assert_eq!(
-        bc.submit_transaction(tx2),
-        Err(TxAdmissionError::MempoolFull)
-    );
-    bc.drop_transaction("alice", 1).unwrap();
-    let tx2 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
-    bc.submit_transaction(tx2).unwrap();
+    let tx2 = build_signed_tx(&sk_b, "bob", "alice", 1, 0, 2000, 1);
+    bc.submit_transaction(tx2.clone()).unwrap();
+    assert!(bc.mempool.contains_key(&("bob".to_string(), 1)));
+    bc.drop_transaction("bob", 1).unwrap();
+    let tx3 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
+    bc.submit_transaction(tx3).unwrap();
 }
 
 #[test]
@@ -106,7 +107,7 @@ fn orphan_sweep_removes_missing_sender() {
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx).unwrap();
     bc.accounts.remove("alice");
-    bc.purge_expired();
+    let _ = bc.purge_expired();
     assert!(bc.mempool.is_empty());
     #[cfg(feature = "telemetry")]
     assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
@@ -124,7 +125,7 @@ fn orphan_ratio_triggers_rebuild() {
         bc.submit_transaction(tx).unwrap();
     }
     bc.accounts.remove("alice");
-    bc.purge_expired();
+    let _ = bc.purge_expired();
     assert_eq!(bc.mempool.len(), 0);
     assert_eq!(bc.orphan_count(), 0);
 }
@@ -162,4 +163,62 @@ fn submit_lock_poisoned_error_and_recovery() {
     );
     bc.heal_mempool();
     assert_eq!(bc.submit_transaction(tx), Ok(()));
+}
+
+#[test]
+fn eviction_panic_rolls_back() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_evict_panic"));
+    bc.max_mempool_size = 1;
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 10_000, 0).unwrap();
+    let (sk_a, _pk_a) = generate_keypair();
+    let (sk_b, _pk_b) = generate_keypair();
+    let tx1 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
+    bc.submit_transaction(tx1).unwrap();
+    let tx2 = build_signed_tx(&sk_b, "bob", "alice", 1, 0, 2000, 1);
+    bc.panic_next_evict();
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        bc.submit_transaction(tx2.clone()).unwrap();
+    }));
+    assert!(res.is_err());
+    bc.heal_mempool();
+    bc.heal_lock("alice");
+    bc.heal_lock("bob");
+    assert_eq!(bc.mempool.len(), 0);
+    bc.submit_transaction(tx2).unwrap();
+    assert_eq!(bc.mempool.len(), 1);
+}
+
+#[test]
+fn comparator_orders_by_fee_expiry_hash() {
+    init();
+    let ttl = 10;
+    let mut bc = Blockchain::new(&unique_path("temp_cmp"));
+    bc.tx_ttl = ttl;
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx1 = build_signed_tx(&sk, "alice", "bob", 1, 0, 2000, 1);
+    let tx2 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 2);
+    let tx3 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 3);
+    let e1 = MempoolEntry {
+        tx: tx1,
+        timestamp_millis: 1,
+    };
+    let e2 = MempoolEntry {
+        tx: tx2.clone(),
+        timestamp_millis: 1,
+    };
+    let e3 = MempoolEntry {
+        tx: tx3.clone(),
+        timestamp_millis: 1,
+    };
+    let mut entries = vec![e3, e2.clone(), e1];
+    entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
+    assert_eq!(entries[0].tx.payload.nonce, 1);
+    let mut ids = [tx2.id(), tx3.id()];
+    ids.sort();
+    assert_eq!(entries[1].tx.id(), ids[0]);
+    assert_eq!(entries[2].tx.id(), ids[1]);
 }

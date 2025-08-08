@@ -12,7 +12,8 @@
 - Fix: isolate temporary chain directories for tests and enable replay attack
   prevention to reject duplicate `(sender, nonce)` pairs.
 - Fix: enforce mempool capacity via atomic counter and `O(log n)` priority
-  heap; timestamps stored as monotonic ticks.
+  heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`;
+  timestamps stored as monotonic ticks.
 - Fix: guard mining mempool mutations with global mutex to enforce
   capacity under concurrency.
 - Feat: introduce minimum fee-per-byte floor with `FeeTooLow` rejection.
@@ -24,6 +25,9 @@
 - Feat: orphan sweeps rebuild heap when `orphan_counter > mempool_size / 2` and
   reset the counter; panic-inject test covers global mempool mutex.
 - Test: add panic-inject harness covering drop path lock poisoning and recovery.
+- Test: add panic-inject harness for admission eviction to ensure no deadlock.
+- Feat: startup TTL purge logs `expired_drop_total`.
+- Doc: introduce `API_CHANGELOG.md` for Python error codes and telemetry endpoints.
 
 ### CLI Flags
 

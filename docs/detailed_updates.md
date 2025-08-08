@@ -24,6 +24,19 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Telemetry Metrics** – Prometheus counters now track TTL expirations
   (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), and orphan
   sweeps (`orphan_sweep_total`).
+- **API Change Log** – `API_CHANGELOG.md` records Python error variants and
+  telemetry counters.
+- **Panic Tests** – Admission eviction path uses a panic-inject harness to
+  demonstrate lock recovery and rollback.
+- **Tracing Spans** – `mempool_mutex` emits sender, nonce, fee-per-byte and
+  current `mempool_size` alongside existing `eviction_sweep` and
+  `startup_rebuild` spans for fine-grained profiling.
+
+Example scrape with Prometheus format:
+
+```bash
+curl -s localhost:9000/metrics | grep mempool_size
+```
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 - **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp
   directory per instance and removes it on drop. Fixtures call `unique_path` so
@@ -33,11 +46,12 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Mempool Hardening** – Admission now uses an atomic size counter and binary
 - **Mempool Hardening** – Admission now uses an atomic size counter and binary
   heap to evict the lowest-priority transaction ordered by
-  `(fee_per_byte, timestamp_millis, tx_hash)`. Entry timestamps persist as
+  `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`. Entry timestamps persist as
   UNIX milliseconds.
 - **Schema v4 Note** – Migration serializes mempool contents with timestamps;
   `Blockchain::open` rebuilds the mempool on startup and drops expired or
-  orphaned entries once `orphan_counter > mempool_size / 2`.
+  orphaned entries once `orphan_counter > mempool_size / 2`. Startup purge logs
+  `expired_drop_total` for visibility.
 - **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
   and per-account pending limits are configurable via `TB_*` environment
   variables. Expired transactions are purged on startup and new submissions.

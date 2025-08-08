@@ -167,20 +167,20 @@ fn rejects_fee_below_min() {
 }
 
 #[test]
-fn mempool_full_rejects() {
+fn mempool_full_evicts_lowest() {
     init();
     let mut bc = Blockchain::new(&unique_path("temp_full"));
     bc.max_mempool_size = 1;
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 10_000, 0).unwrap();
-    let (sk, _pk) = generate_keypair();
-    let tx1 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 1);
-    let tx2 = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 2);
+    let (ska, _pka) = generate_keypair();
+    let (skb, _pkb) = generate_keypair();
+    let tx1 = build_signed_tx(&ska, "a", "b", 1, 0, 1000, 1);
+    let tx2 = build_signed_tx(&skb, "b", "a", 1, 0, 2000, 1);
     bc.submit_transaction(tx1).unwrap();
-    assert_eq!(
-        bc.submit_transaction(tx2),
-        Err(TxAdmissionError::MempoolFull)
-    );
+    bc.submit_transaction(tx2.clone()).unwrap();
+    assert_eq!(bc.mempool.len(), 1);
+    assert!(bc.mempool.contains_key(&("b".to_string(), 1)));
 }
 
 #[test]
