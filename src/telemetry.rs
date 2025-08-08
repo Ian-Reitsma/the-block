@@ -105,3 +105,35 @@ pub fn gather() -> String {
         .unwrap_or_else(|e| panic!("encode: {e}"));
     String::from_utf8(buffer).unwrap_or_default()
 }
+
+/// Start a minimal HTTP server that exposes Prometheus metrics.
+///
+/// The server runs on a background thread and responds to any incoming
+/// connection with the current metrics in text format. The bound socket
+/// address is returned so callers can discover the chosen port when using
+/// an ephemeral one (e.g. `"127.0.0.1:0"`).
+///
+/// This helper is intentionally lightweight and meant for tests or local
+/// demos; production deployments should place a reverse proxy in front of it.
+pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind(addr)?;
+    let local = listener.local_addr()?;
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if let Ok(mut stream) = stream {
+                let mut _req = [0u8; 512];
+                let _ = stream.read(&mut _req);
+                let body = gather();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(), body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        }
+    });
+    Ok(local)
+}

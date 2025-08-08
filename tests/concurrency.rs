@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
+use rand::Rng;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -81,22 +82,32 @@ fn cross_thread_fuzz() {
         let (sk, _pk) = generate_keypair();
         keys.push((name, sk));
     }
+    const ITERS: usize = 10_000;
     let handles: Vec<_> = keys
         .into_iter()
         .enumerate()
         .map(|(i, (name, sk))| {
             let bc_cl = Arc::clone(&bc);
-            let to = format!("acc{}", (i + 1) % 32);
             std::thread::spawn(move || {
-                let tx = build_signed_tx(&sk, &name, &to, 1, 1, 1000, 1);
-                let _ = bc_cl.write().unwrap().submit_transaction(tx);
+                let mut rng = rand::thread_rng();
+                let to = format!("acc{}", (i + 1) % 32);
+                for _ in 0..ITERS {
+                    let fee = rng.gen_range(1000..5000);
+                    let nonce = rng.gen::<u64>() + 1;
+                    let tx = build_signed_tx(&sk, &name, &to, 1, 1, fee, nonce);
+                    let _ = bc_cl.write().unwrap().submit_transaction(tx);
+                }
             })
         })
         .collect();
     for h in handles {
         h.join().unwrap();
     }
-    assert!(bc.read().unwrap().mempool.len() <= 32);
+    let guard = bc.read().unwrap();
+    assert!(guard.mempool.len() <= guard.max_mempool_size);
+    for acc in guard.accounts.values() {
+        assert_eq!(acc.pending.nonce as usize, acc.pending.nonces.len());
+    }
 }
 
 // Ensure mempool cap is respected even under heavy concurrency.

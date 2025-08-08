@@ -6,8 +6,18 @@
 - Isolated chain state into per-test temp directories and cleaned them on drop;
   replay attack prevention test now asserts duplicate `(sender, nonce)` pairs are
   rejected. **COMPLETED/DONE**
+- Added mempool priority comparator unit test proving `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` ordering. **COMPLETED/DONE**
+- Introduced TTL-expiry regression test and telemetry counter `ttl_drop_total`; lock-poison drops now advance `lock_poison_total`.
 
-The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the existing repository snapshot (commit `20ac136e`). Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference the repository at the same commit.
+## Outstanding Blockers
+- **B‑1 Over‑Cap Race**: unify `submit_transaction`, `drop_transaction`, and `mine_block` under a `mempool_mutex → sender_mutex` critical section with counter, heap, and pending updates inside.
+- **B‑2 Orphan Sweep**: maintain `orphan_counter` and rebuild the heap when `orphan_counter > mempool_size / 2`; decrement on TTL purge and drop; emit `ORPHAN_SWEEP_TOTAL`.
+- **B‑3 Timestamp Persistence**: serialize `MempoolEntry.timestamp_ticks`, rebuild heap on `Blockchain::open`, and drop expired or missing-account entries while logging `expired_drop_total`.
+- **B‑4 Self‑Evict Deadlock**: panic‑inject eviction path and verify rollback, incrementing `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL`.
+- **Replay & Migration Tests**: extend restart tests for TTL expiry and re‑enable `test_schema_upgrade_compatibility`.
+- **Telemetry & Spans**: add `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, and span coverage for `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`.
+
+The following notes catalogue gaps, risks, and corrective directives observed across the current branch. Each item is scoped to the current repository snapshot. Sections correspond to the original milestone specifications. Where applicable, cited line numbers reference this repository at HEAD.
 
 Note: `cargo +nightly clippy --all-targets -- -D warnings` reports style and
 documentation issues. Failing it does not change runtime behaviour but leaves
