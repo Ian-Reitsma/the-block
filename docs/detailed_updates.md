@@ -24,12 +24,18 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   `flood_mempool_never_over_cap`) prove the size cap under threaded floods.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
 - **Telemetry Metrics** – Prometheus counters now track TTL expirations
-  (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), orphan
-  sweeps (`orphan_sweep_total`), invalid fee selectors
-  (`invalid_selector_reject_total`), balance overflows
-  (`balance_overflow_reject_total`), drop failures
-  (`drop_not_found_total`), and total rejections labelled by reason
-  (`tx_rejected_total{reason=*}`).
+  (`ttl_drop_total`), startup drops (`startup_ttl_drop_total` (expired mempool entries dropped during startup)), lock poisoning
+  events (`lock_poison_total`), orphan sweeps (`orphan_sweep_total`), invalid
+  fee selectors (`invalid_selector_reject_total`), balance overflows
+  (`balance_overflow_reject_total`), drop failures (`drop_not_found_total`),
+  and total rejections labelled by reason (`tx_rejected_total{reason=*}`).
+- **B‑5 Startup TTL Purge — COMPLETED** – `Blockchain::open` batches mempool
+  rebuilds and invokes [`purge_expired`](../src/lib.rs#L1596-L1665) on startup
+  ([../src/lib.rs](../src/lib.rs#L917-L934)), updating
+  [`orphan_counter`](../src/lib.rs#L1637-L1662) and logging `expired_drop_total`
+  while `ttl_drop_total` and `startup_ttl_drop_total` advance.
+- **Startup Rebuild Benchmark** – Criterion bench `startup_rebuild` compares
+  batched vs naive mempool hydration throughput.
 - **Metrics HTTP Exporter** – `serve_metrics(addr)` spawns a lightweight server
   that returns `gather_metrics()` output. A sample `curl` scrape is shown below.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
@@ -38,8 +44,12 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   eviction uses a separate harness (`eviction_panic_rolls_back`) to verify lock
   recovery and metric increments.
 - **Schema Migration Tests** – `test_schema_upgrade_compatibility` exercises v1/v2/v3 disks upgrading to v4 with `timestamp_ticks` hydration; `ttl_expired_purged_on_restart` proves TTL expiry across restarts.
-- **Tracing Spans** – `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`
-  now capture `sender`, `nonce`, `fee_per_byte`, and the current
+- **Tracing Spans** – `mempool_mutex`, `admission_lock`, `eviction_sweep`, and `startup_rebuild`
+  ([../src/lib.rs](../src/lib.rs#L1066-L1081),
+  [../src/lib.rs](../src/lib.rs#L1535-L1541),
+  [../src/lib.rs](../src/lib.rs#L1621-L1656),
+  [../src/lib.rs](../src/lib.rs#L878-L888))
+  capture `sender`, `nonce`, `fee_per_byte`, and the current
   `mempool_size` for fine-grained profiling.
 - **Admission Panic Property Test** – `admission_panic_rolls_back_all_steps`
   injects panics before and after reservation and proves pending state and
@@ -52,7 +62,7 @@ Example scrape with Prometheus format:
 
 ```bash
 curl -s localhost:9000/metrics \
-  | grep -E 'ttl_drop_total|orphan_sweep_total|lock_poison_total|tx_rejected_total'
+  | grep -E 'startup_ttl_drop_total|ttl_drop_total|orphan_sweep_total|lock_poison_total|tx_rejected_total'
 ```
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 - **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp
@@ -78,9 +88,13 @@ curl -s localhost:9000/metrics \
   `drop_not_found_total` alongside the labelled `tx_rejected_total` entries.
 - **Schema v4 Note** – Migration serializes mempool contents with timestamps;
   `Blockchain::open` rebuilds the mempool on startup, encoding both
-  `timestamp_millis` and `timestamp_ticks` per entry, then drops expired or
-  missing-account entries once `orphan_counter > mempool_size / 2`. Startup
-  purge logs `expired_drop_total` for visibility.
+  `timestamp_millis` and `timestamp_ticks` per entry, skips missing-account
+  entries, and invokes [`purge_expired`](../src/lib.rs#L1596-L1665) to drop
+  TTL-expired transactions and update [`orphan_counter`](../src/lib.rs#L1637-L1662).
+  Startup rebuild loads entries in batches of 256, logs the combined
+  `expired_drop_total`, and `ttl_drop_total` and `startup_ttl_drop_total`
+  advance for visibility
+  ([../src/lib.rs](../src/lib.rs#L917-L934)).
 - **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
   and per-account pending limits are configurable via `TB_*` environment
   variables. Expired transactions are purged on startup and new submissions.

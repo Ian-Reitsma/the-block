@@ -100,7 +100,7 @@ All developers must install the repo's `githooks/pre-commit` hook to ensure the 
 ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 ```
 
-> **Tip:** After any `.rs` or `Cargo.toml` change, run `maturin develop --release` to rebuild and re‑install the Python module in‑place.
+> **Tip:** After any `.rs` or `Cargo.toml` change, run `maturin develop --release --features telemetry` to rebuild and re‑install the Python module in‑place.
 
 ---
 
@@ -110,7 +110,7 @@ ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 | ---------------------- | ----------------------------------------------------- | ------------------------------------ |
 | Rust‑only dev loop     | `cargo test --all`                                    | runs lib + test binaries             |
 | PyO3 wheel (manylinux) | `maturin build --release --features extension-module` | `target/wheels/the_block‑*.whl`      |
-| In‑place dev install   | `maturin develop --release`                           | `import the_block` works in `.venv`  |
+| In‑place dev install   | `maturin develop --release --features telemetry`     | `import the_block` works in `.venv`  |
 | Audit + Clippy         | `cargo clippy --all-targets -- -D warnings`           | zero warnings allowed                |
 | Benchmarks             | `cargo bench`                                         | Criterion HTML in `target/criterion` |
 
@@ -288,21 +288,30 @@ Flags: `--mempool-max`/`TB_MEMPOOL_MAX`, `--mempool-account-cap`/`TB_MEMPOOL_ACC
 
 Telemetry metrics: `mempool_size`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
+`startup_ttl_drop_total` (expired mempool entries dropped during startup),
 `lock_poison_total`, `orphan_sweep_total`,
 `tx_rejected_total{reason=*}`. Telemetry spans:
 `mempool_mutex` (sender, nonce, fpb, mempool_size),
 `admission_lock` (sender, nonce),
 `eviction_sweep` (sender, nonce, fpb, mempool_size),
 `startup_rebuild` (sender, nonce, fpb, mempool_size).
-See the span definitions in [`src/lib.rs`](src/lib.rs#L1053-L1068),
-[`src/lib.rs`](src/lib.rs#L1522-L1528), and
-[`src/lib.rs`](src/lib.rs#L1603-L1637) for traceability.
+See the span definitions in [`src/lib.rs`](src/lib.rs#L1066-L1081),
+[`src/lib.rs`](src/lib.rs#L1535-L1541),
+[`src/lib.rs`](src/lib.rs#L1621-L1656), and
+[`src/lib.rs`](src/lib.rs#L878-L888) for traceability.
 `serve_metrics(addr)` starts a minimal HTTP exporter returning
 `gather_metrics()` output; e.g. `curl -s localhost:9000/metrics |
 grep -E 'orphan_sweep_total|tx_rejected_total'`. Orphan sweeps trigger when
 `orphan_counter > mempool_size / 2`; the sweep rebuilds the heap, drops
 all orphaned entries, emits `ORPHAN_SWEEP_TOTAL`, and resets the counter.
 TTL purges and explicit drops both decrement `orphan_counter`.
+On startup `Blockchain::open` rebuilds the mempool from disk, counting
+missing-account entries and inserting the rest before calling
+[`purge_expired`](src/lib.rs#L1596-L1665).
+The purge drops TTL-expired entries, updates
+[`orphan_counter`](src/lib.rs#L1637-L1662), and returns the count so the
+sum of missing and expired drops can be logged as `expired_drop_total`
+while `TTL_DROP_TOTAL` advances ([src/lib.rs](src/lib.rs#L917-L934)).
 See `API_CHANGELOG.md` for Python error and telemetry endpoint history. Regression test
 `flood_mempool_never_over_cap` floods submissions across threads to assert
 the size cap. Panic-inject tests cover admission rollback and
@@ -342,7 +351,7 @@ All cryptographic code is dependency‑pinned; update via dedicated “crypto‑
 
 | Symptom                            | Likely Cause                         | Fix                                                              |
 | ---------------------------------- | ------------------------------------ | ---------------------------------------------------------------- |
-| `ModuleNotFoundError: the_block`   | Wheel built but not installed        | `maturin develop --release`                                      |
+| `ModuleNotFoundError: the_block`   | Wheel built but not installed        | `maturin develop --release --features telemetry`                                      |
 | `libpython3.12.so` linked in wheel | Forgot `--features extension-module` | Re‑build wheel with flag or make feature default in `Cargo.toml` |
 | Same tx hash repeats               | `nonce` missing / fake sig           | Ensure unique nonce & real signature                             |
 | `cargo test` fails on CI only      | Missing system pkg                   | Check GitHub matrix log; patch `bootstrap.sh`                    |
@@ -391,7 +400,7 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - Provide a panic‑inject test that forces eviction mid‑admission to demonstrate lock ordering and full rollback.
 - Record `LOCK_POISON_TOTAL` and rejection reasons on every failure path.
 
-### B‑5 · Startup TTL Purge
+### B‑5 · Startup TTL Purge — **COMPLETED**
 - Ensure `purge_expired()` runs during `Blockchain::open` and is covered by a restart test that proves `ttl_drop_total` advances.
 - Spec the startup purge behaviour and default telemetry in `CONSENSUS.md` and docs.
 
@@ -400,7 +409,7 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - Replay suite includes `ttl_expired_purged_on_restart` for TTL expiry and `test_schema_upgrade_compatibility` verifying v1/v2/v3 disks migrate to v4, hydrating `timestamp_ticks`.
 
 ### Telemetry & Logging
-- Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and `DROP_NOT_FOUND_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
+- Add counters `TTL_DROP_TOTAL`, `STARTUP_TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and `DROP_NOT_FOUND_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
 - Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool size.
 - Document a `curl` scrape example for `serve_metrics` output in `docs/detailed_updates.md` and keep `rejection_reasons.rs` exercising the labelled counters.
 

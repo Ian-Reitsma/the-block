@@ -36,9 +36,7 @@ use thiserror::Error;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
-pub use telemetry::gather as gather_metrics;
-#[cfg(feature = "telemetry")]
-pub use telemetry::serve as serve_metrics;
+pub use telemetry::{gather_metrics, serve_metrics};
 
 pub mod blockchain;
 use blockchain::difficulty;
@@ -150,6 +148,10 @@ const INITIAL_BLOCK_REWARD_CONSUMER: u64 = 60_000;
 const INITIAL_BLOCK_REWARD_INDUSTRIAL: u64 = 30_000;
 const DECAY_NUMERATOR: u64 = 99995; // ~0.005% per block
 const DECAY_DENOMINATOR: u64 = 100_000;
+
+// === Startup rebuild tuning ===
+/// Number of mempool entries processed per batch during `Blockchain::open`.
+pub const STARTUP_REBUILD_BATCH: usize = 256;
 
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
 /// Converts a byte slice into a fixed 32-byte array, returning `None` on length
@@ -847,65 +849,71 @@ impl Blockchain {
             }
         }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_else(|e| panic!("time: {e}"))
-            .as_millis() as u64;
-        let ttl_ms = bc.tx_ttl * 1000;
-        let mut expired_drop_total = 0u64;
-        for e in mempool_disk {
-            let size = bincode::serialize(&e.tx)
-                .map(|b| b.len() as u64)
-                .unwrap_or(0);
-            let fpb = if size == 0 {
-                0
-            } else {
-                e.tx.payload.fee / size
-            };
-            #[cfg(feature = "telemetry")]
-            let _span = tracing::span!(
-                tracing::Level::TRACE,
-                "startup_rebuild",
-                sender = %e.sender,
-                nonce = e.nonce,
-                fpb,
-                mempool_size = bc
-                    .mempool_size
-                    .load(std::sync::atomic::Ordering::SeqCst)
-            )
-            .entered();
-            #[cfg(not(feature = "telemetry"))]
-            let _ = fpb;
-            if bc.accounts.contains_key(&e.sender) {
-                if now.saturating_sub(e.timestamp_millis) > ttl_ms {
-                    #[cfg(feature = "telemetry")]
-                    telemetry::TTL_DROP_TOTAL.inc();
-                    expired_drop_total += 1;
-                    continue;
+        let mut missing_drop_total = 0u64;
+        let mut iter = mempool_disk.into_iter();
+        loop {
+            let mut batch = Vec::with_capacity(STARTUP_REBUILD_BATCH);
+            for _ in 0..STARTUP_REBUILD_BATCH {
+                if let Some(e) = iter.next() {
+                    batch.push(e);
+                } else {
+                    break;
                 }
-                bc.mempool.insert(
-                    (e.sender.clone(), e.nonce),
-                    MempoolEntry {
-                        tx: e.tx.clone(),
-                        timestamp_millis: e.timestamp_millis,
-                        timestamp_ticks: e.timestamp_ticks,
-                    },
-                );
-                bc.inc_mempool_size();
-                if let Some(acc) = bc.accounts.get_mut(&e.sender) {
-                    if let Ok((fee_consumer, fee_industrial)) =
-                        crate::fee::decompose(e.tx.payload.fee_selector, e.tx.payload.fee)
-                    {
-                        acc.pending.consumer += e.tx.payload.amount_consumer + fee_consumer;
-                        acc.pending.industrial += e.tx.payload.amount_industrial + fee_industrial;
-                        acc.pending.nonce += 1;
-                        acc.pending.nonces.insert(e.tx.payload.nonce);
+            }
+            if batch.is_empty() {
+                break;
+            }
+            for e in batch {
+                let size = bincode::serialize(&e.tx)
+                    .map(|b| b.len() as u64)
+                    .unwrap_or(0);
+                let fpb = if size == 0 {
+                    0
+                } else {
+                    e.tx.payload.fee / size
+                };
+                #[cfg(feature = "telemetry")]
+                let _span = tracing::span!(
+                    tracing::Level::TRACE,
+                    "startup_rebuild",
+                    sender = %e.sender,
+                    nonce = e.nonce,
+                    fpb,
+                    mempool_size = bc
+                        .mempool_size
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                )
+                .entered();
+                #[cfg(not(feature = "telemetry"))]
+                let _ = fpb;
+                if bc.accounts.contains_key(&e.sender) {
+                    bc.mempool.insert(
+                        (e.sender.clone(), e.nonce),
+                        MempoolEntry {
+                            tx: e.tx.clone(),
+                            timestamp_millis: e.timestamp_millis,
+                            timestamp_ticks: e.timestamp_ticks,
+                        },
+                    );
+                    bc.inc_mempool_size();
+                    if let Some(acc) = bc.accounts.get_mut(&e.sender) {
+                        if let Ok((fee_consumer, fee_industrial)) =
+                            crate::fee::decompose(e.tx.payload.fee_selector, e.tx.payload.fee)
+                        {
+                            acc.pending.consumer += e.tx.payload.amount_consumer + fee_consumer;
+                            acc.pending.industrial +=
+                                e.tx.payload.amount_industrial + fee_industrial;
+                            acc.pending.nonce += 1;
+                            acc.pending.nonces.insert(e.tx.payload.nonce);
+                        }
                     }
+                } else {
+                    missing_drop_total += 1;
                 }
-            } else {
-                expired_drop_total += 1;
             }
         }
+        let ttl_drop_total = bc.purge_expired();
+        let expired_drop_total = missing_drop_total + ttl_drop_total;
         #[cfg(not(feature = "telemetry"))]
         let _ = expired_drop_total;
         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -919,6 +927,8 @@ impl Blockchain {
             "expired_drop_total",
             Some(expired_drop_total as u64),
         );
+        #[cfg(feature = "telemetry")]
+        telemetry::STARTUP_TTL_DROP_TOTAL.inc_by(ttl_drop_total);
         Ok(bc)
     }
 
@@ -1553,8 +1563,14 @@ impl Blockchain {
                 }
             }
             if !self.accounts.contains_key(sender) {
-                self.orphan_counter
-                    .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                if self
+                    .orphan_counter
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    > 0
+                {
+                    self.orphan_counter
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
             }
             #[cfg(feature = "telemetry-json")]
             log_event(log::Level::Info, "drop", sender, nonce, "dropped", None);
@@ -2512,6 +2528,11 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
     m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
     m.add("ErrPendingLimit", ErrPendingLimit::type_object(m.py()))?;
+    #[cfg(feature = "telemetry")]
+    {
+        m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;
+        m.add_function(wrap_pyfunction!(serve_metrics, m)?)?;
+    }
     Ok(())
 }
 

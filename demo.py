@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import random
 import shutil
+import time
 
 import the_block
 
@@ -31,6 +32,17 @@ def require(cond: bool, *, msg: str, context: dict | None = None) -> None:
     else:
         explain(f"Assertion failed: {msg}")
     raise SystemExit(1)
+
+
+def metric_val(metrics: str, name: str) -> int:
+    """Extract integer value for a metric name from a metrics string."""
+    for line in metrics.splitlines():
+        if line.startswith(name):
+            try:
+                return int(line.rsplit(" ", 1)[-1])
+            except ValueError:
+                return 0
+    return 0
 
 
 def show_pending(bc: the_block.Blockchain, sender: str, recipient: str) -> None:
@@ -300,6 +312,75 @@ def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
     check_supply(bc, accounts)
 
 
+def restart_purge_demo(priv: bytes) -> None:
+    """Submit expiring tx, restart, and verify purge & metrics."""
+    if not hasattr(the_block, "gather_metrics"):
+        explain("Build with `--features telemetry` to run metric assertions")
+        return
+    explain("Demonstrating TTL purge on restart")
+    path = "ttl_chain"
+    if os.path.exists(path):
+        shutil.rmtree(path)
+        explain("Removed previous ttl_chain directory")
+    bc = the_block.Blockchain.with_difficulty(path, 1)
+    bc.genesis_block()
+    bc.add_account("miner", 1000, 1000)
+    bc.add_account("alice", 0, 0)
+    bc.tx_ttl = 1
+    payload = the_block.RawTxPayload(
+        from_="miner",
+        to="alice",
+        amount_consumer=1,
+        amount_industrial=0,
+        fee=BASE_FEE,
+        fee_selector=2,
+        nonce=1,
+        memo=b"expire",
+    )
+    stx = the_block.sign_tx(list(priv), payload)
+    bc.submit_transaction(stx)
+    explain("Submitted expiring transaction; persisting and waiting")
+    metrics_before = the_block.gather_metrics()
+    ttl_before = metric_val(metrics_before, "ttl_drop_total")
+    startup_before = metric_val(metrics_before, "startup_ttl_drop_total")
+    bc.persist_chain()
+    time.sleep(2)
+    old_ttl = os.environ.get("TB_MEMPOOL_TTL_SECS")
+    os.environ["TB_MEMPOOL_TTL_SECS"] = "1"
+    try:
+        bc = the_block.Blockchain.open(path)
+        after = the_block.gather_metrics()
+        ttl_after = metric_val(after, "ttl_drop_total")
+        startup_after = metric_val(after, "startup_ttl_drop_total")
+        mempool_size = metric_val(after, "mempool_size")
+        explain(
+            f"TTL_DROP_TOTAL before {ttl_before}, after {ttl_after}; "
+            f"STARTUP_TTL_DROP_TOTAL before {startup_before}, after {startup_after}; "
+            f"mempool_size={mempool_size}"
+        )
+        require(
+            ttl_after == ttl_before + 1,
+            msg="TTL_DROP_TOTAL did not increment",
+            context={"before": ttl_before, "after": ttl_after},
+        )
+        require(
+            startup_after == startup_before + 1,
+            msg="STARTUP_TTL_DROP_TOTAL did not increment",
+            context={"before": startup_before, "after": startup_after},
+        )
+        require(
+            mempool_size == 0,
+            msg="mempool not empty",
+            context={"mempool_size": mempool_size},
+        )
+    finally:
+        if old_ttl is None:
+            os.environ.pop("TB_MEMPOOL_TTL_SECS", None)
+        else:
+            os.environ["TB_MEMPOOL_TTL_SECS"] = old_ttl
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def persistence_demo(bc: the_block.Blockchain) -> None:
     """Illustrate persistence call and re-open chain."""
     explain("Persisting chain state to disk")
@@ -339,6 +420,7 @@ def main() -> None:
     transaction_errors(bc, priv)
     mine_blocks(bc, accounts, priv)
     emission_cap_demo(bc, accounts)
+    restart_purge_demo(priv)
     persistence_demo(bc)
     cleanup()
     explain("Demo complete")

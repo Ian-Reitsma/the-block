@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder};
+use pyo3::prelude::*;
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -75,6 +76,18 @@ pub static TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "startup_ttl_drop_total",
+        "Expired mempool entries dropped during startup",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static LOCK_POISON_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "lock_poison_total",
@@ -135,7 +148,8 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub fn gather() -> String {
+#[pyfunction]
+pub fn gather_metrics() -> String {
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();
     let metrics = REGISTRY.gather();
@@ -154,7 +168,8 @@ pub fn gather() -> String {
 ///
 /// This helper is intentionally lightweight and meant for tests or local
 /// demos; production deployments should place a reverse proxy in front of it.
-pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
+#[pyfunction]
+pub fn serve_metrics(addr: &str) -> PyResult<String> {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -165,7 +180,7 @@ pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
             if let Ok(mut stream) = stream {
                 let mut _req = [0u8; 512];
                 let _ = stream.read(&mut _req);
-                let body = gather();
+                let body = gather_metrics();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
                     body.len(), body
@@ -174,5 +189,5 @@ pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
             }
         }
     });
-    Ok(local)
+    Ok(local.to_string())
 }
