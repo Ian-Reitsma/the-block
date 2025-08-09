@@ -1,6 +1,7 @@
 import csv
 from the_block import fee_decompose
 
+
 def test_fee_vectors():
     with open("tests/vectors/fee_v2_vectors.csv") as f:
         reader = csv.DictReader(f)

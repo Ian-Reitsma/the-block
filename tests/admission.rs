@@ -307,7 +307,8 @@ fn validate_block_rejects_wrong_difficulty() {
 fn admission_panic_rolls_back_all_steps() {
     init();
     let (sk, _pk) = generate_keypair();
-    for step in 0..2 {
+    // step 0: panic before reservation; step 1: panic after reservation
+    for step in 0..=1 {
         let path = unique_path(&format!("temp_admission_panic_{step}"));
         let mut bc = Blockchain::new(&path);
         bc.add_account("alice".into(), 10_000, 0).unwrap();

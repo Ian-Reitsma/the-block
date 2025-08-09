@@ -43,8 +43,11 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   `balance_overflow_reject_total`, `drop_not_found_total`,
   `tx_rejected_total{reason=*}`.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
-  `admission_lock` (sender, nonce), `eviction_sweep` (mempool_size,
-  orphan_counter), `startup_rebuild` (expired_drop_total).
+  `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
+  fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
+  mempool_size). See [`src/lib.rs`](src/lib.rs#L1053-L1068),
+  [`src/lib.rs`](src/lib.rs#L1522-L1528), and
+  [`src/lib.rs`](src/lib.rs#L1603-L1637).
 * `serve_metrics(addr)` exposes Prometheus text; e.g.
   `curl -s localhost:9000/metrics | grep tx_rejected_total`.
 

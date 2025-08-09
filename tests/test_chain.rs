@@ -7,17 +7,16 @@
 
 use base64::Engine;
 use proptest::prelude::*;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::{fs, path::Path};
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs, path::Path};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
-    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending, RawTxPayload,
-    SignedTransaction, TokenAmount, TokenBalance,
-    TxAdmissionError,
+    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
+    RawTxPayload, SignedTransaction, TokenAmount, TokenBalance, TxAdmissionError,
 };
 
 fn init() {
@@ -697,7 +696,10 @@ fn test_schema_upgrade_compatibility() {
         "a".into(),
         Account {
             address: "a".into(),
-            balance: TokenBalance { consumer: 10, industrial: 10 },
+            balance: TokenBalance {
+                consumer: 10,
+                industrial: 10,
+            },
             nonce: 0,
             pending: Pending::default(),
         },

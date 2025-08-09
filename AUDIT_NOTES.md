@@ -20,9 +20,13 @@
   `lock_poison_total`, `invalid_selector_reject_total`,
   `balance_overflow_reject_total`, `drop_not_found_total`, and
   `tx_rejected_total{reason=*}` advance on every rejection; spans
-  `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` are instrumented;
-  `serve_metrics` scrape example documented; `rejection_reasons.rs` asserts the
-  labelled counters.
+  `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
+  `startup_rebuild` record sender, nonce, fee-per-byte, and current
+  mempool size ([src/lib.rs](src/lib.rs#L1053-L1068),
+  [src/lib.rs](src/lib.rs#L1522-L1528),
+  [src/lib.rs](src/lib.rs#L1603-L1637)). `serve_metrics` scrape example
+  documented; `rejection_reasons.rs` asserts the labelled counters and
+  `admit_and_mine_never_over_cap` confirms capacity during mining.
 - Archived `artifacts/fuzz.log` and `artifacts/migration.log` with accompanying
   `RISK_MEMO.md` capturing residual risk and review requirements.
 

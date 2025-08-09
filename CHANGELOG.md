@@ -30,8 +30,11 @@
   labelled `tx_rejected_total{reason=*}` metrics.
 - Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for Prometheus scrapes.
 - Feat: rejection counter `tx_rejected_total{reason=*}` and spans
-  `mempool_mutex`, `eviction_sweep`, `startup_rebuild` document drop reasons
-  and startup purge.
+  `mempool_mutex`, `admission_lock`, `eviction_sweep`, `startup_rebuild`
+  capture sender, nonce, fee-per-byte, and mempool size for traceability
+  ([src/lib.rs](src/lib.rs#L1053-L1068),
+  [src/lib.rs](src/lib.rs#L1522-L1528),
+  [src/lib.rs](src/lib.rs#L1603-L1637)).
 - Test: add panic-inject harness covering drop path lock poisoning and recovery.
 - Test: add panic-inject harness for admission eviction proving full rollback
   and advancing `lock_poison_total` and rejection counters.
@@ -40,6 +43,10 @@
   10k iterations to stress capacity and uniqueness invariants.
 - Test: add `flood_mempool_never_over_cap` regression verifying mempool cap
   under threaded submission floods.
+- Test: add `admit_and_mine_never_over_cap` ensuring concurrent admission and
+  mining never exceed the mempool cap.
+- Test: regression tests decrement the orphan counter on explicit drops and
+  TTL purges.
 - Test: `rejection_reasons` asserts telemetry for invalid selector, balance
   overflow, and drop-not-found paths.
 - Feat: startup TTL purge logs `expired_drop_total`.

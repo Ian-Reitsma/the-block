@@ -24,8 +24,12 @@ re‑implement:
    `lock_poison_total`, `orphan_sweep_total`,
    `invalid_selector_reject_total`, `balance_overflow_reject_total`,
    `drop_not_found_total`, `tx_rejected_total{reason=*}`, and span coverage
-   for `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`;
-   comparator ordering test for mempool priority.
+   for `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
+   `startup_rebuild` capturing sender, nonce, fee_per_byte, and
+   mempool_size ([`src/lib.rs`](src/lib.rs#L1053-L1068),
+   [`src/lib.rs`](src/lib.rs#L1522-L1528),
+  [`src/lib.rs`](src/lib.rs#L1603-L1637)). Comparator ordering test for
+   mempool priority.
 6. **Mempool atomicity**: global `mempool_mutex → sender_mutex` critical section with
    counter updates, heap ops, and pending balances inside; orphan sweeps rebuild
    the heap when `orphan_counter > mempool_size / 2` and emit `ORPHAN_SWEEP_TOTAL`.
@@ -82,8 +86,11 @@ Treat the following as blockers. Implement each with atomic commits, exhaustive 
      `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
      `DROP_NOT_FOUND_TOTAL`, plus global `TX_REJECTED_TOTAL{reason=*}` with
      regression tests for each labelled rejection.
-   - Instrument spans `mempool_mutex`, `eviction_sweep`, `startup_rebuild`
-     capturing sender, nonce, fee_per_byte, mempool_size.
+   - Instrument spans `mempool_mutex`, `admission_lock`, `eviction_sweep`,
+     and `startup_rebuild` capturing sender, nonce, fee_per_byte,
+     mempool_size ([`src/lib.rs`](src/lib.rs#L1053-L1068),
+     [`src/lib.rs`](src/lib.rs#L1522-L1528),
+     [`src/lib.rs`](src/lib.rs#L1603-L1637)).
    - Document scrape example for `serve_metrics` and span list in
      `docs/detailed_updates.md` and specs.
 3. **Test & Fuzz Matrix**

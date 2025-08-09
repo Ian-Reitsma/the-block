@@ -70,20 +70,32 @@ fn eviction_panic_rolls_back() {
     assert!(bc.mempool.is_empty());
     let acc = bc.accounts.get("a").unwrap();
     assert_eq!(acc.pending.nonce, 0);
+    assert_eq!(acc.pending.consumer, 0);
+    assert_eq!(acc.pending.industrial, 0);
     assert!(acc.pending.nonces.is_empty());
     let tx3 = build_signed_tx(&sk, "a", "b", 1, 1000, 3);
+    #[cfg(feature = "telemetry")]
+    {
+        let before_lp = telemetry::LOCK_POISON_TOTAL.get();
+        let before_rej = telemetry::TX_REJECTED_TOTAL
+            .with_label_values(&["lock_poison"])
+            .get();
+        assert_eq!(before_lp, before_rej);
+        assert_eq!(
+            Err(TxAdmissionError::LockPoisoned),
+            bc.submit_transaction(tx3)
+        );
+        let after_lp = telemetry::LOCK_POISON_TOTAL.get();
+        let after_rej = telemetry::TX_REJECTED_TOTAL
+            .with_label_values(&["lock_poison"])
+            .get();
+        assert_eq!(before_lp + 1, after_lp);
+        assert_eq!(before_rej + 1, after_rej);
+        assert_eq!(after_lp, after_rej);
+    }
+    #[cfg(not(feature = "telemetry"))]
     assert_eq!(
         Err(TxAdmissionError::LockPoisoned),
         bc.submit_transaction(tx3)
     );
-    #[cfg(feature = "telemetry")]
-    {
-        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
-        assert_eq!(
-            1,
-            telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["lock_poison"])
-                .get()
-        );
-    }
 }

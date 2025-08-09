@@ -174,3 +174,51 @@ fn flood_mempool_never_over_cap() {
     assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size);
     assert!(guard.mempool.len() <= guard.max_mempool_size);
 }
+
+// Concurrent admission and mining can't push the mempool over its cap.
+// AGENTS.md §10.3
+#[test]
+fn admit_and_mine_never_over_cap() {
+    init();
+    let path = unique_path("temp_admit_mine_cap");
+    let mut bc = Blockchain::new(&path);
+    bc.max_mempool_size = 16;
+    bc.max_pending_per_account = 64;
+    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.mine_block("alice").unwrap();
+    let (sk, _pk) = generate_keypair();
+    let bc = Arc::new(RwLock::new(bc));
+    let peak = Arc::new(AtomicUsize::new(0));
+
+    // Miner thread repeatedly empties the pool while submissions race.
+    let bc_miner = Arc::clone(&bc);
+    let peak_miner = Arc::clone(&peak);
+    let miner_handle = std::thread::spawn(move || {
+        for _ in 0..32 {
+            let _ = bc_miner.write().unwrap().mine_block("alice");
+            let len = bc_miner.read().unwrap().mempool.len();
+            peak_miner.fetch_max(len, Ordering::SeqCst);
+        }
+    });
+
+    let handles: Vec<_> = (0..64)
+        .map(|i| {
+            let bc_cl = Arc::clone(&bc);
+            let peak_cl = Arc::clone(&peak);
+            let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, i as u64 + 1);
+            std::thread::spawn(move || {
+                let _ = bc_cl.write().unwrap().submit_transaction(tx);
+                let len = bc_cl.read().unwrap().mempool.len();
+                peak_cl.fetch_max(len, Ordering::SeqCst);
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+    miner_handle.join().unwrap();
+    let guard = bc.read().unwrap();
+    assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size);
+    assert!(guard.mempool.len() <= guard.max_mempool_size);
+}

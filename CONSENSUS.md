@@ -70,6 +70,8 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 
 `Blockchain::mempool` is backed by a `DashMap` keyed by `(sender, nonce)` with
 mutations guarded by a global `mempool_mutex`.
+A tracing span captures each admission at this lock boundary
+([src/lib.rs](src/lib.rs#L1053-L1068)).
 A binary heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`
 provides `O(log n)` eviction. Example ordering:
 
@@ -88,12 +90,18 @@ updates, heap pushes/pops, and pending balance/nonces occur within this order,
 guaranteeing `mempool_size ≤ max_mempool_size`. Each sender is
 limited to 16 pending transactions. Entries expire after `tx_ttl` seconds
 (default 1800) based on the persisted admission timestamp and are purged on new
-submissions and at startup, logging `expired_drop_total`. Mempool entries encode
-both wall-clock milliseconds and monotonic `timestamp_ticks` in schema v4 so
-`Blockchain::open` can rebuild the heap deterministically and drop expired or
-missing-account entries while restoring `mempool_size`. Transactions whose sender account has been removed
-are counted in an `orphan_counter`; when `orphan_counter > mempool_size / 2` a
-sweep rebuilds the heap, drops all orphans, and resets the counter.
+submissions and at startup, logging `expired_drop_total`. In schema v4 each
+mempool record serializes `[sender, nonce, tx, timestamp_millis, timestamp_ticks]`
+where `timestamp_ticks` is a monotonic counter used for deterministic tie
+breaking. `Blockchain::open` rebuilds the heap from this list, dropping any entry
+whose TTL has elapsed or whose sender account is missing and restoring
+`mempool_size` from the survivors ([src/lib.rs](src/lib.rs#L865-L894)).
+Transactions whose sender account has been
+removed are counted in an `orphan_counter`. TTL purges and explicit drops
+decrement this counter. When `orphan_counter > mempool_size / 2` (orphans exceed
+half of the pool) a sweep rebuilds the heap, drops all orphans, emits
+`ORPHAN_SWEEP_TOTAL`, and resets the counter
+([src/lib.rs](src/lib.rs#L1585-L1645)).
 
 Transactions from unknown senders are rejected. Nodes must provision accounts via
 `add_account` before submitting any transaction.

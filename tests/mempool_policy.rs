@@ -143,6 +143,88 @@ fn orphan_ratio_triggers_rebuild() {
 }
 
 #[test]
+fn heap_orphan_stress_triggers_rebuild_and_orders() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_heap_orphan"));
+    bc.max_mempool_size = 16;
+    bc.add_account("sink".into(), 0, 0).unwrap();
+    let mut keys = Vec::new();
+    for i in 0..7 {
+        let name = format!("acct{i}");
+        bc.add_account(name.clone(), 10_000, 0).unwrap();
+        let (sk, _pk) = generate_keypair();
+        keys.push((name, sk));
+    }
+    for i in 0..7 {
+        let tx = build_signed_tx(&keys[i].1, &keys[i].0, "sink", 1, 0, 1000 + i as u64, 1);
+        bc.submit_transaction(tx).unwrap();
+    }
+    for i in 0..4 {
+        bc.accounts.remove(&keys[i].0);
+    }
+    #[cfg(feature = "telemetry")]
+    telemetry::ORPHAN_SWEEP_TOTAL.reset();
+    let _ = bc.purge_expired();
+    assert_eq!(bc.mempool.len(), 3);
+    assert_eq!(bc.orphan_count(), 0);
+    #[cfg(feature = "telemetry")]
+    assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    let ttl = bc.tx_ttl;
+    let mut entries: Vec<_> = bc.mempool.iter().map(|e| e.value().clone()).collect();
+    entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
+    for w in entries.windows(2) {
+        assert!(mempool_cmp(&w[0], &w[1], ttl) != std::cmp::Ordering::Greater);
+    }
+}
+
+#[test]
+fn orphan_drop_decrements_counter() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_orphan_drop"));
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("carol".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk_a, _pk_a) = generate_keypair();
+    let (sk_c, _pk_c) = generate_keypair();
+    let tx1 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
+    let tx2 = build_signed_tx(&sk_c, "carol", "bob", 1, 0, 1000, 1);
+    bc.submit_transaction(tx1).unwrap();
+    bc.submit_transaction(tx2).unwrap();
+    bc.accounts.remove("alice");
+    let _ = bc.purge_expired();
+    assert_eq!(bc.orphan_count(), 1);
+    bc.drop_transaction("alice", 1).unwrap();
+    assert_eq!(bc.orphan_count(), 0);
+}
+
+#[test]
+fn ttl_purge_drops_orphan_and_decrements_counter() {
+    init();
+    let mut bc = Blockchain::new(&unique_path("temp_orphan_ttl"));
+    bc.tx_ttl = 1;
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("carol".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk_a, _pk_a) = generate_keypair();
+    let (sk_c, _pk_c) = generate_keypair();
+    let tx1 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
+    let tx2 = build_signed_tx(&sk_c, "carol", "bob", 1, 0, 1000, 1);
+    bc.submit_transaction(tx1).unwrap();
+    bc.submit_transaction(tx2).unwrap();
+    bc.accounts.remove("alice");
+    let _ = bc.purge_expired();
+    assert_eq!(bc.orphan_count(), 1);
+    if let Some(mut entry) = bc.mempool.get_mut(&("alice".into(), 1)) {
+        entry.timestamp_millis = 0;
+        entry.timestamp_ticks = 0;
+    }
+    let dropped = bc.purge_expired();
+    assert_eq!(dropped, 1);
+    assert_eq!(bc.orphan_count(), 0);
+    assert_eq!(bc.mempool.len(), 1);
+}
+
+#[test]
 fn drop_lock_poisoned_error_and_recovery() {
     init();
     let mut bc = Blockchain::new(&unique_path("temp_drop_poison"));
@@ -239,7 +321,8 @@ fn admission_panic_rolls_back() {
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
-    for step in 0..2 {
+    // step 0: panic before reservation; step 1: panic after reservation
+    for step in 0..=1 {
         let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
         bc.panic_in_admission_after(step);
         let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

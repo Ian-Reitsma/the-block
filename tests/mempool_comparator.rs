@@ -2,7 +2,9 @@
 
 use std::cmp::Ordering;
 use std::fs;
-use the_block::{generate_keypair, mempool_cmp, sign_tx, MempoolEntry, RawTxPayload};
+use std::sync::atomic::AtomicUsize;
+use std::time::{SystemTime, UNIX_EPOCH};
+use the_block::{generate_keypair, mempool_cmp, sign_tx, Blockchain, MempoolEntry, RawTxPayload};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -10,6 +12,12 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
+}
+
+fn unique_path(prefix: &str) -> String {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{prefix}_{id}")
 }
 
 fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
@@ -55,4 +63,74 @@ fn comparator_orders_fee_then_expiry_then_hash() {
     let expected = a.tx.id().cmp(&b.tx.id());
     assert_eq!(expected, mempool_cmp(&a, &b, ttl));
     assert_eq!(expected.reverse(), mempool_cmp(&b, &a, ttl));
+}
+
+#[test]
+fn ordering_stable_after_heap_rebuild() {
+    init();
+    let (sk, _pk) = generate_keypair();
+    let path = unique_path("heap_rebuild");
+    let _ = fs::remove_dir_all(&path);
+    let mut bc = Blockchain::open(&path).unwrap();
+    bc.tx_ttl = 100;
+    for acct in ["a", "b", "c", "d", "e"] {
+        bc.add_account(acct.into(), 10_000, 10_000).unwrap();
+    }
+
+    let submit = |bc: &mut Blockchain, from: &str, fee: u64| {
+        let payload = RawTxPayload {
+            from_: from.into(),
+            to: "sink".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee,
+            fee_selector: 0,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.clone(), payload).unwrap();
+        bc.submit_transaction(tx).unwrap();
+    };
+
+    submit(&mut bc, "a", 4_000);
+    submit(&mut bc, "b", 3_000);
+    submit(&mut bc, "c", 3_000);
+    submit(&mut bc, "d", 2_000);
+    submit(&mut bc, "e", 2_500);
+
+    let base = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    for (from, offset) in ["a", "b", "c", "d", "e"].iter().zip([0, 0, 10, 0, 0]) {
+        if let Some(mut entry) = bc.mempool.get_mut(&(from.to_string(), 1)) {
+            entry.timestamp_millis = base + offset;
+            entry.timestamp_ticks = base + offset;
+        }
+    }
+
+    let entry_a = bc
+        .mempool
+        .get(&(String::from("a"), 1))
+        .map(|e| e.clone())
+        .unwrap();
+    let entry_e = bc
+        .mempool
+        .get(&(String::from("e"), 1))
+        .map(|e| e.clone())
+        .unwrap();
+    let mut expected_entries = vec![entry_a, entry_e];
+    expected_entries.sort_by(|a, b| mempool_cmp(a, b, bc.tx_ttl));
+    let expected: Vec<[u8; 32]> = expected_entries.iter().map(|e| e.tx.id()).collect();
+
+    bc.accounts.remove("b");
+    bc.accounts.remove("c");
+    bc.accounts.remove("d");
+    bc.purge_expired();
+
+    let mut after: Vec<MempoolEntry> = bc.mempool.iter().map(|e| e.value().clone()).collect();
+    after.sort_by(|a, b| mempool_cmp(a, b, bc.tx_ttl));
+    let actual: Vec<[u8; 32]> = after.iter().map(|e| e.tx.id()).collect();
+
+    assert_eq!(expected, actual);
 }
