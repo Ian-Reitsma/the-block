@@ -854,6 +854,28 @@ impl Blockchain {
         let ttl_ms = bc.tx_ttl * 1000;
         let mut expired_drop_total = 0u64;
         for e in mempool_disk {
+            let size = bincode::serialize(&e.tx)
+                .map(|b| b.len() as u64)
+                .unwrap_or(0);
+            let fpb = if size == 0 {
+                0
+            } else {
+                e.tx.payload.fee / size
+            };
+            #[cfg(feature = "telemetry")]
+            let _span = tracing::span!(
+                tracing::Level::TRACE,
+                "startup_rebuild",
+                sender = %e.sender,
+                nonce = e.nonce,
+                fpb,
+                mempool_size = bc
+                    .mempool_size
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            )
+            .entered();
+            #[cfg(not(feature = "telemetry"))]
+            let _ = fpb;
             if bc.accounts.contains_key(&e.sender) {
                 if now.saturating_sub(e.timestamp_millis) > ttl_ms {
                     #[cfg(feature = "telemetry")]
@@ -886,9 +908,6 @@ impl Blockchain {
         }
         #[cfg(not(feature = "telemetry"))]
         let _ = expired_drop_total;
-        #[cfg(feature = "telemetry")]
-        let _span =
-            tracing::span!(tracing::Level::TRACE, "startup_rebuild", expired_drop_total).entered();
         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
         info!("startup expired_drop_total={expired_drop_total}");
         #[cfg(feature = "telemetry-json")]
@@ -1023,7 +1042,11 @@ impl Blockchain {
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
         let size = bincode::serialize(&tx)
-            .map_err(|_| TxAdmissionError::FeeOverflow)?
+            .map_err(|_| {
+                #[cfg(feature = "telemetry")]
+                self.record_reject("fee_overflow");
+                TxAdmissionError::FeeOverflow
+            })?
             .len() as u64;
         let fee_per_byte = if size == 0 { 0 } else { tx.payload.fee / size };
         #[cfg(feature = "telemetry")]
@@ -1064,8 +1087,12 @@ impl Blockchain {
 
         #[cfg(feature = "telemetry")]
         let lock_guard = {
-            let span =
-                tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender_addr);
+            let span = tracing::span!(
+                tracing::Level::TRACE,
+                "admission_lock",
+                sender = %sender_addr,
+                nonce
+            );
             span.in_scope(|| lock.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
                 self.record_reject("lock_poison");
@@ -1175,13 +1202,17 @@ impl Blockchain {
                         );
                         span.in_scope(|| lock.lock()).map_err(|_| {
                             telemetry::LOCK_POISON_TOTAL.inc();
+                            self.record_reject("lock_poison");
                             TxAdmissionError::LockPoisoned
                         })?
                     };
                     #[cfg(not(feature = "telemetry"))]
                     let _guard = lock.lock().map_err(|_| {
                         #[cfg(feature = "telemetry")]
-                        telemetry::LOCK_POISON_TOTAL.inc();
+                        {
+                            telemetry::LOCK_POISON_TOTAL.inc();
+                            self.record_reject("lock_poison");
+                        }
                         TxAdmissionError::LockPoisoned
                     })?;
                 }
@@ -1550,43 +1581,63 @@ impl Blockchain {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|e| panic!("time: {e}"))
             .as_millis() as u64;
-        let mut expired = Vec::new();
-        let mut orphaned = Vec::new();
-        #[cfg(feature = "telemetry")]
-        let _span = tracing::span!(
-            tracing::Level::TRACE,
-            "eviction_sweep",
-            mempool_size = self.mempool_size.load(std::sync::atomic::Ordering::SeqCst),
-            orphan_counter = self
-                .orphan_counter
-                .load(std::sync::atomic::Ordering::SeqCst)
-        )
-        .entered();
+        let mut expired: Vec<(String, u64, u64)> = Vec::new();
+        let mut orphaned: Vec<(String, u64, u64)> = Vec::new();
         for entry in self.mempool.iter() {
-            let sender = &entry.key().0;
+            let sender = entry.key().0.clone();
             let nonce = entry.key().1;
+            let tx = &entry.value().tx;
+            let size = bincode::serialize(tx).map(|b| b.len() as u64).unwrap_or(0);
+            let fpb = if size == 0 { 0 } else { tx.payload.fee / size };
             if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 telemetry::TTL_DROP_TOTAL.inc();
-                expired.push((sender.clone(), nonce));
-            } else if !self.accounts.contains_key(sender) {
-                self.orphan_counter
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                orphaned.push((sender.clone(), nonce));
+                expired.push((sender, nonce, fpb));
+            } else if !self.accounts.contains_key(&sender) {
+                orphaned.push((sender, nonce, fpb));
             }
         }
         let expired_count = expired.len() as u64;
-        for (sender, nonce) in expired {
+        for (sender, nonce, fpb) in expired {
+            #[cfg(feature = "telemetry")]
+            let _span = tracing::span!(
+                tracing::Level::TRACE,
+                "eviction_sweep",
+                sender = %sender,
+                nonce,
+                fpb,
+                mempool_size = self
+                    .mempool_size
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            )
+            .entered();
+            #[cfg(not(feature = "telemetry"))]
+            let _ = fpb;
             let _ = self.drop_transaction(&sender, nonce);
         }
+        // track current orphan count after removing expired entries
+        self.orphan_counter
+            .store(orphaned.len(), std::sync::atomic::Ordering::SeqCst);
         let size = self.mempool_size.load(std::sync::atomic::Ordering::SeqCst);
-        let orphans = self
-            .orphan_counter
-            .load(std::sync::atomic::Ordering::SeqCst);
+        let orphans = orphaned.len();
         if size > 0 && orphans * 2 > size {
             #[cfg(feature = "telemetry")]
             telemetry::ORPHAN_SWEEP_TOTAL.inc();
-            for (sender, nonce) in orphaned {
+            for (sender, nonce, fpb) in orphaned {
+                #[cfg(feature = "telemetry")]
+                let _span = tracing::span!(
+                    tracing::Level::TRACE,
+                    "eviction_sweep",
+                    sender = %sender,
+                    nonce,
+                    fpb,
+                    mempool_size = self
+                        .mempool_size
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                )
+                .entered();
+                #[cfg(not(feature = "telemetry"))]
+                let _ = fpb;
                 let _ = self.drop_transaction(&sender, nonce);
             }
             self.orphan_counter

@@ -38,10 +38,9 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   eviction uses a separate harness (`eviction_panic_rolls_back`) to verify lock
   recovery and metric increments.
 - **Schema Migration Tests** – `test_schema_upgrade_compatibility` exercises v1/v2/v3 disks upgrading to v4 with `timestamp_ticks` hydration; `ttl_expired_purged_on_restart` proves TTL expiry across restarts.
-- **Tracing Spans** – `mempool_mutex` emits sender, nonce, fee-per-byte and
-  current `mempool_size`; `eviction_sweep` records `mempool_size` and
-  `orphan_counter`; `startup_rebuild` includes `expired_drop_total` for
-  fine-grained profiling.
+- **Tracing Spans** – `mempool_mutex`, `eviction_sweep`, and `startup_rebuild`
+  now capture `sender`, `nonce`, `fee_per_byte`, and the current
+  `mempool_size` for fine-grained profiling.
 - **Admission Panic Property Test** – `admission_panic_rolls_back_all_steps`
   injects panics before and after reservation and proves pending state and
   mempool remain clean.
@@ -53,7 +52,7 @@ Example scrape with Prometheus format:
 
 ```bash
 curl -s localhost:9000/metrics \
-  | grep -E 'mempool_size|orphan_sweep_total|invalid_selector_reject_total|tx_rejected_total'
+  | grep -E 'ttl_drop_total|orphan_sweep_total|lock_poison_total|tx_rejected_total'
 ```
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 - **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp

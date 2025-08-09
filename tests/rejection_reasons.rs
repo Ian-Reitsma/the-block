@@ -54,7 +54,10 @@ fn invalid_selector_rejects_and_counts() {
         telemetry::TX_REJECTED_TOTAL.reset();
         telemetry::INVALID_SELECTOR_REJECT_TOTAL.reset();
     }
-    assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::InvalidSelector));
+    assert_eq!(
+        bc.submit_transaction(tx),
+        Err(TxAdmissionError::InvalidSelector)
+    );
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(
@@ -85,7 +88,10 @@ fn balance_overflow_rejects_and_counts() {
         telemetry::TX_REJECTED_TOTAL.reset();
         telemetry::BALANCE_OVERFLOW_REJECT_TOTAL.reset();
     }
-    assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::BalanceOverflow));
+    assert_eq!(
+        bc.submit_transaction(tx),
+        Err(TxAdmissionError::BalanceOverflow)
+    );
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(

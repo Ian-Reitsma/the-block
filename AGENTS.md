@@ -292,13 +292,18 @@ Telemetry metrics: `mempool_size`, `evictions_total`,
 `tx_rejected_total{reason=*}`. Telemetry spans:
 `mempool_mutex` (sender, nonce, fpb, mempool_size),
 `admission_lock` (sender, nonce),
-`eviction_sweep` (mempool_size, orphan_counter),
-`startup_rebuild` (expired_drop_total).
+`eviction_sweep` (sender, nonce, fpb, mempool_size),
+`startup_rebuild` (sender, nonce, fpb, mempool_size).
+See the span definitions in [`src/lib.rs`](src/lib.rs#L1053-L1068),
+[`src/lib.rs`](src/lib.rs#L1522-L1528), and
+[`src/lib.rs`](src/lib.rs#L1603-L1637) for traceability.
 `serve_metrics(addr)` starts a minimal HTTP exporter returning
 `gather_metrics()` output; e.g. `curl -s localhost:9000/metrics |
 grep -E 'orphan_sweep_total|tx_rejected_total'`. Orphan sweeps trigger when
-`orphan_counter > mempool_size / 2` and reset the counter. See `API_CHANGELOG.md` for
-Python error and telemetry endpoint history. Regression test
+`orphan_counter > mempool_size / 2`; the sweep rebuilds the heap, drops
+all orphaned entries, emits `ORPHAN_SWEEP_TOTAL`, and resets the counter.
+TTL purges and explicit drops both decrement `orphan_counter`.
+See `API_CHANGELOG.md` for Python error and telemetry endpoint history. Regression test
 `flood_mempool_never_over_cap` floods submissions across threads to assert
 the size cap. Panic-inject tests cover admission rollback and
 self-eviction to prove recovery. A 32-thread fuzz harness submits random
@@ -372,8 +377,10 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 
 ### B‑2 · Orphan Sweep & Heap Rebuild — **COMPLETED**
 - An `orphan_counter` triggers a heap rebuild when
-  `orphan_counter > mempool_size / 2`. Purge and drop paths decrement the
-  counter and `ORPHAN_SWEEP_TOTAL` telemetry records each sweep.
+  `orphan_counter > mempool_size / 2`. TTL purges and explicit drop
+  operations decrement the counter; when the ratio hits >50 %, a sweep
+  rebuilds the heap, drops all orphaned entries, emits
+  `ORPHAN_SWEEP_TOTAL`, and resets the counter.
 
 ### B‑3 · Timestamp Persistence — **COMPLETED**
 - Serialize `MempoolEntry.timestamp_ticks` in schema v4 and rebuild the heap during `Blockchain::open`.

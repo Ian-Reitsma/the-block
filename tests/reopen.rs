@@ -1,8 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use base64::Engine;
+use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, TxAdmissionError};
+use std::time::{SystemTime, UNIX_EPOCH};
+use the_block::{
+    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
+    RawTxPayload, TokenAmount, TokenBalance, TxAdmissionError,
+};
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -15,6 +22,23 @@ fn unique_path(prefix: &str) -> String {
     static COUNT: AtomicUsize = AtomicUsize::new(0);
     let id = COUNT.fetch_add(1, Ordering::Relaxed);
     format!("{prefix}_{id}")
+}
+
+fn load_fixture(name: &str) -> String {
+    let dir = unique_path("chain_db");
+    fs::create_dir_all(&dir).unwrap();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name)
+        .join("db.b64");
+    let b64 = fs::read_to_string(src).unwrap();
+    let clean: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(clean)
+        .unwrap();
+    let dst = Path::new(&dir).join("db");
+    fs::write(&dst, bytes).unwrap();
+    dir
 }
 
 #[test]
@@ -163,4 +187,77 @@ fn timestamp_ticks_persist_across_restart() {
         .map(|e| e.timestamp_ticks)
         .unwrap();
     assert_eq!(first, persisted);
+}
+
+#[test]
+fn schema_upgrade_compatibility() {
+    init();
+    for fixture in ["v1", "v2"] {
+        let path = load_fixture(fixture);
+        let bc = Blockchain::open(&path).unwrap();
+        for acc in bc.accounts.values() {
+            assert_eq!(acc.pending.consumer, 0);
+            assert_eq!(acc.pending.industrial, 0);
+            assert_eq!(acc.pending.nonce, 0);
+        }
+    }
+
+    let path = unique_path("schema_v3");
+    let _ = fs::remove_dir_all(&path);
+    fs::create_dir_all(&path).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1000,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let entry = MempoolEntryDisk {
+        sender: "a".into(),
+        nonce: 1,
+        tx: tx.clone(),
+        timestamp_millis: now,
+        timestamp_ticks: 0,
+    };
+    let mut accounts = HashMap::new();
+    accounts.insert(
+        "a".into(),
+        Account {
+            address: "a".into(),
+            balance: TokenBalance {
+                consumer: 10,
+                industrial: 10,
+            },
+            nonce: 0,
+            pending: Pending::default(),
+        },
+    );
+    let disk = ChainDisk {
+        schema_version: 3,
+        chain: Vec::new(),
+        accounts,
+        emission_consumer: 0,
+        emission_industrial: 0,
+        block_reward_consumer: TokenAmount::new(0),
+        block_reward_industrial: TokenAmount::new(0),
+        block_height: 0,
+        mempool: vec![entry],
+    };
+    let mut map: HashMap<String, Vec<u8>> = HashMap::new();
+    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+    let db_path = Path::new(&path).join("db");
+    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+
+    let bc = Blockchain::open(&path).unwrap();
+    let migrated = bc.mempool.get(&(String::from("a"), 1)).unwrap();
+    assert_eq!(migrated.timestamp_ticks, migrated.timestamp_millis);
 }

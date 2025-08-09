@@ -18,6 +18,11 @@
   `DROP_NOT_FOUND_TOTAL` expose detailed rejection counts.
 - `TX_REJECTED_TOTAL{reason=*}` aggregates all rejection reasons.
 - `serve_metrics(addr)` exposes Prometheus text over a lightweight HTTP listener.
+- Spans `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
+  `startup_rebuild` record sender, nonce, fee-per-byte, and mempool size
+  ([src/lib.rs](src/lib.rs#L1053-L1068),
+  [src/lib.rs](src/lib.rs#L1522-L1528),
+  [src/lib.rs](src/lib.rs#L1603-L1637)).
 - Documented `mempool_mutex → sender_mutex` lock order and added
-  `flood_mempool_never_over_cap` regression to prove the mempool size
-  invariant.
+  `admit_and_mine_never_over_cap` regression to prove the mempool size
+  invariant and startup TTL purges during `Blockchain::open`.
