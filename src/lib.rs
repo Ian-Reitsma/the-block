@@ -40,6 +40,7 @@ pub use telemetry::gather_metrics;
 #[cfg(feature = "telemetry")]
 pub use telemetry::serve as serve_metrics;
 
+
 pub mod blockchain;
 use blockchain::difficulty;
 
@@ -2534,6 +2535,11 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
     m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
     m.add("ErrPendingLimit", ErrPendingLimit::type_object(m.py()))?;
+    #[cfg(feature = "telemetry")]
+    {
+        m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;
+        m.add_function(wrap_pyfunction!(serve_metrics, m)?)?;
+    }
     Ok(())
 }
 

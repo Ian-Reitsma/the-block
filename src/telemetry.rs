@@ -172,7 +172,8 @@ pub fn gather_metrics() -> PyResult<String> {
 ///
 /// This helper is intentionally lightweight and meant for tests or local
 /// demos; production deployments should place a reverse proxy in front of it.
-pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
+#[pyfunction]
+pub fn serve_metrics(addr: &str) -> PyResult<String> {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -183,7 +184,7 @@ pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
             if let Ok(mut stream) = stream {
                 let mut _req = [0u8; 512];
                 let _ = stream.read(&mut _req);
-                let body = gather();
+                let body = gather_metrics();
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
                     body.len(), body
@@ -192,5 +193,5 @@ pub fn serve(addr: &str) -> std::io::Result<std::net::SocketAddr> {
             }
         }
     });
-    Ok(local)
+    Ok(local.to_string())
 }
