@@ -13,8 +13,13 @@
   `flood_mempool_never_over_cap` proves the size cap.
 - Orphan sweeps rebuild the heap when `orphan_counter > mempool_size / 2`,
   emit `ORPHAN_SWEEP_TOTAL`, and reset the counter.
-- Serialized `timestamp_ticks`, rebuilt the mempool on startup, and dropped
-  expired or missing-account entries while logging `expired_drop_total`.
+- Serialized `timestamp_ticks`, rebuilt the mempool on startup, and invoked
+  `purge_expired` to drop expired or missing-account entries while logging
+  `expired_drop_total` and advancing `ttl_drop_total`.
+- **B‑5 Startup TTL Purge — COMPLETED** – `Blockchain::open` batches mempool entries,
+  invokes [`purge_expired`](src/lib.rs#L1596-L1665) on startup
+  ([src/lib.rs](src/lib.rs#L917-L934)), records `expired_drop_total`, and
+  advances `ttl_drop_total` and `startup_ttl_drop_total`.
 - Panic-inject eviction test proves rollback and advances lock-poison metrics.
 - Completed telemetry coverage: counters `ttl_drop_total`, `orphan_sweep_total`,
   `lock_poison_total`, `invalid_selector_reject_total`,
@@ -22,11 +27,16 @@
   `tx_rejected_total{reason=*}` advance on every rejection; spans
   `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
   `startup_rebuild` record sender, nonce, fee-per-byte, and current
-  mempool size ([src/lib.rs](src/lib.rs#L1053-L1068),
-  [src/lib.rs](src/lib.rs#L1522-L1528),
-  [src/lib.rs](src/lib.rs#L1603-L1637)). `serve_metrics` scrape example
+  mempool size ([src/lib.rs](src/lib.rs#L1066-L1081),
+  [src/lib.rs](src/lib.rs#L1535-L1541),
+  [src/lib.rs](src/lib.rs#L1621-L1656),
+  [src/lib.rs](src/lib.rs#L878-L888)). `serve_metrics` scrape example
   documented; `rejection_reasons.rs` asserts the labelled counters and
   `admit_and_mine_never_over_cap` confirms capacity during mining.
+- Startup rebuild now processes mempool entries in batches and records
+  `startup_ttl_drop_total` (expired mempool entries dropped during startup);
+  bench `startup_rebuild` compares batched vs
+  naive loops.
 - Archived `artifacts/fuzz.log` and `artifacts/migration.log` with accompanying
   `RISK_MEMO.md` capturing residual risk and review requirements.
 
