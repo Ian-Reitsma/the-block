@@ -1,5 +1,6 @@
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder};
+use pyo3::prelude::*;
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -75,6 +76,18 @@ pub static TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "startup_ttl_drop_total",
+        "Expired mempool entries dropped during startup",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static LOCK_POISON_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "lock_poison_total",
@@ -135,7 +148,7 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub fn gather() -> String {
+fn gather() -> String {
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();
     let metrics = REGISTRY.gather();
@@ -143,6 +156,11 @@ pub fn gather() -> String {
         .encode(&metrics, &mut buffer)
         .unwrap_or_else(|e| panic!("encode: {e}"));
     String::from_utf8(buffer).unwrap_or_default()
+}
+
+#[pyfunction]
+pub fn gather_metrics() -> PyResult<String> {
+    Ok(gather())
 }
 
 /// Start a minimal HTTP server that exposes Prometheus metrics.

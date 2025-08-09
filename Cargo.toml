@@ -35,6 +35,11 @@ features = ["pyo3/extension-module"]
 logtest = "2"
 base64 = "0.22"
 proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "startup_rebuild"
+harness = false
 
 [build-dependencies]
 blake3 = "1"

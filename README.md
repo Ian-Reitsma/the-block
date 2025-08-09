@@ -37,7 +37,7 @@
 ```bash
 # Unix/macOS
 bash ./bootstrap.sh          # installs toolchains + builds + tests + wheel
-python demo.py               # mines a few blocks & prints balances
+python demo.py               # mines a few blocks & prints balances (requires telemetry feature)
 
 # Windows (PowerShell)
 ./bootstrap.ps1              # run as admin to install VS Build Tools via choco
@@ -67,10 +67,11 @@ Bootstrap steps:
 1. Install or update **Rust** toolchain (`rustup`, nightly optional).
 2. Install **Python 3.12** + headers, create `.venv`, and activate.
 3. `pip install maturin black pytest` into the venv.
-4. `cargo install maturin` (if missing) and build wheel via `maturin develop --release`.
+4. `cargo install maturin` (if missing) and build wheel via `maturin develop --release --features telemetry`.
 5. Optional: install **Node 20** via `nvm` (for tooling not yet in repo).
 6. Run `cargo test --all --release`, `.venv/bin/python -m pytest`, and
    `.venv/bin/python demo.py` to verify the toolchain and bindings.
+   The demo asserts metrics only if the module was built with `--features telemetry`.
 
 > Need CUDA, Docker, or GPU?  Not here—this repo is CPU‑only and self‑contained.
 
@@ -81,9 +82,9 @@ Bootstrap steps:
 | Task | Command | Expected Output |
 | --- | --- | --- |
 | Rust unit + property tests | `cargo test --all --release` | All tests green |
-| In-place dev install | `maturin develop --release` | Module importable in venv |
+| In-place dev install | `maturin develop --release --features telemetry` | Module importable in venv |
 | Python tests | `.venv/bin/python -m pytest` | All tests pass |
-| End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` |
+| End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` (requires `--features telemetry`) |
 | Lint / Style | `cargo fmt -- --check` | No diffs |
 
 All tests run in isolated temp directories via `unique_path`, preventing state
@@ -199,15 +200,17 @@ reasons for ops tooling.
 ```bash
 TB_TELEMETRY=1 ./target/release/the-block &
 curl -s localhost:9000/metrics \
-  | grep -E 'mempool_size|invalid_selector_reject_total|tx_rejected_total'
+  | grep -E 'mempool_size|startup_ttl_drop_total|invalid_selector_reject_total|tx_rejected_total'
 ```
 
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
-`dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`,
-`orphan_sweep_total`, `invalid_selector_reject_total`,
-`balance_overflow_reject_total`, `drop_not_found_total`, and
-`tx_rejected_total{reason=*}`. Spans `mempool_mutex`, `eviction_sweep`, and
-`startup_rebuild` annotate sender, nonce, fee-per-byte, and sweep details.
+`dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),
+`lock_poison_total`, `orphan_sweep_total`,
+`invalid_selector_reject_total`, `balance_overflow_reject_total`,
+`drop_not_found_total`, and `tx_rejected_total{reason=*}`. Spans
+[`mempool_mutex`](src/lib.rs#L1066-L1081), [`admission_lock`](src/lib.rs#L1535-L1541),
+[`eviction_sweep`](src/lib.rs#L1621-L1656), and [`startup_rebuild`](src/lib.rs#L878-L888) annotate
+sender, nonce, fee-per-byte, and sweep details.
 
 Report security issues privately via `security@the-block.dev` (PGP key in `docs/SECURITY.md`).
 

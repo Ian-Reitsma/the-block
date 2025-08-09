@@ -38,16 +38,18 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 
 ### Telemetry Metrics & Spans
 * Metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
-  `dup_tx_reject_total`, `ttl_drop_total`, `lock_poison_total`,
-  `orphan_sweep_total`, `invalid_selector_reject_total`,
+  `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total`
+  (expired mempool entries dropped during startup),
+  `lock_poison_total`, `orphan_sweep_total`, `invalid_selector_reject_total`,
   `balance_overflow_reject_total`, `drop_not_found_total`,
   `tx_rejected_total{reason=*}`.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
-  mempool_size). See [`src/lib.rs`](src/lib.rs#L1053-L1068),
-  [`src/lib.rs`](src/lib.rs#L1522-L1528), and
-  [`src/lib.rs`](src/lib.rs#L1603-L1637).
+  mempool_size). See [`src/lib.rs`](src/lib.rs#L1066-L1081),
+  [`src/lib.rs`](src/lib.rs#L1535-L1541),
+  [`src/lib.rs`](src/lib.rs#L1621-L1656), and
+  [`src/lib.rs`](src/lib.rs#L878-L888).
 * `serve_metrics(addr)` exposes Prometheus text; e.g.
   `curl -s localhost:9000/metrics | grep tx_rejected_total`.
 
@@ -56,7 +58,7 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Each migration must preserve [`INV-FEE-01`](ECONOMICS.md#inv-fee-01) and [`INV-FEE-02`](ECONOMICS.md#inv-fee-02); update `docs/schema_migrations/` with the new invariants.
 
 ### Python Demo
-* `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output.
+* `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output. Metric assertions require building the module with `--features telemetry`.
 
 ### Tests
 * Rust property tests under `tests/test_chain.rs` validate invariants (balances never
@@ -71,15 +73,18 @@ The following directives are mandatory before any feature expansion. Deliver eac
 
 1. **B‑3 Timestamp Persistence** — *COMPLETED*
    - Persist `MempoolEntry.timestamp_ticks` (schema v4) and rebuild the heap on `Blockchain::open`.
-   - Run `purge_expired` during startup, dropping stale or missing‑account entries and logging `expired_drop_total`.
+   - Run [`purge_expired`](src/lib.rs#L1596-L1665) during startup ([src/lib.rs](src/lib.rs#L917-L934)), dropping stale or missing‑account entries and logging `expired_drop_total`.
    - Update `CONSENSUS.md` with encoding details and migration guidance.
 2. **B‑4 Self‑Evict Deadlock Test** — *COMPLETED*
    - Add a panic‑inject harness that forces eviction mid‑admission to prove lock ordering and automatic rollback.
    - Ensure `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL{reason=lock_poison}` advance together.
-3. **Deterministic Eviction & Replay Tests**
+3. **B‑5 Startup TTL Purge** — *COMPLETED*
+   - `Blockchain::open` batches mempool rebuilds, invokes [`purge_expired`](src/lib.rs#L1596-L1665) on startup ([src/lib.rs](src/lib.rs#L917-L934)) and restart tests assert `ttl_drop_total` and `startup_ttl_drop_total` advance.
+   - `CONSENSUS.md` documents the startup purge, batch size, and telemetry defaults.
+4. **Deterministic Eviction & Replay Tests**
    - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` for stable ordering.
    - Replay tests cover TTL expiry across restart (`ttl_expired_purged_on_restart`) and `test_schema_upgrade_compatibility` validates v1/v2/v3 → v4 migration with `timestamp_ticks` hydration.
-4. **Telemetry & Logging Expansion**
+5. **Telemetry & Logging Expansion**
    - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`,
      `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
      `DROP_NOT_FOUND_TOTAL`, and a global
@@ -89,11 +94,11 @@ The following directives are mandatory before any feature expansion. Deliver eac
    - Publish a `serve_metrics` curl example and span list in
      `docs/detailed_updates.md`; keep `rejection_reasons.rs` exercising the
      labelled counters.
-5. **Test & Fuzz Matrix**
+6. **Test & Fuzz Matrix**
    - Property tests injecting panics at each admission step to guarantee reservation rollback.
    - 32‑thread fuzz harness with random nonces/fees ≥10 k iterations validating cap, uniqueness, and eviction order.
    - Heap orphan stress test: exceed threshold, trigger rebuild, assert ordering and metric increments.
-6. **Documentation Synchronization**
+7. **Documentation Synchronization**
    - Revise `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` to reflect every change above.
 
 ## 3. Mid‑Term Milestones
