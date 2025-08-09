@@ -36,7 +36,10 @@ use thiserror::Error;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
-pub use telemetry::{gather_metrics, serve_metrics};
+pub use telemetry::gather_metrics;
+#[cfg(feature = "telemetry")]
+pub use telemetry::serve as serve_metrics;
+
 
 pub mod blockchain;
 use blockchain::difficulty;
@@ -2510,6 +2513,10 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
+    #[cfg(feature = "telemetry")]
+    {
+        m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;
+    }
     m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
     m.add(
         "ErrInvalidSelector",

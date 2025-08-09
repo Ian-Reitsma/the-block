@@ -148,8 +148,7 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-#[pyfunction]
-pub fn gather_metrics() -> String {
+fn gather() -> String {
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();
     let metrics = REGISTRY.gather();
@@ -157,6 +156,11 @@ pub fn gather_metrics() -> String {
         .encode(&metrics, &mut buffer)
         .unwrap_or_else(|e| panic!("encode: {e}"));
     String::from_utf8(buffer).unwrap_or_default()
+}
+
+#[pyfunction]
+pub fn gather_metrics() -> PyResult<String> {
+    Ok(gather())
 }
 
 /// Start a minimal HTTP server that exposes Prometheus metrics.
