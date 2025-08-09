@@ -6,6 +6,8 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(feature = "telemetry")]
+use the_block::telemetry;
 use the_block::{
     generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
     RawTxPayload, TokenAmount, TokenBalance, TxAdmissionError,
@@ -146,6 +148,53 @@ fn ttl_expired_purged_on_restart() {
     }
     let bc2 = Blockchain::open(&path).unwrap();
     assert!(bc2.mempool.is_empty());
+}
+
+#[test]
+fn startup_ttl_purge_increments_metrics() {
+    init();
+    let (sk, _pk) = generate_keypair();
+    let path = unique_path("startup_ttl_metrics");
+    let _ = fs::remove_dir_all(&path);
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::TTL_DROP_TOTAL.reset();
+        telemetry::STARTUP_TTL_DROP_TOTAL.reset();
+        telemetry::MEMPOOL_SIZE.set(0);
+    }
+    {
+        let mut bc = Blockchain::open(&path).unwrap();
+        bc.tx_ttl = 1;
+        bc.add_account("a".into(), 0, 0).unwrap();
+        bc.add_account("b".into(), 0, 0).unwrap();
+        bc.mine_block("a").unwrap();
+        let payload = RawTxPayload {
+            from_: "a".into(),
+            to: "b".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee: 1000,
+            fee_selector: 0,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        bc.submit_transaction(tx).unwrap();
+        if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+            entry.timestamp_millis = 0;
+            entry.timestamp_ticks = 0;
+        }
+        bc.persist_chain().unwrap();
+        bc.path.clear();
+    }
+    let bc2 = Blockchain::open(&path).unwrap();
+    assert_eq!(0, bc2.mempool.len());
+    #[cfg(feature = "telemetry")]
+    {
+        assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
+        assert_eq!(1, telemetry::STARTUP_TTL_DROP_TOTAL.get());
+        assert_eq!(0, telemetry::MEMPOOL_SIZE.get());
+    }
 }
 
 #[test]

@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop)]
+
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "telemetry")]

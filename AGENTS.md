@@ -288,21 +288,28 @@ Flags: `--mempool-max`/`TB_MEMPOOL_MAX`, `--mempool-account-cap`/`TB_MEMPOOL_ACC
 
 Telemetry metrics: `mempool_size`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
-`lock_poison_total`, `orphan_sweep_total`,
-`tx_rejected_total{reason=*}`. Telemetry spans:
+`startup_ttl_drop_total` (expired mempool entries dropped during startup), `lock_poison_total`,
+`orphan_sweep_total`, `tx_rejected_total{reason=*}`. Telemetry spans:
 `mempool_mutex` (sender, nonce, fpb, mempool_size),
 `admission_lock` (sender, nonce),
 `eviction_sweep` (sender, nonce, fpb, mempool_size),
 `startup_rebuild` (sender, nonce, fpb, mempool_size).
-See the span definitions in [`src/lib.rs`](src/lib.rs#L1053-L1068),
-[`src/lib.rs`](src/lib.rs#L1522-L1528), and
-[`src/lib.rs`](src/lib.rs#L1603-L1637) for traceability.
+See the span definitions in [`src/lib.rs`](src/lib.rs#L1065-L1081),
+[`src/lib.rs`](src/lib.rs#L1535-L1541), and
+[`src/lib.rs`](src/lib.rs#L1615-L1650) for traceability.
 `serve_metrics(addr)` starts a minimal HTTP exporter returning
 `gather_metrics()` output; e.g. `curl -s localhost:9000/metrics |
 grep -E 'orphan_sweep_total|tx_rejected_total'`. Orphan sweeps trigger when
 `orphan_counter > mempool_size / 2`; the sweep rebuilds the heap, drops
 all orphaned entries, emits `ORPHAN_SWEEP_TOTAL`, and resets the counter.
 TTL purges and explicit drops both decrement `orphan_counter`.
+On startup `Blockchain::open` rebuilds the mempool from disk, counting
+missing-account entries and inserting the rest before calling
+[`purge_expired`](src/lib.rs#L1590-L1659).
+The purge drops TTL-expired entries, updates
+[`orphan_counter`](src/lib.rs#L1631-L1656), and returns the count so the
+sum of missing and expired drops can be logged as `expired_drop_total`
+while `TTL_DROP_TOTAL` advances ([src/lib.rs](src/lib.rs#L868-L900)).
 See `API_CHANGELOG.md` for Python error and telemetry endpoint history. Regression test
 `flood_mempool_never_over_cap` floods submissions across threads to assert
 the size cap. Panic-inject tests cover admission rollback and
@@ -391,7 +398,7 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - Provide a panic‑inject test that forces eviction mid‑admission to demonstrate lock ordering and full rollback.
 - Record `LOCK_POISON_TOTAL` and rejection reasons on every failure path.
 
-### B‑5 · Startup TTL Purge
+### B‑5 · Startup TTL Purge — **COMPLETED**
 - Ensure `purge_expired()` runs during `Blockchain::open` and is covered by a restart test that proves `ttl_drop_total` advances.
 - Spec the startup purge behaviour and default telemetry in `CONSENSUS.md` and docs.
 
@@ -400,7 +407,7 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - Replay suite includes `ttl_expired_purged_on_restart` for TTL expiry and `test_schema_upgrade_compatibility` verifying v1/v2/v3 disks migrate to v4, hydrating `timestamp_ticks`.
 
 ### Telemetry & Logging
-- Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and `DROP_NOT_FOUND_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
+- Add counters `TTL_DROP_TOTAL`, `STARTUP_TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and `DROP_NOT_FOUND_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
 - Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool size.
 - Document a `curl` scrape example for `serve_metrics` output in `docs/detailed_updates.md` and keep `rejection_reasons.rs` exercising the labelled counters.
 

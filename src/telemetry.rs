@@ -75,6 +75,18 @@ pub static TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "startup_ttl_drop_total",
+        "Expired mempool entries dropped during startup",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static LOCK_POISON_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "lock_poison_total",

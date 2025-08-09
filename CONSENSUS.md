@@ -71,7 +71,7 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 `Blockchain::mempool` is backed by a `DashMap` keyed by `(sender, nonce)` with
 mutations guarded by a global `mempool_mutex`.
 A tracing span captures each admission at this lock boundary
-([src/lib.rs](src/lib.rs#L1053-L1068)).
+([src/lib.rs](src/lib.rs#L1065-L1081)).
 A binary heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`
 provides `O(log n)` eviction. Example ordering:
 
@@ -90,25 +90,35 @@ updates, heap pushes/pops, and pending balance/nonces occur within this order,
 guaranteeing `mempool_size ≤ max_mempool_size`. Each sender is
 limited to 16 pending transactions. Entries expire after `tx_ttl` seconds
 (default 1800) based on the persisted admission timestamp and are purged on new
-submissions and at startup, logging `expired_drop_total`. In schema v4 each
-mempool record serializes `[sender, nonce, tx, timestamp_millis, timestamp_ticks]`
-where `timestamp_ticks` is a monotonic counter used for deterministic tie
-breaking. `Blockchain::open` rebuilds the heap from this list, dropping any entry
-whose TTL has elapsed or whose sender account is missing and restoring
-`mempool_size` from the survivors ([src/lib.rs](src/lib.rs#L865-L894)).
-Transactions whose sender account has been
-removed are counted in an `orphan_counter`. TTL purges and explicit drops
-decrement this counter. When `orphan_counter > mempool_size / 2` (orphans exceed
-half of the pool) a sweep rebuilds the heap, drops all orphans, emits
-`ORPHAN_SWEEP_TOTAL`, and resets the counter
-([src/lib.rs](src/lib.rs#L1585-L1645)).
+submissions and at startup via `purge_expired()`, logging `expired_drop_total`
+and advancing `ttl_drop_total`. In schema v4 each mempool record serializes
+`[sender, nonce, tx, timestamp_millis, timestamp_ticks]` where `timestamp_ticks`
+is a monotonic counter used for deterministic tie breaking. `Blockchain::open`
+rebuilds the heap from this list, skips entries whose sender account is missing,
+invokes `purge_expired` to drop any whose TTL has elapsed, and restores
+`mempool_size` from the survivors ([src/lib.rs](src/lib.rs#L868-L900)).
+Transactions whose sender account has been removed are counted in an
+`orphan_counter`. TTL purges and explicit drops decrement this counter. When
+`orphan_counter > mempool_size / 2` (orphans exceed half of the pool) a sweep
+rebuilds the heap, drops all orphans, emits `ORPHAN_SWEEP_TOTAL`, and resets the
+counter ([src/lib.rs](src/lib.rs#L1590-L1656)).
+
+### Startup Rebuild & TTL Purge
+
+On restart `Blockchain::open` rehydrates mempool entries from disk, incrementing
+`mempool_size` for each inserted record and counting missing-account entries.
+After hydration it calls [`purge_expired`](src/lib.rs#L1590-L1659) to drop
+TTL-expired entries, update [`orphan_counter`](src/lib.rs#L1631-L1656), and
+return the number removed. The sum of these drops is reported as
+`expired_drop_total`; `TTL_DROP_TOTAL` and `STARTUP_TTL_DROP_TOTAL` advance for visibility as entries load in 256-entry batches
+([src/lib.rs](src/lib.rs#L868-L900)).
 
 Transactions from unknown senders are rejected. Nodes must provision accounts via
 `add_account` before submitting any transaction.
 
 Telemetry counters exported: `mempool_size`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
-`lock_poison_total`, `orphan_sweep_total`,
+`startup_ttl_drop_total`, `lock_poison_total`, `orphan_sweep_total`,
 `invalid_selector_reject_total`, `balance_overflow_reject_total`,
 `drop_not_found_total`, `tx_rejected_total{reason=*}`. `serve_metrics(addr)`
 exposes these metrics over HTTP; e.g. `curl -s localhost:9000/metrics | grep

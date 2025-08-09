@@ -24,12 +24,13 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   `flood_mempool_never_over_cap`) prove the size cap under threaded floods.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
 - **Telemetry Metrics** – Prometheus counters now track TTL expirations
-  (`ttl_drop_total`), lock poisoning events (`lock_poison_total`), orphan
-  sweeps (`orphan_sweep_total`), invalid fee selectors
-  (`invalid_selector_reject_total`), balance overflows
-  (`balance_overflow_reject_total`), drop failures
-  (`drop_not_found_total`), and total rejections labelled by reason
-  (`tx_rejected_total{reason=*}`).
+  (`ttl_drop_total`), startup drops (`startup_ttl_drop_total`), lock poisoning
+  events (`lock_poison_total`), orphan sweeps (`orphan_sweep_total`), invalid
+  fee selectors (`invalid_selector_reject_total`), balance overflows
+  (`balance_overflow_reject_total`), drop failures (`drop_not_found_total`),
+  and total rejections labelled by reason (`tx_rejected_total{reason=*}`).
+- **Startup Rebuild Benchmark** – Criterion bench `startup_rebuild` compares
+  batched vs naive mempool hydration throughput.
 - **Metrics HTTP Exporter** – `serve_metrics(addr)` spawns a lightweight server
   that returns `gather_metrics()` output. A sample `curl` scrape is shown below.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
@@ -52,7 +53,7 @@ Example scrape with Prometheus format:
 
 ```bash
 curl -s localhost:9000/metrics \
-  | grep -E 'ttl_drop_total|orphan_sweep_total|lock_poison_total|tx_rejected_total'
+  | grep -E 'startup_ttl_drop_total|ttl_drop_total|orphan_sweep_total|lock_poison_total|tx_rejected_total'
 ```
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
 - **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp
@@ -78,9 +79,13 @@ curl -s localhost:9000/metrics \
   `drop_not_found_total` alongside the labelled `tx_rejected_total` entries.
 - **Schema v4 Note** – Migration serializes mempool contents with timestamps;
   `Blockchain::open` rebuilds the mempool on startup, encoding both
-  `timestamp_millis` and `timestamp_ticks` per entry, then drops expired or
-  missing-account entries once `orphan_counter > mempool_size / 2`. Startup
-  purge logs `expired_drop_total` for visibility.
+  `timestamp_millis` and `timestamp_ticks` per entry, skips missing-account
+  entries, and invokes [`purge_expired`](../src/lib.rs#L1590-L1659) to drop
+  TTL-expired transactions and update [`orphan_counter`](../src/lib.rs#L1631-L1656).
+  Startup rebuild loads entries in batches of 256, logs the combined
+  `expired_drop_total`, and `ttl_drop_total` and `startup_ttl_drop_total`
+  advance for visibility
+  ([../src/lib.rs](../src/lib.rs#L868-L900)).
 - **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
   and per-account pending limits are configurable via `TB_*` environment
   variables. Expired transactions are purged on startup and new submissions.

@@ -26,9 +26,9 @@ re‑implement:
    `drop_not_found_total`, `tx_rejected_total{reason=*}`, and span coverage
    for `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
    `startup_rebuild` capturing sender, nonce, fee_per_byte, and
-   mempool_size ([`src/lib.rs`](src/lib.rs#L1053-L1068),
-   [`src/lib.rs`](src/lib.rs#L1522-L1528),
-  [`src/lib.rs`](src/lib.rs#L1603-L1637)). Comparator ordering test for
+  mempool_size ([`src/lib.rs`](src/lib.rs#L1065-L1081),
+  [`src/lib.rs`](src/lib.rs#L1535-L1541),
+  [`src/lib.rs`](src/lib.rs#L1615-L1650)). Comparator ordering test for
    mempool priority.
 6. **Mempool atomicity**: global `mempool_mutex → sender_mutex` critical section with
    counter updates, heap ops, and pending balances inside; orphan sweeps rebuild
@@ -36,6 +36,9 @@ re‑implement:
 7. **Timestamp persistence & eviction proof**: mempool entries persist
    `timestamp_ticks` for deterministic startup purge; panic-inject eviction test
    proves lock-poison recovery.
+8. **Startup TTL purge**: `Blockchain::open` batches mempool rebuilds,
+   invokes `purge_expired` on startup, and restart tests ensure both
+   `ttl_drop_total` and `startup_ttl_drop_total` advance.
 
 ---
 
@@ -82,15 +85,15 @@ Treat the following as blockers. Implement each with atomic commits, exhaustive 
    - `ttl_expired_purged_on_restart` exercises TTL expiry across restarts.
    - `test_schema_upgrade_compatibility` verifies v1/v2/v3 → v4 migration.
 2. **Telemetry & Logging Expansion**
-   - Add counters `TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`,
-     `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
+   - Add counters `TTL_DROP_TOTAL`, `STARTUP_TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`,
+     `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
      `DROP_NOT_FOUND_TOTAL`, plus global `TX_REJECTED_TOTAL{reason=*}` with
      regression tests for each labelled rejection.
    - Instrument spans `mempool_mutex`, `admission_lock`, `eviction_sweep`,
      and `startup_rebuild` capturing sender, nonce, fee_per_byte,
-     mempool_size ([`src/lib.rs`](src/lib.rs#L1053-L1068),
-     [`src/lib.rs`](src/lib.rs#L1522-L1528),
-     [`src/lib.rs`](src/lib.rs#L1603-L1637)).
+    mempool_size ([`src/lib.rs`](src/lib.rs#L1065-L1081),
+     [`src/lib.rs`](src/lib.rs#L1535-L1541),
+     [`src/lib.rs`](src/lib.rs#L1615-L1650)).
    - Document scrape example for `serve_metrics` and span list in
      `docs/detailed_updates.md` and specs.
 3. **Test & Fuzz Matrix**

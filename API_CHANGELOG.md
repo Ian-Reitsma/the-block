@@ -12,6 +12,8 @@
 
 ### Telemetry
 - `TTL_DROP_TOTAL` counts transactions purged due to TTL expiry.
+- `STARTUP_TTL_DROP_TOTAL` reports how many transactions were dropped during
+  startup rebuild.
 - `ORPHAN_SWEEP_TOTAL` tracks heap rebuilds triggered by orphan ratios.
 - `LOCK_POISON_TOTAL` records mutex poisoning events.
 - `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and
@@ -20,9 +22,10 @@
 - `serve_metrics(addr)` exposes Prometheus text over a lightweight HTTP listener.
 - Spans `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
   `startup_rebuild` record sender, nonce, fee-per-byte, and mempool size
-  ([src/lib.rs](src/lib.rs#L1053-L1068),
-  [src/lib.rs](src/lib.rs#L1522-L1528),
-  [src/lib.rs](src/lib.rs#L1603-L1637)).
+  ([src/lib.rs](src/lib.rs#L1065-L1081),
+  [src/lib.rs](src/lib.rs#L1535-L1541),
+  [src/lib.rs](src/lib.rs#L1615-L1650)).
 - Documented `mempool_mutex → sender_mutex` lock order and added
   `admit_and_mine_never_over_cap` regression to prove the mempool size
-  invariant and startup TTL purges during `Blockchain::open`.
+  invariant. `Blockchain::open` now invokes `purge_expired`, recording
+  `ttl_drop_total` and `expired_drop_total` on restart.

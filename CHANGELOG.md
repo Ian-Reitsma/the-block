@@ -28,13 +28,15 @@
 - Feat: rejection counters `invalid_selector_reject_total`,
   `balance_overflow_reject_total`, and `drop_not_found_total` accompany
   labelled `tx_rejected_total{reason=*}` metrics.
+- Feat: batched startup mempool rebuild reports `startup_ttl_drop_total` and
+  benchmark `startup_rebuild` compares throughput.
 - Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for Prometheus scrapes.
 - Feat: rejection counter `tx_rejected_total{reason=*}` and spans
   `mempool_mutex`, `admission_lock`, `eviction_sweep`, `startup_rebuild`
   capture sender, nonce, fee-per-byte, and mempool size for traceability
-  ([src/lib.rs](src/lib.rs#L1053-L1068),
-  [src/lib.rs](src/lib.rs#L1522-L1528),
-  [src/lib.rs](src/lib.rs#L1603-L1637)).
+  ([src/lib.rs](src/lib.rs#L1065-L1081),
+  [src/lib.rs](src/lib.rs#L1535-L1541),
+  [src/lib.rs](src/lib.rs#L1615-L1650)).
 - Test: add panic-inject harness covering drop path lock poisoning and recovery.
 - Test: add panic-inject harness for admission eviction proving full rollback
   and advancing `lock_poison_total` and rejection counters.
@@ -49,7 +51,8 @@
   TTL purges.
 - Test: `rejection_reasons` asserts telemetry for invalid selector, balance
   overflow, and drop-not-found paths.
-- Feat: startup TTL purge logs `expired_drop_total`.
+- Feat: `Blockchain::open` invokes `purge_expired`, logging `expired_drop_total`
+  and advancing `ttl_drop_total` on restart.
 - Doc: introduce `API_CHANGELOG.md` for Python error codes and telemetry endpoints.
 - Test: add unit test verifying mempool comparator priority order and regression for TTL expiry telemetry.
 - Test: `test_schema_upgrade_compatibility` migrates v1/v2/v3 disks to v4 with `timestamp_ticks` hydration and `ttl_expired_purged_on_restart` covers TTL purges across restarts.
