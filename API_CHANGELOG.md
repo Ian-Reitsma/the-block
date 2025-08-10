@@ -5,6 +5,12 @@
 ### Python
 - `TxAdmissionError::LockPoisoned` is returned when a mempool mutex guard is poisoned.
 - `TxAdmissionError::PendingLimit` indicates the per-account pending cap was reached.
+- `TxAdmissionError::NonceGap` surfaces as `ErrNonceGap` when a nonce skips the expected sequence.
+- `decode_payload(bytes)` decodes canonical payload bytes back into `RawTxPayload`.
+- `ShutdownFlag` and `PurgeLoopHandle` manage purge threads when used with
+  `maybe_spawn_purge_loop`.
+- `maybe_spawn_purge_loop(bc, shutdown)` reads `TB_PURGE_LOOP_SECS` and returns
+  a `PurgeLoopHandle` that joins the background TTL cleanup thread.
 - `Blockchain::panic_in_admission_after(step)` panics mid-admission for test harnesses;
   `Blockchain::heal_admission()` clears the flag.
 - `Blockchain::panic_next_evict()` triggers a panic during the next eviction and

@@ -44,10 +44,11 @@ use blockchain::difficulty;
 
 pub mod transaction;
 pub use transaction::{
-    canonical_payload_bytes, canonical_payload_py as canonical_payload, sign_tx_py as sign_tx,
+    canonical_payload_bytes, canonical_payload_py as canonical_payload,
+    decode_payload_py as decode_payload, sign_tx_py as sign_tx,
     verify_signed_tx_py as verify_signed_tx, RawTxPayload, SignedTransaction,
 };
-use transaction::{canonical_payload_py, sign_tx_py, verify_signed_tx_py};
+use transaction::{canonical_payload_py, decode_payload_py, sign_tx_py, verify_signed_tx_py};
 pub mod consensus;
 pub mod constants;
 pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
@@ -64,8 +65,8 @@ pub enum TxAdmissionError {
     UnknownSender,
     #[error("insufficient balance")]
     InsufficientBalance,
-    #[error("bad nonce")]
-    BadNonce,
+    #[error("nonce gap")]
+    NonceGap,
     #[error("invalid selector")]
     InvalidSelector,
     #[error("bad signature")]
@@ -90,7 +91,7 @@ pub enum TxAdmissionError {
 
 create_exception!(the_block, ErrUnknownSender, PyException);
 create_exception!(the_block, ErrInsufficientBalance, PyException);
-create_exception!(the_block, ErrBadNonce, PyException);
+create_exception!(the_block, ErrNonceGap, PyException);
 create_exception!(the_block, ErrBadSignature, PyException);
 create_exception!(the_block, ErrDuplicateTx, PyException);
 create_exception!(the_block, ErrTxNotFound, PyException);
@@ -106,7 +107,7 @@ impl From<TxAdmissionError> for PyErr {
             TxAdmissionError::InsufficientBalance => {
                 ErrInsufficientBalance::new_err("insufficient balance")
             }
-            TxAdmissionError::BadNonce => ErrBadNonce::new_err("bad nonce"),
+            TxAdmissionError::NonceGap => ErrNonceGap::new_err("nonce gap"),
             TxAdmissionError::InvalidSelector => ErrInvalidSelector::new_err("invalid selector"),
             TxAdmissionError::BadSignature => ErrBadSignature::new_err("bad signature"),
             TxAdmissionError::Duplicate => ErrDuplicateTx::new_err("duplicate transaction"),
@@ -124,12 +125,19 @@ impl From<TxAdmissionError> for PyErr {
 }
 
 #[cfg(feature = "telemetry-json")]
-fn log_event(level: log::Level, op: &str, sender: &str, nonce: u64, code: &str, fpb: Option<u64>) {
+fn log_event(
+    level: log::Level,
+    op: &str,
+    sender: &str,
+    nonce: u64,
+    reason: &str,
+    fpb: Option<u64>,
+) {
     let mut obj = serde_json::Map::new();
     obj.insert("op".into(), json!(op));
     obj.insert("sender".into(), json!(sender));
     obj.insert("nonce".into(), json!(nonce));
-    obj.insert("code".into(), json!(code));
+    obj.insert("reason".into(), json!(reason));
     if let Some(v) = fpb {
         obj.insert("fpb".into(), json!(v));
     }
@@ -348,6 +356,10 @@ pub struct Block {
     #[pyo3(get)]
     pub previous_hash: String,
     #[pyo3(get)]
+    #[serde(default)]
+    /// UNIX timestamp in milliseconds when the block was mined
+    pub timestamp_millis: u64,
+    #[pyo3(get)]
     pub transactions: Vec<SignedTransaction>,
     #[pyo3(get)]
     #[serde(default)]
@@ -492,7 +504,7 @@ impl Default for Blockchain {
         Self {
             chain: Vec::new(),
             accounts: HashMap::new(),
-            difficulty: difficulty::expected_difficulty(0, 1),
+            difficulty: difficulty::expected_difficulty(&[] as &[Block]),
             mempool: DashMap::new(),
             mempool_size: std::sync::atomic::AtomicUsize::new(0),
             mempool_mutex: Mutex::new(()),
@@ -613,6 +625,7 @@ impl Blockchain {
                             b.hash = calculate_hash(
                                 b.index,
                                 &b.previous_hash,
+                                b.timestamp_millis,
                                 b.nonce,
                                 b.difficulty,
                                 b.coinbase_consumer,
@@ -685,9 +698,58 @@ impl Blockchain {
                             );
                         }
                         if disk.schema_version < 4 {
+                            let mut em_c = 0u64;
+                            let mut em_i = 0u64;
+                            for b in &mut disk.chain {
+                                if let Some(cb) = b.transactions.first() {
+                                    b.coinbase_consumer =
+                                        TokenAmount::new(cb.payload.amount_consumer);
+                                    b.coinbase_industrial =
+                                        TokenAmount::new(cb.payload.amount_industrial);
+                                }
+                                let mut fee_c: u128 = 0;
+                                let mut fee_i: u128 = 0;
+                                for tx in b.transactions.iter().skip(1) {
+                                    if let Ok((c, i)) = crate::fee::decompose(
+                                        tx.payload.fee_selector,
+                                        tx.payload.fee,
+                                    ) {
+                                        fee_c += c as u128;
+                                        fee_i += i as u128;
+                                    }
+                                }
+                                let fc = u64::try_from(fee_c).unwrap_or(0);
+                                let fi = u64::try_from(fee_i).unwrap_or(0);
+                                let mut h = blake3::Hasher::new();
+                                h.update(&fc.to_le_bytes());
+                                h.update(&fi.to_le_bytes());
+                                b.fee_checksum = h.finalize().to_hex().to_string();
+                                b.hash = calculate_hash(
+                                    b.index,
+                                    &b.previous_hash,
+                                    b.timestamp_millis,
+                                    b.nonce,
+                                    b.difficulty,
+                                    b.coinbase_consumer,
+                                    b.coinbase_industrial,
+                                    &b.fee_checksum,
+                                    &b.transactions,
+                                );
+                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_i = em_i.saturating_add(b.coinbase_industrial.get());
+                            }
+                            disk.emission_consumer = em_c;
+                            disk.emission_industrial = em_i;
+                            disk.block_height = disk.chain.len() as u64;
                             for e in &mut disk.mempool {
                                 e.timestamp_ticks = e.timestamp_millis;
                             }
+                            disk.schema_version = 4;
+                            db.insert(
+                                DB_CHAIN,
+                                bincode::serialize(&disk)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
                         }
                         (
                             disk.chain,
@@ -740,6 +802,7 @@ impl Blockchain {
                         b.hash = calculate_hash(
                             b.index,
                             &b.previous_hash,
+                            b.timestamp_millis,
                             b.nonce,
                             b.difficulty,
                             b.coinbase_consumer,
@@ -997,8 +1060,9 @@ impl Blockchain {
         let g = Block {
             index: 0,
             previous_hash: "0".repeat(64),
+            timestamp_millis: 0,
             transactions: vec![],
-            difficulty: difficulty::expected_difficulty(0, self.difficulty),
+            difficulty: difficulty::expected_difficulty(&self.chain),
             nonce: 0,
             // genesis carries zero reward; fields included for stable hashing
             coinbase_consumer: TokenAmount::new(0),
@@ -1386,14 +1450,14 @@ impl Blockchain {
                         "reject",
                         &sender_addr,
                         nonce,
-                        "bad_nonce",
+                        "nonce_gap",
                         None,
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_nonce");
+                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=nonce_gap");
                     #[cfg(feature = "telemetry")]
-                    self.record_reject("bad_nonce");
-                    return Err(TxAdmissionError::BadNonce);
+                    self.record_reject("nonce_gap");
+                    return Err(TxAdmissionError::NonceGap);
                 }
                 // fee per byte check
                 if fee_per_byte < self.min_fee_per_byte {
@@ -1781,10 +1845,15 @@ impl Blockchain {
         };
         let mut txs = vec![coinbase.clone()];
         txs.extend(included.clone());
-        let diff = difficulty::expected_difficulty(index, self.difficulty);
+        let diff = difficulty::expected_difficulty(&self.chain);
+        let timestamp_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
         let mut block = Block {
             index,
             previous_hash: prev_hash.clone(),
+            timestamp_millis,
             transactions: txs.clone(),
             difficulty: diff,
             nonce: 0,
@@ -1799,6 +1868,7 @@ impl Blockchain {
             let hash = calculate_hash(
                 index,
                 &prev_hash,
+                timestamp_millis,
                 nonce,
                 diff,
                 TokenAmount::new(coinbase_consumer),
@@ -1969,7 +2039,8 @@ impl Blockchain {
             return Ok(false);
         }
 
-        if block.difficulty != difficulty::expected_difficulty(block.index, self.difficulty) {
+        if block.difficulty != difficulty::expected_difficulty(&self.chain[..block.index as usize])
+        {
             return Ok(false);
         }
 
@@ -1984,6 +2055,7 @@ impl Blockchain {
         let calc = calculate_hash(
             block.index,
             &block.previous_hash,
+            block.timestamp_millis,
             block.nonce,
             block.difficulty,
             block.coinbase_consumer,
@@ -1997,7 +2069,7 @@ impl Blockchain {
 
         let b = hex_to_bytes(&block.hash);
         if leading_zero_bits(&b)
-            < difficulty::expected_difficulty(block.index, self.difficulty) as u32
+            < difficulty::expected_difficulty(&self.chain[..block.index as usize]) as u32
         {
             return Ok(false);
         }
@@ -2009,38 +2081,33 @@ impl Blockchain {
         }
 
         let mut seen: HashSet<[u8; 32]> = HashSet::new();
-        for tx in &block.transactions {
-            if !seen.insert(tx.id()) {
-                return Ok(false);
-            }
-        }
         let mut expected: HashMap<String, u64> = HashMap::new();
         let mut seen_nonce: HashSet<(String, u64)> = HashSet::new();
         let mut fee_tot_consumer: u128 = 0;
         let mut fee_tot_industrial: u128 = 0;
-        let mut counts: HashMap<String, u64> = HashMap::new();
         for tx in block.transactions.iter().skip(1) {
-            *counts.entry(tx.payload.from_.clone()).or_insert(0) += 1;
+            if !seen.insert(tx.id()) {
+                return Ok(false);
+            }
+            if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
+                return Ok(false);
+            }
+            let exp = expected.entry(tx.payload.from_.clone()).or_insert_with(|| {
+                self.accounts
+                    .get(&tx.payload.from_)
+                    .map(|a| a.nonce + 1)
+                    .unwrap_or(1)
+            });
+            if tx.payload.nonce != *exp {
+                return Ok(false);
+            }
+            *exp += 1;
             match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
                 Ok((fee_consumer, fee_industrial)) => {
                     fee_tot_consumer += fee_consumer as u128;
                     fee_tot_industrial += fee_industrial as u128;
                 }
                 Err(_) => return Ok(false),
-            }
-        }
-        for (addr, count) in counts {
-            let start = self.accounts.get(&addr).map(|a| a.nonce).unwrap_or(0);
-            expected.insert(addr, start.saturating_sub(count));
-        }
-        for tx in block.transactions.iter().skip(1) {
-            let next = expected.entry(tx.payload.from_.clone()).or_insert(0);
-            *next += 1;
-            if tx.payload.nonce != *next {
-                return Ok(false);
-            }
-            if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
-                return Ok(false);
             }
         }
         let mut h = blake3::Hasher::new();
@@ -2068,7 +2135,7 @@ impl Blockchain {
         if new_chain.len() <= self.chain.len() {
             return Err(PyValueError::new_err("Incoming chain not longer"));
         }
-        if !Self::is_valid_chain_rust(&new_chain, 0) {
+        if !Self::is_valid_chain_rust(&new_chain) {
             return Err(PyValueError::new_err("Invalid incoming chain"));
         }
 
@@ -2211,7 +2278,7 @@ impl Blockchain {
     }
 
     #[allow(dead_code)]
-    fn is_valid_chain_rust(chain: &[Block], _difficulty: u32) -> bool {
+    fn is_valid_chain_rust(chain: &[Block]) -> bool {
         for i in 0..chain.len() {
             let b = &chain[i];
             let expected_prev = if i == 0 {
@@ -2222,7 +2289,7 @@ impl Blockchain {
             if b.previous_hash != expected_prev {
                 return false;
             }
-            if b.difficulty != difficulty::expected_difficulty(i as u64, 1) {
+            if b.difficulty != difficulty::expected_difficulty(&chain[..i]) {
                 return false;
             }
             if b.transactions.is_empty() {
@@ -2239,6 +2306,7 @@ impl Blockchain {
             let calc = calculate_hash(
                 b.index,
                 &b.previous_hash,
+                b.timestamp_millis,
                 b.nonce,
                 b.difficulty,
                 b.coinbase_consumer,
@@ -2250,7 +2318,7 @@ impl Blockchain {
                 return false;
             }
             let bytes = hex_to_bytes(&b.hash);
-            if leading_zero_bits(&bytes) < difficulty::expected_difficulty(i as u64, 1) as u32 {
+            if leading_zero_bits(&bytes) < difficulty::expected_difficulty(&chain[..i]) as u32 {
                 return false;
             }
             let mut expected_nonce: HashMap<String, u64> = HashMap::new();
@@ -2375,6 +2443,84 @@ pub fn maybe_spawn_purge_loop(
     None
 }
 
+/// Python-accessible shutdown flag for controlling background threads.
+#[pyclass]
+#[derive(Clone)]
+pub struct ShutdownFlag(Arc<AtomicBool>);
+
+#[pymethods]
+impl ShutdownFlag {
+    #[new]
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Signal any listening threads to terminate.
+    pub fn trigger(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Handle returned by `maybe_spawn_purge_loop_py` allowing joins from Python.
+#[pyclass]
+pub struct PurgeLoopHandle {
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+#[pymethods]
+impl PurgeLoopHandle {
+    /// Join the underlying thread, blocking until completion.
+    pub fn join(&mut self) {
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Python wrapper that reads `TB_PURGE_LOOP_SECS` and spawns a purge loop.
+///
+/// Returns a handle that can be joined to ensure the thread terminates.
+#[pyfunction(name = "maybe_spawn_purge_loop")]
+pub fn maybe_spawn_purge_loop_py(
+    bc: Py<Blockchain>,
+    shutdown: &ShutdownFlag,
+) -> Option<PurgeLoopHandle> {
+    if let Ok(v) = std::env::var("TB_PURGE_LOOP_SECS") {
+        if let Ok(secs) = v.parse::<u64>() {
+            if secs > 0 {
+                let bc_py = Python::with_gil(|py| bc.clone_ref(py));
+                let shutdown_flag = shutdown.0.clone();
+                let handle = thread::spawn(move || {
+                    while !shutdown_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                        Python::with_gil(|py| {
+                            let mut bc = bc_py.borrow_mut(py);
+                            let dropped = bc.purge_expired();
+                            #[cfg(not(feature = "telemetry"))]
+                            let _ = dropped;
+                            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                            info!("purge_loop ttl_drop_total={dropped}");
+                            #[cfg(feature = "telemetry-json")]
+                            log_event(
+                                log::Level::Info,
+                                "purge_loop",
+                                "",
+                                0,
+                                "ttl_drop_total",
+                                Some(dropped),
+                            );
+                        });
+                        thread::sleep(Duration::from_secs(secs));
+                    }
+                });
+                return Some(PurgeLoopHandle {
+                    handle: Some(handle),
+                });
+            }
+        }
+    }
+    None
+}
+
 impl Drop for Blockchain {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
@@ -2472,6 +2618,7 @@ fn leading_zero_bits(hash: &[u8]) -> u32 {
 fn calculate_hash(
     index: u64,
     prev: &str,
+    timestamp: u64,
     nonce: u64,
     difficulty: u64,
     coin_c: TokenAmount,
@@ -2484,6 +2631,7 @@ fn calculate_hash(
     let enc = crate::hashlayout::BlockEncoder {
         index,
         prev,
+        timestamp,
         nonce,
         difficulty,
         coin_c: coin_c.0,
@@ -2556,6 +2704,8 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<SignedTransaction>()?;
     m.add_class::<RawTxPayload>()?;
     m.add_class::<TokenBalance>()?;
+    m.add_class::<ShutdownFlag>()?;
+    m.add_class::<PurgeLoopHandle>()?;
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signature, m)?)?;
@@ -2563,7 +2713,9 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
+    m.add_function(wrap_pyfunction!(maybe_spawn_purge_loop_py, m)?)?;
     m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
     m.add(
         "ErrInvalidSelector",
@@ -2574,7 +2726,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "ErrInsufficientBalance",
         ErrInsufficientBalance::type_object(m.py()),
     )?;
-    m.add("ErrBadNonce", ErrBadNonce::type_object(m.py()))?;
+    m.add("ErrNonceGap", ErrNonceGap::type_object(m.py()))?;
     m.add("ErrBadSignature", ErrBadSignature::type_object(m.py()))?;
     m.add("ErrDuplicateTx", ErrDuplicateTx::type_object(m.py()))?;
     m.add("ErrTxNotFound", ErrTxNotFound::type_object(m.py()))?;

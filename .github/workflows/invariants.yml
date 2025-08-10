@@ -17,3 +17,5 @@ jobs:
         id: vars
         run: |
           cargo test --quiet && echo "status=passing" >> "$GITHUB_OUTPUT"
+      - name: Serialization determinism
+        run: python scripts/serialization_equiv.py

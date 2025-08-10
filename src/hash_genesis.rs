@@ -5,6 +5,7 @@ pub const fn calculate_genesis_hash() -> &'static str {
     BlockEncoder {
         index: 0,
         prev: ZERO_HASH,
+        timestamp: 0,
         nonce: 0,
         difficulty: 8,
         coin_c: 0,
@@ -21,6 +22,7 @@ pub fn calculate_genesis_hash_runtime() -> String {
     BlockEncoder {
         index: 0,
         prev: ZERO_HASH,
+        timestamp: 0,
         nonce: 0,
         difficulty: 8,
         coin_c: 0,

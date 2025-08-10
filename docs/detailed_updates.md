@@ -18,10 +18,23 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Python API** – Module definition uses `Bound<PyModule>` in accordance with `pyo3` 0.24.2.
 - **TokenAmount Display** – Added `__repr__`, `__str__`, and `Display` trait implementations
   so amounts print as plain integers in both Python and Rust logs.
+- **NonceGap Error & Purge Helpers** – Exposed `ErrNonceGap`,
+  `decode_payload`, and purge-loop controls (`ShutdownFlag`, `PurgeLoopHandle`,
+  `maybe_spawn_purge_loop`) honoring `TB_PURGE_LOOP_SECS`.
 - **Mempool Atomicity** – Unified `mempool_mutex → sender_mutex` critical
   section; counter updates, heap ops, and pending balances execute inside the
   lock. Regression tests (`cap_race_respects_limit` and
   `flood_mempool_never_over_cap`) prove the size cap under threaded floods.
+- **Dynamic Difficulty Retargeting** – `expected_difficulty` computes a moving
+  average over recent block timestamps, bounding adjustments to ×4/¼ and
+  validating block header `difficulty` fields.
+- **In-block Nonce Continuity** – `validate_block` tracks per-sender nonces and
+  rejects blocks with gaps or repeats.
+- **Serialization Equivalence** – Rust generates canonical payload CSV vectors
+  and `scripts/serialization_equiv.py` reencodes them in Python to assert byte
+  equality.
+- **Demo Purge Automation** – `demo.py` narrates fee selectors, nonce reuse, and
+  manages a TTL purge loop via Python `ShutdownFlag`/`PurgeLoopHandle` helpers.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
 - **Telemetry Metrics** – Prometheus counters now track TTL expirations
   (`ttl_drop_total`), startup drops (`startup_ttl_drop_total` (expired mempool entries dropped during startup)), lock poisoning
@@ -128,7 +141,7 @@ curl -s localhost:9000/metrics \
 |------------------------|-------------------------------------------|
 | `ErrUnknownSender`     | sender not provisioned                    |
 | `ErrInsufficientBalance` | insufficient funds                     |
-| `ErrBadNonce`          | nonce mismatch                            |
+| `ErrNonceGap`          | nonce gap                                 |
 | `ErrInvalidSelector`   | fee selector out of range                 |
 | `ErrBadSignature`      | Ed25519 signature invalid                 |
 | `ErrDuplicateTx`       | `(sender, nonce)` already present         |
@@ -152,6 +165,23 @@ Drop path lock poisoning is covered by `drop_lock_poisoned_error_and_recovery`.
 | `--min-fee-per-byte`    | `TB_MIN_FEE_PER_BYTE`    | minimum fee per byte         |
 
 For the full rationale see `analysis.txt` and the commit history.
+
+## Roadmap
+
+### Immediate
+
+- Finish atomic `(sender, nonce)` admission with rollback-safe reservations.
+- Add property tests for pending-balance invariants and nonce continuity.
+
+### Medium Term
+
+- Abstract `SimpleDb` behind a trait to enable sled/RocksDB backends.
+- Introduce P2P gossip and a CLI/RPC layer for node control and metrics.
+
+### Long Term
+
+- Research proof-of-service extensions, pluggable post-quantum signatures,
+  and on-chain governance mechanics.
 
 ---
 

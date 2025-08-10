@@ -15,6 +15,8 @@ DECAY_NUMERATOR = 99_995
 DECAY_DENOMINATOR = 100_000
 
 ENV_PREPARED = False
+PURGE_HANDLE = None
+PURGE_SHUTDOWN = None
 
 
 def explain(msg: str) -> None:
@@ -73,6 +75,9 @@ def init_chain() -> the_block.Blockchain:
     explain("Creating new blockchain with difficulty 1")
     bc = the_block.Blockchain.with_difficulty("chain_db", 1)
     bc.genesis_block()
+    global PURGE_HANDLE, PURGE_SHUTDOWN
+    PURGE_SHUTDOWN = the_block.ShutdownFlag()
+    PURGE_HANDLE = the_block.maybe_spawn_purge_loop(bc, PURGE_SHUTDOWN)
     explain("Genesis block created; chain starts at height 0")
     explain(f"Chain length now {bc.current_chain_length()}")
     return bc
@@ -164,89 +169,47 @@ def build_transaction(priv: bytes) -> the_block.RawTxPayload:
 
 
 def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
-    """Demonstrate error paths for transaction submission."""
-    explain("Submitting transaction and demonstrating failure paths")
-    good_payload = the_block.RawTxPayload(
-        from_="miner",
-        to="alice",
-        amount_consumer=1,
-        amount_industrial=0,
-        fee=BASE_FEE,
-        fee_selector=2,
-        nonce=1,
-        memo=b"demo transfer",
-    )
-    stx = the_block.sign_tx(list(priv), good_payload)
-    bc.submit_transaction(stx)
-    explain("Transaction accepted into mempool")
-    show_pending(bc, "miner", "alice")
-    try:
+    """Demonstrate fee selectors and nonce failure paths."""
+    explain("Nonce is like a check number: use each once and in order")
+    next_nonce = 1
+    routes = {
+        0: "all fee to consumer token",
+        1: "all fee to industrial token",
+        2: "fee split between tokens",
+    }
+    for sel, note in routes.items():
+        payload = the_block.RawTxPayload(
+            from_="miner",
+            to="alice",
+            amount_consumer=1,
+            amount_industrial=0,
+            fee=BASE_FEE,
+            fee_selector=sel,
+            nonce=next_nonce,
+            memo=b"selector demo",
+        )
+        stx = the_block.sign_tx(list(priv), payload)
         bc.submit_transaction(stx)
-    except the_block.ErrDuplicateTx:
-        explain("Duplicate submission rejected")
-    show_pending(bc, "miner", "alice")
-    stale_payload = the_block.RawTxPayload(
+        explain(f"Selector {sel}: {note}")
+        next_nonce += 1
+    reuse_payload = the_block.RawTxPayload(
         from_="miner",
         to="alice",
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        fee_selector=2,
-        nonce=1,
-        memo=b"stale nonce",
-    )
-    try:
-        stx_stale = the_block.sign_tx(list(priv), stale_payload)
-        bc.submit_transaction(stx_stale)
-    except the_block.ErrDuplicateTx:
-        explain("Stale nonce submission rejected")
-    show_pending(bc, "miner", "alice")
-    bad_selector = the_block.RawTxPayload(
-        from_="miner",
-        to="alice",
-        amount_consumer=1,
-        amount_industrial=0,
-        fee=BASE_FEE,
-        fee_selector=3,
-        nonce=2,
-        memo=b"bad selector",
-    )
-    try:
-        stx_bad = the_block.sign_tx(list(priv), bad_selector)
-        bc.submit_transaction(stx_bad)
-    except the_block.ErrInvalidSelector:
-        explain("Transaction with bad selector rejected")
-    show_pending(bc, "miner", "alice")
-    overflow_payload = the_block.RawTxPayload(
-        from_="miner",
-        to="alice",
-        amount_consumer=1,
-        amount_industrial=0,
-        fee=MAX_FEE + 1,
         fee_selector=0,
-        nonce=3,
-        memo=b"overflow fee",
+        nonce=2,
+        memo=b"reused nonce",
     )
     try:
-        stx_over = the_block.sign_tx(list(priv), overflow_payload)
-        bc.submit_transaction(stx_over)
-    except the_block.ErrFeeOverflow:
-        explain("Transaction with overflow fee rejected")
+        stx_dup = the_block.sign_tx(list(priv), reuse_payload)
+        bc.submit_transaction(stx_dup)
+    except the_block.ErrDuplicateTx:
+        explain(
+            "Reusing nonce 2 is like writing two checks with the same number; the bank rejects it"
+        )
     show_pending(bc, "miner", "alice")
-    fc, fi = the_block.fee_decompose(2, BASE_FEE)
-    exp_c = 1 + fc
-    exp_i = fi
-    miner_p = bc.accounts["miner"].pending
-    alice_p = bc.accounts["alice"].pending
-    explain(
-        "Summary -> miner expected "
-        f"c={exp_c} i={exp_i} n=1, got "
-        f"c={miner_p.consumer} i={miner_p.industrial} n={miner_p.nonce}"
-    )
-    explain(
-        "Alice expected c=0 i=0 n=0, got "
-        f"c={alice_p.consumer} i={alice_p.industrial} n={alice_p.nonce}"
-    )
 
 
 def mine_blocks(bc: the_block.Blockchain, accounts: list[str], priv: bytes) -> None:
@@ -260,7 +223,7 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str], priv: bytes) -> N
             amount_industrial=0,
             fee=BASE_FEE,
             fee_selector=2,
-            nonce=i + 2,
+            nonce=i + 4,
             memo=b"block transfer",
         )
         stx = the_block.sign_tx(list(priv), payload)
@@ -396,6 +359,10 @@ def persistence_demo(bc: the_block.Blockchain) -> None:
 def cleanup() -> None:
     """Remove database so repeated runs start fresh."""
     explain("Cleaning up chain_db directory")
+    if PURGE_SHUTDOWN is not None:
+        PURGE_SHUTDOWN.trigger()
+    if PURGE_HANDLE is not None:
+        PURGE_HANDLE.join()
     shutil.rmtree("chain_db", ignore_errors=True)
 
 

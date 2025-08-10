@@ -7,6 +7,7 @@ pub trait HashEncoder {
 pub struct BlockEncoder<'a> {
     pub index: u64,
     pub prev: &'a str,
+    pub timestamp: u64,
     pub nonce: u64,
     pub difficulty: u64,
     pub coin_c: u64,
@@ -19,6 +20,7 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
     fn encode(&self, h: &mut Hasher) {
         h.update(&self.index.to_le_bytes());
         h.update(self.prev.as_bytes());
+        h.update(&self.timestamp.to_le_bytes());
         h.update(&self.nonce.to_le_bytes());
         h.update(&self.difficulty.to_le_bytes());
         h.update(&self.coin_c.to_le_bytes());

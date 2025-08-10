@@ -46,29 +46,36 @@ re‑implement:
 9. Cached each transaction's serialized size in `MempoolEntry` and updated
    `purge_expired` to use the cached fee-per-byte, avoiding reserialization.
    Added `scripts/check_anchors.py` and CI step to validate Markdown anchors.
+10. Dynamic difficulty retargeting with per-block `difficulty` field,
+    in-block nonce continuity validation, Python-accessible purge-loop handles,
+    and cross-language serialization determinism tests.
 
 ---
 
 ## Current Status & Completion Estimate
 
-*Completion score: **56 / 100*** — robust single-node kernel with improved
-telemetry yet still lacking network and ops scaffolding.  See
-[Project Completion Snapshot](#project-completion-snapshot--56--100) for
+*Completion score: **60 / 100*** — dynamic difficulty, nonce continuity, and
+Python purge-loop controls elevate the kernel, yet networking and persistent
+storage remain open. See
+[Project Completion Snapshot](#project-completion-snapshot--60--100) for
 detail.
 
-* **Core consensus/state/tx logic** — 92 %: fee routing, nonce tracking,
-  comparator ordering, and global atomicity via `mempool_mutex →
-  sender_mutex` are in place.
+* **Core consensus/state/tx logic** — 94 %: dynamic difficulty retargeting,
+  nonce continuity, fee routing, comparator ordering, and global atomicity via
+  `mempool_mutex → sender_mutex` are in place.
 * **Database/persistence** — 65 %: schema v4 persists admission ticks; durable
   backend pending.
-* **Testing/validation** — 68 %: admission and eviction panic tests in place;
-  long-range fuzzing and migration property tests remain.
-* **Demo/docs** — 62 %: docs track new metrics but still lack cross-links and
-  startup rebuild details.
+* **Testing/validation** — 70 %: admission and eviction panic tests and
+  serialization equivalence checks are in place; long-range fuzzing and
+  migration property tests remain.
+* **Demo/docs** — 68 %: demo narrates fee selectors and purge-loop lifecycle;
+  docs track new metrics but still lack cross-links and startup rebuild
+  details.
 * **Networking (P2P/sync/forks)** — 0 %: no gossip layer, handshake, fork
   resolution, or RPC/CLI.
-* **Mid-term engineering infra** — 15 %: CI runs fmt/tests only; coverage,
-  fuzzing, schema lint, and contributor automation missing.
+* **Mid-term engineering infra** — 20 %: CI runs fmt/tests and serialization
+  determinism, but coverage, fuzzing, schema lint, and contributor automation
+  remain.
 * **Upgrade/governance** — 0 %: no fork artefacts, snapshot tooling, or
   governance docs.
 * **Long-term vision scaffolding** — 0 %: quantum safety, resource proofs,
@@ -87,29 +94,23 @@ detail.
 
 Treat the following as blockers. Implement each with atomic commits, exhaustive tests, and cross‑referenced documentation.
 
-1. **Deterministic Eviction & Replay Tests**
-   - Existing comparator test must remain; extend to stable ordering after heap rebuild.
-   - `ttl_expired_purged_on_restart` exercises TTL expiry across restarts.
-   - `test_schema_upgrade_compatibility` verifies v1/v2/v3 → v4 migration.
-2. **Telemetry & Logging Expansion**
-   - Add counters `TTL_DROP_TOTAL`, `STARTUP_TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`,
-     `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`,
-     `DROP_NOT_FOUND_TOTAL`, plus global `TX_REJECTED_TOTAL{reason=*}` with
-     regression tests for each labelled rejection.
-   - Instrument spans `mempool_mutex`, `admission_lock`, `eviction_sweep`,
-     and `startup_rebuild` capturing sender, nonce, fee_per_byte,
-     mempool_size ([`src/lib.rs`](src/lib.rs#L1067-L1082),
-     [`src/lib.rs`](src/lib.rs#L1536-L1542),
-     [`src/lib.rs`](src/lib.rs#L1622-L1657),
-     [`src/lib.rs`](src/lib.rs#L879-L889)).
-   - Document scrape example for `serve_metrics` and span list in
-     `docs/detailed_updates.md` and specs.
-3. **Test & Fuzz Matrix**
-   - Property tests injecting panics at each admission step verifying reservation rollback and metrics.
-   - 32‑thread fuzz harness with random fees/nonces for ≥10 k iterations exercising cap and uniqueness.
-   - Heap orphan stress test exceeding threshold and asserting rebuild metrics.
-4. **Documentation Synchronization**
-   - Update `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` for all of the above.
+1. **Admission Atomicity & Ledger Invariants**
+   - Use `DashMap::entry` or per-sender mutex to guarantee `(sender, nonce)`
+     check+insert and pending-balance reservation happen atomically.
+   - Regression tests prove pending balances and nonce sets roll back on panic.
+2. **Pending Ledger Consistency Tests**
+   - Property tests ensure `pending.consumer + balance.consumer ≥ 0` and
+     pending nonces stay contiguous after drops or reorgs.
+3. **Persistence Abstraction**
+   - Define a `Db` trait and adapt `SimpleDb` to it, paving the way for sled or
+     RocksDB implementations.
+4. **Networking & CLI Skeleton**
+   - Introduce a stub `network` module for block/tx gossip and a simple CLI/RPC
+     layer exposing balance queries, transaction submission, mining, and
+     metrics.
+5. **Documentation & Telemetry**
+   - Keep README, AGENTS, and changelogs synchronized; ensure new counters are
+     documented and `scripts/check_anchors.py` passes.
 
 ---
 
@@ -119,7 +120,7 @@ Once the immediate blockers are merged, build outward while maintaining determin
 1. **Durable storage backend** – replace `SimpleDb` with a crash-safe key‑value store. B‑3’s timestamp persistence is prerequisite.
 2. **P2P networking & sync** – design gossip and fork-resolution protocols; a race-free mempool and replay-safe persistence prevent divergence.
 3. **Node API & tooling** – expose RPC/CLI once telemetry counters and spans enable operational monitoring.
-4. **Dynamic difficulty retargeting** – implement moving-average algorithm; depends on reliable timestamps and startup rebuild.
+4. **Dynamic difficulty retargeting — COMPLETED** – moving-average algorithm with clamped adjustment now governs PoW targets.
 5. **Enhanced validation & security** – extend panic-inject and fuzz coverage to network inputs, enforcing signature, nonce, and fee invariants.
 6. **Testing & visualization tools** – multi-node integration tests and dashboards leveraging the metrics emitted above.
 
@@ -138,16 +139,16 @@ These require research but should influence architectural choices now:
 
 ---
 
-## Project Completion Snapshot — 52 / 100
+## Project Completion Snapshot — 60 / 100
 
 The kernel is progressing but still far from investor-ready. Score components:
 
-* **Core consensus/state/tx logic** ≈ 92 %: fee routing, pending balances, dual-token fees, and comparator ordering are proven; global mempool mutex still pending.
-* **Database/persistence** ≈ 60 %: schema v3 migration exists, but timestamp persistence, durable backend, and rollback tooling are absent.
-* **Testing/validation** ≈ 62 %: comparator and panic-inject tests exist, yet eviction, replay, and long-range fuzz gaps remain.
-* **Demo/docs** ≈ 62 %: metrics and comparator documented; startup rebuild algorithm and API changelog coverage missing.
+* **Core consensus/state/tx logic** ≈ 94 %: fee routing, nonce continuity, dynamic difficulty, and comparator ordering are proven.
+* **Database/persistence** ≈ 65 %: schema v4 migration exists, but durable backend and rollback tooling are absent.
+* **Testing/validation** ≈ 70 %: comparator, panic-inject, and serialization equivalence tests exist; long-range fuzz gaps remain.
+* **Demo/docs** ≈ 68 %: demo narrates fee selectors and purge loop; cross-links and startup rebuild details still missing.
 * **Networking (P2P/sync/forks)** 0 %: no gossip, fork resolution, handshake, or RPC/CLI.
-* **Mid-term engineering infra** ≈ 15 %: CI enforces fmt/tests but lacks coverage, fuzz, schema lint, or contributor automation.
+* **Mid-term engineering infra** ≈ 20 %: CI enforces fmt/tests and serialization determinism but lacks coverage, fuzz, or schema lint.
 * **Upgrade/governance** 0 %: no fork artifacts, snapshot tools, or governance docs.
 * **Long-term vision** 0 %: quantum safety, resource proofs, sharding, and on-chain governance remain conceptual only.
 
