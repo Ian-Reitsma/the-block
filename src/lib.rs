@@ -1674,7 +1674,9 @@ impl Blockchain {
             let fpb = entry.value().fee_per_byte();
             if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
-                telemetry::TTL_DROP_TOTAL.inc();
+                if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
+                    telemetry::TTL_DROP_TOTAL.inc();
+                }
                 expired.push((sender, nonce, fpb));
             } else if !self.accounts.contains_key(&sender) {
                 orphaned.push((sender, nonce, fpb));
@@ -1705,7 +1707,9 @@ impl Blockchain {
         let orphans = orphaned.len();
         if size > 0 && orphans * 2 > size {
             #[cfg(feature = "telemetry")]
-            telemetry::ORPHAN_SWEEP_TOTAL.inc();
+            if telemetry::ORPHAN_SWEEP_TOTAL.get() < u64::MAX {
+                telemetry::ORPHAN_SWEEP_TOTAL.inc();
+            }
             for (sender, nonce, fpb) in orphaned {
                 #[cfg(feature = "telemetry")]
                 let _span = tracing::span!(
@@ -2443,7 +2447,7 @@ pub fn maybe_spawn_purge_loop(
     None
 }
 
-/// Python-accessible shutdown flag for controlling background threads.
+/// Thread-safe flag used to signal background threads to shut down.
 #[pyclass]
 #[derive(Clone)]
 pub struct ShutdownFlag(Arc<AtomicBool>);
@@ -2451,17 +2455,34 @@ pub struct ShutdownFlag(Arc<AtomicBool>);
 #[pymethods]
 impl ShutdownFlag {
     #[new]
+    #[pyo3(text_signature = "()")]
+    /// Create a new unset shutdown flag.
+    ///
+    /// Returns:
+    ///     ShutdownFlag: a fresh flag in the ``False`` state.
     pub fn new() -> Self {
         Self(Arc::new(AtomicBool::new(false)))
     }
 
     /// Signal any listening threads to terminate.
+    ///
+    /// Returns:
+    ///     None
+    ///
+    /// Once triggered the flag remains set.
+    #[pyo3(text_signature = "()")]
     pub fn trigger(&self) {
         self.0.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
-/// Handle returned by `maybe_spawn_purge_loop_py` allowing joins from Python.
+impl ShutdownFlag {
+    pub fn as_arc(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.0)
+    }
+}
+
+/// Handle to a purge loop thread, allowing callers to join from Python.
 #[pyclass]
 pub struct PurgeLoopHandle {
     handle: Option<thread::JoinHandle<()>>,
@@ -2470,6 +2491,12 @@ pub struct PurgeLoopHandle {
 #[pymethods]
 impl PurgeLoopHandle {
     /// Join the underlying thread, blocking until completion.
+    ///
+    /// Returns:
+    ///     None
+    ///
+    /// Safe to call multiple times; subsequent calls are no-ops.
+    #[pyo3(text_signature = "()")]
     pub fn join(&mut self) {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
@@ -2477,10 +2504,69 @@ impl PurgeLoopHandle {
     }
 }
 
+/// Context manager that spawns and manages the mempool purge loop.
+///
+/// The loop is started only if ``TB_PURGE_LOOP_SECS`` is set to a positive
+/// interval. Exiting the context triggers ``shutdown`` and joins the thread.
+///
+/// Args:
+///     bc (Blockchain): chain instance to operate on.
+#[pyclass]
+pub struct PurgeLoop {
+    shutdown: ShutdownFlag,
+    handle: Option<PurgeLoopHandle>,
+}
+
+#[pymethods]
+impl PurgeLoop {
+    #[new]
+    #[pyo3(text_signature = "(bc)")]
+    pub fn new(bc: Py<Blockchain>) -> Self {
+        let shutdown = ShutdownFlag::new();
+        let handle = maybe_spawn_purge_loop_py(bc, &shutdown);
+        Self { shutdown, handle }
+    }
+
+    /// Enter the purge loop context.
+    ///
+    /// Returns:
+    ///     PurgeLoop: this instance.
+    pub fn __enter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf
+    }
+
+    /// Exit the purge loop context, triggering shutdown and joining the thread.
+    ///
+    /// Args:
+    ///     exc_type (type | None): Exception type if raised.
+    ///     exc (BaseException | None): Exception instance.
+    ///     tb (Traceback | None): Traceback object.
+    ///
+    /// Returns:
+    ///     bool: ``False`` to propagate exceptions.
+    pub fn __exit__(
+        &mut self,
+        _exc_type: &Bound<'_, PyAny>,
+        _exc: &Bound<'_, PyAny>,
+        _tb: &Bound<'_, PyAny>,
+    ) -> PyResult<bool> {
+        self.shutdown.trigger();
+        if let Some(mut h) = self.handle.take() {
+            h.join();
+        }
+        Ok(false)
+    }
+}
+
 /// Python wrapper that reads `TB_PURGE_LOOP_SECS` and spawns a purge loop.
 ///
-/// Returns a handle that can be joined to ensure the thread terminates.
-#[pyfunction(name = "maybe_spawn_purge_loop")]
+/// Args:
+///     bc (Blockchain): Chain instance to operate on.
+///     shutdown (ShutdownFlag): Flag used to signal termination.
+///
+/// Returns:
+///     PurgeLoopHandle | None: Handle to the purge thread, or ``None`` if disabled.
+#[pyfunction(name = "maybe_spawn_purge_loop", text_signature = "(bc, shutdown)")]
 pub fn maybe_spawn_purge_loop_py(
     bc: Py<Blockchain>,
     shutdown: &ShutdownFlag,
@@ -2706,6 +2792,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<TokenBalance>()?;
     m.add_class::<ShutdownFlag>()?;
     m.add_class::<PurgeLoopHandle>()?;
+    m.add_class::<PurgeLoop>()?;
     m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
     m.add_function(wrap_pyfunction!(sign_message, m)?)?;
     m.add_function(wrap_pyfunction!(verify_signature, m)?)?;

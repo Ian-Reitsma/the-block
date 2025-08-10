@@ -158,7 +158,7 @@ Run all locally via:
 
 CI is GitHub Actions; each push/PR runs **seven** jobs:
 
-1. **Lint** — `cargo fmt -- --check` + `black --check` + `ruff check .` + `python scripts/check_anchors.py`.
+1. **Lint** — `cargo fmt -- --check` + `black --check` + `ruff check .` + `python scripts/check_anchors.py --md-anchors`.
 2. **Build Matrix** — Linux/macOS/Windows in debug & release.
 3. **Tests** — `cargo test --all --release` + `pytest`.
 4. **Cargo Audit** — `cargo audit -q` must report zero vulnerabilities.
@@ -285,7 +285,7 @@ pub struct SignedTransaction {
 
 Fail fast, log once, halt node.
 
-## 11 · Security & Cryptography — Red-Team Grade Controls
+## 11 · Security & Cryptography — Red-Team Grade Controls <a id="11-security--cryptography"></a>
 
 | Threat | Hard Control (compile-time) | Soft Control (run-time) | Audit Evidence |
 | ------ | --------------------------- | ----------------------- | -------------- |
@@ -391,27 +391,42 @@ any testnet or production exposure. Each change **must** include tests, telemetr
   `scripts/serialization_equiv.py`) wired into CI.
 
 ### B‑8 · Purge Loop Controls — **COMPLETED**
-- Provide `ShutdownFlag`, `PurgeLoopHandle`, and
-  `maybe_spawn_purge_loop` bindings so Python callers and the demo can
-  manage TTL cleanup threads.
+- Expose `ShutdownFlag`, `PurgeLoopHandle`, and a Pythonic `PurgeLoop`
+  context manager that spawns the purge loop on `__enter__` and triggers
+  shutdown on `__exit__`; `maybe_spawn_purge_loop` remains available for
+  manual control.
+- `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` counters saturate at
+  `u64::MAX`, and tests assert `ShutdownFlag.trigger()` halts the thread
+  before further increments.
 
 ### Deterministic Eviction & Replay Safety
 - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` and prove ordering stability.
 - Replay suite includes `ttl_expired_purged_on_restart` for TTL expiry and `test_schema_upgrade_compatibility` verifying v1/v2/v3 disks migrate to v4, hydrating `timestamp_ticks`.
 
 ### Telemetry & Logging
-- Add counters `TTL_DROP_TOTAL`, `STARTUP_TTL_DROP_TOTAL`, `ORPHAN_SWEEP_TOTAL`, `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and `DROP_NOT_FOUND_TOTAL` and ensure `TX_REJECTED_TOTAL{reason=*}` advances on every rejection.
-- Instrument spans `mempool_mutex`, `eviction_sweep`, and `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool size.
-- Document a `curl` scrape example for `serve_metrics` output in `docs/detailed_updates.md` and keep `rejection_reasons.rs` exercising the labelled counters.
+- Counters `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` saturate at
+  `u64::MAX` to prevent overflow; `STARTUP_TTL_DROP_TOTAL`,
+  `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`,
+  `BALANCE_OVERFLOW_REJECT_TOTAL`, `DROP_NOT_FOUND_TOTAL`, and
+  `TX_REJECTED_TOTAL{reason=*}` track all rejection paths.
+- Instrument spans `mempool_mutex`, `eviction_sweep`, and
+  `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool
+  size.
+- Document a `curl` scrape example for `serve_metrics` output in
+  `docs/detailed_updates.md` and keep `rejection_reasons.rs` exercising
+  the labelled counters.
 
 ### Test & Fuzz Matrix
 - Property test: inject panics at each admission step to verify reservation rollback and heap invariants.
 - 32‑thread fuzz harness: random fees and nonces for ≥10 k iterations asserting capacity and per-account uniqueness.
 - Heap orphan stress test: exceed the orphan threshold, trigger rebuild, and assert ordering and metrics.
 
-### Documentation
-- Mirror these directives in `Agents-Sup.md`, `Agent-Next-Instructions.md`, and `AUDIT_NOTES.md`.
-- Keep `CHANGELOG.md` and `API_CHANGELOG.md` synchronized with new errors, metrics, and flags.
+- Mirror these directives in `Agents-Sup.md`, `Agent-Next-Instructions.md`,
+  and `AUDIT_NOTES.md`.
+- Keep `CHANGELOG.md` and `API_CHANGELOG.md` synchronized with new
+  errors, metrics, and flags.
+- `scripts/check_anchors.py --md-anchors` validates Markdown headings and
+  Rust line anchors; CI rejects any broken link.
 
 ---
 

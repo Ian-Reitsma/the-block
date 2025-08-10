@@ -31,8 +31,9 @@ re‑implement:
     [`src/lib.rs`](src/lib.rs#L1622-L1657),
     [`src/lib.rs`](src/lib.rs#L879-L889)). Comparator ordering test for
    mempool priority.
-   `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS`/`--mempool-purge-interval`
-   and calls `purge_expired` periodically, advancing TTL and orphan-sweep metrics.
+   `maybe_spawn_purge_loop` (wrapped by the `PurgeLoop` context manager)
+   reads `TB_PURGE_LOOP_SECS`/`--mempool-purge-interval` and calls
+   `purge_expired` periodically, advancing TTL and orphan-sweep metrics.
 6. **Mempool atomicity**: global `mempool_mutex → sender_mutex` critical section with
    counter updates, heap ops, and pending balances inside; orphan sweeps rebuild
    the heap when `orphan_counter > mempool_size / 2` and emit `ORPHAN_SWEEP_TOTAL`.
@@ -45,10 +46,15 @@ re‑implement:
    `ttl_drop_total` and `startup_ttl_drop_total` advance.
 9. Cached each transaction's serialized size in `MempoolEntry` and updated
    `purge_expired` to use the cached fee-per-byte, avoiding reserialization.
-   Added `scripts/check_anchors.py` and CI step to validate Markdown anchors.
+   `scripts/check_anchors.py --md-anchors` now validates Rust line and
+   Markdown section links in CI.
 10. Dynamic difficulty retargeting with per-block `difficulty` field,
-    in-block nonce continuity validation, Python-accessible purge-loop handles,
-    and cross-language serialization determinism tests.
+    in-block nonce continuity validation, Pythonic `PurgeLoop` context
+    manager wrapping `ShutdownFlag` and `PurgeLoopHandle`, and
+    cross-language serialization determinism tests.
+11. Telemetry counters `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` saturate at
+    `u64::MAX`; tests confirm `ShutdownFlag.trigger()` halts purge threads
+    before overflow.
 
 ---
 
@@ -110,7 +116,7 @@ Treat the following as blockers. Implement each with atomic commits, exhaustive 
      metrics.
 5. **Documentation & Telemetry**
    - Keep README, AGENTS, and changelogs synchronized; ensure new counters are
-     documented and `scripts/check_anchors.py` passes.
+     documented and `scripts/check_anchors.py --md-anchors` passes.
 
 ---
 
@@ -277,8 +283,9 @@ testnet burn-in & audits (+5), ecosystem tooling (+5).
 1. Reread `AGENTS.md` in full and set up the environment with `bootstrap.sh`.
 2. Confirm no `AGENT_NOTES.md` file exists; if one appears, read it.
 3. Select a single immediate priority and implement it end‑to‑end with tests.
-4. Run `cargo fmt`, `cargo clippy --all-targets --all-features`, and
-   `cargo test --all` before committing.
+4. Run `cargo fmt`, `cargo clippy --all-targets --all-features`,
+   `cargo test --all`, and `python scripts/check_anchors.py --md-anchors`
+   before committing.
 5. Update docs and specs alongside code.  Every new invariant needs a proof or
    reference in `Agents-Sup.md` or the appropriate spec.
 6. Open a PR referencing this file in the summary, detailing tests and docs.

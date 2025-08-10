@@ -1,12 +1,13 @@
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
-use the_block::{generate_keypair, maybe_spawn_purge_loop, sign_tx, Blockchain, RawTxPayload};
+use the_block::{
+    generate_keypair, maybe_spawn_purge_loop, sign_tx, Blockchain, RawTxPayload, ShutdownFlag,
+};
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -51,18 +52,22 @@ fn env_driven_purge_loop_drops_entries() {
     #[cfg(feature = "telemetry")]
     telemetry::TTL_DROP_TOTAL.reset();
     let bc = Arc::new(Mutex::new(bc));
-    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown = ShutdownFlag::new();
     let handle =
-        maybe_spawn_purge_loop(Arc::clone(&bc), Arc::clone(&shutdown)).expect("loop not started");
+        maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).expect("loop not started");
     thread::sleep(Duration::from_millis(50));
-    shutdown.store(true, Ordering::SeqCst);
+    #[cfg(feature = "telemetry")]
+    let before = telemetry::TTL_DROP_TOTAL.get();
+    shutdown.trigger();
     handle.join().unwrap();
+    thread::sleep(Duration::from_millis(50));
     std::env::remove_var("TB_PURGE_LOOP_SECS");
     let guard = bc.lock().unwrap();
     assert!(guard.mempool.is_empty());
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
+        assert_eq!(before, telemetry::TTL_DROP_TOTAL.get());
         telemetry::TTL_DROP_TOTAL.reset();
     }
 }

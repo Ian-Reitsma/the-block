@@ -12,7 +12,7 @@ jobs:
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Check anchors
-        run: python scripts/check_anchors.py
+        run: python scripts/check_anchors.py --md-anchors
       - name: Run tests
         id: vars
         run: |

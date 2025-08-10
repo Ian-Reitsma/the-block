@@ -1,24 +1,33 @@
 #!/usr/bin/env python3
-"""Validate Markdown references to Rust source line ranges.
+"""Validate Markdown references to Rust lines and optional section anchors.
 
 Searches repository markdown files for links like ``src/lib.rs#L10-L20`` or
 ``src/telemetry.rs#L5`` and verifies that the referenced line numbers exist in
 the target file. Supports relative paths such as ``../src/lib.rs``.
+
+When invoked with ``--md-anchors`` the script also checks links of the form
+``README.md#section`` and ensures that the target heading exists.
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# ``src/`` prefix with any path ending in ``.rs``
-MD_PATTERN = re.compile(
+# Rust ``src/*.rs#Lx-Ly`` anchors
+RUST_PATTERN = re.compile(
     r"\((?P<path>(?:\./|\../)*src/[A-Za-z0-9_/]+\.rs)#L(?P<start>\d+)(?:-L(?P<end>\d+))?\)"
 )
 
+# Markdown ``file.md#section`` anchors
+MD_PATTERN = re.compile(
+    r"\((?P<path>(?:\./|\../)*[A-Za-z0-9_/]+\.md)#(?P<section>[A-Za-z0-9_-]+)\)"
+)
 
-def check_anchor(md_path: Path, match: re.Match[str]) -> str | None:
+
+def check_rust_anchor(md_path: Path, match: re.Match[str]) -> str | None:
     rel_path = match.group("path")
     start = int(match.group("start"))
     end = int(match.group("end") or start)
@@ -37,15 +46,51 @@ def check_anchor(md_path: Path, match: re.Match[str]) -> str | None:
     return None
 
 
+def slugify(text: str) -> str:
+    text = re.sub(r"\s+", "-", text.strip().lower())
+    return re.sub(r"[^a-z0-9-]", "", text)
+
+
+def check_md_anchor(md_path: Path, match: re.Match[str]) -> str | None:
+    rel_path = match.group("path")
+    section = match.group("section")
+    target = (md_path.parent / rel_path).resolve()
+    if not target.exists():
+        return f"{md_path}: missing file {rel_path}"
+    content = target.read_text(encoding="utf-8")
+    anchors = {
+        slugify(line.lstrip("#"))
+        for line in content.splitlines()
+        if line.startswith("#")
+    }
+    anchors.update(m.group(1).lower() for m in re.finditer(r"<a id=\"([A-Za-z0-9_-]+)\"", content))
+    section_slug = slugify(section)
+    if section_slug not in anchors and section.lower() not in anchors:
+        return f"{md_path}: missing anchor {rel_path}#{section}"
+    return None
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--md-anchors",
+        action="store_true",
+        help="Validate Markdown #section anchors in addition to Rust line anchors",
+    )
+    args = parser.parse_args()
+
     errors: list[str] = []
     for md in ROOT.rglob("*.md"):
         if any(part in {"target", ".git", "advisory-db", ".venv"} for part in md.parts):
             continue
         content = md.read_text(encoding="utf-8")
-        for match in MD_PATTERN.finditer(content):
-            if err := check_anchor(md, match):
+        for match in RUST_PATTERN.finditer(content):
+            if err := check_rust_anchor(md, match):
                 errors.append(err)
+        if args.md_anchors:
+            for match in MD_PATTERN.finditer(content):
+                if err := check_md_anchor(md, match):
+                    errors.append(err)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

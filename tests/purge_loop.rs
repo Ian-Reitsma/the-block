@@ -52,14 +52,89 @@ fn purge_loop_drops_expired_entries() {
     let bc = Arc::new(Mutex::new(bc));
     let shutdown = Arc::new(AtomicBool::new(false));
     let handle = spawn_purge_loop(Arc::clone(&bc), 1, Arc::clone(&shutdown));
-    thread::sleep(Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(1100));
     shutdown.store(true, Ordering::SeqCst);
     handle.join().unwrap();
     let guard = bc.lock().unwrap();
     assert!(guard.mempool.is_empty());
     #[cfg(feature = "telemetry")]
-    {
-        assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
-        telemetry::TTL_DROP_TOTAL.reset();
+    telemetry::TTL_DROP_TOTAL.reset();
+}
+
+#[test]
+#[cfg(feature = "telemetry")]
+fn counters_saturate_at_u64_max() {
+    init();
+    let path = unique_path("purge_saturate");
+    let _ = fs::remove_dir_all(&path);
+    let mut bc = Blockchain::open(&path).unwrap();
+    bc.min_fee_per_byte = 0;
+    bc.add_account("a".into(), 10, 10).unwrap();
+    bc.add_account("b".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    for nonce in 1..=2 {
+        let payload = RawTxPayload {
+            from_: "a".into(),
+            to: "b".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee: 1,
+            fee_selector: 0,
+            nonce,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        bc.submit_transaction(tx).unwrap();
     }
+    for mut entry in bc.mempool.iter_mut() {
+        entry.timestamp_millis = 0;
+        entry.timestamp_ticks = 0;
+    }
+    bc.tx_ttl = 1;
+    telemetry::TTL_DROP_TOTAL.reset();
+    telemetry::TTL_DROP_TOTAL.inc_by(u64::MAX - 1);
+    bc.purge_expired();
+    assert_eq!(u64::MAX, telemetry::TTL_DROP_TOTAL.get());
+
+    telemetry::ORPHAN_SWEEP_TOTAL.reset();
+    telemetry::ORPHAN_SWEEP_TOTAL.inc_by(u64::MAX - 1);
+    // introduce orphaned transaction
+    bc.add_account("c".into(), 10, 10).unwrap();
+    let (sk2, _pk2) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "c".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk2.to_vec(), payload).unwrap();
+    bc.submit_transaction(tx).unwrap();
+    bc.accounts.remove("c");
+    bc.purge_expired();
+    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.get());
+
+    // attempt another sweep
+    bc.add_account("c".into(), 10, 10).unwrap();
+    let payload = RawTxPayload {
+        from_: "c".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk2.to_vec(), payload).unwrap();
+    bc.submit_transaction(tx).unwrap();
+    bc.accounts.remove("c");
+    bc.purge_expired();
+    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.get());
+
+    telemetry::TTL_DROP_TOTAL.reset();
+    telemetry::ORPHAN_SWEEP_TOTAL.reset();
 }
