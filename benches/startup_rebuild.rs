@@ -48,12 +48,16 @@ fn rebuild_naive(entries: &[MempoolEntryDisk], acc: &Account) {
     let mut bc = Blockchain::default();
     bc.accounts.insert(acc.address.clone(), acc.clone());
     for e in entries.iter() {
+        let size = bincode::serialize(&e.tx)
+            .map(|b| b.len() as u64)
+            .unwrap_or(0);
         bc.mempool.insert(
             (e.sender.clone(), e.nonce),
             MempoolEntry {
                 tx: e.tx.clone(),
                 timestamp_millis: e.timestamp_millis,
                 timestamp_ticks: e.timestamp_ticks,
+                serialized_size: size,
             },
         );
     }
@@ -76,12 +80,16 @@ fn rebuild_batched(entries: &[MempoolEntryDisk], acc: &Account) {
             break;
         }
         for e in batch {
+            let size = bincode::serialize(&e.tx)
+                .map(|b| b.len() as u64)
+                .unwrap_or(0);
             bc.mempool.insert(
                 (e.sender.clone(), e.nonce),
                 MempoolEntry {
                     tx: e.tx.clone(),
                     timestamp_millis: e.timestamp_millis,
                     timestamp_ticks: e.timestamp_ticks,
+                    serialized_size: size,
                 },
             );
         }

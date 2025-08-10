@@ -26,8 +26,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod simple_db;
 use simple_db::SimpleDb as Db;
 use std::convert::TryInto;
@@ -36,10 +37,7 @@ use thiserror::Error;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
-pub use telemetry::gather_metrics;
-#[cfg(feature = "telemetry")]
-pub use telemetry::serve as serve_metrics;
-
+pub use telemetry::{gather_metrics, serve_metrics};
 
 pub mod blockchain;
 use blockchain::difficulty;
@@ -379,17 +377,16 @@ pub struct MempoolEntry {
     pub timestamp_millis: u64,
     /// Monotonic tick count at admission for heap ordering
     pub timestamp_ticks: u64,
+    /// Cached serialized size of the transaction in bytes
+    pub serialized_size: u64,
 }
 
 impl MempoolEntry {
     fn fee_per_byte(&self) -> u64 {
-        let size = bincode::serialize(&self.tx)
-            .unwrap_or_else(|e| panic!("serialize tx: {e}"))
-            .len() as u64;
-        if size == 0 {
+        if self.serialized_size == 0 {
             0
         } else {
-            self.tx.payload.fee / size
+            self.tx.payload.fee / self.serialized_size
         }
     }
 
@@ -890,12 +887,16 @@ impl Blockchain {
                 #[cfg(not(feature = "telemetry"))]
                 let _ = fpb;
                 if bc.accounts.contains_key(&e.sender) {
+                    let size = bincode::serialize(&e.tx)
+                        .map(|b| b.len() as u64)
+                        .unwrap_or(0);
                     bc.mempool.insert(
                         (e.sender.clone(), e.nonce),
                         MempoolEntry {
                             tx: e.tx.clone(),
                             timestamp_millis: e.timestamp_millis,
                             timestamp_ticks: e.timestamp_ticks,
+                            serialized_size: size,
                         },
                     );
                     bc.inc_mempool_size();
@@ -1469,6 +1470,7 @@ impl Blockchain {
                         tx,
                         timestamp_millis: now.as_millis() as u64,
                         timestamp_ticks: now.as_nanos() as u64,
+                        serialized_size: size,
                     });
                     guard.commit();
                     #[cfg(feature = "telemetry")]
@@ -1605,9 +1607,7 @@ impl Blockchain {
         for entry in self.mempool.iter() {
             let sender = entry.key().0.clone();
             let nonce = entry.key().1;
-            let tx = &entry.value().tx;
-            let size = bincode::serialize(tx).map(|b| b.len() as u64).unwrap_or(0);
-            let fpb = if size == 0 { 0 } else { tx.payload.fee / size };
+            let fpb = entry.value().fee_per_byte();
             if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 telemetry::TTL_DROP_TOTAL.inc();
@@ -2324,6 +2324,57 @@ impl Blockchain {
     }
 }
 
+/// Spawn a background loop that periodically calls `purge_expired`.
+///
+/// The loop sleeps for `interval_secs` between iterations and stops when
+/// `shutdown` is set to `true`.
+pub fn spawn_purge_loop(
+    bc: Arc<Mutex<Blockchain>>,
+    interval_secs: u64,
+    shutdown: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        while !shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+            {
+                let mut guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+                let dropped = guard.purge_expired();
+                #[cfg(not(feature = "telemetry"))]
+                let _ = dropped;
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                info!("purge_loop ttl_drop_total={dropped}");
+                #[cfg(feature = "telemetry-json")]
+                log_event(
+                    log::Level::Info,
+                    "purge_loop",
+                    "",
+                    0,
+                    "ttl_drop_total",
+                    Some(dropped),
+                );
+            }
+            thread::sleep(Duration::from_secs(interval_secs));
+        }
+    })
+}
+
+/// Conditionally spawn a purge loop based on `TB_PURGE_LOOP_SECS`.
+///
+/// Returns `Some(handle)` if the environment variable parses to a positive
+/// interval and the loop was started, otherwise `None`.
+pub fn maybe_spawn_purge_loop(
+    bc: Arc<Mutex<Blockchain>>,
+    shutdown: Arc<AtomicBool>,
+) -> Option<thread::JoinHandle<()>> {
+    if let Ok(v) = std::env::var("TB_PURGE_LOOP_SECS") {
+        if let Ok(secs) = v.parse::<u64>() {
+            if secs > 0 {
+                return Some(spawn_purge_loop(bc, secs, shutdown));
+            }
+        }
+    }
+    None
+}
+
 impl Drop for Blockchain {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
@@ -2513,10 +2564,6 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
-    #[cfg(feature = "telemetry")]
-    {
-        m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;
-    }
     m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
     m.add(
         "ErrInvalidSelector",

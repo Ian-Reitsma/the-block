@@ -9,6 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Check anchors
+        run: python scripts/check_anchors.py
       - name: Run tests
         id: vars
         run: |

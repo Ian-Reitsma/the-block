@@ -20,15 +20,20 @@
   `DROP_NOT_FOUND_TOTAL` expose detailed rejection counts.
 - `TX_REJECTED_TOTAL{reason=*}` aggregates all rejection reasons.
 - `serve_metrics(addr)` exposes Prometheus text over a lightweight HTTP listener.
+- `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS` and spawns a background
+  thread that periodically calls `purge_expired`, advancing
+  `ttl_drop_total` and `orphan_sweep_total`.
 - Spans `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
   `startup_rebuild` record sender, nonce, fee-per-byte, and mempool size
-  ([src/lib.rs](src/lib.rs#L1066-L1081),
-  [src/lib.rs](src/lib.rs#L1535-L1541),
-  [src/lib.rs](src/lib.rs#L1621-L1656),
-  [src/lib.rs](src/lib.rs#L878-L888)).
+  ([src/lib.rs](src/lib.rs#L1067-L1082),
+  [src/lib.rs](src/lib.rs#L1536-L1542),
+  [src/lib.rs](src/lib.rs#L1622-L1657),
+  [src/lib.rs](src/lib.rs#L879-L889)).
 - Documented `mempool_mutex → sender_mutex` lock order and added
   `admit_and_mine_never_over_cap` regression to prove the mempool size
   invariant.
-- **B ‑5 Startup TTL Purge — COMPLETED** – `Blockchain::open` now invokes [`purge_expired`](src/lib.rs#L1596-L1665)
-  ([src/lib.rs](src/lib.rs#L917-L934)), recording
+- **B ‑5 Startup TTL Purge — COMPLETED** – `Blockchain::open` now invokes [`purge_expired`](src/lib.rs#L1597-L1666)
+  ([src/lib.rs](src/lib.rs#L918-L935)), recording
   `ttl_drop_total`, `startup_ttl_drop_total`, and `expired_drop_total` on restart.
+- Cached serialized transaction sizes in `MempoolEntry` so `purge_expired`
+  avoids reserializing transactions (internal optimization).

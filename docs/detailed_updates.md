@@ -30,9 +30,9 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   (`balance_overflow_reject_total`), drop failures (`drop_not_found_total`),
   and total rejections labelled by reason (`tx_rejected_total{reason=*}`).
 - **B‑5 Startup TTL Purge — COMPLETED** – `Blockchain::open` batches mempool
-  rebuilds and invokes [`purge_expired`](../src/lib.rs#L1596-L1665) on startup
-  ([../src/lib.rs](../src/lib.rs#L917-L934)), updating
-  [`orphan_counter`](../src/lib.rs#L1637-L1662) and logging `expired_drop_total`
+  rebuilds and invokes [`purge_expired`](../src.lib.rs#L1597-L1666) on startup
+  ([../src/lib.rs](../src.lib.rs#L918-L935)), updating
+  [`orphan_counter`](../src.lib.rs#L1638-L1663) and logging `expired_drop_total`
   while `ttl_drop_total` and `startup_ttl_drop_total` advance.
 - **Startup Rebuild Benchmark** – Criterion bench `startup_rebuild` compares
   batched vs naive mempool hydration throughput.
@@ -45,10 +45,10 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   recovery and metric increments.
 - **Schema Migration Tests** – `test_schema_upgrade_compatibility` exercises v1/v2/v3 disks upgrading to v4 with `timestamp_ticks` hydration; `ttl_expired_purged_on_restart` proves TTL expiry across restarts.
 - **Tracing Spans** – `mempool_mutex`, `admission_lock`, `eviction_sweep`, and `startup_rebuild`
-  ([../src/lib.rs](../src/lib.rs#L1066-L1081),
-  [../src/lib.rs](../src/lib.rs#L1535-L1541),
-  [../src/lib.rs](../src/lib.rs#L1621-L1656),
-  [../src/lib.rs](../src/lib.rs#L878-L888))
+  ([../src/lib.rs](../src/lib.rs#L1067-L1082),
+  [../src/lib.rs](../src/lib.rs#L1536-L1542),
+  [../src/lib.rs](../src/lib.rs#L1622-L1657),
+  [../src/lib.rs](../src.lib.rs#L879-L889))
   capture `sender`, `nonce`, `fee_per_byte`, and the current
   `mempool_size` for fine-grained profiling.
 - **Admission Panic Property Test** – `admission_panic_rolls_back_all_steps`
@@ -86,15 +86,24 @@ curl -s localhost:9000/metrics \
 - **Rejection Reason Metrics** – `rejection_reasons` regression suite asserts
   `invalid_selector_reject_total`, `balance_overflow_reject_total`, and
   `drop_not_found_total` alongside the labelled `tx_rejected_total` entries.
+- **Background Purge Loop** – `maybe_spawn_purge_loop` reads
+  `TB_PURGE_LOOP_SECS` / `--mempool-purge-interval` and periodically calls
+  `purge_expired`, advancing TTL and orphan-sweep metrics even when the mempool
+  is idle.
+- **Mempool Entry Cache** – Each mempool entry now caches its serialized size,
+  allowing `purge_expired` to compute fee-per-byte without reserializing
+  transactions.
+- **Anchor Validation** – Added `scripts/check_anchors.py` and CI step to ensure
+  Markdown links to `src/lib.rs` remain valid.
 - **Schema v4 Note** – Migration serializes mempool contents with timestamps;
   `Blockchain::open` rebuilds the mempool on startup, encoding both
   `timestamp_millis` and `timestamp_ticks` per entry, skips missing-account
-  entries, and invokes [`purge_expired`](../src/lib.rs#L1596-L1665) to drop
-  TTL-expired transactions and update [`orphan_counter`](../src/lib.rs#L1637-L1662).
+  entries, and invokes [`purge_expired`](../src.lib.rs#L1597-L1666) to drop
+  TTL-expired transactions and update [`orphan_counter`](../src.lib.rs#L1638-L1663).
   Startup rebuild loads entries in batches of 256, logs the combined
   `expired_drop_total`, and `ttl_drop_total` and `startup_ttl_drop_total`
   advance for visibility
-  ([../src/lib.rs](../src/lib.rs#L917-L934)).
+  ([../src/lib.rs](../src.lib.rs#L918-L935)).
 - **Configurable Limits** – `max_mempool_size`, `min_fee_per_byte`, `tx_ttl`
   and per-account pending limits are configurable via `TB_*` environment
   variables. Expired transactions are purged on startup and new submissions.

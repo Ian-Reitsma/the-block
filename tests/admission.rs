@@ -73,6 +73,7 @@ fn mine_block_skips_nonce_gaps() {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos() as u64,
+            serialized_size: bincode::serialize(&tx).map(|b| b.len() as u64).unwrap_or(0),
         },
     );
     let block = bc.mine_block("miner").unwrap();

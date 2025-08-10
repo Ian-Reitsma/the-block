@@ -26,11 +26,13 @@ re‑implement:
    `drop_not_found_total`, `tx_rejected_total{reason=*}`, and span coverage
    for `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
    `startup_rebuild` capturing sender, nonce, fee_per_byte, and
-  mempool_size ([`src/lib.rs`](src/lib.rs#L1066-L1081),
-    [`src/lib.rs`](src/lib.rs#L1535-L1541),
-    [`src/lib.rs`](src/lib.rs#L1621-L1656),
-    [`src/lib.rs`](src/lib.rs#L878-L888)). Comparator ordering test for
+  mempool_size ([`src/lib.rs`](src/lib.rs#L1067-L1082),
+    [`src/lib.rs`](src/lib.rs#L1536-L1542),
+    [`src/lib.rs`](src/lib.rs#L1622-L1657),
+    [`src/lib.rs`](src/lib.rs#L879-L889)). Comparator ordering test for
    mempool priority.
+   `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS`/`--mempool-purge-interval`
+   and calls `purge_expired` periodically, advancing TTL and orphan-sweep metrics.
 6. **Mempool atomicity**: global `mempool_mutex → sender_mutex` critical section with
    counter updates, heap ops, and pending balances inside; orphan sweeps rebuild
    the heap when `orphan_counter > mempool_size / 2` and emit `ORPHAN_SWEEP_TOTAL`.
@@ -38,9 +40,12 @@ re‑implement:
    `timestamp_ticks` for deterministic startup purge; panic-inject eviction test
    proves lock-poison recovery.
 8. **B‑5 Startup TTL Purge — COMPLETED**: `Blockchain::open` batches mempool rebuilds,
-   invokes [`purge_expired`](src/lib.rs#L1596-L1665) on startup
-   ([src/lib.rs](src/lib.rs#L917-L934)), and restart tests ensure both
+   invokes [`purge_expired`](src/lib.rs#L1597-L1666) on startup
+   ([src/lib.rs](src/lib.rs#L918-L935)), and restart tests ensure both
    `ttl_drop_total` and `startup_ttl_drop_total` advance.
+9. Cached each transaction's serialized size in `MempoolEntry` and updated
+   `purge_expired` to use the cached fee-per-byte, avoiding reserialization.
+   Added `scripts/check_anchors.py` and CI step to validate Markdown anchors.
 
 ---
 
@@ -93,10 +98,10 @@ Treat the following as blockers. Implement each with atomic commits, exhaustive 
      regression tests for each labelled rejection.
    - Instrument spans `mempool_mutex`, `admission_lock`, `eviction_sweep`,
      and `startup_rebuild` capturing sender, nonce, fee_per_byte,
-     mempool_size ([`src/lib.rs`](src/lib.rs#L1066-L1081),
-     [`src/lib.rs`](src/lib.rs#L1535-L1541),
-     [`src/lib.rs`](src/lib.rs#L1621-L1656),
-     [`src/lib.rs`](src/lib.rs#L878-L888)).
+     mempool_size ([`src/lib.rs`](src/lib.rs#L1067-L1082),
+     [`src/lib.rs`](src/lib.rs#L1536-L1542),
+     [`src/lib.rs`](src/lib.rs#L1622-L1657),
+     [`src/lib.rs`](src/lib.rs#L879-L889)).
    - Document scrape example for `serve_metrics` and span list in
      `docs/detailed_updates.md` and specs.
 3. **Test & Fuzz Matrix**

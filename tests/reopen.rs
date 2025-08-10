@@ -198,6 +198,67 @@ fn startup_ttl_purge_increments_metrics() {
 }
 
 #[test]
+fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
+    init();
+    let path = unique_path("startup_orphan_metrics");
+    let _ = fs::remove_dir_all(&path);
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::STARTUP_TTL_DROP_TOTAL.reset();
+        telemetry::ORPHAN_SWEEP_TOTAL.reset();
+        telemetry::MEMPOOL_SIZE.set(0);
+    }
+    {
+        let (sk, _pk) = generate_keypair();
+        fs::create_dir_all(&path).unwrap();
+        let payload = RawTxPayload {
+            from_: "ghost".into(),
+            to: "b".into(),
+            amount_consumer: 1,
+            amount_industrial: 1,
+            fee: 1000,
+            fee_selector: 0,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let entry = MempoolEntryDisk {
+            sender: "ghost".into(),
+            nonce: 1,
+            tx: tx.clone(),
+            timestamp_millis: now,
+            timestamp_ticks: now,
+        };
+        let disk = ChainDisk {
+            schema_version: 4,
+            chain: Vec::new(),
+            accounts: HashMap::new(),
+            emission_consumer: 0,
+            emission_industrial: 0,
+            block_reward_consumer: TokenAmount::new(0),
+            block_reward_industrial: TokenAmount::new(0),
+            block_height: 0,
+            mempool: vec![entry],
+        };
+        let mut map: HashMap<String, Vec<u8>> = HashMap::new();
+        map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+        let db_path = Path::new(&path).join("db");
+        fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+    }
+    let bc = Blockchain::open(&path).unwrap();
+    assert!(bc.mempool.is_empty());
+    #[cfg(feature = "telemetry")]
+    {
+        assert_eq!(0, telemetry::STARTUP_TTL_DROP_TOTAL.get());
+        assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    }
+}
+
+#[test]
 fn timestamp_ticks_persist_across_restart() {
     init();
     let (sk, _pk) = generate_keypair();
