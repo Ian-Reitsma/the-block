@@ -8,8 +8,8 @@
   indexes; `Blockchain::open` rebuilds the mempool on startup dropping
   expired or orphaned entries.
 - **B‑5 Startup TTL Purge — COMPLETED**: `Blockchain::open` batches mempool
-  rebuilds, invokes [`purge_expired`](src/lib.rs#L1596-L1665) during startup
-  ([src/lib.rs](src/lib.rs#L917-L934)), logs `expired_drop_total`, and
+  rebuilds, invokes [`purge_expired`](src/lib.rs#L1597-L1666) during startup
+  ([src/lib.rs](src/lib.rs#L918-L935)), logs `expired_drop_total`, and
   increments `ttl_drop_total` and `startup_ttl_drop_total`.
 - Breaking: mempool entries persist admission timestamps (`timestamp_millis`
   and monotonic `timestamp_ticks`); schema v4 serializes pending transactions
@@ -36,13 +36,20 @@
   (expired mempool entries dropped during startup) and
   benchmark `startup_rebuild` compares throughput.
 - Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for Prometheus scrapes.
+- Feat: optional purge loop `maybe_spawn_purge_loop` reads
+  `TB_PURGE_LOOP_SECS` / `--mempool-purge-interval` and calls
+  `purge_expired` on a fixed interval, advancing `ttl_drop_total` and
+  `orphan_sweep_total`.
+- Perf: cache serialized transaction size in each mempool entry so
+  `purge_expired` can compute fee-per-byte without reserializing.
+- Dev: CI validates Markdown anchors via `scripts/check_anchors.py`.
 - Feat: rejection counter `tx_rejected_total{reason=*}` and spans
   `mempool_mutex`, `admission_lock`, `eviction_sweep`, `startup_rebuild`
   capture sender, nonce, fee-per-byte, and mempool size for traceability
-    ([src/lib.rs](src/lib.rs#L1066-L1081),
-    [src/lib.rs](src/lib.rs#L1535-L1541),
-    [src/lib.rs](src/lib.rs#L1621-L1656),
-    [src/lib.rs](src/lib.rs#L878-L888)).
+    ([src/lib.rs](src/lib.rs#L1067-L1082),
+    [src/lib.rs](src/lib.rs#L1536-L1542),
+    [src/lib.rs](src/lib.rs#L1622-L1657),
+    [src/lib.rs](src/lib.rs#L879-L889)).
 - Test: add panic-inject harness for admission eviction proving full rollback
   and advancing `lock_poison_total` and rejection counters.
 - Test: add admission panic hook verifying reservation rollback across steps.

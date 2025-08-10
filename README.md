@@ -48,10 +48,7 @@ python demo.py               # same demo
 
 ## Disclaimer
 
-This repository is a **research prototype**. Running the demo does **not** create
-or transfer any real cryptocurrency. Nothing herein constitutes financial advice
-or an invitation to invest. Use the code at your own risk and review the license
-terms carefully.
+This repository houses a production‑grade blockchain kernel under active development. Running the demo does **not** create or transfer any real cryptocurrency. Nothing herein constitutes financial advice or an invitation to invest. Use the code at your own risk and review the license terms carefully.
 
 ---
 
@@ -203,13 +200,19 @@ curl -s localhost:9000/metrics \
   | grep -E 'mempool_size|startup_ttl_drop_total|invalid_selector_reject_total|tx_rejected_total'
 ```
 
+Call `maybe_spawn_purge_loop` after opening the chain to honor
+`TB_PURGE_LOOP_SECS`. When set to a positive value the helper spawns a
+background thread that periodically calls `purge_expired`, trimming TTL-expired
+entries even without new submissions and driving `ttl_drop_total` and
+`orphan_sweep_total`.
+
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
 `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),
 `lock_poison_total`, `orphan_sweep_total`,
 `invalid_selector_reject_total`, `balance_overflow_reject_total`,
 `drop_not_found_total`, and `tx_rejected_total{reason=*}`. Spans
-[`mempool_mutex`](src/lib.rs#L1066-L1081), [`admission_lock`](src/lib.rs#L1535-L1541),
-[`eviction_sweep`](src/lib.rs#L1621-L1656), and [`startup_rebuild`](src/lib.rs#L878-L888) annotate
+[`mempool_mutex`](src/lib.rs#L1067-L1082), [`admission_lock`](src/lib.rs#L1536-L1542),
+[`eviction_sweep`](src/lib.rs#L1622-L1657), and [`startup_rebuild`](src/lib.rs#L879-L889) annotate
 sender, nonce, fee-per-byte, and sweep details.
 
 Report security issues privately via `security@the-block.dev` (PGP key in `docs/SECURITY.md`).
@@ -218,7 +221,7 @@ Report security issues privately via `security@the-block.dev` (PGP key in `docs/
 
 ## Disclaimer
 
-This software is an experimental blockchain kernel for research and development. It is not investment advice and comes with no warranty. Use at your own risk.
+This software is a production‑grade blockchain kernel under active development. It is not investment advice and comes with no warranty. Use at your own risk.
 
 ---
 

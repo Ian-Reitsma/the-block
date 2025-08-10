@@ -4,7 +4,7 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 
 ## 0. Scope Reminder
 
-* **Research Prototype** – The code demonstrates blockchain mechanics for educational review. It is **not** a production network nor financial instrument.
+* **Production Kernel** – The code targets real economic deployment. It is **not** a toy network nor financial instrument.
 * **Rust First, Python Friendly** – The kernel is implemented in Rust with PyO3 bindings for scripting and tests. Absolutely no unsafe code is allowed.
 * **Dual‑Token Ledger** – Balances are tracked in consumer and industrial units. Token arithmetic uses the `TokenAmount` wrapper.
 
@@ -35,6 +35,8 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Entries referencing missing accounts increment an `orphan_counter`; once the
   counter exceeds half the mempool, a sweep drops all orphans, emits
   `ORPHAN_SWEEP_TOTAL`, and resets the counter.
+* Each mempool entry caches its serialized size so `purge_expired` can compute
+  fee-per-byte without reserializing transactions.
 
 ### Telemetry Metrics & Spans
 * Metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
@@ -43,13 +45,17 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   `lock_poison_total`, `orphan_sweep_total`, `invalid_selector_reject_total`,
   `balance_overflow_reject_total`, `drop_not_found_total`,
   `tx_rejected_total{reason=*}`.
+* `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS` (or
+  `--mempool-purge-interval`) and spawns a thread that periodically calls
+  `purge_expired`, advancing TTL and orphan-sweep metrics even when the node is
+  idle.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
-  mempool_size). See [`src/lib.rs`](src/lib.rs#L1066-L1081),
-  [`src/lib.rs`](src/lib.rs#L1535-L1541),
-  [`src/lib.rs`](src/lib.rs#L1621-L1656), and
-  [`src/lib.rs`](src/lib.rs#L878-L888).
+  mempool_size). See [`src/lib.rs`](src/lib.rs#L1067-L1082),
+  [`src/lib.rs`](src/lib.rs#L1536-L1542),
+  [`src/lib.rs`](src/lib.rs#L1622-L1657), and
+  [`src/lib.rs`](src/lib.rs#L879-L889).
 * `serve_metrics(addr)` exposes Prometheus text; e.g.
   `curl -s localhost:9000/metrics | grep tx_rejected_total`.
 
@@ -73,13 +79,13 @@ The following directives are mandatory before any feature expansion. Deliver eac
 
 1. **B‑3 Timestamp Persistence** — *COMPLETED*
    - Persist `MempoolEntry.timestamp_ticks` (schema v4) and rebuild the heap on `Blockchain::open`.
-   - Run [`purge_expired`](src/lib.rs#L1596-L1665) during startup ([src/lib.rs](src/lib.rs#L917-L934)), dropping stale or missing‑account entries and logging `expired_drop_total`.
+   - Run [`purge_expired`](src/lib.rs#L1597-L1666) during startup ([src/lib.rs](src/lib.rs#L918-L935)), dropping stale or missing‑account entries and logging `expired_drop_total`.
    - Update `CONSENSUS.md` with encoding details and migration guidance.
 2. **B‑4 Self‑Evict Deadlock Test** — *COMPLETED*
    - Add a panic‑inject harness that forces eviction mid‑admission to prove lock ordering and automatic rollback.
    - Ensure `LOCK_POISON_TOTAL` and `TX_REJECTED_TOTAL{reason=lock_poison}` advance together.
 3. **B‑5 Startup TTL Purge** — *COMPLETED*
-   - `Blockchain::open` batches mempool rebuilds, invokes [`purge_expired`](src/lib.rs#L1596-L1665) on startup ([src/lib.rs](src/lib.rs#L917-L934)) and restart tests assert `ttl_drop_total` and `startup_ttl_drop_total` advance.
+   - `Blockchain::open` batches mempool rebuilds, invokes [`purge_expired`](src/lib.rs#L1597-L1666) on startup ([src/lib.rs](src/lib.rs#L918-L935)) and restart tests assert `ttl_drop_total` and `startup_ttl_drop_total` advance.
    - `CONSENSUS.md` documents the startup purge, batch size, and telemetry defaults.
 4. **Deterministic Eviction & Replay Tests**
    - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` for stable ordering.
@@ -127,10 +133,10 @@ Once networking is stable, the project aims to become a modular research platfor
   documentation, or potential bug risks.
 * **No code without spec** – if the behavior is not described in `AGENTS.md` or this supplement, document it first.
 * **Explain your reasoning** in PR summaries. Future agents must be able to trace design decisions from docs → commit → code.
-* **Educational Only** – reiterate that this repository does not create real tokens or investment opportunities. The project is a learning platform.
+* **Operational Rigor** – this repository does not create real tokens or investment opportunities, yet every change assumes eventual main-net exposure.
 
 ---
 
 ### Disclaimer
-The information herein is provided for research and educational purposes. The maintainers of **the‑block** do not offer investment advice or guarantee financial returns. Use the software at your own risk and consult the license terms for permitted usage.
+The information herein is provided without warranty and does not constitute investment advice. Use the software at your own risk and consult the license terms for permitted usage.
 

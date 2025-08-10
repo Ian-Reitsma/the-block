@@ -354,20 +354,32 @@ fn comparator_orders_by_fee_expiry_hash() {
     let tx1 = build_signed_tx(&sk, "alice", "bob", 1, 0, 2000, 1);
     let tx2 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 2);
     let tx3 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 3);
+    let size1 = bincode::serialize(&tx1)
+        .map(|b| b.len() as u64)
+        .unwrap_or(0);
+    let size2 = bincode::serialize(&tx2)
+        .map(|b| b.len() as u64)
+        .unwrap_or(0);
+    let size3 = bincode::serialize(&tx3)
+        .map(|b| b.len() as u64)
+        .unwrap_or(0);
     let e1 = MempoolEntry {
         tx: tx1,
         timestamp_millis: 1,
         timestamp_ticks: 1,
+        serialized_size: size1,
     };
     let e2 = MempoolEntry {
         tx: tx2.clone(),
         timestamp_millis: 1,
         timestamp_ticks: 1,
+        serialized_size: size2,
     };
     let e3 = MempoolEntry {
         tx: tx3.clone(),
         timestamp_millis: 1,
         timestamp_ticks: 1,
+        serialized_size: size3,
     };
     let mut entries = vec![e3, e2.clone(), e1];
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
