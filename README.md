@@ -14,9 +14,10 @@
 5. [Using the Python Module](#using-the-python-module)
 6. [Architecture Primer](#architecture-primer)
 7. [Project Layout](#project-layout)
-8. [Contribution Guidelines](#contribution-guidelines)
-9. [Security Model](#security-model)
-10. [License](#license)
+8. [Status & Roadmap](#status--roadmap)
+9. [Contribution Guidelines](#contribution-guidelines)
+10. [Security Model](#security-model)
+11. [License](#license)
 
 ---
 
@@ -122,6 +123,13 @@ print(block["header"]["hash"])
 
 All functions return Python‑native types (`dict`, `bytes`, `int`) for simplicity.
 
+Additional helpers:
+
+- `decode_payload(bytes)` reverses canonical encoding to `RawTxPayload`.
+- `ShutdownFlag` and `PurgeLoopHandle` let you control the TTL purge loop via
+  `maybe_spawn_purge_loop(bc, ShutdownFlag())`.
+- Reusing or skipping a nonce raises `ErrNonceGap`.
+
 ---
 
 ## Architecture Primer
@@ -163,6 +171,38 @@ AGENTS.md              # Developer handbook (authoritative)
 
 ---
 
+## Status & Roadmap
+
+### Accomplishments
+
+- **NonceGap enforcement** – admission rejects any transaction that skips a nonce and surfaces a dedicated `ErrNonceGap` exception.
+- **Python purge-loop control** – `ShutdownFlag` and `PurgeLoopHandle` allow Python callers to spawn and stop TTL cleanup threads via `maybe_spawn_purge_loop`.
+- **Dynamic difficulty retargeting** – proof-of-work adjusts to network timing using a moving average of the last 120 blocks with a ±4× clamp.
+- **In-block nonce continuity** – `validate_block` tracks nonces per sender and rejects gaps or repeats within mined blocks.
+- **Cross-language serialization determinism** – Rust generates canonical payload CSV vectors and a Python script reencodes them to assert byte equality.
+- **Schema v4 migration** – legacy databases recompute coinbase and fee checksums to preserve total supply.
+- **Demo narration** – `demo.py` now explains fee selectors, nonce reuse, and automatically manages purge-loop lifetime.
+
+### Immediate Priorities (0–2 months)
+
+- Harden admission atomicity by unifying `(sender, nonce)` insert + reservation into a single operation.
+- Property tests ensuring pending balance rollbacks and contiguous nonces after drops or reorgs.
+- Document new helpers and metrics across `API_CHANGELOG.md`, `README.md`, and specs with anchor validation.
+
+### Medium Term (2–6 months)
+
+- Replace the in-memory `SimpleDb` with a crash-safe backend (sled/RocksDB) behind a storage trait.
+- Introduce basic P2P block and transaction gossip with libp2p, enforcing validation on receipt.
+- Expose node controls via a CLI or RPC layer for balance queries, transaction submission, mining, and metrics.
+
+### Long Term (6 months +)
+
+- Research proof-of-service extensions that reward external resource contributions.
+- Abstract signature verification to allow pluggable post-quantum algorithms.
+- Define an on-chain governance mechanism with feature-bit negotiation for upgrades.
+
+---
+
 ## Contribution Guidelines
 
 1. **Fork & branch**: `git checkout -b feat/<topic>`.
@@ -200,19 +240,19 @@ curl -s localhost:9000/metrics \
   | grep -E 'mempool_size|startup_ttl_drop_total|invalid_selector_reject_total|tx_rejected_total'
 ```
 
-Call `maybe_spawn_purge_loop` after opening the chain to honor
-`TB_PURGE_LOOP_SECS`. When set to a positive value the helper spawns a
-background thread that periodically calls `purge_expired`, trimming TTL-expired
-entries even without new submissions and driving `ttl_drop_total` and
-`orphan_sweep_total`.
+Call `maybe_spawn_purge_loop(bc, ShutdownFlag())` after opening the chain to
+honor `TB_PURGE_LOOP_SECS`. When set to a positive value the helper spawns a
+background thread and returns a `PurgeLoopHandle` you can join to shut it down.
+The loop periodically calls `purge_expired`, trimming TTL-expired entries even
+without new submissions and driving `ttl_drop_total` and `orphan_sweep_total`.
 
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
 `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),
 `lock_poison_total`, `orphan_sweep_total`,
 `invalid_selector_reject_total`, `balance_overflow_reject_total`,
 `drop_not_found_total`, and `tx_rejected_total{reason=*}`. Spans
-[`mempool_mutex`](src/lib.rs#L1067-L1082), [`admission_lock`](src/lib.rs#L1536-L1542),
-[`eviction_sweep`](src/lib.rs#L1622-L1657), and [`startup_rebuild`](src/lib.rs#L879-L889) annotate
+[`mempool_mutex`](src/lib.rs#L1132-L1145), [`admission_lock`](src/lib.rs#L1596-L1608),
+[`eviction_sweep`](src/lib.rs#L1684-L1704), and [`startup_rebuild`](src/lib.rs#L936-L948) annotate
 sender, nonce, fee-per-byte, and sweep details.
 
 Report security issues privately via `security@the-block.dev` (PGP key in `docs/SECURITY.md`).

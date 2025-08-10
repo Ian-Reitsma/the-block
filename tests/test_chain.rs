@@ -393,7 +393,7 @@ fn test_pending_nonce_and_balances() {
     let gap = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 3);
     assert!(matches!(
         bc.submit_transaction(gap),
-        Err(TxAdmissionError::BadNonce)
+        Err(TxAdmissionError::NonceGap)
     ));
     // sequential nonce succeeds
     let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 2);
@@ -604,6 +604,7 @@ fn test_import_difficulty_mismatch() {
     let enc = BlockEncoder {
         index: fork[idx].index,
         prev: &fork[idx].previous_hash,
+        timestamp: fork[idx].timestamp_millis,
         nonce: fork[idx].nonce,
         difficulty: fork[idx].difficulty,
         coin_c: fork[idx].coinbase_consumer.0,

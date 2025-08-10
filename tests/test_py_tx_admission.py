@@ -25,7 +25,7 @@ def test_unknown_sender(tmp_path):
         bc.submit_transaction(stx)
 
 
-def test_bad_nonce(tmp_path):
+def test_nonce_gap(tmp_path):
     bc = make_bc(tmp_path / "nonce")
     bc.add_account("miner", 10_000, 0)
     bc.add_account("alice", 0, 0)
@@ -41,7 +41,7 @@ def test_bad_nonce(tmp_path):
         memo=b"",
     )
     stx = the_block.sign_tx(list(priv), payload)
-    with pytest.raises(the_block.ErrBadNonce):
+    with pytest.raises(the_block.ErrNonceGap):
         bc.submit_transaction(stx)
 
 

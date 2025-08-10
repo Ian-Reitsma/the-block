@@ -6,7 +6,7 @@ use std::time::Duration;
 
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
-use the_block::{generate_keypair, sign_tx, spawn_purge_loop, Blockchain, RawTxPayload};
+use the_block::{generate_keypair, maybe_spawn_purge_loop, sign_tx, Blockchain, RawTxPayload};
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -21,10 +21,11 @@ fn unique_path(prefix: &str) -> String {
 }
 
 #[test]
-fn purge_loop_drops_expired_entries() {
+fn env_driven_purge_loop_drops_entries() {
     init();
-    let path = unique_path("purge_loop");
+    let path = unique_path("maybe_purge_loop");
     let _ = fs::remove_dir_all(&path);
+    std::env::set_var("TB_PURGE_LOOP_SECS", "1");
     let mut bc = Blockchain::open(&path).unwrap();
     bc.min_fee_per_byte = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
@@ -51,10 +52,12 @@ fn purge_loop_drops_expired_entries() {
     telemetry::TTL_DROP_TOTAL.reset();
     let bc = Arc::new(Mutex::new(bc));
     let shutdown = Arc::new(AtomicBool::new(false));
-    let handle = spawn_purge_loop(Arc::clone(&bc), 1, Arc::clone(&shutdown));
+    let handle =
+        maybe_spawn_purge_loop(Arc::clone(&bc), Arc::clone(&shutdown)).expect("loop not started");
     thread::sleep(Duration::from_millis(50));
     shutdown.store(true, Ordering::SeqCst);
     handle.join().unwrap();
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
     let guard = bc.lock().unwrap();
     assert!(guard.mempool.is_empty());
     #[cfg(feature = "telemetry")]

@@ -174,3 +174,11 @@ pub fn verify_signed_tx_py(tx: SignedTransaction) -> bool {
 pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
     canonical_payload_bytes(&payload)
 }
+
+/// Python helper that decodes canonical bytes into a [`RawTxPayload`].
+#[pyfunction(name = "decode_payload")]
+pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
+    bincode_config()
+        .deserialize(&bytes)
+        .map_err(|e| PyValueError::new_err(format!("decode: {e}")))
+}

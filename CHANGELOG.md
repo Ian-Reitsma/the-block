@@ -32,6 +32,19 @@
 - Feat: rejection counters `invalid_selector_reject_total`,
   `balance_overflow_reject_total`, and `drop_not_found_total` accompany
   labelled `tx_rejected_total{reason=*}` metrics.
+- Breaking: rename `BadNonce` to `NonceGap` and expose `decode_payload` to Python for
+  canonical payload round-trips.
+- Fix: schema v4 migration recomputes coinbase amounts and fee checksums to
+  preserve total supply.
+- Feat: dynamic difficulty retargeting adjusts PoW targets using a moving
+  average over recent block timestamps with step clamped to ×4/¼; validators
+  reject blocks whose header difficulty mismatches `expected_difficulty`.
+- Feat: block validation enforces per-sender nonce continuity, rejecting gaps
+  or repeats inside a mined block.
+- Feat: Python purge-loop controls (`ShutdownFlag`, `PurgeLoopHandle`,
+  `maybe_spawn_purge_loop`) allow TTL cleanup threads from Python and demo.
+- Test: cross-language serialization determinism ensured via
+  `serialization_equiv.rs` and `scripts/serialization_equiv.py`.
 - Feat: batched startup mempool rebuild reports `startup_ttl_drop_total`
   (expired mempool entries dropped during startup) and
   benchmark `startup_rebuild` compares throughput.

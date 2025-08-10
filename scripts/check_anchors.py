@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Validate Markdown references to src/lib.rs line ranges.
+"""Validate Markdown references to Rust source line ranges.
 
-Searches repository markdown files for links like ``src/lib.rs#L10-L20`` and
-verifies that the referenced line numbers exist in ``src/lib.rs``. Supports
-relative paths such as ``../src/lib.rs``.
+Searches repository markdown files for links like ``src/lib.rs#L10-L20`` or
+``src/telemetry.rs#L5`` and verifies that the referenced line numbers exist in
+the target file. Supports relative paths such as ``../src/lib.rs``.
 """
 from __future__ import annotations
 
@@ -12,8 +12,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# ``src/`` prefix with any path ending in ``.rs``
 MD_PATTERN = re.compile(
-    r"\((?P<path>(?:\./|\../)*src/lib\.rs)#L(?P<start>\d+)(?:-L(?P<end>\d+))?\)"
+    r"\((?P<path>(?:\./|\../)*src/[A-Za-z0-9_/]+\.rs)#L(?P<start>\d+)(?:-L(?P<end>\d+))?\)"
 )
 
 

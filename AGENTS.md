@@ -379,6 +379,22 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - Ensure `purge_expired()` runs during `Blockchain::open` and is covered by a restart test that proves `ttl_drop_total` advances.
 - Spec the startup purge behaviour and default telemetry in `CONSENSUS.md` and docs.
 
+### B‑6 · Dynamic Difficulty Retargeting — **COMPLETED**
+- Implement `expected_difficulty` using a moving average over the last ~120
+  block timestamps with the adjustment bounded to the range \[¼, ×4].
+- Include `difficulty` in block headers; `mine_block` encodes it and
+  `validate_block` rejects mismatches.
+
+### B‑7 · Cross-Language Determinism — **COMPLETED**
+- Expose `decode_payload` through FFI and add a Rust ↔ Python
+  round‑trip test (`serialization_equiv.rs` and
+  `scripts/serialization_equiv.py`) wired into CI.
+
+### B‑8 · Purge Loop Controls — **COMPLETED**
+- Provide `ShutdownFlag`, `PurgeLoopHandle`, and
+  `maybe_spawn_purge_loop` bindings so Python callers and the demo can
+  manage TTL cleanup threads.
+
 ### Deterministic Eviction & Replay Safety
 - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` and prove ordering stability.
 - Replay suite includes `ttl_expired_purged_on_restart` for TTL expiry and `test_schema_upgrade_compatibility` verifying v1/v2/v3 disks migrate to v4, hydrating `timestamp_ticks`.

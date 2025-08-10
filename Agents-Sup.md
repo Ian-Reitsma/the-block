@@ -11,14 +11,18 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ## 1. Current Architecture Overview
 
 ### Consensus & Mining
-* Proof of Work using BLAKE3 hashes. Difficulty is static today (see `Blockchain.difficulty`).
+* Proof of Work using BLAKE3 hashes with dynamic difficulty retargeting.
+  `expected_difficulty` computes a moving average over ~120 block timestamps
+  clamped to a \[¼, ×4] adjustment; headers store the difficulty and validators
+  reject mismatches.
 * Each block stores `coinbase_consumer` and `coinbase_industrial`; the first transaction must match these values.
 * Block rewards decay by a factor of `DECAY_NUMERATOR / DECAY_DENOMINATOR` each block.
 
 ### Accounts & Transactions
 * `Account` maintains balances, nonce and pending totals to prevent overspending.
 * `RawTxPayload` → `SignedTransaction` using Ed25519 signatures. The canonical signing bytes are `domain_tag || bincode(payload)`.
-* Transactions include a `fee_selector` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces.
+* Transactions include a `fee_selector` selector (0=consumer, 1=industrial, 2=split) and must use sequential nonces; `validate_block`
+  tracks expected nonces per sender and rejects gaps or repeats within a block.
 
 ### Storage
 * Persistent state lives in an in-memory map (`SimpleDb`). `ChainDisk` encapsulates the
@@ -48,7 +52,8 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS` (or
   `--mempool-purge-interval`) and spawns a thread that periodically calls
   `purge_expired`, advancing TTL and orphan-sweep metrics even when the node is
-  idle.
+  idle; Python bindings expose `ShutdownFlag` and `PurgeLoopHandle` to manage
+  the lifecycle from scripts and the demo.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
@@ -104,6 +109,20 @@ The following directives are mandatory before any feature expansion. Deliver eac
    - Property tests injecting panics at each admission step to guarantee reservation rollback.
    - 32‑thread fuzz harness with random nonces/fees ≥10 k iterations validating cap, uniqueness, and eviction order.
    - Heap orphan stress test: exceed threshold, trigger rebuild, assert ordering and metric increments.
+
+7. **Admission Atomicity & Ledger Invariants**
+   - Use `DashMap::entry` or per-sender mutex to ensure `(sender, nonce)` insert
+     and pending-balance reservation form a single atomic operation.
+   - Property tests prove pending balances and nonce sets return to prior values on rollback.
+
+8. **Persistence Abstraction**
+   - Introduce a storage trait so `SimpleDb` can be swapped for sled/RocksDB
+     without touching consensus code.
+
+9. **P2P Skeleton & CLI**
+   - Draft a `network` module with basic block/tx gossip and a lightweight
+     command-line interface for balance queries, transaction submission, mining,
+     and metrics.
 7. **Documentation Synchronization**
    - Revise `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` to reflect every change above.
 
@@ -113,7 +132,7 @@ Once the mempool and persistence layers satisfy the above directives, pursue fea
 1. **Durable Storage Backend** – replace `SimpleDb` with a crash‑safe key‑value store. Timestamp persistence from B‑3 enables deterministic rebuilds.
 2. **P2P Networking & Sync** – design gossip and fork resolution protocols. A race‑free mempool and replay‑safe persistence are prerequisites.
 3. **Node API & Tooling** – expose CLI/RPC once telemetry counters and spans offer operational visibility for remote control.
-4. **Dynamic Difficulty Retargeting** – implement moving‑average difficulty; requires reliable timestamping and startup rebuild.
+4. **Dynamic Difficulty Retargeting — COMPLETED** – moving‑average difficulty with bounded step is in place; headers carry `difficulty` and validation enforces the value.
 5. **Enhanced Validation & Security** – extend panic‑inject and fuzz coverage to network inputs, enforcing signature, nonce, and fee invariants across peers.
 6. **Testing & Visualization Tools** – multi‑node integration tests and dashboards leveraging the telemetry emitted above.
 

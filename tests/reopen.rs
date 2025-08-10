@@ -202,6 +202,8 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     init();
     let path = unique_path("startup_orphan_metrics");
     let _ = fs::remove_dir_all(&path);
+    std::env::remove_var("TB_MEMPOOL_TTL_SECS");
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
     #[cfg(feature = "telemetry")]
     {
         telemetry::STARTUP_TTL_DROP_TOTAL.reset();
@@ -225,7 +227,8 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_millis() as u64;
+            .as_millis() as u64
+            + 10_000; // ensure far future to avoid TTL expiry
         let entry = MempoolEntryDisk {
             sender: "ghost".into(),
             nonce: 1,

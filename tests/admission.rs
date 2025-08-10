@@ -91,7 +91,7 @@ fn validate_block_rejects_nonce_gap() {
     let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 1000, 3);
     let index = 0u64;
     let prev = "0".repeat(64);
-    let diff = the_block::blockchain::difficulty::expected_difficulty(index, bc.difficulty);
+    let diff = the_block::blockchain::difficulty::expected_difficulty(&bc.chain);
     let reward_c = bc.block_reward_consumer.0;
     let reward_i = bc.block_reward_industrial.0;
     let fee_checksum = {
@@ -122,6 +122,7 @@ fn validate_block_rejects_nonce_gap() {
         let enc = BlockEncoder {
             index,
             prev: &prev,
+            timestamp: 0,
             nonce,
             difficulty: diff,
             coin_c: reward_c,
@@ -151,6 +152,7 @@ fn validate_block_rejects_nonce_gap() {
     let block = the_block::Block {
         index,
         previous_hash: prev,
+        timestamp_millis: 0,
         transactions: txs,
         difficulty: diff,
         nonce,
@@ -293,6 +295,7 @@ fn validate_block_rejects_wrong_difficulty() {
     let enc = BlockEncoder {
         index: block.index,
         prev: &block.previous_hash,
+        timestamp: block.timestamp_millis,
         nonce: block.nonce,
         difficulty: block.difficulty,
         coin_c: block.coinbase_consumer.0,
