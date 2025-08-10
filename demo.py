@@ -15,8 +15,6 @@ DECAY_NUMERATOR = 99_995
 DECAY_DENOMINATOR = 100_000
 
 ENV_PREPARED = False
-PURGE_HANDLE = None
-PURGE_SHUTDOWN = None
 
 
 def explain(msg: str) -> None:
@@ -75,9 +73,6 @@ def init_chain() -> the_block.Blockchain:
     explain("Creating new blockchain with difficulty 1")
     bc = the_block.Blockchain.with_difficulty("chain_db", 1)
     bc.genesis_block()
-    global PURGE_HANDLE, PURGE_SHUTDOWN
-    PURGE_SHUTDOWN = the_block.ShutdownFlag()
-    PURGE_HANDLE = the_block.maybe_spawn_purge_loop(bc, PURGE_SHUTDOWN)
     explain("Genesis block created; chain starts at height 0")
     explain(f"Chain length now {bc.current_chain_length()}")
     return bc
@@ -359,10 +354,6 @@ def persistence_demo(bc: the_block.Blockchain) -> None:
 def cleanup() -> None:
     """Remove database so repeated runs start fresh."""
     explain("Cleaning up chain_db directory")
-    if PURGE_SHUTDOWN is not None:
-        PURGE_SHUTDOWN.trigger()
-    if PURGE_HANDLE is not None:
-        PURGE_HANDLE.join()
     shutil.rmtree("chain_db", ignore_errors=True)
 
 
@@ -380,15 +371,16 @@ def main() -> None:
     """Run the full demo sequentially."""
     init_environment()
     bc = init_chain()
-    accounts = create_accounts(bc)
-    priv = keypair_demo()
-    fee_demo()
-    mine_initial_block(bc, accounts)
-    transaction_errors(bc, priv)
-    mine_blocks(bc, accounts, priv)
-    emission_cap_demo(bc, accounts)
-    restart_purge_demo(priv)
-    persistence_demo(bc)
+    with the_block.PurgeLoop(bc):
+        accounts = create_accounts(bc)
+        priv = keypair_demo()
+        fee_demo()
+        mine_initial_block(bc, accounts)
+        transaction_errors(bc, priv)
+        mine_blocks(bc, accounts, priv)
+        emission_cap_demo(bc, accounts)
+        restart_purge_demo(priv)
+        persistence_demo(bc)
     cleanup()
     explain("Demo complete")
 

@@ -41,8 +41,14 @@
   bench `startup_rebuild` compares batched vs
   naive loops.
 - Cached serialized transaction sizes inside `MempoolEntry` so
-  `purge_expired` computes fee-per-byte without reserializing; added
-  `scripts/check_anchors.py` to CI to validate Markdown links.
+  `purge_expired` computes fee-per-byte without reserializing;
+  `scripts/check_anchors.py --md-anchors` now validates Markdown section
+  and Rust line links in CI.
+- Introduced Pythonic `PurgeLoop` context manager wrapping `ShutdownFlag`
+  and `PurgeLoopHandle`; `demo.py` and docs showcase `with PurgeLoop(bc):`.
+- `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` counters saturate at
+  `u64::MAX`; tests prove `ShutdownFlag.trigger()` stops the purge loop
+  before overflow.
 - Archived `artifacts/fuzz.log` and `artifacts/migration.log` with accompanying
   `RISK_MEMO.md` capturing residual risk and review requirements.
 

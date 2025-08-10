@@ -48,12 +48,14 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   (expired mempool entries dropped during startup),
   `lock_poison_total`, `orphan_sweep_total`, `invalid_selector_reject_total`,
   `balance_overflow_reject_total`, `drop_not_found_total`,
-  `tx_rejected_total{reason=*}`.
+  `tx_rejected_total{reason=*}`. `ttl_drop_total` and `orphan_sweep_total`
+  saturate at `u64::MAX` to avoid overflow.
 * `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS` (or
   `--mempool-purge-interval`) and spawns a thread that periodically calls
   `purge_expired`, advancing TTL and orphan-sweep metrics even when the node is
-  idle; Python bindings expose `ShutdownFlag` and `PurgeLoopHandle` to manage
-  the lifecycle from scripts and the demo.
+  idle. Python exposes a `PurgeLoop` context manager wrapping
+  `ShutdownFlag`/`PurgeLoopHandle` for automatic startup and clean shutdown;
+  manual control is still available via the raw bindings.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
@@ -69,7 +71,11 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Each migration must preserve [`INV-FEE-01`](ECONOMICS.md#inv-fee-01) and [`INV-FEE-02`](ECONOMICS.md#inv-fee-02); update `docs/schema_migrations/` with the new invariants.
 
 ### Python Demo
-* `demo.py` creates a fresh chain, mines a genesis block, signs a sample message, submits a transaction and mines additional blocks while printing explanatory output. Metric assertions require building the module with `--features telemetry`.
+* `demo.py` creates a fresh chain, mines a genesis block, signs a sample
+  message, submits a transaction and mines additional blocks while
+  printing explanatory output. It uses `with PurgeLoop(bc):` to spawn and
+  join the purge thread automatically. Metric assertions require building
+  the module with `--features telemetry`.
 
 ### Tests
 * Rust property tests under `tests/test_chain.rs` validate invariants (balances never
@@ -124,7 +130,10 @@ The following directives are mandatory before any feature expansion. Deliver eac
      command-line interface for balance queries, transaction submission, mining,
      and metrics.
 7. **Documentation Synchronization**
-   - Revise `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and `docs/detailed_updates.md` to reflect every change above.
+   - Revise `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`,
+     `AUDIT_NOTES.md`, `CHANGELOG.md`, `API_CHANGELOG.md`, and
+     `docs/detailed_updates.md` to reflect every change above, and ensure
+     `scripts/check_anchors.py --md-anchors` passes.
 
 ## 3. Mid‑Term Milestones
 Once the mempool and persistence layers satisfy the above directives, pursue features that build upon this foundation and depend on its determinism.

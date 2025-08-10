@@ -9,6 +9,8 @@
 - `decode_payload(bytes)` decodes canonical payload bytes back into `RawTxPayload`.
 - `ShutdownFlag` and `PurgeLoopHandle` manage purge threads when used with
   `maybe_spawn_purge_loop`.
+- `PurgeLoop(bc)` context manager spawns the purge loop and triggers
+  shutdown on exit.
 - `maybe_spawn_purge_loop(bc, shutdown)` reads `TB_PURGE_LOOP_SECS` and returns
   a `PurgeLoopHandle` that joins the background TTL cleanup thread.
 - `Blockchain::panic_in_admission_after(step)` panics mid-admission for test harnesses;

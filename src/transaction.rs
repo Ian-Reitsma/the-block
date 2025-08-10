@@ -175,8 +175,18 @@ pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
     canonical_payload_bytes(&payload)
 }
 
-/// Python helper that decodes canonical bytes into a [`RawTxPayload`].
-#[pyfunction(name = "decode_payload")]
+/// Decode canonical payload bytes into a :class:`RawTxPayload`.
+///
+/// Args:
+///     bytes (bytes): Serialized payload bytes produced by
+///         :func:`canonical_payload`.
+///
+/// Returns:
+///     RawTxPayload: Decoded payload structure.
+///
+/// Raises:
+///     ValueError: If ``bytes`` cannot be deserialized.
+#[pyfunction(name = "decode_payload", text_signature = "(bytes)")]
 pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
     bincode_config()
         .deserialize(&bytes)

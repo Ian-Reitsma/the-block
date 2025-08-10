@@ -84,6 +84,7 @@ Bootstrap steps:
 | Python tests | `.venv/bin/python -m pytest` | All tests pass |
 | End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` (requires `--features telemetry`) |
 | Lint / Style | `cargo fmt -- --check` | No diffs |
+| Markdown anchors | `python scripts/check_anchors.py --md-anchors` | No output |
 
 All tests run in isolated temp directories via `unique_path`, preventing state
 leakage between cases. Paths are removed once the chain drops.
@@ -126,7 +127,8 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 Additional helpers:
 
 - `decode_payload(bytes)` reverses canonical encoding to `RawTxPayload`.
-- `ShutdownFlag` and `PurgeLoopHandle` let you control the TTL purge loop via
+- `PurgeLoop` provides a context manager that spawns and joins the TTL purge loop.
+  For manual control use `ShutdownFlag`/`PurgeLoopHandle` with
   `maybe_spawn_purge_loop(bc, ShutdownFlag())`.
 - Reusing or skipping a nonce raises `ErrNonceGap`.
 
@@ -176,7 +178,9 @@ AGENTS.md              # Developer handbook (authoritative)
 ### Accomplishments
 
 - **NonceGap enforcement** – admission rejects any transaction that skips a nonce and surfaces a dedicated `ErrNonceGap` exception.
-- **Python purge-loop control** – `ShutdownFlag` and `PurgeLoopHandle` allow Python callers to spawn and stop TTL cleanup threads via `maybe_spawn_purge_loop`.
+- **Python purge-loop context manager** – `PurgeLoop` wraps `ShutdownFlag` and `PurgeLoopHandle`, spawning the TTL cleanup thread on entry and triggering shutdown/join on exit.
+- **Telemetry counter saturation** – `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` saturate at `u64::MAX`; tests assert `ShutdownFlag.trigger()` halts purge threads before overflow.
+- **Markdown anchor validation** – `scripts/check_anchors.py --md-anchors` verifies intra-repo section links and runs in CI.
 - **Dynamic difficulty retargeting** – proof-of-work adjusts to network timing using a moving average of the last 120 blocks with a ±4× clamp.
 - **In-block nonce continuity** – `validate_block` tracks nonces per sender and rejects gaps or repeats within mined blocks.
 - **Cross-language serialization determinism** – Rust generates canonical payload CSV vectors and a Python script reencodes them to assert byte equality.
@@ -206,7 +210,7 @@ AGENTS.md              # Developer handbook (authoritative)
 ## Contribution Guidelines
 
 1. **Fork & branch**: `git checkout -b feat/<topic>`.
-2. **Follow coding standards** (Rustfmt, Clippy, Black).
+2. **Follow coding standards** (`cargo fmt`, Clippy, Black, `python scripts/check_anchors.py --md-anchors`).
 3. **Write tests** for every PR; property tests if possible.
 4. **Update docs** (`AGENTS.md`, `docs/`) if behaviour or API changes.
 5. **Commit messages** follow Conventional Commits (`feat:`, `fix:`, `refactor:`).
@@ -240,11 +244,13 @@ curl -s localhost:9000/metrics \
   | grep -E 'mempool_size|startup_ttl_drop_total|invalid_selector_reject_total|tx_rejected_total'
 ```
 
-Call `maybe_spawn_purge_loop(bc, ShutdownFlag())` after opening the chain to
-honor `TB_PURGE_LOOP_SECS`. When set to a positive value the helper spawns a
-background thread and returns a `PurgeLoopHandle` you can join to shut it down.
-The loop periodically calls `purge_expired`, trimming TTL-expired entries even
-without new submissions and driving `ttl_drop_total` and `orphan_sweep_total`.
+Use `with PurgeLoop(bc):` to honor `TB_PURGE_LOOP_SECS` and spawn a background
+thread that automatically triggers shutdown and joins when the block exits.
+For manual control, call `maybe_spawn_purge_loop(bc, ShutdownFlag())` to obtain
+a `PurgeLoopHandle` you can join explicitly. The loop periodically invokes
+`purge_expired`, trimming TTL-expired entries even without new submissions and
+driving `ttl_drop_total` and `orphan_sweep_total`. Counters saturate at
+`u64::MAX` to prevent overflow.
 
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
 `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),
