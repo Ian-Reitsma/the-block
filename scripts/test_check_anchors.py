@@ -23,6 +23,18 @@ def test_slugify_punctuation():
     assert slugify("Heading & punctuation!") == "heading-punctuation"
 
 
+def test_slugify_accents():
+    assert slugify("Déjà vu") == "deja-vu"
+
+
+def test_slugify_emoji():
+    assert slugify("Heading 😄") == "heading"
+
+
+def test_slugify_repeated_punctuation():
+    assert slugify("Wait---what??") == "wait-what"
+
+
 def test_check_md_anchor_slug(tmp_path: Path):
     target = tmp_path / "doc.md"
     target.write_text("# Heading & punctuation!\n", encoding="utf-8")

@@ -3,8 +3,10 @@
 
 use logtest::Logger;
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
+
+mod util;
+use util::temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -12,12 +14,6 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 #[test]
@@ -36,7 +32,8 @@ fn logs_accept_and_reject() {
         memo: Vec::new(),
     };
     let tx = sign_tx(priv_a.to_vec(), payload).unwrap();
-    let mut bc = Blockchain::new(&unique_path("temp_logging"));
+    let dir = temp_dir("temp_logging");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("a".into(), 10_000, 10_000).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     assert!(bc.submit_transaction(tx.clone()).is_ok());

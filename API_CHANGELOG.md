@@ -13,11 +13,15 @@
   shutdown on exit.
 - `maybe_spawn_purge_loop(bc, shutdown)` reads `TB_PURGE_LOOP_SECS` and returns
   a `PurgeLoopHandle` that joins the background TTL cleanup thread.
+- `maybe_spawn_purge_loop` now errors when `TB_PURGE_LOOP_SECS` is unset,
+  non-numeric, or ≤0; the Python wrapper raises ``ValueError`` with the parse
+  message.
 - `Blockchain::panic_in_admission_after(step)` panics mid-admission for test harnesses;
   `Blockchain::heal_admission()` clears the flag.
 - `Blockchain::panic_next_evict()` triggers a panic during the next eviction and
   `Blockchain::heal_mempool()` clears the poisoned mutex.
-- `PurgeLoopHandle.join()` raises `RuntimeError` if the purge thread panicked.
+- `PurgeLoopHandle.join()` raises `RuntimeError` if the purge thread panicked
+  and includes a backtrace when `RUST_BACKTRACE` is set.
 
 ### Telemetry
 - `TTL_DROP_TOTAL` counts transactions purged due to TTL expiry.

@@ -1,6 +1,8 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, fs};
 use the_block::{Block, Blockchain, ChainDisk, RawTxPayload, SignedTransaction, TokenAmount};
+
+mod util;
+use util::temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -9,18 +11,11 @@ fn init() {
     });
 }
 
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
-}
-
 #[test]
 fn migrate_v3_recomputes_supply() {
     init();
-    let path = unique_path("schema_v3_recompute");
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
+    let dir = temp_dir("schema_v3_recompute");
+    fs::create_dir_all(dir.path()).unwrap();
 
     let coinbase = SignedTransaction {
         payload: RawTxPayload {
@@ -75,10 +70,10 @@ fn migrate_v3_recomputes_supply() {
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
-    let db_path = Path::new(&path).join("db");
+    let db_path = dir.path().join("db");
     fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
 
-    let bc = Blockchain::open(&path).unwrap();
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let blk = &bc.chain[0];
     assert_eq!(blk.coinbase_consumer.get(), 50);
     assert_eq!(blk.coinbase_industrial.get(), 25);

@@ -1,20 +1,16 @@
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TxAdmissionError,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -44,7 +40,8 @@ fn build_signed_tx(
 #[test]
 fn invalid_selector_rejects_and_counts() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_invalid_selector"));
+    let dir = temp_dir("temp_invalid_selector");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -73,7 +70,8 @@ fn invalid_selector_rejects_and_counts() {
 #[test]
 fn balance_overflow_rejects_and_counts() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_balance_overflow"));
+    let dir = temp_dir("temp_balance_overflow");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), u64::MAX, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     // create pending reservation near limit to force overflow
@@ -107,7 +105,8 @@ fn balance_overflow_rejects_and_counts() {
 #[test]
 fn drop_not_found_rejects_and_counts() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_drop_not_found"));
+    let dir = temp_dir("temp_drop_not_found");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     #[cfg(feature = "telemetry")]
     {

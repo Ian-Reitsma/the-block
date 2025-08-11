@@ -4,16 +4,12 @@ use std::sync::{Arc, RwLock};
 use proptest::prelude::*;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
-}
-
-fn unique_path(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -58,7 +54,8 @@ proptest! {
         )
     ) {
         init();
-        let mut bc = Blockchain::new(&unique_path("temp_orphan_fuzz"));
+        let dir = temp_dir("temp_orphan_fuzz");
+        let mut bc = Blockchain::new(dir.path().to_str().unwrap());
         bc.min_fee_per_byte = 0;
         bc.add_account("sink".into(), 0, 0).unwrap();
         for i in 0..ACCOUNTS {

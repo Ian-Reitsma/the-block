@@ -7,9 +7,9 @@ the target file. Supports relative paths such as ``../src/lib.rs``.
 
 When invoked with ``--md-anchors`` the script also checks links of the form
 ``README.md#section`` and ensures that the target heading exists. Section names
-are slugified the same way GitHub generates anchors: text is lowercased, spaces
-and punctuation collapse to ``-``, repeated dashes are trimmed, and emoji or
-other symbols are dropped.
+are slugified in a GitHub-compatible way: Unicode text is normalized (NFKD),
+diacritics are stripped, emoji and other symbols are removed, whitespace and
+punctuation collapse to ``-``, and leading or trailing dashes are trimmed.
 """
 from __future__ import annotations
 
@@ -52,15 +52,33 @@ def check_rust_anchor(md_path: Path, match: re.Match[str]) -> str | None:
 def slugify(text: str) -> str:
     """Produce a GitHub-style slug for a heading text.
 
-    Follows the algorithm used for markdown heading anchors: lowercase the
-    text, drop emoji or other symbols, replace whitespace and punctuation with a
-    single ``-``, and trim any leading/trailing dashes.
+    The algorithm mirrors GitHub's anchor generation: Unicode is normalized,
+    diacritics are removed, emoji/symbol characters are dropped, whitespace and
+    punctuation collapse to a single ``-``, and any leading or trailing dashes
+    are trimmed.
     """
 
-    text = text.strip().lower()
-    text = re.sub(r"[^a-z0-9\s-]", "", text)
-    text = re.sub(r"[\s-]+", "-", text)
-    return text.strip("-")
+    import unicodedata
+
+    normalized = unicodedata.normalize("NFKD", text)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
+    slug: list[str] = []
+    dash = False
+    for ch in normalized:
+        if ch.isalnum():
+            slug.append(ch.lower())
+            dash = False
+        else:
+            category = unicodedata.category(ch)
+            if category[0] in {"Z", "P"}:
+                if not dash:
+                    slug.append("-")
+                    dash = True
+            # Drop any other category without inserting a dash so emoji vanish
+            # without leaving extra separators.
+
+    return "".join(slug).strip("-")
 
 
 def check_md_anchor(md_path: Path, match: re.Match[str]) -> str | None:

@@ -1,7 +1,6 @@
 #![allow(clippy::needless_range_loop)]
 
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
@@ -9,15 +8,12 @@ use the_block::{
     SignedTransaction, TxAdmissionError,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -45,7 +41,8 @@ fn build_signed_tx(
 #[test]
 fn replacement_rejected() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_replace"));
+    let dir = temp_dir("temp_replace");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("miner".into(), 0, 0).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -59,7 +56,8 @@ fn replacement_rejected() {
 #[test]
 fn eviction_via_drop_transaction() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_evict"));
+    let dir = temp_dir("temp_evict");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
@@ -78,7 +76,8 @@ fn eviction_via_drop_transaction() {
 #[test]
 fn ttl_expiry_purges_and_counts() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_ttl"));
+    let dir = temp_dir("temp_ttl");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.tx_ttl = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
@@ -101,7 +100,8 @@ fn ttl_expiry_purges_and_counts() {
 #[test]
 fn fee_floor_enforced() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_fee_floor"));
+    let dir = temp_dir("temp_fee_floor");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -112,7 +112,8 @@ fn fee_floor_enforced() {
 #[test]
 fn orphan_sweep_removes_missing_sender() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_orphan"));
+    let dir = temp_dir("temp_orphan");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -130,7 +131,8 @@ fn orphan_sweep_removes_missing_sender() {
 #[test]
 fn orphan_ratio_triggers_rebuild() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_orphan_ratio"));
+    let dir = temp_dir("temp_orphan_ratio");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -147,7 +149,8 @@ fn orphan_ratio_triggers_rebuild() {
 #[test]
 fn heap_orphan_stress_triggers_rebuild_and_orders() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_heap_orphan"));
+    let dir = temp_dir("temp_heap_orphan");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 16;
     bc.add_account("sink".into(), 0, 0).unwrap();
     let mut keys = Vec::new();
@@ -182,7 +185,8 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
 #[test]
 fn orphan_drop_decrements_counter() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_orphan_drop"));
+    let dir = temp_dir("temp_orphan_drop");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("carol".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
@@ -202,7 +206,8 @@ fn orphan_drop_decrements_counter() {
 #[test]
 fn ttl_purge_drops_orphan_and_decrements_counter() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_orphan_ttl"));
+    let dir = temp_dir("temp_orphan_ttl");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.tx_ttl = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("carol".into(), 10_000, 0).unwrap();
@@ -229,7 +234,8 @@ fn ttl_purge_drops_orphan_and_decrements_counter() {
 #[test]
 fn drop_lock_poisoned_error_and_recovery() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_drop_poison"));
+    let dir = temp_dir("temp_drop_poison");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -262,7 +268,8 @@ fn drop_lock_poisoned_error_and_recovery() {
 #[test]
 fn submit_lock_poisoned_error_and_recovery() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_submit_poison"));
+    let dir = temp_dir("temp_submit_poison");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -294,7 +301,8 @@ fn submit_lock_poisoned_error_and_recovery() {
 #[test]
 fn eviction_panic_rolls_back() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_evict_panic"));
+    let dir = temp_dir("temp_evict_panic");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
@@ -319,7 +327,8 @@ fn eviction_panic_rolls_back() {
 #[test]
 fn admission_panic_rolls_back() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_admit_panic"));
+    let dir = temp_dir("temp_admit_panic");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -346,7 +355,8 @@ fn admission_panic_rolls_back() {
 fn comparator_orders_by_fee_expiry_hash() {
     init();
     let ttl = 10;
-    let mut bc = Blockchain::new(&unique_path("temp_cmp"));
+    let dir = temp_dir("temp_cmp");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.tx_ttl = ttl;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();

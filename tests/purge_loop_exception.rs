@@ -10,25 +10,20 @@ use std::ffi::CString;
 use the_block::telemetry;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
 }
 
-fn unique_path(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, AtomicOrdering::Relaxed);
-    format!("{prefix}_{id}")
-}
-
 #[test]
 fn purge_loop_shutdowns_on_exception() {
     init();
-    let path = unique_path("purge_loop_exception");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("purge_loop_exception");
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
-    let mut bc = Blockchain::open(&path).unwrap();
+    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.min_fee_per_byte = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
