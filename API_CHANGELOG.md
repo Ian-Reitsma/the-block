@@ -17,6 +17,7 @@
   `Blockchain::heal_admission()` clears the flag.
 - `Blockchain::panic_next_evict()` triggers a panic during the next eviction and
   `Blockchain::heal_mempool()` clears the poisoned mutex.
+- `PurgeLoopHandle.join()` raises `RuntimeError` if the purge thread panicked.
 
 ### Telemetry
 - `TTL_DROP_TOTAL` counts transactions purged due to TTL expiry.

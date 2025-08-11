@@ -21,6 +21,9 @@
   timestamps stored as monotonic ticks.
 - Fix: guard mining mempool mutations with global mutex to enforce
   capacity under concurrency.
+- Fix: `PurgeLoopHandle.join` surfaces purge thread panics as `RuntimeError`.
+- Docs: document `TB_PURGE_LOOP_SECS` in `README` and `.env.example`.
+- Docs: add `decode_payload` usage example in `README` and `demo.py`.
 - Feat: introduce minimum fee-per-byte floor with `FeeTooLow` rejection.
 - Feat: expose mempool limits (`max_mempool_size`, `min_fee_per_byte`,
   `tx_ttl`, `max_pending_per_account`) via `TB_*` env vars and sweep expired

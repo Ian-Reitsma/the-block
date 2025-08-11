@@ -132,6 +132,28 @@ Additional helpers:
   `maybe_spawn_purge_loop(bc, ShutdownFlag())`.
 - Reusing or skipping a nonce raises `ErrNonceGap`.
 
+### Decoding transaction payloads
+
+Produce canonical bytes for a payload and decode them back:
+
+```python
+from the_block import RawTxPayload, canonical_payload, decode_payload
+
+payload = RawTxPayload(
+    from_="alice",
+    to="bob",
+    amount_consumer=5,
+    amount_industrial=0,
+    fee=10,
+    nonce=0,
+    memo=b"demo",
+)
+
+raw = canonical_payload(payload)
+decoded = decode_payload(raw)
+print(decoded.from_, decoded.nonce)
+```
+
 ---
 
 ## Architecture Primer
@@ -246,11 +268,19 @@ curl -s localhost:9000/metrics \
 
 Use `with PurgeLoop(bc):` to honor `TB_PURGE_LOOP_SECS` and spawn a background
 thread that automatically triggers shutdown and joins when the block exits.
+`TB_PURGE_LOOP_SECS` sets the interval **in seconds** between TTL sweeps;
+setting it to `0` or leaving it unset disables the loop (default).
 For manual control, call `maybe_spawn_purge_loop(bc, ShutdownFlag())` to obtain
 a `PurgeLoopHandle` you can join explicitly. The loop periodically invokes
 `purge_expired`, trimming TTL-expired entries even without new submissions and
 driving `ttl_drop_total` and `orphan_sweep_total`. Counters saturate at
 `u64::MAX` to prevent overflow.
+
+Example:
+
+```bash
+TB_PURGE_LOOP_SECS=30 python demo.py
+```
 
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
 `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),

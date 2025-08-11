@@ -123,6 +123,27 @@ def fee_demo() -> None:
         explain("Fee overflow rejected: value exceeds allowed range")
 
 
+def decode_payload_demo() -> None:
+    """Round-trip canonical payload bytes through decode_payload."""
+    explain("Decoding canonical payload bytes")
+    payload = the_block.RawTxPayload(
+        from_="alice",
+        to="bob",
+        amount_consumer=1,
+        amount_industrial=0,
+        fee=BASE_FEE,
+        fee_selector=2,
+        nonce=0,
+        memo=b"demo",
+    )
+    raw = the_block.canonical_payload(payload)
+    decoded = the_block.decode_payload(raw)
+    explain(
+        f"Decoded payload -> from={decoded.from_} to={decoded.to} "
+        f"consumer={decoded.amount_consumer} fee={decoded.fee}"
+    )
+
+
 def mine_initial_block(bc: the_block.Blockchain, accounts: list[str]) -> None:
     """Mine one block so the miner earns starting funds."""
     explain("Mining first block so miner receives starting tokens")
@@ -135,32 +156,6 @@ def mine_initial_block(bc: the_block.Blockchain, accounts: list[str]) -> None:
         context={"block_index": blk.index, "nonce": blk.nonce},
     )
     check_supply(bc, accounts)
-
-
-def build_transaction(priv: bytes) -> the_block.RawTxPayload:
-    """Construct a sample transaction from miner to alice."""
-    explain("Building transaction: miner pays alice 1 consumer token")
-    payload = the_block.RawTxPayload(
-        from_="miner",
-        to="alice",
-        amount_consumer=1,
-        amount_industrial=0,
-        fee=BASE_FEE,
-        fee_selector=2,
-        nonce=1,
-        memo=b"demo transfer",
-    )
-    bytes_hex = the_block.canonical_payload(payload).hex()
-    explain(f"Canonical payload bytes: {bytes_hex}")
-    stx = the_block.sign_tx(list(priv), payload)
-    explain("Signed transaction created")
-    require(
-        the_block.verify_signed_tx(stx),
-        msg="transaction signature invalid",
-        context={"nonce": payload.nonce},
-    )
-    explain("Signature on transaction verified")
-    return stx
 
 
 def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
@@ -371,10 +366,12 @@ def main() -> None:
     """Run the full demo sequentially."""
     init_environment()
     bc = init_chain()
+    # TB_PURGE_LOOP_SECS controls purge interval in seconds; unset/0 disables.
     with the_block.PurgeLoop(bc):
         accounts = create_accounts(bc)
         priv = keypair_demo()
         fee_demo()
+        decode_payload_demo()
         mine_initial_block(bc, accounts)
         transaction_errors(bc, priv)
         mine_blocks(bc, accounts, priv)
