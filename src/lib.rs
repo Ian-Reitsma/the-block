@@ -15,7 +15,7 @@ use log::info;
 #[cfg(feature = "telemetry")]
 use log::warn;
 use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyValueError};
+use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 use pyo3::PyTypeInfo;
@@ -438,6 +438,7 @@ pub struct Blockchain {
     orphan_counter: std::sync::atomic::AtomicUsize,
     panic_on_evict: std::sync::atomic::AtomicBool,
     panic_on_admit: std::sync::atomic::AtomicI32,
+    panic_on_purge: std::sync::atomic::AtomicBool,
     #[pyo3(get, set)]
     pub max_mempool_size: usize,
     #[pyo3(get, set)]
@@ -511,6 +512,7 @@ impl Default for Blockchain {
             orphan_counter: std::sync::atomic::AtomicUsize::new(0),
             panic_on_evict: std::sync::atomic::AtomicBool::new(false),
             panic_on_admit: std::sync::atomic::AtomicI32::new(-1),
+            panic_on_purge: std::sync::atomic::AtomicBool::new(false),
             max_mempool_size: 1024,
             min_fee_per_byte: 1,
             tx_ttl: 1800,
@@ -1661,6 +1663,12 @@ impl Blockchain {
     }
 
     pub fn purge_expired(&mut self) -> u64 {
+        if self
+            .panic_on_purge
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            panic!("purge panic");
+        }
         let ttl_ms = self.tx_ttl * 1000;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2495,12 +2503,25 @@ impl PurgeLoopHandle {
     /// Returns:
     ///     None
     ///
+    /// Raises:
+    ///     RuntimeError: if the purge thread panicked.
+    ///
     /// Safe to call multiple times; subsequent calls are no-ops.
     #[pyo3(text_signature = "()")]
-    pub fn join(&mut self) {
+    pub fn join(&mut self) -> PyResult<()> {
         if let Some(h) = self.handle.take() {
-            let _ = h.join();
+            if let Err(panic) = h.join() {
+                let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "purge loop panicked".to_string()
+                };
+                return Err(PyRuntimeError::new_err(msg));
+            }
         }
+        Ok(())
     }
 }
 
@@ -2552,7 +2573,7 @@ impl PurgeLoop {
     ) -> PyResult<bool> {
         self.shutdown.trigger();
         if let Some(mut h) = self.handle.take() {
-            h.join();
+            h.join()?;
         }
         Ok(false)
     }
@@ -2670,6 +2691,12 @@ impl Blockchain {
     #[doc(hidden)]
     pub fn panic_next_evict(&self) {
         self.panic_on_evict
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[doc(hidden)]
+    pub fn panic_next_purge(&self) {
+        self.panic_on_purge
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 

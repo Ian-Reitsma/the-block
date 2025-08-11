@@ -6,7 +6,10 @@ Searches repository markdown files for links like ``src/lib.rs#L10-L20`` or
 the target file. Supports relative paths such as ``../src/lib.rs``.
 
 When invoked with ``--md-anchors`` the script also checks links of the form
-``README.md#section`` and ensures that the target heading exists.
+``README.md#section`` and ensures that the target heading exists. Section names
+are slugified the same way GitHub generates anchors: text is lowercased, spaces
+and punctuation collapse to ``-``, repeated dashes are trimmed, and emoji or
+other symbols are dropped.
 """
 from __future__ import annotations
 
@@ -47,8 +50,17 @@ def check_rust_anchor(md_path: Path, match: re.Match[str]) -> str | None:
 
 
 def slugify(text: str) -> str:
-    text = re.sub(r"\s+", "-", text.strip().lower())
-    return re.sub(r"[^a-z0-9-]", "", text)
+    """Produce a GitHub-style slug for a heading text.
+
+    Follows the algorithm used for markdown heading anchors: lowercase the
+    text, drop emoji or other symbols, replace whitespace and punctuation with a
+    single ``-``, and trim any leading/trailing dashes.
+    """
+
+    text = text.strip().lower()
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s-]+", "-", text)
+    return text.strip("-")
 
 
 def check_md_anchor(md_path: Path, match: re.Match[str]) -> str | None:
@@ -63,7 +75,9 @@ def check_md_anchor(md_path: Path, match: re.Match[str]) -> str | None:
         for line in content.splitlines()
         if line.startswith("#")
     }
-    anchors.update(m.group(1).lower() for m in re.finditer(r"<a id=\"([A-Za-z0-9_-]+)\"", content))
+    anchors.update(
+        m.group(1).lower() for m in re.finditer(r"<a id=\"([A-Za-z0-9_-]+)\"", content)
+    )
     section_slug = slugify(section)
     if section_slug not in anchors and section.lower() not in anchors:
         return f"{md_path}: missing anchor {rel_path}#{section}"
