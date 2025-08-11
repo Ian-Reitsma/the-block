@@ -4,15 +4,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -40,8 +37,8 @@ fn build_signed_tx(
 #[test]
 fn concurrent_duplicate_submission() {
     init();
-    let path = unique_path("temp_concurrency");
-    let bc = Arc::new(RwLock::new(Blockchain::new(&path)));
+    let dir = temp_dir("temp_concurrency");
+    let bc = Arc::new(RwLock::new(Blockchain::new(dir.path().to_str().unwrap())));
     bc.write()
         .unwrap()
         .add_account("alice".into(), 10_000, 0)
@@ -70,8 +67,8 @@ fn concurrent_duplicate_submission() {
 #[test]
 fn cross_thread_fuzz() {
     init();
-    let path = unique_path("temp_fuzz");
-    let bc = Arc::new(RwLock::new(Blockchain::new(&path)));
+    let dir = temp_dir("temp_fuzz");
+    let bc = Arc::new(RwLock::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mut keys = Vec::new();
     for i in 0..32 {
         let name = format!("acc{i}");
@@ -115,8 +112,8 @@ fn cross_thread_fuzz() {
 #[test]
 fn cap_race_respects_limit() {
     init();
-    let path = unique_path("temp_cap_race");
-    let mut bc = Blockchain::new(&path);
+    let dir = temp_dir("temp_cap_race");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 32;
     bc.max_pending_per_account = 64;
     bc.add_account("alice".into(), 1_000_000, 0).unwrap();
@@ -145,8 +142,8 @@ fn cap_race_respects_limit() {
 #[test]
 fn flood_mempool_never_over_cap() {
     init();
-    let path = unique_path("temp_flood_cap");
-    let mut bc = Blockchain::new(&path);
+    let dir = temp_dir("temp_flood_cap");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 16;
     bc.max_pending_per_account = 64;
     bc.add_account("alice".into(), 1_000_000, 0).unwrap();
@@ -180,8 +177,8 @@ fn flood_mempool_never_over_cap() {
 #[test]
 fn admit_and_mine_never_over_cap() {
     init();
-    let path = unique_path("temp_admit_mine_cap");
-    let mut bc = Blockchain::new(&path);
+    let dir = temp_dir("temp_admit_mine_cap");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 16;
     bc.max_pending_per_account = 64;
     bc.add_account("alice".into(), 1_000_000, 0).unwrap();
@@ -196,8 +193,15 @@ fn admit_and_mine_never_over_cap() {
     let peak_miner = Arc::clone(&peak);
     let miner_handle = std::thread::spawn(move || {
         for _ in 0..32 {
-            let _ = bc_miner.write().unwrap().mine_block("alice");
-            let len = bc_miner.read().unwrap().mempool.len();
+            let mut guard = bc_miner.write().unwrap();
+            let _ = guard.mine_block("alice");
+            let first_ts = guard.chain.first().unwrap().timestamp_millis;
+            let len_chain = guard.chain.len() as u64;
+            if let Some(last) = guard.chain.last_mut() {
+                last.timestamp_millis = first_ts + (len_chain - 1) * 1_000;
+            }
+            let len = guard.mempool.len();
+            drop(guard);
             peak_miner.fetch_max(len, Ordering::SeqCst);
         }
     });

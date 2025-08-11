@@ -1,24 +1,19 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction, TxAdmissionError,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         pyo3::prepare_freethreaded_python();
     });
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -46,9 +41,8 @@ fn build_signed_tx(
 fn eviction_panic_rolls_back() {
     init();
     let (sk, _pk) = generate_keypair();
-    let path = unique_path("evict_panic");
-    let _ = fs::remove_dir_all(&path);
-    let mut bc = Blockchain::open(&path).unwrap();
+    let dir = temp_dir("evict_panic");
+    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.max_mempool_size = 1;
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();

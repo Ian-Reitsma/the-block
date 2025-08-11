@@ -1,8 +1,14 @@
 use std::fs;
 
+#[cfg(target_os = "linux")]
+use std::time::Duration;
+
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use std::ffi::CString;
+
+mod util;
+use util::temp::temp_dir;
 
 use the_block::{maybe_spawn_purge_loop_py, Blockchain, ShutdownFlag};
 
@@ -11,20 +17,15 @@ fn init() {
     pyo3::prepare_freethreaded_python();
 }
 
-fn unique_path(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, AtomicOrdering::Relaxed);
-    format!("{prefix}_{id}")
-}
-
-#[test]
-fn purge_loop_join_surfaces_panic() {
-    init();
-    let path = unique_path("purge_loop_join_panic");
-    let _ = fs::remove_dir_all(&path);
+fn run_purge_panic(backtrace: bool) -> String {
+    let dir = temp_dir("purge_loop_join_panic");
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
-    let bc = Blockchain::open(&path).unwrap();
+    if backtrace {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    } else {
+        std::env::remove_var("RUST_BACKTRACE");
+    }
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.panic_next_purge();
     let shutdown = ShutdownFlag::new();
 
@@ -54,11 +55,71 @@ def trigger(handle):
         Ok::<(), PyErr>(())
     });
     assert!(result.is_err());
-    Python::with_gil(|py| {
+    let msg = Python::with_gil(|py| {
         let err = result.unwrap_err();
         assert!(err.is_instance_of::<pyo3::exceptions::PyRuntimeError>(py));
-        let msg = err.value(py).to_string();
-        assert!(msg.contains("purge panic"));
+        err.value(py).to_string()
     });
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
+    if backtrace {
+        std::env::remove_var("RUST_BACKTRACE");
+    }
+    msg
+}
+
+#[test]
+fn purge_loop_join_surfaces_panic() {
+    init();
+    let msg = run_purge_panic(false);
+    assert!(msg.contains("purge panic"));
+    assert!(!msg.contains("Backtrace"));
+    let msg_bt = run_purge_panic(true);
+    assert!(msg_bt.contains("purge panic"));
+    assert!(msg_bt.contains("Backtrace"));
+}
+
+#[cfg(target_os = "linux")]
+fn thread_count() -> usize {
+    std::fs::read_dir("/proc/self/task").unwrap().count()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn purge_loop_joins_on_drop() {
+    init();
+    let dir = temp_dir("purge_loop_drop_join");
+    std::env::set_var("TB_PURGE_LOOP_SECS", "1");
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    let shutdown = ShutdownFlag::new();
+
+    let before = thread_count();
+    let handle = Python::with_gil(|py| {
+        let bc_py = Py::new(py, bc).unwrap();
+        maybe_spawn_purge_loop_py(bc_py, &shutdown).expect("loop not started")
+    });
+
+    let mut mid = thread_count();
+    for _ in 0..10 {
+        if mid == before + 1 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        mid = thread_count();
+    }
+    assert_eq!(before + 1, mid);
+
+    shutdown.trigger();
+    drop(handle);
+
+    let mut after = thread_count();
+    for _ in 0..50 {
+        if after == before {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        after = thread_count();
+    }
+    assert!(after <= before);
+
     std::env::remove_var("TB_PURGE_LOOP_SECS");
 }

@@ -9,25 +9,20 @@ use the_block::{
     generate_keypair, maybe_spawn_purge_loop, sign_tx, Blockchain, RawTxPayload, ShutdownFlag,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
 }
 
-fn unique_path(prefix: &str) -> String {
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, AtomicOrdering::Relaxed);
-    format!("{prefix}_{id}")
-}
-
 #[test]
 fn env_driven_purge_loop_drops_entries() {
     init();
-    let path = unique_path("maybe_purge_loop");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("maybe_purge_loop");
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
-    let mut bc = Blockchain::open(&path).unwrap();
+    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.min_fee_per_byte = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
@@ -54,7 +49,7 @@ fn env_driven_purge_loop_drops_entries() {
     let bc = Arc::new(Mutex::new(bc));
     let shutdown = ShutdownFlag::new();
     let handle =
-        maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).expect("loop not started");
+        maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).expect("invalid interval");
     thread::sleep(Duration::from_millis(50));
     #[cfg(feature = "telemetry")]
     let before = telemetry::TTL_DROP_TOTAL.get();
@@ -70,4 +65,45 @@ fn env_driven_purge_loop_drops_entries() {
         assert_eq!(before, telemetry::TTL_DROP_TOTAL.get());
         telemetry::TTL_DROP_TOTAL.reset();
     }
+}
+
+#[test]
+fn invalid_env_surfaces_error() {
+    init();
+    std::env::set_var("TB_PURGE_LOOP_SECS", "not-a-number");
+    let dir = temp_dir("invalid_purge_loop");
+    let bc = Arc::new(Mutex::new(
+        Blockchain::open(dir.path().to_str().unwrap()).unwrap(),
+    ));
+    let shutdown = ShutdownFlag::new();
+    let err = maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).unwrap_err();
+    assert!(err.contains("TB_PURGE_LOOP_SECS"));
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
+}
+
+#[test]
+fn zero_env_surfaces_error() {
+    init();
+    std::env::set_var("TB_PURGE_LOOP_SECS", "0");
+    let dir = temp_dir("zero_purge_loop");
+    let bc = Arc::new(Mutex::new(
+        Blockchain::open(dir.path().to_str().unwrap()).unwrap(),
+    ));
+    let shutdown = ShutdownFlag::new();
+    let err = maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).unwrap_err();
+    assert!(err.contains("TB_PURGE_LOOP_SECS"));
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
+}
+
+#[test]
+fn missing_env_surfaces_error() {
+    init();
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
+    let dir = temp_dir("missing_purge_loop");
+    let bc = Arc::new(Mutex::new(
+        Blockchain::open(dir.path().to_str().unwrap()).unwrap(),
+    ));
+    let shutdown = ShutdownFlag::new();
+    let err = maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).unwrap_err();
+    assert!(err.contains("TB_PURGE_LOOP_SECS"));
 }

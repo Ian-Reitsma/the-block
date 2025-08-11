@@ -18,10 +18,12 @@
   prevention to reject duplicate `(sender, nonce)` pairs.
 - Fix: enforce mempool capacity via atomic counter and `O(log n)` priority
   heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`;
-  timestamps stored as monotonic ticks.
+- Change: `maybe_spawn_purge_loop` errors when `TB_PURGE_LOOP_SECS` is unset,
+  non-numeric, or ≤0 and Python raises ``ValueError``.
 - Fix: guard mining mempool mutations with global mutex to enforce
   capacity under concurrency.
-- Fix: `PurgeLoopHandle.join` surfaces purge thread panics as `RuntimeError`.
+- Fix: `PurgeLoopHandle.join` surfaces purge thread panics as `RuntimeError`,
+  capturing a backtrace when `RUST_BACKTRACE` is set.
 - Docs: document `TB_PURGE_LOOP_SECS` in `README` and `.env.example`.
 - Docs: add `decode_payload` usage example in `README` and `demo.py`.
 - Feat: introduce minimum fee-per-byte floor with `FeeTooLow` rejection.

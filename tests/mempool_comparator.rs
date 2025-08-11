@@ -2,9 +2,11 @@
 
 use std::cmp::Ordering;
 use std::fs;
-use std::sync::atomic::AtomicUsize;
 use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::{generate_keypair, mempool_cmp, sign_tx, Blockchain, MempoolEntry, RawTxPayload};
+
+mod util;
+use util::temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
@@ -12,12 +14,6 @@ fn init() {
         pyo3::prepare_freethreaded_python();
     });
     let _ = fs::remove_dir_all("chain_db");
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
@@ -71,9 +67,8 @@ fn comparator_orders_fee_then_expiry_then_hash() {
 fn ordering_stable_after_heap_rebuild() {
     init();
     let (sk, _pk) = generate_keypair();
-    let path = unique_path("heap_rebuild");
-    let _ = fs::remove_dir_all(&path);
-    let mut bc = Blockchain::open(&path).unwrap();
+    let dir = temp_dir("heap_rebuild");
+    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.tx_ttl = 100;
     for acct in ["a", "b", "c", "d", "e"] {
         bc.add_account(acct.into(), 10_000, 10_000).unwrap();

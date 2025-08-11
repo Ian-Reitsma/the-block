@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -7,15 +7,12 @@ use the_block::{
     generate_keypair, mempool_cmp, sign_tx, Blockchain, RawTxPayload, SignedTransaction,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -46,7 +43,8 @@ fn fuzz_mempool_random_fees_nonces() {
     const THREADS: usize = 32;
     const TOTAL_ITERS: usize = 10_000;
 
-    let mut bc = Blockchain::new(&unique_path("temp_fuzz"));
+    let dir = temp_dir("temp_fuzz");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 128;
     bc.max_pending_per_account = 128;
     bc.add_account("sink".into(), 0, 0).unwrap();

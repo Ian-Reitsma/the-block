@@ -1,5 +1,4 @@
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::hashlayout::BlockEncoder;
 #[cfg(feature = "telemetry")]
@@ -9,15 +8,12 @@ use the_block::{
     TokenAmount, TxAdmissionError,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
     pyo3::prepare_freethreaded_python();
-}
-
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
 }
 
 fn build_signed_tx(
@@ -45,7 +41,8 @@ fn build_signed_tx(
 #[test]
 fn rejects_unknown_sender() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_admission"));
+    let dir = temp_dir("temp_admission");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("miner".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "miner", 1, 0, 1000, 1);
@@ -55,7 +52,8 @@ fn rejects_unknown_sender() {
 #[test]
 fn mine_block_skips_nonce_gaps() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_admission"));
+    let dir = temp_dir("temp_admission");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("miner".into(), 10, 10).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -85,7 +83,8 @@ fn mine_block_skips_nonce_gaps() {
 #[test]
 fn validate_block_rejects_nonce_gap() {
     init();
-    let bc = Blockchain::new(&unique_path("temp_admission"));
+    let dir = temp_dir("temp_admission");
+    let bc = Blockchain::new(dir.path().to_str().unwrap());
     let (sk, _pk) = generate_keypair();
     let tx1 = build_signed_tx(&sk, "miner", "alice", 0, 0, 1000, 1);
     let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 1000, 3);
@@ -167,7 +166,8 @@ fn validate_block_rejects_nonce_gap() {
 #[test]
 fn rejects_fee_below_min() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_fee"));
+    let dir = temp_dir("temp_fee");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -178,7 +178,8 @@ fn rejects_fee_below_min() {
 #[test]
 fn mempool_full_evicts_lowest() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_full"));
+    let dir = temp_dir("temp_full");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size = 1;
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 10_000, 0).unwrap();
@@ -195,7 +196,8 @@ fn mempool_full_evicts_lowest() {
 #[test]
 fn fee_per_byte_boundary() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_fpb"));
+    let dir = temp_dir("temp_fpb");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     bc.min_fee_per_byte = 5;
@@ -228,7 +230,8 @@ fn fee_per_byte_boundary() {
 #[test]
 fn lock_poisoned_error_and_recovery() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_poison"));
+    let dir = temp_dir("temp_poison");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -265,7 +268,8 @@ fn lock_poisoned_error_and_recovery() {
 #[test]
 fn enforces_per_account_pending_limit() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_pending"));
+    let dir = temp_dir("temp_pending");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_pending_per_account = 1;
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
@@ -282,7 +286,8 @@ fn enforces_per_account_pending_limit() {
 #[test]
 fn validate_block_rejects_wrong_difficulty() {
     init();
-    let mut bc = Blockchain::new(&unique_path("temp_admission"));
+    let dir = temp_dir("temp_admission");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("miner".into(), 0, 0).unwrap();
     let mut block = bc.mine_block("miner").unwrap();
     block.difficulty += 1;
@@ -313,8 +318,8 @@ fn admission_panic_rolls_back_all_steps() {
     let (sk, _pk) = generate_keypair();
     // step 0: panic before reservation; step 1: panic after reservation
     for step in 0..=1 {
-        let path = unique_path(&format!("temp_admission_panic_{step}"));
-        let mut bc = Blockchain::new(&path);
+        let dir = temp_dir(&format!("temp_admission_panic_{step}"));
+        let mut bc = Blockchain::new(dir.path().to_str().unwrap());
         bc.add_account("alice".into(), 10_000, 0).unwrap();
         bc.add_account("bob".into(), 0, 0).unwrap();
         let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);

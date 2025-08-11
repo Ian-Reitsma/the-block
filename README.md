@@ -110,6 +110,7 @@ payload = RawTxPayload(
     amount_consumer   = 1_000,
     amount_industrial = 0,
     fee               = 10,
+    fee_selector      = 0,
     nonce             = 0,
     memo              = b"hello‑world",
 )
@@ -122,14 +123,20 @@ block = mine_block([stx])  # returns dict‑like Python object
 print(block["header"]["hash"])
 ```
 
+The `fee_selector` chooses which token pool covers the fee: `0` for consumer
+tokens, `1` for industrial tokens, or `2` to split evenly. Unless you need a
+different funding source, use `0`.
+
 All functions return Python‑native types (`dict`, `bytes`, `int`) for simplicity.
 
 Additional helpers:
 
 - `decode_payload(bytes)` reverses canonical encoding to `RawTxPayload`.
 - `PurgeLoop` provides a context manager that spawns and joins the TTL purge loop.
-  For manual control use `ShutdownFlag`/`PurgeLoopHandle` with
-  `maybe_spawn_purge_loop(bc, ShutdownFlag())`.
+  `TB_PURGE_LOOP_SECS` must be set to a positive integer; invalid or missing
+  values raise ``ValueError``. For manual control use
+  `ShutdownFlag`/`PurgeLoopHandle` with `maybe_spawn_purge_loop(bc,
+  ShutdownFlag())`.
 - Reusing or skipping a nonce raises `ErrNonceGap`.
 
 ### Decoding transaction payloads
@@ -145,6 +152,7 @@ payload = RawTxPayload(
     amount_consumer=5,
     amount_industrial=0,
     fee=10,
+    fee_selector=0,
     nonce=0,
     memo=b"demo",
 )
@@ -268,13 +276,13 @@ curl -s localhost:9000/metrics \
 
 Use `with PurgeLoop(bc):` to honor `TB_PURGE_LOOP_SECS` and spawn a background
 thread that automatically triggers shutdown and joins when the block exits.
-`TB_PURGE_LOOP_SECS` sets the interval **in seconds** between TTL sweeps;
-setting it to `0` or leaving it unset disables the loop (default).
-For manual control, call `maybe_spawn_purge_loop(bc, ShutdownFlag())` to obtain
-a `PurgeLoopHandle` you can join explicitly. The loop periodically invokes
-`purge_expired`, trimming TTL-expired entries even without new submissions and
-driving `ttl_drop_total` and `orphan_sweep_total`. Counters saturate at
-`u64::MAX` to prevent overflow.
+`TB_PURGE_LOOP_SECS` sets the interval **in seconds** between TTL sweeps and
+must be a positive integer. Unset, non-numeric, or non-positive values raise an
+error. For manual control, call `maybe_spawn_purge_loop(bc, ShutdownFlag())` to
+obtain a `PurgeLoopHandle` you can join explicitly. The loop periodically
+invokes `purge_expired`, trimming TTL-expired entries even without new
+submissions and driving `ttl_drop_total` and `orphan_sweep_total`. Counters
+saturate at `u64::MAX` to prevent overflow.
 
 Example:
 

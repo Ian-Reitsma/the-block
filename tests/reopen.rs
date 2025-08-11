@@ -4,7 +4,6 @@ use base64::Engine;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
@@ -13,6 +12,9 @@ use the_block::{
     RawTxPayload, TokenAmount, TokenBalance, TxAdmissionError,
 };
 
+mod util;
+use util::temp::temp_dir;
+
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -20,15 +22,8 @@ fn init() {
     });
 }
 
-fn unique_path(prefix: &str) -> String {
-    static COUNT: AtomicUsize = AtomicUsize::new(0);
-    let id = COUNT.fetch_add(1, Ordering::Relaxed);
-    format!("{prefix}_{id}")
-}
-
-fn load_fixture(name: &str) -> String {
-    let dir = unique_path("chain_db");
-    fs::create_dir_all(&dir).unwrap();
+fn load_fixture(name: &str) -> tempfile::TempDir {
+    let dir = temp_dir("chain_db");
     let src = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
@@ -38,7 +33,7 @@ fn load_fixture(name: &str) -> String {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(clean)
         .unwrap();
-    let dst = Path::new(&dir).join("db");
+    let dst = dir.path().join("db");
     fs::write(&dst, bytes).unwrap();
     dir
 }
@@ -47,11 +42,10 @@ fn load_fixture(name: &str) -> String {
 fn open_mine_reopen() {
     init();
     let (priv_a, _) = generate_keypair();
-    let path = unique_path("chain_db");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("chain_db");
 
     {
-        let mut bc = Blockchain::open(&path).unwrap();
+        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -59,7 +53,7 @@ fn open_mine_reopen() {
         bc.path.clear();
     }
 
-    let mut bc = Blockchain::open(&path).unwrap();
+    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let payload = RawTxPayload {
         from_: "a".into(),
         to: "b".into(),
@@ -78,10 +72,9 @@ fn open_mine_reopen() {
 fn replay_after_crash_is_duplicate() {
     init();
     let (sk, _pk) = generate_keypair();
-    let path = unique_path("replay_db");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("replay_db");
     {
-        let mut bc = Blockchain::open(&path).unwrap();
+        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -100,7 +93,7 @@ fn replay_after_crash_is_duplicate() {
         bc.persist_chain().unwrap();
         bc.path.clear();
     }
-    let mut bc2 = Blockchain::open(&path).unwrap();
+    let mut bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let payload = RawTxPayload {
         from_: "a".into(),
         to: "b".into(),
@@ -119,10 +112,9 @@ fn replay_after_crash_is_duplicate() {
 fn ttl_expired_purged_on_restart() {
     init();
     let (sk, _pk) = generate_keypair();
-    let path = unique_path("replay_ttl");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("replay_ttl");
     {
-        let mut bc = Blockchain::open(&path).unwrap();
+        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         bc.tx_ttl = 1;
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
@@ -146,7 +138,7 @@ fn ttl_expired_purged_on_restart() {
         bc.persist_chain().unwrap();
         bc.path.clear();
     }
-    let bc2 = Blockchain::open(&path).unwrap();
+    let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert!(bc2.mempool.is_empty());
 }
 
@@ -154,8 +146,7 @@ fn ttl_expired_purged_on_restart() {
 fn startup_ttl_purge_increments_metrics() {
     init();
     let (sk, _pk) = generate_keypair();
-    let path = unique_path("startup_ttl_metrics");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("startup_ttl_metrics");
     #[cfg(feature = "telemetry")]
     {
         telemetry::TTL_DROP_TOTAL.reset();
@@ -163,7 +154,7 @@ fn startup_ttl_purge_increments_metrics() {
         telemetry::MEMPOOL_SIZE.set(0);
     }
     {
-        let mut bc = Blockchain::open(&path).unwrap();
+        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         bc.tx_ttl = 1;
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
@@ -187,7 +178,7 @@ fn startup_ttl_purge_increments_metrics() {
         bc.persist_chain().unwrap();
         bc.path.clear();
     }
-    let bc2 = Blockchain::open(&path).unwrap();
+    let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(0, bc2.mempool.len());
     #[cfg(feature = "telemetry")]
     {
@@ -200,8 +191,7 @@ fn startup_ttl_purge_increments_metrics() {
 #[test]
 fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     init();
-    let path = unique_path("startup_orphan_metrics");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("startup_orphan_metrics");
     std::env::remove_var("TB_MEMPOOL_TTL_SECS");
     std::env::remove_var("TB_PURGE_LOOP_SECS");
     #[cfg(feature = "telemetry")]
@@ -212,7 +202,7 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     }
     {
         let (sk, _pk) = generate_keypair();
-        fs::create_dir_all(&path).unwrap();
+        fs::create_dir_all(dir.path()).unwrap();
         let payload = RawTxPayload {
             from_: "ghost".into(),
             to: "b".into(),
@@ -249,10 +239,10 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
         map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
-        let db_path = Path::new(&path).join("db");
+        let db_path = dir.path().join("db");
         fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
     }
-    let bc = Blockchain::open(&path).unwrap();
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert!(bc.mempool.is_empty());
     #[cfg(feature = "telemetry")]
     {
@@ -265,11 +255,10 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
 fn timestamp_ticks_persist_across_restart() {
     init();
     let (sk, _pk) = generate_keypair();
-    let path = unique_path("ticks_db");
-    let _ = fs::remove_dir_all(&path);
+    let dir = temp_dir("ticks_db");
     let first;
     {
-        let mut bc = Blockchain::open(&path).unwrap();
+        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -293,7 +282,7 @@ fn timestamp_ticks_persist_across_restart() {
         bc.persist_chain().unwrap();
         bc.path.clear();
     }
-    let bc2 = Blockchain::open(&path).unwrap();
+    let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let persisted = bc2
         .mempool
         .get(&("a".into(), 1))
@@ -306,8 +295,8 @@ fn timestamp_ticks_persist_across_restart() {
 fn schema_upgrade_compatibility() {
     init();
     for fixture in ["v1", "v2"] {
-        let path = load_fixture(fixture);
-        let bc = Blockchain::open(&path).unwrap();
+        let dir = load_fixture(fixture);
+        let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         for acc in bc.accounts.values() {
             assert_eq!(acc.pending.consumer, 0);
             assert_eq!(acc.pending.industrial, 0);
@@ -315,9 +304,8 @@ fn schema_upgrade_compatibility() {
         }
     }
 
-    let path = unique_path("schema_v3");
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).unwrap();
+    let dir = temp_dir("schema_v3");
+    fs::create_dir_all(dir.path()).unwrap();
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "a".into(),
@@ -367,10 +355,10 @@ fn schema_upgrade_compatibility() {
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
-    let db_path = Path::new(&path).join("db");
+    let db_path = dir.path().join("db");
     fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
 
-    let bc = Blockchain::open(&path).unwrap();
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let migrated = bc.mempool.get(&(String::from("a"), 1)).unwrap();
     assert_eq!(migrated.timestamp_ticks, migrated.timestamp_millis);
 }

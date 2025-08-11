@@ -31,6 +31,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod simple_db;
 use simple_db::SimpleDb as Db;
+use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
 
@@ -2437,22 +2438,42 @@ pub fn spawn_purge_loop(
     })
 }
 
-/// Conditionally spawn a purge loop based on `TB_PURGE_LOOP_SECS`.
+const ENV_PURGE_LOOP_SECS: &str = "TB_PURGE_LOOP_SECS";
+
+fn parse_purge_interval() -> Result<u64, String> {
+    let raw = std::env::var(ENV_PURGE_LOOP_SECS)
+        .map_err(|_| format!("{ENV_PURGE_LOOP_SECS} is unset"))?;
+    let secs = raw
+        .parse::<u64>()
+        .map_err(|_| format!("{ENV_PURGE_LOOP_SECS} must be a positive integer: {raw}"))?;
+    if secs == 0 {
+        Err(format!(
+            "{ENV_PURGE_LOOP_SECS} must be a positive integer: {raw}"
+        ))
+    } else {
+        Ok(secs)
+    }
+}
+
+/// Spawn a purge loop based on `TB_PURGE_LOOP_SECS`.
 ///
-/// Returns `Some(handle)` if the environment variable parses to a positive
-/// interval and the loop was started, otherwise `None`.
+/// Returns:
+///     `Ok(handle)` if the environment variable parses to a positive interval.
+///
+/// Errors:
+///     `Err(String)` when the variable is unset, non-numeric, or ≤0.
 pub fn maybe_spawn_purge_loop(
     bc: Arc<Mutex<Blockchain>>,
     shutdown: Arc<AtomicBool>,
-) -> Option<thread::JoinHandle<()>> {
-    if let Ok(v) = std::env::var("TB_PURGE_LOOP_SECS") {
-        if let Ok(secs) = v.parse::<u64>() {
-            if secs > 0 {
-                return Some(spawn_purge_loop(bc, secs, shutdown));
-            }
+) -> Result<thread::JoinHandle<()>, String> {
+    match parse_purge_interval() {
+        Ok(secs) => Ok(spawn_purge_loop(bc, secs, shutdown)),
+        Err(e) => {
+            #[cfg(feature = "telemetry")]
+            log::warn!("{e}");
+            Err(e)
         }
     }
-    None
 }
 
 /// Thread-safe flag used to signal background threads to shut down.
@@ -2491,6 +2512,9 @@ impl ShutdownFlag {
 }
 
 /// Handle to a purge loop thread, allowing callers to join from Python.
+///
+/// Dropping the handle automatically joins the purge thread, ensuring it
+/// terminates even if ``join`` is never called explicitly.
 #[pyclass]
 pub struct PurgeLoopHandle {
     handle: Option<thread::JoinHandle<()>>,
@@ -2511,13 +2535,7 @@ impl PurgeLoopHandle {
     pub fn join(&mut self) -> PyResult<()> {
         if let Some(h) = self.handle.take() {
             if let Err(panic) = h.join() {
-                let msg = if let Some(s) = panic.downcast_ref::<&str>() {
-                    (*s).to_string()
-                } else if let Some(s) = panic.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "purge loop panicked".to_string()
-                };
+                let msg = Self::format_panic(panic);
                 return Err(PyRuntimeError::new_err(msg));
             }
         }
@@ -2525,10 +2543,37 @@ impl PurgeLoopHandle {
     }
 }
 
+impl Drop for PurgeLoopHandle {
+    fn drop(&mut self) {
+        let _ = self.join();
+    }
+}
+impl PurgeLoopHandle {
+    fn format_panic(panic: Box<dyn Any + Send>) -> String {
+        let mut msg = if let Some(s) = panic.downcast_ref::<&str>() {
+            (*s).to_string()
+        } else if let Some(s) = panic.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "purge loop panicked".to_string()
+        };
+
+        if std::env::var("RUST_BACKTRACE").map_or(false, |v| v != "0") {
+            use std::backtrace::Backtrace;
+            use std::fmt::Write as _;
+            let bt = Backtrace::capture();
+            let _ = writeln!(msg, "\nBacktrace:\n{bt}");
+        }
+
+        msg
+    }
+}
+
 /// Context manager that spawns and manages the mempool purge loop.
 ///
-/// The loop is started only if ``TB_PURGE_LOOP_SECS`` is set to a positive
-/// interval. Exiting the context triggers ``shutdown`` and joins the thread.
+/// The loop interval is read from ``TB_PURGE_LOOP_SECS`` which must be a
+/// positive integer. Exiting the context triggers ``shutdown`` and joins the
+/// thread.
 ///
 /// Args:
 ///     bc (Blockchain): chain instance to operate on.
@@ -2542,10 +2587,13 @@ pub struct PurgeLoop {
 impl PurgeLoop {
     #[new]
     #[pyo3(text_signature = "(bc)")]
-    pub fn new(bc: Py<Blockchain>) -> Self {
+    pub fn new(bc: Py<Blockchain>) -> PyResult<Self> {
         let shutdown = ShutdownFlag::new();
-        let handle = maybe_spawn_purge_loop_py(bc, &shutdown);
-        Self { shutdown, handle }
+        let handle = maybe_spawn_purge_loop_py(bc, &shutdown)?;
+        Ok(Self {
+            shutdown,
+            handle: Some(handle),
+        })
     }
 
     /// Enter the purge loop context.
@@ -2586,46 +2634,43 @@ impl PurgeLoop {
 ///     shutdown (ShutdownFlag): Flag used to signal termination.
 ///
 /// Returns:
-///     PurgeLoopHandle | None: Handle to the purge thread, or ``None`` if disabled.
+///     PurgeLoopHandle: handle to the purge thread.
+///
+/// Raises:
+///     ValueError: if ``TB_PURGE_LOOP_SECS`` is unset, non-numeric, or ≤ 0.
 #[pyfunction(name = "maybe_spawn_purge_loop", text_signature = "(bc, shutdown)")]
 pub fn maybe_spawn_purge_loop_py(
     bc: Py<Blockchain>,
     shutdown: &ShutdownFlag,
-) -> Option<PurgeLoopHandle> {
-    if let Ok(v) = std::env::var("TB_PURGE_LOOP_SECS") {
-        if let Ok(secs) = v.parse::<u64>() {
-            if secs > 0 {
-                let bc_py = Python::with_gil(|py| bc.clone_ref(py));
-                let shutdown_flag = shutdown.0.clone();
-                let handle = thread::spawn(move || {
-                    while !shutdown_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                        Python::with_gil(|py| {
-                            let mut bc = bc_py.borrow_mut(py);
-                            let dropped = bc.purge_expired();
-                            #[cfg(not(feature = "telemetry"))]
-                            let _ = dropped;
-                            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                            info!("purge_loop ttl_drop_total={dropped}");
-                            #[cfg(feature = "telemetry-json")]
-                            log_event(
-                                log::Level::Info,
-                                "purge_loop",
-                                "",
-                                0,
-                                "ttl_drop_total",
-                                Some(dropped),
-                            );
-                        });
-                        thread::sleep(Duration::from_secs(secs));
-                    }
-                });
-                return Some(PurgeLoopHandle {
-                    handle: Some(handle),
-                });
-            }
+) -> PyResult<PurgeLoopHandle> {
+    let secs = parse_purge_interval().map_err(PyValueError::new_err)?;
+    let bc_py = Python::with_gil(|py| bc.clone_ref(py));
+    let shutdown_flag = shutdown.0.clone();
+    let handle = thread::spawn(move || {
+        while !shutdown_flag.load(std::sync::atomic::Ordering::SeqCst) {
+            Python::with_gil(|py| {
+                let mut bc = bc_py.borrow_mut(py);
+                let dropped = bc.purge_expired();
+                #[cfg(not(feature = "telemetry"))]
+                let _ = dropped;
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                info!("purge_loop ttl_drop_total={dropped}");
+                #[cfg(feature = "telemetry-json")]
+                log_event(
+                    log::Level::Info,
+                    "purge_loop",
+                    "",
+                    0,
+                    "ttl_drop_total",
+                    Some(dropped),
+                );
+            });
+            thread::sleep(Duration::from_secs(secs));
         }
-    }
-    None
+    });
+    Ok(PurgeLoopHandle {
+        handle: Some(handle),
+    })
 }
 
 impl Drop for Blockchain {
