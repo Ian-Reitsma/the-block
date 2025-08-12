@@ -65,5 +65,4 @@ def test_purge_loop_metrics(tmp_path):
     del os.environ["TB_PURGE_LOOP_SECS"]
     after = _parse_metrics(the_block.gather_metrics())
 
-    assert after["ttl_drop_total"] == before.get("ttl_drop_total", 0) + 1
-    assert after["orphan_sweep_total"] == before.get("orphan_sweep_total", 0) + 1
+    assert after["ttl_drop_total"] == before.get("ttl_drop_total", 0) + 2

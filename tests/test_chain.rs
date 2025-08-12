@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::Path};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
-    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
+    fee, generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
     RawTxPayload, SignedTransaction, TokenAmount, TokenBalance, TxAdmissionError,
 };
 
@@ -645,8 +645,58 @@ fn test_chain_determinism() {
 fn test_schema_upgrade_compatibility() {
     init();
     for fixture in ["v1", "v2"] {
-        let path = load_fixture(fixture);
-        let bc = Blockchain::open(&path).unwrap();
+        let dir = load_fixture(fixture);
+        let raw = fs::read(dir.path().join("db")).unwrap();
+        let map: HashMap<String, Vec<u8>> = bincode::deserialize(&raw).unwrap();
+        let disk: ChainDisk = bincode::deserialize(&map["chain"]).unwrap();
+        let pre_em_c = disk.emission_consumer;
+        let pre_em_i = disk.emission_industrial;
+        let pre_checksums: Vec<String> = disk.chain.iter().map(|b| b.fee_checksum.clone()).collect();
+        let pre_sum_c: u64 = disk
+            .chain
+            .iter()
+            .map(|b| b.coinbase_consumer.get())
+            .sum();
+        let pre_sum_i: u64 = disk
+            .chain
+            .iter()
+            .map(|b| b.coinbase_industrial.get())
+            .sum();
+        assert_eq!(pre_em_c, pre_sum_c);
+        assert_eq!(pre_em_i, pre_sum_i);
+
+        let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(bc.emission_consumer, pre_em_c);
+        assert_eq!(bc.emission_industrial, pre_em_i);
+
+        let post_sum_c: u64 = bc.chain.iter().map(|b| b.coinbase_consumer.get()).sum();
+        let post_sum_i: u64 = bc
+            .chain
+            .iter()
+            .map(|b| b.coinbase_industrial.get())
+            .sum();
+        assert_eq!(bc.emission_consumer, post_sum_c);
+        assert_eq!(bc.emission_industrial, post_sum_i);
+
+        for (blk, pre) in bc.chain.iter().zip(pre_checksums.iter()) {
+            let mut fee_c: u128 = 0;
+            let mut fee_i: u128 = 0;
+            for tx in blk.transactions.iter().skip(1) {
+                if let Ok((c, i)) = fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                    fee_c += c as u128;
+                    fee_i += i as u128;
+                }
+            }
+            let fc = u64::try_from(fee_c).unwrap_or(0);
+            let fi = u64::try_from(fee_i).unwrap_or(0);
+            let mut h = blake3::Hasher::new();
+            h.update(&fc.to_le_bytes());
+            h.update(&fi.to_le_bytes());
+            let expected = h.finalize().to_hex().to_string();
+            assert_eq!(blk.fee_checksum, expected);
+            assert_eq!(blk.fee_checksum, *pre);
+        }
+
         for acc in bc.accounts.values() {
             assert_eq!(acc.pending.consumer, 0);
             assert_eq!(acc.pending.industrial, 0);
@@ -654,10 +704,12 @@ fn test_schema_upgrade_compatibility() {
         }
     }
 
-    // Schema v3 stored only wall-clock admission times. Opening should
-    // hydrate `timestamp_ticks` for each mempool entry.
-    let dir = temp_dir("schema_v3");
-    fs::create_dir_all(dir.path()).unwrap();
+    // Schema v3 stored only wall-clock admission times and could miss
+    // emission totals. Build a synthetic v3 disk and ensure migration
+    // hydrates timestamps and recomputes emission/fees.
+    let (_tmp, mut bc_tmp) = temp_blockchain("schema_v3_build");
+    bc_tmp.add_account("a".into(), 0, 0).unwrap();
+    bc_tmp.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "a".into(),
@@ -669,60 +721,97 @@ fn test_schema_upgrade_compatibility() {
         nonce: 1,
         memo: Vec::new(),
     };
-    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    let tx1 = sign_tx(sk.to_vec(), payload).unwrap();
+    bc_tmp.submit_transaction(tx1.clone()).unwrap();
+    bc_tmp.mine_block("a").unwrap();
+    let pre_sum_c: u64 = bc_tmp
+        .chain
+        .iter()
+        .map(|b| b.coinbase_consumer.get())
+        .sum();
+    let pre_sum_i: u64 = bc_tmp
+        .chain
+        .iter()
+        .map(|b| b.coinbase_industrial.get())
+        .sum();
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64;
+    let payload2 = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1000,
+        fee_selector: 0,
+        nonce: 2,
+        memo: Vec::new(),
+    };
+    let tx2 = sign_tx(sk.to_vec(), payload2).unwrap();
     let entry = MempoolEntryDisk {
         sender: "a".into(),
-        nonce: 1,
-        tx,
+        nonce: 2,
+        tx: tx2,
         timestamp_millis: now,
-        timestamp_ticks: 0, // simulate pre-v4 missing field
+        timestamp_ticks: 0,
     };
-    let mut accounts = HashMap::new();
-    accounts.insert(
-        "a".into(),
-        Account {
-            address: "a".into(),
-            balance: TokenBalance {
-                consumer: 10,
-                industrial: 10,
-            },
-            nonce: 0,
-            pending: Pending::default(),
-        },
-    );
     let disk = ChainDisk {
         schema_version: 3,
-        chain: Vec::new(),
-        accounts,
+        chain: bc_tmp.chain.clone(),
+        accounts: bc_tmp.accounts.clone(),
         emission_consumer: 0,
         emission_industrial: 0,
-        block_reward_consumer: TokenAmount::new(0),
-        block_reward_industrial: TokenAmount::new(0),
-        block_height: 0,
+        block_reward_consumer: bc_tmp.block_reward_consumer,
+        block_reward_industrial: bc_tmp.block_reward_industrial,
+        block_height: bc_tmp.block_height,
         mempool: vec![entry],
     };
+    let dir = temp_dir("schema_v3");
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
-    let db_path = dir.path().join("db");
-    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+    fs::write(dir.path().join("db"), bincode::serialize(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    let migrated = bc.mempool.get(&(String::from("a"), 1)).unwrap();
+    let post_sum_c: u64 = bc.chain.iter().map(|b| b.coinbase_consumer.get()).sum();
+    let post_sum_i: u64 = bc
+        .chain
+        .iter()
+        .map(|b| b.coinbase_industrial.get())
+        .sum();
+    assert_eq!(bc.emission_consumer, pre_sum_c);
+    assert_eq!(bc.emission_industrial, pre_sum_i);
+    assert_eq!(bc.emission_consumer, post_sum_c);
+    assert_eq!(bc.emission_industrial, post_sum_i);
+    for blk in &bc.chain {
+        let mut fee_c: u128 = 0;
+        let mut fee_i: u128 = 0;
+        for tx in blk.transactions.iter().skip(1) {
+            if let Ok((c, i)) = fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                fee_c += c as u128;
+                fee_i += i as u128;
+            }
+        }
+        let fc = u64::try_from(fee_c).unwrap_or(0);
+        let fi = u64::try_from(fee_i).unwrap_or(0);
+        let mut h = blake3::Hasher::new();
+        h.update(&fc.to_le_bytes());
+        h.update(&fi.to_le_bytes());
+        assert_eq!(blk.fee_checksum, h.finalize().to_hex().to_string());
+    }
+    let migrated = bc.mempool.get(&(String::from("a"), 2)).unwrap();
     assert_eq!(migrated.timestamp_ticks, migrated.timestamp_millis);
 }
 
 #[test]
 fn test_snapshot_rollback() {
     init();
-    let path = load_fixture("v2");
-    let mut bc = Blockchain::open(&path).unwrap();
+    let dir = load_fixture("v2");
+    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let before = hash_state(&bc);
     bc.persist_chain().unwrap();
-    let src_db = Path::new(&path).join("db");
+    let src_db = dir.path().join("db");
     let snapshot_dir = temp_dir("snapshot");
     // `Path::join` normalizes separators so the test works on Linux and macOS.
     let snapshot_db = snapshot_dir.path().join("db");

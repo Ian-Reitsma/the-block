@@ -26,8 +26,13 @@
   appending a Rust backtrace when `RUST_BACKTRACE=1`.
 - Fix: dropping `PurgeLoopHandle` triggers its shutdown flag to halt the
   purge thread when `ShutdownFlag.trigger()` is omitted.
+- Feat: expose `spawn_purge_loop(bc, interval_secs, shutdown)` to Python for
+  manual TTL purge scheduling.
 - Docs: document `TB_PURGE_LOOP_SECS` in `README` and `.env.example`.
 - Docs: add `decode_payload` usage example in `README` and `demo.py`.
+- Feat: assign numeric error codes (`ERR_*`) to transaction admission
+  failures; Python exceptions expose `error.code` and JSON logs include the
+  `code` field.
 - Feat: introduce minimum fee-per-byte floor with `FeeTooLow` rejection.
 - Feat: expose mempool limits (`max_mempool_size`, `min_fee_per_byte`,
   `tx_ttl`, `max_pending_per_account`) via `TB_*` env vars and sweep expired

@@ -131,6 +131,25 @@ exposes these metrics over HTTP; e.g. `curl -s localhost:9000/metrics | grep
 invalid_selector_reject_total`. See `API_CHANGELOG.md` for Python error and
 telemetry endpoint history.
 
+### Transaction Admission Error Codes
+
+| Code | Constant                  | Reason                  |
+|----:|---------------------------|-------------------------|
+| 0   | `ERR_OK`                  | accepted                |
+| 1   | `ERR_UNKNOWN_SENDER`      | sender account missing  |
+| 2   | `ERR_INSUFFICIENT_BALANCE`| balance below required  |
+| 3   | `ERR_NONCE_GAP`           | nonce does not follow   |
+| 4   | `ERR_INVALID_SELECTOR`    | fee selector unsupported|
+| 5   | `ERR_BAD_SIGNATURE`       | signature invalid       |
+| 6   | `ERR_DUPLICATE`           | tx already pending      |
+| 7   | `ERR_NOT_FOUND`           | tx absent on drop       |
+| 8   | `ERR_BALANCE_OVERFLOW`    | balance arithmetic overflow |
+| 9   | `ERR_FEE_OVERFLOW`        | fee arithmetic overflow |
+| 10  | `ERR_FEE_TOO_LOW`         | below fee-per-byte floor|
+| 11  | `ERR_MEMPOOL_FULL`        | global mempool capacity reached |
+| 12  | `ERR_LOCK_POISONED`       | mutex poisoned          |
+| 13  | `ERR_PENDING_LIMIT`       | per-account cap reached |
+
 ### Capacity & Flags
 
 | Limit               | Default | CLI Flag                | Env Var                    |

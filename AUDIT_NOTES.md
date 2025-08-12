@@ -49,6 +49,20 @@
 - `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` counters saturate at
   `u64::MAX`; tests prove `ShutdownFlag.trigger()` stops the purge loop
   before overflow.
+- Added direct `spawn_purge_loop` Python binding, enabling manual
+  interval selection, concurrent loops, double trigger/join tests, and
+  panic injection via `panic_next_purge`.
+- Expanded `scripts/check_anchors.py` to crawl `src`, `tests`, `benches`, and
+  `xtask` directories with cached file reads and parallel scanning; updated
+  tests cover anchors into `tests/` and `run_all_tests.sh` now skips missing
+  features and warns if `cargo fuzz` is unavailable.
+- `TxAdmissionError` is `#[repr(u16)]` with stable `ERR_*` constants; Python
+  exposes `.code` and telemetry `log_event` entries now carry a numeric
+  `code` field alongside `reason`.
+- Property-based `fee_recompute_prop` test randomizes blocks, coinbases, and
+  fees to ensure migrations recompute emission totals and `fee_checksum`
+  correctly; `test_schema_upgrade_compatibility` asserts coinbase sums and
+  per-block fee hashes for legacy fixtures.
 - Archived `artifacts/fuzz.log` and `artifacts/migration.log` with accompanying
   `RISK_MEMO.md` capturing residual risk and review requirements.
 

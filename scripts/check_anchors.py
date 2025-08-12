@@ -14,20 +14,29 @@ punctuation collapse to ``-``, and leading or trailing dashes are trimmed.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import functools
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-# Rust ``src/*.rs#Lx-Ly`` anchors
+# Rust ``(src|tests|benches|xtask)/*.rs#Lx-Ly`` anchors
+# Allow dots and nested module paths; the heavy lifting is done by
+# ``check_rust_anchor`` which resolves the path and verifies the line range.
 RUST_PATTERN = re.compile(
-    r"\((?P<path>(?:\./|\../)*src/[A-Za-z0-9_/]+\.rs)#L(?P<start>\d+)(?:-L(?P<end>\d+))?\)"
+    r"\((?P<path>(?:\./|\../)*(?:src|tests|benches|xtask)/[A-Za-z0-9_.\-/]+\.rs)#L(?P<start>\d+)(?:-L(?P<end>\d+))?\)"
 )
 
 # Markdown ``file.md#section`` anchors
 MD_PATTERN = re.compile(
     r"\((?P<path>(?:\./|\../)*[A-Za-z0-9_/]+\.md)#(?P<section>[A-Za-z0-9_-]+)\)"
 )
+
+
+@functools.lru_cache(maxsize=None)
+def _cached_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
 
 
 def check_rust_anchor(md_path: Path, match: re.Match[str]) -> str | None:
@@ -39,7 +48,7 @@ def check_rust_anchor(md_path: Path, match: re.Match[str]) -> str | None:
     if not target.exists():
         return f"{md_path}: missing file {rel_path}"
 
-    lines = target.read_text(encoding="utf-8").splitlines()
+    lines = _cached_lines(target)
     total = len(lines)
     if not (1 <= start <= end <= total):
         return (
@@ -102,6 +111,19 @@ def check_md_anchor(md_path: Path, match: re.Match[str]) -> str | None:
     return None
 
 
+def _process_md(md: Path, md_anchors: bool) -> list[str]:
+    errors: list[str] = []
+    content = md.read_text(encoding="utf-8").replace("\\", "/")
+    for match in RUST_PATTERN.finditer(content):
+        if err := check_rust_anchor(md, match):
+            errors.append(err)
+    if md_anchors:
+        for match in MD_PATTERN.finditer(content):
+            if err := check_md_anchor(md, match):
+                errors.append(err)
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -111,18 +133,16 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    md_files = [
+        md
+        for md in ROOT.rglob("*.md")
+        if not any(part in {"target", ".git", "advisory-db", ".venv"} for part in md.parts)
+    ]
     errors: list[str] = []
-    for md in ROOT.rglob("*.md"):
-        if any(part in {"target", ".git", "advisory-db", ".venv"} for part in md.parts):
-            continue
-        content = md.read_text(encoding="utf-8").replace("\\", "/")
-        for match in RUST_PATTERN.finditer(content):
-            if err := check_rust_anchor(md, match):
-                errors.append(err)
-        if args.md_anchors:
-            for match in MD_PATTERN.finditer(content):
-                if err := check_md_anchor(md, match):
-                    errors.append(err)
+    with concurrent.futures.ThreadPoolExecutor() as ex:
+        for result in ex.map(lambda m: _process_md(m, args.md_anchors), md_files):
+            errors.extend(result)
+
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

@@ -396,6 +396,9 @@ any testnet or production exposure. Each change **must** include tests, telemetr
   context manager that spawns the purge loop on `__enter__` and triggers
   shutdown on `__exit__`; `maybe_spawn_purge_loop` remains available for
   manual control.
+- Bind `spawn_purge_loop` directly to Python to allow explicit
+  interval selection and concurrent loop testing; dropping the returned
+  handle or triggering its `ShutdownFlag` stops the thread.
 - `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` counters saturate at
   `u64::MAX`, and tests assert `ShutdownFlag.trigger()` halts the thread
   before further increments.
@@ -409,7 +412,10 @@ any testnet or production exposure. Each change **must** include tests, telemetr
   `u64::MAX` to prevent overflow; `STARTUP_TTL_DROP_TOTAL`,
   `LOCK_POISON_TOTAL`, `INVALID_SELECTOR_REJECT_TOTAL`,
   `BALANCE_OVERFLOW_REJECT_TOTAL`, `DROP_NOT_FOUND_TOTAL`, and
-  `TX_REJECTED_TOTAL{reason=*}` track all rejection paths.
+  `TX_REJECTED_TOTAL{reason=*}` track all rejection paths. Each
+  `TxAdmissionError` variant is `#[repr(u16)]` with a stable `ERR_*`
+  constant; `log_event` emits the numeric `code` alongside `reason` and
+  Python exceptions expose `.code` for programmatic inspection.
 - Instrument spans `mempool_mutex`, `eviction_sweep`, and
   `startup_rebuild` capturing sender, nonce, fee_per_byte, and mempool
   size.

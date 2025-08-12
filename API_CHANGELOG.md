@@ -6,6 +6,8 @@
 - `TxAdmissionError::LockPoisoned` is returned when a mempool mutex guard is poisoned.
 - `TxAdmissionError::PendingLimit` indicates the per-account pending cap was reached.
 - `TxAdmissionError::NonceGap` surfaces as `ErrNonceGap` when a nonce skips the expected sequence.
+- `TxAdmissionError` instances expose a stable `code` property and constants
+  `ERR_*` map each rejection reason to a numeric identifier.
 - `decode_payload(bytes)` decodes canonical payload bytes back into `RawTxPayload`.
 - `ShutdownFlag` and `PurgeLoopHandle` manage purge threads when used with
   `maybe_spawn_purge_loop`.
@@ -16,6 +18,8 @@
 - `maybe_spawn_purge_loop` now errors when `TB_PURGE_LOOP_SECS` is unset,
   non-numeric, or ≤0; the Python wrapper raises ``ValueError`` with the parse
   message.
+- `spawn_purge_loop(bc, interval_secs, shutdown)` spawns the purge loop with a
+  manually supplied interval.
 - `Blockchain::panic_in_admission_after(step)` panics mid-admission for test harnesses;
   `Blockchain::heal_admission()` clears the flag.
 - `Blockchain::panic_next_evict()` triggers a panic during the next eviction and
@@ -38,6 +42,8 @@
 - `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS` and spawns a background
   thread that periodically calls `purge_expired`, advancing
   `ttl_drop_total` and `orphan_sweep_total`.
+- JSON telemetry logs now include a numeric `code` alongside `reason` for
+  each admission event.
 - Spans `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
   `startup_rebuild` record sender, nonce, fee-per-byte, and mempool size
   ([src/lib.rs](src/lib.rs#L1067-L1082),
