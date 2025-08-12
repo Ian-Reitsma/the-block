@@ -133,11 +133,12 @@ All functions return Python‑native types (`dict`, `bytes`, `int`) for simplici
 Additional helpers:
 
 - `decode_payload(bytes)` reverses canonical encoding to `RawTxPayload`.
-- `PurgeLoop` provides a context manager that spawns and joins the TTL purge loop.
-  `TB_PURGE_LOOP_SECS` must be set to a positive integer; invalid or missing
-  values raise ``ValueError``. For manual control use
-  `ShutdownFlag`/`PurgeLoopHandle` with `maybe_spawn_purge_loop(bc,
-  ShutdownFlag())`.
+  - `PurgeLoop` provides a context manager that spawns and joins the TTL purge loop.
+    `TB_PURGE_LOOP_SECS` must be set to a positive integer; invalid or missing
+    values raise ``ValueError``. For manual control use
+    `ShutdownFlag`/`PurgeLoopHandle` with `spawn_purge_loop(bc, 1,
+    ShutdownFlag())` where the second argument specifies the interval in
+    seconds.
 - Reusing or skipping a nonce raises `ErrNonceGap`.
 
 ### Decoding transaction payloads
@@ -279,7 +280,7 @@ Use `with PurgeLoop(bc):` to honor `TB_PURGE_LOOP_SECS` and spawn a background
 thread that automatically triggers shutdown and joins when the block exits.
 `TB_PURGE_LOOP_SECS` sets the interval **in seconds** between TTL sweeps and
 must be a positive integer. Unset, non-numeric, or non-positive values raise an
-error. For manual control, call `maybe_spawn_purge_loop(bc, ShutdownFlag())` to
+error. For manual control, call `spawn_purge_loop(bc, 1, ShutdownFlag())` to
 obtain a `PurgeLoopHandle` you can join explicitly. Dropping the handle
 triggers shutdown and joins the thread if you omit an explicit
 `ShutdownFlag.trigger()`. The loop periodically
@@ -299,10 +300,10 @@ message:
 
 ```bash
 RUST_BACKTRACE=1 python - <<'PY'
-from the_block import Blockchain, ShutdownFlag, maybe_spawn_purge_loop
+from the_block import Blockchain, ShutdownFlag, spawn_purge_loop
 
 bc = Blockchain.with_difficulty('demo-db', 1)
-handle = maybe_spawn_purge_loop(bc, ShutdownFlag())
+handle = spawn_purge_loop(bc, 1, ShutdownFlag())
 
 try:
     handle.join()
@@ -310,6 +311,12 @@ except RuntimeError as err:
     print(err)  # backtrace included
 PY
 ```
+
+Admission failures raise typed exceptions. Each `TxAdmissionError` variant
+encodes a stable `u16` and is re-exposed to Python both as an `ERR_*`
+constant and through the exception's `.code` attribute. Structured telemetry
+logs emit the same numeric `code` field alongside the textual `reason` so
+downstream consumers can rely on fixed identifiers when parsing rejects.
 
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
 `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),

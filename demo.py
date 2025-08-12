@@ -365,7 +365,12 @@ def main() -> None:
     """Run the full demo sequentially."""
     init_environment()
     bc = init_chain()
-    # TB_PURGE_LOOP_SECS controls purge interval in seconds; unset/0 disables.
+    # TB_PURGE_LOOP_SECS controls purge interval for the context manager.
+    # For manual control specify the interval directly:
+    # flag = the_block.ShutdownFlag()
+    # handle = the_block.spawn_purge_loop(bc, 1, flag)
+    # ... work ...
+    # flag.trigger(); handle.join()
     with the_block.PurgeLoop(bc):
         accounts = create_accounts(bc)
         priv = keypair_demo()

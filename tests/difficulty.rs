@@ -19,7 +19,7 @@ fn blank_block(index: u64, ts: u64, diff: u64) -> Block {
 #[test]
 fn retargets_up_when_blocks_fast() {
     let mut chain = Vec::new();
-    let mut ts = 0u64;
+    let mut ts = 1u64;
     for i in 0..120 {
         chain.push(blank_block(i, ts, 1000));
         ts += 500; // half the target spacing
@@ -31,7 +31,7 @@ fn retargets_up_when_blocks_fast() {
 #[test]
 fn retargets_down_when_blocks_slow() {
     let mut chain = Vec::new();
-    let mut ts = 0u64;
+    let mut ts = 1u64;
     for i in 0..120 {
         chain.push(blank_block(i, ts, 1000));
         ts += 2_000; // double the target spacing

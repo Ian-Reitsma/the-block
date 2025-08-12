@@ -55,6 +55,20 @@ re‑implement:
 11. Telemetry counters `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` saturate at
     `u64::MAX`; tests confirm `ShutdownFlag.trigger()` halts purge threads
     before overflow.
+12. Stable transaction-admission error codes: `TxAdmissionError` is
+    `#[repr(u16)]`, Python re-exports `ERR_*` constants and `.code` attributes,
+    and `log_event` emits the numeric `code` in telemetry JSON.
+13. Anchor checker walks `src`, `tests`, `benches`, and `xtask` with cached
+    file reads and parallel scanning; `scripts/test_check_anchors.py` covers
+    `tests/` anchors and `run_all_tests.sh` now skips missing features and
+    warns when `cargo fuzz` is unavailable.
+14. Direct `spawn_purge_loop(bc, secs, shutdown)` binding for Python enables
+    manual interval control and concurrency tests. New tests cover manual
+    trigger/join semantics, panic propagation via `panic_next_purge`, and
+    env-driven loops sweeping TTL-expired and orphan transactions.
+15. Coinbase/fee recomputation is stress-tested: property-based generator
+    randomizes blocks, coinbases, and fees, and schema upgrade tests validate
+    emission totals and per-block `fee_checksum` after migration.
 
 ---
 

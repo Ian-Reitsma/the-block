@@ -60,3 +60,51 @@ def test_rust_anchor_windows_path(tmp_path: Path):
     match = RUST_PATTERN.search(content)
     assert match is not None
     assert check_rust_anchor(md, match) is None
+
+
+def test_rust_anchor_tests_dir(tmp_path: Path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "example.rs").write_text("fn main() {}\n", encoding="utf-8")
+    md = tmp_path / "ref.md"
+    md.write_text("(tests/example.rs#L1)\n", encoding="utf-8")
+    content = md.read_text(encoding="utf-8")
+    match = RUST_PATTERN.search(content)
+    assert match is not None
+    assert check_rust_anchor(md, match) is None
+
+
+def test_rust_anchor_benches_dir(tmp_path: Path):
+    benches = tmp_path / "benches"
+    benches.mkdir()
+    (benches / "bench.rs").write_text("fn main() {}\n", encoding="utf-8")
+    md = tmp_path / "ref.md"
+    md.write_text("(benches/bench.rs#L1)\n", encoding="utf-8")
+    content = md.read_text(encoding="utf-8")
+    match = RUST_PATTERN.search(content)
+    assert match is not None
+    assert check_rust_anchor(md, match) is None
+
+
+def test_rust_anchor_nested_path(tmp_path: Path):
+    nested = tmp_path / "src" / "bin"
+    nested.mkdir(parents=True)
+    (nested / "main.rs").write_text("fn main() {}\n", encoding="utf-8")
+    md = tmp_path / "ref.md"
+    md.write_text("(src/bin/main.rs#L1)\n", encoding="utf-8")
+    content = md.read_text(encoding="utf-8")
+    match = RUST_PATTERN.search(content)
+    assert match is not None
+    assert check_rust_anchor(md, match) is None
+
+
+def test_rust_anchor_path_with_dots(tmp_path: Path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "foo.bar.rs").write_text("fn main() {}\n", encoding="utf-8")
+    md = tmp_path / "ref.md"
+    md.write_text("(src/foo.bar.rs#L1)\n", encoding="utf-8")
+    content = md.read_text(encoding="utf-8")
+    match = RUST_PATTERN.search(content)
+    assert match is not None
+    assert check_rust_anchor(md, match) is None

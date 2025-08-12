@@ -56,7 +56,12 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   `purge_expired`, advancing TTL and orphan-sweep metrics even when the node is
   idle. Python exposes a `PurgeLoop` context manager wrapping
   `ShutdownFlag`/`PurgeLoopHandle` for automatic startup and clean shutdown;
-  manual control is still available via the raw bindings.
+  manual control is available via the `spawn_purge_loop(bc, secs, shutdown)`
+  binding.
+* Admission failures are reported with `TxAdmissionError` which is
+  `#[repr(u16)]`; Python re-exports `ERR_*` constants and each exception has a
+  `.code` attribute. `log_event` includes the same numeric `code` in telemetry
+  JSON so log consumers can match on stable identifiers.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,

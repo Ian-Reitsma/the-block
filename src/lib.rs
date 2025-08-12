@@ -60,34 +60,43 @@ pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, Fe
 
 // === Transaction admission errors ===
 
-#[derive(Debug, Error, PartialEq)]
+#[repr(u16)]
+#[derive(Debug, Error, PartialEq, Clone, Copy)]
 pub enum TxAdmissionError {
     #[error("unknown sender")]
-    UnknownSender,
+    UnknownSender = ERR_UNKNOWN_SENDER,
     #[error("insufficient balance")]
-    InsufficientBalance,
+    InsufficientBalance = ERR_INSUFFICIENT_BALANCE,
     #[error("nonce gap")]
-    NonceGap,
+    NonceGap = ERR_NONCE_GAP,
     #[error("invalid selector")]
-    InvalidSelector,
+    InvalidSelector = ERR_INVALID_SELECTOR,
     #[error("bad signature")]
-    BadSignature,
+    BadSignature = ERR_BAD_SIGNATURE,
     #[error("duplicate transaction")]
-    Duplicate,
+    Duplicate = ERR_DUPLICATE,
     #[error("transaction not found")]
-    NotFound,
+    NotFound = ERR_NOT_FOUND,
     #[error("balance overflow")]
-    BalanceOverflow,
+    BalanceOverflow = ERR_BALANCE_OVERFLOW,
     #[error("fee overflow")]
-    FeeOverflow,
+    FeeOverflow = ERR_FEE_OVERFLOW,
     #[error("fee below minimum")]
-    FeeTooLow,
+    FeeTooLow = ERR_FEE_TOO_LOW,
     #[error("mempool full")]
-    MempoolFull,
+    MempoolFull = ERR_MEMPOOL_FULL,
     #[error("lock poisoned")]
-    LockPoisoned,
+    LockPoisoned = ERR_LOCK_POISONED,
     #[error("pending limit reached")]
-    PendingLimitReached,
+    PendingLimitReached = ERR_PENDING_LIMIT,
+}
+
+impl TxAdmissionError {
+    #[must_use]
+    #[inline]
+    pub const fn code(self) -> u16 {
+        self as u16
+    }
 }
 
 create_exception!(the_block, ErrUnknownSender, PyException);
@@ -103,25 +112,46 @@ create_exception!(the_block, ErrPendingLimit, PyException);
 
 impl From<TxAdmissionError> for PyErr {
     fn from(e: TxAdmissionError) -> Self {
-        match e {
-            TxAdmissionError::UnknownSender => ErrUnknownSender::new_err("unknown sender"),
-            TxAdmissionError::InsufficientBalance => {
-                ErrInsufficientBalance::new_err("insufficient balance")
-            }
-            TxAdmissionError::NonceGap => ErrNonceGap::new_err("nonce gap"),
-            TxAdmissionError::InvalidSelector => ErrInvalidSelector::new_err("invalid selector"),
-            TxAdmissionError::BadSignature => ErrBadSignature::new_err("bad signature"),
-            TxAdmissionError::Duplicate => ErrDuplicateTx::new_err("duplicate transaction"),
-            TxAdmissionError::NotFound => ErrTxNotFound::new_err("transaction not found"),
-            TxAdmissionError::BalanceOverflow => PyValueError::new_err("balance overflow"),
-            TxAdmissionError::FeeOverflow => ErrFeeOverflow::new_err("fee overflow"),
-            TxAdmissionError::FeeTooLow => ErrFeeTooLow::new_err("fee below minimum"),
-            TxAdmissionError::MempoolFull => ErrMempoolFull::new_err("mempool full"),
-            TxAdmissionError::LockPoisoned => ErrLockPoisoned::new_err("lock poisoned"),
-            TxAdmissionError::PendingLimitReached => {
-                ErrPendingLimit::new_err("pending limit reached")
-            }
-        }
+        let code = e.code();
+        Python::with_gil(|py| {
+            let (ty, msg) = match e {
+                TxAdmissionError::UnknownSender => {
+                    (py.get_type::<ErrUnknownSender>(), "unknown sender")
+                }
+                TxAdmissionError::InsufficientBalance => (
+                    py.get_type::<ErrInsufficientBalance>(),
+                    "insufficient balance",
+                ),
+                TxAdmissionError::NonceGap => (py.get_type::<ErrNonceGap>(), "nonce gap"),
+                TxAdmissionError::InvalidSelector => {
+                    (py.get_type::<ErrInvalidSelector>(), "invalid selector")
+                }
+                TxAdmissionError::BadSignature => {
+                    (py.get_type::<ErrBadSignature>(), "bad signature")
+                }
+                TxAdmissionError::Duplicate => {
+                    (py.get_type::<ErrDuplicateTx>(), "duplicate transaction")
+                }
+                TxAdmissionError::NotFound => {
+                    (py.get_type::<ErrTxNotFound>(), "transaction not found")
+                }
+                TxAdmissionError::BalanceOverflow => {
+                    (py.get_type::<PyValueError>(), "balance overflow")
+                }
+                TxAdmissionError::FeeOverflow => (py.get_type::<ErrFeeOverflow>(), "fee overflow"),
+                TxAdmissionError::FeeTooLow => (py.get_type::<ErrFeeTooLow>(), "fee below minimum"),
+                TxAdmissionError::MempoolFull => (py.get_type::<ErrMempoolFull>(), "mempool full"),
+                TxAdmissionError::LockPoisoned => {
+                    (py.get_type::<ErrLockPoisoned>(), "lock poisoned")
+                }
+                TxAdmissionError::PendingLimitReached => {
+                    (py.get_type::<ErrPendingLimit>(), "pending limit reached")
+                }
+            };
+            let err = ty.call1((msg,)).expect("exception construction failed");
+            err.setattr("code", code).expect("set code attr");
+            PyErr::from_value(err)
+        })
     }
 }
 
@@ -132,6 +162,7 @@ fn log_event(
     sender: &str,
     nonce: u64,
     reason: &str,
+    code: u16,
     fpb: Option<u64>,
 ) {
     let mut obj = serde_json::Map::new();
@@ -139,6 +170,7 @@ fn log_event(
     obj.insert("sender".into(), json!(sender));
     obj.insert("nonce".into(), json!(nonce));
     obj.insert("reason".into(), json!(reason));
+    obj.insert("code".into(), json!(code));
     if let Some(v) = fpb {
         obj.insert("fpb".into(), json!(v));
     }
@@ -995,6 +1027,7 @@ impl Blockchain {
             "",
             0,
             "expired_drop_total",
+            ERR_OK,
             Some(expired_drop_total as u64),
         );
         #[cfg(feature = "telemetry")]
@@ -1103,6 +1136,27 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Remove an existing account. Intended for testing hooks.
+    ///
+    /// # Errors
+    /// Returns [`PyValueError`] if the account is not found.
+    #[doc(hidden)]
+    pub fn remove_account(&mut self, address: &str) -> PyResult<()> {
+        self.accounts
+            .remove(address)
+            .map(|_| ())
+            .ok_or_else(|| PyValueError::new_err("Account not found"))
+    }
+
+    /// Backdate a mempool entry's timestamp for testing purposes.
+    #[doc(hidden)]
+    pub fn backdate_mempool_entry(&self, sender: &str, nonce: u64, millis: u64) {
+        if let Some(mut entry) = self.mempool.get_mut(&(sender.to_string(), nonce)) {
+            entry.timestamp_millis = millis;
+            entry.timestamp_ticks = millis;
+        }
+    }
+
     /// Return the balance for an account.
     ///
     /// # Errors
@@ -1201,6 +1255,7 @@ impl Blockchain {
                 &sender_addr,
                 nonce,
                 "invalid_selector",
+                TxAdmissionError::InvalidSelector.code(),
                 None,
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1331,6 +1386,7 @@ impl Blockchain {
                     &sender_addr,
                     nonce,
                     "mempool_full",
+                    TxAdmissionError::MempoolFull.code(),
                     None,
                 );
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1349,6 +1405,7 @@ impl Blockchain {
                     &sender_addr,
                     nonce,
                     "duplicate",
+                    TxAdmissionError::Duplicate.code(),
                     None,
                 );
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1372,6 +1429,7 @@ impl Blockchain {
                             &sender_addr,
                             nonce,
                             "unknown_sender",
+                            TxAdmissionError::UnknownSender.code(),
                             None,
                         );
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1417,6 +1475,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "insufficient_balance",
+                        TxAdmissionError::InsufficientBalance.code(),
                         None,
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1434,6 +1493,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "duplicate",
+                        TxAdmissionError::Duplicate.code(),
                         None,
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1454,6 +1514,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "nonce_gap",
+                        TxAdmissionError::NonceGap.code(),
                         None,
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1472,6 +1533,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "fee_too_low",
+                        TxAdmissionError::FeeTooLow.code(),
                         Some(fee_per_byte),
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1492,6 +1554,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "bad_signature",
+                        TxAdmissionError::BadSignature.code(),
                         None,
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1509,6 +1572,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "pending_limit",
+                        TxAdmissionError::PendingLimitReached.code(),
                         None,
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1549,6 +1613,7 @@ impl Blockchain {
                         &sender_addr,
                         nonce,
                         "ok",
+                        ERR_OK,
                         Some(fee_per_byte),
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -1645,13 +1710,29 @@ impl Blockchain {
                 }
             }
             #[cfg(feature = "telemetry-json")]
-            log_event(log::Level::Info, "drop", sender, nonce, "dropped", None);
+            log_event(
+                log::Level::Info,
+                "drop",
+                sender,
+                nonce,
+                "dropped",
+                ERR_OK,
+                None,
+            );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             info!("tx dropped sender={sender} nonce={nonce} reason=dropped");
             Ok(())
         } else {
             #[cfg(feature = "telemetry-json")]
-            log_event(log::Level::Warn, "drop", sender, nonce, "not_found", None);
+            log_event(
+                log::Level::Warn,
+                "drop",
+                sender,
+                nonce,
+                "not_found",
+                TxAdmissionError::NotFound.code(),
+                None,
+            );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             warn!("drop failed sender={sender} nonce={nonce} reason=not_found");
             #[cfg(feature = "telemetry")]
@@ -2280,6 +2361,11 @@ impl Blockchain {
 
         Ok(())
     }
+
+    #[doc(hidden)]
+    pub fn panic_next_purge(&self) {
+        self.trigger_panic_next_purge();
+    }
 }
 
 impl Blockchain {
@@ -2409,7 +2495,7 @@ impl Blockchain {
 ///
 /// The loop sleeps for `interval_secs` between iterations and stops when
 /// `shutdown` is set to `true`.
-pub fn spawn_purge_loop(
+pub fn spawn_purge_loop_thread(
     bc: Arc<Mutex<Blockchain>>,
     interval_secs: u64,
     shutdown: Arc<AtomicBool>,
@@ -2430,11 +2516,59 @@ pub fn spawn_purge_loop(
                     "",
                     0,
                     "ttl_drop_total",
+                    ERR_OK,
                     Some(dropped),
                 );
             }
             thread::sleep(Duration::from_secs(interval_secs));
         }
+    })
+}
+
+/// Python binding for spawning a purge loop with a manual interval.
+///
+/// Args:
+///     bc (Blockchain): Chain instance to operate on.
+///     interval_secs (int): Number of seconds to sleep between purges.
+///     shutdown (ShutdownFlag): Flag used to signal termination.
+///
+/// Returns:
+///     PurgeLoopHandle: handle to the purge thread.
+#[pyfunction(text_signature = "(bc, interval_secs, shutdown)")]
+pub fn spawn_purge_loop(
+    bc: Py<Blockchain>,
+    interval_secs: u64,
+    shutdown: &ShutdownFlag,
+) -> PyResult<PurgeLoopHandle> {
+    let bc_py = Python::with_gil(|py| bc.clone_ref(py));
+    let thread_flag = shutdown.clone();
+    let handle_shutdown = shutdown.clone();
+    let handle = thread::spawn(move || {
+        while !thread_flag.0.load(std::sync::atomic::Ordering::SeqCst) {
+            Python::with_gil(|py| {
+                let mut bc = bc_py.borrow_mut(py);
+                let dropped = bc.purge_expired();
+                #[cfg(not(feature = "telemetry"))]
+                let _ = dropped;
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                info!("purge_loop ttl_drop_total={dropped}");
+                #[cfg(feature = "telemetry-json")]
+                log_event(
+                    log::Level::Info,
+                    "purge_loop",
+                    "",
+                    0,
+                    "ttl_drop_total",
+                    ERR_OK,
+                    Some(dropped),
+                );
+            });
+            thread::sleep(Duration::from_secs(interval_secs));
+        }
+    });
+    Ok(PurgeLoopHandle {
+        handle: Some(handle),
+        shutdown: handle_shutdown,
     })
 }
 
@@ -2467,7 +2601,7 @@ pub fn maybe_spawn_purge_loop(
     shutdown: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<()>, String> {
     match parse_purge_interval() {
-        Ok(secs) => Ok(spawn_purge_loop(bc, secs, shutdown)),
+        Ok(secs) => Ok(spawn_purge_loop_thread(bc, secs, shutdown)),
         Err(e) => {
             #[cfg(feature = "telemetry")]
             log::warn!("{e}");
@@ -2647,35 +2781,7 @@ pub fn maybe_spawn_purge_loop_py(
     shutdown: &ShutdownFlag,
 ) -> PyResult<PurgeLoopHandle> {
     let secs = parse_purge_interval().map_err(PyValueError::new_err)?;
-    let bc_py = Python::with_gil(|py| bc.clone_ref(py));
-    let thread_flag = shutdown.clone();
-    let handle_shutdown = shutdown.clone();
-    let handle = thread::spawn(move || {
-        while !thread_flag.0.load(std::sync::atomic::Ordering::SeqCst) {
-            Python::with_gil(|py| {
-                let mut bc = bc_py.borrow_mut(py);
-                let dropped = bc.purge_expired();
-                #[cfg(not(feature = "telemetry"))]
-                let _ = dropped;
-                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                info!("purge_loop ttl_drop_total={dropped}");
-                #[cfg(feature = "telemetry-json")]
-                log_event(
-                    log::Level::Info,
-                    "purge_loop",
-                    "",
-                    0,
-                    "ttl_drop_total",
-                    Some(dropped),
-                );
-            });
-            thread::sleep(Duration::from_secs(secs));
-        }
-    });
-    Ok(PurgeLoopHandle {
-        handle: Some(handle),
-        shutdown: handle_shutdown,
-    })
+    spawn_purge_loop(bc, secs, shutdown)
 }
 
 impl Drop for Blockchain {
@@ -2745,7 +2851,7 @@ impl Blockchain {
     }
 
     #[doc(hidden)]
-    pub fn panic_next_purge(&self) {
+    pub fn trigger_panic_next_purge(&self) {
         self.panic_on_purge
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -2848,6 +2954,22 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
     false
 }
 
+// === Tx admission error codes ===
+pub const ERR_OK: u16 = 0;
+pub const ERR_UNKNOWN_SENDER: u16 = 1;
+pub const ERR_INSUFFICIENT_BALANCE: u16 = 2;
+pub const ERR_NONCE_GAP: u16 = 3;
+pub const ERR_INVALID_SELECTOR: u16 = 4;
+pub const ERR_BAD_SIGNATURE: u16 = 5;
+pub const ERR_DUPLICATE: u16 = 6;
+pub const ERR_NOT_FOUND: u16 = 7;
+pub const ERR_BALANCE_OVERFLOW: u16 = 8;
+pub const ERR_FEE_OVERFLOW: u16 = 9;
+pub const ERR_FEE_TOO_LOW: u16 = 10;
+pub const ERR_MEMPOOL_FULL: u16 = 11;
+pub const ERR_LOCK_POISONED: u16 = 12;
+pub const ERR_PENDING_LIMIT: u16 = 13;
+
 /// Return the integer network identifier used in domain separation.
 #[must_use]
 #[pyfunction]
@@ -2879,6 +3001,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(decode_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
+    m.add_function(wrap_pyfunction!(spawn_purge_loop, m)?)?;
     m.add_function(wrap_pyfunction!(maybe_spawn_purge_loop_py, m)?)?;
     m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
     m.add(
@@ -2898,6 +3021,20 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
     m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
     m.add("ErrPendingLimit", ErrPendingLimit::type_object(m.py()))?;
+    m.add("ERR_OK", ERR_OK)?;
+    m.add("ERR_UNKNOWN_SENDER", ERR_UNKNOWN_SENDER)?;
+    m.add("ERR_INSUFFICIENT_BALANCE", ERR_INSUFFICIENT_BALANCE)?;
+    m.add("ERR_NONCE_GAP", ERR_NONCE_GAP)?;
+    m.add("ERR_INVALID_SELECTOR", ERR_INVALID_SELECTOR)?;
+    m.add("ERR_BAD_SIGNATURE", ERR_BAD_SIGNATURE)?;
+    m.add("ERR_DUPLICATE", ERR_DUPLICATE)?;
+    m.add("ERR_NOT_FOUND", ERR_NOT_FOUND)?;
+    m.add("ERR_BALANCE_OVERFLOW", ERR_BALANCE_OVERFLOW)?;
+    m.add("ERR_FEE_OVERFLOW", ERR_FEE_OVERFLOW)?;
+    m.add("ERR_FEE_TOO_LOW", ERR_FEE_TOO_LOW)?;
+    m.add("ERR_MEMPOOL_FULL", ERR_MEMPOOL_FULL)?;
+    m.add("ERR_LOCK_POISONED", ERR_LOCK_POISONED)?;
+    m.add("ERR_PENDING_LIMIT", ERR_PENDING_LIMIT)?;
     #[cfg(feature = "telemetry")]
     {
         m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;

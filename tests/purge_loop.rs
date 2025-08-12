@@ -7,12 +7,12 @@ use std::thread;
 use std::time::Duration;
 
 mod util;
-use util::temp::temp_dir;
 use tempfile::TempDir;
+use util::temp::temp_dir;
 
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
-use the_block::{generate_keypair, sign_tx, spawn_purge_loop, Blockchain, RawTxPayload};
+use the_block::{generate_keypair, sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload};
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
@@ -76,7 +76,7 @@ fn purge_loop_drops_expired_entries() {
     telemetry::TTL_DROP_TOTAL.reset();
     let bc = Arc::new(Mutex::new(bc));
     let shutdown = Arc::new(AtomicBool::new(false));
-    let handle = spawn_purge_loop(Arc::clone(&bc), 1, Arc::clone(&shutdown));
+    let handle = spawn_purge_loop_thread(Arc::clone(&bc), 1, Arc::clone(&shutdown));
     thread::sleep(Duration::from_millis(1100));
     shutdown.store(true, Ordering::SeqCst);
     handle.join().unwrap();
