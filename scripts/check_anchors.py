@@ -31,7 +31,7 @@ MD_PATTERN = re.compile(
 
 
 def check_rust_anchor(md_path: Path, match: re.Match[str]) -> str | None:
-    rel_path = match.group("path")
+    rel_path = match.group("path").replace("\\", "/")
     start = int(match.group("start"))
     end = int(match.group("end") or start)
 
@@ -82,7 +82,7 @@ def slugify(text: str) -> str:
 
 
 def check_md_anchor(md_path: Path, match: re.Match[str]) -> str | None:
-    rel_path = match.group("path")
+    rel_path = match.group("path").replace("\\", "/")
     section = match.group("section")
     target = (md_path.parent / rel_path).resolve()
     if not target.exists():
@@ -115,7 +115,7 @@ def main() -> int:
     for md in ROOT.rglob("*.md"):
         if any(part in {"target", ".git", "advisory-db", ".venv"} for part in md.parts):
             continue
-        content = md.read_text(encoding="utf-8")
+        content = md.read_text(encoding="utf-8").replace("\\", "/")
         for match in RUST_PATTERN.finditer(content):
             if err := check_rust_anchor(md, match):
                 errors.append(err)

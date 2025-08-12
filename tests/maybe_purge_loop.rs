@@ -1,5 +1,5 @@
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -17,9 +17,16 @@ fn init() {
     pyo3::prepare_freethreaded_python();
 }
 
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn env_guard() -> MutexGuard<'static, ()> {
+    ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
 #[test]
 fn env_driven_purge_loop_drops_entries() {
     init();
+    let _guard = env_guard();
     let dir = temp_dir("maybe_purge_loop");
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
@@ -70,6 +77,7 @@ fn env_driven_purge_loop_drops_entries() {
 #[test]
 fn invalid_env_surfaces_error() {
     init();
+    let _guard = env_guard();
     std::env::set_var("TB_PURGE_LOOP_SECS", "not-a-number");
     let dir = temp_dir("invalid_purge_loop");
     let bc = Arc::new(Mutex::new(
@@ -84,6 +92,7 @@ fn invalid_env_surfaces_error() {
 #[test]
 fn zero_env_surfaces_error() {
     init();
+    let _guard = env_guard();
     std::env::set_var("TB_PURGE_LOOP_SECS", "0");
     let dir = temp_dir("zero_purge_loop");
     let bc = Arc::new(Mutex::new(
@@ -98,6 +107,7 @@ fn zero_env_surfaces_error() {
 #[test]
 fn missing_env_surfaces_error() {
     init();
+    let _guard = env_guard();
     std::env::remove_var("TB_PURGE_LOOP_SECS");
     let dir = temp_dir("missing_purge_loop");
     let bc = Arc::new(Mutex::new(
@@ -106,4 +116,19 @@ fn missing_env_surfaces_error() {
     let shutdown = ShutdownFlag::new();
     let err = maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).unwrap_err();
     assert!(err.contains("TB_PURGE_LOOP_SECS"));
+}
+
+#[test]
+fn negative_env_surfaces_error() {
+    init();
+    let _guard = env_guard();
+    std::env::set_var("TB_PURGE_LOOP_SECS", "-5");
+    let dir = temp_dir("negative_purge_loop");
+    let bc = Arc::new(Mutex::new(
+        Blockchain::open(dir.path().to_str().unwrap()).unwrap(),
+    ));
+    let shutdown = ShutdownFlag::new();
+    let err = maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).unwrap_err();
+    assert!(err.contains("TB_PURGE_LOOP_SECS"));
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
 }

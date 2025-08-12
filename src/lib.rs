@@ -1861,7 +1861,7 @@ impl Blockchain {
         let diff = difficulty::expected_difficulty(&self.chain);
         let timestamp_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| Duration::from_secs(0))
             .as_millis() as u64;
         let mut block = Block {
             index,
@@ -2513,11 +2513,13 @@ impl ShutdownFlag {
 
 /// Handle to a purge loop thread, allowing callers to join from Python.
 ///
-/// Dropping the handle automatically joins the purge thread, ensuring it
-/// terminates even if ``join`` is never called explicitly.
+/// Dropping the handle triggers shutdown and joins the purge thread,
+/// ensuring it terminates even if ``trigger``/``join`` are never called
+/// explicitly.
 #[pyclass]
 pub struct PurgeLoopHandle {
     handle: Option<thread::JoinHandle<()>>,
+    shutdown: ShutdownFlag,
 }
 
 #[pymethods]
@@ -2545,6 +2547,7 @@ impl PurgeLoopHandle {
 
 impl Drop for PurgeLoopHandle {
     fn drop(&mut self) {
+        self.shutdown.trigger();
         let _ = self.join();
     }
 }
@@ -2645,9 +2648,10 @@ pub fn maybe_spawn_purge_loop_py(
 ) -> PyResult<PurgeLoopHandle> {
     let secs = parse_purge_interval().map_err(PyValueError::new_err)?;
     let bc_py = Python::with_gil(|py| bc.clone_ref(py));
-    let shutdown_flag = shutdown.0.clone();
+    let thread_flag = shutdown.clone();
+    let handle_shutdown = shutdown.clone();
     let handle = thread::spawn(move || {
-        while !shutdown_flag.load(std::sync::atomic::Ordering::SeqCst) {
+        while !thread_flag.0.load(std::sync::atomic::Ordering::SeqCst) {
             Python::with_gil(|py| {
                 let mut bc = bc_py.borrow_mut(py);
                 let dropped = bc.purge_expired();
@@ -2670,6 +2674,7 @@ pub fn maybe_spawn_purge_loop_py(
     });
     Ok(PurgeLoopHandle {
         handle: Some(handle),
+        shutdown: handle_shutdown,
     })
 }
 

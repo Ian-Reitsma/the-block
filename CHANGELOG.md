@@ -23,7 +23,9 @@
 - Fix: guard mining mempool mutations with global mutex to enforce
   capacity under concurrency.
 - Fix: `PurgeLoopHandle.join` surfaces purge thread panics as `RuntimeError`,
-  capturing a backtrace when `RUST_BACKTRACE` is set.
+  appending a Rust backtrace when `RUST_BACKTRACE=1`.
+- Fix: dropping `PurgeLoopHandle` triggers its shutdown flag to halt the
+  purge thread when `ShutdownFlag.trigger()` is omitted.
 - Docs: document `TB_PURGE_LOOP_SECS` in `README` and `.env.example`.
 - Docs: add `decode_payload` usage example in `README` and `demo.py`.
 - Feat: introduce minimum fee-per-byte floor with `FeeTooLow` rejection.

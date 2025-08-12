@@ -86,8 +86,9 @@ Bootstrap steps:
 | Lint / Style | `cargo fmt -- --check` | No diffs |
 | Markdown anchors | `python scripts/check_anchors.py --md-anchors` | No output |
 
-All tests run in isolated temp directories via `unique_path`, preventing state
-leakage between cases. Paths are removed once the chain drops.
+All tests run in isolated temp directories via `tests::util::temp::temp_dir`,
+preventing state leakage between cases. These directories are removed
+automatically when their handle is dropped.
 
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
 
@@ -279,7 +280,9 @@ thread that automatically triggers shutdown and joins when the block exits.
 `TB_PURGE_LOOP_SECS` sets the interval **in seconds** between TTL sweeps and
 must be a positive integer. Unset, non-numeric, or non-positive values raise an
 error. For manual control, call `maybe_spawn_purge_loop(bc, ShutdownFlag())` to
-obtain a `PurgeLoopHandle` you can join explicitly. The loop periodically
+obtain a `PurgeLoopHandle` you can join explicitly. Dropping the handle
+triggers shutdown and joins the thread if you omit an explicit
+`ShutdownFlag.trigger()`. The loop periodically
 invokes `purge_expired`, trimming TTL-expired entries even without new
 submissions and driving `ttl_drop_total` and `orphan_sweep_total`. Counters
 saturate at `u64::MAX` to prevent overflow.
@@ -288,6 +291,24 @@ Example:
 
 ```bash
 TB_PURGE_LOOP_SECS=30 python demo.py
+```
+
+If the purge thread panics, calling `PurgeLoopHandle.join()` raises
+`RuntimeError`. Set `RUST_BACKTRACE=1` to append a Rust backtrace to the
+message:
+
+```bash
+RUST_BACKTRACE=1 python - <<'PY'
+from the_block import Blockchain, ShutdownFlag, maybe_spawn_purge_loop
+
+bc = Blockchain.with_difficulty('demo-db', 1)
+handle = maybe_spawn_purge_loop(bc, ShutdownFlag())
+
+try:
+    handle.join()
+except RuntimeError as err:
+    print(err)  # backtrace included
+PY
 ```
 
 Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,

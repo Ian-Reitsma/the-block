@@ -13,6 +13,8 @@ spec.loader.exec_module(check_anchors)
 slugify = check_anchors.slugify
 check_md_anchor = check_anchors.check_md_anchor
 MD_PATTERN = check_anchors.MD_PATTERN
+check_rust_anchor = check_anchors.check_rust_anchor
+RUST_PATTERN = check_anchors.RUST_PATTERN
 
 
 def test_slugify_mixed_case():
@@ -44,3 +46,17 @@ def test_check_md_anchor_slug(tmp_path: Path):
     match = MD_PATTERN.search(content)
     assert match is not None
     assert check_md_anchor(ref, match) is None
+
+
+def test_rust_anchor_windows_path(tmp_path: Path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "lib.rs").write_text("fn main() {}\n", encoding="utf-8")
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    md = docs / "ref.md"
+    md.write_text("(..\\src\\lib.rs#L1)\n", encoding="utf-8")
+    content = md.read_text(encoding="utf-8").replace("\\", "/")
+    match = RUST_PATTERN.search(content)
+    assert match is not None
+    assert check_rust_anchor(md, match) is None

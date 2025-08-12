@@ -21,7 +21,9 @@
 - `Blockchain::panic_next_evict()` triggers a panic during the next eviction and
   `Blockchain::heal_mempool()` clears the poisoned mutex.
 - `PurgeLoopHandle.join()` raises `RuntimeError` if the purge thread panicked
-  and includes a backtrace when `RUST_BACKTRACE` is set.
+  and setting `RUST_BACKTRACE=1` appends a Rust backtrace to the panic message.
+- Dropping `PurgeLoopHandle` triggers shutdown automatically if
+  `ShutdownFlag.trigger()` was not called.
 
 ### Telemetry
 - `TTL_DROP_TOTAL` counts transactions purged due to TTL expiry.

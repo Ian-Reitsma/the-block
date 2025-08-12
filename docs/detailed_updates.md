@@ -78,9 +78,10 @@ curl -s localhost:9000/metrics \
   | grep -E 'startup_ttl_drop_total|ttl_drop_total|orphan_sweep_total|lock_poison_total|tx_rejected_total'
 ```
 - **Documentation** – Project disclaimers moved to README and Agents-Sup now details schema migrations and invariant anchors.
-- **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique temp
-  directory per instance and removes it on drop. Fixtures call `unique_path` so
-  parallel tests cannot interfere.
+- **Test Harness Isolation** – `Blockchain::new(path)` now provisions a unique
+  temp directory per instance and removes it on drop. Fixtures call
+  `tests::util::temp::temp_dir` so parallel tests cannot interfere and cleanup
+  happens automatically.
 - **Replay Guard Test** – Reactivated `test_replay_attack_prevention` to prove duplicates
   with the same `(sender, nonce)` are rejected.
 - **Mempool Hardening** – Admission now uses an atomic size counter and binary
