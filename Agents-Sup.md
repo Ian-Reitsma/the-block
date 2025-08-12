@@ -29,7 +29,8 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   chain, account map and emission counters. Schema version = 3.
 * `Blockchain` tracks its `path` and its `Drop` impl removes the directory.
   `Blockchain::new(path)` expects a unique temp directory; tests use
-  `unique_path()` to avoid cross-test leakage.
+  `tests::util::temp::temp_dir()` to avoid cross-test leakage and ensure
+  automatic cleanup.
 
 ### Mempool Concurrency
 * A global `mempool_mutex` guards all mempool mutations before the per-sender
@@ -80,8 +81,8 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 ### Tests
 * Rust property tests under `tests/test_chain.rs` validate invariants (balances never
   negative, reward decay, duplicate TxID rejection, etc.).
-* Fixtures create isolated directories via `unique_path()` and clean them after
-  execution so runs remain hermetic.
+* Fixtures create isolated directories via `tests::util::temp::temp_dir()` and
+  clean them automatically after execution so runs remain hermetic.
 * `test_replay_attack_prevention` asserts duplicate `(sender, nonce)` pairs are rejected.
 * `tests/test_interop.py` confirms Python and Rust encode transactions identically.
 

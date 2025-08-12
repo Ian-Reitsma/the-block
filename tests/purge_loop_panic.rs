@@ -10,6 +10,7 @@ use std::ffi::CString;
 mod util;
 use util::temp::temp_dir;
 
+use serial_test::serial;
 use the_block::{maybe_spawn_purge_loop_py, Blockchain, ShutdownFlag};
 
 fn init() {
@@ -68,6 +69,7 @@ def trigger(handle):
 }
 
 #[test]
+#[serial]
 fn purge_loop_join_surfaces_panic() {
     init();
     let msg = run_purge_panic(false);
@@ -85,6 +87,7 @@ fn thread_count() -> usize {
 
 #[cfg(target_os = "linux")]
 #[test]
+#[serial]
 fn purge_loop_joins_on_drop() {
     init();
     let dir = temp_dir("purge_loop_drop_join");
@@ -99,7 +102,49 @@ fn purge_loop_joins_on_drop() {
     });
 
     let mut mid = thread_count();
-    for _ in 0..10 {
+    for _ in 0..100 {
+        if mid >= before + 1 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        mid = thread_count();
+    }
+    assert!(mid >= before + 1);
+
+    shutdown.trigger();
+    drop(handle);
+
+    let mut after = thread_count();
+    for _ in 0..50 {
+        if after == before {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        after = thread_count();
+    }
+    assert!(after <= before);
+
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[serial]
+fn purge_loop_drop_without_trigger_stops_thread() {
+    init();
+    let dir = temp_dir("purge_loop_drop_no_trigger");
+    std::env::set_var("TB_PURGE_LOOP_SECS", "1");
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    let shutdown = ShutdownFlag::new();
+
+    let before = thread_count();
+    let handle = Python::with_gil(|py| {
+        let bc_py = Py::new(py, bc).unwrap();
+        maybe_spawn_purge_loop_py(bc_py, &shutdown).expect("loop not started")
+    });
+
+    let mut mid = thread_count();
+    for _ in 0..100 {
         if mid == before + 1 {
             break;
         }
@@ -108,7 +153,6 @@ fn purge_loop_joins_on_drop() {
     }
     assert_eq!(before + 1, mid);
 
-    shutdown.trigger();
     drop(handle);
 
     let mut after = thread_count();

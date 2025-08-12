@@ -37,6 +37,7 @@ base64 = "0.22"
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 csv = "1"
+serial_test = "3"
 
 [[bench]]
 name = "startup_rebuild"

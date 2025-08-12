@@ -165,8 +165,9 @@ CI is GitHub Actions; each push/PR runs **seven** jobs:
 5. **Udeps** — `cargo +nightly udeps --all-targets` ensures no unused dependencies.
 6. **Fuzz Smoke** — 1 k iterations per target to catch obvious regressions.
 7. **Wheel Build** — `maturin build` and `auditwheel show` to confirm manylinux compliance.
-8. **Isolation** — each test uses `unique_path` so every `Blockchain` instance
-   writes to a fresh temp directory and removes it on drop.
+8. **Isolation** — each test uses `tests::util::temp::temp_dir` so every
+   `Blockchain` instance writes to a fresh temp directory that is removed
+   automatically when the handle drops.
 9. **Replay Guard** — `test_replay_attack_prevention` exercises the
    `(sender, nonce)` dedup logic; duplicates must be rejected.
 

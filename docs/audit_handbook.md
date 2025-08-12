@@ -8,7 +8,7 @@ An automated audit matrix (`xtask gen-audit-matrix`) maps every requirement ID t
 - Build steps print a machine-readable nonce containing the git commit, timestamp, and dependency hashes.
 - Tests start from a deliberately "dirty" state with leftover DB files and temporary garbage to verify correct cleanup.
 - Each `Blockchain::new(path)` instance writes to its own temp directory via
-  `unique_path` and deletes it after tests, proving isolation.
+  `tests::util::temp::temp_dir` and deletes it after tests, proving isolation.
 
 ## 2. Attack Surface Exploration
 - Begin by attacking the least documented paths. Introduce corrupted database files, malformed blocks, and replayed transactions.

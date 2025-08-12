@@ -23,8 +23,8 @@ pub fn expected_difficulty(chain: &[Block]) -> u64 {
     if slice.len() < 2 {
         return current;
     }
-    let first_ts = slice.first().unwrap().timestamp_millis;
-    let last_ts = slice.last().unwrap().timestamp_millis;
+    let first_ts = slice[0].timestamp_millis;
+    let last_ts = slice[slice.len() - 1].timestamp_millis;
     if first_ts == 0 || last_ts <= first_ts {
         return current;
     }
