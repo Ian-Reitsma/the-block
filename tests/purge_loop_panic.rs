@@ -103,13 +103,13 @@ fn purge_loop_joins_on_drop() {
 
     let mut mid = thread_count();
     for _ in 0..100 {
-        if mid >= before + 1 {
+        if mid > before {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
         mid = thread_count();
     }
-    assert!(mid >= before + 1);
+    assert!(mid > before);
 
     shutdown.trigger();
     drop(handle);

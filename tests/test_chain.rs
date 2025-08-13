@@ -14,12 +14,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::Path};
 use the_block::hashlayout::BlockEncoder;
 use the_block::{
-    fee, generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
-    RawTxPayload, SignedTransaction, TokenAmount, TokenBalance, TxAdmissionError,
+    fee, generate_keypair, sign_tx, Blockchain, ChainDisk, MempoolEntryDisk, RawTxPayload,
+    SignedTransaction, TokenAmount, TxAdmissionError,
 };
 
-mod vectors;
 mod util;
+mod vectors;
 use util::temp::{temp_blockchain, temp_dir};
 
 fn init() {
@@ -186,7 +186,6 @@ proptest! {
         assert_eq!(miner.pending.industrial, 0);
         drop(guard);
         drop(bc);
-        let _ = fs::remove_dir_all(&path);
     }
 }
 
@@ -651,17 +650,10 @@ fn test_schema_upgrade_compatibility() {
         let disk: ChainDisk = bincode::deserialize(&map["chain"]).unwrap();
         let pre_em_c = disk.emission_consumer;
         let pre_em_i = disk.emission_industrial;
-        let pre_checksums: Vec<String> = disk.chain.iter().map(|b| b.fee_checksum.clone()).collect();
-        let pre_sum_c: u64 = disk
-            .chain
-            .iter()
-            .map(|b| b.coinbase_consumer.get())
-            .sum();
-        let pre_sum_i: u64 = disk
-            .chain
-            .iter()
-            .map(|b| b.coinbase_industrial.get())
-            .sum();
+        let pre_checksums: Vec<String> =
+            disk.chain.iter().map(|b| b.fee_checksum.clone()).collect();
+        let pre_sum_c: u64 = disk.chain.iter().map(|b| b.coinbase_consumer.get()).sum();
+        let pre_sum_i: u64 = disk.chain.iter().map(|b| b.coinbase_industrial.get()).sum();
         assert_eq!(pre_em_c, pre_sum_c);
         assert_eq!(pre_em_i, pre_sum_i);
 
@@ -670,11 +662,7 @@ fn test_schema_upgrade_compatibility() {
         assert_eq!(bc.emission_industrial, pre_em_i);
 
         let post_sum_c: u64 = bc.chain.iter().map(|b| b.coinbase_consumer.get()).sum();
-        let post_sum_i: u64 = bc
-            .chain
-            .iter()
-            .map(|b| b.coinbase_industrial.get())
-            .sum();
+        let post_sum_i: u64 = bc.chain.iter().map(|b| b.coinbase_industrial.get()).sum();
         assert_eq!(bc.emission_consumer, post_sum_c);
         assert_eq!(bc.emission_industrial, post_sum_i);
 
@@ -724,11 +712,7 @@ fn test_schema_upgrade_compatibility() {
     let tx1 = sign_tx(sk.to_vec(), payload).unwrap();
     bc_tmp.submit_transaction(tx1.clone()).unwrap();
     bc_tmp.mine_block("a").unwrap();
-    let pre_sum_c: u64 = bc_tmp
-        .chain
-        .iter()
-        .map(|b| b.coinbase_consumer.get())
-        .sum();
+    let pre_sum_c: u64 = bc_tmp.chain.iter().map(|b| b.coinbase_consumer.get()).sum();
     let pre_sum_i: u64 = bc_tmp
         .chain
         .iter()
@@ -775,11 +759,7 @@ fn test_schema_upgrade_compatibility() {
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let post_sum_c: u64 = bc.chain.iter().map(|b| b.coinbase_consumer.get()).sum();
-    let post_sum_i: u64 = bc
-        .chain
-        .iter()
-        .map(|b| b.coinbase_industrial.get())
-        .sum();
+    let post_sum_i: u64 = bc.chain.iter().map(|b| b.coinbase_industrial.get()).sum();
     assert_eq!(bc.emission_consumer, pre_sum_c);
     assert_eq!(bc.emission_industrial, pre_sum_i);
     assert_eq!(bc.emission_consumer, post_sum_c);

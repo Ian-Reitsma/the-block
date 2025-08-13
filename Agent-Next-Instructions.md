@@ -27,13 +27,16 @@ re‑implement:
    for `mempool_mutex`, `admission_lock`, `eviction_sweep`, and
    `startup_rebuild` capturing sender, nonce, fee_per_byte, and
   mempool_size ([`src/lib.rs`](src/lib.rs#L1067-L1082),
-    [`src/lib.rs`](src/lib.rs#L1536-L1542),
-    [`src/lib.rs`](src/lib.rs#L1622-L1657),
-    [`src/lib.rs`](src/lib.rs#L879-L889)). Comparator ordering test for
+   [`src/lib.rs`](src/lib.rs#L1536-L1542),
+   [`src/lib.rs`](src/lib.rs#L1622-L1657),
+   [`src/lib.rs`](src/lib.rs#L879-L889)). Comparator ordering test for
    mempool priority.
    `maybe_spawn_purge_loop` (wrapped by the `PurgeLoop` context manager)
    reads `TB_PURGE_LOOP_SECS`/`--mempool-purge-interval` and calls
    `purge_expired` periodically, advancing TTL and orphan-sweep metrics.
+   Setting `TB_DEMO_MANUAL_PURGE=1` while running `demo.py` skips the
+   context manager and demonstrates manual `ShutdownFlag` + handle
+   control instead.
 6. **Mempool atomicity**: global `mempool_mutex → sender_mutex` critical section with
    counter updates, heap ops, and pending balances inside; orphan sweeps rebuild
    the heap when `orphan_counter > mempool_size / 2` and emit `ORPHAN_SWEEP_TOTAL`.
@@ -51,24 +54,52 @@ re‑implement:
 10. Dynamic difficulty retargeting with per-block `difficulty` field,
     in-block nonce continuity validation, Pythonic `PurgeLoop` context
     manager wrapping `ShutdownFlag` and `PurgeLoopHandle`, and
-    cross-language serialization determinism tests.
+    cross-language serialization determinism tests. `Blockchain::open`,
+    `mine_block`, and `import_chain` now refresh the `difficulty`
+    field to the current network target.
 11. Telemetry counters `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` saturate at
     `u64::MAX`; tests confirm `ShutdownFlag.trigger()` halts purge threads
     before overflow.
 12. Stable transaction-admission error codes: `TxAdmissionError` is
     `#[repr(u16)]`, Python re-exports `ERR_*` constants and `.code` attributes,
-    and `log_event` emits the numeric `code` in telemetry JSON.
+    and `log_event` emits the numeric `code` in telemetry JSON. A
+    table-driven `tests/test_tx_error_codes.py` enumerates every variant and
+    asserts `exc.code == ERR_*`; a doc-hidden `poison_mempool(bc)` helper
+    enables lock-poison coverage, while `tests/logging.rs` parses telemetry
+    JSON to ensure accepted and duplicate transactions carry the expected
+    numeric codes.
 13. Anchor checker walks `src`, `tests`, `benches`, and `xtask` with cached
     file reads and parallel scanning; `scripts/test_check_anchors.py` covers
-    `tests/` anchors and `run_all_tests.sh` now skips missing features and
-    warns when `cargo fuzz` is unavailable.
+    `tests/` anchors. `run_all_tests.sh` auto-detects optional features via
+    `cargo metadata | jq` and warns when `jq` or `cargo fuzz` is absent,
+    continuing without them.
 14. Direct `spawn_purge_loop(bc, secs, shutdown)` binding for Python enables
     manual interval control and concurrency tests. New tests cover manual
     trigger/join semantics, panic propagation via `panic_next_purge`, and
-    env-driven loops sweeping TTL-expired and orphan transactions.
+    env-driven loops sweeping TTL-expired and orphan transactions, asserting
+    `ttl_drop_total` and `orphan_sweep_total` each advance and the mempool
+    returns to zero.
 15. Coinbase/fee recomputation is stress-tested: property-based generator
     randomizes blocks, coinbases, and fees, and schema upgrade tests validate
     emission totals and per-block `fee_checksum` after migration.
+16. Minimal TCP gossip layer under `net/` broadcasts transactions and blocks,
+    applies a longest-chain rule on conflicts, and has a multi-node
+    convergence test.
+17. Command-line `node` binary exposes JSON-RPC endpoints for balance queries,
+    transaction submission, mining control, and metrics; `--mempool-purge-interval`
+    and `--serve-metrics` flags configure purge loop and Prometheus export.
+18. `tests/node_rpc.rs` performs a smoke test of the RPC layer, exercising the
+    metrics, balance, and mining-control methods.
+19. `demo_runs_clean` integration test injects `TB_PURGE_LOOP_SECS=1`, sets
+    `TB_DEMO_MANUAL_PURGE` to the empty string, forces unbuffered Python output,
+    enforces a 10-second timeout, and prints demo logs on failure while
+    preserving them on disk.
+20. `tests/test_spawn_purge_loop.py` spawns two manual purge loops with
+    different intervals and cross-order joins, asserting the mempool remains
+    stable and that repeated joins are no-ops.
+21. README now explains how to opt into the manual purge-loop demo via
+    `TB_DEMO_MANUAL_PURGE`, and `CONSENSUS.md` documents the timestamp-based
+    difficulty retargeting window (120 blocks, 1 000 ms, clamp ¼–×4).
 
 ---
 
@@ -91,8 +122,9 @@ detail.
 * **Demo/docs** — 68 %: demo narrates fee selectors and purge-loop lifecycle;
   docs track new metrics but still lack cross-links and startup rebuild
   details.
-* **Networking (P2P/sync/forks)** — 0 %: no gossip layer, handshake, fork
-  resolution, or RPC/CLI.
+* **Networking (P2P/sync/forks)** — 10 %: skeleton TCP gossip with peer
+  discovery and longest-chain sync landed; full handshake, RPC, and CLI
+  remain.
 * **Mid-term engineering infra** — 20 %: CI runs fmt/tests and serialization
   determinism, but coverage, fuzzing, schema lint, and contributor automation
   remain.
@@ -243,7 +275,7 @@ can extend timelines.
 
 ## Comparative Positioning
 
-**Scores**: Solana 84, Ethereum 68, Bitcoin 50, Pi Network 25, The‑Block 52.
+**Scores**: Solana 84, Ethereum 68, Bitcoin 50, Pi Network 25, The‑Block 60.
 
 **Structural advantages**
 
@@ -255,12 +287,12 @@ can extend timelines.
 
 **Current deficits**
 
-* No P2P or sync.
-* Static difficulty and in-memory DB.
+* Rudimentary P2P without peer discovery or robust sync.
+* In-memory DB; no persistent storage backend.
 * Absent upgrade governance and tooling.
 
-**Path to 80 +**: deliver networking & sync (+15), dynamic difficulty (+5),
-persistent storage (+5), CLI/RPC/explorer (+3), governance artifacts (+4),
+**Path to 80 +**: expand networking & sync (+10), persistent storage (+5),
+CLI/RPC/explorer enhancements (+3), governance artifacts (+4),
 testnet burn-in & audits (+5), ecosystem tooling (+5).
 
 | Chain | Score | Strengths                | Liabilities                   |
@@ -269,7 +301,7 @@ testnet burn-in & audits (+5), ecosystem tooling (+5).
 | Ethereum | 68 | deep ecosystem, rollups   | 15 TPS base, high fees       |
 | Bitcoin | 50 | longest uptime, strong PoW | 10‑min blocks, limited script|
 | Pi Network | 25 | large funnel, mobile UX   | opaque consensus, closed code|
-| The‑Block | 52 | spec-first, dual-token, Rust | no P2P, static diff, mem DB |
+| The‑Block | 60 | spec-first, dual-token, Rust | basic gossip, mem DB |
 
 ---
 
@@ -304,6 +336,12 @@ testnet burn-in & audits (+5), ecosystem tooling (+5).
    reference in `Agents-Sup.md` or the appropriate spec.
 6. Open a PR referencing this file in the summary, detailing tests and docs.
 7. Include file and command citations in the PR per `AGENTS.md` §9.
+8. When running `demo.py` (e.g., the `demo_runs_clean` test), set
+   `TB_PURGE_LOOP_SECS` to a positive integer such as `1` so the purge
+   loop context manager can spawn. Leave `TB_DEMO_MANUAL_PURGE` unset or
+   empty to use the context manager; set `TB_DEMO_MANUAL_PURGE=1` to
+   exercise the manual shutdown‑flag/handle example instead of the
+   context manager.
 
 Stay relentless.  Mediocrity is a bug.
 

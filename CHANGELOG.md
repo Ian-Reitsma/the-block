@@ -65,6 +65,23 @@
   `TB_PURGE_LOOP_SECS` / `--mempool-purge-interval` and calls
   `purge_expired` on a fixed interval, advancing `ttl_drop_total` and
   `orphan_sweep_total`.
+- Feat: added `node` binary with clap-based CLI and JSON-RPC endpoints for
+  balances, transaction submission, mining control, and metrics; flags
+  `--mempool-purge-interval` and `--serve-metrics` configure purge loop and
+  Prometheus exporter.
+- Test: `tests/node_rpc.rs` smoke-tests JSON-RPC metrics, balance queries, and
+  mining control.
+- Test: env-driven purge loop inserts a TTL-expired transaction and an orphan
+  (removing the sender) and asserts `ttl_drop_total` and
+  `orphan_sweep_total` each increase by one while `mempool_size` returns to
+  zero.
+- Fix: `Blockchain::open`, `mine_block`, and `import_chain` refresh the
+  public `difficulty` field via `expected_difficulty`.
+- Test: table-driven `test_tx_error_codes.py` covers every admission error,
+  including lock-poison, asserting each `exc.code` matches `ERR_*`.
+- Test: `tests/logging.rs` (with `--features telemetry-json`) captures
+  admitted and duplicate transactions and verifies the telemetry `code`
+  field matches `ERR_OK` and `ERR_DUPLICATE`.
 - Perf: cache serialized transaction size in each mempool entry so
   `purge_expired` can compute fee-per-byte without reserializing.
 - Dev: CI validates Markdown anchors via `scripts/check_anchors.py`.
@@ -94,6 +111,18 @@
 - Test: add unit test verifying mempool comparator priority order and regression for TTL expiry telemetry.
 - Test: `test_schema_upgrade_compatibility` migrates v1/v2/v3 disks to v4 with `timestamp_ticks` hydration and `ttl_expired_purged_on_restart` covers TTL purges across restarts.
 - Doc: refresh `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, and `AUDIT_NOTES.md` with authoritative next-step directives.
+- Feat: minimal TCP gossip layer (`net`) broadcasts transactions and blocks and
+  applies the longest-chain rule; `tests/net_gossip.rs` verifies convergence.
+- Dev: `scripts/run_all_tests.sh` warns and skips feature detection when `jq`
+  is missing instead of aborting.
+- Doc: README documents opting into the manual purge-loop demo via
+  `TB_DEMO_MANUAL_PURGE` and notes concurrent purge-loop coverage.
+- Test: `tests/test_spawn_purge_loop.py` runs two manual purge loops with
+  different intervals and cross-order joins, ensuring clean shutdown and
+  idempotent handle joins; `tests/demo.rs` sets `TB_PURGE_LOOP_SECS=1`,
+  clears manual purge via `TB_DEMO_MANUAL_PURGE=""`, forces
+  `PYTHONUNBUFFERED=1`, enforces a 10-second timeout, and prints logs on
+  failure so the demo exits reliably in CI.
 
 ### CLI Flags
 

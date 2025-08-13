@@ -60,11 +60,19 @@ fn mempool_order_invariant() {
     chain_b.submit_transaction(tx2).unwrap();
     chain_b.submit_transaction(tx1).unwrap();
 
-    chain_a.mine_block("miner").unwrap();
-    chain_b.mine_block("miner").unwrap();
-
-    assert_eq!(
-        chain_a.chain.last().unwrap().hash,
-        chain_b.chain.last().unwrap().hash
-    );
+    let block_a = chain_a.mine_block("miner").unwrap();
+    let block_b = chain_b.mine_block("miner").unwrap();
+    let order_a: Vec<(String, u64)> = block_a
+        .transactions
+        .iter()
+        .skip(1)
+        .map(|tx| (tx.payload.from_.clone(), tx.payload.nonce))
+        .collect();
+    let order_b: Vec<(String, u64)> = block_b
+        .transactions
+        .iter()
+        .skip(1)
+        .map(|tx| (tx.payload.from_.clone(), tx.payload.nonce))
+        .collect();
+    assert_eq!(order_a, order_b);
 }

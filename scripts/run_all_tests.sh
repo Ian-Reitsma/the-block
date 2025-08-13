@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# run_all_tests.sh — build the wheel and run all tests.
+# Optional Cargo features are auto-detected via `cargo metadata | jq`.
+# If `jq` is missing, the script warns and proceeds without optional features
+# so minimal images can still execute the test suite.
 set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -7,9 +11,6 @@ if [[ -z "${VIRTUAL_ENV:-}" || "$(which python)" != "$REPO_ROOT/.venv/bin/python
   exit 1
 fi
 
-# Discover optional feature flags from Cargo metadata. If `jq` is unavailable,
-# fall back to running without optional features and emit a warning. This keeps
-# the script usable on minimal images.
 FEATURE_CANDIDATES=(fuzzy telemetry)
 SELECTED_FEATURES=()
 if command -v jq >/dev/null 2>&1; then

@@ -35,6 +35,9 @@ use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
 
+pub mod net;
+pub mod rpc;
+
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
@@ -148,8 +151,13 @@ impl From<TxAdmissionError> for PyErr {
                     (py.get_type::<ErrPendingLimit>(), "pending limit reached")
                 }
             };
-            let err = ty.call1((msg,)).expect("exception construction failed");
-            err.setattr("code", code).expect("set code attr");
+            let err = match ty.call1((msg,)) {
+                Ok(e) => e,
+                Err(e) => panic!("exception construction failed: {e}"),
+            };
+            if let Err(e) = err.setattr("code", code) {
+                panic!("set code attr: {e}");
+            }
             PyErr::from_value(err)
         })
     }
@@ -925,6 +933,7 @@ impl Blockchain {
         bc.block_reward_consumer = br_c;
         bc.block_reward_industrial = br_i;
         bc.block_height = bh;
+        bc.difficulty = difficulty::expected_difficulty(&bc.chain);
 
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
@@ -1975,6 +1984,7 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                self.difficulty = difficulty::expected_difficulty(&self.chain);
                 // CONSENSUS.md §10.3: mempool mutations are guarded by mempool_mutex
                 #[cfg(feature = "telemetry")]
                 let _pool_guard = {
@@ -2358,6 +2368,8 @@ impl Blockchain {
             self.chain.push(block.clone());
             self.block_height += 1;
         }
+
+        self.difficulty = difficulty::expected_difficulty(&self.chain);
 
         Ok(())
     }
@@ -2784,6 +2796,12 @@ pub fn maybe_spawn_purge_loop_py(
     spawn_purge_loop(bc, secs, shutdown)
 }
 
+#[pyfunction]
+#[doc(hidden)]
+pub fn poison_mempool(bc: &Blockchain) {
+    bc.poison_mempool();
+}
+
 impl Drop for Blockchain {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
@@ -3003,6 +3021,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
     m.add_function(wrap_pyfunction!(spawn_purge_loop, m)?)?;
     m.add_function(wrap_pyfunction!(maybe_spawn_purge_loop_py, m)?)?;
+    m.add_function(wrap_pyfunction!(poison_mempool, m)?)?;
     m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
     m.add(
         "ErrInvalidSelector",
