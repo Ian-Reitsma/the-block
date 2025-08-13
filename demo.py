@@ -361,27 +361,42 @@ def check_supply(bc: the_block.Blockchain, accounts: list[str]) -> None:
     assert (sum_c, sum_i) == (tot_c, tot_i), "balance mismatch"
 
 
+def demo_steps(bc: the_block.Blockchain) -> None:
+    """Run the core demo steps once a purge loop is active."""
+    accounts = create_accounts(bc)
+    priv = keypair_demo()
+    fee_demo()
+    decode_payload_demo()
+    mine_initial_block(bc, accounts)
+    transaction_errors(bc, priv)
+    mine_blocks(bc, accounts, priv)
+    emission_cap_demo(bc, accounts)
+    restart_purge_demo(priv)
+    persistence_demo(bc)
+
+
 def main() -> None:
     """Run the full demo sequentially."""
     init_environment()
     bc = init_chain()
-    # TB_PURGE_LOOP_SECS controls purge interval for the context manager.
-    # For manual control specify the interval directly:
-    # flag = the_block.ShutdownFlag()
-    # handle = the_block.spawn_purge_loop(bc, 1, flag)
-    # ... work ...
-    # flag.trigger(); handle.join()
-    with the_block.PurgeLoop(bc):
-        accounts = create_accounts(bc)
-        priv = keypair_demo()
-        fee_demo()
-        decode_payload_demo()
-        mine_initial_block(bc, accounts)
-        transaction_errors(bc, priv)
-        mine_blocks(bc, accounts, priv)
-        emission_cap_demo(bc, accounts)
-        restart_purge_demo(priv)
-        persistence_demo(bc)
+    if os.getenv("TB_DEMO_MANUAL_PURGE"):
+        explain(
+            "TB_DEMO_MANUAL_PURGE set: demonstrating manual purge-loop control"
+        )
+        flag = the_block.ShutdownFlag()
+        explain("ShutdownFlag created; trigger it like a fuse to stop the loop")
+        handle = the_block.spawn_purge_loop(bc, 1, flag)
+        explain("Handle returned; join waits for the loop to finish")
+        try:
+            demo_steps(bc)
+        finally:
+            explain("Triggering shutdown flag and joining purge loop")
+            flag.trigger()
+            handle.join()
+    else:
+        # TB_PURGE_LOOP_SECS controls purge interval for the context manager.
+        with the_block.PurgeLoop(bc):
+            demo_steps(bc)
     cleanup()
     explain("Demo complete")
 

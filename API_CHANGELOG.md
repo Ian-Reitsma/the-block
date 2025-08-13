@@ -58,3 +58,9 @@
   `ttl_drop_total`, `startup_ttl_drop_total`, and `expired_drop_total` on restart.
 - Cached serialized transaction sizes in `MempoolEntry` so `purge_expired`
   avoids reserializing transactions (internal optimization).
+
+### Node CLI & RPC
+- Introduced `node` binary exposing `--rpc-addr`, `--mempool-purge-interval`,
+  and `--serve-metrics` flags.
+- JSON-RPC methods `balance`, `submit_tx`, `start_mining`, `stop_mining`, and
+  `metrics` enable external control of the blockchain.

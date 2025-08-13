@@ -18,15 +18,16 @@ thiserror = "1"
 proptest = { version = "1", optional = true }
 dashmap = "5"
 log = { version = "0.4", optional = true, features = ["kv_unstable"] }
-serde_json = { version = "1", optional = true }
+serde_json = "1"
 prometheus = { version = "0.13", optional = true }
 once_cell = { version = "1", optional = true }
 tracing = { version = "0.1", optional = true }
+clap = { version = "4", features = ["derive"] }
 
 [features]
 fuzzy = ["proptest"]
 telemetry = ["log", "prometheus", "tracing", "once_cell"]
-telemetry-json = ["telemetry", "serde_json"]
+telemetry-json = ["telemetry"]
 
 [tool.maturin]
 features = ["pyo3/extension-module", "telemetry"]
@@ -38,6 +39,7 @@ proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 csv = "1"
 serial_test = "3"
+wait-timeout = "0.2"
 
 [[bench]]
 name = "startup_rebuild"

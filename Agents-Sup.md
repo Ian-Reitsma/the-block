@@ -14,7 +14,8 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Proof of Work using BLAKE3 hashes with dynamic difficulty retargeting.
   `expected_difficulty` computes a moving average over ~120 block timestamps
   clamped to a \[¼, ×4] adjustment; headers store the difficulty and validators
-  reject mismatches.
+  reject mismatches. See [`CONSENSUS.md#difficulty-retargeting`](CONSENSUS.md#difficulty-retargeting)
+  for the full algorithm and tuning parameters.
 * Each block stores `coinbase_consumer` and `coinbase_industrial`; the first transaction must match these values.
 * Block rewards decay by a factor of `DECAY_NUMERATOR / DECAY_DENOMINATOR` each block.
 
@@ -43,6 +44,20 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
 * Each mempool entry caches its serialized size so `purge_expired` can compute
   fee-per-byte without reserializing transactions.
 
+### Networking & Gossip
+* The `net` module provides a minimal TCP gossip layer with a thread-safe
+  `PeerSet` and `Message` enums for `Hello`, `Tx`, `Block`, and `Chain`.
+* Nodes broadcast transactions and blocks and adopt longer forks via
+  `Blockchain::import_chain`, ensuring convergence on the longest chain.
+* `src/bin/node.rs` wraps the chain in a JSON-RPC server exposing balance queries,
+  transaction submission, start/stop mining, and metrics export. Flags
+  `--mempool-purge-interval` and `--serve-metrics` configure the purge loop and
+  Prometheus endpoint.
+* Integration test `tests/net_gossip.rs` spawns three nodes that exchange
+  data and verify equal chain heights.
+* `tests/node_rpc.rs` smoke-tests the RPC layer by hitting the metrics,
+  balance, and mining-control endpoints.
+
 ### Telemetry Metrics & Spans
 * Metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
   `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total`
@@ -57,11 +72,16 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   idle. Python exposes a `PurgeLoop` context manager wrapping
   `ShutdownFlag`/`PurgeLoopHandle` for automatic startup and clean shutdown;
   manual control is available via the `spawn_purge_loop(bc, secs, shutdown)`
-  binding.
+  binding. Set `TB_DEMO_MANUAL_PURGE=1` while running `demo.py` to opt
+  into the manual flag/handle demonstration.
 * Admission failures are reported with `TxAdmissionError` which is
   `#[repr(u16)]`; Python re-exports `ERR_*` constants and each exception has a
   `.code` attribute. `log_event` includes the same numeric `code` in telemetry
-  JSON so log consumers can match on stable identifiers.
+  JSON so log consumers can match on stable identifiers. The
+  `tests/test_tx_error_codes.py` suite iterates over every variant to assert
+  `exc.code == ERR_*`, a doc-hidden `poison_mempool(bc)` helper enables
+  lock-poison coverage, and `tests/logging.rs` captures telemetry JSON to verify
+  accepted and duplicate transactions emit the expected numeric codes.
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
@@ -82,6 +102,13 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   printing explanatory output. It uses `with PurgeLoop(bc):` to spawn and
   join the purge thread automatically. Metric assertions require building
   the module with `--features telemetry`.
+* `TB_PURGE_LOOP_SECS` must be set to a positive integer before invoking
+  the demo; the `demo_runs_clean` test sets it to `1`, forces
+  `PYTHONUNBUFFERED=1`, sets `TB_DEMO_MANUAL_PURGE` to the empty string, and
+  kills the demo if it runs longer than 10 seconds to keep CI reliable while
+  printing and preserving demo logs on failure. Set `TB_DEMO_MANUAL_PURGE=1`
+  to opt into a manual `ShutdownFlag`/handle example instead of the context
+  manager; the README's Quick Start section shows example invocations.
 
 ### Tests
 * Rust property tests under `tests/test_chain.rs` validate invariants (balances never
@@ -90,6 +117,14 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   clean them automatically after execution so runs remain hermetic.
 * `test_replay_attack_prevention` asserts duplicate `(sender, nonce)` pairs are rejected.
 * `tests/test_interop.py` confirms Python and Rust encode transactions identically.
+* `tests/test_purge_loop_env.py` inserts a TTL-expired transaction and an orphan
+  (by deleting the sender) before spawning the loop and asserts
+  `ttl_drop_total` and `orphan_sweep_total` each increment while the mempool
+  returns to zero.
+* `tests/test_spawn_purge_loop.py` spawns two manual purge loops with different
+  intervals, triggers both shutdown flags, joins handles in reverse order, and
+  repeats a join to prove threads halt without panics or negative mempool
+  accounting.
 
 ## 2. Immediate Next Steps
 The following directives are mandatory before any feature expansion. Deliver each with exhaustive tests, telemetry, and cross‑referenced documentation.
@@ -163,6 +198,8 @@ Once networking is stable, the project aims to become a modular research platfor
 
 * **Every commit must pass** `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test --all --release`, and `pytest`.
+* `scripts/run_all_tests.sh` auto-detects optional features via `cargo metadata | jq`;
+  if `jq` is missing, it warns and proceeds without those features.
 * Failing `clippy` does not change runtime behaviour; it flags style,
   documentation, or potential bug risks.
 * **No code without spec** – if the behavior is not described in `AGENTS.md` or this supplement, document it first.

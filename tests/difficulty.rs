@@ -25,7 +25,7 @@ fn retargets_up_when_blocks_fast() {
         ts += 500; // half the target spacing
     }
     let next = expected_difficulty(&chain);
-    assert!(next > 1000);
+    assert_eq!(next, 2000);
 }
 
 #[test]
@@ -37,5 +37,5 @@ fn retargets_down_when_blocks_slow() {
         ts += 2_000; // double the target spacing
     }
     let next = expected_difficulty(&chain);
-    assert!(next < 1000);
+    assert_eq!(next, 500);
 }

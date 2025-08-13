@@ -38,14 +38,33 @@
 ```bash
 # Unix/macOS
 bash ./bootstrap.sh          # installs toolchains + builds + tests + wheel
-python demo.py               # mines a few blocks & prints balances (requires telemetry feature)
+TB_PURGE_LOOP_SECS=1 python demo.py   # demo with background purge loop
 
 # Windows (PowerShell)
 ./bootstrap.ps1              # run as admin to install VS Build Tools via choco
-python demo.py               # same demo
+set TB_PURGE_LOOP_SECS=1; python demo.py
 ```
 
 > Look for `🎉 demo completed` in the console—if you see it, the kernel, bindings, and demo all worked.
+
+### Manual purge-loop demonstration
+
+To watch the purge loop being started and stopped explicitly, set
+`TB_DEMO_MANUAL_PURGE=1` before invoking the demo:
+
+```bash
+TB_DEMO_MANUAL_PURGE=1 TB_PURGE_LOOP_SECS=1 python demo.py
+```
+
+In this mode `demo.py` calls
+`spawn_purge_loop(bc, 1, ShutdownFlag())`, submits a transaction, and then
+triggers the flag and joins the handle. Without `TB_DEMO_MANUAL_PURGE` the
+demo uses the `PurgeLoop` context manager with `TB_PURGE_LOOP_SECS` to spawn
+and cleanly stop the background thread. CI runs the demo with
+`TB_PURGE_LOOP_SECS=1` and leaves `TB_DEMO_MANUAL_PURGE` empty so the
+context-manager path finishes within the 20‑second budget; the manual
+flag/handle variant is covered separately in `tests/test_spawn_purge_loop.py`
+using the same 1‑second interval to keep it fast.
 
 ## Disclaimer
 
@@ -89,8 +108,42 @@ Bootstrap steps:
 All tests run in isolated temp directories via `tests::util::temp::temp_dir`,
 preventing state leakage between cases. These directories are removed
 automatically when their handle is dropped.
-
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
+
+---
+
+## Node CLI and JSON-RPC
+
+Compile and run a local node with optional metrics export and background TTL
+purges:
+
+```bash
+cargo run --bin node -- --rpc-addr 127.0.0.1:3030 \
+    --mempool-purge-interval 5 --serve-metrics 127.0.0.1:9100
+```
+
+Interact with the node via JSON-RPC:
+
+```bash
+# Query balances
+curl -s -X POST 127.0.0.1:3030 -d '{"method":"balance","params":{"address":"alice"}}'
+
+# Submit a hex‑encoded bincode transaction
+curl -s -X POST 127.0.0.1:3030 -d '{"method":"submit_tx","params":{"tx":"<hex>"}}'
+
+# Start and stop mining
+curl -s -X POST 127.0.0.1:3030 -d '{"method":"start_mining","params":{"miner":"miner"}}'
+curl -s -X POST 127.0.0.1:3030 -d '{"method":"stop_mining"}'
+
+# Dump metrics over RPC
+curl -s -X POST 127.0.0.1:3030 -d '{"method":"metrics"}'
+```
+
+The `--serve-metrics` flag also exposes Prometheus text on a separate socket:
+
+```bash
+curl -s 127.0.0.1:9100 | grep mempool_size
+```
 
 ---
 
@@ -218,18 +271,32 @@ AGENTS.md              # Developer handbook (authoritative)
 - **Cross-language serialization determinism** – Rust generates canonical payload CSV vectors and a Python script reencodes them to assert byte equality.
 - **Schema v4 migration** – legacy databases recompute coinbase and fee checksums to preserve total supply.
 - **Demo narration** – `demo.py` now explains fee selectors, nonce reuse, and automatically manages purge-loop lifetime.
+- **Manual purge-loop demo** – setting `TB_DEMO_MANUAL_PURGE=1` exercises an
+  explicit `ShutdownFlag`/handle sequence before the context-manager path.
+- **Concurrent purge-loop stress tests** – `tests/test_spawn_purge_loop.py`
+  proves multiple loops can run and join in any order without panics.
+- **CLI node & JSON-RPC** – `cargo run --bin node` serves balance queries,
+  transaction submission, mining control, and metrics over JSON-RPC.
+- **Minimal P2P gossip** – the `net` module gossips transactions/blocks over
+  TCP and adopts the longest chain.
+- **Stable admission error codes** – table-driven tests assert each
+  `TxAdmissionError` maps to its `ERR_*` constant and telemetry JSON includes a
+  numeric `code`.
+- **Environment purge metrics** – `tests/test_purge_loop_env.py` drops a
+  TTL-expired and orphaned transaction and verifies `ttl_drop_total` and
+  `orphan_sweep_total` increments.
 
 ### Immediate Priorities (0–2 months)
 
 - Harden admission atomicity by unifying `(sender, nonce)` insert + reservation into a single operation.
 - Property tests ensuring pending balance rollbacks and contiguous nonces after drops or reorgs.
-- Document new helpers and metrics across `API_CHANGELOG.md`, `README.md`, and specs with anchor validation.
+- Expand RPC and gossip integration tests to cover adversarial scenarios.
 
 ### Medium Term (2–6 months)
 
 - Replace the in-memory `SimpleDb` with a crash-safe backend (sled/RocksDB) behind a storage trait.
-- Introduce basic P2P block and transaction gossip with libp2p, enforcing validation on receipt.
-- Expose node controls via a CLI or RPC layer for balance queries, transaction submission, mining, and metrics.
+- Harden the P2P layer with peer discovery, inventory exchange, and robust fork reconciliation.
+- Extend the CLI/RPC surface with authentication and additional admin tooling.
 
 ### Long Term (6 months +)
 

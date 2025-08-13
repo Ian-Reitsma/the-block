@@ -423,6 +423,16 @@ any testnet or production exposure. Each change **must** include tests, telemetr
   `docs/detailed_updates.md` and keep `rejection_reasons.rs` exercising
   the labelled counters.
 
+### Networking & Control Surface — COMPLETED
+- `net` module exposes a TCP gossip `Node`, thread-safe `PeerSet`, and bincode
+  `Message` enums that broadcast transactions and blocks and adopt the
+  longest-chain rule.
+- `src/bin/node.rs` provides a JSON-RPC server with `--rpc-addr`,
+  `--mempool-purge-interval`, and `--serve-metrics` flags for balance queries,
+  transaction submission, mining control, and metrics export.
+- Integration tests `tests/net_gossip.rs` and `tests/node_rpc.rs` prove gossip
+  convergence and exercise the RPC surface end-to-end.
+
 ### Test & Fuzz Matrix
 - Property test: inject panics at each admission step to verify reservation rollback and heap invariants.
 - 32‑thread fuzz harness: random fees and nonces for ≥10 k iterations asserting capacity and per-account uniqueness.

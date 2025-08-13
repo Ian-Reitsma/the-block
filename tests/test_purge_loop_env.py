@@ -64,6 +64,7 @@ def test_valid_env_returns_handle(tmp_path):
     bc.add_account("carol", 10_000, 0)
     bc.tx_ttl = 1
 
+    # TTL-expired transaction from Alice
     priv_a, _ = the_block.generate_keypair()
     payload_a = the_block.RawTxPayload(
         from_="alice",
@@ -78,6 +79,7 @@ def test_valid_env_returns_handle(tmp_path):
     stx_a = the_block.sign_tx(list(priv_a), payload_a)
     bc.submit_transaction(stx_a)
 
+    # Orphaned transaction from Carol (account removed)
     priv_c, _ = the_block.generate_keypair()
     payload_c = the_block.RawTxPayload(
         from_="carol",
@@ -92,8 +94,11 @@ def test_valid_env_returns_handle(tmp_path):
     stx_c = the_block.sign_tx(list(priv_c), payload_c)
     bc.submit_transaction(stx_c)
     bc.remove_account("carol")
+
+    # Backdate Alice's entry so it expires on the next purge
     bc.backdate_mempool_entry("alice", 1, 0)
 
+    # Snapshot metrics before starting the purge loop
     before = _parse_metrics(the_block.gather_metrics())
 
     flag = the_block.ShutdownFlag()
@@ -103,8 +108,10 @@ def test_valid_env_returns_handle(tmp_path):
     flag.trigger()
     handle.join()
     del os.environ["TB_PURGE_LOOP_SECS"]
+
+    # Verify metrics after the purge completes
     after = _parse_metrics(the_block.gather_metrics())
 
-    assert after["ttl_drop_total"] == before.get("ttl_drop_total", 0) + 1
-    assert after["orphan_sweep_total"] == before.get("orphan_sweep_total", 0) + 1
+    assert after["ttl_drop_total"] == before["ttl_drop_total"] + 1
+    assert after["orphan_sweep_total"] == before["orphan_sweep_total"] + 1
     assert after["mempool_size"] == 0

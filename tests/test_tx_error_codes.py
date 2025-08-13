@@ -211,6 +211,25 @@ def trigger_mempool_full(tmp_path):
     bc.submit_transaction(stx)
 
 
+def trigger_lock_poisoned(tmp_path):
+    bc = make_chain(tmp_path)
+    priv, _ = the_block.generate_keypair()
+    bc.add_account("alice", 10, 0)
+    payload = the_block.RawTxPayload(
+        from_="alice",
+        to="alice",
+        amount_consumer=0,
+        amount_industrial=0,
+        fee=0,
+        fee_selector=0,
+        nonce=1,
+        memo=b"",
+    )
+    stx = the_block.sign_tx(list(priv), payload)
+    the_block.poison_mempool(bc)
+    bc.submit_transaction(stx)
+
+
 def trigger_pending_limit(tmp_path):
     bc = make_chain(tmp_path)
     bc.max_pending_per_account = 1
@@ -254,6 +273,7 @@ CASES = [
     (trigger_fee_overflow, the_block.ErrFeeOverflow, the_block.ERR_FEE_OVERFLOW),
     (trigger_fee_too_low, the_block.ErrFeeTooLow, the_block.ERR_FEE_TOO_LOW),
     (trigger_mempool_full, the_block.ErrMempoolFull, the_block.ERR_MEMPOOL_FULL),
+    (trigger_lock_poisoned, the_block.ErrLockPoisoned, the_block.ERR_LOCK_POISONED),
     (trigger_pending_limit, the_block.ErrPendingLimit, the_block.ERR_PENDING_LIMIT),
 ]
 

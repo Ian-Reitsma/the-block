@@ -54,8 +54,9 @@
   panic injection via `panic_next_purge`.
 - Expanded `scripts/check_anchors.py` to crawl `src`, `tests`, `benches`, and
   `xtask` directories with cached file reads and parallel scanning; updated
-  tests cover anchors into `tests/` and `run_all_tests.sh` now skips missing
-  features and warns if `cargo fuzz` is unavailable.
+  tests cover anchors into `tests/` and `run_all_tests.sh` now warns when
+  `jq` or `cargo fuzz` is unavailable, skipping feature detection rather than
+  aborting.
 - `TxAdmissionError` is `#[repr(u16)]` with stable `ERR_*` constants; Python
   exposes `.code` and telemetry `log_event` entries now carry a numeric
   `code` field alongside `reason`.
@@ -65,6 +66,38 @@
   per-block fee hashes for legacy fixtures.
 - Archived `artifacts/fuzz.log` and `artifacts/migration.log` with accompanying
   `RISK_MEMO.md` capturing residual risk and review requirements.
+- Introduced a minimal TCP gossip layer (`src/net`) with peer discovery and
+  longest-chain adoption; `tests/net_gossip.rs` spins up three nodes to
+  confirm chain-height convergence.
+- Added command-line `node` binary with JSON-RPC for balance queries,
+  transaction submission, mining control, and metrics export; flags
+  `--mempool-purge-interval` and `--serve-metrics` wire into purge loop and
+  Prometheus exporter.
+- `tests/node_rpc.rs` now performs a JSON-RPC smoke test, hitting the metrics,
+  balance, and mining-control endpoints.
+- `tests/test_purge_loop_env.py` now inserts both a TTL-expired transaction
+  and an orphaned one by deleting its sender, then verifies
+  `ttl_drop_total`, `orphan_sweep_total`, and `mempool_size` counters.
+- `Blockchain::open`, `mine_block`, and `import_chain` refresh the public
+  `difficulty` field using `expected_difficulty`; `tests/difficulty.rs`
+  asserts retargeting doubles or halves difficulty for fast/slow blocks.
+- Table-driven `test_tx_error_codes.py` covers all `TxAdmissionError` variants
+  (including lock-poison) and asserts each exception's `.code` matches its
+  `ERR_*` constant; `tests/logging.rs` parses telemetry JSON and confirms
+  accepted and duplicate transactions carry numeric `code` fields.
+- `tests/demo.rs` spawns the Python demo with a 10-second timeout, sets
+  `TB_PURGE_LOOP_SECS=1`, forces unbuffered output, and sets
+  `TB_DEMO_MANUAL_PURGE` to the empty string so the manual path stays
+  disabled; demo logs print and persist on failure.
+- Added `tests/test_spawn_purge_loop.py` concurrency coverage spawning two
+  manual loops with different intervals and cross-order joins to prove clean
+  shutdown and idempotent handle reuse.
+- `mempool_order_invariant` now checks transaction order equality instead of
+  block hash to avoid timestamp-driven divergence.
+- README documents the `TB_DEMO_MANUAL_PURGE` flag for the manual
+  purge-loop demonstration, and `CONSENSUS.md` records the timestamp-based
+  difficulty retargeting window (120 blocks, 1 000 ms spacing, clamp
+  ¼–×4).
 
 ## Outstanding Blockers
 - **Replay & Migration Tests**: restart suite now covers TTL expiry, and `test_schema_upgrade_compatibility` verifies v1/v2/v3 → v4 migration.
@@ -193,7 +226,7 @@ These notes should guide subsequent contributors in elevating the branch to the 
 
 ## 20. Repository Hygiene
 - `analysis.txt` and other scratch files live at repo root; convert such documents into tracked design notes under `docs/` or remove them to avoid confusion.
-- Ensure every script in `scripts/` has `set -euo pipefail` and consistent shebangs; current `scripts/run_all_tests.sh` lacks error checking for missing tools.
+- Ensure every script in `scripts/` has `set -euo pipefail` and consistent shebangs; `scripts/run_all_tests.sh` now guards against missing `jq` and `cargo-fuzz`, warning and continuing instead of aborting.
 - Add `.editorconfig` to enforce consistent indentation (spaces vs tabs) across Rust, Python, and Markdown sources.
 
 ## 21. Testing Infrastructure Gaps

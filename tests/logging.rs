@@ -2,7 +2,6 @@
 #![cfg(feature = "telemetry")]
 
 use logtest::Logger;
-use std::fs;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, ERR_DUPLICATE, ERR_OK};
 
 #[cfg(feature = "telemetry-json")]
@@ -16,7 +15,6 @@ fn init() {
     ONCE.call_once(|| {
         pyo3::prepare_freethreaded_python();
     });
-    let _ = fs::remove_dir_all("chain_db");
 }
 
 #[test]
@@ -50,19 +48,14 @@ fn logs_accept_and_reject() {
         let mut saw_dup = false;
         for rec in logs {
             let v: Value = serde_json::from_str(rec.args()).unwrap();
+            let code = v.get("code").and_then(Value::as_u64).expect("numeric code");
             match (v.get("op"), v.get("reason")) {
                 (Some(op), Some(reason)) if op == "admit" && reason == "ok" => {
-                    assert_eq!(
-                        v.get("code").and_then(Value::as_u64).unwrap(),
-                        ERR_OK as u64
-                    );
+                    assert_eq!(code, ERR_OK as u64);
                     saw_ok = true;
                 }
                 (Some(op), Some(reason)) if op == "reject" && reason == "duplicate" => {
-                    assert_eq!(
-                        v.get("code").and_then(Value::as_u64).unwrap(),
-                        ERR_DUPLICATE as u64
-                    );
+                    assert_eq!(code, ERR_DUPLICATE as u64);
                     saw_dup = true;
                 }
                 _ => {}
@@ -70,7 +63,7 @@ fn logs_accept_and_reject() {
         }
         assert!(
             saw_ok && saw_dup,
-            "missing admit or duplicate log with code"
+            "missing admit or duplicate log with code",
         );
     }
 
