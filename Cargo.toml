@@ -23,6 +23,9 @@ prometheus = { version = "0.13", optional = true }
 once_cell = { version = "1", optional = true }
 tracing = { version = "0.1", optional = true }
 clap = { version = "4", features = ["derive"] }
+base64 = "0.22"
+dirs = "5"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
 
 [features]
 fuzzy = ["proptest"]
@@ -34,7 +37,6 @@ features = ["pyo3/extension-module", "telemetry"]
 
 [dev-dependencies]
 logtest = "2"
-base64 = "0.22"
 proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 csv = "1"
@@ -44,6 +46,10 @@ wait-timeout = "0.2"
 [[bench]]
 name = "startup_rebuild"
 harness = false
+
+[[test]]
+name = "nonce_supply_prop"
+path = "tests/nonce_supply_prop.rs"
 
 [build-dependencies]
 blake3 = "1"

@@ -345,9 +345,9 @@ fn admission_panic_rolls_back() {
         bc.heal_lock("alice");
         assert!(bc.mempool.is_empty());
         let acc = bc.accounts.get("alice").unwrap();
-        assert_eq!(acc.pending.consumer, 0);
-        assert_eq!(acc.pending.nonce, 0);
-        assert!(acc.pending.nonces.is_empty());
+        assert_eq!(acc.pending_consumer, 0);
+        assert_eq!(acc.pending_nonce, 0);
+        assert!(acc.pending_nonces.is_empty());
     }
 }
 

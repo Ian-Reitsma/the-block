@@ -159,6 +159,7 @@ fn validate_block_rejects_nonce_gap() {
         coinbase_consumer: TokenAmount::new(reward_c),
         coinbase_industrial: TokenAmount::new(reward_i),
         fee_checksum,
+        snapshot_root: String::new(),
     };
     assert!(!bc.validate_block(&block).unwrap());
 }
@@ -284,6 +285,23 @@ fn enforces_per_account_pending_limit() {
 }
 
 #[test]
+fn reject_overspend_multiple_nonces() {
+    init();
+    let dir = temp_dir("temp_overspend_multi");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    let tx1 = build_signed_tx(&sk, "alice", "bob", 6_000, 0, 1_000, 1);
+    let tx2 = build_signed_tx(&sk, "alice", "bob", 6_000, 0, 1_000, 2);
+    assert!(bc.submit_transaction(tx1).is_ok());
+    assert_eq!(
+        bc.submit_transaction(tx2),
+        Err(TxAdmissionError::InsufficientBalance)
+    );
+}
+
+#[test]
 fn validate_block_rejects_wrong_difficulty() {
     init();
     let dir = temp_dir("temp_admission");
@@ -329,10 +347,10 @@ fn admission_panic_rolls_back_all_steps() {
         }));
         assert!(res.is_err(), "admission step {step} should panic");
         let acc = bc.accounts.get("alice").unwrap();
-        assert_eq!(acc.pending.nonce, 0);
-        assert_eq!(acc.pending.consumer, 0);
-        assert_eq!(acc.pending.industrial, 0);
-        assert!(acc.pending.nonces.is_empty());
+        assert_eq!(acc.pending_nonce, 0);
+        assert_eq!(acc.pending_consumer, 0);
+        assert_eq!(acc.pending_industrial, 0);
+        assert!(acc.pending_nonces.is_empty());
         assert!(bc.mempool.is_empty());
     }
 }

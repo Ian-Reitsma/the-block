@@ -56,6 +56,7 @@ fn migrate_v3_recomputes_supply() {
         coinbase_consumer: TokenAmount::new(0),
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
+        snapshot_root: String::new(),
     };
     let disk = ChainDisk {
         schema_version: 3,

@@ -124,7 +124,66 @@ purges:
 
 ```bash
 cargo run --bin node -- --rpc-addr 127.0.0.1:3030 \
-    --mempool-purge-interval 5 --serve-metrics 127.0.0.1:9100
+    --mempool-purge-interval 5 --metrics-addr 127.0.0.1:9100
+```
+
+### Wallet key management
+
+The `node` binary doubles as a simple wallet storing keys under
+`~/.the_block/keys`:
+
+```bash
+# Generate a keypair saved as ~/.the_block/keys/alice.pem
+cargo run --bin node -- generate-key alice
+
+# Display the hex address for a key id
+cargo run --bin node -- show-address alice
+
+# Sign a transaction JSON payload
+cargo run --bin node -- sign-tx alice '{"from_":"<hex>","to":"bob","amount_consumer":1,"amount_industrial":0,"fee":1,"fee_selector":0,"nonce":1,"memo":[]}'
+# => <hex-encoded bincode SignedTransaction>
+
+# Import an existing PEM file and show its address
+cargo run --bin node -- import-key path/to/key.pem
+cargo run --bin node -- show-address key
+```
+Use the address to query balances or submit transactions over JSON-RPC:
+
+```bash
+ADDR=$(cargo run --bin node -- show-address alice)
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"balance","params":{"address":"'"$ADDR"'"}}'
+```
+
+### Example RPC session
+
+```bash
+# 1. Start a node in one terminal
+cargo run --bin node -- --rpc-addr 127.0.0.1:3030 --mempool-purge-interval 5
+
+# 2. Generate a key and capture its address
+cargo run --bin node -- generate-key alice
+ADDR=$(cargo run --bin node -- show-address alice)
+
+# 3. Sign and submit a self-transfer
+TX=$(cargo run --bin node -- sign-tx alice '{"from_":"'$ADDR'","to":"'$ADDR'","amount_consumer":1,"amount_industrial":0,"fee":1,"fee_selector":0,"nonce":1,"memo":[]}')
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"submit_tx","params":{"tx":"'$TX'"}}'
+
+# 4. Mine a block to include the transaction
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"start_mining","params":{"miner":"'$ADDR'"}}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"stop_mining"}'
+
+# 5. Query the updated balance
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":5,"method":"balance","params":{"address":"'$ADDR'"}}'
 ```
 
 Interact with the node via JSON-RPC; requests use `jsonrpc` and an incrementing `id`:
@@ -171,7 +230,7 @@ def rpc(method, params=None, *, id=1):
 print(rpc("balance", {"address": "alice"}))
 ```
 
-The `--serve-metrics` flag also exposes Prometheus text on a separate socket:
+The `--metrics-addr` flag also exposes Prometheus text on a separate socket:
 
 ```bash
 curl -s 127.0.0.1:9100 | grep mempool_size

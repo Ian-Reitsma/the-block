@@ -45,6 +45,8 @@ pub use telemetry::{gather_metrics, serve_metrics};
 
 pub mod blockchain;
 use blockchain::difficulty;
+pub mod service_badge;
+pub use service_badge::ServiceBadgeTracker;
 
 pub mod transaction;
 pub use transaction::{
@@ -203,6 +205,9 @@ const DECAY_DENOMINATOR: u64 = 100_000;
 /// Number of mempool entries processed per batch during `Blockchain::open`.
 pub const STARTUP_REBUILD_BATCH: usize = 256;
 
+pub const DEFAULT_SNAPSHOT_INTERVAL: u64 = 1024;
+const ENV_SNAPSHOT_INTERVAL: &str = "TB_SNAPSHOT_INTERVAL";
+
 // === Helpers for Ed25519 v2.x ([u8;32], [u8;64]) ===
 /// Converts a byte slice into a fixed 32-byte array, returning `None` on length
 /// mismatch.
@@ -218,6 +223,14 @@ pub(crate) fn to_array_64(bytes: &[u8]) -> Option<[u8; 64]> {
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     // Utility used by tests and examples
     hex::decode(hex).expect("Invalid hex string")
+}
+
+fn snapshot_interval_from_env() -> u64 {
+    std::env::var(ENV_SNAPSHOT_INTERVAL)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_SNAPSHOT_INTERVAL)
 }
 
 // === Data types ===
@@ -284,23 +297,6 @@ pub struct TokenBalance {
 }
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Default)]
-pub struct Pending {
-    #[pyo3(get)]
-    #[serde(default)]
-    pub consumer: u64,
-    #[pyo3(get)]
-    #[serde(default)]
-    pub industrial: u64,
-    #[pyo3(get)]
-    #[serde(default)]
-    pub nonce: u64,
-    #[pyo3(get)]
-    #[serde(default)]
-    pub nonces: HashSet<u64>,
-}
-
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Account {
     #[pyo3(get)]
@@ -312,11 +308,18 @@ pub struct Account {
     pub nonce: u64,
     #[pyo3(get)]
     #[serde(default)]
-    pub pending: Pending,
+    pub pending_consumer: u64,
+    #[pyo3(get)]
+    #[serde(default)]
+    pub pending_industrial: u64,
+    #[serde(default)]
+    pub pending_nonce: u64,
+    #[serde(default)]
+    pub pending_nonces: HashSet<u64>,
 }
 
 struct Reservation<'a> {
-    pending: &'a mut Pending,
+    account: &'a mut Account,
     reserve_consumer: u64,
     reserve_industrial: u64,
     nonce: u64,
@@ -325,17 +328,17 @@ struct Reservation<'a> {
 
 impl<'a> Reservation<'a> {
     fn new(
-        pending: &'a mut Pending,
+        account: &'a mut Account,
         reserve_consumer: u64,
         reserve_industrial: u64,
         nonce: u64,
     ) -> Self {
-        pending.consumer += reserve_consumer;
-        pending.industrial += reserve_industrial;
-        pending.nonce += 1;
-        pending.nonces.insert(nonce);
+        account.pending_consumer += reserve_consumer;
+        account.pending_industrial += reserve_industrial;
+        account.pending_nonce += 1;
+        account.pending_nonces.insert(nonce);
         Self {
-            pending,
+            account,
             reserve_consumer,
             reserve_industrial,
             nonce,
@@ -350,13 +353,16 @@ impl<'a> Reservation<'a> {
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.pending.consumer = self.pending.consumer.saturating_sub(self.reserve_consumer);
-            self.pending.industrial = self
-                .pending
-                .industrial
+            self.account.pending_consumer = self
+                .account
+                .pending_consumer
+                .saturating_sub(self.reserve_consumer);
+            self.account.pending_industrial = self
+                .account
+                .pending_industrial
                 .saturating_sub(self.reserve_industrial);
-            self.pending.nonce = self.pending.nonce.saturating_sub(1);
-            self.pending.nonces.remove(&self.nonce);
+            self.account.pending_nonce = self.account.pending_nonce.saturating_sub(1);
+            self.account.pending_nonces.remove(&self.nonce);
         }
     }
 }
@@ -369,12 +375,12 @@ struct ReservationGuard<'a> {
 impl<'a> ReservationGuard<'a> {
     fn new(
         lock: MutexGuard<'a, ()>,
-        pending: &'a mut Pending,
+        account: &'a mut Account,
         reserve_consumer: u64,
         reserve_industrial: u64,
         nonce: u64,
     ) -> Self {
-        let reservation = Reservation::new(pending, reserve_consumer, reserve_industrial, nonce);
+        let reservation = Reservation::new(account, reserve_consumer, reserve_industrial, nonce);
         Self {
             reservation: Some(reservation),
             _lock: lock,
@@ -421,6 +427,10 @@ pub struct Block {
     #[serde(default)]
     /// blake3(total_fee_ct || total_fee_it) in hex
     pub fee_checksum: String,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Merkle root of account state at snapshot checkpoints
+    pub snapshot_root: String,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -502,10 +512,13 @@ pub struct Blockchain {
     pub block_reward_industrial: TokenAmount,
     #[pyo3(get, set)]
     pub block_height: u64,
+    #[pyo3(get, set)]
+    pub snapshot_interval: u64,
     #[pyo3(get)]
     pub skipped: Vec<SignedTransaction>,
     #[pyo3(get)]
     pub skipped_nonce_gap: u64,
+    badge_tracker: ServiceBadgeTracker,
 }
 
 #[pyclass]
@@ -566,8 +579,10 @@ impl Default for Blockchain {
             block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
             block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
             block_height: 0,
+            snapshot_interval: snapshot_interval_from_env(),
             skipped: Vec::new(),
             skipped_nonce_gap: 0,
+            badge_tracker: ServiceBadgeTracker::new(),
         }
     }
 }
@@ -614,9 +629,22 @@ impl Blockchain {
 
     #[cfg(feature = "telemetry")]
     fn record_reject(&self, reason: &str) {
-        telemetry::TX_REJECTED_TOTAL
-            .with_label_values(&[reason])
-            .inc();
+        telemetry::RECORDER.tx_rejected(reason);
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn record_submit(&self) {
+        telemetry::RECORDER.tx_submitted();
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn record_block_mined(&self) {
+        telemetry::RECORDER.block_mined();
+    }
+
+    /// Evaluate badge eligibility based on uptime and performance metrics.
+    pub fn check_badges(&mut self) {
+        self.badge_tracker.check_badges();
     }
 }
 
@@ -919,9 +947,9 @@ impl Blockchain {
             b.fee_checksum = h.finalize().to_hex().to_string();
         }
         for acc in accounts.values_mut() {
-            acc.pending.consumer = 0;
-            acc.pending.industrial = 0;
-            acc.pending.nonce = acc.pending.nonces.len() as u64;
+            acc.pending_consumer = 0;
+            acc.pending_industrial = 0;
+            acc.pending_nonce = acc.pending_nonces.len() as u64;
         }
         let mut bc = Blockchain::default();
         bc.path = path.to_string();
@@ -934,6 +962,71 @@ impl Blockchain {
         bc.block_reward_industrial = br_i;
         bc.block_height = bh;
         bc.difficulty = difficulty::expected_difficulty(&bc.chain);
+
+        if let Ok(Some((snap_height, snap_accounts, root))) =
+            crate::blockchain::snapshot::load_latest(path)
+        {
+            if (snap_height as usize) <= bc.chain.len() {
+                if let Some(b_snap) = bc.chain.get((snap_height - 1) as usize) {
+                    if b_snap.snapshot_root == root {
+                        bc.accounts = snap_accounts;
+                        for blk in bc.chain[snap_height as usize..].iter() {
+                            for tx in &blk.transactions {
+                                if tx.payload.from_ != "0".repeat(34) {
+                                    if let Some(s) = bc.accounts.get_mut(&tx.payload.from_) {
+                                        if let Ok((fee_c, fee_i)) = crate::fee::decompose(
+                                            tx.payload.fee_selector,
+                                            tx.payload.fee,
+                                        ) {
+                                            let total_c = tx.payload.amount_consumer + fee_c;
+                                            let total_i = tx.payload.amount_industrial + fee_i;
+                                            s.balance.consumer =
+                                                s.balance.consumer.saturating_sub(total_c);
+                                            s.balance.industrial =
+                                                s.balance.industrial.saturating_sub(total_i);
+                                            s.nonce = tx.payload.nonce;
+                                        }
+                                    }
+                                }
+                                let r =
+                                    bc.accounts.entry(tx.payload.to.clone()).or_insert(Account {
+                                        address: tx.payload.to.clone(),
+                                        balance: TokenBalance {
+                                            consumer: 0,
+                                            industrial: 0,
+                                        },
+                                        nonce: 0,
+                                        pending_consumer: 0,
+                                        pending_industrial: 0,
+                                        pending_nonce: 0,
+                                        pending_nonces: HashSet::new(),
+                                    });
+                                r.balance.consumer = r
+                                    .balance
+                                    .consumer
+                                    .saturating_add(tx.payload.amount_consumer);
+                                r.balance.industrial = r
+                                    .balance
+                                    .industrial
+                                    .saturating_add(tx.payload.amount_industrial);
+                            }
+                        }
+                        bc.emission_consumer = bc
+                            .accounts
+                            .values()
+                            .map(|a| a.balance.consumer)
+                            .sum::<u64>();
+                        bc.emission_industrial = bc
+                            .accounts
+                            .values()
+                            .map(|a| a.balance.industrial)
+                            .sum::<u64>();
+                    }
+                }
+            }
+        }
+        bc.block_height = bc.chain.len() as u64;
+        bc.snapshot_interval = snapshot_interval_from_env();
 
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
@@ -1011,11 +1104,11 @@ impl Blockchain {
                         if let Ok((fee_consumer, fee_industrial)) =
                             crate::fee::decompose(e.tx.payload.fee_selector, e.tx.payload.fee)
                         {
-                            acc.pending.consumer += e.tx.payload.amount_consumer + fee_consumer;
-                            acc.pending.industrial +=
+                            acc.pending_consumer += e.tx.payload.amount_consumer + fee_consumer;
+                            acc.pending_industrial +=
                                 e.tx.payload.amount_industrial + fee_industrial;
-                            acc.pending.nonce += 1;
-                            acc.pending.nonces.insert(e.tx.payload.nonce);
+                            acc.pending_nonce += 1;
+                            acc.pending_nonces.insert(e.tx.payload.nonce);
                         }
                     }
                 } else {
@@ -1114,6 +1207,7 @@ impl Blockchain {
             coinbase_industrial: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
+            snapshot_root: String::new(),
         };
         self.chain.push(g);
         self.block_height = 1;
@@ -1139,7 +1233,10 @@ impl Blockchain {
                 industrial,
             },
             nonce: 0,
-            pending: Pending::default(),
+            pending_consumer: 0,
+            pending_industrial: 0,
+            pending_nonce: 0,
+            pending_nonces: HashSet::new(),
         };
         self.accounts.insert(address, acc);
         Ok(())
@@ -1183,6 +1280,8 @@ impl Blockchain {
     /// Returns [`TxAdmissionError`] if validation fails or the sender is missing.
     pub fn submit_transaction(&mut self, tx: SignedTransaction) -> Result<(), TxAdmissionError> {
         let _ = self.purge_expired();
+        #[cfg(feature = "telemetry")]
+        self.record_submit();
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
         let size = bincode::serialize(&tx)
@@ -1370,10 +1469,10 @@ impl Blockchain {
                     ) {
                         let total_c = ev_entry.tx.payload.amount_consumer + c;
                         let total_i = ev_entry.tx.payload.amount_industrial + i;
-                        acc.pending.consumer = acc.pending.consumer.saturating_sub(total_c);
-                        acc.pending.industrial = acc.pending.industrial.saturating_sub(total_i);
-                        acc.pending.nonce = acc.pending.nonce.saturating_sub(1);
-                        acc.pending.nonces.remove(&ev_nonce);
+                        acc.pending_consumer = acc.pending_consumer.saturating_sub(total_c);
+                        acc.pending_industrial = acc.pending_industrial.saturating_sub(total_i);
+                        acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                        acc.pending_nonces.remove(&ev_nonce);
                     }
                 } else {
                     self.orphan_counter
@@ -1450,7 +1549,7 @@ impl Blockchain {
                         return Err(TxAdmissionError::UnknownSender);
                     }
                 };
-                let required_consumer = match sender.pending.consumer.checked_add(total_consumer) {
+                let required_consumer = match sender.pending_consumer.checked_add(total_consumer) {
                     Some(v) => v,
                     None => {
                         #[cfg(feature = "telemetry")]
@@ -1462,7 +1561,7 @@ impl Blockchain {
                     }
                 };
                 let required_industrial =
-                    match sender.pending.industrial.checked_add(total_industrial) {
+                    match sender.pending_industrial.checked_add(total_industrial) {
                         Some(v) => v,
                         None => {
                             #[cfg(feature = "telemetry")]
@@ -1493,7 +1592,7 @@ impl Blockchain {
                     self.record_reject("insufficient_balance");
                     return Err(TxAdmissionError::InsufficientBalance);
                 }
-                if sender.pending.nonces.contains(&nonce) {
+                if sender.pending_nonces.contains(&nonce) {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
@@ -1514,7 +1613,7 @@ impl Blockchain {
                     }
                     return Err(TxAdmissionError::Duplicate);
                 }
-                if nonce != sender.nonce + sender.pending.nonce + 1 {
+                if nonce != sender.nonce + sender.pending_nonce + 1 {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
@@ -1572,7 +1671,7 @@ impl Blockchain {
                     self.record_reject("bad_signature");
                     return Err(TxAdmissionError::BadSignature);
                 }
-                if sender.pending.nonce as usize >= self.max_pending_per_account {
+                if sender.pending_nonce as usize >= self.max_pending_per_account {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
@@ -1593,7 +1692,7 @@ impl Blockchain {
                 {
                     let guard = ReservationGuard::new(
                         lock_guard,
-                        &mut sender.pending,
+                        sender,
                         total_consumer,
                         total_industrial,
                         nonce,
@@ -1701,11 +1800,11 @@ impl Blockchain {
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                    acc.pending.consumer = acc.pending.consumer.saturating_sub(total_consumer);
-                    acc.pending.industrial =
-                        acc.pending.industrial.saturating_sub(total_industrial);
-                    acc.pending.nonce = acc.pending.nonce.saturating_sub(1);
-                    acc.pending.nonces.remove(&nonce);
+                    acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
+                    acc.pending_industrial =
+                        acc.pending_industrial.saturating_sub(total_industrial);
+                    acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                    acc.pending_nonces.remove(&nonce);
                 }
             }
             if !self.accounts.contains_key(sender) {
@@ -1964,6 +2063,7 @@ impl Blockchain {
             coinbase_consumer: TokenAmount::new(coinbase_consumer),
             coinbase_industrial: TokenAmount::new(coinbase_industrial),
             fee_checksum: fee_checksum.clone(),
+            snapshot_root: String::new(),
         };
 
         let mut nonce = 0u64;
@@ -2053,11 +2153,11 @@ impl Blockchain {
                             s.balance.consumer = s.balance.consumer.saturating_sub(total_consumer);
                             s.balance.industrial =
                                 s.balance.industrial.saturating_sub(total_industrial);
-                            s.pending.consumer = s.pending.consumer.saturating_sub(total_consumer);
-                            s.pending.industrial =
-                                s.pending.industrial.saturating_sub(total_industrial);
-                            s.pending.nonce = s.pending.nonce.saturating_sub(1);
-                            s.pending.nonces.remove(&tx.payload.nonce);
+                            s.pending_consumer = s.pending_consumer.saturating_sub(total_consumer);
+                            s.pending_industrial =
+                                s.pending_industrial.saturating_sub(total_industrial);
+                            s.pending_nonce = s.pending_nonce.saturating_sub(1);
+                            s.pending_nonces.remove(&tx.payload.nonce);
                             s.nonce = tx.payload.nonce;
                         }
                     }
@@ -2071,7 +2171,10 @@ impl Blockchain {
                                 industrial: 0,
                             },
                             nonce: 0,
-                            pending: Pending::default(),
+                            pending_consumer: 0,
+                            pending_industrial: 0,
+                            pending_nonce: 0,
+                            pending_nonces: HashSet::new(),
                         });
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
@@ -2102,7 +2205,10 @@ impl Blockchain {
                             industrial: 0,
                         },
                         nonce: 0,
-                        pending: Pending::default(),
+                        pending_consumer: 0,
+                        pending_industrial: 0,
+                        pending_nonce: 0,
+                        pending_nonces: HashSet::new(),
                     });
                 miner.balance.consumer = miner
                     .balance
@@ -2118,6 +2224,25 @@ impl Blockchain {
                 self.emission_consumer += reward_consumer.0;
                 self.emission_industrial += reward_industrial.0;
                 self.block_height += 1;
+                #[cfg(feature = "telemetry")]
+                self.record_block_mined();
+                if self.block_height % 600 == 0 {
+                    self.badge_tracker
+                        .record_epoch(true, Duration::from_millis(0));
+                    self.check_badges();
+                }
+                if self.block_height % self.snapshot_interval == 0 {
+                    let root = crate::blockchain::snapshot::write_snapshot(
+                        &self.path,
+                        self.block_height,
+                        &self.accounts,
+                    )
+                    .map_err(|e| PyValueError::new_err(format!("snapshot error: {e}")))?;
+                    if let Some(last) = self.chain.last_mut() {
+                        last.snapshot_root = root.clone();
+                    }
+                    block.snapshot_root = root;
+                }
 
                 self.persist_chain()?;
 
@@ -2300,7 +2425,10 @@ impl Blockchain {
                             industrial: 0,
                         },
                         nonce: 0,
-                        pending: Pending::default(),
+                        pending_consumer: 0,
+                        pending_industrial: 0,
+                        pending_nonce: 0,
+                        pending_nonces: HashSet::new(),
                     });
                 r.balance.consumer += tx.payload.amount_consumer;
                 r.balance.industrial += tx.payload.amount_industrial;
@@ -2329,7 +2457,10 @@ impl Blockchain {
                     industrial: 0,
                 },
                 nonce: 0,
-                pending: Pending::default(),
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+                pending_nonces: HashSet::new(),
             });
             miner.balance.consumer = miner
                 .balance
@@ -2860,7 +2991,9 @@ pub fn poison_mempool(bc: &Blockchain) {
 
 impl Drop for Blockchain {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
+        if !self.path.is_empty() {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 }
 
@@ -3126,18 +3259,26 @@ mod reservation_tests {
     proptest! {
         #[test]
         fn reservation_rollback_on_panic(cons in 0u64..1000, ind in 0u64..1000) {
-            let mut pending = Pending::default();
+            let mut acc = Account {
+                address: "a".into(),
+                balance: TokenBalance { consumer: 0, industrial: 0 },
+                nonce: 0,
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+                pending_nonces: HashSet::new(),
+            };
             let lock = Mutex::new(());
             let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let res = ReservationGuard::new(guard, &mut pending, cons, ind, 1);
+            let res = ReservationGuard::new(guard, &mut acc, cons, ind, 1);
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
                 drop(res);
                 panic!("boom");
             }));
-            assert_eq!(pending.consumer, 0);
-            assert_eq!(pending.industrial, 0);
-            assert_eq!(pending.nonce, 0);
-            assert!(pending.nonces.is_empty());
+            assert_eq!(acc.pending_consumer, 0);
+            assert_eq!(acc.pending_industrial, 0);
+            assert_eq!(acc.pending_nonce, 0);
+            assert!(acc.pending_nonces.is_empty());
         }
     }
 }

@@ -1,15 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use base64::Engine;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
-    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Pending,
-    RawTxPayload, TokenAmount, TokenBalance, TxAdmissionError,
+    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, RawTxPayload,
+    TokenAmount, TokenBalance, TxAdmissionError,
 };
 
 mod util;
@@ -45,7 +45,7 @@ fn open_mine_reopen() {
     let dir = temp_dir("chain_db");
 
     {
-        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -74,7 +74,7 @@ fn replay_after_crash_is_duplicate() {
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("replay_db");
     {
-        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -114,7 +114,7 @@ fn ttl_expired_purged_on_restart() {
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("replay_ttl");
     {
-        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
         bc.tx_ttl = 1;
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
@@ -154,7 +154,7 @@ fn startup_ttl_purge_increments_metrics() {
         telemetry::MEMPOOL_SIZE.set(0);
     }
     {
-        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
         bc.tx_ttl = 1;
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
@@ -252,13 +252,34 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
 }
 
 #[test]
+fn reopen_from_snapshot() {
+    init();
+    std::env::set_var("TB_SNAPSHOT_INTERVAL", "5");
+    let dir = temp_dir("snapshot_restore");
+    let pre_accounts;
+    {
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+        bc.add_account("miner".into(), 0, 0).unwrap();
+        for _ in 0..5 {
+            bc.mine_block("miner").unwrap();
+        }
+        pre_accounts = bc.accounts.clone();
+        bc.persist_chain().unwrap();
+        bc.path.clear();
+    }
+    let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    std::env::remove_var("TB_SNAPSHOT_INTERVAL");
+    assert_eq!(bc2.accounts, pre_accounts);
+}
+
+#[test]
 fn timestamp_ticks_persist_across_restart() {
     init();
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("ticks_db");
     let first;
     {
-        let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -298,9 +319,9 @@ fn schema_upgrade_compatibility() {
         let dir = load_fixture(fixture);
         let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
         for acc in bc.accounts.values() {
-            assert_eq!(acc.pending.consumer, 0);
-            assert_eq!(acc.pending.industrial, 0);
-            assert_eq!(acc.pending.nonce, 0);
+            assert_eq!(acc.pending_consumer, 0);
+            assert_eq!(acc.pending_industrial, 0);
+            assert_eq!(acc.pending_nonce, 0);
         }
     }
 
@@ -339,7 +360,10 @@ fn schema_upgrade_compatibility() {
                 industrial: 10,
             },
             nonce: 0,
-            pending: Pending::default(),
+            pending_consumer: 0,
+            pending_industrial: 0,
+            pending_nonce: 0,
+            pending_nonces: HashSet::new(),
         },
     );
     let disk = ChainDisk {

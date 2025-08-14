@@ -1,32 +1,34 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
 use serial_test::serial;
-use the_block::{generate_keypair, rpc::spawn_rpc_server, sign_tx, Blockchain, RawTxPayload};
+use the_block::{generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload};
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 mod util;
 
-fn rpc(addr: &str, body: &str) -> Value {
-    let mut stream = TcpStream::connect(addr).unwrap();
+async fn rpc(addr: &str, body: &str) -> Value {
+    let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );
-    stream.write_all(req.as_bytes()).unwrap();
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).unwrap();
+    stream.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp).await.unwrap();
+    let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let body = &resp[body_idx + 4..];
     serde_json::from_str::<Value>(body).unwrap()
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn rpc_smoke() {
+async fn rpc_smoke() {
     let dir = util::temp::temp_dir("rpc_smoke");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     {
@@ -34,11 +36,17 @@ fn rpc_smoke() {
         guard.add_account("alice".to_string(), 42, 0).unwrap();
     }
     let mining = Arc::new(AtomicBool::new(false));
-    let (addr, _handle) =
-        spawn_rpc_server(Arc::clone(&bc), Arc::clone(&mining), "127.0.0.1:0").unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        tx,
+    ));
+    let addr = rx.await.unwrap();
 
     // metrics endpoint
-    let val = rpc(&addr, r#"{"method":"metrics"}"#);
+    let val = rpc(&addr, r#"{"method":"metrics"}"#).await;
     #[cfg(feature = "telemetry")]
     assert!(val["result"].as_str().unwrap().contains("mempool_size"));
     #[cfg(not(feature = "telemetry"))]
@@ -48,22 +56,26 @@ fn rpc_smoke() {
     let bal = rpc(
         &addr,
         r#"{"method":"balance","params":{"address":"alice"}}"#,
-    );
+    )
+    .await;
     assert_eq!(bal["result"]["consumer"].as_u64().unwrap(), 42);
 
     // start and stop mining
     let start = rpc(
         &addr,
         r#"{"method":"start_mining","params":{"miner":"alice"}}"#,
-    );
+    )
+    .await;
     assert_eq!(start["result"]["status"], "ok");
-    let stop = rpc(&addr, r#"{"method":"stop_mining"}"#);
+    let stop = rpc(&addr, r#"{"method":"stop_mining"}"#).await;
     assert_eq!(stop["result"]["status"], "ok");
+
+    handle.abort();
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn rpc_concurrent_controls() {
+async fn rpc_concurrent_controls() {
     let dir = util::temp::temp_dir("rpc_concurrent");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     {
@@ -75,8 +87,14 @@ fn rpc_concurrent_controls() {
         guard.mine_block("alice").unwrap();
     }
     let mining = Arc::new(AtomicBool::new(false));
-    let (addr, _handle) =
-        spawn_rpc_server(Arc::clone(&bc), Arc::clone(&mining), "127.0.0.1:0").unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        tx,
+    ));
+    let addr = rx.await.unwrap();
 
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
@@ -92,64 +110,81 @@ fn rpc_concurrent_controls() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     let tx_hex = hex::encode(bincode::serialize(&tx).unwrap());
     let tx_arc = Arc::new(tx_hex);
-    let handles: Vec<_> = (0..6)
-        .map(|i| {
-            let addr = addr.clone();
-            let tx = Arc::clone(&tx_arc);
-            std::thread::spawn(move || {
-                let body = match i % 3 {
-                    0 => r#"{"method":"start_mining","params":{"miner":"alice"}}"#.to_string(),
-                    1 => r#"{"method":"stop_mining"}"#.to_string(),
-                    _ => format!("{{\"method\":\"submit_tx\",\"params\":{{\"tx\":\"{tx}\"}}}}"),
-                };
-                let _ = rpc(&addr, &body);
-            })
-        })
-        .collect();
-    for h in handles {
-        h.join().unwrap();
+
+    let mut handles = Vec::new();
+    for i in 0..6 {
+        let addr = addr.clone();
+        let tx = Arc::clone(&tx_arc);
+        handles.push(tokio::spawn(async move {
+            let body = match i % 3 {
+                0 => r#"{"method":"start_mining","params":{"miner":"alice"}}"#.to_string(),
+                1 => r#"{"method":"stop_mining"}"#.to_string(),
+                _ => format!("{{\"method\":\"submit_tx\",\"params\":{{\"tx\":\"{tx}\"}}}}"),
+            };
+            let _ = rpc(&addr, &body).await;
+        }));
     }
-    let _ = rpc(&addr, r#"{"method":"stop_mining"}"#);
+    for h in handles {
+        let _ = h.await;
+    }
+    let _ = rpc(&addr, r#"{"method":"stop_mining"}"#).await;
     assert!(bc.lock().unwrap().mempool.len() <= 1);
+
+    handle.abort();
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn rpc_error_responses() {
+async fn rpc_error_responses() {
     let dir = util::temp::temp_dir("rpc_errors");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
-    let (addr, _handle) =
-        spawn_rpc_server(Arc::clone(&bc), Arc::clone(&mining), "127.0.0.1:0").unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        tx,
+    ));
+    let addr = rx.await.unwrap();
 
     // malformed JSON
-    let mut stream = TcpStream::connect(&addr).unwrap();
+    let mut stream = TcpStream::connect(&addr).await.unwrap();
     let bad = "{\"method\":\"balance\""; // missing closing brace
     let req = format!(
         "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
         bad.len(),
         bad
     );
-    stream.write_all(req.as_bytes()).unwrap();
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).unwrap();
-    let body = resp.split("\r\n\r\n").nth(1).unwrap();
+    stream.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp).await.unwrap();
+    let body = String::from_utf8(resp).unwrap();
+    let body = body.split("\r\n\r\n").nth(1).unwrap();
     let val: Value = serde_json::from_str(body).unwrap();
     assert_eq!(val["error"]["code"].as_i64().unwrap(), -32700);
 
     // unknown method
-    let val = rpc(&addr, r#"{"method":"unknown"}"#);
+    let val = rpc(&addr, r#"{"method":"unknown"}"#).await;
     assert_eq!(val["error"]["code"].as_i64().unwrap(), -32601);
+
+    handle.abort();
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn rpc_fragmented_request() {
+async fn rpc_fragmented_request() {
     let dir = util::temp::temp_dir("rpc_fragmented");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
-    let (addr, _handle) =
-        spawn_rpc_server(Arc::clone(&bc), Arc::clone(&mining), "127.0.0.1:0").unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        tx,
+    ));
+    let addr = rx.await.unwrap();
 
     let body = r#"{"method":"stop_mining"}"#;
     let req = format!(
@@ -157,14 +192,17 @@ fn rpc_fragmented_request() {
         body.len(),
         body
     );
-    let mut stream = TcpStream::connect(&addr).unwrap();
+    let mut stream = TcpStream::connect(&addr).await.unwrap();
     let mid = req.len() / 2;
-    stream.write_all(&req.as_bytes()[..mid]).unwrap();
-    std::thread::sleep(Duration::from_millis(5));
-    stream.write_all(&req.as_bytes()[mid..]).unwrap();
-    let mut resp = String::new();
-    stream.read_to_string(&mut resp).unwrap();
+    stream.write_all(&req.as_bytes()[..mid]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    stream.write_all(&req.as_bytes()[mid..]).await.unwrap();
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp).await.unwrap();
+    let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let val: Value = serde_json::from_str(&resp[body_idx + 4..]).unwrap();
     assert_eq!(val["result"]["status"], "ok");
+
+    handle.abort();
 }

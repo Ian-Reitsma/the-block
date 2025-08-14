@@ -71,8 +71,9 @@
   confirm chain-height convergence.
 - Added command-line `node` binary with JSON-RPC for balance queries,
   transaction submission, mining control, and metrics export; flags
-  `--mempool-purge-interval` and `--serve-metrics` wire into purge loop and
+  `--mempool-purge-interval` and `--metrics-addr` wire into purge loop and
   Prometheus exporter.
+- RPC server migrated to `tokio` with async tasks replacing per-connection threads for scalable handling.
 - `tests/node_rpc.rs` now performs a JSON-RPC smoke test, hitting the metrics,
   balance, and mining-control endpoints.
 - `tests/test_purge_loop_env.py` now inserts both a TTL-expired transaction

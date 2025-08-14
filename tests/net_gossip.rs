@@ -1,16 +1,19 @@
+use ed25519_dalek::SigningKey;
+use rand_core::{OsRng, RngCore};
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::thread;
 use std::time::Duration;
 use the_block::{
     generate_keypair,
-    net::{Message, Node},
+    net::{Message, Node, Payload},
     sign_tx, Block, Blockchain, RawTxPayload, TokenAmount,
 };
 
-fn send(addr: SocketAddr, msg: &Message) {
+fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
+    let msg = Message::new(body, sk);
     let mut stream = TcpStream::connect(addr).unwrap();
-    let bytes = bincode::serialize(msg).unwrap();
+    let bytes = bincode::serialize(&msg).unwrap();
     stream.write_all(&bytes).unwrap();
 }
 
@@ -139,7 +142,11 @@ fn invalid_gossip_tx_rejected() {
     let addr: SocketAddr = "127.0.0.1:7201".parse().unwrap();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
-
+    let mut rng = OsRng;
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    let kp = SigningKey::from_bytes(&seed);
+    send(addr, &kp, Payload::Hello(vec![]));
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "unknown".into(),
@@ -152,7 +159,7 @@ fn invalid_gossip_tx_rejected() {
         memo: Vec::new(),
     };
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
-    send(addr, &Message::Tx(tx));
+    send(addr, &kp, Payload::Tx(tx));
 
     thread::sleep(Duration::from_millis(100));
 
@@ -165,6 +172,11 @@ fn invalid_gossip_block_rejected() {
     let addr: SocketAddr = "127.0.0.1:7202".parse().unwrap();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
+    let mut rng = OsRng;
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    let kp = SigningKey::from_bytes(&seed);
+    send(addr, &kp, Payload::Hello(vec![]));
 
     let block = Block {
         index: 99,
@@ -177,10 +189,42 @@ fn invalid_gossip_block_rejected() {
         coinbase_consumer: TokenAmount::new(0),
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
+        snapshot_root: String::new(),
     };
-    send(addr, &Message::Block(block));
+    send(addr, &kp, Payload::Block(block));
 
     thread::sleep(Duration::from_millis(100));
 
+    assert!(node.blockchain().chain.is_empty());
+}
+
+/// Blocks signed with unknown keys are discarded.
+#[test]
+fn forged_identity_rejected() {
+    let addr: SocketAddr = "127.0.0.1:7301".parse().unwrap();
+    let node = Node::new(addr, vec![], Blockchain::default());
+    let _h = node.start();
+
+    // Forge a block with an unauthorized key and no hello handshake
+    let mut rng = OsRng;
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    let kp = SigningKey::from_bytes(&seed);
+    let block = Block {
+        index: 0,
+        previous_hash: "0".repeat(64),
+        timestamp_millis: 0,
+        transactions: Vec::new(),
+        difficulty: 0,
+        nonce: 0,
+        hash: String::new(),
+        coinbase_consumer: TokenAmount::new(0),
+        coinbase_industrial: TokenAmount::new(0),
+        fee_checksum: String::new(),
+        snapshot_root: String::new(),
+    };
+    send(addr, &kp, Payload::Block(block));
+
+    thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().chain.is_empty());
 }

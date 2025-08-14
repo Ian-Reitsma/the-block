@@ -85,9 +85,9 @@ re‑implement:
 16. Minimal TCP gossip layer under `net/` broadcasts transactions and blocks,
     applies a longest-chain rule on conflicts, and has a multi-node
     convergence test.
-17. Command-line `node` binary exposes JSON-RPC endpoints for balance queries,
+17. Command-line `node` binary exposes `tokio`-based JSON-RPC endpoints for balance queries,
     transaction submission, mining control, and metrics; `--mempool-purge-interval`
-    and `--serve-metrics` flags configure purge loop and Prometheus export.
+    and `--metrics-addr` flags configure purge loop and Prometheus export.
 18. `tests/node_rpc.rs` performs a smoke test of the RPC layer, exercising the
     metrics, balance, and mining-control methods.
 19. `demo_runs_clean` integration test injects `TB_PURGE_LOOP_SECS=1`, sets
@@ -151,7 +151,7 @@ Treat the following as blockers. Implement each with atomic commits, exhaustive 
      check+insert and pending-balance reservation happen atomically.
    - Regression tests prove pending balances and nonce sets roll back on panic.
 2. **Pending Ledger Consistency Tests**
-   - Property tests ensure `pending.consumer + balance.consumer ≥ 0` and
+   - Property tests ensure `pending_consumer + balance.consumer ≥ 0` and
      pending nonces stay contiguous after drops or reorgs.
 3. **Persistence Abstraction**
    - Define a `Db` trait and adapt `SimpleDb` to it, paving the way for sled or
@@ -343,6 +343,9 @@ testnet burn-in & audits (+5), ecosystem tooling (+5).
    use the context manager; set `TB_DEMO_MANUAL_PURGE=1` to exercise the
    manual shutdown‑flag/handle example instead. The script will invoke
    `maturin develop` automatically if the `the_block` module is missing.
+9. For long-running tests (e.g., `reopen_from_snapshot`), set `TB_SNAPSHOT_INTERVAL`
+   and lower block counts locally to iterate quickly, then restore canonical
+   values before committing.
 
 Stay relentless.  Mediocrity is a bug.
 

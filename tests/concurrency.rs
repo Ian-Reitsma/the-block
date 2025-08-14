@@ -57,7 +57,7 @@ fn concurrent_duplicate_submission() {
     assert!(r1 ^ r2, "exactly one submission should succeed");
     let pending_nonce = {
         let guard = bc.read().unwrap();
-        guard.accounts.get("alice").unwrap().pending.nonce
+        guard.accounts.get("alice").unwrap().pending_nonce
     };
     assert_eq!(pending_nonce, 1);
     bc.write().unwrap().drop_transaction("alice", 1).unwrap();
@@ -103,7 +103,7 @@ fn cross_thread_fuzz() {
     let guard = bc.read().unwrap();
     assert!(guard.mempool.len() <= guard.max_mempool_size);
     for acc in guard.accounts.values() {
-        assert_eq!(acc.pending.nonce as usize, acc.pending.nonces.len());
+        assert_eq!(acc.pending_nonce as usize, acc.pending_nonces.len());
     }
 }
 

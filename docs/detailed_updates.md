@@ -36,12 +36,14 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Demo Purge Automation** – `demo.py` narrates fee selectors, nonce reuse, and
   manages a TTL purge loop via Python `ShutdownFlag`/`PurgeLoopHandle` helpers.
 - **Python API Errors** – `fee_decompose` now raises distinct `ErrFeeOverflow` and `ErrInvalidSelector` exceptions for precise error handling.
-- **Telemetry Metrics** – Prometheus counters now track TTL expirations
-  (`ttl_drop_total`), startup drops (`startup_ttl_drop_total` (expired mempool entries dropped during startup)), lock poisoning
-  events (`lock_poison_total`), orphan sweeps (`orphan_sweep_total`), invalid
-  fee selectors (`invalid_selector_reject_total`), balance overflows
-  (`balance_overflow_reject_total`), drop failures (`drop_not_found_total`),
-  and total rejections labelled by reason (`tx_rejected_total{reason=*}`).
+- **Telemetry Metrics** – Prometheus counters track total submissions
+  (`tx_submitted_total`), blocks mined (`block_mined_total`), TTL expirations
+  (`ttl_drop_total`), startup drops (`startup_ttl_drop_total` (expired mempool
+  entries dropped during startup)), lock poisoning events (`lock_poison_total`),
+  orphan sweeps (`orphan_sweep_total`), invalid fee selectors
+  (`invalid_selector_reject_total`), balance overflows
+  (`balance_overflow_reject_total`), drop failures (`drop_not_found_total`), and
+  total rejections labelled by reason (`tx_rejected_total{reason=*}`).
 - **B‑5 Startup TTL Purge — COMPLETED** – `Blockchain::open` batches mempool
   rebuilds and invokes [`purge_expired`](../src.lib.rs#L1597-L1666) on startup
   ([../src/lib.rs](../src.lib.rs#L918-L935)), updating
@@ -51,6 +53,7 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
   batched vs naive mempool hydration throughput.
 - **Metrics HTTP Exporter** – `serve_metrics(addr)` spawns a lightweight server
   that returns `gather_metrics()` output. A sample `curl` scrape is shown below.
+- **Async RPC Server** – JSON-RPC listener now uses `tokio` with async tasks for connection handling, eliminating per-connection threads and improving scalability.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
   telemetry counters.
 - **Panic Tests** – Admission path includes panic-inject steps for rollback and

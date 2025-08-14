@@ -77,7 +77,7 @@ fn balance_overflow_rejects_and_counts() {
     // create pending reservation near limit to force overflow
     {
         let acc = bc.accounts.get_mut("alice").unwrap();
-        acc.pending.consumer = u64::MAX - 1;
+        acc.pending_consumer = u64::MAX - 1;
     }
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1, 1, 0);

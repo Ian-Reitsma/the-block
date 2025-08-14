@@ -63,10 +63,10 @@ fn eviction_panic_rolls_back() {
     assert!(result.is_err());
     assert!(bc.mempool.is_empty());
     let acc = bc.accounts.get("a").unwrap();
-    assert_eq!(acc.pending.nonce, 0);
-    assert_eq!(acc.pending.consumer, 0);
-    assert_eq!(acc.pending.industrial, 0);
-    assert!(acc.pending.nonces.is_empty());
+    assert_eq!(acc.pending_nonce, 0);
+    assert_eq!(acc.pending_consumer, 0);
+    assert_eq!(acc.pending_industrial, 0);
+    assert!(acc.pending_nonces.is_empty());
     let tx3 = build_signed_tx(&sk, "a", "b", 1, 1000, 3);
     #[cfg(feature = "telemetry")]
     {

@@ -1,8 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::{
-    sign_tx, Account, Blockchain, MempoolEntry, MempoolEntryDisk, Pending, RawTxPayload,
-    TokenBalance, STARTUP_REBUILD_BATCH,
+    sign_tx, Account, Blockchain, MempoolEntry, MempoolEntryDisk, RawTxPayload, TokenBalance,
+    STARTUP_REBUILD_BATCH,
 };
 
 fn sample_entries(count: usize) -> (Vec<MempoolEntryDisk>, Account) {
@@ -39,7 +40,10 @@ fn sample_entries(count: usize) -> (Vec<MempoolEntryDisk>, Account) {
             industrial: 1_000_000,
         },
         nonce: 0,
-        pending: Pending::default(),
+        pending_consumer: 0,
+        pending_industrial: 0,
+        pending_nonce: 0,
+        pending_nonces: HashSet::new(),
     };
     (entries, account)
 }
