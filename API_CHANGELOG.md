@@ -38,6 +38,9 @@
 - `INVALID_SELECTOR_REJECT_TOTAL`, `BALANCE_OVERFLOW_REJECT_TOTAL`, and
   `DROP_NOT_FOUND_TOTAL` expose detailed rejection counts.
 - `TX_REJECTED_TOTAL{reason=*}` aggregates all rejection reasons.
+
+### Kernel
+- `service_badge` module introduces `ServiceBadgeTracker` and `Blockchain::check_badges()` which evaluates uptime every 600 blocks.
 - `serve_metrics(addr)` exposes Prometheus text over a lightweight HTTP listener.
 - `maybe_spawn_purge_loop` reads `TB_PURGE_LOOP_SECS` and spawns a background
   thread that periodically calls `purge_expired`, advancing
@@ -61,6 +64,7 @@
 
 ### Node CLI & RPC
 - Introduced `node` binary exposing `--rpc-addr`, `--mempool-purge-interval`,
-  and `--serve-metrics` flags.
+  and `--metrics-addr` flags.
 - JSON-RPC methods `balance`, `submit_tx`, `start_mining`, `stop_mining`, and
   `metrics` enable external control of the blockchain.
+- RPC server uses `tokio` for asynchronous connection handling, removing the thread-per-connection model.

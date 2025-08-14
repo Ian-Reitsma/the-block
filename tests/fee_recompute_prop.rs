@@ -77,6 +77,7 @@ proptest! {
                 coinbase_consumer: TokenAmount::new(0),
                 coinbase_industrial: TokenAmount::new(0),
                 fee_checksum: String::new(),
+                snapshot_root: String::new(),
             };
             chain.push(block);
         }

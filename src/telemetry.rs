@@ -52,12 +52,30 @@ pub static TX_ADMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static TX_SUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("tx_submitted_total", "Total submitted transactions")
+        .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new("tx_rejected_total", "Total rejected transactions"),
         &["reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static BLOCK_MINED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("block_mined_total", "Total mined blocks")
+        .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -148,6 +166,24 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub struct Recorder;
+
+impl Recorder {
+    pub fn tx_submitted(&self) {
+        TX_SUBMITTED_TOTAL.inc();
+    }
+
+    pub fn tx_rejected(&self, reason: &str) {
+        TX_REJECTED_TOTAL.with_label_values(&[reason]).inc();
+    }
+
+    pub fn block_mined(&self) {
+        BLOCK_MINED_TOTAL.inc();
+    }
+}
+
+pub static RECORDER: Recorder = Recorder;
+
 fn gather() -> String {
     // Ensure all metrics are registered even if they haven't been used yet so
     // `gather_metrics` always exposes a stable set of counters.
@@ -157,7 +193,9 @@ fn gather() -> String {
         &*FEE_FLOOR_REJECT_TOTAL,
         &*DUP_TX_REJECT_TOTAL,
         &*TX_ADMITTED_TOTAL,
+        &*TX_SUBMITTED_TOTAL,
         &*TX_REJECTED_TOTAL,
+        &*BLOCK_MINED_TOTAL,
         &*TTL_DROP_TOTAL,
         &*STARTUP_TTL_DROP_TOTAL,
         &*LOCK_POISON_TOTAL,

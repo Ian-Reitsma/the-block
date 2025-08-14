@@ -49,9 +49,9 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   `PeerSet` and `Message` enums for `Hello`, `Tx`, `Block`, and `Chain`.
 * Nodes broadcast transactions and blocks and adopt longer forks via
   `Blockchain::import_chain`, ensuring convergence on the longest chain.
-* `src/bin/node.rs` wraps the chain in a JSON-RPC server exposing balance queries,
+* `src/bin/node.rs` wraps the chain in a `tokio`-based JSON-RPC server exposing balance queries,
   transaction submission, start/stop mining, and metrics export. Flags
-  `--mempool-purge-interval` and `--serve-metrics` configure the purge loop and
+  `--mempool-purge-interval` and `--metrics-addr` configure the purge loop and
   Prometheus endpoint.
 * Integration test `tests/net_gossip.rs` spawns three nodes that exchange
   data and verify equal chain heights.
@@ -99,6 +99,7 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   [`src/lib.rs`](src/lib.rs#L879-L889).
 * `serve_metrics(addr)` exposes Prometheus text; e.g.
   `curl -s localhost:9000/metrics | grep tx_rejected_total`.
+  The CLI uses `--metrics-addr` to spawn this exporter during `node run`.
 
 ### Schema Migrations & Invariants
 * Bump `ChainDisk.schema_version` for any on-disk format change and supply a lossless migration routine with tests.
@@ -134,6 +135,9 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   intervals, triggers both shutdown flags, joins handles in reverse order, and
   repeats a join to prove threads halt without panics or negative mempool
   accounting.
+* Long-running integration tests (e.g., `reopen_from_snapshot`) may set
+  `TB_SNAPSHOT_INTERVAL` and mine fewer blocks for local debugging, but must
+  restore canonical values before committing.
 
 ## 2. Immediate Next Steps
 The following directives are mandatory before any feature expansion. Deliver each with exhaustive tests, telemetry, and cross‑referenced documentation.

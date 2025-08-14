@@ -3,12 +3,14 @@
 ## Unreleased
 
 ### Added
-- Hardened JSON-RPC server with per-connection threads, read timeouts, and `Content-Length` parsing; returns spec-compliant errors ([src/rpc.rs](src/rpc.rs), [src/bin/node.rs](src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
+- Asynchronous JSON-RPC server built on `tokio` replaces the thread-per-connection model and dispatches requests with async tasks while preserving spec-compliant errors ([src/rpc.rs](src/rpc.rs), [src/bin/node.rs](src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
 - Network partition/rejoin and invalid gossip cases ensure longest-chain convergence ([tests/net_gossip.rs](tests/net_gossip.rs)).
 - Demo auto-builds the extension and defaults the purge loop to one second; CI captures logs and clears manual flags ([demo.py](demo.py), [tests/demo.rs](tests/demo.rs)).
 - Telemetry logs TTL drops and orphan sweeps with stable `code` fields and sample JSON lines ([src/telemetry.rs](src/telemetry.rs), [tests/logging.rs](tests/logging.rs)).
 - Stress tests spawn overlapping purge loops, log start/stop times, and assert metrics after each join ([tests/test_spawn_purge_loop.py](tests/test_spawn_purge_loop.py)).
 - Test harness installs `maturin` on demand and builds the Python extension before running tests ([tests/conftest.py](tests/conftest.py)).
+- Prototype service-badge tracker mints placeholder badges after high-uptime epochs ([src/service_badge.rs](src/service_badge.rs), [tests/service_badge.rs](tests/service_badge.rs)).
+- Network topology diagrams and an RPC walkthrough illustrate partition tests and end-to-end transaction flow ([docs/network_topologies.md](docs/network_topologies.md), [README.md](README.md), [AGENTS.md](AGENTS.md)).
 
 ### Changed
 - Moving-average difficulty retargeting validates block headers against expected difficulty ([src/lib.rs](src/lib.rs)).
@@ -91,7 +93,7 @@
   `orphan_sweep_total`.
 - Feat: added `node` binary with clap-based CLI and JSON-RPC endpoints for
   balances, transaction submission, mining control, and metrics; flags
-  `--mempool-purge-interval` and `--serve-metrics` configure purge loop and
+  `--mempool-purge-interval` and `--metrics-addr` configure purge loop and
   Prometheus exporter.
 - Test: `tests/node_rpc.rs` smoke-tests JSON-RPC metrics, balance queries, and
   mining control.

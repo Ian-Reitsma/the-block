@@ -13,13 +13,13 @@ This chapter details how The‑Block enforces a one‑to‑one mapping between s
 2. **Balance Check** – The node computes effective balances:
 
    ```text
-   effective_consumer   = balance.consumer   − pending.consumer
-   effective_industrial = balance.industrial − pending.industrial
+   effective_consumer   = balance.consumer   − pending_consumer
+   effective_industrial = balance.industrial − pending_industrial
    ```
 
    The transaction is rejected if the debit plus fee exceeds either effective balance.
 3. **Reservation** – On success the account reserves the amounts and fee by
-   increasing `pending.consumer`, `pending.industrial`, and `pending.nonce`.
+   increasing `pending_consumer`, `pending_industrial`, and `pending_nonce`.
    No further transaction from the same sender is allowed unless the nonce is
    exactly `account.nonce + pending_nonce + 1`.
 4. **Mining** – When a block includes the transaction the reserved values are
@@ -32,10 +32,10 @@ This chapter details how The‑Block enforces a one‑to‑one mapping between s
 ## Invariants
 
 * **INV-PENDING-001** – At any time there is at most one committed or pending
-  transaction with nonce `N = account.nonce + pending.nonce + 1`.
-* **INV-PENDING-002** – `balance.consumer + pending.consumer` and
-  `balance.industrial + pending.industrial` are never negative.
-* **INV-PENDING-003** – `pending.nonce` equals the number of transactions for the
+  transaction with nonce `N = account.nonce + pending_nonce + 1`.
+* **INV-PENDING-002** – `balance.consumer + pending_consumer` and
+  `balance.industrial + pending_industrial` are never negative.
+* **INV-PENDING-003** – `pending_nonce` equals the number of transactions for the
   account currently in the mempool.
 * **INV-PENDING-004** – Atomicity of reservations:
 
@@ -47,6 +47,15 @@ This chapter details how The‑Block enforces a one‑to‑one mapping between s
   where `i` ranges over consumer and industrial token classes and `d_i(k)` is the
   debit in transaction `k`.
 
+## Nonce and Supply Invariants
+
+* **INV-NONCE-001** – Account nonces increase by exactly one for each mined
+  transaction. Property test `nonce_supply_prop` submits randomized sequences and
+  asserts the sender's nonce matches `previous_nonce + 1` after every block.
+* **INV-SUPPLY-001** – The sum of all account balances equals the total emitted
+  supply after each block. The same property test confirms `Σ balances == Σ
+  emitted` regardless of transaction order.
+
 ## State Diagrams
 
 Below is a simplified example of a single account sending one transaction.
@@ -55,27 +64,27 @@ Below is a simplified example of a single account sending one transaction.
 
 ```
 nonce           = 0
-pending.nonce   = 0
+pending_nonce   = 0
 balance.consumer= 10
-pending.consumer= 0
+pending_consumer= 0
 ```
 
 ### After `tx1` (amount=2, fee=1)
 
 ```
 nonce           = 0
-pending.nonce   = 1
+pending_nonce   = 1
 balance.consumer= 10
-pending.consumer= 3
+pending_consumer= 3
 ```
 
 ### After Block Mined
 
 ```
 nonce           = 1
-pending.nonce   = 0
+pending_nonce   = 0
 balance.consumer= 7   # 10 − 3
-pending.consumer= 0
+pending_consumer= 0
 ```
 
 Reorg or explicit eviction reverses the reservation step so the "Before" state
@@ -85,22 +94,22 @@ is restored.
 
 ```text
 nonce                  = 0
-pending.nonce          = 0
+pending_nonce          = 0
 balance.consumer       = 20
 balance.industrial     = 15
-pending.consumer       = 0
-pending.industrial     = 0
+pending_consumer       = 0
+pending_industrial     = 0
 ```
 
 After a transaction debiting 5 consumer and 4 industrial with fee 1:
 
 ```text
 nonce                  = 0
-pending.nonce          = 1
+pending_nonce          = 1
 balance.consumer       = 20
 balance.industrial     = 15
-pending.consumer       = 6  # 5 + fee
-pending.industrial     = 4
+pending_consumer       = 6  # 5 + fee
+pending_industrial     = 4
 ```
 
 Once mined the reservations convert to real debits and pending fields drop to
@@ -108,8 +117,8 @@ zero.
 
 ## Fork and Reorg Example
 
-| Step | nonce | pending.nonce | consumer | pending.consumer |
-|-----|------|--------------|---------|-----------------|
+| Step | nonce | pending_nonce | consumer | pending_consumer |
+|-----|------|---------------|---------|------------------|
 | Before fork | 3 | 0 | 5 | 0 |
 | Submit tx4  | 3 | 1 | 5 | 1 |
 | Fork mined  | 4 | 0 | 4 | 0 |

@@ -1,15 +1,13 @@
-#[cfg(feature = "telemetry")]
-use crate::gather_metrics;
 use crate::{Blockchain, SignedTransaction};
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::thread;
-use std::time::Duration;
+
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::oneshot;
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -43,22 +41,18 @@ struct RpcError {
     message: &'static str,
 }
 
-fn handle_conn(mut stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<AtomicBool>) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let mut reader = BufReader::new(match stream.try_clone() {
-        Ok(s) => s,
-        Err(_) => return,
-    });
+async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<AtomicBool>) {
+    let mut reader = BufReader::new(stream);
 
     let mut line = String::new();
-    if reader.read_line(&mut line).is_err() {
+    if reader.read_line(&mut line).await.is_err() {
         return;
     }
 
     let mut content_len = 0usize;
     loop {
         line.clear();
-        if reader.read_line(&mut line).is_err() {
+        if reader.read_line(&mut line).await.is_err() {
             return;
         }
         if line == "\r\n" {
@@ -70,7 +64,7 @@ fn handle_conn(mut stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<At
     }
 
     let mut body_bytes = vec![0u8; content_len];
-    if reader.read_exact(&mut body_bytes).is_err() {
+    if reader.read_exact(&mut body_bytes).await.is_err() {
         return;
     }
     let body = String::from_utf8_lossy(&body_bytes);
@@ -110,13 +104,14 @@ fn handle_conn(mut stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<At
         })
         .to_string()
     });
+    let mut stream = reader.into_inner();
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );
-    let _ = stream.write_all(response.as_bytes());
-    let _ = stream.shutdown(std::net::Shutdown::Both);
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.shutdown().await;
 }
 
 fn dispatch(
@@ -172,7 +167,7 @@ fn dispatch(
                 let bc = Arc::clone(&bc);
                 let miner = miner.to_string();
                 let flag = Arc::clone(&mining);
-                thread::spawn(move || {
+                std::thread::spawn(move || {
                     while flag.load(Ordering::SeqCst) {
                         if let Ok(mut g) = bc.lock() {
                             let _ = g.mine_block(&miner);
@@ -189,7 +184,7 @@ fn dispatch(
         "metrics" => {
             #[cfg(feature = "telemetry")]
             {
-                let m = gather_metrics().unwrap_or_default();
+                let m = crate::gather_metrics().unwrap_or_default();
                 serde_json::json!(m)
             }
             #[cfg(not(feature = "telemetry"))]
@@ -206,23 +201,21 @@ fn dispatch(
     })
 }
 
-pub fn spawn_rpc_server(
+pub async fn run_rpc_server(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
-    addr: &str,
-) -> std::io::Result<(String, thread::JoinHandle<()>)> {
-    let listener = TcpListener::bind(addr)?;
-    let local = listener.local_addr()?;
-    let bc = Arc::clone(&bc);
-    let mining = Arc::clone(&mining);
-    let handle = thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(stream) = stream {
-                let bc = Arc::clone(&bc);
-                let mining = Arc::clone(&mining);
-                thread::spawn(move || handle_conn(stream, bc, mining));
-            }
-        }
-    });
-    Ok((local.to_string(), handle))
+    addr: String,
+    ready: oneshot::Sender<String>,
+) -> std::io::Result<()> {
+    let listener = TcpListener::bind(&addr).await?;
+    let local = listener.local_addr()?.to_string();
+    let _ = ready.send(local);
+    loop {
+        let (stream, _) = listener.accept().await?;
+        let bc = Arc::clone(&bc);
+        let mining = Arc::clone(&mining);
+        tokio::spawn(async move {
+            handle_conn(stream, bc, mining).await;
+        });
+    }
 }

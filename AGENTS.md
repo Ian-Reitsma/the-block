@@ -442,7 +442,7 @@ any testnet or production exposure. Each change **must** include tests, telemetr
   `Message` enums that broadcast transactions and blocks and adopt the
   longest-chain rule.
 - `src/bin/node.rs` provides a JSON-RPC server with `--rpc-addr`,
-- `--mempool-purge-interval`, and `--serve-metrics` flags for balance queries,
+- `--mempool-purge-interval`, and `--metrics-addr` flags for balance queries,
   transaction submission, mining control, and metrics export.
 - Integration tests `tests/net_gossip.rs` and `tests/node_rpc.rs` prove gossip
   convergence and exercise the RPC surface end-to-end. Gossip tests cover a
@@ -453,6 +453,34 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - RPC server returns JSON-RPC–compliant errors for malformed requests or
   unknown methods, and `rpc_concurrent_controls` exercises concurrent mining
   and submission calls to guard against race conditions.
+
+#### RPC session walkthrough
+
+```bash
+# Start a node with RPC enabled
+cargo run --bin node -- --rpc-addr 127.0.0.1:3030 --mempool-purge-interval 5
+
+# Generate a key and capture its address
+cargo run --bin node -- generate-key alice
+ADDR=$(cargo run --bin node -- show-address alice)
+
+# Sign and submit a self-transfer
+TX=$(cargo run --bin node -- sign-tx alice '{"from_":"'$ADDR'","to":"'$ADDR'","amount_consumer":1,"amount_industrial":0,"fee":1,"fee_selector":0,"nonce":1,"memo":[]}')
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"submit_tx","params":{"tx":"'$TX'"}}'
+
+# Mine one block and query the new balance
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"start_mining","params":{"miner":"'$ADDR'"}}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"stop_mining"}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"balance","params":{"address":"'$ADDR'"}}'
+```
 
 ### Test & Fuzz Matrix
 - Property test: inject panics at each admission step to verify reservation rollback and heap invariants.
