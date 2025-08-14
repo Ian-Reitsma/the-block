@@ -338,10 +338,11 @@ testnet burn-in & audits (+5), ecosystem tooling (+5).
 7. Include file and command citations in the PR per `AGENTS.md` §9.
 8. When running `demo.py` (e.g., the `demo_runs_clean` test), set
    `TB_PURGE_LOOP_SECS` to a positive integer such as `1` so the purge
-   loop context manager can spawn. Leave `TB_DEMO_MANUAL_PURGE` unset or
-   empty to use the context manager; set `TB_DEMO_MANUAL_PURGE=1` to
-   exercise the manual shutdown‑flag/handle example instead of the
-   context manager.
+   loop context manager can spawn, force `PYTHONUNBUFFERED=1` for
+   real-time logs, and leave `TB_DEMO_MANUAL_PURGE` unset or empty to
+   use the context manager; set `TB_DEMO_MANUAL_PURGE=1` to exercise the
+   manual shutdown‑flag/handle example instead. The script will invoke
+   `maturin develop` automatically if the `the_block` module is missing.
 
 Stay relentless.  Mediocrity is a bug.
 

@@ -135,6 +135,9 @@ ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 >
 > **CI will fail** any PR that leaves `clippy` warnings, `rustfmt` diffs, or
 > test failures.
+>
+> Repository verified lint-clean on 2025-02-14 via `cargo fmt` and
+> `cargo clippy --all-targets --all-features -- -D warnings`.
 
 ---
 
@@ -145,12 +148,19 @@ ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 3. **Cross‑Language Determinism** — Python ↔ Rust serialization byte‑for‑byte equality for 100 random payloads (`tests/test_determinism.py`).
 4. **Fuzzing** (`cargo fuzz run verify_sig`) — signature verification stability, 10 k iterations on CI.
 5. **Benchmarks** (Criterion) — `verify_signature` must stay < 50 µs median on Apple M2.
+6. **Demo Integration** — `cargo test --release demo_runs_clean` runs `demo.py`; it defaults `TB_PURGE_LOOP_SECS=1` when unset, forces `PYTHONUNBUFFERED=1`, and leaves `TB_DEMO_MANUAL_PURGE` empty; logs are captured on failure. The demo auto-installs `the_block` with `maturin` if the module is missing.
+
+7. **Lock-Poison Helper** — use `poison_mempool(bc)` to simulate a poisoned mutex and exercise `ERR_LOCK_POISON` and `lock_poison_total` paths.
 
 Run all locally via:
 
 ```bash
 ./scripts/run_all_tests.sh   # wrapper calls cargo, pytest, fuzz (quick), benches (optional)
 ```
+
+### Flaky Tests
+
+`demo_runs_clean` occasionally times out on slow hardware. Ensure `TB_PURGE_LOOP_SECS=1`, `PYTHONUNBUFFERED=1`, and `TB_DEMO_MANUAL_PURGE` is unset; re-run with `-- --nocapture` to capture demo logs if failures persist.
 
 ---
 
@@ -331,6 +341,7 @@ Account trie root every 2¹⁰ blocks; light-client proof ≤ 512 B for 1 M a
 | `libpython3.12.so` linked in wheel | Forgot `--features extension-module` | Re‑build wheel with flag or make feature default in `Cargo.toml` |
 | Same tx hash repeats               | `nonce` missing / fake sig           | Ensure unique nonce & real signature                             |
 | `cargo test` fails on CI only      | Missing system pkg                   | Check GitHub matrix log; patch `bootstrap.sh`                    |
+| `demo_runs_clean` hangs or times out | Purge loop thread not shutting down or env vars missing | Run with `TB_PURGE_LOOP_SECS=1`, `PYTHONUNBUFFERED=1`, and unset `TB_DEMO_MANUAL_PURGE`; inspect persisted stdout/stderr |
 
 If the playbook fails, open an issue with *exact* cmd + full output.
 
@@ -402,6 +413,9 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 - `TTL_DROP_TOTAL` and `ORPHAN_SWEEP_TOTAL` counters saturate at
   `u64::MAX`, and tests assert `ShutdownFlag.trigger()` halts the thread
   before further increments.
+- Stress tests in `tests/test_spawn_purge_loop.py` run overlapping
+  purge loops, log their start/stop times, and assert `mempool_size` and
+  metrics after each join to surface race conditions.
 
 ### Deterministic Eviction & Replay Safety
 - Unit‑test the priority comparator `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)` and prove ordering stability.
@@ -428,10 +442,17 @@ any testnet or production exposure. Each change **must** include tests, telemetr
   `Message` enums that broadcast transactions and blocks and adopt the
   longest-chain rule.
 - `src/bin/node.rs` provides a JSON-RPC server with `--rpc-addr`,
-  `--mempool-purge-interval`, and `--serve-metrics` flags for balance queries,
+- `--mempool-purge-interval`, and `--serve-metrics` flags for balance queries,
   transaction submission, mining control, and metrics export.
 - Integration tests `tests/net_gossip.rs` and `tests/node_rpc.rs` prove gossip
-  convergence and exercise the RPC surface end-to-end.
+  convergence and exercise the RPC surface end-to-end. Gossip tests cover a
+  three-node mesh, a partition/rejoin scenario where an isolated node returns
+  with a longer fork, and negative cases where malformed transactions or blocks
+  are ignored. They bind to fixed `127.0.0.1:700*` ports and run serially to
+  avoid conflicts with other services.
+- RPC server returns JSON-RPC–compliant errors for malformed requests or
+  unknown methods, and `rpc_concurrent_controls` exercises concurrent mining
+  and submission calls to guard against race conditions.
 
 ### Test & Fuzz Matrix
 - Property test: inject panics at each admission step to verify reservation rollback and heap invariants.

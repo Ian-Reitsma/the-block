@@ -19,6 +19,9 @@ use the_block::{
 };
 
 mod util;
+// Ensure vector helpers from `tests/vectors.rs` are available when the
+// `fuzzy` feature is enabled. The module may be empty but must exist so this
+// include doesn't break builds that expect it.
 mod vectors;
 use util::temp::{temp_blockchain, temp_dir};
 

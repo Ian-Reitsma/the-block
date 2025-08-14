@@ -41,6 +41,8 @@ fn main() {
     }
 
     let mining = Arc::new(AtomicBool::new(false));
+    // `spawn_rpc_server` now surfaces JSON-RPC compliant errors for malformed
+    // requests or unknown methods.
     let (rpc_addr, handle) = spawn_rpc_server(Arc::clone(&bc), Arc::clone(&mining), &opts.rpc_addr)
         .expect("spawn rpc server");
     println!("RPC listening on {rpc_addr}");

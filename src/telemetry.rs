@@ -149,6 +149,24 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 fn gather() -> String {
+    // Ensure all metrics are registered even if they haven't been used yet so
+    // `gather_metrics` always exposes a stable set of counters.
+    let _ = (
+        &*MEMPOOL_SIZE,
+        &*EVICTIONS_TOTAL,
+        &*FEE_FLOOR_REJECT_TOTAL,
+        &*DUP_TX_REJECT_TOTAL,
+        &*TX_ADMITTED_TOTAL,
+        &*TX_REJECTED_TOTAL,
+        &*TTL_DROP_TOTAL,
+        &*STARTUP_TTL_DROP_TOTAL,
+        &*LOCK_POISON_TOTAL,
+        &*ORPHAN_SWEEP_TOTAL,
+        &*INVALID_SELECTOR_REJECT_TOTAL,
+        &*BALANCE_OVERFLOW_REJECT_TOTAL,
+        &*DROP_NOT_FOUND_TOTAL,
+    );
+
     let mut buffer = Vec::new();
     let encoder = TextEncoder::new();
     let metrics = REGISTRY.gather();
