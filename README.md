@@ -38,14 +38,19 @@
 ```bash
 # Unix/macOS
 bash ./bootstrap.sh          # installs toolchains + builds + tests + wheel
-TB_PURGE_LOOP_SECS=1 python demo.py   # demo with background purge loop
+python demo.py               # demo with background purge loop (TB_PURGE_LOOP_SECS defaults to 1)
 
 # Windows (PowerShell)
 ./bootstrap.ps1              # run as admin to install VS Build Tools via choco
-set TB_PURGE_LOOP_SECS=1; python demo.py
+python demo.py
 ```
 
 > Look for `🎉 demo completed` in the console—if you see it, the kernel, bindings, and demo all worked.
+
+Running `demo.py` will attempt to build the `the_block` extension with
+`maturin` if it is not already installed. The script installs `maturin` on
+the fly when missing, so only a Rust toolchain and build prerequisites are
+required.
 
 ### Manual purge-loop demonstration
 
@@ -53,16 +58,16 @@ To watch the purge loop being started and stopped explicitly, set
 `TB_DEMO_MANUAL_PURGE=1` before invoking the demo:
 
 ```bash
-TB_DEMO_MANUAL_PURGE=1 TB_PURGE_LOOP_SECS=1 python demo.py
+TB_DEMO_MANUAL_PURGE=1 python demo.py
 ```
 
 In this mode `demo.py` calls
 `spawn_purge_loop(bc, 1, ShutdownFlag())`, submits a transaction, and then
 triggers the flag and joins the handle. Without `TB_DEMO_MANUAL_PURGE` the
-demo uses the `PurgeLoop` context manager with `TB_PURGE_LOOP_SECS` to spawn
-and cleanly stop the background thread. CI runs the demo with
-`TB_PURGE_LOOP_SECS=1` and leaves `TB_DEMO_MANUAL_PURGE` empty so the
-context-manager path finishes within the 20‑second budget; the manual
+demo uses the `PurgeLoop` context manager with `TB_PURGE_LOOP_SECS` (default `1`)
+to spawn and cleanly stop the background thread. CI runs the demo with
+`TB_PURGE_LOOP_SECS=1`, forces `PYTHONUNBUFFERED=1`, and leaves
+`TB_DEMO_MANUAL_PURGE` empty so the context-manager path finishes within the 20‑second budget; the manual
 flag/handle variant is covered separately in `tests/test_spawn_purge_loop.py`
 using the same 1‑second interval to keep it fast.
 
@@ -122,27 +127,70 @@ cargo run --bin node -- --rpc-addr 127.0.0.1:3030 \
     --mempool-purge-interval 5 --serve-metrics 127.0.0.1:9100
 ```
 
-Interact with the node via JSON-RPC:
+Interact with the node via JSON-RPC; requests use `jsonrpc` and an incrementing `id`:
 
 ```bash
 # Query balances
-curl -s -X POST 127.0.0.1:3030 -d '{"method":"balance","params":{"address":"alice"}}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"balance","params":{"address":"alice"}}'
+# => {"jsonrpc":"2.0","result":{"consumer":0,"industrial":0},"id":1}
 
-# Submit a hex‑encoded bincode transaction
-curl -s -X POST 127.0.0.1:3030 -d '{"method":"submit_tx","params":{"tx":"<hex>"}}'
+# Submit a hex‑encoded bincode transaction (use an actual hex string)
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"submit_tx","params":{"tx":"<hex>"}}'
+# => {"jsonrpc":"2.0","result":{"status":"ok"},"id":2}
 
 # Start and stop mining
-curl -s -X POST 127.0.0.1:3030 -d '{"method":"start_mining","params":{"miner":"miner"}}'
-curl -s -X POST 127.0.0.1:3030 -d '{"method":"stop_mining"}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"start_mining","params":{"miner":"miner"}}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"stop_mining"}'
 
 # Dump metrics over RPC
-curl -s -X POST 127.0.0.1:3030 -d '{"method":"metrics"}'
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":5,"method":"metrics"}'
+```
+
+A minimal Python client for quick experimentation:
+
+```python
+import json, socket
+
+def rpc(method, params=None, *, id=1):
+    body = json.dumps({"jsonrpc": "2.0", "id": id, "method": method, "params": params or {}})
+    with socket.create_connection(("127.0.0.1", 3030)) as s:
+        s.sendall(f"POST / HTTP/1.1\r\nContent-Length: {len(body)}\r\n\r\n{body}".encode())
+        resp = s.recv(4096).split(b"\r\n\r\n", 1)[1]
+    return json.loads(resp)
+
+print(rpc("balance", {"address": "alice"}))
 ```
 
 The `--serve-metrics` flag also exposes Prometheus text on a separate socket:
 
 ```bash
 curl -s 127.0.0.1:9100 | grep mempool_size
+```
+
+### Difficulty retargeting test
+
+Exercise the moving-average difficulty algorithm:
+
+```bash
+cargo test --test difficulty -- --nocapture
+```
+
+### Networking gossip demo
+
+Start three in-process peers and verify longest-chain convergence:
+
+```bash
+cargo test --test net_gossip -- --nocapture
 ```
 
 ---
@@ -354,6 +402,17 @@ triggers shutdown and joins the thread if you omit an explicit
 invokes `purge_expired`, trimming TTL-expired entries even without new
 submissions and driving `ttl_drop_total` and `orphan_sweep_total`. Counters
 saturate at `u64::MAX` to prevent overflow.
+
+### Sample JSON log output
+
+When built with `--features telemetry-json`, log lines include a numeric `code`
+for programmatic matching:
+
+```json
+{"op":"reject","sender":"a","nonce":3,"reason":"nonce_gap","code":3}
+{"op":"purge_loop","reason":"ttl_drop_total","code":0,"fpb":1}
+{"op":"purge_loop","reason":"orphan_sweep_total","code":0,"fpb":1}
+```
 
 Example:
 

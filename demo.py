@@ -1,11 +1,64 @@
 from __future__ import annotations
 
+import importlib
 import os
+import pathlib
 import random
 import shutil
+import subprocess
+import sys
 import time
 
-import the_block
+
+def _ensure_maturin() -> None:
+    """Install maturin if missing."""
+    try:
+        importlib.import_module("maturin")
+    except ModuleNotFoundError:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "maturin==1.9.2"],
+            check=True,
+        )
+
+
+def _load_the_block():
+    """Import the_block, building it on demand if needed."""
+    try:
+        return importlib.import_module("the_block")
+    except ModuleNotFoundError:
+        repo_root = pathlib.Path(__file__).resolve().parent
+        _ensure_maturin()
+        env = os.environ.copy()
+        env["MATURIN_PYTHON"] = sys.executable
+        env["PYO3_PYTHON"] = sys.executable
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "maturin",
+                "develop",
+                "--release",
+                "-F",
+                "pyo3/extension-module",
+                "-F",
+                "telemetry",
+            ],
+            cwd=repo_root,
+            check=True,
+            env=env,
+        )
+        venv_site = (
+            repo_root
+            / ".venv"
+            / "lib"
+            / f"python{sys.version_info.major}.{sys.version_info.minor}"
+            / "site-packages"
+        )
+        sys.path.append(str(venv_site))
+        return importlib.import_module("the_block")
+
+
+the_block = _load_the_block()
 
 MAX_FEE = (1 << 63) - 1
 BASE_FEE = 1_000
@@ -60,6 +113,9 @@ def init_environment() -> None:
     os.environ["PYTHONHASHSEED"] = "0"
     random.seed(0)
     explain("Python random seeded with 0")
+    if "TB_PURGE_LOOP_SECS" not in os.environ:
+        os.environ["TB_PURGE_LOOP_SECS"] = "1"
+        explain("TB_PURGE_LOOP_SECS unset; defaulting to 1 second purge interval")
     if os.path.exists("chain_db"):
         shutil.rmtree("chain_db")
         explain("Removed previous chain_db directory")
@@ -296,7 +352,7 @@ def restart_purge_demo(priv: bytes) -> None:
     ttl_before = metric_val(metrics_before, "ttl_drop_total")
     startup_before = metric_val(metrics_before, "startup_ttl_drop_total")
     bc.persist_chain()
-    time.sleep(2)
+    time.sleep(1.1)  # wait just over 1s for TTL expiry
     old_ttl = os.environ.get("TB_MEMPOOL_TTL_SECS")
     os.environ["TB_MEMPOOL_TTL_SECS"] = "1"
     try:
@@ -380,9 +436,7 @@ def main() -> None:
     init_environment()
     bc = init_chain()
     if os.getenv("TB_DEMO_MANUAL_PURGE"):
-        explain(
-            "TB_DEMO_MANUAL_PURGE set: demonstrating manual purge-loop control"
-        )
+        explain("TB_DEMO_MANUAL_PURGE set: demonstrating manual purge-loop control")
         flag = the_block.ShutdownFlag()
         explain("ShutdownFlag created; trigger it like a fuse to stop the loop")
         handle = the_block.spawn_purge_loop(bc, 1, flag)

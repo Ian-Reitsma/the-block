@@ -80,8 +80,16 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   JSON so log consumers can match on stable identifiers. The
   `tests/test_tx_error_codes.py` suite iterates over every variant to assert
   `exc.code == ERR_*`, a doc-hidden `poison_mempool(bc)` helper enables
-  lock-poison coverage, and `tests/logging.rs` captures telemetry JSON to verify
-  accepted and duplicate transactions emit the expected numeric codes.
+  lock-poison coverage, and `tests/logging.rs` captures telemetry JSON for
+  admitted transactions, duplicates, nonce gaps, insufficient balances, and
+  purge-loop TTL and orphan sweeps.
+* Sample JSON logs (`--features telemetry-json`):
+
+  ```json
+  {"op":"reject","sender":"a","nonce":3,"reason":"nonce_gap","code":3}
+  {"op":"purge_loop","reason":"ttl_drop_total","code":0,"fpb":1}
+  {"op":"purge_loop","reason":"orphan_sweep_total","code":0,"fpb":1}
+  ```
 * Spans: `mempool_mutex` (sender, nonce, fpb, mempool_size),
   `admission_lock` (sender, nonce), `eviction_sweep` (sender, nonce,
   fpb, mempool_size), `startup_rebuild` (sender, nonce, fpb,
@@ -101,14 +109,15 @@ This document extends `AGENTS.md` with a deep dive into the project's long‑ter
   message, submits a transaction and mines additional blocks while
   printing explanatory output. It uses `with PurgeLoop(bc):` to spawn and
   join the purge thread automatically. Metric assertions require building
-  the module with `--features telemetry`.
-* `TB_PURGE_LOOP_SECS` must be set to a positive integer before invoking
-  the demo; the `demo_runs_clean` test sets it to `1`, forces
-  `PYTHONUNBUFFERED=1`, sets `TB_DEMO_MANUAL_PURGE` to the empty string, and
-  kills the demo if it runs longer than 10 seconds to keep CI reliable while
-  printing and preserving demo logs on failure. Set `TB_DEMO_MANUAL_PURGE=1`
-  to opt into a manual `ShutdownFlag`/handle example instead of the context
-  manager; the README's Quick Start section shows example invocations.
+  the module with `--features telemetry`; the script will invoke
+  `maturin develop` on the fly if `the_block` is missing.
+* `TB_PURGE_LOOP_SECS` defaults to `1`; set another positive integer to
+  change the interval. The `demo_runs_clean` test sets it explicitly to `1`,
+  forces `PYTHONUNBUFFERED=1`, clears `TB_DEMO_MANUAL_PURGE`, and kills the
+  demo if it runs longer than 10 seconds to keep CI reliable while printing
+  and preserving demo logs on failure. Set `TB_DEMO_MANUAL_PURGE=1` to opt
+  into a manual `ShutdownFlag`/handle example instead of the context manager;
+  the README's Quick Start section shows example invocations.
 
 ### Tests
 * Rust property tests under `tests/test_chain.rs` validate invariants (balances never

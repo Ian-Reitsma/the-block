@@ -2516,21 +2516,49 @@ pub fn spawn_purge_loop_thread(
         while !shutdown.load(std::sync::atomic::Ordering::SeqCst) {
             {
                 let mut guard = bc.lock().unwrap_or_else(|e| e.into_inner());
-                let dropped = guard.purge_expired();
+                #[cfg(feature = "telemetry")]
+                {
+                    let (ttl_before, orphan_before) = (
+                        telemetry::TTL_DROP_TOTAL.get(),
+                        telemetry::ORPHAN_SWEEP_TOTAL.get(),
+                    );
+                    let _ = guard.purge_expired();
+                    let (ttl_delta, orphan_delta) = (
+                        telemetry::TTL_DROP_TOTAL.get().saturating_sub(ttl_before),
+                        telemetry::ORPHAN_SWEEP_TOTAL
+                            .get()
+                            .saturating_sub(orphan_before),
+                    );
+                    #[cfg(not(feature = "telemetry-json"))]
+                    info!(
+                        "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
+                    );
+                    #[cfg(feature = "telemetry-json")]
+                    {
+                        log_event(
+                            log::Level::Info,
+                            "purge_loop",
+                            "",
+                            0,
+                            "ttl_drop_total",
+                            ERR_OK,
+                            Some(ttl_delta),
+                        );
+                        log_event(
+                            log::Level::Info,
+                            "purge_loop",
+                            "",
+                            0,
+                            "orphan_sweep_total",
+                            ERR_OK,
+                            Some(orphan_delta),
+                        );
+                    }
+                }
                 #[cfg(not(feature = "telemetry"))]
-                let _ = dropped;
-                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                info!("purge_loop ttl_drop_total={dropped}");
-                #[cfg(feature = "telemetry-json")]
-                log_event(
-                    log::Level::Info,
-                    "purge_loop",
-                    "",
-                    0,
-                    "ttl_drop_total",
-                    ERR_OK,
-                    Some(dropped),
-                );
+                {
+                    let _ = guard.purge_expired();
+                }
             }
             thread::sleep(Duration::from_secs(interval_secs));
         }
@@ -2559,21 +2587,49 @@ pub fn spawn_purge_loop(
         while !thread_flag.0.load(std::sync::atomic::Ordering::SeqCst) {
             Python::with_gil(|py| {
                 let mut bc = bc_py.borrow_mut(py);
-                let dropped = bc.purge_expired();
+                #[cfg(feature = "telemetry")]
+                {
+                    let (ttl_before, orphan_before) = (
+                        telemetry::TTL_DROP_TOTAL.get(),
+                        telemetry::ORPHAN_SWEEP_TOTAL.get(),
+                    );
+                    let _ = bc.purge_expired();
+                    let (ttl_delta, orphan_delta) = (
+                        telemetry::TTL_DROP_TOTAL.get().saturating_sub(ttl_before),
+                        telemetry::ORPHAN_SWEEP_TOTAL
+                            .get()
+                            .saturating_sub(orphan_before),
+                    );
+                    #[cfg(not(feature = "telemetry-json"))]
+                    info!(
+                        "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
+                    );
+                    #[cfg(feature = "telemetry-json")]
+                    {
+                        log_event(
+                            log::Level::Info,
+                            "purge_loop",
+                            "",
+                            0,
+                            "ttl_drop_total",
+                            ERR_OK,
+                            Some(ttl_delta),
+                        );
+                        log_event(
+                            log::Level::Info,
+                            "purge_loop",
+                            "",
+                            0,
+                            "orphan_sweep_total",
+                            ERR_OK,
+                            Some(orphan_delta),
+                        );
+                    }
+                }
                 #[cfg(not(feature = "telemetry"))]
-                let _ = dropped;
-                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                info!("purge_loop ttl_drop_total={dropped}");
-                #[cfg(feature = "telemetry-json")]
-                log_event(
-                    log::Level::Info,
-                    "purge_loop",
-                    "",
-                    0,
-                    "ttl_drop_total",
-                    ERR_OK,
-                    Some(dropped),
-                );
+                {
+                    let _ = bc.purge_expired();
+                }
             });
             thread::sleep(Duration::from_secs(interval_secs));
         }

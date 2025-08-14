@@ -29,7 +29,7 @@ fuzzy = ["proptest"]
 telemetry = ["log", "prometheus", "tracing", "once_cell"]
 telemetry-json = ["telemetry"]
 
-[tool.maturin]
+[package.metadata.maturin]
 features = ["pyo3/extension-module", "telemetry"]
 
 [dev-dependencies]

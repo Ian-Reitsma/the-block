@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Added
+- Hardened JSON-RPC server with per-connection threads, read timeouts, and `Content-Length` parsing; returns spec-compliant errors ([src/rpc.rs](src/rpc.rs), [src/bin/node.rs](src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
+- Network partition/rejoin and invalid gossip cases ensure longest-chain convergence ([tests/net_gossip.rs](tests/net_gossip.rs)).
+- Demo auto-builds the extension and defaults the purge loop to one second; CI captures logs and clears manual flags ([demo.py](demo.py), [tests/demo.rs](tests/demo.rs)).
+- Telemetry logs TTL drops and orphan sweeps with stable `code` fields and sample JSON lines ([src/telemetry.rs](src/telemetry.rs), [tests/logging.rs](tests/logging.rs)).
+- Stress tests spawn overlapping purge loops, log start/stop times, and assert metrics after each join ([tests/test_spawn_purge_loop.py](tests/test_spawn_purge_loop.py)).
+- Test harness installs `maturin` on demand and builds the Python extension before running tests ([tests/conftest.py](tests/conftest.py)).
+
+### Changed
+- Moving-average difficulty retargeting validates block headers against expected difficulty ([src/lib.rs](src/lib.rs)).
+- README and agent handbooks document JSON-RPC sessions, networking demos, and purge-loop defaults ([README.md](README.md), [AGENTS.md](AGENTS.md), [Agents-Sup.md](Agents-Sup.md)).
+
+### Fixed
+- Telemetry exporter always emits keys such as `orphan_sweep_total` even before they increment ([src/telemetry.rs](src/telemetry.rs)).
+
+### Breaking
+- Renamed `fee_token` to `fee_selector` and bumped the crypto domain tag to `THE_BLOCKv2|` ([src/lib.rs](src/lib.rs)).
+
+- Fix: make `demo.py` build the `the_block` extension with `maturin` when
+  missing and default `TB_PURGE_LOOP_SECS` to `1`, preventing module and
+  purge-loop errors during quick starts.
+- Feat: log `orphan_sweep_total` alongside `ttl_drop_total` in purge loop
+  telemetry, extend logging tests for nonce-gap and balance rejections, and
+  document sample JSON log output.
 - Breaking: Fee routing overhaul, overflow clamp, invariants **INV-FEE-01** and **INV-FEE-02**.
 - Breaking: rename `fee_token` to `fee_selector` and bump crypto domain tag to `THE_BLOCKv2|`.
 - Breaking: database schema **v4** adds per-account mempool caps and TTL
@@ -113,16 +137,29 @@
 - Doc: refresh `AGENTS.md`, `Agents-Sup.md`, `Agent-Next-Instructions.md`, and `AUDIT_NOTES.md` with authoritative next-step directives.
 - Feat: minimal TCP gossip layer (`net`) broadcasts transactions and blocks and
   applies the longest-chain rule; `tests/net_gossip.rs` verifies convergence.
-- Dev: `scripts/run_all_tests.sh` warns and skips feature detection when `jq`
-  is missing instead of aborting.
-- Doc: README documents opting into the manual purge-loop demo via
-  `TB_DEMO_MANUAL_PURGE` and notes concurrent purge-loop coverage.
-- Test: `tests/test_spawn_purge_loop.py` runs two manual purge loops with
-  different intervals and cross-order joins, ensuring clean shutdown and
-  idempotent handle joins; `tests/demo.rs` sets `TB_PURGE_LOOP_SECS=1`,
+  - Dev: `scripts/run_all_tests.sh` warns and skips feature detection when `jq`
+    is missing instead of aborting. [0df8a72]
+  - Doc: README documents opting into the manual purge-loop demo via
+    `TB_DEMO_MANUAL_PURGE` and notes concurrent purge-loop coverage.
+  - Fix: stabilize `demo_runs_clean` by shortening purge-loop waits, clearing
+    manual purge flags, and capturing logs. [c7c8a84]
+  - Docs: expand networking and difficulty demos and record purge-loop env
+    defaults across contributor guides. [a0da8b3]
+  - Test: `tests/test_spawn_purge_loop.py` runs two manual purge loops with
+    different intervals and cross-order joins, ensuring clean shutdown and
+    idempotent handle joins; `tests/demo.rs` sets `TB_PURGE_LOOP_SECS=1`,
   clears manual purge via `TB_DEMO_MANUAL_PURGE=""`, forces
   `PYTHONUNBUFFERED=1`, enforces a 10-second timeout, and prints logs on
   failure so the demo exits reliably in CI.
+  - Fix: RPC server returns JSON-RPC compliant errors for malformed JSON and
+    unknown methods.
+  - Test: `rpc_concurrent_controls` exercises concurrent `start_mining`,
+    `stop_mining`, and `submit_tx` requests to ensure thread safety.
+  - Fix: RPC server parses `Content-Length`, applies read timeouts, accepts
+    connections concurrently, and handles fragmented HTTP bodies without
+    hanging.
+  - Docs: expand JSON-RPC section with a full request/response session and a
+    minimal Python client example.
 
 ### CLI Flags
 
