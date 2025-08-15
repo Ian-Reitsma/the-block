@@ -210,6 +210,14 @@ curl -s -X POST 127.0.0.1:3030 \
   -d '{"jsonrpc":"2.0","id":5,"method":"balance","params":{"address":"'$ADDR'"}}'
 ```
 
+Environment variables influence node behaviour during these sessions:
+
+```
+TB_PURGE_LOOP_SECS=1      # interval for background TTL sweeps
+PYTHONUNBUFFERED=1        # unbuffered output for Python demos/tests
+TB_DEMO_MANUAL_PURGE=1    # require manual purge-loop shutdown
+```
+
 Interact with the node via JSON-RPC; requests use `jsonrpc` and an incrementing `id`:
 
 ```bash

@@ -10,8 +10,11 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-pub use message::{Message, Payload};
+pub use message::{Handshake, Message, Payload};
 pub use peer::PeerSet;
+
+/// Current gossip protocol version.
+pub const PROTOCOL_VERSION: u32 = 1;
 
 /// A minimal TCP gossip node.
 pub struct Node {
@@ -41,10 +44,11 @@ impl Node {
         thread::spawn(move || {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
+                    let addr = stream.peer_addr().ok();
                     let mut buf = Vec::new();
                     if stream.read_to_end(&mut buf).is_ok() {
                         if let Ok(msg) = bincode::deserialize::<Message>(&buf) {
-                            peers.handle_message(msg, &chain);
+                            peers.handle_message(msg, addr, &chain);
                         }
                     }
                 }
@@ -64,11 +68,26 @@ impl Node {
         }
     }
 
-    /// Send a hello message advertising peers.
-    pub fn hello(&self) {
-        let mut addrs = self.peers.list();
+    /// Perform peer discovery by handshaking with known peers and exchanging address lists.
+    pub fn discover_peers(&self) {
+        let peers = self.peers.list();
+        // send handshake to each peer
+        let hs = Handshake {
+            node_id: self.key.verifying_key().to_bytes(),
+            protocol_version: PROTOCOL_VERSION,
+            features: Vec::new(),
+        };
+        let hs_msg = Message::new(Payload::Handshake(hs), &self.key);
+        for p in &peers {
+            let _ = send_msg(*p, &hs_msg);
+        }
+        // advertise our peer set
+        let mut addrs = peers.clone();
         addrs.push(self.addr);
-        self.broadcast_payload(Payload::Hello(addrs));
+        let hello_msg = Message::new(Payload::Hello(addrs), &self.key);
+        for p in self.peers.list() {
+            let _ = send_msg(p, &hello_msg);
+        }
     }
 
     /// Access the underlying blockchain.

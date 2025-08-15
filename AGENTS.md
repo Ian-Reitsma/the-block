@@ -142,6 +142,12 @@ All developers must install the repo's `githooks/pre-commit` hook to ensure the 
 ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 ```
 
+### Environment variables
+
+- `TB_PURGE_LOOP_SECS` — positive integer controlling purge-loop cadence; `1` keeps tests fast.
+- `PYTHONUNBUFFERED` — set to `1` for deterministic Python logs in demos and tests.
+- `TB_DEMO_MANUAL_PURGE` — set to `1` to require an explicit purge-loop shutdown in `demo.py`.
+
 > **Tip:** After any `.rs` or `Cargo.toml` change, run `maturin develop --release --features telemetry` to rebuild and re‑install the Python module in‑place.
 
 ---

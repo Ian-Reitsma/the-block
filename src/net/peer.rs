@@ -1,4 +1,4 @@
-use super::{load_net_key, send_msg};
+use super::{load_net_key, send_msg, PROTOCOL_VERSION};
 use crate::net::message::{Message, Payload};
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -52,7 +52,12 @@ impl PeerSet {
     }
 
     /// Verify and handle an incoming message. Unknown peers or bad signatures are dropped.
-    pub fn handle_message(&self, msg: Message, chain: &Arc<Mutex<Blockchain>>) {
+    pub fn handle_message(
+        &self,
+        msg: Message,
+        addr: Option<SocketAddr>,
+        chain: &Arc<Mutex<Blockchain>>,
+    ) {
         let bytes = match bincode::serialize(&msg.body) {
             Ok(b) => b,
             Err(_) => return,
@@ -70,8 +75,16 @@ impl PeerSet {
         }
 
         match msg.body {
-            Payload::Hello(addrs) => {
+            Payload::Handshake(hs) => {
+                if hs.protocol_version != PROTOCOL_VERSION {
+                    return;
+                }
                 self.authorize(msg.pubkey);
+                if let Some(peer_addr) = addr {
+                    self.add(peer_addr);
+                }
+            }
+            Payload::Hello(addrs) => {
                 for a in addrs {
                     self.add(a);
                 }
