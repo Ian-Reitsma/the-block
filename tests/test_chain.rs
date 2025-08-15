@@ -280,7 +280,7 @@ fn test_fee_credit_to_miner() {
     bc.mine_block("miner").unwrap();
 
     let (privkey, _pubk) = generate_keypair();
-    let fee = 7;
+    let fee = 1000;
     let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 2, fee, 1);
 
     bc.submit_transaction(tx).unwrap();
@@ -301,7 +301,7 @@ fn test_replay_attack_prevention() {
     bc.mine_block("miner").unwrap();
 
     let (privkey, _pubk) = generate_keypair();
-    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 5, 2, 0, 1);
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 5, 2, 1000, 1);
     let _ = bc.submit_transaction(tx.clone());
 
     // replay
@@ -320,7 +320,7 @@ fn test_mempool_flush_on_block_mine() {
 
     let (privkey, _pubk) = generate_keypair();
     for n in 0..100 {
-        let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 0, n + 1);
+        let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1000, n + 1);
         let _ = bc.submit_transaction(tx);
     }
     assert!(!bc.mempool.is_empty());
@@ -338,7 +338,7 @@ fn test_duplicate_txid_rejected() {
     bc.mine_block("miner").unwrap();
 
     let (privkey, _pub) = generate_keypair();
-    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 0, 1);
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 1000, 1);
     bc.submit_transaction(tx1.clone()).unwrap();
     let block = bc.mine_block("miner").unwrap();
 
@@ -357,12 +357,12 @@ fn test_duplicate_sender_nonce_rejected_in_block() {
     bc.mine_block("miner").unwrap();
 
     let (privkey, _pub) = generate_keypair();
-    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 0, 1);
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 1000, 1);
     bc.submit_transaction(tx1.clone()).unwrap();
     let block = bc.mine_block("miner").unwrap();
 
     let mut bad_block = block.clone();
-    let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 2, 0, 0, 1);
+    let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 2, 0, 1000, 1);
     bad_block.transactions.push(tx2);
     assert!(!bc.validate_block(&bad_block).unwrap());
 }
@@ -378,16 +378,16 @@ fn test_pending_nonce_and_balances() {
 
     let (privkey, _pub) = generate_keypair();
     // first tx with nonce 1
-    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 2, 3, 1, 1);
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "alice", 2, 3, 1000, 1);
     bc.submit_transaction(tx1).unwrap();
     // gap nonce is rejected
-    let gap = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 3);
+    let gap = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1000, 3);
     assert!(matches!(
         bc.submit_transaction(gap),
         Err(TxAdmissionError::NonceGap)
     ));
     // sequential nonce succeeds
-    let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 2);
+    let tx2 = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1000, 2);
     bc.submit_transaction(tx2).unwrap();
 
     let sender = bc.accounts.get("miner").unwrap();
@@ -396,7 +396,7 @@ fn test_pending_nonce_and_balances() {
     assert!(sender.pending_industrial > 0);
 
     // overspend beyond effective balance fails
-    let huge = testutil::build_signed_tx(&privkey, "miner", "alice", u64::MAX / 2, 0, 0, 3);
+    let huge = testutil::build_signed_tx(&privkey, "miner", "alice", u64::MAX / 2, 0, 1000, 3);
     assert!(matches!(
         bc.submit_transaction(huge),
         Err(TxAdmissionError::InsufficientBalance)
@@ -414,10 +414,10 @@ fn test_pending_nonce_and_balances() {
 fn test_drop_transaction_releases_pending() {
     init();
     let mut bc = Blockchain::open("temp_drop").unwrap();
-    bc.add_account("miner".into(), 5, 5).unwrap();
+    bc.add_account("miner".into(), 2000, 5).unwrap();
     bc.add_account("alice".into(), 0, 0).unwrap();
     let (privkey, _pub) = generate_keypair();
-    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1, 1);
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1000, 1);
     bc.submit_transaction(tx).unwrap();
     assert_eq!(bc.accounts.get("miner").unwrap().pending_nonce, 1);
     bc.drop_transaction("miner", 1).unwrap();
@@ -437,10 +437,20 @@ fn test_fee_checksum_enforced() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
     let (privkey, _pub) = generate_keypair();
-    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 2, 1);
+    let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 0, 2000, 1);
     bc.submit_transaction(tx).unwrap();
     let mut block = bc.mine_block("miner").unwrap();
-    assert!(bc.validate_block(&block).unwrap());
+    let mut fee_tot_consumer = 0u64;
+    let mut fee_tot_industrial = 0u64;
+    for tx in block.transactions.iter().skip(1) {
+        let (c, i) = the_block::fee::decompose(tx.payload.fee_selector, tx.payload.fee).unwrap();
+        fee_tot_consumer += c;
+        fee_tot_industrial += i;
+    }
+    let mut h = blake3::Hasher::new();
+    h.update(&fee_tot_consumer.to_le_bytes());
+    h.update(&fee_tot_industrial.to_le_bytes());
+    assert_eq!(h.finalize().to_hex().to_string(), block.fee_checksum);
     block.fee_checksum = "00".repeat(32);
     assert!(!bc.validate_block(&block).unwrap());
 }
@@ -465,7 +475,7 @@ fn test_multithreaded_submit_and_mine() {
             let privkey = privkey.clone();
             thread::spawn(move || {
                 for n in 0..5 {
-                    let tx = testutil::build_signed_tx(&privkey, "miner", "bob", 1, 1, 0, n + 1);
+                    let tx = testutil::build_signed_tx(&privkey, "miner", "bob", 1, 1, 1000, n + 1);
                     let mut chain = write_lock!(bc);
                     let _ = chain.submit_transaction(tx.clone());
                     let _ = chain.mine_block("miner");
@@ -632,7 +642,7 @@ fn test_chain_determinism() {
     }
 
     let (privkey, _pubk) = generate_keypair();
-    let tx1 = testutil::build_signed_tx(&privkey, "miner", "miner", 1, 1, 0, 1);
+    let tx1 = testutil::build_signed_tx(&privkey, "miner", "miner", 1, 1, 1000, 1);
     let tx2 = tx1.clone();
     bc1.submit_transaction(tx1).unwrap();
     bc2.submit_transaction(tx2).unwrap();

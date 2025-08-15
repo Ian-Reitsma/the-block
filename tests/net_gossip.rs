@@ -81,8 +81,16 @@ fn gossip_converges_to_longest_chain() {
     }
     node2.broadcast_chain();
 
-    // allow gossip to propagate
-    thread::sleep(Duration::from_millis(200));
+    // wait up to 2s for all nodes to converge on the longest chain
+    for _ in 0..20 {
+        let h1 = node1.blockchain().block_height;
+        let h2 = node2.blockchain().block_height;
+        let h3 = node3.blockchain().block_height;
+        if h1 == h2 && h2 == h3 && h1 == 3 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 
     let h1 = node1.blockchain().block_height;
     let h2 = node2.blockchain().block_height;

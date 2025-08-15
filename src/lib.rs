@@ -5,8 +5,10 @@
 
 //! Core blockchain implementation with Python bindings.
 //!
-//! Exposes a minimal proof-of-work chain with dual-token economics. See
-//! `AGENTS.md` for the high-level specification.
+//! This crate is the civic-grade kernel for a one-second Layer 1 that
+//! notarizes sub-second micro-shards and enforces service-based governance
+//! through dual Consumer/Industrial tokens and a service-credit meter. See
+//! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -312,6 +314,7 @@ pub struct Account {
     #[pyo3(get)]
     #[serde(default)]
     pub pending_industrial: u64,
+    #[pyo3(get)]
     #[serde(default)]
     pub pending_nonce: u64,
     #[serde(default)]
@@ -1133,7 +1136,10 @@ impl Blockchain {
             Some(expired_drop_total as u64),
         );
         #[cfg(feature = "telemetry")]
-        telemetry::STARTUP_TTL_DROP_TOTAL.inc_by(ttl_drop_total);
+        {
+            telemetry::ORPHAN_SWEEP_TOTAL.inc_by(missing_drop_total);
+            telemetry::STARTUP_TTL_DROP_TOTAL.inc_by(ttl_drop_total);
+        }
         Ok(bc)
     }
 

@@ -147,6 +147,8 @@ fn startup_ttl_purge_increments_metrics() {
     init();
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("startup_ttl_metrics");
+    std::env::remove_var("TB_MEMPOOL_TTL_SECS");
+    std::env::remove_var("TB_PURGE_LOOP_SECS");
     #[cfg(feature = "telemetry")]
     {
         telemetry::TTL_DROP_TOTAL.reset();
@@ -189,6 +191,7 @@ fn startup_ttl_purge_increments_metrics() {
 }
 
 #[test]
+#[serial_test::serial]
 fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     init();
     let dir = temp_dir("startup_orphan_metrics");
@@ -246,6 +249,10 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     assert!(bc.mempool.is_empty());
     #[cfg(feature = "telemetry")]
     {
+        // Missing-account drops come from orphaned bundles that never earned
+        // service credits. They count toward orphan sweeps, not TTL expiry,
+        // preserving the civic-grade accounting model that underpins
+        // service-based governance.
         assert_eq!(0, telemetry::STARTUP_TTL_DROP_TOTAL.get());
         assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
     }

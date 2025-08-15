@@ -51,6 +51,32 @@ No longer a toy. The‑Block codebase targets production-grade deployment under 
 Every commit is treated as if main-net launch were tomorrow: formal proofs, multi-arch CI, and external security audits are mandatory gates.
 Proceed only if you understand that errors here translate directly into on-chain financial risk.
 
+### Vision Snapshot
+
+*The-Block* ultimately targets a civic-grade chain: a one-second base layer
+that anchors notarized micro-shards, dual Consumer/Industrial tokens, and a
+service-credit meter that rewards honest node work. Governance follows the
+"service guarantees citizenship" maxim—badges earned by uptime grant one
+vote per node, with shard-based districts to check capture. This repository is
+the kernel of that architecture.
+
+### Current Foundation
+
+The codebase already ships a reproducible kernel with:
+
+- dynamic difficulty retargeting and one-second block cadence,
+- dual-token fee routing and decay-driven emissions,
+- purge-loop infrastructure with telemetry counters and TTL/orphan sweeps,
+- a minimal TCP gossip layer and JSON-RPC control surface,
+- cross-language serialization tests and a Python demo.
+
+### Long-Term Goals
+
+Future milestones add durable storage, authenticated peer discovery,
+micro-shard bundle roots, quantum-ready crypto, and the full
+service-based governance stack. See `agents_vision.md` for the complete
+blueprint.
+
 ---
 
 ## 2 · Repository Layout

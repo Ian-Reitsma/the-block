@@ -1,3 +1,7 @@
+"""Interactive walkthrough for The‑Block's vision: a one‑second Layer 1 that
+anchors micro‑shards and rewards honest service with dual Consumer/Industrial
+tokens."""
+
 from __future__ import annotations
 
 import importlib
@@ -100,10 +104,14 @@ def metric_val(metrics: str, name: str) -> int:
 
 def show_pending(bc: the_block.Blockchain, sender: str, recipient: str) -> None:
     """Display pending reservations for two accounts."""
-    s = bc.accounts[sender].pending
-    r = bc.accounts[recipient].pending
-    explain(f"{sender} pending -> c={s.consumer} i={s.industrial} n={s.nonce}")
-    explain(f"{recipient} pending -> c={r.consumer} i={r.industrial} n={r.nonce}")
+    s = bc.accounts[sender]
+    r = bc.accounts[recipient]
+    explain(
+        f"{sender} pending -> c={s.pending_consumer} i={s.pending_industrial} n={s.pending_nonce}"
+    )
+    explain(
+        f"{recipient} pending -> c={r.pending_consumer} i={r.pending_industrial} n={r.pending_nonce}"
+    )
 
 
 def init_environment() -> None:
