@@ -4,6 +4,19 @@
 > development state and expectations to the next agent.  Every directive
 > presumes you have absorbed `AGENTS.md` and the repository specs.
 
+### Vision in Brief
+
+The-Block is building a one-second Layer 1 that notarizes sub-second
+micro-shards. Economics use two tradeable tokens—Consumer and
+Industrial—plus non-transferable service credits. Governance assigns one
+badge per reliable node and uses shard districts for bicameral votes. The
+current kernel already covers dynamic difficulty, dual-token fee routing,
+purge loops with telemetry, basic gossip, and a JSON-RPC node. The tasks
+below extend this foundation toward persistent storage, secure networking,
+and full service-based governance.
+See `agents_vision.md` for the full narrative on how these pieces cohere into
+a civic-grade public good.
+
 ---
 
 ## Completed Roadmap Items (Recap)

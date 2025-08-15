@@ -7,9 +7,14 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(not(feature = "telemetry-json"))]
 use the_block::{
-    generate_keypair, sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ERR_DUPLICATE,
-    ERR_INSUFFICIENT_BALANCE, ERR_NONCE_GAP, ERR_OK,
+    generate_keypair, sign_tx, spawn_purge_loop_thread, telemetry, Blockchain, RawTxPayload,
+};
+#[cfg(feature = "telemetry-json")]
+use the_block::{
+    generate_keypair, sign_tx, spawn_purge_loop_thread, telemetry, Blockchain, RawTxPayload,
+    ERR_DUPLICATE, ERR_INSUFFICIENT_BALANCE, ERR_NONCE_GAP, ERR_OK,
 };
 
 #[cfg(feature = "telemetry-json")]
@@ -25,10 +30,7 @@ fn init() {
     });
 }
 
-#[test]
-fn logs_accept_and_reject() {
-    init();
-    let logger = Logger::start();
+fn scenario_accept_and_reject(logger: &mut Logger) {
     let (priv_a, _) = generate_keypair();
     let payload = RawTxPayload {
         from_: "a".into(),
@@ -48,7 +50,6 @@ fn logs_accept_and_reject() {
     assert!(bc.submit_transaction(tx.clone()).is_ok());
     assert!(bc.submit_transaction(tx.clone()).is_err());
 
-    // Nonce gap: submit nonce 3 skipping expected nonce 2
     let payload_gap = RawTxPayload {
         nonce: 3,
         ..payload.clone()
@@ -56,7 +57,6 @@ fn logs_accept_and_reject() {
     let tx_gap = sign_tx(priv_a.clone().to_vec(), payload_gap).unwrap();
     assert!(bc.submit_transaction(tx_gap).is_err());
 
-    // Insufficient balance: nonce 2 with too-high amount
     let payload_balance = RawTxPayload {
         nonce: 2,
         amount_consumer: 20_000,
@@ -113,12 +113,14 @@ fn logs_accept_and_reject() {
     }
 }
 
-#[test]
-fn logs_purge_loop_counters() {
-    init();
-    let logger = Logger::start();
+fn scenario_purge_loop_counters(logger: &mut Logger) {
     let dir = temp_dir("temp_purge_logs");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::TTL_DROP_TOTAL.reset();
+        telemetry::ORPHAN_SWEEP_TOTAL.reset();
+    }
     {
         let mut chain = bc.lock().unwrap();
         chain.add_account("a".into(), 10_000, 0).unwrap();
@@ -215,4 +217,12 @@ fn logs_purge_loop_counters() {
             .iter()
             .any(|r| r.args().contains("orphan_sweep_total=1")));
     }
+}
+
+#[test]
+fn logs_accept_and_reject_and_purge_loop_counters() {
+    init();
+    let mut logger = Logger::start();
+    scenario_accept_and_reject(&mut logger);
+    scenario_purge_loop_counters(&mut logger);
 }

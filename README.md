@@ -8,21 +8,23 @@
 ## Table of Contents
 
 1. [Why the‑block?](#why-the‑block)
-2. [Quick Start](#quick-start)
-3. [Installation & Bootstrap](#installation--bootstrap)
-4. [Build & Test Matrix](#build--test-matrix)
-5. [Using the Python Module](#using-the-python-module)
-6. [Architecture Primer](#architecture-primer)
-7. [Project Layout](#project-layout)
-8. [Status & Roadmap](#status--roadmap)
-9. [Contribution Guidelines](#contribution-guidelines)
-10. [Security Model](#security-model)
-11. [License](#license)
+2. [Vision & Current State](#vision--current-state)
+3. [Quick Start](#quick-start)
+4. [Installation & Bootstrap](#installation--bootstrap)
+5. [Build & Test Matrix](#build--test-matrix)
+6. [Using the Python Module](#using-the-python-module)
+7. [Architecture Primer](#architecture-primer)
+8. [Project Layout](#project-layout)
+9. [Status & Roadmap](#status--roadmap)
+10. [Contribution Guidelines](#contribution-guidelines)
+11. [Security Model](#security-model)
+12. [License](#license)
 
 ---
 
 ## Why the‑block?
 
+* **Civic‑grade architecture** – one‑second Layer 1 anchors notarized micro‑shards and ties votes to service via a non‑transferable credit meter.
 * **Dual‑Token Economics** – consumer & industrial coins emitted per block, supporting differentiated incentive layers.
 * **Ed25519 + BLAKE3** – modern cryptography with strict verification and domain separation.
 * **Rust first** – `#![forbid(unsafe_code)]`, MSRV 1.74, formally verifiable components.
@@ -31,6 +33,28 @@
 * **Deterministic state** – cross‑language tests guarantee every node serializes, signs, and hashes identically.
 * **Schema versioned DB** – the node refuses to open newer databases without explicit migration, preventing silent corruption.
 * **CI‑first** – GitHub Actions matrix across Linux, macOS, and Windows (WSL) ensures builds stay green.
+
+## Vision & Current State
+
+The‑block aims to be a civic‑grade network where **service guarantees
+citizenship**. A one‑second Layer 1 anchors notarized micro‑shards for
+sub‑second AI and data workloads. Economics flow through two tradeable
+tokens—**Consumer** and **Industrial**—while a non‑transferable service‑credit
+meter offsets writes for honest nodes. Governance ties one badge to one vote
+and groups nodes into shard districts for bicameral decisions.
+
+The current kernel already provides:
+
+- one‑second block cadence with dynamic difficulty,
+- dual‑token fee routing and decay‑based emission,
+- purge‑loop infrastructure with TTL/orphan telemetry,
+- a minimal TCP gossip layer and JSON‑RPC control surface, and
+- a Python demo showcasing fee selectors and nonce rules.
+
+Upcoming work adds durable storage, authenticated peer discovery,
+micro‑shard bundle roots, quantum‑ready crypto, and the full badge‑based
+governance stack. See [`agents_vision.md`](agents_vision.md) for the complete
+blueprint.
 ---
 
 ## Quick Start
