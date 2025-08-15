@@ -69,6 +69,23 @@ fn open_mine_reopen() {
 }
 
 #[test]
+fn reopen_from_snapshot() {
+    init();
+    let dir = temp_dir("snapshot_db");
+    let accounts_before;
+    {
+        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+        for _ in 0..1200 {
+            bc.mine_block("miner").unwrap();
+        }
+        accounts_before = bc.accounts.clone();
+        bc.path.clear();
+    }
+    let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    assert_eq!(bc2.accounts, accounts_before);
+}
+
+#[test]
 fn replay_after_crash_is_duplicate() {
     init();
     let (sk, _pk) = generate_keypair();
@@ -256,27 +273,6 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
         assert_eq!(0, telemetry::STARTUP_TTL_DROP_TOTAL.get());
         assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
     }
-}
-
-#[test]
-fn reopen_from_snapshot() {
-    init();
-    std::env::set_var("TB_SNAPSHOT_INTERVAL", "5");
-    let dir = temp_dir("snapshot_restore");
-    let pre_accounts;
-    {
-        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
-        bc.add_account("miner".into(), 0, 0).unwrap();
-        for _ in 0..5 {
-            bc.mine_block("miner").unwrap();
-        }
-        pre_accounts = bc.accounts.clone();
-        bc.persist_chain().unwrap();
-        bc.path.clear();
-    }
-    let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    std::env::remove_var("TB_SNAPSHOT_INTERVAL");
-    assert_eq!(bc2.accounts, pre_accounts);
 }
 
 #[test]

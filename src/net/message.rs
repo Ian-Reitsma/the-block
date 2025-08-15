@@ -28,9 +28,22 @@ impl Message {
     }
 }
 
+/// Initial handshake information exchanged on connection.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Handshake {
+    /// Opaque node identifier (usually the verifying key bytes).
+    pub node_id: [u8; 32],
+    /// Protocol version this node speaks.
+    pub protocol_version: u32,
+    /// Advertised optional features.
+    pub features: Vec<String>,
+}
+
 /// Network message payloads exchanged between peers.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {
+    /// Version/feature negotiation and identity exchange.
+    Handshake(Handshake),
     /// Advertise known peers.
     Hello(Vec<SocketAddr>),
     /// Broadcast a transaction to be relayed and mined.

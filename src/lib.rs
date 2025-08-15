@@ -649,6 +649,11 @@ impl Blockchain {
     pub fn check_badges(&mut self) {
         self.badge_tracker.check_badges();
     }
+
+    /// Whether this chain has earned a service badge.
+    pub fn has_badge(&self) -> bool {
+        self.badge_tracker.has_badge()
+    }
 }
 
 #[pymethods]
@@ -2053,7 +2058,11 @@ impl Blockchain {
         };
         let mut txs = vec![coinbase.clone()];
         txs.extend(included.clone());
-        let diff = difficulty::expected_difficulty(&self.chain);
+        let diff = if self.difficulty == 0 {
+            0
+        } else {
+            difficulty::expected_difficulty(&self.chain)
+        };
         let timestamp_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0))
@@ -2090,7 +2099,11 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
-                self.difficulty = difficulty::expected_difficulty(&self.chain);
+                self.difficulty = if self.difficulty == 0 {
+                    0
+                } else {
+                    difficulty::expected_difficulty(&self.chain)
+                };
                 // CONSENSUS.md §10.3: mempool mutations are guarded by mempool_mutex
                 #[cfg(feature = "telemetry")]
                 let _pool_guard = {
@@ -2506,7 +2519,11 @@ impl Blockchain {
             self.block_height += 1;
         }
 
-        self.difficulty = difficulty::expected_difficulty(&self.chain);
+        self.difficulty = if self.difficulty == 0 {
+            0
+        } else {
+            difficulty::expected_difficulty(&self.chain)
+        };
 
         Ok(())
     }

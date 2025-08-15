@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 use the_block::{
     generate_keypair,
-    net::{Message, Node, Payload},
+    net::{Handshake, Message, Node, Payload, PROTOCOL_VERSION},
     sign_tx, Block, Blockchain, RawTxPayload, TokenAmount,
 };
 
@@ -34,9 +34,10 @@ fn gossip_converges_to_longest_chain() {
     let _h2 = node2.start();
     let _h3 = node3.start();
 
-    node1.hello();
-    node2.hello();
-    node3.hello();
+    node1.discover_peers();
+    node2.discover_peers();
+    node3.discover_peers();
+    thread::sleep(Duration::from_millis(100));
 
     // genesis block from node1
     {
@@ -44,6 +45,7 @@ fn gossip_converges_to_longest_chain() {
         bc.mine_block("miner1").unwrap();
     }
     node1.broadcast_chain();
+    thread::sleep(Duration::from_millis(100));
 
     // broadcast a transaction from miner1 to miner2
     let (sk, _pk) = generate_keypair();
@@ -114,8 +116,8 @@ fn partition_rejoins_longest_chain() {
     let _h1 = node1.start();
     let _h2 = node2.start();
 
-    node1.hello();
-    node2.hello();
+    node1.discover_peers();
+    node2.discover_peers();
 
     {
         let mut bc = node1.blockchain();
@@ -135,7 +137,7 @@ fn partition_rejoins_longest_chain() {
         bc.mine_block("miner3").unwrap();
     }
     node3.broadcast_chain();
-    node3.hello();
+    node3.discover_peers();
 
     thread::sleep(Duration::from_millis(200));
 
@@ -154,7 +156,12 @@ fn invalid_gossip_tx_rejected() {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
-    send(addr, &kp, Payload::Hello(vec![]));
+    let hs = Handshake {
+        node_id: kp.verifying_key().to_bytes(),
+        protocol_version: PROTOCOL_VERSION,
+        features: Vec::new(),
+    };
+    send(addr, &kp, Payload::Handshake(hs));
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "unknown".into(),
@@ -184,7 +191,12 @@ fn invalid_gossip_block_rejected() {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
-    send(addr, &kp, Payload::Hello(vec![]));
+    let hs = Handshake {
+        node_id: kp.verifying_key().to_bytes(),
+        protocol_version: PROTOCOL_VERSION,
+        features: Vec::new(),
+    };
+    send(addr, &kp, Payload::Handshake(hs));
 
     let block = Block {
         index: 99,
@@ -213,7 +225,7 @@ fn forged_identity_rejected() {
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
 
-    // Forge a block with an unauthorized key and no hello handshake
+    // Forge a block with an unauthorized key and no handshake
     let mut rng = OsRng;
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
@@ -235,4 +247,40 @@ fn forged_identity_rejected() {
 
     thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().chain.is_empty());
+}
+
+/// Peers advertising an unsupported protocol version are ignored.
+#[test]
+fn handshake_version_mismatch_rejected() {
+    let addr: SocketAddr = "127.0.0.1:7302".parse().unwrap();
+    let node = Node::new(addr, vec![], Blockchain::default());
+    let _h = node.start();
+
+    let mut rng = OsRng;
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    let kp = SigningKey::from_bytes(&seed);
+    let bad = Handshake {
+        node_id: kp.verifying_key().to_bytes(),
+        protocol_version: PROTOCOL_VERSION + 1,
+        features: Vec::new(),
+    };
+    send(addr, &kp, Payload::Handshake(bad));
+
+    let (sk, _pk) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "x".into(),
+        to: "y".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    send(addr, &kp, Payload::Tx(tx));
+
+    thread::sleep(Duration::from_millis(100));
+    assert!(node.blockchain().mempool.is_empty());
 }
