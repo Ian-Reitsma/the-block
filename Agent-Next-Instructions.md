@@ -342,23 +342,29 @@ testnet burn-in & audits (+5), ecosystem tooling (+5).
 1. Reread `AGENTS.md` in full and set up the environment with `bootstrap.sh`.
 2. Confirm no `AGENT_NOTES.md` file exists; if one appears, read it.
 3. Select a single immediate priority and implement it end‑to‑end with tests.
-4. Run `cargo fmt`, `cargo clippy --all-targets --all-features`,
+4. Run `cargo fmt`, `black --check .`, `cargo clippy --all-targets --all-features`,
    `cargo test --all`, and `python scripts/check_anchors.py --md-anchors`
-   before committing.
+   before committing. If `black --check` flags `scripts/check_anchors.py` or
+   `tests/test_tx_error_codes.py`, format them with `black scripts/check_anchors.py
+   tests/test_tx_error_codes.py`, commit the result, and rerun `black --check .`
+   to confirm a clean tree.
 5. Update docs and specs alongside code.  Every new invariant needs a proof or
    reference in `Agents-Sup.md` or the appropriate spec.
 6. Open a PR referencing this file in the summary, detailing tests and docs.
 7. Include file and command citations in the PR per `AGENTS.md` §9.
 8. When running `demo.py` (e.g., the `demo_runs_clean` test), set
-   `TB_PURGE_LOOP_SECS` to a positive integer such as `1` so the purge
-   loop context manager can spawn, force `PYTHONUNBUFFERED=1` for
-   real-time logs, and leave `TB_DEMO_MANUAL_PURGE` unset or empty to
-   use the context manager; set `TB_DEMO_MANUAL_PURGE=1` to exercise the
-   manual shutdown‑flag/handle example instead. The script will invoke
-   `maturin develop` automatically if the `the_block` module is missing.
+    `TB_PURGE_LOOP_SECS` to a positive integer such as `1` so the purge
+    loop context manager can spawn, force `PYTHONUNBUFFERED=1` for
+    real-time logs, and leave `TB_DEMO_MANUAL_PURGE` unset or empty to
+    use the context manager; set `TB_DEMO_MANUAL_PURGE=1` to exercise the
+    manual shutdown‑flag/handle example instead. The script will invoke
+    `maturin develop` automatically if the `the_block` module is missing.
+    If `cargo test` hangs on `demo_runs_clean`, run
+    `cargo test demo_runs_clean -- --nocapture` once to build the Python
+    wheel before rerunning the full suite.
 9. For long-running tests (e.g., `reopen_from_snapshot`), set `TB_SNAPSHOT_INTERVAL`
-   and lower block counts locally to iterate quickly, then restore canonical
-   values before committing.
+    and lower block counts locally to iterate quickly, then restore canonical
+    values before committing.
 
 Stay relentless.  Mediocrity is a bug.
 

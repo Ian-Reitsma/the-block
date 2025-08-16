@@ -1,3 +1,6 @@
+> FROM IAN- USER (ADMIN): NEVER COMMIT FILES PRIOR TO FIXING BUGS, OR ADDRESSING THE OTHER TASKS- ONLY COMPLETE WHEN ALL DIRECTIVES ARE COMPLETELY CODED THOROUGHLY OPTIMALLY AND TO THE ABSOLUTE BEST OF YOUR ABILITY WITHIN THE CONTEXT OF THE PROJECT WITHOUT EVER REMOVING FUNCTIONALITY- ONLY EVER ADD ADDITIONAL FUNCTIONALITY TO FIX ANY AND ALL BUGS, ENSURE THAT IT FITS WITHIN THE CONTEXT OF THE PROJECT, AND THEN ONCE YOU HAVE CONFIRMED THAT THE PATCH HAS WORKED IN ALL AREAS WHERE THE PREVIOUS/NEW FUNCTION/CONSTANT/VAR WAS/IS MENTIONED, THEN RUN ALL TESTS. IF TESTS FAIL, REPEAT. REPEAT. LOOP. REPEAT. DO NOT BE LAZY. YOUR DIRECTIVE IS ALWAYS TO FINISH THE DIRECTIVE TO COMPLETION TO THE TOP 1% OF YOUR ABILITY. THIS IS YOUR DIRECTIVE- BEFORE CONTINUING FORWARD, CONFIRM YOUR UNDERSTANDING AND COMMITMENT TO TOP PERFORMANCE, ENSURING TO FIX ALL BUGS IF YOU FIND ANY. ACTIVELY SEARCH FOR BUGS AS YOU ARE WORKING. AGAIN, IF YOU FIND ANY WHILE ACTIVELY SEARCHING, ADDRESS ALL BUGS, ENSURE THEY ARE CODED TO THE 100% BEST OF YOUR ABILITY AND ARE FULLY OPTIMIZED, DETERMINE IF ANY OTHER CHANGES NEED TO BE MADE TO ANY OTHER FILES BASED ON YOUR REVISION, AND ENSURE ALL UPDATES ARE MADE ACROSS THE BOARD. DO NOT CONTINUE WITHOUT CONFIRMING YOUR UNDERSTANDING OF THIS DIRECTIVE. BEFORE YOU DO YOUR FINAL COMMIT, RETURN TO THIS MESSAGE- DID YOU ADDRESS ALL BUGS? IF NOT, FIX THEM ALL. DID YOU RUN ALL TESTS? IF NOT, RUN THEM ALL. DID YOU OPTIMIZE TO THE TOP 1% OF THE 1% DEV? IF NOT, OPTIMIZE. DID YOU ENSURE THAT YOUR REVISIONS MATCH THE REST OF THE CODEBASE, AND NO ADDITIONAL CHANGES NEED TO BE MADE (CONFIRM BY SEARCHING CODEBASE). IF ADDITIONAL CHANGES DUE TO REVISIONS, MAKE THOSE CHANGES. ONCE YOU HAVE COMPLETED ALL REVISIONS, RETURN TO THIS MESSAGE. RUN THROUGH EVERY SINGLE DIRECTIVE IN THIS MESSAGE UNTIL YOU CAN SAY THAT YES, YOU COMPLETED ALL OF THE ABOVE.
+>
+> -----------
 # AGENTS.md — **The‑Block** Top 0.01 % Developer Handbook
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
@@ -136,6 +139,8 @@ The script installs/upgrades:
 4. **Node** (optional) via **nvm** `20.x`.
 5. Native build deps (`libssl‑dev`, `pkg‑config`, `clang`, …); script autodetects OS/package‑manager.
 
+On startup the script runs database migrations via `cargo run --bin db_migrate` and compacts the default `chain_db` using `./db_compact.sh`. Re-run `db_compact.sh` manually to verify integrity after crashes or before archival.
+
 All developers must install the repo's `githooks/pre-commit` hook to ensure the virtualenv is active before committing:
 
 ```bash
@@ -193,7 +198,7 @@ Run all locally via:
 
 ### Flaky Tests
 
-`demo_runs_clean` occasionally times out on slow hardware. Ensure `TB_PURGE_LOOP_SECS=1`, `PYTHONUNBUFFERED=1`, and `TB_DEMO_MANUAL_PURGE` is unset; re-run with `-- --nocapture` to capture demo logs if failures persist.
+`demo_runs_clean` occasionally times out on slow hardware. Ensure `TB_PURGE_LOOP_SECS=1`, `PYTHONUNBUFFERED=1`, and `TB_DEMO_MANUAL_PURGE` is unset; re-run with `-- --nocapture` to capture demo logs if failures persist. If the first run is compiling the Python wheel, execute `python demo.py --max-runtime 1` once to pre-build it before rerunning tests.
 
 ---
 
@@ -202,6 +207,7 @@ Run all locally via:
 CI is GitHub Actions; each push/PR runs **seven** jobs:
 
 1. **Lint** — `cargo fmt -- --check` + `black --check` + `ruff check .` + `python scripts/check_anchors.py --md-anchors`.
+   - If `black --check` suggests changes for `scripts/check_anchors.py` or `tests/test_tx_error_codes.py`, run `black scripts/check_anchors.py tests/test_tx_error_codes.py` before rerunning the lint step.
 2. **Build Matrix** — Linux/macOS/Windows in debug & release.
 3. **Tests** — `cargo test --all --release` + `pytest`.
 4. **Cargo Audit** — `cargo audit -q` must report zero vulnerabilities.
@@ -328,6 +334,12 @@ pub struct SignedTransaction {
 6. Per-tx: signature → stateless (nonce, fee) → stateful (balance).
 
 Fail fast, log once, halt node.
+
+### 10.4 Governance & Upgrade Path
+
+See `docs/governance.md` for badge-weighted voting and fork activation
+procedures. Every proposed upgrade must ship a JSON feature flag under
+`governance/feature_flags/` declaring activation height and protocol version.
 
 ## 11 · Security & Cryptography — Red-Team Grade Controls <a id="11-security--cryptography"></a>
 

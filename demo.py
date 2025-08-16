@@ -7,11 +7,24 @@ from __future__ import annotations
 import importlib
 import os
 import pathlib
+import atexit
 import random
 import shutil
 import subprocess
 import sys
 import time
+import argparse
+
+
+if os.getenv("TB_SAVE_LOGS") == "1":
+    log_dir = pathlib.Path("demo_logs")
+    log_dir.mkdir(exist_ok=True)
+    _out = open(log_dir / "stdout.log", "w")
+    _err = open(log_dir / "stderr.log", "w")
+    atexit.register(_out.close)
+    atexit.register(_err.close)
+    sys.stdout = _out
+    sys.stderr = _err
 
 
 def _ensure_build_tools() -> None:
@@ -451,6 +464,10 @@ def demo_steps(bc: the_block.Blockchain) -> None:
 
 def main() -> None:
     """Run the full demo sequentially."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-runtime", type=int, default=15)
+    args = parser.parse_args()
+    start = time.time()
     init_environment()
     bc = init_chain()
     if os.getenv("TB_DEMO_MANUAL_PURGE"):
@@ -471,6 +488,9 @@ def main() -> None:
             demo_steps(bc)
     cleanup()
     explain("Demo complete")
+    if time.time() - start > args.max_runtime:
+        explain("Max runtime exceeded")
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

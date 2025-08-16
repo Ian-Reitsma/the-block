@@ -1,11 +1,12 @@
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
+use serial_test::serial;
+use std::fs;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
 use tempfile::tempdir;
-use serial_test::serial;
 use the_block::{
     generate_keypair,
     net::{Handshake, Message, Node, Payload, PROTOCOL_VERSION},
@@ -316,4 +317,22 @@ fn handshake_version_mismatch_rejected() {
 
     thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().mempool.is_empty());
+}
+
+/// Nodes can load seed peers from a config file.
+#[test]
+#[serial]
+fn discover_peers_from_file_loads_seeds() {
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr1 = free_addr();
+    let addr2 = free_addr();
+    let node1 = Node::new(addr1, vec![], Blockchain::default());
+    let node2 = Node::new(addr2, vec![], Blockchain::default());
+    let _h2 = node2.start();
+    let cfg = dir.path().join("seeds.txt");
+    fs::write(&cfg, format!("{}\n", addr2)).unwrap();
+    node1.discover_peers_from_file(&cfg);
+    thread::sleep(Duration::from_millis(100));
+    assert!(node1.peer_addrs().contains(&addr2));
 }

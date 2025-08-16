@@ -13,6 +13,9 @@ fn init() {
 fn metrics_http_exporter_serves_prometheus_text() {
     init();
     telemetry::MEMPOOL_SIZE.set(42);
+    telemetry::RECORDER.tx_submitted();
+    telemetry::RECORDER.tx_rejected("bad_sig");
+    telemetry::RECORDER.block_mined();
     let addr = serve_metrics("127.0.0.1:0").expect("start server");
     let mut stream = TcpStream::connect(addr).expect("connect metrics");
     stream
@@ -20,6 +23,10 @@ fn metrics_http_exporter_serves_prometheus_text() {
         .unwrap();
     let mut buf = String::new();
     stream.read_to_string(&mut buf).unwrap();
+    assert!(buf.contains("Content-Type: text/plain"));
     assert!(buf.contains("mempool_size"));
     assert!(buf.contains("42"));
+    assert!(buf.contains("tx_submitted_total 1"));
+    assert!(buf.contains("tx_rejected_total{reason=\"bad_sig\"} 1"));
+    assert!(buf.contains("block_mined_total 1"));
 }

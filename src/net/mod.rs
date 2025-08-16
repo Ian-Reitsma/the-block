@@ -5,9 +5,9 @@ use crate::{Blockchain, SignedTransaction};
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
 use std::fs;
-use std::path::PathBuf;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -89,6 +89,23 @@ impl Node {
         for p in self.peers.list() {
             let _ = send_msg(p, &hello_msg);
         }
+    }
+
+    /// Snapshot known peer addresses.
+    pub fn peer_addrs(&self) -> Vec<SocketAddr> {
+        self.peers.list()
+    }
+
+    /// Load seed peer addresses from `config` and perform discovery.
+    pub fn discover_peers_from_file<P: AsRef<std::path::Path>>(&self, config: P) {
+        if let Ok(data) = fs::read_to_string(config) {
+            for line in data.lines() {
+                if let Ok(addr) = line.trim().parse::<SocketAddr>() {
+                    self.peers.add(addr);
+                }
+            }
+        }
+        self.discover_peers();
     }
 
     /// Access the underlying blockchain.

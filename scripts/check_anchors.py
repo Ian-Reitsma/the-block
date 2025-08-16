@@ -136,7 +136,9 @@ def main() -> int:
     md_files = [
         md
         for md in ROOT.rglob("*.md")
-        if not any(part in {"target", ".git", "advisory-db", ".venv"} for part in md.parts)
+        if not any(
+            part in {"target", ".git", "advisory-db", ".venv"} for part in md.parts
+        )
     ]
     errors: list[str] = []
     with concurrent.futures.ThreadPoolExecutor() as ex:
