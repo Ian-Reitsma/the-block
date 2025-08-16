@@ -168,10 +168,10 @@ ls "$PYTHONHOME"/lib | grep libpython
 ## Node CLI and JSON-RPC
 
 Compile and run a local node with optional metrics export and background TTL
-purges:
+purges. Enable the `telemetry` feature to expose Prometheus metrics:
 
 ```bash
-cargo run --bin node -- run --rpc-addr 127.0.0.1:3030 \
+cargo run --features telemetry --bin node -- run --rpc-addr 127.0.0.1:3030 \
     --mempool-purge-interval 5 --metrics-addr 127.0.0.1:9100
 ```
 
