@@ -259,7 +259,11 @@ fi
 
 # Python/Node deps (all pip/poetry only if not broken)
 if (( BROKEN_PYTHON == 0 )); then
-  [[ -s requirements.txt ]] && run_step "pip install requirements" pip install -r requirements.txt
+  if [[ -s requirements.txt ]]; then
+    if ! run_step "pip install requirements" pip install -r requirements.txt; then
+      cecho yellow "   → continuing without optional Python deps"
+    fi
+  fi
   if [[ -f pyproject.toml ]] && command -v poetry &>/dev/null; then
     run_step "poetry install" poetry install
   fi
