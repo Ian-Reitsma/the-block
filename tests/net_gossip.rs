@@ -79,6 +79,7 @@ fn gossip_converges_to_longest_chain() {
     // node2 extends its fork to become the longest chain
     {
         let mut bc = node2.blockchain();
+        thread::sleep(Duration::from_millis(1));
         bc.mine_block("miner2").unwrap();
     }
     node2.broadcast_chain();
@@ -122,6 +123,7 @@ fn partition_rejoins_longest_chain() {
     {
         let mut bc = node1.blockchain();
         bc.mine_block("miner1").unwrap();
+        thread::sleep(Duration::from_millis(1));
         bc.mine_block("miner1").unwrap();
     }
     node1.broadcast_chain();
@@ -133,7 +135,9 @@ fn partition_rejoins_longest_chain() {
     {
         let mut bc = node3.blockchain();
         bc.mine_block("miner3").unwrap();
+        thread::sleep(Duration::from_millis(1));
         bc.mine_block("miner3").unwrap();
+        thread::sleep(Duration::from_millis(1));
         bc.mine_block("miner3").unwrap();
     }
     node3.broadcast_chain();

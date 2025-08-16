@@ -152,7 +152,8 @@ to the binary's `rpath` so `cargo run` can find `libpython` at runtime:
 export PYO3_PYTHON=$(python3 -c 'import sys; print(sys.executable)')
 export PYTHONHOME=$(python3 -c 'import sys, pathlib; print(pathlib.Path(sys.executable).resolve().parents[1])')
 cargo build
-cargo run --bin node -- --help
+cargo run --bin node -- --help            # list subcommands
+cargo run --bin node -- run --help        # run-specific options
 ```
 
 Verify that the expected dynamic library exists in the selected Python
@@ -170,7 +171,7 @@ Compile and run a local node with optional metrics export and background TTL
 purges:
 
 ```bash
-cargo run --bin node -- --rpc-addr 127.0.0.1:3030 \
+cargo run --bin node -- run --rpc-addr 127.0.0.1:3030 \
     --mempool-purge-interval 5 --metrics-addr 127.0.0.1:9100
 ```
 
@@ -207,7 +208,7 @@ curl -s -X POST 127.0.0.1:3030 \
 
 ```bash
 # 1. Start a node in one terminal
-cargo run --bin node -- --rpc-addr 127.0.0.1:3030 --mempool-purge-interval 5
+cargo run --bin node -- run --rpc-addr 127.0.0.1:3030 --mempool-purge-interval 5
 
 # 2. Generate a key and capture its address
 cargo run --bin node -- generate-key alice
@@ -236,7 +237,7 @@ curl -s -X POST 127.0.0.1:3030 \
 Environment variables influence node behaviour during these sessions:
 
 ```
-TB_PURGE_LOOP_SECS=1      # interval for background TTL sweeps
+TB_PURGE_LOOP_SECS=1      # (optional) purge loop interval; demo.py defaults to 1
 PYTHONUNBUFFERED=1        # unbuffered output for Python demos/tests
 TB_DEMO_MANUAL_PURGE=1    # require manual purge-loop shutdown
 ```
