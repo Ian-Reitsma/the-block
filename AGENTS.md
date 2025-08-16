@@ -148,7 +148,7 @@ ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 - `PYTHONUNBUFFERED` — set to `1` for deterministic Python logs in demos and tests.
 - `TB_DEMO_MANUAL_PURGE` — set to `1` to require an explicit purge-loop shutdown in `demo.py`.
 
-> **Tip:** After any `.rs` or `Cargo.toml` change, run `maturin develop --release --features telemetry` to rebuild and re‑install the Python module in‑place.
+ > **Tip:** After any `.rs` or `Cargo.toml` change, run `maturin develop --release --features telemetry` to rebuild and re‑install the Python module in‑place. The `pytest` harness will call `maturin develop` automatically if `the_block` is missing, but running it yourself keeps the extension fresh during development.
 
 ---
 
@@ -180,9 +180,10 @@ ln -sf ../../githooks/pre-commit .git/hooks/pre-commit
 3. **Cross‑Language Determinism** — Python ↔ Rust serialization byte‑for‑byte equality for 100 random payloads (`tests/test_determinism.py`).
 4. **Fuzzing** (`cargo fuzz run verify_sig`) — signature verification stability, 10 k iterations on CI.
 5. **Benchmarks** (Criterion) — `verify_signature` must stay < 50 µs median on Apple M2.
-6. **Demo Integration** — `cargo test --release demo_runs_clean` runs `demo.py`; it defaults `TB_PURGE_LOOP_SECS=1` when unset, forces `PYTHONUNBUFFERED=1`, and leaves `TB_DEMO_MANUAL_PURGE` empty; logs are captured on failure. The demo auto-installs `the_block` with `maturin` if the module is missing.
+6. **Pytest Auto-Build** — `tests/conftest.py` runs `maturin develop` if `import the_block` fails, so Python tests can run without manual setup.
+7. **Demo Integration** — `cargo test --release demo_runs_clean` runs `demo.py`; it defaults `TB_PURGE_LOOP_SECS=1` when unset, forces `PYTHONUNBUFFERED=1`, and leaves `TB_DEMO_MANUAL_PURGE` empty; logs are captured on failure. The demo auto-installs `the_block` with `maturin` if the module is missing.
 
-7. **Lock-Poison Helper** — use `poison_mempool(bc)` to simulate a poisoned mutex and exercise `ERR_LOCK_POISON` and `lock_poison_total` paths.
+8. **Lock-Poison Helper** — use `poison_mempool(bc)` to simulate a poisoned mutex and exercise `ERR_LOCK_POISON` and `lock_poison_total` paths.
 
 Run all locally via:
 

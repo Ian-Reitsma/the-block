@@ -3,6 +3,12 @@ use std::{env, fs, path::Path};
 
 fn main() {
     println!("cargo:rerun-if-changed=src/constants.rs");
+    println!("cargo:rerun-if-env-changed=PYTHONHOME");
+    if cfg!(target_os = "macos") {
+        if let Ok(py_home) = env::var("PYTHONHOME") {
+            println!("cargo:rustc-link-arg=-Wl,-rpath,{}/lib", py_home);
+        }
+    }
     if !include_str!("src/constants.rs").is_ascii() {
         println!(
             "::error file=src/constants.rs,line=1,col=1::Non-ASCII detected in consensus file"
