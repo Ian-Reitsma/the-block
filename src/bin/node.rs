@@ -90,9 +90,9 @@ enum Commands {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    match cli.command {
+    let code = match cli.command {
         Commands::Run {
             rpc_addr,
             mempool_purge_interval,
@@ -108,7 +108,7 @@ async fn main() {
             #[cfg(not(feature = "telemetry"))]
             if metrics_addr.is_some() {
                 eprintln!("telemetry feature not enabled");
-                std::process::exit(1);
+                return std::process::ExitCode::FAILURE;
             }
 
             if mempool_purge_interval > 0 {
@@ -127,6 +127,7 @@ async fn main() {
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
             let _ = handle.await;
+            std::process::ExitCode::SUCCESS
         }
         Commands::GenerateKey { key_id } => {
             let (sk_bytes, _pk) = generate_keypair();
@@ -134,9 +135,17 @@ async fn main() {
             fs::create_dir_all(key_dir()).expect("key dir");
             write_pem(&key_path(&key_id), &sk).expect("write key");
             println!("{}", hex::encode(sk.verifying_key().to_bytes()));
+            std::process::ExitCode::SUCCESS
         }
         Commands::ImportKey { file } => {
-            let data = fs::read_to_string(&file).expect("read key file");
+            let data = match fs::read_to_string(&file) {
+                Ok(d) => d,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("key file not found: {file}");
+                    return std::process::ExitCode::FAILURE;
+                }
+                Err(e) => panic!("read key file: {e}"),
+            };
             let sk = read_pem(&data).expect("parse key");
             fs::create_dir_all(key_dir()).expect("key dir");
             let key_id = Path::new(&file)
@@ -145,10 +154,12 @@ async fn main() {
                 .unwrap_or("imported");
             fs::write(key_path(key_id), data).expect("write key");
             println!("{}", hex::encode(sk.verifying_key().to_bytes()));
+            std::process::ExitCode::SUCCESS
         }
         Commands::ShowAddress { key_id } => {
             let sk = load_key(&key_id);
             println!("{}", hex::encode(sk.verifying_key().to_bytes()));
+            std::process::ExitCode::SUCCESS
         }
         Commands::SignTx { key_id, tx_json } => {
             let sk = load_key(&key_id);
@@ -156,6 +167,8 @@ async fn main() {
             let signed = sign_tx(sk.to_bytes().to_vec(), payload).expect("sign tx");
             let bytes = bincode::serialize(&signed).expect("serialize tx");
             println!("{}", hex::encode(bytes));
+            std::process::ExitCode::SUCCESS
         }
-    }
+    };
+    code
 }

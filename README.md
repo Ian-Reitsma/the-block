@@ -183,7 +183,8 @@ Gossip nodes persist a signing key at `$HOME/.the_block/net_key`; override with
 ### Wallet key management
 
 The `node` binary doubles as a simple wallet storing keys under
-`~/.the_block/keys`:
+`~/.the_block/keys`. The `import-key` command reads a PEM file from the
+provided path:
 
 ```bash
 # Generate a keypair saved as ~/.the_block/keys/alice.pem
@@ -199,6 +200,10 @@ cargo run --bin node -- sign-tx alice '{"from_":"<hex>","to":"bob","amount_consu
 # Import an existing PEM file and show its address
 cargo run --bin node -- import-key path/to/key.pem
 cargo run --bin node -- show-address key
+
+# The import command expects a valid path; a missing file yields a clear error
+cargo run --bin node -- import-key nonexistent.pem
+key file not found: nonexistent.pem
 ```
 Use the address to query balances or submit transactions over JSON-RPC:
 
@@ -304,6 +309,15 @@ Exercise the moving-average difficulty algorithm:
 
 ```bash
 cargo test --test difficulty -- --nocapture
+```
+
+Sample output:
+
+```
+running 3 tests
+test retargets_up_when_blocks_fast ... ok
+test retargets_down_when_blocks_slow ... ok
+test retarget_adjusts ... ok
 ```
 
 ### Networking gossip demo

@@ -40,3 +40,21 @@ fn retargets_down_when_blocks_slow() {
     let next = expected_difficulty(&chain);
     assert_eq!(next, 500);
 }
+
+#[test]
+fn retarget_adjusts() {
+    let mut chain = Vec::new();
+    let mut ts = 1u64;
+    for i in 0..120 {
+        chain.push(blank_block(i, ts, 1000));
+        ts += 500;
+    }
+    let up = expected_difficulty(&chain);
+    assert_eq!(up, 2000);
+    for i in 120..240 {
+        chain.push(blank_block(i, ts, up));
+        ts += 2_000;
+    }
+    let down = expected_difficulty(&chain);
+    assert_eq!(down, 1000);
+}

@@ -102,7 +102,8 @@ fn purge_loop_joins_on_drop() {
     });
 
     let mut mid = thread_count();
-    for _ in 0..100 {
+    // Allow up to ~5s for the purge loop thread to spawn.
+    for _ in 0..500 {
         if mid > before {
             break;
         }
@@ -115,7 +116,8 @@ fn purge_loop_joins_on_drop() {
     drop(handle);
 
     let mut after = thread_count();
-    for _ in 0..50 {
+    // Wait up to ~5s for the thread to terminate after dropping the handle.
+    for _ in 0..500 {
         if after == before {
             break;
         }

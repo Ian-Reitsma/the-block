@@ -64,6 +64,7 @@ pub mod fee;
 pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
+pub mod storage;
 
 // === Transaction admission errors ===
 
@@ -88,6 +89,8 @@ pub enum TxAdmissionError {
     BalanceOverflow = ERR_BALANCE_OVERFLOW,
     #[error("fee overflow")]
     FeeOverflow = ERR_FEE_OVERFLOW,
+    #[error("fee too large")]
+    FeeTooLarge = ERR_FEE_TOO_LARGE,
     #[error("fee below minimum")]
     FeeTooLow = ERR_FEE_TOO_LOW,
     #[error("mempool full")]
@@ -112,6 +115,7 @@ create_exception!(the_block, ErrNonceGap, PyException);
 create_exception!(the_block, ErrBadSignature, PyException);
 create_exception!(the_block, ErrDuplicateTx, PyException);
 create_exception!(the_block, ErrTxNotFound, PyException);
+create_exception!(the_block, ErrFeeTooLarge, PyException);
 create_exception!(the_block, ErrFeeTooLow, PyException);
 create_exception!(the_block, ErrMempoolFull, PyException);
 create_exception!(the_block, ErrLockPoisoned, PyException);
@@ -146,6 +150,7 @@ impl From<TxAdmissionError> for PyErr {
                     (py.get_type::<PyValueError>(), "balance overflow")
                 }
                 TxAdmissionError::FeeOverflow => (py.get_type::<ErrFeeOverflow>(), "fee overflow"),
+                TxAdmissionError::FeeTooLarge => (py.get_type::<ErrFeeTooLarge>(), "fee too large"),
                 TxAdmissionError::FeeTooLow => (py.get_type::<ErrFeeTooLow>(), "fee below minimum"),
                 TxAdmissionError::MempoolFull => (py.get_type::<ErrMempoolFull>(), "mempool full"),
                 TxAdmissionError::LockPoisoned => {
@@ -1386,6 +1391,11 @@ impl Blockchain {
             }
             return Err(TxAdmissionError::InvalidSelector);
         }
+        if tx.payload.fee >= (1u64 << 63) {
+            #[cfg(feature = "telemetry")]
+            self.record_reject("fee_too_large");
+            return Err(TxAdmissionError::FeeTooLarge);
+        }
         let (fee_consumer, fee_industrial) =
             match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
                 Ok(v) => v,
@@ -1956,11 +1966,7 @@ impl Blockchain {
     }
 
     #[cfg(any(test, debug_assertions))]
-    pub fn mine_block_at(
-        &mut self,
-        miner_addr: &str,
-        timestamp_millis: u64,
-    ) -> PyResult<Block> {
+    pub fn mine_block_at(&mut self, miner_addr: &str, timestamp_millis: u64) -> PyResult<Block> {
         self.mine_block_with_ts(miner_addr, timestamp_millis)
     }
 
@@ -1970,11 +1976,7 @@ impl Blockchain {
     /// Returns a [`PyValueError`] if fee or nonce calculations overflow or if
     /// persisting the chain fails.
     #[allow(clippy::too_many_lines)]
-    fn mine_block_with_ts(
-        &mut self,
-        miner_addr: &str,
-        timestamp_millis: u64,
-    ) -> PyResult<Block> {
+    fn mine_block_with_ts(&mut self, miner_addr: &str, timestamp_millis: u64) -> PyResult<Block> {
         let index = self.chain.len() as u64;
         let prev_hash = if index == 0 {
             "0".repeat(64)
@@ -3222,6 +3224,7 @@ pub const ERR_FEE_TOO_LOW: u16 = 10;
 pub const ERR_MEMPOOL_FULL: u16 = 11;
 pub const ERR_LOCK_POISONED: u16 = 12;
 pub const ERR_PENDING_LIMIT: u16 = 13;
+pub const ERR_FEE_TOO_LARGE: u16 = 14;
 
 /// Return the integer network identifier used in domain separation.
 #[must_use]
@@ -3271,6 +3274,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrBadSignature", ErrBadSignature::type_object(m.py()))?;
     m.add("ErrDuplicateTx", ErrDuplicateTx::type_object(m.py()))?;
     m.add("ErrTxNotFound", ErrTxNotFound::type_object(m.py()))?;
+    m.add("ErrFeeTooLarge", ErrFeeTooLarge::type_object(m.py()))?;
     m.add("ErrFeeTooLow", ErrFeeTooLow::type_object(m.py()))?;
     m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
     m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
@@ -3285,6 +3289,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ERR_NOT_FOUND", ERR_NOT_FOUND)?;
     m.add("ERR_BALANCE_OVERFLOW", ERR_BALANCE_OVERFLOW)?;
     m.add("ERR_FEE_OVERFLOW", ERR_FEE_OVERFLOW)?;
+    m.add("ERR_FEE_TOO_LARGE", ERR_FEE_TOO_LARGE)?;
     m.add("ERR_FEE_TOO_LOW", ERR_FEE_TOO_LOW)?;
     m.add("ERR_MEMPOOL_FULL", ERR_MEMPOOL_FULL)?;
     m.add("ERR_LOCK_POISONED", ERR_LOCK_POISONED)?;

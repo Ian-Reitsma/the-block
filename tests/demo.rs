@@ -1,69 +1,50 @@
-use std::{
-    io::Read,
-    process::{Command, Stdio},
-    time::Duration,
-};
+use std::{fs, process::Command, time::Duration};
 
 use wait_timeout::ChildExt;
 
 #[test]
 fn demo_runs_clean() {
-    let out = tempfile::NamedTempFile::new().expect("stdout tmp");
-    let err = tempfile::NamedTempFile::new().expect("stderr tmp");
-    let out_path = out.path().to_owned();
-    let err_path = err.path().to_owned();
+    Command::new(".venv/bin/maturin")
+        .args([
+            "develop",
+            "--release",
+            "-F",
+            "pyo3/extension-module",
+            "-F",
+            "telemetry",
+        ])
+        .status()
+        .expect("build python extension");
     let mut child = Command::new(".venv/bin/python")
         .arg("demo.py")
+        .arg("--max-runtime")
+        .arg("15")
         .env("TB_PURGE_LOOP_SECS", "1")
+        .env("TB_SAVE_LOGS", "1")
         .env_remove("TB_DEMO_MANUAL_PURGE")
         .env("PYTHONUNBUFFERED", "1")
-        .stdout(Stdio::from(out.reopen().expect("stdout handle")))
-        .stderr(Stdio::from(err.reopen().expect("stderr handle")))
         .spawn()
         .expect("spawn demo");
     match child
-        .wait_timeout(Duration::from_secs(20))
+        // Allow extra time on first run so the demo binary can build.
+        .wait_timeout(Duration::from_secs(120))
         .expect("wait demo")
     {
         Some(status) if status.success() => {}
         Some(_) => {
-            let mut out_log = String::new();
-            let mut err_log = String::new();
-            std::fs::File::open(&out_path)
-                .and_then(|mut f| f.read_to_string(&mut out_log))
-                .ok();
-            std::fs::File::open(&err_path)
-                .and_then(|mut f| f.read_to_string(&mut err_log))
-                .ok();
+            let out_log = fs::read_to_string("demo_logs/stdout.log").unwrap_or_default();
+            let err_log = fs::read_to_string("demo_logs/stderr.log").unwrap_or_default();
             eprintln!("stdout:\n{out_log}");
             eprintln!("stderr:\n{err_log}");
-            out.keep().expect("persist stdout");
-            err.keep().expect("persist stderr");
-            panic!(
-                "demo failed; stdout: {}, stderr: {}",
-                out_path.display(),
-                err_path.display()
-            );
+            panic!("demo failed; logs persisted in demo_logs/");
         }
         None => {
             let _ = child.kill();
-            let mut out_log = String::new();
-            let mut err_log = String::new();
-            std::fs::File::open(&out_path)
-                .and_then(|mut f| f.read_to_string(&mut out_log))
-                .ok();
-            std::fs::File::open(&err_path)
-                .and_then(|mut f| f.read_to_string(&mut err_log))
-                .ok();
+            let out_log = fs::read_to_string("demo_logs/stdout.log").unwrap_or_default();
+            let err_log = fs::read_to_string("demo_logs/stderr.log").unwrap_or_default();
             eprintln!("stdout:\n{out_log}");
             eprintln!("stderr:\n{err_log}");
-            out.keep().expect("persist stdout");
-            err.keep().expect("persist stderr");
-            panic!(
-                "demo timed out; stdout: {}, stderr: {}",
-                out_path.display(),
-                err_path.display()
-            );
+            panic!("demo timed out; logs persisted in demo_logs/");
         }
     }
 }

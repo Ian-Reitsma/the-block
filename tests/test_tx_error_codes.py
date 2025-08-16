@@ -155,7 +155,7 @@ def trigger_balance_overflow(tmp_path):
     bc.submit_transaction(tx2)
 
 
-def trigger_fee_overflow(tmp_path):
+def trigger_fee_too_large(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
     bc.add_account("alice", 10, 0)
@@ -165,6 +165,25 @@ def trigger_fee_overflow(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=1 << 63,
+        fee_selector=0,
+        nonce=1,
+        memo=b"",
+    )
+    stx = the_block.sign_tx(list(priv), payload)
+    bc.submit_transaction(stx)
+
+
+def trigger_fee_overflow(tmp_path):
+    bc = make_chain(tmp_path)
+    priv, _ = the_block.generate_keypair()
+    max_u64 = (1 << 64) - 1
+    bc.add_account("alice", max_u64, 0)
+    payload = the_block.RawTxPayload(
+        from_="alice",
+        to="alice",
+        amount_consumer=max_u64,
+        amount_industrial=0,
+        fee=1,
         fee_selector=0,
         nonce=1,
         memo=b"",
@@ -263,13 +282,22 @@ def trigger_pending_limit(tmp_path):
 
 CASES = [
     (trigger_unknown_sender, the_block.ErrUnknownSender, the_block.ERR_UNKNOWN_SENDER),
-    (trigger_insufficient_balance, the_block.ErrInsufficientBalance, the_block.ERR_INSUFFICIENT_BALANCE),
+    (
+        trigger_insufficient_balance,
+        the_block.ErrInsufficientBalance,
+        the_block.ERR_INSUFFICIENT_BALANCE,
+    ),
     (trigger_nonce_gap, the_block.ErrNonceGap, the_block.ERR_NONCE_GAP),
-    (trigger_invalid_selector, the_block.ErrInvalidSelector, the_block.ERR_INVALID_SELECTOR),
+    (
+        trigger_invalid_selector,
+        the_block.ErrInvalidSelector,
+        the_block.ERR_INVALID_SELECTOR,
+    ),
     (trigger_bad_signature, the_block.ErrBadSignature, the_block.ERR_BAD_SIGNATURE),
     (trigger_duplicate, the_block.ErrDuplicateTx, the_block.ERR_DUPLICATE),
     (trigger_not_found, the_block.ErrTxNotFound, the_block.ERR_NOT_FOUND),
     (trigger_balance_overflow, ValueError, the_block.ERR_BALANCE_OVERFLOW),
+    (trigger_fee_too_large, the_block.ErrFeeTooLarge, the_block.ERR_FEE_TOO_LARGE),
     (trigger_fee_overflow, the_block.ErrFeeOverflow, the_block.ERR_FEE_OVERFLOW),
     (trigger_fee_too_low, the_block.ErrFeeTooLow, the_block.ERR_FEE_TOO_LOW),
     (trigger_mempool_full, the_block.ErrMempoolFull, the_block.ERR_MEMPOOL_FULL),

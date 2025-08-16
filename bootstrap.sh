@@ -105,6 +105,12 @@ else
   cecho yellow "   → No .env.example found, skipping env sync."
 fi
 
+# Run database migrations and compaction
+if [[ -x ./db_compact.sh ]]; then
+  run_step "database migrations" cargo run --quiet --bin db_migrate
+  run_step "database compaction" ./db_compact.sh
+fi
+
 # requirements.txt/package.json sanity
 if [[ -f requirements.txt ]]; then
   if [[ ! -s requirements.txt ]] || ! grep -q '[^[:space:]]' requirements.txt; then

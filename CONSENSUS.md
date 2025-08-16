@@ -167,6 +167,7 @@ telemetry endpoint history.
 | 11  | `ERR_MEMPOOL_FULL`        | global mempool capacity reached |
 | 12  | `ERR_LOCK_POISONED`       | mutex poisoned          |
 | 13  | `ERR_PENDING_LIMIT`       | per-account cap reached |
+| 14  | `ERR_FEE_TOO_LARGE`       | fee exceeds 2^63-1      |
 
 ### Capacity & Flags
 

@@ -1,35 +1,29 @@
-# Metrics
+# Telemetry and Prometheus Metrics
 
-The node exposes Prometheus metrics when started with `--metrics-addr`:
+The node exposes internal counters via a minimal HTTP exporter when compiled
+with the `telemetry` feature. Start a node with the `--metrics-addr` flag and
+visit the `/metrics` endpoint to scrape metrics in the Prometheus text format.
 
 ```bash
-cargo run --bin node -- run --metrics-addr 127.0.0.1:9001
-curl -s http://localhost:9001/metrics
+$ cargo run --bin node --features telemetry -- run --metrics-addr 127.0.0.1:9100
 ```
 
-Example scrape output:
+Sample output:
 
-```text
+```bash
+$ curl -s http://127.0.0.1:9100/metrics | head -n 5
 # HELP tx_submitted_total Total submitted transactions
 # TYPE tx_submitted_total counter
-tx_submitted_total 1
-# HELP tx_rejected_total Total rejected transactions
-# TYPE tx_rejected_total counter
-tx_rejected_total{reason="duplicate"} 1
+tx_submitted_total 0
 # HELP block_mined_total Total mined blocks
 # TYPE block_mined_total counter
-block_mined_total 1
 ```
 
-Metric descriptions:
+The exporter currently tracks:
 
-| Metric | Meaning |
-|--------|---------|
-| `tx_submitted_total` | Count of all transactions submitted for admission |
-| `tx_rejected_total{reason}` | Labelled count of rejected transactions with the provided reason |
-| `block_mined_total` | Number of blocks successfully mined |
+- `tx_submitted_total` – transactions submitted to the mempool
+- `tx_rejected_total{reason}` – transactions rejected with a labeled reason
+- `block_mined_total` – blocks successfully mined
+- `mempool_size` – gauge of current mempool size
 
-Other counters, such as `mempool_size` and `ttl_drop_total`, remain available
-for deeper inspection. The endpoint returns standard Prometheus text suitable
-for scraping and alerting.
-
+For a full list of counters, see `src/telemetry.rs`.
