@@ -491,7 +491,7 @@ any testnet or production exposure. Each change **must** include tests, telemetr
 
 ```bash
 # Start a node with RPC enabled
-cargo run --bin node -- --rpc-addr 127.0.0.1:3030 --mempool-purge-interval 5
+cargo run --bin node -- run --rpc-addr 127.0.0.1:3030 --mempool-purge-interval 5
 
 # Generate a key and capture its address
 cargo run --bin node -- generate-key alice

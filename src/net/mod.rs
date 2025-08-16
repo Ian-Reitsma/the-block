@@ -5,6 +5,7 @@ use crate::{Blockchain, SignedTransaction};
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
 use std::fs;
+use std::path::PathBuf;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -115,7 +116,15 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
 }
 
 pub(crate) fn load_net_key() -> SigningKey {
-    if let Ok(bytes) = fs::read("net_key") {
+    let path = std::env::var("TB_NET_KEY_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .expect("home dir")
+                .join(".the_block")
+                .join("net_key")
+        });
+    if let Ok(bytes) = fs::read(&path) {
         if bytes.len() == 64 {
             let mut arr = [0u8; 64];
             arr.copy_from_slice(&bytes);
@@ -128,6 +137,9 @@ pub(crate) fn load_net_key() -> SigningKey {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let sk = SigningKey::from_bytes(&seed);
-    fs::write("net_key", sk.to_keypair_bytes()).unwrap_or_else(|e| panic!("write net_key: {e}"));
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(&path, sk.to_keypair_bytes()).unwrap_or_else(|e| panic!("write net_key: {e}"));
     sk
 }

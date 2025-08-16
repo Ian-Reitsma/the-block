@@ -1947,13 +1947,34 @@ impl Blockchain {
         self.chain.len()
     }
 
+    pub fn mine_block(&mut self, miner_addr: &str) -> PyResult<Block> {
+        let timestamp_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_millis() as u64;
+        self.mine_block_with_ts(miner_addr, timestamp_millis)
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    pub fn mine_block_at(
+        &mut self,
+        miner_addr: &str,
+        timestamp_millis: u64,
+    ) -> PyResult<Block> {
+        self.mine_block_with_ts(miner_addr, timestamp_millis)
+    }
+
     /// Mine a new block and credit rewards to `miner_addr`.
     ///
     /// # Errors
     /// Returns a [`PyValueError`] if fee or nonce calculations overflow or if
     /// persisting the chain fails.
     #[allow(clippy::too_many_lines)]
-    pub fn mine_block(&mut self, miner_addr: &str) -> PyResult<Block> {
+    fn mine_block_with_ts(
+        &mut self,
+        miner_addr: &str,
+        timestamp_millis: u64,
+    ) -> PyResult<Block> {
         let index = self.chain.len() as u64;
         let prev_hash = if index == 0 {
             "0".repeat(64)
@@ -2063,10 +2084,6 @@ impl Blockchain {
         } else {
             difficulty::expected_difficulty(&self.chain)
         };
-        let timestamp_millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_else(|_| Duration::from_secs(0))
-            .as_millis() as u64;
         let mut block = Block {
             index,
             previous_hash: prev_hash.clone(),
@@ -2377,6 +2394,12 @@ impl Blockchain {
         }
 
         Ok(true)
+    }
+
+    /// Validate the entire chain from genesis to tip.
+    #[inline]
+    pub fn is_valid_chain(&self) -> PyResult<bool> {
+        Ok(Self::is_valid_chain_rust(&self.chain))
     }
 
     pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {

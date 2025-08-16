@@ -1,9 +1,11 @@
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
 use std::io::Write;
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::thread;
 use std::time::Duration;
+use tempfile::tempdir;
+use serial_test::serial;
 use the_block::{
     generate_keypair,
     net::{Handshake, Message, Node, Payload, PROTOCOL_VERSION},
@@ -17,14 +19,23 @@ fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
     stream.write_all(&bytes).unwrap();
 }
 
+fn free_addr() -> SocketAddr {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+}
+
 /// Spin up three nodes that exchange transactions and blocks, ensuring
 /// they converge to the same chain height even after a temporary fork.
 #[test]
+#[serial]
 fn gossip_converges_to_longest_chain() {
-    // fixed localhost ports for deterministic tests
-    let addr1: SocketAddr = "127.0.0.1:7001".parse().unwrap();
-    let addr2: SocketAddr = "127.0.0.1:7002".parse().unwrap();
-    let addr3: SocketAddr = "127.0.0.1:7003".parse().unwrap();
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr1 = free_addr();
+    let addr2 = free_addr();
+    let addr3 = free_addr();
 
     let node1 = Node::new(addr1, vec![addr2, addr3], Blockchain::default());
     let node2 = Node::new(addr2, vec![addr1, addr3], Blockchain::default());
@@ -40,9 +51,11 @@ fn gossip_converges_to_longest_chain() {
     thread::sleep(Duration::from_millis(100));
 
     // genesis block from node1
+    let mut ts = 1;
     {
         let mut bc = node1.blockchain();
-        bc.mine_block("miner1").unwrap();
+        bc.mine_block_at("miner1", ts).unwrap();
+        ts += 1;
     }
     node1.broadcast_chain();
     thread::sleep(Duration::from_millis(100));
@@ -65,11 +78,11 @@ fn gossip_converges_to_longest_chain() {
     // each secondary node mines a block at height 2 without broadcasting
     {
         let mut bc = node2.blockchain();
-        bc.mine_block("miner2").unwrap();
+        bc.mine_block_at("miner2", ts).unwrap();
     }
     {
         let mut bc = node3.blockchain();
-        bc.mine_block("miner3").unwrap();
+        bc.mine_block_at("miner3", ts).unwrap();
     }
 
     // node3 advertises its fork first, node2 follows
@@ -79,7 +92,7 @@ fn gossip_converges_to_longest_chain() {
     // node2 extends its fork to become the longest chain
     {
         let mut bc = node2.blockchain();
-        bc.mine_block("miner2").unwrap();
+        bc.mine_block_at("miner2", ts).unwrap();
     }
     node2.broadcast_chain();
 
@@ -105,10 +118,13 @@ fn gossip_converges_to_longest_chain() {
 /// Start two nodes, then introduce a third with a longer fork to ensure
 /// the network adopts the longest chain after reconnection.
 #[test]
+#[serial]
 fn partition_rejoins_longest_chain() {
-    let addr1: SocketAddr = "127.0.0.1:7101".parse().unwrap();
-    let addr2: SocketAddr = "127.0.0.1:7102".parse().unwrap();
-    let addr3: SocketAddr = "127.0.0.1:7103".parse().unwrap();
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr1 = free_addr();
+    let addr2 = free_addr();
+    let addr3 = free_addr();
 
     let node1 = Node::new(addr1, vec![addr2], Blockchain::default());
     let node2 = Node::new(addr2, vec![addr1], Blockchain::default());
@@ -119,10 +135,13 @@ fn partition_rejoins_longest_chain() {
     node1.discover_peers();
     node2.discover_peers();
 
+    let mut ts = 1;
     {
         let mut bc = node1.blockchain();
-        bc.mine_block("miner1").unwrap();
-        bc.mine_block("miner1").unwrap();
+        bc.mine_block_at("miner1", ts).unwrap();
+        ts += 1;
+        bc.mine_block_at("miner1", ts).unwrap();
+        ts += 1;
     }
     node1.broadcast_chain();
     thread::sleep(Duration::from_millis(100));
@@ -132,9 +151,11 @@ fn partition_rejoins_longest_chain() {
     let _h3 = node3.start();
     {
         let mut bc = node3.blockchain();
-        bc.mine_block("miner3").unwrap();
-        bc.mine_block("miner3").unwrap();
-        bc.mine_block("miner3").unwrap();
+        bc.mine_block_at("miner3", ts).unwrap();
+        ts += 1;
+        bc.mine_block_at("miner3", ts).unwrap();
+        ts += 1;
+        bc.mine_block_at("miner3", ts).unwrap();
     }
     node3.broadcast_chain();
     node3.discover_peers();
@@ -148,8 +169,11 @@ fn partition_rejoins_longest_chain() {
 
 /// Invalid transactions broadcast over the network are ignored.
 #[test]
+#[serial]
 fn invalid_gossip_tx_rejected() {
-    let addr: SocketAddr = "127.0.0.1:7201".parse().unwrap();
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
     let mut rng = OsRng;
@@ -183,8 +207,11 @@ fn invalid_gossip_tx_rejected() {
 
 /// Invalid blocks are ignored and do not crash peers.
 #[test]
+#[serial]
 fn invalid_gossip_block_rejected() {
-    let addr: SocketAddr = "127.0.0.1:7202".parse().unwrap();
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
     let mut rng = OsRng;
@@ -220,8 +247,11 @@ fn invalid_gossip_block_rejected() {
 
 /// Blocks signed with unknown keys are discarded.
 #[test]
+#[serial]
 fn forged_identity_rejected() {
-    let addr: SocketAddr = "127.0.0.1:7301".parse().unwrap();
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
 
@@ -251,8 +281,11 @@ fn forged_identity_rejected() {
 
 /// Peers advertising an unsupported protocol version are ignored.
 #[test]
+#[serial]
 fn handshake_version_mismatch_rejected() {
-    let addr: SocketAddr = "127.0.0.1:7302".parse().unwrap();
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
 
