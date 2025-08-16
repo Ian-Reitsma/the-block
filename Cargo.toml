@@ -5,7 +5,7 @@ edition = "2021"
 resolver = "2"
  
 [dependencies]
-pyo3 = { version = "0.24.2", default-features = false, features = ["macros"], optional = false }
+pyo3 = { version = "0.24.2", default-features = false, features = ["macros", "auto-initialize"], optional = false }
 serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 blake3 = "1"
@@ -33,7 +33,7 @@ telemetry = ["log", "prometheus", "tracing", "once_cell"]
 telemetry-json = ["telemetry"]
 
 [package.metadata.maturin]
-features = ["pyo3/extension-module", "telemetry"]
+features = ["pyo3/extension-module", "pyo3/auto-initialize", "telemetry"]
 
 [dev-dependencies]
 logtest = "2"

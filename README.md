@@ -139,6 +139,29 @@ preventing state leakage between cases. These directories are removed
 automatically when their handle is dropped.
 CI runs all of the above across **Linux‑glibc 2.34, macOS 12, and Windows 11 (WSL 2)**.  A red badge on `main` blocks merges.
 
+### macOS Python framework
+
+`pyo3` looks for the active Python when compiling. On macOS the dynamic
+loader may fail with `dyld: Library not loaded: @rpath/libpython*.dylib`
+if the build linked against a different interpreter than the one in your
+virtual environment. Export `PYO3_PYTHON` and `PYTHONHOME` before building
+to select the correct interpreter. The build script adds `$PYTHONHOME/lib`
+to the binary's `rpath` so `cargo run` can find `libpython` at runtime:
+
+```bash
+export PYO3_PYTHON=$(python3 -c 'import sys; print(sys.executable)')
+export PYTHONHOME=$(python3 -c 'import sys, pathlib; print(pathlib.Path(sys.executable).resolve().parents[1])')
+cargo build
+cargo run --bin node -- --help
+```
+
+Verify that the expected dynamic library exists in the selected Python
+home:
+
+```bash
+ls "$PYTHONHOME"/lib | grep libpython
+```
+
 ---
 
 ## Node CLI and JSON-RPC
