@@ -174,6 +174,10 @@ purges. Enable the `telemetry` feature to expose Prometheus metrics:
 cargo run --features telemetry --bin node -- run --rpc-addr 127.0.0.1:3030 \
     --mempool-purge-interval 5 --metrics-addr 127.0.0.1:9100
 ```
+Supplying `--metrics-addr` without `--features telemetry` exits with an error.
+
+Gossip nodes persist a signing key at `$HOME/.the_block/net_key`; override with
+`TB_NET_KEY_PATH` to relocate the key during tests or ephemeral runs.
 
 ### Wallet key management
 
@@ -240,6 +244,7 @@ Environment variables influence node behaviour during these sessions:
 TB_PURGE_LOOP_SECS=1      # (optional) purge loop interval; demo.py defaults to 1
 PYTHONUNBUFFERED=1        # unbuffered output for Python demos/tests
 TB_DEMO_MANUAL_PURGE=1    # require manual purge-loop shutdown
+TB_NET_KEY_PATH=/tmp/net_key  # override gossip key location for tests
 ```
 
 Interact with the node via JSON-RPC; requests use `jsonrpc` and an incrementing `id`:

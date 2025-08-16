@@ -71,7 +71,7 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         mempool_purge_interval: u64,
 
-        /// Optional address to expose Prometheus metrics on
+        /// Expose Prometheus metrics on this address (requires `--features telemetry`)
         #[arg(long, value_name = "ADDR")]
         metrics_addr: Option<String>,
 
@@ -108,6 +108,7 @@ async fn main() {
             #[cfg(not(feature = "telemetry"))]
             if metrics_addr.is_some() {
                 eprintln!("telemetry feature not enabled");
+                std::process::exit(1);
             }
 
             if mempool_purge_interval > 0 {
