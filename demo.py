@@ -15,7 +15,7 @@ import time
 
 
 def _ensure_build_tools() -> None:
-    """Install maturin/patchelf if missing."""
+    """Install maturin and (on Linux) patchelf if missing."""
     try:
         importlib.import_module("maturin")
     except ModuleNotFoundError:
@@ -31,7 +31,7 @@ def _ensure_build_tools() -> None:
             ],
             check=True,
         )
-    if shutil.which("patchelf") is None:
+    if sys.platform != "darwin" and shutil.which("patchelf") is None:
         subprocess.run(
             [
                 sys.executable,

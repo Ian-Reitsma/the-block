@@ -74,7 +74,8 @@ python demo.py
 Running `demo.py` will attempt to build the `the_block` extension with
 `maturin` if it is not already installed. The script installs `maturin` on
 the fly when missing, so only a Rust toolchain and build prerequisites are
-required.
+required. On Linux, `patchelf` is also installed to adjust shared-library
+paths; macOS users do not need `patchelf` and the demo runs without it.
 
 ### Manual purge-loop demonstration
 
