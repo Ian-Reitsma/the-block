@@ -14,13 +14,34 @@ import sys
 import time
 
 
-def _ensure_maturin() -> None:
-    """Install maturin if missing."""
+def _ensure_build_tools() -> None:
+    """Install maturin/patchelf if missing."""
     try:
         importlib.import_module("maturin")
     except ModuleNotFoundError:
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--quiet", "maturin==1.9.2"],
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--quiet",
+                "--root-user-action=ignore",
+                "maturin==1.9.2",
+            ],
+            check=True,
+        )
+    if shutil.which("patchelf") is None:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--quiet",
+                "--root-user-action=ignore",
+                "patchelf==0.17.2.1",
+            ],
             check=True,
         )
 
@@ -31,7 +52,7 @@ def _load_the_block():
         return importlib.import_module("the_block")
     except ModuleNotFoundError:
         repo_root = pathlib.Path(__file__).resolve().parent
-        _ensure_maturin()
+        _ensure_build_tools()
         env = os.environ.copy()
         env["MATURIN_PYTHON"] = sys.executable
         env["PYO3_PYTHON"] = sys.executable
