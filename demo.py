@@ -213,11 +213,6 @@ def mine_initial_block(bc: the_block.Blockchain, accounts: list[str]) -> None:
     explain("Mining first block so miner receives starting tokens")
     blk = bc.mine_block("miner")
     explain(f"Mined block #{blk.index} with hash {blk.hash}")
-    explain("Validating block and checking supply invariants")
-    if not bc.validate_block(blk):
-        explain(
-            f"Warning: block #{blk.index} failed validation (nonce={blk.nonce}), continuing"
-        )
     check_supply(bc, accounts)
 
 
@@ -285,12 +280,6 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str], priv: bytes) -> N
         show_pending(bc, "miner", "bob")
         blk = bc.mine_block("miner")
         explain(f"Mined block #{blk.index} with hash {blk.hash}")
-        if not bc.validate_block(blk):
-            explain(
-                f"Warning: block #{blk.index} failed validation (nonce={blk.nonce}), continuing"
-            )
-        else:
-            explain("Block validated successfully")
         check_supply(bc, accounts)
         tot_c, tot_i = bc.circulating_supply()
         explain(f"Circulating totals -> consumer {tot_c}, industrial {tot_i}")

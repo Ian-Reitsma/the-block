@@ -2396,6 +2396,12 @@ impl Blockchain {
         Ok(true)
     }
 
+    /// Validate the entire chain from genesis to tip.
+    #[inline]
+    pub fn is_valid_chain(&self) -> PyResult<bool> {
+        Ok(Self::is_valid_chain_rust(&self.chain))
+    }
+
     pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
         if new_chain.len() <= self.chain.len() {
             return Err(PyValueError::new_err("Incoming chain not longer"));
