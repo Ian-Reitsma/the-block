@@ -1,5 +1,7 @@
 # ECONOMICS — Fee Routing Glossary and Invariants
 
+Pointer: For the project-wide glossary and cross-references, see `AGENTS.md` §14. Keep invariant names (`INV-FEE-01`, `INV-FEE-02`) synchronized between this file and AGENTS.md.
+
 ## Glossary
 
 - **Consumer Token (CT)** — unit for high‑velocity transactions.
@@ -38,4 +40,3 @@ Given the pre‑admission clamp `f < 2^{63}`, the split rules guarantee each `fe
 | `f=1,  ν=1`               | `(0,-1)`        | `(0,1)`        | Charge IT only     | INV-FEE-01                         |
 | `f=2^63−1, ν=0`           | `(-(2^63−1),0)`| `(2^63−1,0)`   | Max legal fee      | INV-FEE-02                         |
 | `f=2^63, any ν`           | —               | —              | Reject admission (FeeOverflow) | INV-FEE-02             |
-

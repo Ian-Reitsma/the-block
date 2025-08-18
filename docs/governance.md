@@ -20,4 +20,5 @@ node will refuse connections from peers advertising an incompatible protocol
 version.
 
 For more details on badge voting, shard districts and protocol negotiation, see
-`agents_vision.md`.
+[AGENTS.md §16 — Vision & Strategy (Authoritative)](../AGENTS.md#16-vision--strategy-authoritative)
+and `agents_vision.md`.
