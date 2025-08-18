@@ -333,42 +333,47 @@ cargo test --test net_gossip -- --nocapture
 ## Using the Python Module
 
 ```python
-from the_block import RawTxPayload, sign_tx, verify_signed_tx, mine_block
-from nacl.signing import SigningKey  # or use ed25519_dalek in Rust
+from the_block import (
+    RawTxPayload,
+    sign_tx,
+    verify_signed_tx,
+    mine_block,
+    generate_keypair,
+)
 
 # 1 Generate keypair
-sk = SigningKey.generate()
-pk = sk.verify_key
+sk, pk = generate_keypair()
 
 # 2 Create and sign a transaction
 payload = RawTxPayload(
-    from_ = pk.encode().hex(),
-    to    = "deadbeef" * 4,
-    amount_consumer   = 1_000,
-    amount_industrial = 0,
-    fee               = 10,
-    fee_selector      = 0,
-    nonce             = 0,
-    memo              = b"hello‑world",
+    from_=pk.hex(),
+    to="deadbeef" * 4,
+    amount_consumer=1_000,
+    amount_industrial=0,
+    fee=10,
+    fee_selector=0,
+    nonce=1,
+    memo=b"hello‑world",
 )
 
-stx = sign_tx(sk.encode(), payload)
+stx = sign_tx(sk, payload)
 assert verify_signed_tx(stx)
 
 # 3 Mine a block (CPU PoW)
-block = mine_block([stx])  # returns dict‑like Python object
-print(block["header"]["hash"])
+block = mine_block([stx])  # returns a Block object
+print(block.hash)
 ```
 
 The `fee_selector` chooses which token pool covers the fee: `0` for consumer
 tokens, `1` for industrial tokens, or `2` to split evenly. Unless you need a
 different funding source, use `0`.
 
-All functions return Python‑native types (`dict`, `bytes`, `int`) for simplicity.
+All helpers expose convenient Python bindings; `Block` fields are accessible as attributes.
 
 Additional helpers:
 
 - `decode_payload(bytes)` reverses canonical encoding to `RawTxPayload`.
+- `RawTxPayload` exposes both `from_` and `from` attributes; decoding returns objects accessible via either name.
   - `PurgeLoop` provides a context manager that spawns and joins the TTL purge loop.
     `TB_PURGE_LOOP_SECS` must be set to a positive integer; invalid or missing
     values raise ``ValueError``. For manual control use

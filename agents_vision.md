@@ -96,8 +96,17 @@ Offer ballot commitments, timestamping, and reconciliation proofs as a parallel 
 - Secret ballots, voter-set snapshots, and timelocks to blunt bribery and governance capture.
 - Bug bounty + independent audits; emergency pause behind a supermajority, time-bounded, and visible on-chain.
 
-## 9. Ethical Charter (Biblical Values and Secular Principles)
-We encode voluntariness (no coercion to use), stewardship (keys and data under the person’s control), truthfulness (public hashes, timelocks, auditable records), justice (one service badge = one vote; no buying political power), revocability (share by choice; revoke at will), and mercy (social recovery options for lost keys). The network is a tool for people, never a tool over people.
+## 9. Ethical Charter (Biblical Christian Values & Principles)
+This project is explicitly grounded in Biblical Christian ethics. In practical terms we encode:
+
+- Dignity (Imago Dei): every person bears God’s image and therefore retains agency and worth. Participation is voluntary and never coerced.
+- Love of neighbor and justice: rules apply equally; political power cannot be bought; one earned service badge = one vote within guardrails that protect the weak.
+- Truthfulness and integrity: public hashes, timelocks, and auditable records make deception costly and accountability routine.
+- Stewardship: keys, data, and resources are entrusted to people as caretakers; defaults protect the vulnerable; designs avoid creating harm.
+- Mercy and restoration: social‑recovery options exist for lost keys and honest mistakes; mechanisms prefer proportionate responses over punitive traps.
+- Consent and revocability: sharing is opt‑in, scope‑limited, and revocable at will.
+
+The network is a tool for people under God, never a tool over people. These principles inform technical choices without turning the software into doctrine; they simply align the system’s incentives and controls with a Christian understanding of truth, justice, mercy, and stewardship.
 
 ## 10. Comparative Positioning (Fully Realized State)
 On a 0–100 “best-possible blockchain” scale:

@@ -23,3 +23,8 @@ snapshot/
 # NPM lockfile is generated for optional tooling; ignore to keep repo deterministic
 # See AGENTS.md §4 for Node tooling policy.
 package-lock.json
+# Local node data and logs
+node-data/
+node-data-*/
+demo_logs/
+db

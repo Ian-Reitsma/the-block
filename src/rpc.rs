@@ -6,6 +6,7 @@ use std::sync::{
 };
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::time::{timeout, Duration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
@@ -44,28 +45,58 @@ struct RpcError {
 async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<AtomicBool>) {
     let mut reader = BufReader::new(stream);
 
+    // Read request line with timeout to avoid hanging connections.
     let mut line = String::new();
-    if reader.read_line(&mut line).await.is_err() {
-        return;
+    match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
+        Ok(Ok(_)) => {}
+        _ => return,
     }
 
+    // Parse headers. Accept both CRLF and LF-only terminators.
     let mut content_len = 0usize;
+    let mut expect_continue = false;
     loop {
         line.clear();
-        if reader.read_line(&mut line).await.is_err() {
-            return;
-        }
-        if line == "\r\n" {
+        let read = match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
+            Ok(Ok(n)) => n,
+            _ => return,
+        };
+        if read == 0 {
+            // EOF before headers complete
             break;
         }
-        if let Some(val) = line.to_lowercase().strip_prefix("content-length:") {
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        let lower = line.to_lowercase();
+        if let Some(val) = lower.strip_prefix("content-length:") {
             content_len = val.trim().parse().unwrap_or(0);
+        } else if let Some(val) = lower.strip_prefix("expect:") {
+            if val.trim().starts_with("100-continue") {
+                expect_continue = true;
+            }
         }
     }
 
+    // If the client sent 'Expect: 100-continue', acknowledge it to unblock senders.
+    if expect_continue {
+        let stream = reader.get_mut();
+        let _ = stream
+            .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
+            .await;
+        let _ = stream.flush().await;
+    }
+
+    // Read body (if any) with timeout; default to empty on missing Content-Length.
     let mut body_bytes = vec![0u8; content_len];
-    if reader.read_exact(&mut body_bytes).await.is_err() {
-        return;
+    if content_len > 0 {
+        if timeout(Duration::from_secs(3), reader.read_exact(&mut body_bytes))
+            .await
+            .ok()
+            .is_none()
+        {
+            return;
+        }
     }
     let body = String::from_utf8_lossy(&body_bytes);
 
@@ -106,7 +137,7 @@ async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<
     });
     let mut stream = reader.into_inner();
     let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );
@@ -120,6 +151,20 @@ fn dispatch(
     mining: Arc<AtomicBool>,
 ) -> Result<serde_json::Value, RpcError> {
     Ok(match req.method.as_str() {
+        "set_difficulty" => {
+            let val = req
+                .params
+                .get("value")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            match bc.lock() {
+                Ok(mut guard) => {
+                    guard.difficulty = val;
+                    serde_json::json!({"status": "ok"})
+                }
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
         "balance" => {
             let addr = req
                 .params

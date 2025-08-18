@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Python: `mine_block(txs)` helper to mine a block from signed transactions for scripts and demos ([src/lib.rs](src/lib.rs)).
 - Asynchronous JSON-RPC server built on `tokio` replaces the thread-per-connection model and dispatches requests with async tasks while preserving spec-compliant errors ([src/rpc.rs](src/rpc.rs), [src/bin/node.rs](src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
 - Network partition/rejoin and invalid gossip cases ensure longest-chain convergence ([tests/net_gossip.rs](tests/net_gossip.rs)).
 - Demo auto-builds the extension and defaults the purge loop to one second; CI captures logs and clears manual flags ([demo.py](demo.py), [tests/demo.rs](tests/demo.rs)).
@@ -18,6 +19,7 @@
 
 ### Fixed
 - Telemetry exporter always emits keys such as `orphan_sweep_total` even before they increment ([src/telemetry.rs](src/telemetry.rs)).
+- Python: `RawTxPayload` now exposes both `from_` and `from` properties, restoring examples that accessed either name after decode ([src/transaction.rs](src/transaction.rs)).
 
 ### Breaking
 - Renamed `fee_token` to `fee_selector` and bumped the crypto domain tag to `THE_BLOCKv2|` ([src/lib.rs](src/lib.rs)).
@@ -169,4 +171,3 @@
 - `--mempool-account-cap` / `TB_MEMPOOL_ACCOUNT_CAP`
 - `--mempool-ttl` / `TB_MEMPOOL_TTL_SECS`
 - `--min-fee-per-byte` / `TB_MIN_FEE_PER_BYTE`
-

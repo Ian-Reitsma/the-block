@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Python
+- Python helper `mine_block(txs)` mines a block from signed transactions for quick demos ([src/lib.rs](src/lib.rs)).
+- `RawTxPayload` exposes both `from_` and `from` attributes so decoded payloads are accessible via either name ([src/transaction.rs](src/transaction.rs)).
 - `TxAdmissionError::LockPoisoned` is returned when a mempool mutex guard is poisoned.
 - `TxAdmissionError::PendingLimit` indicates the per-account pending cap was reached.
 - `TxAdmissionError::NonceGap` surfaces as `ErrNonceGap` when a nonce skips the expected sequence.

@@ -56,6 +56,8 @@ pub use transaction::{
     decode_payload_py as decode_payload, sign_tx_py as sign_tx,
     verify_signed_tx_py as verify_signed_tx, RawTxPayload, SignedTransaction,
 };
+// Python helper re-exported at the crate root
+pub use self::mine_block_py as mine_block;
 use transaction::{canonical_payload_py, decode_payload_py, sign_tx_py, verify_signed_tx_py};
 pub mod consensus;
 pub mod constants;
@@ -1965,7 +1967,11 @@ impl Blockchain {
         self.mine_block_with_ts(miner_addr, timestamp_millis)
     }
 
-    #[cfg(any(test, debug_assertions))]
+    /// Mine a block at an explicit timestamp.
+    ///
+    /// This helper is primarily used by tests to produce deterministic
+    /// chains.  It remains available in all builds so integration tests
+    /// compiled in release mode can leverage it.
     pub fn mine_block_at(&mut self, miner_addr: &str, timestamp_millis: u64) -> PyResult<Block> {
         self.mine_block_with_ts(miner_addr, timestamp_millis)
     }
@@ -3209,6 +3215,27 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
     false
 }
 
+/// Python-accessible helper to mine a block from signed transactions.
+///
+/// Spins up a temporary `Blockchain` with a genesis block, sets a zero
+/// fee-per-byte floor, seeds missing sender accounts with large balances,
+/// admits the provided transactions, and mines a block to the hardcoded
+/// miner address "miner".
+#[pyfunction(name = "mine_block")]
+pub fn mine_block_py(txs: Vec<SignedTransaction>) -> PyResult<Block> {
+    let mut bc = Blockchain::default();
+    bc.genesis_block()?;
+    bc.min_fee_per_byte = 0;
+    for tx in txs {
+        let sender = tx.payload.from_.clone();
+        if sender != "0".repeat(34) && !bc.accounts.contains_key(&sender) {
+            bc.add_account(sender.clone(), u64::MAX / 2, u64::MAX / 2)?;
+        }
+        bc.submit_transaction(tx).map_err(PyErr::from)?;
+    }
+    bc.mine_block("miner")
+}
+
 // === Tx admission error codes ===
 pub const ERR_OK: u16 = 0;
 pub const ERR_UNKNOWN_SENDER: u16 = 1;
@@ -3256,6 +3283,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
     m.add_function(wrap_pyfunction!(decode_payload_py, m)?)?;
+    m.add_function(wrap_pyfunction!(mine_block_py, m)?)?;
     m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
     m.add_function(wrap_pyfunction!(spawn_purge_loop, m)?)?;
     m.add_function(wrap_pyfunction!(maybe_spawn_purge_loop_py, m)?)?;

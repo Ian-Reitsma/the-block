@@ -14,7 +14,7 @@ use pyo3::prelude::*;
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct RawTxPayload {
-    #[pyo3(get, set, name = "from")]
+    #[pyo3(get, set)]
     pub from_: String,
     #[pyo3(get, set)]
     pub to: String,
@@ -69,6 +69,17 @@ impl RawTxPayload {
             self.nonce,
             self.memo.len(),
         )
+    }
+
+    // Python alias property: expose `from` alongside `from_` for ergonomics
+    #[getter(from)]
+    fn get_from_alias(&self) -> String {
+        self.from_.clone()
+    }
+
+    #[setter(from)]
+    fn set_from_alias(&mut self, val: String) {
+        self.from_ = val;
     }
 }
 
