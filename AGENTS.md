@@ -280,12 +280,19 @@ This section reflects the unified vision in `agents_vision.md` and overrides old
 - Shadow marketplace: stake‑backed intents for 2–3 job types; compute/display p25–p75 bands + p_adj; break‑even/margin probe (kWh input × local benchmark).
 - LocalNet (fast road): short relays over Wi‑Fi/BLE with receipts and paid relays; strict defaults (Wi‑Fi only unless charging) and battery/data caps.
 - Offline money & messaging (canary): P2P escrowed receipts, delayed settlement on reconnect; small group tab with “split later;” SOS broadcast.
+- @handle identities as dialable IDs for calls, messages, and payments.
+- Tap-to-join posters and scratch-card gift wallets for zero-setup onboarding.
 
 ### Phase B (2–6 weeks): People‑Built Internet Primitives
 - Range Boost (long road): delay‑tolerant store‑and‑forward; optional lighthouse recognition (USB/hat radios later); earnings receipts for coverage/delivery.
 - Hotspot Exchange: host mode (rate‑limited guest Wi‑Fi, wrapped traffic); guest mode (one‑tap join, credit spend); credits backed by BLOCKc with simple meter.
 - Carry‑to‑Earn: bundle courier with sealed delivery receipts; earnings for commuters/routes; privacy explainer in UI.
 - Neighborhood Update Accelerator: content‑addressed seeding and instant downloads for big updates/patches/trailers.
+- Coverage bounty heatmap and missions rail to light up dark zones.
+- Instant screen takeover and find‑anything network hooks.
+- Offline micro‑merchant & escrow flow; reversible local deals.
+- $15 lighthouse dongle reference design for community relays.
+- Presence‑backed passes (age, ticket) without personal data.
 
 ### Phase C (6–10 weeks): Industrial Canary Lanes + SDKs v1
 - Two Industrial lanes: live transcode and authenticity checks; sealed‑bid batch matches; tiny deposits; per‑slice pricing; daily per‑node payout caps; operator diagnostics.
@@ -412,6 +419,7 @@ re‑implement:
     preserving them on disk.
 20. `tests/test_spawn_purge_loop.py` spawns two manual purge loops with
     different intervals and cross-order joins to assert mempool invariants and metrics.
+21. Everyday-user docs refreshed: README section renamed to “What you will be able to do as an everyday user,” expanded with lost-item recovery, tap-to-screen, and offline bill splits, and FAQ now covers hardware requirements, multi-day offline queues, device restore, and safe Wi‑Fi sharing.
 
 ---
 
@@ -984,17 +992,17 @@ technical debt.
 ---
 
 ## 29. Networking Readiness (Mid-Term Milestone)
-- No `p2p` module or dependency exists; begin by selecting a networking crate (`libp2p` or `quic`). Draft message schemas for `TxBroadcast`, `BlockAnnounce`, and `ChainRequest`.
+- Basic `p2p` module introduced with `libp2p` dependency. Message schemas (`TxBroadcast`, `BlockAnnounce`, `ChainRequest`) and handshake structs now exist; future work will wire them into a gossip loop and handshake feature negotiation.
 - Design peer handshake including feature bits (`0x0004` for FEE_ROUTING_V2`) and schema version negotiation. Stub out structs so future integration does not disturb current consensus code.
 - Plan for mempool synchronization: implement gossip with inventory (`inv`) and getdata style flows to prevent duplicate downloads and enable relay suppression.
 
 ## 30. Formal Verification Scaffold
-- Repository lacks `formal/` directory promised for F★ specs. Create `formal/fee_v2.fst` stubs mirroring the algebra in ECONOMICS.md with type definitions for `FeeSelector`, `FeeDecomp`, and lemmas (`fee_split_sum`, `inv_fee_01`).
-- Provide build tooling (`Makefile` or `fstar.mk`) so CI can check F★ files for syntax and type errors even before proofs are completed.
-- Document how invariants map to code modules to guide the formal methods team; e.g., `fee::decompose` ↔ `Fstar.Fee.decompose`.
+- `formal/fee_v2.fst` stub landed with type skeletons for `FeeSelector`, `FeeDecomp`, and lemmas (`fee_split_sum`, `inv_fee_01`).
+- `formal/Makefile` invokes `fstar.exe` so CI can at least type-check F★ files even before proofs exist.
+- Map invariants to code modules; e.g., `fee::decompose` ↔ `Fstar.Fee.decompose`.
 
 ## 31. Summary of Missing Deliverables
-- Governance artefacts (`governance/FORK-FEE-01.json`) — absent.
+- Governance artefact (`governance/FORK-FEE-01.json`) — **present** (draft for fee-selector fork).
 - P2P feature-bit handshake — absent.
 - CI jobs (`fee-unit-tests`, `fee-fuzz-san`, `schema-lint`) — absent.
 - Migration test (`test_schema_upgrade_compatibility`) — active.
@@ -1006,12 +1014,23 @@ technical debt.
 ---
 
 ## 32. Risk Register and Stakeholder Assignments
-- Establish a `docs/risk_register.md` tracking each economic and technical risk identified here, owner assignment, mitigation status, and review date.
+- `docs/risk_register.md` now tracks economic/network/security risks with owner and review date.
 - Assign Lead Economist to validate invariants and fee algebra; Security Chair to sign off on overflow and nonce logic; QA Lead to monitor fuzz dashboards and CI.
 - Schedule pre-fork sign-off meeting and record minutes to satisfy governance and audit requirements.
 
 ## 33. Concluding Directive
 Every item above is a blocker for a production-grade release. Treat this document as a living specification: update it whenever an issue is resolved, add commit references, and ensure future contributors can trace every consensus change to a documented rationale.
+
+---
+
+## 34. Recent Work Log (2024-07-XX)
+- Added in-memory `HandleRegistry` with `register_handle`/`resolve_handle` RPCs and tests; README shows sample `curl` usage.
+- Pulled in `libp2p`; scaffolding `src/p2p` with handshake struct and message enums (`TxBroadcast`, `BlockAnnounce`, `ChainRequest`).
+- Seeded formal verification under `formal/` with `fee_v2.fst` and `Makefile` for `fstar.exe` checks.
+- Logged economic, networking, and security items in `docs/risk_register.md` with owners and review dates.
+- Captured fee-selector fork draft at `governance/FORK-FEE-01.json`.
+- Updated `Cargo.lock` (~2k lines) after pulling in `libp2p` and test deps.
+- Expanded README everyday-user section with lost-and-found alerts, tap-to-screen sessions, offline bill splits, and coverage incentives.
 
 ---
 

@@ -179,6 +179,41 @@ fn dispatch(
                 serde_json::json!({"consumer": 0, "industrial": 0})
             }
         }
+        "register_handle" => {
+            let handle = req
+                .params
+                .get("handle")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let addr = req
+                .params
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match bc.lock() {
+                Ok(mut guard) => {
+                    if guard.register_handle(handle, addr) {
+                        serde_json::json!({"status": "ok"})
+                    } else {
+                        serde_json::json!({"error": "handle taken or address missing"})
+                    }
+                }
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
+        "resolve_handle" => {
+            let handle = req
+                .params
+                .get("handle")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(addr) = guard.resolve_handle(handle) {
+                serde_json::json!({"address": addr})
+            } else {
+                serde_json::json!({"address": null})
+            }
+        }
         "submit_tx" => {
             let tx_hex = req.params.get("tx").and_then(|v| v.as_str()).unwrap_or("");
             match hex::decode(tx_hex)

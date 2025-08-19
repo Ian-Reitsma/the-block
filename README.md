@@ -1,4 +1,4 @@
-2# the‑block
+# The Block
 
 > **A formally‑specified, dual‑token blockchain kernel written in Rust with first‑class Python bindings.**  Zero unsafe code, deterministic serialization, cross‑platform builds, one‑command bootstrap.
 > Built from day one for real-world deployment; every example uses the same APIs shipped to production nodes.
@@ -21,25 +21,13 @@ Plain‑English overview
 - Nearby boost: Your phone/computer can fetch from (and help) nearby devices over home Wi‑Fi/Bluetooth/Wi‑Fi Direct. That means faster starts and downloads that don’t stall when the wider internet is slow.
 - Pay for results, not promises: Work is split into tiny slices (think a few seconds of video, or a small chunk of data). Helpers only get paid when a slice finishes. No finish = no charge. That keeps costs fair and predictable.
 
-What you can do (as a normal person)
-- Faster starts: Videos/music/apps start instantly instead of spinning.
-  How: Your app grabs the first chunks from nearby devices over local links while the rest streams from the internet. Your app checks each chunk’s fingerprint (hash) so you never get tampered data.
-  Why it helps: Local hops are usually tens of milliseconds vs. hundreds+ over the WAN; the first seconds arrive immediately and hide weak connections.
-- Share big things quickly: Send that 1 GB video to a friend without re‑uploading to the cloud.
-  How: Your devices connect directly on the local network (or via short relays) and swap encrypted chunks that the app can verify.
-  Why it helps: Local links are fast and cheap; the chain records a proof of delivery so you can trust it happened.
-- Keep working offline: Messages and small payments still “go through” if you’re out of signal.
-  How: Your phone saves an encrypted intent + a small escrow receipt; it relays via nearby devices and settles on reconnect (canary feature; turned on only with safeguards).
-  Why it helps: You can keep moving — the network fills the gaps for you later and shows a clear receipt.
-- Earn by helping: Leave your laptop plugged in at home to relay/download for the neighborhood or finish tiny compute slices.
-  How: You opt in, set safe limits (Wi‑Fi only, plugged‑in only, daily caps). Your device proves “I delivered 200 MB to three neighbors” or “I finished ten 5‑second transcode slices” via receipts. The network credits your wallet automatically.
-  Why you earn more where coverage is scarce: Prices adjust with supply and demand. If few helpers are around and many people need chunks, the network pays more to attract help (like surge pay, but transparent and capped). You can see rates before you opt in.
-- Use “compute‑backed money”: Points you earn/spend map to real utility.
-  How: The network publishes a daily “redeem curve” (e.g., 100 points buys 60 seconds of standard compute or 500 MB delivered today). Those rates are enforced by receipts and a reserve funded from marketplace fees.
-  Why it’s useful: Your points aren’t just speculative — they reliably buy time/bytes you can use or gift.
-- Settle small tabs instantly: Pay back a friend or tip a helper without swapping apps.
-  How: Your wallet signs a tiny transfer and the chain confirms it in the next one‑second “page,” leaving a tamper‑proof receipt.
-  Why it helps: It’s as quick as handing over cash, and everyone sees exactly what cleared.
+What you will be able to do as an everyday user
+- Run an unlimited personal cloud: Drop your entire photo library or code repo into your vault and fetch it from any device with your @handle.
+  How: Files are chunked, encrypted, and stored across helpers; receipts prove chunks exist so you never pay twice for the same bytes.
+  Why it helps: No monthly storage bill, no third‑party logins—your vault grows as you do.
+- Host a website or app straight from your wallet.
+  How: Publish a static site or mini‑app bundle under `@handle.site`; nearby nodes serve the first bytes while the rest streams from the mesh or internet.
+  Why it helps: No hosting contract, no DNS hassle, and you can prove exactly what was served.
 
 Why this could be great for you
 - It’s faster: Local links avoid far‑away detours; the first chunks show up immediately and keep streams smooth.
@@ -47,19 +35,32 @@ Why this could be great for you
 - It works more often: When the wider internet hiccups, nearby helpers keep things flowing.
 - It’s private by default: Files/messages stay end‑to‑end encrypted. Public receipts prove that work happened without revealing your content.
 - You stay in control: You own the keys. Earning is opt‑in with clear limits (Wi‑Fi‑only, power‑only, daily caps) and one‑tap off.
+- No new accounts: @handles act as phone numbers, email addresses, and wallet IDs all at once.
+- Offline still counts: Transfers and messages reconcile automatically when any device comes online, so you never redo work.
+- Coverage pays: Running a lighthouse in a dead zone can literally pay part of your internet bill.
+- Clear receipts: Every action leaves a human‑readable line item; you always know what happened and why you were paid or charged.
+- Unlimited vault: Your storage expands with the network; no subscription walls.
+- Host from anywhere: A site or app tied to your @handle is reachable worldwide with no hosting bill.
+- Built‑in authenticity: Captures and posts ship with provenance, so deepfakes are obvious and real work stands out.
 
 Everyday examples
-- Streaming a trailer on the subway: Your app fetches the first 5–10 seconds from a nearby cache, then continues normally. You see instant start; your wallet auto‑applies any personal rebate first, then tiny coins if needed.
-- Sending a 1 GB video to a friend: The app sends encrypted chunks over local Wi‑Fi; both devices get a “delivered” receipt on the public notebook. If a helper relayed, they get a small credit.
-- Phone upgrade day in your neighborhood: A few plugged‑in devices seed the update; your phone verifies each chunk by hash and finishes in seconds. Everyone who seeded gets paid per MB delivered.
-- Helping quietly at home: Overnight, your PC finishes 40 short transcode slices and relays 1 GB of updates. In the morning, your wallet shows “+340 points” with line‑item receipts.
-- Paying a friend back for coffee: You send them a few points from your wallet; both of you see the credit and receipt almost instantly.
+- Uploading your whole camera roll once and pulling it down on a new laptop the same day without a subscription bill.
+- Spinning up `@you.site` for your side project in minutes and seeing neighbors fetch the first bytes before any host even sees the request.
+- Posting a video with a green “authentic capture” badge that followers can verify in one tap; obvious deepfakes get flagged immediately.
+- Selling an e‑book or song direct from your vault: buyers pay a few points, download, and the receipt proves exactly what was delivered.
+- Settling a global micro‑tip in a second: your wallet signs, the block lands, both of you get the receipt.
+- Waking to see “+340 points for hosting 5 GB and finishing 40 transcode slices overnight” without touching a settings menu.
+- Unlocking a coffee‑shop TV with a tap to demo your app, then wiping it clean when you leave.
 
 Common questions
 - Is this a coin? Treat points like app credits with clear utility. You can hold them, trade them, or redeem for compute/data. The network publishes rates daily and enforces them with receipts.
 - Will it drain my battery? Earning is off by default on battery. Typical defaults: “plugged‑in + on Wi‑Fi only” with daily caps you can change.
 - Can someone spy on me? No. Apps encrypt content before it leaves your device. The network only sees fingerprints and receipts; helpers never see your plaintext.
 - Do I need to understand blockchains? No. The blockchain is just the shared notebook that keeps score and prevents cheating.
+- Do I need extra hardware? Nope. Phones and laptops work out of the box. Optional “lighthouse” sticks boost range and earnings but aren’t required.
+- What if I’m offline for days? Your messages, payments, and earnings queue securely and finalize the moment any device regains a path.
+- What happens if I lose my device? Your points stay tied to your keys. Use your recovery kit (friends, hardware key, or stored phrase) to restore on a new device.
+- Is sharing my Wi‑Fi risky? Guest traffic is wrapped and capped; hosts see only usage totals, and abuse reports include signed proofs.
 
 Try it in a minute
 - Run the Quick Start below to see a live demo that creates a wallet, submits a tiny action, and includes it in the next one‑second “page” of the notebook.
@@ -386,6 +387,16 @@ curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"submit_tx","params":{"tx":"<hex>"}}'
 # => {"jsonrpc":"2.0","result":{"status":"ok"},"id":2}
+
+# Register and resolve @handles
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"register_handle","params":{"handle":"@alice","address":"alice"}}'
+# => {"jsonrpc":"2.0","result":{"status":"ok"},"id":3}
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"resolve_handle","params":{"handle":"@alice"}}'
+# => {"jsonrpc":"2.0","result":{"address":"alice"},"id":4}
 
 # Start and stop mining
 curl -s -X POST 127.0.0.1:3030 \
