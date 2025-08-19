@@ -6,9 +6,9 @@ use std::sync::{
 };
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::time::{timeout, Duration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
+use tokio::time::{timeout, Duration};
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -81,9 +81,7 @@ async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<
     // If the client sent 'Expect: 100-continue', acknowledge it to unblock senders.
     if expect_continue {
         let stream = reader.get_mut();
-        let _ = stream
-            .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
-            .await;
+        let _ = stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await;
         let _ = stream.flush().await;
     }
 

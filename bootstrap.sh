@@ -28,8 +28,6 @@ IFS=$'\n\t'
 
 APP_NAME="the-block"
 REQUIRED_PYTHON="3.12.3"
-REQUIRED_NODE="20"
-NVM_VERSION="0.39.7"
 PARTIAL_RUN_FLAG=".bootstrap_partial"
 touch "$PARTIAL_RUN_FLAG"
 
@@ -178,26 +176,17 @@ elif command -v conda &>/dev/null && conda info --envs | grep -q '3\.12'; then
 else
   if ! command -v pyenv &>/dev/null; then
     run_step "install pyenv" curl https://pyenv.run | bash
-    export PATH="$HOME/.pyenv/bin:$PATH"
-    eval "$(pyenv init -)"
-    eval "$(pyenv virtualenv-init -)"
-  else
-    export PATH="$HOME/.pyenv/bin:$PATH"
-    eval "$(pyenv init -)"
-    eval "$(pyenv virtualenv-init -)"
   fi
-  # ----> ENSURE pyenv always available before every pyenv command <----
-  export PATH="$HOME/.pyenv/bin:$PATH"
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
+  pyenv_init() {
+    export PATH="$HOME/.pyenv/bin:$PATH"
+    eval "$(pyenv init -)"
+    eval "$(pyenv virtualenv-init -)"
+  }
+  pyenv_init
   run_step "pyenv install $REQUIRED_PYTHON" pyenv install -s "$REQUIRED_PYTHON"
-  export PATH="$HOME/.pyenv/bin:$PATH"
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
+  pyenv_init
   run_step "pyenv local $REQUIRED_PYTHON" pyenv local "$REQUIRED_PYTHON"
-  export PATH="$HOME/.pyenv/bin:$PATH"
-  eval "$(pyenv init -)"
-  eval "$(pyenv virtualenv-init -)"
+  pyenv_init
   PY_BIN="$(pyenv which python)"
 fi
 
@@ -227,16 +216,6 @@ if ! python -c 'import sqlite3' 2>/dev/null; then
   SKIPPED_STEPS+=("Python missing sqlite3; re-install with headers to fix")
 fi
 
-# Node/NVM, Yarn/pnpm globally
-export NVM_DIR="$HOME/.nvm"
-[[ -s "$NVM_DIR/nvm.sh" ]] || run_step "install nvm" curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v$NVM_VERSION/install.sh | bash
-source "$NVM_DIR/nvm.sh"
-command -v node &>/dev/null && [[ "$(node -v)" == v$REQUIRED_NODE* ]] || run_step "nvm install $REQUIRED_NODE" nvm install "$REQUIRED_NODE"
-run_step "nvm alias default" nvm alias default $REQUIRED_NODE
-run_step "nvm use $REQUIRED_NODE" nvm use $REQUIRED_NODE
-command -v yarn &>/dev/null || run_step "npm install -g yarn" npm install -g yarn
-command -v pnpm &>/dev/null || run_step "npm install -g pnpm" npm install -g pnpm
-
 # Rust toolchain, just, cargo-make, maturin
 if ! command -v cargo &>/dev/null; then
   run_step "install Rust" curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -255,7 +234,6 @@ fi
 # Skeleton files
 [[ -f requirements.txt ]]         || echo "# placeholder" > requirements.txt
 [[ -f README.md       ]]         || echo -e "# $APP_NAME\n\nBootstrap complete. Next steps:\n- Edit README\n- Push code\n" > README.md
-[[ -f package.json    ]]         || echo '{ "name": "the-block", "version": "0.1.0" }' > package.json
 [[ -f .pre-commit-config.yaml ]] || echo "# See https://pre-commit.com" > .pre-commit-config.yaml
 
 # Optional builds
@@ -329,7 +307,7 @@ fi
 cecho green "==> [$APP_NAME] bootstrap complete"
 cecho cyan "   Activate venv:   source .venv/bin/activate"
 
-for exe in python node cargo just docker yarn pnpm; do
+for exe in python cargo just docker; do
   if command -v $exe &>/dev/null; then
     if [[ "$exe" == "python" ]]; then
       cecho blue "   $($exe -V 2>&1 | head -n1)"

@@ -4,7 +4,6 @@
 $ErrorActionPreference = "Stop"
 $APP_NAME = "the-block"
 $REQUIRED_PYTHON = "3.12.3"
-$REQUIRED_NODE = "20"
 $PYTHON_VENV = ".venv"
 $CARGO_BIN = "$env:USERPROFILE\.cargo\bin"
 
@@ -71,22 +70,6 @@ Function Ensure-Venv {
     .\$PYTHON_VENV\Scripts\Activate.ps1
 }
 
-Function Ensure-Node {
-    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        Ensure-Tool "node" "nodejs" "nodejs"
-    }
-    $nodever = node --version
-    if ($nodever -notlike "v$REQUIRED_NODE*") {
-        Write-Color Yellow "Node version mismatch. Installing Node $REQUIRED_NODE..."
-        choco install nodejs --version=$REQUIRED_NODE -y
-    }
-}
-
-Function Ensure-Npm-Global($Pkg) {
-    if (-not (npm list -g $Pkg | Select-String $Pkg)) {
-        npm install -g $Pkg
-    }
-}
 
 Function Ensure-Rust {
     if (-not (Test-Path "$CARGO_BIN\rustup.exe")) {
@@ -134,15 +117,11 @@ Ensure-Venv
 Write-Color Cyan "Upgrading pip, setuptools, wheel..."
 .\$PYTHON_VENV\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
 
-Ensure-Node
-Ensure-Npm-Global "yarn"
-Ensure-Npm-Global "pnpm"
-
 Ensure-Rust
 Ensure-Maturin
 Run-Maturin-Develop
 
-# Python/Node project deps
+# Python project deps
 if (Test-Path "requirements.txt" -and (Get-Content requirements.txt | Where-Object {$_ -match '\S'})) {
     Write-Color Cyan "Installing Python requirements..."
     .\$PYTHON_VENV\Scripts\pip.exe install -r requirements.txt
@@ -151,12 +130,10 @@ if (Test-Path "pyproject.toml" -and (Get-Command poetry -ErrorAction SilentlyCon
     Write-Color Cyan "Installing poetry deps..."
     poetry install
 }
-if (Test-Path "package.json") {
-    if (Test-Path "pnpm-lock.yaml") { pnpm install }
-    elseif (Test-Path "yarn.lock") { yarn install }
-    elseif (Test-Path "package-lock.json") { npm ci }
-    else { npm install }
-}
+  if (Test-Path "package.json" -and (Get-Command npm -ErrorAction SilentlyContinue)) {
+      if (Test-Path "package-lock.json") { npm ci }
+      else { npm install }
+  }
 
 # Optional: Pre-commit hooks (if desired)
 if (Test-Path ".pre-commit-config.yaml") {
@@ -168,15 +145,12 @@ if (Test-Path ".pre-commit-config.yaml") {
 Write-Color Green "==> [$APP_NAME] bootstrap complete."
 Write-Color Cyan "Activate venv:  .\$PYTHON_VENV\Scripts\Activate.ps1"
 Write-Color Cyan "Python: $(.\$PYTHON_VENV\Scripts\python.exe --version)"
-Write-Color Cyan "Node: $(node --version)"
 Write-Color Cyan "Rust: $(rustc --version)"
 Write-Color Cyan "Cargo: $(cargo --version)"
 
 # Show other tools if present
-foreach ($tool in "docker", "yarn", "pnpm") {
-    if (Get-Command $tool -ErrorAction SilentlyContinue) {
-        Write-Color Blue "$tool: $(& $tool --version)"
-    }
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+    Write-Color Blue "docker: $(docker --version)"
 }
 
 Write-Color Yellow "If anything failed, see errors above or re-run as Administrator for missing tools."
