@@ -7,8 +7,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 if [[ -z "${VIRTUAL_ENV:-}" || "$(which python)" != "$REPO_ROOT/.venv/bin/python" ]]; then
-  echo "Error: activate the venv at $REPO_ROOT/.venv before running." >&2
-  exit 1
+  if [[ -f "$REPO_ROOT/.venv/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/.venv/bin/activate"
+  else
+    echo "Error: activate the venv at $REPO_ROOT/.venv before running." >&2
+    exit 1
+  fi
 fi
 
 FEATURE_CANDIDATES=(fuzzy telemetry)

@@ -527,9 +527,10 @@ fn test_fork_and_reorg_resolution() {
     let (_dir1, mut bc1) = temp_blockchain("temp_chain");
     let (_dir2, mut bc2) = temp_blockchain("temp_chain");
 
+    let ts = 1_000;
     for bc in [&mut bc1, &mut bc2].iter_mut() {
         bc.add_account("miner".into(), 0, 0).unwrap();
-        bc.mine_block("miner").unwrap();
+        bc.mine_block_at("miner", ts).unwrap();
     }
 
     // chain lengths diverge
@@ -636,9 +637,10 @@ fn test_chain_determinism() {
     init();
     let (_dir1, mut bc1) = temp_blockchain("temp_chain");
     let (_dir2, mut bc2) = temp_blockchain("temp_chain");
+    let ts = 1_000;
     for bc in [&mut bc1, &mut bc2].iter_mut() {
         bc.add_account("miner".into(), 0, 0).unwrap();
-        bc.mine_block("miner").unwrap();
+        bc.mine_block_at("miner", ts).unwrap();
     }
 
     let (privkey, _pubk) = generate_keypair();
@@ -647,8 +649,8 @@ fn test_chain_determinism() {
     bc1.submit_transaction(tx1).unwrap();
     bc2.submit_transaction(tx2).unwrap();
 
-    bc1.mine_block("miner").unwrap();
-    bc2.mine_block("miner").unwrap();
+    bc1.mine_block_at("miner", ts + 1).unwrap();
+    bc2.mine_block_at("miner", ts + 1).unwrap();
 
     assert_eq!(bc1.chain, bc2.chain);
 }

@@ -37,6 +37,9 @@ What you can do (as a normal person)
 - Use “compute‑backed money”: Points you earn/spend map to real utility.
   How: The network publishes a daily “redeem curve” (e.g., 100 points buys 60 seconds of standard compute or 500 MB delivered today). Those rates are enforced by receipts and a reserve funded from marketplace fees.
   Why it’s useful: Your points aren’t just speculative — they reliably buy time/bytes you can use or gift.
+- Settle small tabs instantly: Pay back a friend or tip a helper without swapping apps.
+  How: Your wallet signs a tiny transfer and the chain confirms it in the next one‑second “page,” leaving a tamper‑proof receipt.
+  Why it helps: It’s as quick as handing over cash, and everyone sees exactly what cleared.
 
 Why this could be great for you
 - It’s faster: Local links avoid far‑away detours; the first chunks show up immediately and keep streams smooth.
@@ -50,6 +53,7 @@ Everyday examples
 - Sending a 1 GB video to a friend: The app sends encrypted chunks over local Wi‑Fi; both devices get a “delivered” receipt on the public notebook. If a helper relayed, they get a small credit.
 - Phone upgrade day in your neighborhood: A few plugged‑in devices seed the update; your phone verifies each chunk by hash and finishes in seconds. Everyone who seeded gets paid per MB delivered.
 - Helping quietly at home: Overnight, your PC finishes 40 short transcode slices and relays 1 GB of updates. In the morning, your wallet shows “+340 points” with line‑item receipts.
+- Paying a friend back for coffee: You send them a few points from your wallet; both of you see the credit and receipt almost instantly.
 
 Common questions
 - Is this a coin? Treat points like app credits with clear utility. You can hold them, trade them, or redeem for compute/data. The network publishes rates daily and enforces them with receipts.

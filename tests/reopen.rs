@@ -160,6 +160,7 @@ fn ttl_expired_purged_on_restart() {
 }
 
 #[test]
+#[serial_test::serial]
 fn startup_ttl_purge_increments_metrics() {
     init();
     let (sk, _pk) = generate_keypair();
@@ -197,12 +198,14 @@ fn startup_ttl_purge_increments_metrics() {
         bc.persist_chain().unwrap();
         bc.path.clear();
     }
+    #[cfg(feature = "telemetry")]
+    let start_ttl = telemetry::STARTUP_TTL_DROP_TOTAL.get();
     let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(0, bc2.mempool.len());
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
-        assert_eq!(1, telemetry::STARTUP_TTL_DROP_TOTAL.get());
+        assert_eq!(1, telemetry::TTL_DROP_TOTAL.get() - start_ttl);
+        assert_eq!(start_ttl + 1, telemetry::STARTUP_TTL_DROP_TOTAL.get());
         assert_eq!(0, telemetry::MEMPOOL_SIZE.get());
     }
 }

@@ -137,7 +137,7 @@ pub(crate) fn load_net_key() -> SigningKey {
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
             dirs::home_dir()
-                .expect("home dir")
+                .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("net_key")
         });
