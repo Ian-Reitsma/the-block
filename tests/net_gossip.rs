@@ -9,7 +9,7 @@ use std::time::Duration;
 use tempfile::tempdir;
 use the_block::{
     generate_keypair,
-    net::{Handshake, Message, Node, Payload, PROTOCOL_VERSION},
+    net::{Handshake, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
     sign_tx, Block, Blockchain, RawTxPayload, TokenAmount,
 };
 
@@ -184,7 +184,7 @@ fn invalid_gossip_tx_rejected() {
     let hs = Handshake {
         node_id: kp.verifying_key().to_bytes(),
         protocol_version: PROTOCOL_VERSION,
-        features: Vec::new(),
+        features: LOCAL_FEATURES,
     };
     send(addr, &kp, Payload::Handshake(hs));
     let (sk, _pk) = generate_keypair();
@@ -222,7 +222,7 @@ fn invalid_gossip_block_rejected() {
     let hs = Handshake {
         node_id: kp.verifying_key().to_bytes(),
         protocol_version: PROTOCOL_VERSION,
-        features: Vec::new(),
+        features: LOCAL_FEATURES,
     };
     send(addr, &kp, Payload::Handshake(hs));
 
@@ -237,7 +237,7 @@ fn invalid_gossip_block_rejected() {
         coinbase_consumer: TokenAmount::new(0),
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
-        snapshot_root: String::new(),
+        state_root: String::new(),
     };
     send(addr, &kp, Payload::Block(block));
 
@@ -272,7 +272,7 @@ fn forged_identity_rejected() {
         coinbase_consumer: TokenAmount::new(0),
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
-        snapshot_root: String::new(),
+        state_root: String::new(),
     };
     send(addr, &kp, Payload::Block(block));
 
@@ -297,7 +297,46 @@ fn handshake_version_mismatch_rejected() {
     let bad = Handshake {
         node_id: kp.verifying_key().to_bytes(),
         protocol_version: PROTOCOL_VERSION + 1,
-        features: Vec::new(),
+        features: LOCAL_FEATURES,
+    };
+    send(addr, &kp, Payload::Handshake(bad));
+
+    let (sk, _pk) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "x".into(),
+        to: "y".into(),
+        amount_consumer: 1,
+        amount_industrial: 1,
+        fee: 1,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    send(addr, &kp, Payload::Tx(tx));
+
+    thread::sleep(Duration::from_millis(100));
+    assert!(node.blockchain().mempool.is_empty());
+}
+
+/// Peers missing required feature bits are ignored.
+#[test]
+#[serial]
+fn handshake_feature_mismatch_rejected() {
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr = free_addr();
+    let node = Node::new(addr, vec![], Blockchain::default());
+    let _h = node.start();
+
+    let mut rng = OsRng;
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    let kp = SigningKey::from_bytes(&seed);
+    let bad = Handshake {
+        node_id: kp.verifying_key().to_bytes(),
+        protocol_version: PROTOCOL_VERSION,
+        features: 0,
     };
     send(addr, &kp, Payload::Handshake(bad));
 
@@ -335,4 +374,125 @@ fn discover_peers_from_file_loads_seeds() {
     node1.discover_peers_from_file(&cfg);
     thread::sleep(Duration::from_millis(100));
     assert!(node1.peer_addrs().contains(&addr2));
+}
+
+#[test]
+#[serial]
+fn peer_rate_limit_and_ban() {
+    std::env::set_var("TB_P2P_MAX_PER_SEC", "3");
+    std::env::set_var("TB_P2P_BAN_SECS", "60");
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr = free_addr();
+    let mut bc = Blockchain::default();
+    bc.add_account("alice".into(), 100, 0).unwrap();
+    bc.add_account("bob".into(), 0, 0).unwrap();
+    let node = Node::new(addr, vec![], bc);
+    let _h = node.start();
+    let mut rng = OsRng;
+    let mut seed = [0u8; 32];
+    rng.fill_bytes(&mut seed);
+    let sk = SigningKey::from_bytes(&seed);
+    send(
+        addr,
+        &sk,
+        Payload::Handshake(Handshake {
+            node_id: sk.verifying_key().to_bytes(),
+            protocol_version: PROTOCOL_VERSION,
+            features: LOCAL_FEATURES,
+        }),
+    );
+    for _ in 0..4 {
+        send(addr, &sk, Payload::Hello(vec![]));
+    }
+    let (sk_tx, _pk_tx) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "alice".into(),
+        to: "bob".into(),
+        amount_consumer: 1,
+        amount_industrial: 0,
+        fee: 1000,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk_tx.to_vec(), payload).unwrap();
+    send(addr, &sk, Payload::Tx(tx));
+    thread::sleep(Duration::from_millis(100));
+    assert!(node.blockchain().mempool.is_empty());
+    std::env::remove_var("TB_P2P_MAX_PER_SEC");
+    std::env::remove_var("TB_P2P_BAN_SECS");
+    std::env::remove_var("TB_NET_KEY_PATH");
+}
+
+#[test]
+#[serial]
+fn partition_state_replay() {
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let addr1 = free_addr();
+    let addr2 = free_addr();
+
+    let mut bc1 = Blockchain::default();
+    let mut bc2 = Blockchain::default();
+    bc1.add_account("alice".into(), 5000, 0).unwrap();
+    bc1.add_account("bob".into(), 0, 0).unwrap();
+    bc2.add_account("alice".into(), 5000, 0).unwrap();
+    bc2.add_account("bob".into(), 0, 0).unwrap();
+
+    let node1 = Node::new(addr1, vec![addr2], bc1);
+    let node2 = Node::new(addr2, vec![addr1], bc2);
+
+    let _h1 = node1.start();
+    let _h2 = node2.start();
+
+    let mut ts = 1;
+    let (sk, _pk) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "alice".into(),
+        to: "bob".into(),
+        amount_consumer: 5,
+        amount_industrial: 0,
+        fee: 1000,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx = sign_tx(sk.to_vec(), payload).unwrap();
+    {
+        let mut bc = node1.blockchain();
+        bc.submit_transaction(tx).unwrap();
+        bc.mine_block_at("alice", ts).unwrap();
+    }
+
+    {
+        let mut bc = node2.blockchain();
+        bc.mine_block_at("alice", ts).unwrap();
+        ts += 1;
+        bc.mine_block_at("alice", ts).unwrap();
+    }
+
+    node1.discover_peers();
+    node2.discover_peers();
+    node1.broadcast_chain();
+    node2.broadcast_chain();
+    thread::sleep(Duration::from_millis(200));
+
+    assert_eq!(node1.blockchain().block_height, 2);
+    assert_eq!(node2.blockchain().block_height, 2);
+    let bal1 = node1
+        .blockchain()
+        .accounts
+        .get("bob")
+        .map(|a| a.balance.consumer)
+        .unwrap_or(0);
+    let bal2 = node2
+        .blockchain()
+        .accounts
+        .get("bob")
+        .map(|a| a.balance.consumer)
+        .unwrap_or(0);
+    assert_eq!(bal1, 0);
+    assert_eq!(bal2, 0);
+    std::env::remove_var("TB_NET_KEY_PATH");
 }

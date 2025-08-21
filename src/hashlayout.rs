@@ -13,6 +13,7 @@ pub struct BlockEncoder<'a> {
     pub coin_c: u64,
     pub coin_i: u64,
     pub fee_checksum: &'a str,
+    pub state_root: &'a str,
     pub tx_ids: &'a [&'a [u8]],
 }
 
@@ -26,6 +27,7 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.coin_c.to_le_bytes());
         h.update(&self.coin_i.to_le_bytes());
         h.update(self.fee_checksum.as_bytes());
+        h.update(self.state_root.as_bytes());
         for id in self.tx_ids {
             h.update(id);
         }

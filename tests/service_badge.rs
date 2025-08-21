@@ -9,6 +9,11 @@ fn badge_issued_after_90_days() {
     for _ in 0..90 {
         tracker.record_epoch(true, Duration::from_millis(0));
     }
-    tracker.check_badges();
     assert!(tracker.has_badge());
+
+    // Drop below the revocation threshold.
+    for _ in 0..90 {
+        tracker.record_epoch(false, Duration::from_millis(0));
+    }
+    assert!(!tracker.has_badge());
 }

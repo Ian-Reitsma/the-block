@@ -15,13 +15,18 @@ impl ServiceBadgeTracker {
         Self::default()
     }
 
-    /// Record whether the node was up for the given epoch.
-    pub fn record_epoch(&mut self, up: bool, latency: Duration) {
+    /// Record a heartbeat proof for the current epoch.
+    ///
+    /// A valid proof counts toward uptime; missing or invalid proofs are
+    /// treated as downtime and may revoke an existing badge.
+    pub fn record_epoch(&mut self, proof_ok: bool, latency: Duration) {
         self.total_epochs += 1;
-        if up {
+        if proof_ok {
             self.uptime_epochs += 1;
         }
         self.latency_samples.push(latency);
+        // Update badge status on each epoch so lapses trigger revocation.
+        self.check_badges();
     }
 
     /// Percentage of epochs where the node was considered up.
@@ -34,8 +39,13 @@ impl ServiceBadgeTracker {
 
     /// Mint or revoke badges based on recorded metrics.
     pub fn check_badges(&mut self) {
-        if !self.badge_minted && self.total_epochs >= 90 && self.uptime_percent() >= 99.0 {
-            self.badge_minted = true;
+        if !self.badge_minted {
+            if self.total_epochs >= 90 && self.uptime_percent() >= 99.0 {
+                self.badge_minted = true;
+            }
+        } else if self.uptime_percent() < 95.0 {
+            // Revoke the badge if uptime slips below 95% after minting.
+            self.badge_minted = false;
         }
     }
 

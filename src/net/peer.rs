@@ -2,15 +2,18 @@ use super::{load_net_key, send_msg, PROTOCOL_VERSION};
 use crate::net::message::{Message, Payload};
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use std::collections::HashSet;
+use once_cell::sync::Lazy;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// Thread-safe peer set used by the gossip layer.
 #[derive(Clone, Default)]
 pub struct PeerSet {
     addrs: Arc<Mutex<HashSet<SocketAddr>>>,
     authorized: Arc<Mutex<HashSet<[u8; 32]>>>,
+    states: Arc<Mutex<HashMap<[u8; 32], PeerState>>>,
 }
 
 impl PeerSet {
@@ -20,6 +23,7 @@ impl PeerSet {
         Self {
             addrs: Arc::new(Mutex::new(set)),
             authorized: Arc::new(Mutex::new(HashSet::new())),
+            states: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -51,6 +55,33 @@ impl PeerSet {
             .unwrap_or(false)
     }
 
+    fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
+        let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(*pk).or_insert(PeerState {
+            count: 0,
+            last: Instant::now(),
+            banned_until: None,
+        });
+        if let Some(until) = entry.banned_until {
+            if until > Instant::now() {
+                return Err(PeerErrorCode::Banned);
+            } else {
+                entry.banned_until = None;
+                entry.count = 0;
+            }
+        }
+        if entry.last.elapsed() >= Duration::from_secs(1) {
+            entry.last = Instant::now();
+            entry.count = 0;
+        }
+        entry.count += 1;
+        if entry.count > *P2P_MAX_PER_SEC {
+            entry.banned_until = Some(Instant::now() + Duration::from_secs(*P2P_BAN_SECS));
+            return Err(PeerErrorCode::RateLimit);
+        }
+        Ok(())
+    }
+
     /// Verify and handle an incoming message. Unknown peers or bad signatures are dropped.
     pub fn handle_message(
         &self,
@@ -74,9 +105,29 @@ impl PeerSet {
             return;
         }
 
+        if let Err(code) = self.check_rate(&msg.pubkey) {
+            telemetry_peer_error(code);
+            if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
+                if let Some(peer_addr) = addr {
+                    if let Ok(mut a) = self.addrs.lock() {
+                        a.remove(&peer_addr);
+                    }
+                }
+                if let Ok(mut auth) = self.authorized.lock() {
+                    auth.remove(&msg.pubkey);
+                }
+            }
+            return;
+        }
+
         match msg.body {
             Payload::Handshake(hs) => {
                 if hs.protocol_version != PROTOCOL_VERSION {
+                    telemetry_peer_error(PeerErrorCode::HandshakeVersion);
+                    return;
+                }
+                if (hs.features & crate::net::REQUIRED_FEATURES) != crate::net::REQUIRED_FEATURES {
+                    telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                     return;
                 }
                 self.authorize(msg.pubkey);
@@ -132,3 +183,54 @@ impl PeerSet {
         }
     }
 }
+
+struct PeerState {
+    count: u32,
+    last: Instant,
+    banned_until: Option<Instant>,
+}
+
+#[derive(Copy, Clone)]
+enum PeerErrorCode {
+    HandshakeVersion,
+    HandshakeFeature,
+    RateLimit,
+    Banned,
+}
+
+#[allow(dead_code)]
+impl PeerErrorCode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::HandshakeVersion => "1000",
+            Self::HandshakeFeature => "1001",
+            Self::RateLimit => "2000",
+            Self::Banned => "2001",
+        }
+    }
+}
+
+fn telemetry_peer_error(code: PeerErrorCode) {
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::PEER_ERROR_TOTAL
+            .with_label_values(&[code.as_str()])
+            .inc();
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = code;
+}
+
+static P2P_MAX_PER_SEC: Lazy<u32> = Lazy::new(|| {
+    std::env::var("TB_P2P_MAX_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100)
+});
+
+static P2P_BAN_SECS: Lazy<u64> = Lazy::new(|| {
+    std::env::var("TB_P2P_BAN_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60)
+});

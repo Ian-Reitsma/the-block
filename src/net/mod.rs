@@ -17,6 +17,12 @@ pub use peer::PeerSet;
 /// Current gossip protocol version.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Feature bits required for peer connections.
+pub const REQUIRED_FEATURES: u32 = crate::p2p::FeatureBits::FEE_ROUTING_V2;
+
+/// Feature bits this node advertises.
+pub const LOCAL_FEATURES: u32 = REQUIRED_FEATURES;
+
 /// A minimal TCP gossip node.
 pub struct Node {
     addr: SocketAddr,
@@ -76,7 +82,7 @@ impl Node {
         let hs = Handshake {
             node_id: self.key.verifying_key().to_bytes(),
             protocol_version: PROTOCOL_VERSION,
-            features: Vec::new(),
+            features: LOCAL_FEATURES,
         };
         let hs_msg = Message::new(Payload::Handshake(hs), &self.key);
         for p in &peers {

@@ -18,6 +18,19 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Python API** – Module definition uses `Bound<PyModule>` in accordance with `pyo3` 0.24.2.
 - **TokenAmount Display** – Added `__repr__`, `__str__`, and `Display` trait implementations
   so amounts print as plain integers in both Python and Rust logs.
+- **RPC Rate Limit** – Stabilized rate-limit enforcement with a deterministic test and
+  typed errors for rate-limited and banned clients.
+- **Compute Market** – Added an execution path for slice outputs, expanded unit tests,
+  and published a sample Grafana dashboard for backlog monitoring.
+- **Formal Harness** – Introduced `formal/compute_market.fst` and wired it into the
+  `formal/Makefile` so CI can type-check compute-market invariants.
+- **Security & Abuse Controls** – Introduced SBOM generation and license
+  gating via `deny.toml`, a `check_cla.sh` helper for contributor license
+  enforcement, and minimal law-enforcement request and warrant-canary logs
+  that hash sensitive metadata.
+- **License Audit & Formal Checks** – Expanded `deny.toml` to allow Unicode,
+  BSD-2-Clause, MPL-2.0, and LLVM-exception licenses and added F★ stubs
+  so `make -C formal` type-checks both `Fee_v2` and `Compute_market`.
 - **NonceGap Error & Purge Helpers** – Exposed `ErrNonceGap`,
   `decode_payload`, and purge-loop controls (`ShutdownFlag`, `PurgeLoopHandle`,
   `maybe_spawn_purge_loop`) honoring `TB_PURGE_LOOP_SECS`.
@@ -54,6 +67,13 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Metrics HTTP Exporter** – `serve_metrics(addr)` spawns a lightweight server
   that returns `gather_metrics()` output. A sample `curl` scrape is shown below.
 - **Async RPC Server** – JSON-RPC listener now uses `tokio` with async tasks for connection handling, eliminating per-connection threads and improving scalability.
+- **Feature-Bit Handshake** – Peers negotiate protocol versions and feature bits; connections missing required bits (`0x0004`) are dropped.
+- **Peer Rate Limits & Ban List** – Nodes track per-peer message rates, banning noisy peers and exporting `peer_error_total{code}` counters.
+- **RPC Rate Limits** – JSON-RPC server rejects abusive clients with typed error codes (`-32001` for rate limit, `-32002` when banned) and records `rpc_client_error_total{code}`.
+- **RPC Nonce Guard** – Mutating RPC methods require a unique `nonce` parameter and reject replays.
+- **Crash-safe WAL** – `SimpleDb` appends all writes to a BLAKE3‑checked write‑ahead log and replays it on restart before truncating.
+- **Snapshot Rotation & Diffs** – The node emits full snapshots every `TB_SNAPSHOT_INTERVAL` blocks and incremental diffs in between; CI now restores from the latest snapshot + diffs.
+- **State Root Proofs** – Each block commits a state Merkle root and `account_proof` exposes inclusion proofs for light clients.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
   telemetry counters.
 - **Panic Tests** – Admission path includes panic-inject steps for rollback and
@@ -176,6 +196,20 @@ For the full rationale see `analysis.txt` and the commit history.
 
 - Finish atomic `(sender, nonce)` admission with rollback-safe reservations.
 - Add property tests for pending-balance invariants and nonce continuity.
+- Land initial compute-market primitives: stake-backed offers, per-slice
+  verification, price bands, and carry-to-earn receipts.
+- Expand compute-market module with job/offer matching, slice payouts,
+  price board tracking, and receipt validation helpers.
+- Add cancellation paths, backlog-based price adjustment, and a sliding
+  price board to refine compute-market economics.
+- Track heartbeat proofs for service-badge minting and revoke badges on
+  sustained lapses to keep governance eligibility current.
+- Scaffold a bicameral voting module with Operator and Builder houses,
+  enforcing quorum and a configurable timelock before execution.
+- Publish SRE runbooks covering mempool spikes, state corruption, and
+  block-halt recovery procedures.
+- Introduce a reproducible-build flow with a pinned toolchain and
+  Dockerfile that emits deterministic hashes.
 
 ### Medium Term
 

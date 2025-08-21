@@ -63,12 +63,42 @@ async fn rpc_smoke() {
     // start and stop mining
     let start = rpc(
         &addr,
-        r#"{"method":"start_mining","params":{"miner":"alice"}}"#,
+        r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
     )
     .await;
     assert_eq!(start["result"]["status"], "ok");
-    let stop = rpc(&addr, r#"{"method":"stop_mining"}"#).await;
+    let stop = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":2}}"#).await;
     assert_eq!(stop["result"]["status"], "ok");
+
+    handle.abort();
+}
+
+#[tokio::test]
+#[serial]
+async fn rpc_nonce_replay_rejected() {
+    let dir = util::temp::temp_dir("rpc_nonce_replay");
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        tx,
+    ));
+    let addr = rx.await.unwrap();
+
+    let first = rpc(
+        &addr,
+        r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
+    )
+    .await;
+    assert_eq!(first["result"]["status"], "ok");
+    let replay = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":1}}"#).await;
+    assert_eq!(
+        replay["error"]["message"].as_str().unwrap(),
+        "replayed nonce"
+    );
 
     handle.abort();
 }
@@ -117,9 +147,16 @@ async fn rpc_concurrent_controls() {
         let tx = Arc::clone(&tx_arc);
         handles.push(tokio::spawn(async move {
             let body = match i % 3 {
-                0 => r#"{"method":"start_mining","params":{"miner":"alice"}}"#.to_string(),
-                1 => r#"{"method":"stop_mining"}"#.to_string(),
-                _ => format!("{{\"method\":\"submit_tx\",\"params\":{{\"tx\":\"{tx}\"}}}}"),
+                0 => format!(
+                    "{{\"method\":\"start_mining\",\"params\":{{\"miner\":\"alice\",\"nonce\":{i}}}}}",
+                    i = i
+                ),
+                1 => format!("{{\"method\":\"stop_mining\",\"params\":{{\"nonce\":{i}}}}}", i = i),
+                _ => format!(
+                    "{{\"method\":\"submit_tx\",\"params\":{{\"tx\":\"{tx}\",\"nonce\":{i}}}}}",
+                    tx = tx,
+                    i = i
+                ),
             };
             let _ = rpc(&addr, &body).await;
         }));
@@ -127,7 +164,7 @@ async fn rpc_concurrent_controls() {
     for h in handles {
         let _ = h.await;
     }
-    let _ = rpc(&addr, r#"{"method":"stop_mining"}"#).await;
+    let _ = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":999}}"#).await;
     assert!(bc.lock().unwrap().mempool.len() <= 1);
 
     handle.abort();
@@ -186,7 +223,7 @@ async fn rpc_fragmented_request() {
     ));
     let addr = rx.await.unwrap();
 
-    let body = r#"{"method":"stop_mining"}"#;
+    let body = r#"{"method":"stop_mining","params":{"nonce":1}}"#;
     let req = format!(
         "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
@@ -205,4 +242,36 @@ async fn rpc_fragmented_request() {
     assert_eq!(val["result"]["status"], "ok");
 
     handle.abort();
+}
+
+#[tokio::test]
+#[serial]
+async fn rpc_rate_limit_and_ban() {
+    std::env::set_var("TB_RPC_MAX_PER_SEC", "1");
+    std::env::set_var("TB_RPC_BAN_SECS", "60");
+    let dir = util::temp::temp_dir("rpc_rate_limit");
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        tx,
+    ));
+    let addr = rx.await.unwrap();
+
+    let req = r#"{"method":"metrics"}"#;
+    let (a, b) = tokio::join!(rpc(&addr, req), rpc(&addr, req));
+    let (ok, limited) = if a["error"].is_null() { (a, b) } else { (b, a) };
+    assert!(ok["error"].is_null());
+    assert_eq!(limited["error"]["message"], "rate limited");
+    assert_eq!(limited["error"]["code"], -32001);
+    let banned = rpc(&addr, req).await;
+    assert_eq!(banned["error"]["message"], "banned");
+    assert_eq!(banned["error"]["code"], -32002);
+
+    handle.abort();
+    std::env::remove_var("TB_RPC_MAX_PER_SEC");
+    std::env::remove_var("TB_RPC_BAN_SECS");
 }

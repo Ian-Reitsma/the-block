@@ -4,9 +4,9 @@ Nodes earn a *service badge* for sustained uptime. Each badge represents
 approximately 90 days of near-perfect availability and is intended for future
 governance voting.
 
-The tracker records whether the node was up for each 600-block epoch and its
+The tracker records a heartbeat proof for each 600-block epoch along with a
 latency sample. When 90 epochs have been recorded and uptime exceeds 99%, a
-badge is minted.
+badge is minted. If uptime later falls below 95% the badge is revoked.
 
 ```rust
 use the_block::ServiceBadgeTracker;
@@ -14,8 +14,11 @@ let mut tracker = ServiceBadgeTracker::new();
 for _ in 0..90 {
     tracker.record_epoch(true, std::time::Duration::from_millis(0));
 }
-tracker.check_badges();
 assert!(tracker.has_badge());
+for _ in 0..90 {
+    tracker.record_epoch(false, std::time::Duration::from_millis(0));
+}
+assert!(!tracker.has_badge());
 ```
 
 `Blockchain::mine_block` automatically records epochs every 600 blocks and

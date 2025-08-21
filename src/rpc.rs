@@ -1,14 +1,17 @@
 use crate::{Blockchain, SignedTransaction};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::net::IpAddr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration as TokioDuration};
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -42,12 +45,118 @@ struct RpcError {
     message: &'static str,
 }
 
-async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<AtomicBool>) {
+struct ClientState {
+    count: u32,
+    last: Instant,
+    banned_until: Option<Instant>,
+}
+
+#[derive(Copy, Clone)]
+enum RpcClientErrorCode {
+    RateLimit,
+    Banned,
+}
+
+#[allow(dead_code)]
+impl RpcClientErrorCode {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::RateLimit => "2000",
+            Self::Banned => "2001",
+        }
+    }
+    fn rpc_code(&self) -> i32 {
+        match self {
+            Self::RateLimit => -32001,
+            Self::Banned => -32002,
+        }
+    }
+    fn message(&self) -> &'static str {
+        match self {
+            Self::RateLimit => "rate limited",
+            Self::Banned => "banned",
+        }
+    }
+}
+
+fn telemetry_rpc_error(code: RpcClientErrorCode) {
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::RPC_CLIENT_ERROR_TOTAL
+            .with_label_values(&[code.as_str()])
+            .inc();
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = code;
+}
+
+fn check_client(
+    addr: &IpAddr,
+    clients: &Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    max_per_sec: u32,
+    ban_secs: u64,
+) -> Result<(), RpcClientErrorCode> {
+    let mut map = clients.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = map.entry(*addr).or_insert(ClientState {
+        count: 0,
+        last: Instant::now(),
+        banned_until: None,
+    });
+    if let Some(until) = entry.banned_until {
+        if until > Instant::now() {
+            return Err(RpcClientErrorCode::Banned);
+        } else {
+            entry.banned_until = None;
+            entry.count = 0;
+        }
+    }
+    if entry.last.elapsed() >= Duration::from_secs(1) {
+        entry.last = Instant::now();
+        entry.count = 0;
+    }
+    entry.count += 1;
+    if entry.count > max_per_sec {
+        entry.banned_until = Some(Instant::now() + Duration::from_secs(ban_secs));
+        return Err(RpcClientErrorCode::RateLimit);
+    }
+    Ok(())
+}
+
+fn check_nonce(
+    params: &serde_json::Value,
+    nonces: &Arc<Mutex<HashSet<u64>>>,
+) -> Result<(), RpcError> {
+    let nonce = params
+        .get("nonce")
+        .and_then(|v| v.as_u64())
+        .ok_or(RpcError {
+            code: -32602,
+            message: "missing nonce",
+        })?;
+    let mut guard = nonces.lock().map_err(|_| RpcError {
+        code: -32603,
+        message: "internal error",
+    })?;
+    if !guard.insert(nonce) {
+        return Err(RpcError {
+            code: -32000,
+            message: "replayed nonce",
+        });
+    }
+    Ok(())
+}
+
+async fn handle_conn(
+    stream: TcpStream,
+    bc: Arc<Mutex<Blockchain>>,
+    mining: Arc<AtomicBool>,
+    nonces: Arc<Mutex<HashSet<u64>>>,
+) {
     let mut reader = BufReader::new(stream);
 
     // Read request line with timeout to avoid hanging connections.
     let mut line = String::new();
-    match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
+    match timeout(TokioDuration::from_secs(3), reader.read_line(&mut line)).await {
         Ok(Ok(_)) => {}
         _ => return,
     }
@@ -57,7 +166,7 @@ async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<
     let mut expect_continue = false;
     loop {
         line.clear();
-        let read = match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
+        let read = match timeout(TokioDuration::from_secs(3), reader.read_line(&mut line)).await {
             Ok(Ok(n)) => n,
             _ => return,
         };
@@ -88,10 +197,13 @@ async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<
     // Read body (if any) with timeout; default to empty on missing Content-Length.
     let mut body_bytes = vec![0u8; content_len];
     if content_len > 0 {
-        if timeout(Duration::from_secs(3), reader.read_exact(&mut body_bytes))
-            .await
-            .ok()
-            .is_none()
+        if timeout(
+            TokioDuration::from_secs(3),
+            reader.read_exact(&mut body_bytes),
+        )
+        .await
+        .ok()
+        .is_none()
         {
             return;
         }
@@ -102,7 +214,12 @@ async fn handle_conn(stream: TcpStream, bc: Arc<Mutex<Blockchain>>, mining: Arc<
     let resp = match req {
         Ok(r) => {
             let id = r.id.clone();
-            match dispatch(&r, bc, mining) {
+            match dispatch(
+                &r,
+                Arc::clone(&bc),
+                Arc::clone(&mining),
+                Arc::clone(&nonces),
+            ) {
                 Ok(v) => RpcResponse::Result {
                     jsonrpc: "2.0",
                     result: v,
@@ -147,6 +264,7 @@ fn dispatch(
     req: &RpcRequest,
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
+    nonces: Arc<Mutex<HashSet<u64>>>,
 ) -> Result<serde_json::Value, RpcError> {
     Ok(match req.method.as_str() {
         "set_difficulty" => {
@@ -180,6 +298,7 @@ fn dispatch(
             }
         }
         "register_handle" => {
+            check_nonce(&req.params, &nonces)?;
             let handle = req
                 .params
                 .get("handle")
@@ -214,7 +333,49 @@ fn dispatch(
                 serde_json::json!({"address": null})
             }
         }
+        "record_le_request" => {
+            check_nonce(&req.params, &nonces)?;
+            let agency = req
+                .params
+                .get("agency")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let case = req
+                .params
+                .get("case")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match bc.lock() {
+                Ok(guard) => {
+                    let base = guard.path.clone();
+                    match crate::le_portal::record_request(&base, agency, case) {
+                        Ok(_) => serde_json::json!({"status": "ok"}),
+                        Err(_) => serde_json::json!({"error": "io"}),
+                    }
+                }
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
+        "warrant_canary" => {
+            check_nonce(&req.params, &nonces)?;
+            let msg = req
+                .params
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match bc.lock() {
+                Ok(guard) => {
+                    let base = guard.path.clone();
+                    match crate::le_portal::record_canary(&base, msg) {
+                        Ok(hash) => serde_json::json!({"hash": hash}),
+                        Err(_) => serde_json::json!({"error": "io"}),
+                    }
+                }
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
         "submit_tx" => {
+            check_nonce(&req.params, &nonces)?;
             let tx_hex = req.params.get("tx").and_then(|v| v.as_str()).unwrap_or("");
             match hex::decode(tx_hex)
                 .ok()
@@ -236,6 +397,7 @@ fn dispatch(
             }
         }
         "start_mining" => {
+            check_nonce(&req.params, &nonces)?;
             let miner = req
                 .params
                 .get("miner")
@@ -256,6 +418,7 @@ fn dispatch(
             serde_json::json!({"status": "ok"})
         }
         "stop_mining" => {
+            check_nonce(&req.params, &nonces)?;
             mining.store(false, Ordering::SeqCst);
             serde_json::json!({"status": "ok"})
         }
@@ -288,12 +451,43 @@ pub async fn run_rpc_server(
     let listener = TcpListener::bind(&addr).await?;
     let local = listener.local_addr()?.to_string();
     let _ = ready.send(local);
+    let nonces = Arc::new(Mutex::new(HashSet::new()));
+    let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
+    let max_per_sec = std::env::var("TB_RPC_MAX_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100);
+    let ban_secs = std::env::var("TB_RPC_BAN_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (mut stream, addr) = listener.accept().await?;
+        if let Err(code) = check_client(&addr.ip(), &clients, max_per_sec, ban_secs) {
+            telemetry_rpc_error(code);
+            let err = RpcError {
+                code: code.rpc_code(),
+                message: code.message(),
+            };
+            let body = serde_json::to_string(&RpcResponse::Error {
+                jsonrpc: "2.0",
+                error: err,
+                id: None,
+            })
+            .unwrap();
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).await?;
+            stream.shutdown().await?;
+            continue;
+        }
         let bc = Arc::clone(&bc);
         let mining = Arc::clone(&mining);
+        let nonces = Arc::clone(&nonces);
         tokio::spawn(async move {
-            handle_conn(stream, bc, mining).await;
+            handle_conn(stream, bc, mining, nonces).await;
         });
     }
 }
