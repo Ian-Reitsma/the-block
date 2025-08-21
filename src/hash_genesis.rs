@@ -11,6 +11,7 @@ pub const fn calculate_genesis_hash() -> &'static str {
         coin_c: 0,
         coin_i: 0,
         fee_checksum: ZERO_HASH,
+        state_root: ZERO_HASH,
         tx_ids: &[],
     }
     .const_hash()
@@ -28,6 +29,7 @@ pub fn calculate_genesis_hash_runtime() -> String {
         coin_c: 0,
         coin_i: 0,
         fee_checksum: ZERO_HASH,
+        state_root: ZERO_HASH,
         tx_ids: &[],
     }
     .hash()

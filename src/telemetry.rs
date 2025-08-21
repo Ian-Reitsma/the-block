@@ -1,6 +1,9 @@
+use blake3;
 use once_cell::sync::Lazy;
 use prometheus::{Encoder, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder};
 use pyo3::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -166,6 +169,33 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("peer_error_total", "Total peer errors grouped by code"),
+        &["code"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "rpc_client_error_total",
+            "Total RPC client errors grouped by code",
+        ),
+        &["code"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub struct Recorder;
 
 impl Recorder {
@@ -183,6 +213,105 @@ impl Recorder {
 }
 
 pub static RECORDER: Recorder = Recorder;
+
+pub const LOG_FIELDS: &[&str] = &[
+    "subsystem",
+    "op",
+    "sender",
+    "nonce",
+    "reason",
+    "code",
+    "fpb",
+];
+
+pub static LOG_EMIT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("log_emit_total", "Total emitted log events"),
+        &["subsystem"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("log_drop_total", "Logs dropped due to rate limiting"),
+        &["subsystem"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+static LOG_SEC: AtomicU64 = AtomicU64::new(0);
+static LOG_COUNT: AtomicU64 = AtomicU64::new(0);
+
+/// Maximum log events per second before sampling kicks in.
+pub const LOG_LIMIT: u64 = 100;
+/// After `LOG_LIMIT` is exceeded, emit one in every `LOG_SAMPLE_STRIDE` events.
+pub const LOG_SAMPLE_STRIDE: u64 = 100;
+
+pub fn should_log(subsystem: &str) -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let last = LOG_SEC.load(Ordering::Relaxed);
+    if now != last {
+        LOG_SEC.store(now, Ordering::Relaxed);
+        LOG_COUNT.store(0, Ordering::Relaxed);
+    }
+    let count = LOG_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    if count <= LOG_LIMIT || count % LOG_SAMPLE_STRIDE == 0 {
+        LOG_EMIT_TOTAL.with_label_values(&[subsystem]).inc();
+        true
+    } else {
+        LOG_DROP_TOTAL.with_label_values(&[subsystem]).inc();
+        false
+    }
+}
+
+#[doc(hidden)]
+pub fn reset_log_counters() {
+    LOG_SEC.store(0, Ordering::Relaxed);
+    LOG_COUNT.store(0, Ordering::Relaxed);
+    for sub in ["mempool", "storage", "p2p", "compute"] {
+        LOG_EMIT_TOTAL.with_label_values(&[sub]).reset();
+        LOG_DROP_TOTAL.with_label_values(&[sub]).reset();
+    }
+}
+
+#[pyfunction]
+pub fn redact_at_rest(dir: &str, hours: u64, hash: bool) -> PyResult<()> {
+    use std::fs;
+    use std::time::Duration;
+
+    let cutoff = SystemTime::now() - Duration::from_secs(hours * 3600);
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            let meta = entry.metadata()?;
+            if let Ok(modified) = meta.modified() {
+                if modified < cutoff {
+                    if hash {
+                        let data = fs::read(&path)?;
+                        let digest = blake3::hash(&data).to_hex().to_string();
+                        fs::write(&path, digest)?;
+                    } else {
+                        let _ = fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 fn gather() -> String {
     // Ensure all metrics are registered even if they haven't been used yet so
@@ -203,6 +332,14 @@ fn gather() -> String {
         &*INVALID_SELECTOR_REJECT_TOTAL,
         &*BALANCE_OVERFLOW_REJECT_TOTAL,
         &*DROP_NOT_FOUND_TOTAL,
+        LOG_EMIT_TOTAL.with_label_values(&["mempool"]),
+        LOG_EMIT_TOTAL.with_label_values(&["storage"]),
+        LOG_EMIT_TOTAL.with_label_values(&["p2p"]),
+        LOG_EMIT_TOTAL.with_label_values(&["compute"]),
+        LOG_DROP_TOTAL.with_label_values(&["mempool"]),
+        LOG_DROP_TOTAL.with_label_values(&["storage"]),
+        LOG_DROP_TOTAL.with_label_values(&["p2p"]),
+        LOG_DROP_TOTAL.with_label_values(&["compute"]),
     );
 
     let mut buffer = Vec::new();

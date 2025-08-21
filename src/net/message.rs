@@ -35,8 +35,8 @@ pub struct Handshake {
     pub node_id: [u8; 32],
     /// Protocol version this node speaks.
     pub protocol_version: u32,
-    /// Advertised optional features.
-    pub features: Vec<String>,
+    /// Advertised optional feature bits.
+    pub features: u32,
 }
 
 /// Network message payloads exchanged between peers.

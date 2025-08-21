@@ -1,0 +1,476 @@
+use blake3::Hasher;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+
+/// Minimum bond required on each side of a compute offer.
+pub const MIN_BOND: u64 = 1;
+
+/// A stake-backed offer for compute capacity.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Offer {
+    pub job_id: String,
+    pub provider_bond: u64,
+    pub consumer_bond: u64,
+    pub capacity: u64,
+    pub price: u64,
+}
+
+impl Offer {
+    /// Validate that both sides posted at least `MIN_BOND`.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.provider_bond < MIN_BOND {
+            return Err("provider bond too low");
+        }
+        if self.consumer_bond < MIN_BOND {
+            return Err("consumer bond too low");
+        }
+        Ok(())
+    }
+}
+
+/// A single slice of a job with a reference hash and output hash.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SliceProof {
+    pub reference: [u8; 32],
+    pub output: [u8; 32],
+    pub payout: u64,
+}
+
+impl SliceProof {
+    /// Verify that the output matches the reference hash.
+    pub fn verify(&self) -> bool {
+        self.reference == self.output
+    }
+}
+
+/// Compute price bands (p25, median, p75) for dashboard display.
+pub fn price_bands(prices: &[u64]) -> Option<(u64, u64, u64)> {
+    if prices.is_empty() {
+        return None;
+    }
+    let mut p = prices.to_vec();
+    p.sort_unstable();
+    let median = p[p.len() / 2];
+    let p25 = p[(p.len() as f64 * 0.25).floor() as usize];
+    let p75 = p[(p.len() as f64 * 0.75).floor() as usize];
+    Some((p25, median, p75))
+}
+
+/// Adjust the median price by a backlog factor.
+pub fn adjust_price(median: u64, backlog_factor: f64) -> u64 {
+    (median as f64 * backlog_factor).round() as u64
+}
+
+/// Receipt for carry-to-earn courier mode.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CourierReceipt {
+    pub bundle_hash: String,
+    pub delivered: bool,
+}
+
+/// Create a receipt by hashing bundle bytes.
+pub fn store_receipt(bundle: &[u8]) -> CourierReceipt {
+    let mut h = Hasher::new();
+    h.update(bundle);
+    let bundle_hash = h.finalize().to_hex().to_string();
+    CourierReceipt {
+        bundle_hash,
+        delivered: false,
+    }
+}
+
+/// Mark a receipt as forwarded/delivered.
+pub fn forward_receipt(mut receipt: CourierReceipt) -> CourierReceipt {
+    receipt.delivered = true;
+    receipt
+}
+
+/// Check that a receipt matches the bundle bytes and was delivered.
+pub fn validate_receipt(receipt: &CourierReceipt, bundle: &[u8]) -> bool {
+    let mut h = Hasher::new();
+    h.update(bundle);
+    h.finalize().to_hex().to_string() == receipt.bundle_hash && receipt.delivered
+}
+
+/// A workload describes real compute to run for a job slice.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum Workload {
+    Transcode(Vec<u8>),
+    Inference(Vec<u8>),
+}
+
+fn run_workload(w: &Workload) -> [u8; 32] {
+    let mut h = Hasher::new();
+    match w {
+        Workload::Transcode(data) | Workload::Inference(data) => h.update(data),
+    };
+    *h.finalize().as_bytes()
+}
+
+/// A job submitted by a consumer with per-slice reference hashes.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Job {
+    pub job_id: String,
+    pub slices: Vec<[u8; 32]>,
+    pub price_per_slice: u64,
+    pub consumer_bond: u64,
+    pub workloads: Vec<Workload>,
+}
+
+/// Internal state for a matched job.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct JobState {
+    job: Job,
+    provider_bond: u64,
+    paid_slices: usize,
+    completed: bool,
+}
+
+/// In-memory market tracking offers and active jobs.
+#[derive(Default)]
+pub struct Market {
+    offers: HashMap<String, Offer>,
+    jobs: HashMap<String, JobState>,
+}
+
+impl Market {
+    /// Create an empty market.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Post an offer from a provider.
+    pub fn post_offer(&mut self, offer: Offer) -> Result<(), &'static str> {
+        offer.validate()?;
+        if self.offers.contains_key(&offer.job_id) {
+            return Err("offer already exists");
+        }
+        self.offers.insert(offer.job_id.clone(), offer);
+        Ok(())
+    }
+
+    /// Submit a job from the consumer side, matching an existing offer.
+    pub fn submit_job(&mut self, job: Job) -> Result<(), &'static str> {
+        if job.consumer_bond < MIN_BOND {
+            return Err("consumer bond too low");
+        }
+        if job.workloads.len() != job.slices.len() {
+            return Err("workload count mismatch");
+        }
+        let offer = self.offers.remove(&job.job_id).ok_or("no offer for job")?;
+        let state = JobState {
+            job,
+            provider_bond: offer.provider_bond,
+            paid_slices: 0,
+            completed: false,
+        };
+        self.jobs.insert(state.job.job_id.clone(), state);
+        Ok(())
+    }
+
+    /// Cancel an unmatched offer and return it.
+    pub fn cancel_offer(&mut self, job_id: &str) -> Option<Offer> {
+        self.offers.remove(job_id)
+    }
+
+    /// Cancel an in-flight job, returning both bonds.
+    pub fn cancel_job(&mut self, job_id: &str) -> Option<(u64, u64)> {
+        let state = self.jobs.remove(job_id)?;
+        Some((state.provider_bond, state.job.consumer_bond))
+    }
+
+    /// Verify a slice proof and record the payout.
+    pub fn submit_slice(&mut self, job_id: &str, proof: SliceProof) -> Result<u64, &'static str> {
+        let state = self.jobs.get_mut(job_id).ok_or("unknown job")?;
+        if state.completed {
+            return Err("job already completed");
+        }
+        let expected = state
+            .job
+            .slices
+            .get(state.paid_slices)
+            .ok_or("no such slice")?;
+        if &proof.reference != expected {
+            return Err("reference mismatch");
+        }
+        if !proof.verify() {
+            return Err("invalid proof");
+        }
+        if proof.payout != state.job.price_per_slice {
+            return Err("payout mismatch");
+        }
+        state.paid_slices += 1;
+        if state.paid_slices == state.job.slices.len() {
+            state.completed = true;
+        }
+        Ok(proof.payout)
+    }
+
+    /// Finalize a job and release bonds if complete.
+    pub fn finalize_job(&mut self, job_id: &str) -> Option<(u64, u64)> {
+        let state = self.jobs.get(job_id)?;
+        if !state.completed {
+            return None;
+        }
+        let provider_bond = state.provider_bond;
+        let consumer_bond = state.job.consumer_bond;
+        self.jobs.remove(job_id);
+        Some((provider_bond, consumer_bond))
+    }
+
+    /// Execute a job by submitting slice outputs and returning total payout.
+    pub fn execute_job(&mut self, job_id: &str) -> Result<u64, &'static str> {
+        let (slices, workloads, price) = {
+            let state = self.jobs.get(job_id).ok_or("unknown job")?;
+            (
+                state.job.slices.clone(),
+                state.job.workloads.clone(),
+                state.job.price_per_slice,
+            )
+        };
+        let mut total = 0;
+        for (expected, w) in slices.into_iter().zip(workloads.iter()) {
+            let output = run_workload(w);
+            let proof = SliceProof {
+                reference: expected,
+                output,
+                payout: price,
+            };
+            total += self.submit_slice(job_id, proof)?;
+        }
+        Ok(total)
+    }
+
+    /// Compute a backlog factor based on pending slices vs. available capacity.
+    pub fn backlog_factor(&self) -> f64 {
+        let pending: u64 = self
+            .jobs
+            .values()
+            .map(|s| (s.job.slices.len() - s.paid_slices) as u64)
+            .sum();
+        let capacity: u64 = self.offers.values().map(|o| o.capacity).sum();
+        if capacity == 0 {
+            1.0 + pending as f64
+        } else {
+            1.0 + pending as f64 / capacity as f64
+        }
+    }
+}
+
+/// Track recent prices and compute bands.
+pub struct PriceBoard {
+    prices: VecDeque<u64>,
+    max: usize,
+}
+
+impl Default for PriceBoard {
+    fn default() -> Self {
+        Self::new(100)
+    }
+}
+
+impl PriceBoard {
+    /// Create a board retaining up to `max` prices.
+    pub fn new(max: usize) -> Self {
+        Self {
+            prices: VecDeque::new(),
+            max,
+        }
+    }
+
+    /// Record a new price observation, trimming to `max` entries.
+    pub fn record(&mut self, price: u64) {
+        if self.prices.len() == self.max {
+            self.prices.pop_front();
+        }
+        self.prices.push_back(price);
+    }
+
+    /// Return p25/median/p75 bands from observed prices.
+    pub fn bands(&self) -> Option<(u64, u64, u64)> {
+        let v: Vec<u64> = self.prices.iter().copied().collect();
+        price_bands(&v)
+    }
+
+    /// Return a backlog-adjusted median price.
+    pub fn adjusted_median(&self, backlog_factor: f64) -> Option<u64> {
+        self.bands()
+            .map(|(_, median, _)| adjust_price(median, backlog_factor))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn offer_requires_bonds() {
+        let offer = Offer {
+            job_id: "job".into(),
+            provider_bond: 1,
+            consumer_bond: 1,
+            capacity: 10,
+            price: 5,
+        };
+        assert!(offer.validate().is_ok());
+    }
+
+    #[test]
+    fn slice_verification() {
+        let data = b"hello";
+        let mut h = Hasher::new();
+        h.update(data);
+        let hash = *h.finalize().as_bytes();
+        let proof = SliceProof {
+            reference: hash,
+            output: hash,
+            payout: 1,
+        };
+        assert!(proof.verify());
+    }
+
+    #[test]
+    fn price_band_calc() {
+        let bands = price_bands(&[1, 2, 3, 4]).unwrap();
+        assert_eq!(bands, (2, 3, 4));
+    }
+
+    #[test]
+    fn courier_store_forward() {
+        let receipt = store_receipt(b"bundle");
+        assert!(!receipt.delivered);
+        let receipt = forward_receipt(receipt);
+        assert!(receipt.delivered);
+    }
+
+    #[test]
+    fn receipt_validation_roundtrip() {
+        let bundle = b"payload";
+        let mut receipt = store_receipt(bundle);
+        assert!(!validate_receipt(&receipt, bundle));
+        receipt = forward_receipt(receipt);
+        assert!(validate_receipt(&receipt, bundle));
+    }
+
+    #[test]
+    fn job_lifecycle_and_finalize() {
+        let mut market = Market::new();
+        let job_id = "job1".to_string();
+        let offer = Offer {
+            job_id: job_id.clone(),
+            provider_bond: 1,
+            consumer_bond: 1,
+            capacity: 1,
+            price: 5,
+        };
+        market.post_offer(offer).unwrap();
+        let mut h = Hasher::new();
+        h.update(b"slice");
+        let hash = *h.finalize().as_bytes();
+        let job = Job {
+            job_id: job_id.clone(),
+            slices: vec![hash],
+            price_per_slice: 5,
+            consumer_bond: 1,
+            workloads: vec![Workload::Transcode(b"slice".to_vec())],
+        };
+        market.submit_job(job).unwrap();
+        let proof = SliceProof {
+            reference: hash,
+            output: hash,
+            payout: 5,
+        };
+        assert_eq!(market.submit_slice(&job_id, proof).unwrap(), 5);
+        let bonds = market.finalize_job(&job_id).unwrap();
+        assert_eq!(bonds, (1, 1));
+    }
+
+    #[test]
+    fn backlog_adjusts_price() {
+        let mut market = Market::new();
+        let mut h = Hasher::new();
+        h.update(b"a");
+        let hash = *h.finalize().as_bytes();
+        let offer = Offer {
+            job_id: "j1".into(),
+            provider_bond: 1,
+            consumer_bond: 1,
+            capacity: 1,
+            price: 5,
+        };
+        market.post_offer(offer).unwrap();
+        let job = Job {
+            job_id: "j1".into(),
+            slices: vec![hash, hash],
+            price_per_slice: 5,
+            consumer_bond: 1,
+            workloads: vec![
+                Workload::Transcode(b"a".to_vec()),
+                Workload::Transcode(b"a".to_vec()),
+            ],
+        };
+        market.submit_job(job).unwrap();
+        assert!(market.backlog_factor() > 1.0);
+        let mut board = PriceBoard::new(10);
+        board.record(5);
+        let adj = board.adjusted_median(market.backlog_factor()).unwrap();
+        assert!(adj >= 5);
+    }
+
+    #[test]
+    fn cancel_paths() {
+        let mut market = Market::new();
+        let offer = Offer {
+            job_id: "j2".into(),
+            provider_bond: 1,
+            consumer_bond: 1,
+            capacity: 1,
+            price: 5,
+        };
+        market.post_offer(offer.clone()).unwrap();
+        assert!(market.cancel_offer("j2").is_some());
+        market.post_offer(offer).unwrap();
+        let mut h = Hasher::new();
+        h.update(b"slice");
+        let hash = *h.finalize().as_bytes();
+        let job = Job {
+            job_id: "j2".into(),
+            slices: vec![hash],
+            price_per_slice: 5,
+            consumer_bond: 1,
+            workloads: vec![Workload::Transcode(b"slice".to_vec())],
+        };
+        market.submit_job(job).unwrap();
+        let bonds = market.cancel_job("j2").unwrap();
+        assert_eq!(bonds, (1, 1));
+    }
+
+    #[test]
+    fn execute_job_path() {
+        let mut market = Market::new();
+        let job_id = "exec".to_string();
+        let offer = Offer {
+            job_id: job_id.clone(),
+            provider_bond: 1,
+            consumer_bond: 1,
+            capacity: 1,
+            price: 2,
+        };
+        market.post_offer(offer).unwrap();
+        let mut h = Hasher::new();
+        h.update(b"a");
+        let hash = *h.finalize().as_bytes();
+        let job = Job {
+            job_id: job_id.clone(),
+            slices: vec![hash],
+            price_per_slice: 2,
+            consumer_bond: 1,
+            workloads: vec![Workload::Transcode(b"a".to_vec())],
+        };
+        market.submit_job(job).unwrap();
+        let total = market.execute_job(&job_id).unwrap();
+        assert_eq!(total, 2);
+        let bonds = market.finalize_job(&job_id).unwrap();
+        assert_eq!(bonds, (1, 1));
+    }
+}

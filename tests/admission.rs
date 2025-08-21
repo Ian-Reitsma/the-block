@@ -1,6 +1,6 @@
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
-use the_block::hashlayout::BlockEncoder;
+use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
@@ -127,6 +127,7 @@ fn validate_block_rejects_nonce_gap() {
             coin_c: reward_c,
             coin_i: reward_i,
             fee_checksum: &fee_checksum,
+            state_root: ZERO_HASH,
             tx_ids: &id_refs,
         };
         let h = enc.hash();
@@ -159,7 +160,7 @@ fn validate_block_rejects_nonce_gap() {
         coinbase_consumer: TokenAmount::new(reward_c),
         coinbase_industrial: TokenAmount::new(reward_i),
         fee_checksum,
-        snapshot_root: String::new(),
+        state_root: String::new(),
     };
     assert!(!bc.validate_block(&block).unwrap());
 }
@@ -324,6 +325,7 @@ fn validate_block_rejects_wrong_difficulty() {
         coin_c: block.coinbase_consumer.0,
         coin_i: block.coinbase_industrial.0,
         fee_checksum: &block.fee_checksum,
+        state_root: ZERO_HASH,
         tx_ids: &id_refs,
     };
     block.hash = enc.hash();

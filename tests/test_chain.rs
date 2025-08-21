@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::Path};
-use the_block::hashlayout::BlockEncoder;
+use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 use the_block::{
     fee, generate_keypair, sign_tx, Blockchain, ChainDisk, MempoolEntryDisk, RawTxPayload,
     SignedTransaction, TokenAmount, TxAdmissionError,
@@ -613,6 +613,7 @@ fn test_import_difficulty_mismatch() {
         coin_c: fork[idx].coinbase_consumer.0,
         coin_i: fork[idx].coinbase_industrial.0,
         fee_checksum: &fork[idx].fee_checksum,
+        state_root: ZERO_HASH,
         tx_ids: &id_refs,
     };
     fork[idx].hash = enc.hash();

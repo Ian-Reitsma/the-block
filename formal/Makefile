@@ -1,9 +1,13 @@
 FSTAR ?= fstar.exe
-FSTAR_OPTS = --include .
+FSTAR_OPTS = --include . --include $(FSTAR_HOME)/ulib
 
-all: fee_v2.checked
+all: Fee_v2.checked compute_market.checked
 
-fee_v2.checked: fee_v2.fst
+Fee_v2.checked: Fee_v2.fst
+	$(FSTAR) $(FSTAR_OPTS) $<
+	@touch $@
+
+compute_market.checked: Compute_market.fst
 	$(FSTAR) $(FSTAR_OPTS) $<
 	@touch $@
 

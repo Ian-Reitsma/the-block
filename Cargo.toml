@@ -20,10 +20,11 @@ dashmap = "5"
 log = { version = "0.4", optional = true, features = ["kv_unstable"] }
 serde_json = "1"
 prometheus = { version = "0.13", optional = true }
-once_cell = { version = "1", optional = true }
+once_cell = "1"
 tracing = { version = "0.1", optional = true }
 clap = { version = "4", features = ["derive"] }
 base64 = "0.22"
+base64ct = "1.6.0"
 dirs = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
 sled = { version = "0.34" }
@@ -31,7 +32,7 @@ libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio
 
 [features]
 fuzzy = ["proptest"]
-telemetry = ["log", "prometheus", "tracing", "once_cell"]
+telemetry = ["log", "prometheus", "tracing"]
 telemetry-json = ["telemetry"]
 
 [package.metadata.maturin]
@@ -59,3 +60,4 @@ blake3 = "1"
 [lib]
  name = "the_block"
  crate-type = ["cdylib", "rlib"]
+

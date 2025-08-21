@@ -1,145 +1,21 @@
-# The Block
+## Table of Contents
 
-> **A formally‑specified, dual‑token blockchain kernel written in Rust with first‑class Python bindings.**  Zero unsafe code, deterministic serialization, cross‑platform builds, one‑command bootstrap.
-> Built from day one for real-world deployment; every example uses the same APIs shipped to production nodes.
-
-> Quick Links for Users
-> - Vision & Strategy: see AGENTS.md §16 (authoritative) — `AGENTS.md#16-vision--strategy-authoritative`
-> - What to build next: see AGENTS.md §17 (Agent Playbooks) — `AGENTS.md#17-agent-playbooks--consolidated`
-> - Audit & Risks: see AGENTS.md (Audit Appendix) — `AGENTS.md#audit-appendix`
-> - Try it now: jump to Quick Start — `#quick-start`
-
----
-
-## For Everyday Users: What This Is and Why It Matters
-
-Short version: this project turns nearby phones and computers into a friendly utility that helps your apps start instantly, share faster, and keep working even when the internet is spotty — while letting you earn by helping others. It’s a public network that rewards useful work (speeding up downloads, relaying messages, doing a bit of compute) instead of hype. You don’t need to know anything about blockchains; think of it as a trustworthy public notebook that keeps score and pays fairly.
-
-Plain‑English overview
-- A public notebook: Every second, the network adds a new “page” that can’t be edited later. Pages store small receipts like “file X delivered” or “job Y finished” — not your private files. Anyone can verify the receipt without learning your content.
-- Two kinds of points: Your app uses Consumer points (for normal actions) and Industrial points (paid to devices that help). Both are just balances you control in your wallet; no bank or app can take them.
-- Nearby boost: Your phone/computer can fetch from (and help) nearby devices over home Wi‑Fi/Bluetooth/Wi‑Fi Direct. That means faster starts and downloads that don’t stall when the wider internet is slow.
-- Pay for results, not promises: Work is split into tiny slices (think a few seconds of video, or a small chunk of data). Helpers only get paid when a slice finishes. No finish = no charge. That keeps costs fair and predictable.
-
-What you will be able to do as an everyday user
-- Run an unlimited personal cloud: Drop your entire photo library or code repo into your vault and fetch it from any device with your @handle.
-  How: Files are chunked, encrypted, and stored across helpers; receipts prove chunks exist so you never pay twice for the same bytes.
-  Why it helps: No monthly storage bill, no third‑party logins—your vault grows as you do.
-- Host a website or app straight from your wallet.
-  How: Publish a static site or mini‑app bundle under `@handle.site`; nearby nodes serve the first bytes while the rest streams from the mesh or internet.
-  Why it helps: No hosting contract, no DNS hassle, and you can prove exactly what was served.
-
-Why this could be great for you
-- It’s faster: Local links avoid far‑away detours; the first chunks show up immediately and keep streams smooth.
-- It’s cheaper: You can “pay by helping” — a few MB relayed or a short compute slice finished can offset your costs.
-- It works more often: When the wider internet hiccups, nearby helpers keep things flowing.
-- It’s private by default: Files/messages stay end‑to‑end encrypted. Public receipts prove that work happened without revealing your content.
-- You stay in control: You own the keys. Earning is opt‑in with clear limits (Wi‑Fi‑only, power‑only, daily caps) and one‑tap off.
-- No new accounts: @handles act as phone numbers, email addresses, and wallet IDs all at once.
-- Offline still counts: Transfers and messages reconcile automatically when any device comes online, so you never redo work.
-- Coverage pays: Running a lighthouse in a dead zone can literally pay part of your internet bill.
-- Clear receipts: Every action leaves a human‑readable line item; you always know what happened and why you were paid or charged.
-- Unlimited vault: Your storage expands with the network; no subscription walls.
-- Host from anywhere: A site or app tied to your @handle is reachable worldwide with no hosting bill.
-- Built‑in authenticity: Captures and posts ship with provenance, so deepfakes are obvious and real work stands out.
-
-Everyday examples
-- Uploading your whole camera roll once and pulling it down on a new laptop the same day without a subscription bill.
-- Spinning up `@you.site` for your side project in minutes and seeing neighbors fetch the first bytes before any host even sees the request.
-- Posting a video with a green “authentic capture” badge that followers can verify in one tap; obvious deepfakes get flagged immediately.
-- Selling an e‑book or song direct from your vault: buyers pay a few points, download, and the receipt proves exactly what was delivered.
-- Settling a global micro‑tip in a second: your wallet signs, the block lands, both of you get the receipt.
-- Waking to see “+340 points for hosting 5 GB and finishing 40 transcode slices overnight” without touching a settings menu.
-- Unlocking a coffee‑shop TV with a tap to demo your app, then wiping it clean when you leave.
-
-Common questions
-- Is this a coin? Treat points like app credits with clear utility. You can hold them, trade them, or redeem for compute/data. The network publishes rates daily and enforces them with receipts.
-- Will it drain my battery? Earning is off by default on battery. Typical defaults: “plugged‑in + on Wi‑Fi only” with daily caps you can change.
-- Can someone spy on me? No. Apps encrypt content before it leaves your device. The network only sees fingerprints and receipts; helpers never see your plaintext.
-- Do I need to understand blockchains? No. The blockchain is just the shared notebook that keeps score and prevents cheating.
-- Do I need extra hardware? Nope. Phones and laptops work out of the box. Optional “lighthouse” sticks boost range and earnings but aren’t required.
-- What if I’m offline for days? Your messages, payments, and earnings queue securely and finalize the moment any device regains a path.
-- What happens if I lose my device? Your points stay tied to your keys. Use your recovery kit (friends, hardware key, or stored phrase) to restore on a new device.
-- Is sharing my Wi‑Fi risky? Guest traffic is wrapped and capped; hosts see only usage totals, and abuse reports include signed proofs.
-
-Try it in a minute
-- Run the Quick Start below to see a live demo that creates a wallet, submits a tiny action, and includes it in the next one‑second “page” of the notebook.
-
-What’s coming next
-- LocalNet: visible speed boosts for starts/downloads/games by securely using nearby helpers (strict defaults + clear receipts).
-- Carry‑to‑Earn: sealed bundles ride along your commute; delivery receipts unlock small credits on arrival.
-- Compute marketplace: simple early jobs (transcode, authenticity checks) with clear per‑slice prices and daily earning caps.
-- Instant Apps + compute‑backed money: tap‑to‑use mini‑apps that run via nearby compute and settle later; creators paid per use, users often pay zero if they’ve been helping.
+1. [Why The Block](#why-the-block)
+2. [Vision & Current State](#vision--current-state)
+3. [Quick Start](#quick-start)
+4. [Installation & Bootstrap](#installation--bootstrap)
+5. [Build & Test Matrix](#build--test-matrix)
+6. [Using the Python Module](#using-the-python-module)
+7. [Architecture Primer](#architecture-primer)
+8. [Project Layout](#project-layout)
+9. [Status & Roadmap](#status--roadmap)
+10. [Contribution Guidelines](#contribution-guidelines)
+11. [Security Model](#security-model)
+12. [License](#license)
 
 ---
 
-## Project Snapshot
-
-What we have today
-- A fast, predictable base layer that produces a new “block” about every second. Think of a block as a sealed page in a public notebook where everyone can verify the math.
-- A working demo and a local node you can run on your laptop: generate a key, send yourself a tiny transaction, and watch it be included in the next block.
-- Two balances in one wallet: a Consumer balance (for everyday app actions) and an Industrial balance (for compute‑related rewards). Both behave like points; you always keep control of your keys.
-- Safety by design: modern cryptography, no unsafe Rust code, and tests that ensure every machine encodes data exactly the same way.
-- Basic networking and a simple control API so developers can submit transactions, check balances, mine, and scrape health metrics.
-
-What that means (in practice)
-- You can already run a mini version of the chain at home, move value between addresses, and mine new blocks with your CPU.
-- Apps can reliably submit actions and get deterministic results. If it works once, it works the same way next time.
-- The project is engineered for real‑world use, not just a demo: it’s portable (Mac/Windows/Linux), tested, and predictable.
-
-What you can do today (no blockchain experience needed)
-- Install with one command, run the demo, and see a transaction get included in about a second.
-- Start a local node, generate a key, submit a transaction over JSON‑RPC, and query your balance.
-- Mine a block on your CPU to include your transaction.
-- Turn on metrics and watch health counters (like mempool size and rejections) in plain text.
-- Run the full test suite to verify everything works the same on your machine.
-
-Where this is going (near‑term potential)
-- Instant starts and fast sharing, even on weak connections, by securely using nearby devices (LocalNet) and paid relays.
-- A compute marketplace where your device can earn by finishing useful jobs (like video transcodes or authenticity checks). You get paid for results, not promises.
-- Bigger jobs (minutes to hours) get split into pieces with progress receipts; the chain notarizes compact proofs so users can trust the outcome without seeing private data.
-- “Compute‑Backed Money” that lets you trade coins for real utility (seconds of compute or MB delivered), published and enforced by the protocol.
-
-What this is not (yet)
-- A full “app store” or marketplace UI. The kernel exposes APIs and receipts, but user‑facing apps live on top.
-- Long‑term storage backends and full peer discovery. The kernel ships with a simple, test‑friendly store and minimal gossip; robust sync/backends come next.
-- Governance dashboards and on‑chain upgrade packages. The rules are specified; tooling and artifacts will follow in this repo family.
-- A production wallet app. You get a developer‑friendly CLI and Python bindings; polished UX comes in companion projects.
-
-How layers affect you (no jargon)
-- You don’t pick a “layer number.” The network picks the right speed lane for your request automatically.
-- Small actions happen fast (about a second) and get anchored right away.
-- Bigger jobs run in pieces with progress receipts; you still use the same wallet, and you get paid (or charged) only for results.
-
-Simple definitions
-- Blockchain: a shared ledger—like a public notebook—where entries are locked in order so anyone can check them later.
-- Token: a digital “point” that you control with your key; the project uses two kinds to separate everyday use from compute rewards.
-- Block: a sealed batch of entries written about every second.
-- Layer: a speed lane—fast or long‑running—where work gets done and a summary is anchored back to the ledger.
-- Receipt/Root: a compact proof that a batch of work happened; it lets others verify without seeing the private data.
-- Key/Wallet: your secret that authorizes actions; never share it. Lose the key, lose access.
-
----
-
-## Table of Contents
-
-1. [For Everyday Users](#for-everyday-users-what-this-is-and-why-it-matters)
-2. [Why the‑block?](#why-the‑block)
-3. [Vision & Current State](#vision--current-state)
-4. [Quick Start](#quick-start)
-5. [Installation & Bootstrap](#installation--bootstrap)
-6. [Build & Test Matrix](#build--test-matrix)
-7. [Using the Python Module](#using-the-python-module)
-8. [Architecture Primer](#architecture-primer)
-9. [Project Layout](#project-layout)
-10. [Status & Roadmap](#status--roadmap)
-11. [Contribution Guidelines](#contribution-guidelines)
-12. [Security Model](#security-model)
-13. [License](#license)
-
----
-
-## Why the‑block?
+## Why The Block
 
 * **Civic‑grade architecture** – one‑second Layer 1 anchors notarized micro‑shards and ties votes to service via a non‑transferable credit meter.
 * **Dual‑Token Economics** – consumer & industrial coins emitted per block, supporting differentiated incentive layers.

@@ -10,8 +10,10 @@
 //! through dual Consumer/Industrial tokens and a service-credit meter. See
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
+use blake3;
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use hex;
 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
 use log::info;
 #[cfg(feature = "telemetry")]
@@ -32,25 +34,32 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod simple_db;
+pub use simple_db::SimpleDb;
 use simple_db::SimpleDb as Db;
 use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
 
-pub mod net;
 pub mod handles;
+pub mod net;
 pub mod p2p;
 pub mod rpc;
 
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
-pub use telemetry::{gather_metrics, serve_metrics};
+pub use telemetry::{gather_metrics, redact_at_rest, serve_metrics};
 
 pub mod blockchain;
 use blockchain::difficulty;
 pub mod service_badge;
 pub use service_badge::ServiceBadgeTracker;
+
+pub mod governance;
+pub use governance::{Bicameral, Proposal};
+
+pub mod compute_market;
+pub mod le_portal;
 
 pub mod transaction;
 pub use transaction::{
@@ -176,8 +185,15 @@ impl From<TxAdmissionError> for PyErr {
     }
 }
 
+#[cfg(feature = "telemetry")]
+fn scrub(s: &str) -> String {
+    let h = blake3::hash(s.as_bytes());
+    hex::encode(h.as_bytes())
+}
+
 #[cfg(feature = "telemetry-json")]
 fn log_event(
+    subsystem: &str,
     level: log::Level,
     op: &str,
     sender: &str,
@@ -186,9 +202,13 @@ fn log_event(
     code: u16,
     fpb: Option<u64>,
 ) {
+    if !telemetry::should_log(subsystem) {
+        return;
+    }
     let mut obj = serde_json::Map::new();
+    obj.insert("subsystem".into(), json!(subsystem));
     obj.insert("op".into(), json!(op));
-    obj.insert("sender".into(), json!(sender));
+    obj.insert("sender".into(), json!(scrub(sender)));
     obj.insert("nonce".into(), json!(nonce));
     obj.insert("reason".into(), json!(reason));
     obj.insert("code".into(), json!(code));
@@ -440,9 +460,9 @@ pub struct Block {
     /// blake3(total_fee_ct || total_fee_it) in hex
     pub fee_checksum: String,
     #[pyo3(get)]
-    #[serde(default)]
-    /// Merkle root of account state at snapshot checkpoints
-    pub snapshot_root: String,
+    #[serde(default, alias = "snapshot_root")]
+    /// Merkle root of account state
+    pub state_root: String,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -722,6 +742,7 @@ impl Blockchain {
                                 b.coinbase_industrial,
                                 &b.fee_checksum,
                                 &b.transactions,
+                                &b.state_root,
                             );
                         }
                         let mut em_c = 0u64;
@@ -824,6 +845,7 @@ impl Blockchain {
                                     b.coinbase_industrial,
                                     &b.fee_checksum,
                                     &b.transactions,
+                                    &b.state_root,
                                 );
                                 em_c = em_c.saturating_add(b.coinbase_consumer.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
@@ -899,6 +921,7 @@ impl Blockchain {
                             b.coinbase_industrial,
                             &b.fee_checksum,
                             &b.transactions,
+                            &b.state_root,
                         );
                     }
                     let mut em_c = 0u64;
@@ -987,7 +1010,7 @@ impl Blockchain {
         {
             if (snap_height as usize) <= bc.chain.len() {
                 if let Some(b_snap) = bc.chain.get((snap_height - 1) as usize) {
-                    if b_snap.snapshot_root == root {
+                    if b_snap.state_root == root {
                         bc.accounts = snap_accounts;
                         for blk in bc.chain[snap_height as usize..].iter() {
                             for tx in &blk.transactions {
@@ -1095,7 +1118,7 @@ impl Blockchain {
                 let _span = tracing::span!(
                     tracing::Level::TRACE,
                     "startup_rebuild",
-                    sender = %e.sender,
+                    sender = %scrub(&e.sender),
                     nonce = e.nonce,
                     fpb,
                     mempool_size = bc
@@ -1143,6 +1166,7 @@ impl Blockchain {
         info!("startup expired_drop_total={expired_drop_total}");
         #[cfg(feature = "telemetry-json")]
         log_event(
+            "storage",
             log::Level::Info,
             "startup_purge",
             "",
@@ -1170,7 +1194,8 @@ impl Blockchain {
     /// Returns `true` on success and `false` if the handle is taken or address missing.
     pub fn register_handle(&mut self, handle: &str, address: &str) -> bool {
         if self.accounts.contains_key(address) {
-            self.handles.register(handle.to_string(), address.to_string())
+            self.handles
+                .register(handle.to_string(), address.to_string())
         } else {
             false
         }
@@ -1244,7 +1269,7 @@ impl Blockchain {
             coinbase_industrial: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
-            snapshot_root: String::new(),
+            state_root: String::new(),
         };
         self.chain.push(g);
         self.block_height = 1;
@@ -1334,7 +1359,7 @@ impl Blockchain {
             let span = tracing::span!(
                 tracing::Level::TRACE,
                 "mempool_mutex",
-                sender = %sender_addr,
+                sender = %scrub(&sender_addr),
                 nonce,
                 fpb = fee_per_byte,
                 mempool_size = self
@@ -1370,7 +1395,7 @@ impl Blockchain {
             let span = tracing::span!(
                 tracing::Level::TRACE,
                 "admission_lock",
-                sender = %sender_addr,
+                sender = %scrub(&sender_addr),
                 nonce
             );
             span.in_scope(|| lock.lock()).map_err(|_| {
@@ -1395,6 +1420,7 @@ impl Blockchain {
         if tx.payload.fee_selector > 2 {
             #[cfg(feature = "telemetry-json")]
             log_event(
+                "mempool",
                 log::Level::Warn,
                 "reject",
                 &sender_addr,
@@ -1483,7 +1509,7 @@ impl Blockchain {
                         let span = tracing::span!(
                             tracing::Level::TRACE,
                             "admission_lock",
-                            sender = %ev_sender,
+                            sender = %scrub(&ev_sender),
                             nonce = ev_nonce
                         );
                         span.in_scope(|| lock.lock()).map_err(|_| {
@@ -1531,6 +1557,7 @@ impl Blockchain {
                 self.record_reject("mempool_full");
                 #[cfg(feature = "telemetry-json")]
                 log_event(
+                    "mempool",
                     log::Level::Warn,
                     "reject",
                     &sender_addr,
@@ -1550,6 +1577,7 @@ impl Blockchain {
                 #[cfg(feature = "telemetry")]
                 #[cfg(feature = "telemetry-json")]
                 log_event(
+                    "mempool",
                     log::Level::Warn,
                     "reject",
                     &sender_addr,
@@ -1574,6 +1602,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry")]
                         #[cfg(feature = "telemetry-json")]
                         log_event(
+                            "mempool",
                             log::Level::Warn,
                             "reject",
                             &sender_addr,
@@ -1620,6 +1649,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Warn,
                         "reject",
                         &sender_addr,
@@ -1638,6 +1668,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Warn,
                         "reject",
                         &sender_addr,
@@ -1659,6 +1690,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Warn,
                         "reject",
                         &sender_addr,
@@ -1678,6 +1710,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Warn,
                         "reject",
                         &sender_addr,
@@ -1699,6 +1732,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Warn,
                         "reject",
                         &sender_addr,
@@ -1717,6 +1751,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Warn,
                         "reject",
                         &sender_addr,
@@ -1758,6 +1793,7 @@ impl Blockchain {
                     self.record_admit();
                     #[cfg(feature = "telemetry-json")]
                     log_event(
+                        "mempool",
                         log::Level::Info,
                         "admit",
                         &sender_addr,
@@ -1767,10 +1803,14 @@ impl Blockchain {
                         Some(fee_per_byte),
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    info!(
-                        "tx accepted sender={sender_addr} nonce={nonce} reason=accepted id={}",
-                        hex::encode(tx_id)
-                    );
+                    if telemetry::should_log("mempool") {
+                        info!(
+                            "tx accepted sender={} nonce={} reason=accepted id={}",
+                            scrub(&sender_addr),
+                            nonce,
+                            scrub(&hex::encode(tx_id))
+                        );
+                    }
                 }
                 self.inc_mempool_size();
                 Ok(())
@@ -1788,7 +1828,7 @@ impl Blockchain {
             let span = tracing::span!(
                 tracing::Level::TRACE,
                 "mempool_mutex",
-                sender = %sender,
+                sender = %scrub(sender),
                 nonce,
                 fpb = 0u64,
                 mempool_size = self
@@ -1817,7 +1857,7 @@ impl Blockchain {
             .clone();
         #[cfg(feature = "telemetry")]
         let _guard = {
-            let span = tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %sender, nonce = nonce);
+            let span = tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %scrub(sender), nonce = nonce);
             span.in_scope(|| lock.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
                 self.record_reject("lock_poison");
@@ -1861,6 +1901,7 @@ impl Blockchain {
             }
             #[cfg(feature = "telemetry-json")]
             log_event(
+                "mempool",
                 log::Level::Info,
                 "drop",
                 sender,
@@ -1870,11 +1911,18 @@ impl Blockchain {
                 None,
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-            info!("tx dropped sender={sender} nonce={nonce} reason=dropped");
+            if telemetry::should_log("mempool") {
+                info!(
+                    "tx dropped sender={} nonce={} reason=dropped",
+                    scrub(sender),
+                    nonce
+                );
+            }
             Ok(())
         } else {
             #[cfg(feature = "telemetry-json")]
             log_event(
+                "mempool",
                 log::Level::Warn,
                 "drop",
                 sender,
@@ -1928,7 +1976,7 @@ impl Blockchain {
             let _span = tracing::span!(
                 tracing::Level::TRACE,
                 "eviction_sweep",
-                sender = %sender,
+                sender = %scrub(&sender),
                 nonce,
                 fpb,
                 mempool_size = self
@@ -1955,7 +2003,7 @@ impl Blockchain {
                 let _span = tracing::span!(
                     tracing::Level::TRACE,
                     "eviction_sweep",
-                    sender = %sender,
+                    sender = %scrub(&sender),
                     nonce,
                     fpb,
                     mempool_size = self
@@ -2106,6 +2154,66 @@ impl Blockchain {
         };
         let mut txs = vec![coinbase.clone()];
         txs.extend(included.clone());
+
+        // Pre-compute state root using a shadow copy of accounts
+        let mut shadow_accounts = self.accounts.clone();
+        for tx in txs.iter().skip(1) {
+            if tx.payload.from_ != "0".repeat(34) {
+                if let Some(s) = shadow_accounts.get_mut(&tx.payload.from_) {
+                    let (fee_c, fee_i) =
+                        crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                            .unwrap_or((0, 0));
+                    let total_c = tx.payload.amount_consumer + fee_c;
+                    let total_i = tx.payload.amount_industrial + fee_i;
+                    s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
+                    s.balance.industrial = s.balance.industrial.saturating_sub(total_i);
+                    s.nonce = tx.payload.nonce;
+                }
+            }
+            let r = shadow_accounts
+                .entry(tx.payload.to.clone())
+                .or_insert(Account {
+                    address: tx.payload.to.clone(),
+                    balance: TokenBalance {
+                        consumer: 0,
+                        industrial: 0,
+                    },
+                    nonce: 0,
+                    pending_consumer: 0,
+                    pending_industrial: 0,
+                    pending_nonce: 0,
+                    pending_nonces: HashSet::new(),
+                });
+            r.balance.consumer += tx.payload.amount_consumer;
+            r.balance.industrial += tx.payload.amount_industrial;
+        }
+        let miner_shadow = shadow_accounts
+            .entry(miner_addr.to_owned())
+            .or_insert(Account {
+                address: miner_addr.to_owned(),
+                balance: TokenBalance {
+                    consumer: 0,
+                    industrial: 0,
+                },
+                nonce: 0,
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+                pending_nonces: HashSet::new(),
+            });
+        miner_shadow.balance.consumer = miner_shadow
+            .balance
+            .consumer
+            .checked_add(coinbase_consumer)
+            .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
+        miner_shadow.balance.industrial = miner_shadow
+            .balance
+            .industrial
+            .checked_add(coinbase_industrial)
+            .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
+
+        let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
+
         let diff = if self.difficulty == 0 {
             0
         } else {
@@ -2122,7 +2230,7 @@ impl Blockchain {
             coinbase_consumer: TokenAmount::new(coinbase_consumer),
             coinbase_industrial: TokenAmount::new(coinbase_industrial),
             fee_checksum: fee_checksum.clone(),
-            snapshot_root: String::new(),
+            state_root: root.clone(),
         };
 
         let mut nonce = 0u64;
@@ -2137,6 +2245,7 @@ impl Blockchain {
                 TokenAmount::new(coinbase_industrial),
                 &fee_checksum,
                 &txs,
+                &root,
             );
             let bytes = hex_to_bytes(&hash);
             if leading_zero_bits(&bytes) >= diff as u32 {
@@ -2154,7 +2263,7 @@ impl Blockchain {
                     let span = tracing::span!(
                         tracing::Level::TRACE,
                         "mempool_mutex",
-                        sender = %miner_addr,
+                        sender = %scrub(&miner_addr),
                         nonce = 0u64,
                         fpb = 0u64,
                         mempool_size = self
@@ -2176,6 +2285,7 @@ impl Blockchain {
                     }
                     PyValueError::new_err("Lock poisoned")
                 })?;
+                let mut changed: HashSet<String> = HashSet::new();
                 for tx in txs.iter().skip(1) {
                     let lock = self
                         .admission_locks
@@ -2187,7 +2297,7 @@ impl Blockchain {
                         let span = tracing::span!(
                             tracing::Level::TRACE,
                             "admission_lock",
-                            sender = %tx.payload.from_,
+                            sender = %scrub(&tx.payload.from_),
                             nonce = tx.payload.nonce
                         );
                         span.in_scope(|| lock.lock()).map_err(|_| {
@@ -2207,6 +2317,7 @@ impl Blockchain {
                     })?;
 
                     if tx.payload.from_ != "0".repeat(34) {
+                        changed.insert(tx.payload.from_.clone());
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             let (fee_consumer, fee_industrial) =
                                 crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
@@ -2241,6 +2352,7 @@ impl Blockchain {
                         });
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
+                    changed.insert(tx.payload.to.clone());
 
                     self.mempool
                         .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
@@ -2283,6 +2395,7 @@ impl Blockchain {
                     .industrial
                     .checked_add(coinbase_industrial)
                     .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
+                changed.insert(miner_addr.to_owned());
 
                 self.emission_consumer += reward_consumer.0;
                 self.emission_industrial += reward_industrial.0;
@@ -2295,16 +2408,26 @@ impl Blockchain {
                     self.check_badges();
                 }
                 if self.block_height % self.snapshot_interval == 0 {
-                    let root = crate::blockchain::snapshot::write_snapshot(
+                    let r = crate::blockchain::snapshot::write_snapshot(
                         &self.path,
                         self.block_height,
                         &self.accounts,
                     )
                     .map_err(|e| PyValueError::new_err(format!("snapshot error: {e}")))?;
-                    if let Some(last) = self.chain.last_mut() {
-                        last.snapshot_root = root.clone();
-                    }
-                    block.snapshot_root = root;
+                    debug_assert_eq!(r, block.state_root);
+                } else {
+                    let changes: HashMap<String, Account> = changed
+                        .iter()
+                        .filter_map(|a| self.accounts.get(a).map(|acc| (a.clone(), acc.clone())))
+                        .collect();
+                    let r = crate::blockchain::snapshot::write_diff(
+                        &self.path,
+                        self.block_height,
+                        &changes,
+                        &self.accounts,
+                    )
+                    .map_err(|e| PyValueError::new_err(format!("snapshot diff error: {e}")))?;
+                    debug_assert_eq!(r, block.state_root);
                 }
 
                 self.persist_chain()?;
@@ -2354,6 +2477,7 @@ impl Blockchain {
             block.coinbase_industrial,
             &block.fee_checksum,
             &block.transactions,
+            &block.state_root,
         );
         if calc != block.hash {
             return Ok(false);
@@ -2578,6 +2702,14 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Return the current state root and Merkle proof for the given account.
+    pub fn account_proof(&self, address: String) -> PyResult<(String, Vec<(String, bool)>)> {
+        let root = crate::blockchain::snapshot::state_root(&self.accounts);
+        let proof = crate::blockchain::snapshot::account_proof(&self.accounts, &address)
+            .ok_or_else(|| PyValueError::new_err("unknown account"))?;
+        Ok((root, proof))
+    }
+
     #[doc(hidden)]
     pub fn panic_next_purge(&self) {
         self.trigger_panic_next_purge();
@@ -2628,6 +2760,7 @@ impl Blockchain {
                 b.coinbase_industrial,
                 &b.fee_checksum,
                 &b.transactions,
+                &b.state_root,
             );
             if calc != b.hash {
                 return false;
@@ -2734,12 +2867,15 @@ pub fn spawn_purge_loop_thread(
                             .saturating_sub(orphan_before),
                     );
                     #[cfg(not(feature = "telemetry-json"))]
-                    info!(
-                        "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
-                    );
+                    if telemetry::should_log("mempool") {
+                        info!(
+                            "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
+                        );
+                    }
                     #[cfg(feature = "telemetry-json")]
                     {
                         log_event(
+                            "mempool",
                             log::Level::Info,
                             "purge_loop",
                             "",
@@ -2749,6 +2885,7 @@ pub fn spawn_purge_loop_thread(
                             Some(ttl_delta),
                         );
                         log_event(
+                            "mempool",
                             log::Level::Info,
                             "purge_loop",
                             "",
@@ -2805,12 +2942,15 @@ pub fn spawn_purge_loop(
                             .saturating_sub(orphan_before),
                     );
                     #[cfg(not(feature = "telemetry-json"))]
-                    info!(
-                        "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
-                    );
+                    if telemetry::should_log("mempool") {
+                        info!(
+                            "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
+                        );
+                    }
                     #[cfg(feature = "telemetry-json")]
                     {
                         log_event(
+                            "mempool",
                             log::Level::Info,
                             "purge_loop",
                             "",
@@ -2820,6 +2960,7 @@ pub fn spawn_purge_loop(
                             Some(ttl_delta),
                         );
                         log_event(
+                            "mempool",
                             log::Level::Info,
                             "purge_loop",
                             "",
@@ -3174,6 +3315,7 @@ fn calculate_hash(
     coin_i: TokenAmount,
     fee_checksum: &str,
     txs: &[SignedTransaction],
+    state_root: &str,
 ) -> String {
     let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();
     let id_refs: Vec<&[u8]> = ids.iter().map(<[u8; 32]>::as_ref).collect();
@@ -3186,6 +3328,7 @@ fn calculate_hash(
         coin_c: coin_c.0,
         coin_i: coin_i.0,
         fee_checksum,
+        state_root,
         tx_ids: &id_refs,
     };
     enc.hash()
@@ -3307,6 +3450,8 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(spawn_purge_loop, m)?)?;
     m.add_function(wrap_pyfunction!(maybe_spawn_purge_loop_py, m)?)?;
     m.add_function(wrap_pyfunction!(poison_mempool, m)?)?;
+    #[cfg(feature = "telemetry")]
+    m.add_function(wrap_pyfunction!(redact_at_rest, m)?)?;
     m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
     m.add(
         "ErrInvalidSelector",
