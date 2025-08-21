@@ -1,6 +1,12 @@
-use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+
+pub mod courier;
+pub mod errors;
+pub mod price_board;
+pub mod workloads;
+
+pub use errors::MarketError;
 
 /// Minimum bond required on each side of a compute offer.
 pub const MIN_BOND: u64 = 1;
@@ -61,37 +67,6 @@ pub fn adjust_price(median: u64, backlog_factor: f64) -> u64 {
     (median as f64 * backlog_factor).round() as u64
 }
 
-/// Receipt for carry-to-earn courier mode.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct CourierReceipt {
-    pub bundle_hash: String,
-    pub delivered: bool,
-}
-
-/// Create a receipt by hashing bundle bytes.
-pub fn store_receipt(bundle: &[u8]) -> CourierReceipt {
-    let mut h = Hasher::new();
-    h.update(bundle);
-    let bundle_hash = h.finalize().to_hex().to_string();
-    CourierReceipt {
-        bundle_hash,
-        delivered: false,
-    }
-}
-
-/// Mark a receipt as forwarded/delivered.
-pub fn forward_receipt(mut receipt: CourierReceipt) -> CourierReceipt {
-    receipt.delivered = true;
-    receipt
-}
-
-/// Check that a receipt matches the bundle bytes and was delivered.
-pub fn validate_receipt(receipt: &CourierReceipt, bundle: &[u8]) -> bool {
-    let mut h = Hasher::new();
-    h.update(bundle);
-    h.finalize().to_hex().to_string() == receipt.bundle_hash && receipt.delivered
-}
-
 /// A workload describes real compute to run for a job slice.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Workload {
@@ -99,12 +74,20 @@ pub enum Workload {
     Inference(Vec<u8>),
 }
 
-fn run_workload(w: &Workload) -> [u8; 32] {
-    let mut h = Hasher::new();
-    match w {
-        Workload::Transcode(data) | Workload::Inference(data) => h.update(data),
-    };
-    *h.finalize().as_bytes()
+/// Execute workloads and produce proof hashes.
+pub struct WorkloadRunner;
+
+impl WorkloadRunner {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn run(&self, w: &Workload) -> [u8; 32] {
+        match w {
+            Workload::Transcode(data) => workloads::transcode::run(data),
+            Workload::Inference(data) => workloads::inference::run(data),
+        }
+    }
 }
 
 /// A job submitted by a consumer with per-slice reference hashes.
@@ -141,7 +124,13 @@ impl Market {
 
     /// Post an offer from a provider.
     pub fn post_offer(&mut self, offer: Offer) -> Result<(), &'static str> {
+        let mut offer = offer;
         offer.validate()?;
+        if offer.price == 0 {
+            if let Some(p) = price_board::backlog_adjusted_bid(self.jobs.len()) {
+                offer.price = p;
+            }
+        }
         if self.offers.contains_key(&offer.job_id) {
             return Err("offer already exists");
         }
@@ -158,6 +147,7 @@ impl Market {
             return Err("workload count mismatch");
         }
         let offer = self.offers.remove(&job.job_id).ok_or("no offer for job")?;
+        price_board::record_price(offer.price);
         let state = JobState {
             job,
             provider_bond: offer.provider_bond,
@@ -228,9 +218,10 @@ impl Market {
                 state.job.price_per_slice,
             )
         };
+        let runner = WorkloadRunner::new();
         let mut total = 0;
         for (expected, w) in slices.into_iter().zip(workloads.iter()) {
-            let output = run_workload(w);
+            let output = runner.run(w);
             let proof = SliceProof {
                 reference: expected,
                 output,
@@ -302,6 +293,7 @@ impl PriceBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blake3::Hasher;
 
     #[test]
     fn offer_requires_bonds() {
@@ -337,19 +329,13 @@ mod tests {
 
     #[test]
     fn courier_store_forward() {
-        let receipt = store_receipt(b"bundle");
+        use crate::compute_market::courier::CourierStore;
+        let dir = tempfile::tempdir().unwrap();
+        let store = CourierStore::open(dir.path().to_str().unwrap());
+        let receipt = store.send(b"bundle", "alice");
         assert!(!receipt.delivered);
-        let receipt = forward_receipt(receipt);
-        assert!(receipt.delivered);
-    }
-
-    #[test]
-    fn receipt_validation_roundtrip() {
-        let bundle = b"payload";
-        let mut receipt = store_receipt(bundle);
-        assert!(!validate_receipt(&receipt, bundle));
-        receipt = forward_receipt(receipt);
-        assert!(validate_receipt(&receipt, bundle));
+        let forwarded = store.flush(|r| r.sender == "alice").unwrap();
+        assert_eq!(forwarded, 1);
     }
 
     #[test]

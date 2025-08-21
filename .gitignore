@@ -28,3 +28,7 @@ node-data/
 node-data-*/
 demo_logs/
 db
+formal/.fstar/
+formal/*.checked
+# Documentation artifacts
+docs/images/

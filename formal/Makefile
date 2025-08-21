@@ -1,15 +1,15 @@
-FSTAR ?= fstar.exe
-FSTAR_OPTS = --include . --include $(FSTAR_HOME)/ulib
+FSTAR_HOME ?= $(shell ../scripts/install_fstar.sh)
+FSTAR ?= $(FSTAR_HOME)/bin/fstar.exe
+FSTAR_OPTS = --include . --include $(FSTAR_HOME)/lib
 
-all: Fee_v2.checked compute_market.checked
+SOURCES = Fee_v2.fst Compute_market.fst Compute_market_invariants.fst
+TARGETS = $(SOURCES:.fst=.checked)
 
-Fee_v2.checked: Fee_v2.fst
-	$(FSTAR) $(FSTAR_OPTS) $<
-	@touch $@
+all: $(TARGETS)
 
-compute_market.checked: Compute_market.fst
+%.checked: %.fst
 	$(FSTAR) $(FSTAR_OPTS) $<
 	@touch $@
 
 clean:
-	rm -f *.checked
+	rm -f $(TARGETS)

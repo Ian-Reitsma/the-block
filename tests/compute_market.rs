@@ -35,10 +35,13 @@ fn price_band_and_adjustment() {
 
 #[test]
 fn courier_receipt_forwarding() {
-    let receipt = store_receipt(b"bundle");
+    use the_block::compute_market::courier::CourierStore;
+    let dir = tempfile::tempdir().unwrap();
+    let store = CourierStore::open(dir.path().to_str().unwrap());
+    let receipt = store.send(b"bundle", "alice");
     assert!(!receipt.delivered);
-    let receipt = forward_receipt(receipt);
-    assert!(receipt.delivered);
+    let forwarded = store.flush(|r| r.sender == "alice").unwrap();
+    assert_eq!(forwarded, 1);
 }
 
 #[test]
@@ -85,9 +88,10 @@ fn price_board_tracks_bands() {
 
 #[test]
 fn receipt_validation() {
-    let bundle = b"payload";
-    let mut receipt = store_receipt(bundle);
-    assert!(!validate_receipt(&receipt, bundle));
-    receipt = forward_receipt(receipt);
-    assert!(validate_receipt(&receipt, bundle));
+    use the_block::compute_market::courier::CourierStore;
+    let dir = tempfile::tempdir().unwrap();
+    let store = CourierStore::open(dir.path().to_str().unwrap());
+    store.send(b"payload", "bob");
+    assert_eq!(store.flush(|_| false).unwrap(), 0);
+    assert_eq!(store.flush(|r| r.sender == "bob").unwrap(), 1);
 }

@@ -1,0 +1,22 @@
+name: ci
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: lint grafana dashboard
+        run: npx grafonnet lint monitoring/grafana/dashboard.json
+      - name: cargo test
+        run: cargo test --all-features
+      - name: snapshot restore
+        run: scripts/snapshot_ci.sh
+      - name: wal fuzz smoke
+        run: cargo fuzz run wal_fuzz --max-iters=1000

@@ -26,4 +26,3 @@ impl HandleRegistry {
         self.map.get(handle)
     }
 }
-

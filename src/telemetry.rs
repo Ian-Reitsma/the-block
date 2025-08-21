@@ -1,6 +1,8 @@
 use blake3;
 use once_cell::sync::Lazy;
-use prometheus::{Encoder, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder};
+use prometheus::{
+    Encoder, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder,
+};
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -119,6 +121,15 @@ pub static LOCK_POISON_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
+});
+
+pub static BANNED_PEERS_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("banned_peers_total", "Total peers currently banned")
+        .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
 });
 
 pub static ORPHAN_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
@@ -248,6 +259,16 @@ pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static LOG_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("log_size_bytes", "Size of serialized log events in bytes")
+        .buckets(prometheus::exponential_buckets(64.0, 2.0, 8).unwrap());
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
 static LOG_SEC: AtomicU64 = AtomicU64::new(0);
 static LOG_COUNT: AtomicU64 = AtomicU64::new(0);
 
@@ -274,6 +295,10 @@ pub fn should_log(subsystem: &str) -> bool {
         LOG_DROP_TOTAL.with_label_values(&[subsystem]).inc();
         false
     }
+}
+
+pub fn observe_log_size(bytes: usize) {
+    LOG_SIZE_BYTES.observe(bytes as f64);
 }
 
 #[doc(hidden)]

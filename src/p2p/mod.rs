@@ -7,6 +7,8 @@ pub struct FeatureBits(pub u32);
 impl FeatureBits {
     /// P2P protocol supporting future fee routing.
     pub const FEE_ROUTING_V2: u32 = 0x0004;
+    /// Compute-market RPCs and workloads.
+    pub const COMPUTE_MARKET_V1: u32 = 0x0008;
 }
 
 /// Initial handshake exchanged between peers prior to gossip.

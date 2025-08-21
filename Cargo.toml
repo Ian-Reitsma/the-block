@@ -26,7 +26,7 @@ clap = { version = "4", features = ["derive"] }
 base64 = "0.22"
 base64ct = "1.6.0"
 dirs = "5"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "test-util"] }
 sled = { version = "0.34" }
 libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio", "noise", "yamux"] }
 
@@ -45,6 +45,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 csv = "1"
 serial_test = "3"
 wait-timeout = "0.2"
+arbitrary = { version = "1", features = ["derive"] }
 
 [[bench]]
 name = "startup_rebuild"

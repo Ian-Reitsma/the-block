@@ -24,3 +24,12 @@ A ---- B    C
 `partition_rejoins_longest_chain` begins with `A` and `B` connected while `C`
 mines in isolation.  When `C` reconnects with a longer fork it is adopted by
 the network, demonstrating partition recovery.
+
+## Feature Bits
+
+| Bit | Name | Meaning |
+| --- | --- | --- |
+| 0x0004 | FEE_ROUTING_V2 | P2P protocol supporting future fee routing |
+| 0x0008 | COMPUTE_MARKET_V1 | Compute-market RPCs and workloads |
+
+Peers lacking required bits are rejected during handshake.

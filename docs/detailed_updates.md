@@ -18,12 +18,14 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Python API** – Module definition uses `Bound<PyModule>` in accordance with `pyo3` 0.24.2.
 - **TokenAmount Display** – Added `__repr__`, `__str__`, and `Display` trait implementations
   so amounts print as plain integers in both Python and Rust logs.
-- **RPC Rate Limit** – Stabilized rate-limit enforcement with a deterministic test and
-  typed errors for rate-limited and banned clients.
+- **RPC Rate Limit** – Stabilized rate-limit enforcement with a deterministic
+  `tokio::time::pause`-driven test and typed errors for rate-limited and banned
+  clients.
 - **Compute Market** – Added an execution path for slice outputs, expanded unit tests,
   and published a sample Grafana dashboard for backlog monitoring.
 - **Formal Harness** – Introduced `formal/compute_market.fst` and wired it into the
-  `formal/Makefile` so CI can type-check compute-market invariants.
+  `formal/Makefile` so CI can type-check compute-market invariants, auto-downloading
+  a pinned F★ toolchain if missing.
 - **Security & Abuse Controls** – Introduced SBOM generation and license
   gating via `deny.toml`, a `check_cla.sh` helper for contributor license
   enforcement, and minimal law-enforcement request and warrant-canary logs
@@ -72,7 +74,7 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **RPC Rate Limits** – JSON-RPC server rejects abusive clients with typed error codes (`-32001` for rate limit, `-32002` when banned) and records `rpc_client_error_total{code}`.
 - **RPC Nonce Guard** – Mutating RPC methods require a unique `nonce` parameter and reject replays.
 - **Crash-safe WAL** – `SimpleDb` appends all writes to a BLAKE3‑checked write‑ahead log and replays it on restart before truncating.
-- **Snapshot Rotation & Diffs** – The node emits full snapshots every `TB_SNAPSHOT_INTERVAL` blocks and incremental diffs in between; CI now restores from the latest snapshot + diffs.
+- **Snapshot Rotation & Diffs** – The node emits full snapshots every `TB_SNAPSHOT_INTERVAL` blocks and incremental diffs in between; CI now restores from the latest snapshot + diffs via `scripts/snapshot_ci.sh`.
 - **State Root Proofs** – Each block commits a state Merkle root and `account_proof` exposes inclusion proofs for light clients.
 - **API Change Log** – `API_CHANGELOG.md` records Python error variants and
   telemetry counters.

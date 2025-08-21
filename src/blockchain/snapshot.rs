@@ -5,6 +5,57 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+#[derive(Clone)]
+pub struct SnapshotManager {
+    pub base: String,
+    pub interval: u64,
+}
+
+impl SnapshotManager {
+    pub fn new(base: String, interval: u64) -> Self {
+        Self { base, interval }
+    }
+    pub fn set_base(&mut self, base: String) {
+        self.base = base;
+    }
+    pub fn set_interval(&mut self, interval: u64) {
+        self.interval = interval;
+    }
+    pub fn write_snapshot(
+        &self,
+        height: u64,
+        accounts: &HashMap<String, Account>,
+    ) -> std::io::Result<String> {
+        write_snapshot(&self.base, height, accounts)
+    }
+    pub fn write_diff(
+        &self,
+        height: u64,
+        changes: &HashMap<String, Account>,
+        full: &HashMap<String, Account>,
+    ) -> std::io::Result<String> {
+        write_diff(&self.base, height, changes, full)
+    }
+    pub fn load_latest(&self) -> std::io::Result<Option<(u64, HashMap<String, Account>, String)>> {
+        load_latest(&self.base)
+    }
+    pub fn list(&self) -> std::io::Result<Vec<u64>> {
+        let dir = Path::new(&self.base).join("snapshots");
+        let mut hs = Vec::new();
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                if let Some(stem) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                    if let Ok(h) = stem.parse::<u64>() {
+                        hs.push(h);
+                    }
+                }
+            }
+        }
+        hs.sort_unstable();
+        Ok(hs)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct SnapshotAccount {
     address: String,

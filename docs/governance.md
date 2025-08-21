@@ -9,6 +9,13 @@ Two chambers participate in ratifying upgrades:
 - **Operator House** – one vote per high-uptime node.
 - **Builder House** – one vote per active core developer.
 
+## Proposal lifecycle
+
+1. Draft a JSON proposal (see `examples/governance/`).
+2. Submit with `gov submit <file>` to receive an id.
+3. Cast votes via `gov vote <id> --house ops|builders`.
+4. After both houses reach quorum and the timelock elapses, the proposal may be executed.
+
 Both houses must reach quorum before a proposal enters a timelock period,
 after which it may be executed on-chain.
 
@@ -28,5 +35,5 @@ routing v2) during handshake. A node will refuse connections from peers
 advertising an incompatible protocol version or missing required features.
 
 For more details on badge voting, shard districts and protocol negotiation, see
-[AGENTS.md §16 — Vision & Strategy (Authoritative)](../AGENTS.md#16-vision--strategy-authoritative)
+[AGENTS.md §16 — Vision & Strategy](../AGENTS.md#16-vision-strategy)
 and `agents_vision.md`.
