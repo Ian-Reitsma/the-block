@@ -1,0 +1,25 @@
+{
+  "title": "The-Block Dashboard",
+  "schemaVersion": 27,
+  "version": 1,
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Mempool Size",
+      "targets": [{"expr": "mempool_size"}],
+      "id": 1
+    },
+    {
+      "type": "graph",
+      "title": "Banned Peers",
+      "targets": [{"expr": "banned_peers_total"}],
+      "id": 2
+    },
+    {
+      "type": "graph",
+      "title": "Log Size Avg",
+      "targets": [{"expr": "sum(rate(log_size_bytes_sum[5m])) / sum(rate(log_size_bytes_count[5m]))"}],
+      "id": 3
+    }
+  ]
+}

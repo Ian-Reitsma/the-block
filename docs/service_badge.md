@@ -24,3 +24,14 @@ assert!(!tracker.has_badge());
 `Blockchain::mine_block` automatically records epochs every 600 blocks and
 updates the badge tracker. The current node's badge status can be queried with
 `Blockchain::has_badge()`.
+
+## HTTP Status Endpoint
+
+Nodes expose `/badge/status` on the RPC port for external monitoring. The
+endpoint returns a JSON object:
+
+```json
+{"active": true}
+```
+
+`active: true` indicates a badge is currently minted; otherwise `false`.

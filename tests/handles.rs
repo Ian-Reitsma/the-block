@@ -8,7 +8,10 @@ fn register_and_resolve_handle() {
         "addr1".into(),
         Account {
             address: "addr1".into(),
-            balance: TokenBalance { consumer: 0, industrial: 0 },
+            balance: TokenBalance {
+                consumer: 0,
+                industrial: 0,
+            },
             nonce: 0,
             pending_consumer: 0,
             pending_industrial: 0,
@@ -20,4 +23,3 @@ fn register_and_resolve_handle() {
     assert_eq!(bc.resolve_handle("@alice"), Some("addr1".to_string()));
     assert!(!bc.register_handle("@alice", "addr1"));
 }
-

@@ -66,3 +66,51 @@ impl Bicameral {
         self.can_execute(p, now)
     }
 }
+
+#[derive(Clone, Copy)]
+pub enum House {
+    Operators,
+    Builders,
+}
+
+pub struct Governance {
+    pub bicameral: Bicameral,
+    proposals: std::collections::HashMap<u64, Proposal>,
+    next_id: u64,
+}
+
+impl Governance {
+    pub fn new(quorum_ops: u32, quorum_builders: u32, timelock_secs: u64) -> Self {
+        Self {
+            bicameral: Bicameral::new(quorum_ops, quorum_builders, timelock_secs),
+            proposals: std::collections::HashMap::new(),
+            next_id: 0,
+        }
+    }
+
+    pub fn submit(&mut self, start: u64, end: u64) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.proposals.insert(id, Proposal::new(id, start, end));
+        id
+    }
+
+    pub fn vote(&mut self, id: u64, house: House, approve: bool) -> Result<(), &'static str> {
+        let p = self.proposals.get_mut(&id).ok_or("proposal not found")?;
+        match house {
+            House::Operators => p.vote_operator(approve),
+            House::Builders => p.vote_builder(approve),
+        }
+        Ok(())
+    }
+
+    pub fn execute(&mut self, id: u64, now: u64) -> Result<(), &'static str> {
+        let p = self.proposals.get_mut(&id).ok_or("proposal not found")?;
+        if self.bicameral.can_execute(p, now) {
+            p.executed = true;
+            Ok(())
+        } else {
+            Err("quorum or timelock not satisfied")
+        }
+    }
+}

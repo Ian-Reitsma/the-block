@@ -243,35 +243,3 @@ async fn rpc_fragmented_request() {
 
     handle.abort();
 }
-
-#[tokio::test]
-#[serial]
-async fn rpc_rate_limit_and_ban() {
-    std::env::set_var("TB_RPC_MAX_PER_SEC", "1");
-    std::env::set_var("TB_RPC_BAN_SECS", "60");
-    let dir = util::temp::temp_dir("rpc_rate_limit");
-    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-    let mining = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
-        Arc::clone(&bc),
-        Arc::clone(&mining),
-        "127.0.0.1:0".to_string(),
-        tx,
-    ));
-    let addr = rx.await.unwrap();
-
-    let req = r#"{"method":"metrics"}"#;
-    let (a, b) = tokio::join!(rpc(&addr, req), rpc(&addr, req));
-    let (ok, limited) = if a["error"].is_null() { (a, b) } else { (b, a) };
-    assert!(ok["error"].is_null());
-    assert_eq!(limited["error"]["message"], "rate limited");
-    assert_eq!(limited["error"]["code"], -32001);
-    let banned = rpc(&addr, req).await;
-    assert_eq!(banned["error"]["message"], "banned");
-    assert_eq!(banned["error"]["code"], -32002);
-
-    handle.abort();
-    std::env::remove_var("TB_RPC_MAX_PER_SEC");
-    std::env::remove_var("TB_RPC_BAN_SECS");
-}

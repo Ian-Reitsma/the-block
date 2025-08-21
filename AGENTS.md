@@ -3,6 +3,7 @@
 Quick Index
 - Vision & Strategy: see §16
 - Agent Playbooks: see §17
+- Monitoring Stack: see `docs/monitoring.md` and `make monitor`
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
@@ -239,6 +240,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Logging and observability: instrument changes; silent failures are bugs.
 - Security assumptions: treat inputs as adversarial; validations must be total and explicit.
 - Granular commits: single logical changes; every commit builds, tests, and lints cleanly.
+- Formal proofs: `make -C formal` auto-installs F★ to `formal/.fstar`; set `FSTAR_VERSION` to override.
 
 ### 17.5 Architecture & Telemetry Highlights (from Agents‑Sup)
 

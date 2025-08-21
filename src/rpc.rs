@@ -6,12 +6,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::{Duration, Instant};
+use tokio::time::{timeout, Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
-use tokio::time::{timeout, Duration as TokioDuration};
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -43,6 +42,15 @@ enum RpcResponse {
 struct RpcError {
     code: i32,
     message: &'static str,
+}
+
+impl From<crate::compute_market::MarketError> for RpcError {
+    fn from(e: crate::compute_market::MarketError) -> Self {
+        Self {
+            code: e.code(),
+            message: e.message(),
+        }
+    }
 }
 
 struct ClientState {
@@ -156,17 +164,21 @@ async fn handle_conn(
 
     // Read request line with timeout to avoid hanging connections.
     let mut line = String::new();
-    match timeout(TokioDuration::from_secs(3), reader.read_line(&mut line)).await {
+    match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
         Ok(Ok(_)) => {}
         _ => return,
     }
+
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or("").to_string();
+    let path = parts.next().unwrap_or("").to_string();
 
     // Parse headers. Accept both CRLF and LF-only terminators.
     let mut content_len = 0usize;
     let mut expect_continue = false;
     loop {
         line.clear();
-        let read = match timeout(TokioDuration::from_secs(3), reader.read_line(&mut line)).await {
+        let read = match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
             Ok(Ok(n)) => n,
             _ => return,
         };
@@ -194,16 +206,31 @@ async fn handle_conn(
         let _ = stream.flush().await;
     }
 
+    if method == "GET" && path == "/badge/status" {
+        let active = {
+            let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
+            chain.check_badges();
+            chain.has_badge()
+        };
+        let body = format!("{{\"active\":{}}}", active);
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let mut stream = reader.into_inner();
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
     // Read body (if any) with timeout; default to empty on missing Content-Length.
     let mut body_bytes = vec![0u8; content_len];
     if content_len > 0 {
-        if timeout(
-            TokioDuration::from_secs(3),
-            reader.read_exact(&mut body_bytes),
-        )
-        .await
-        .ok()
-        .is_none()
+        if timeout(Duration::from_secs(3), reader.read_exact(&mut body_bytes))
+            .await
+            .ok()
+            .is_none()
         {
             return;
         }
@@ -433,6 +460,14 @@ fn dispatch(
                 serde_json::json!("telemetry disabled")
             }
         }
+        "price_board_get" => match crate::compute_market::price_board::bands() {
+            Some((p25, median, p75)) => {
+                serde_json::json!({"p25": p25, "median": median, "p75": p75})
+            }
+            None => {
+                return Err(crate::compute_market::MarketError::NoPriceData.into());
+            }
+        },
         _ => {
             return Err(RpcError {
                 code: -32601,

@@ -14,3 +14,10 @@ Logs are sampled and rate limited; emitted and dropped counts are exported via `
 The logger permits up to 100 events per second before sampling kicks in. Once the limit is exceeded, only one out of every 100 events is emitted while the rest are dropped, preventing log bursts from overwhelming block propagation.
 
 Counters `peer_error_total{code}` and `rpc_client_error_total{code}` track rate‑limited and banned peers and RPC clients for observability.
+
+The gauge `banned_peers_total` exposes the number of peers currently banned and
+is updated whenever bans are added or expire.
+
+Histogram `log_size_bytes` records the serialized size of each emitted log.
+Panels on the default Grafana dashboard derive average log size from this
+histogram, helping operators tune retention and export costs.

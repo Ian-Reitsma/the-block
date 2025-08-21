@@ -52,11 +52,12 @@ pub use telemetry::{gather_metrics, redact_at_rest, serve_metrics};
 
 pub mod blockchain;
 use blockchain::difficulty;
+pub use blockchain::snapshot::SnapshotManager;
 pub mod service_badge;
 pub use service_badge::ServiceBadgeTracker;
 
 pub mod governance;
-pub use governance::{Bicameral, Proposal};
+pub use governance::{Bicameral, Governance, House, Proposal};
 
 pub mod compute_market;
 pub mod le_portal;
@@ -216,6 +217,7 @@ fn log_event(
         obj.insert("fpb".into(), json!(v));
     }
     let msg = serde_json::Value::Object(obj).to_string();
+    telemetry::observe_log_size(msg.len());
     log::log!(level, "{}", msg);
 }
 
@@ -545,8 +547,7 @@ pub struct Blockchain {
     pub block_reward_industrial: TokenAmount,
     #[pyo3(get, set)]
     pub block_height: u64,
-    #[pyo3(get, set)]
-    pub snapshot_interval: u64,
+    pub snapshot: SnapshotManager,
     #[pyo3(get)]
     pub skipped: Vec<SignedTransaction>,
     #[pyo3(get)]
@@ -613,7 +614,7 @@ impl Default for Blockchain {
             block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
             block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
             block_height: 0,
-            snapshot_interval: snapshot_interval_from_env(),
+            snapshot: SnapshotManager::new(String::new(), snapshot_interval_from_env()),
             skipped: Vec::new(),
             skipped_nonce_gap: 0,
             badge_tracker: ServiceBadgeTracker::new(),
@@ -678,12 +679,40 @@ impl Blockchain {
 
     /// Evaluate badge eligibility based on uptime and performance metrics.
     pub fn check_badges(&mut self) {
+        let before = self.badge_tracker.has_badge();
         self.badge_tracker.check_badges();
+        let after = self.badge_tracker.has_badge();
+        if before != after {
+            #[cfg(feature = "telemetry-json")]
+            log_event(
+                "service",
+                log::Level::Info,
+                "badge",
+                "-",
+                0,
+                if after { "minted" } else { "revoked" },
+                ERR_OK,
+                None,
+            );
+            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+            if telemetry::should_log("service") {
+                info!("badge {}", if after { "minted" } else { "revoked" });
+            }
+        }
+    }
+
+    pub fn accounts(&self) -> &HashMap<String, Account> {
+        &self.accounts
     }
 
     /// Whether this chain has earned a service badge.
     pub fn has_badge(&self) -> bool {
         self.badge_tracker.has_badge()
+    }
+
+    /// Mutable access to the service badge tracker.
+    pub fn badge_tracker_mut(&mut self) -> &mut ServiceBadgeTracker {
+        &mut self.badge_tracker
     }
 }
 
@@ -1068,7 +1097,8 @@ impl Blockchain {
             }
         }
         bc.block_height = bc.chain.len() as u64;
-        bc.snapshot_interval = snapshot_interval_from_env();
+        bc.snapshot.set_base(path.to_string());
+        bc.snapshot.set_interval(snapshot_interval_from_env());
 
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
@@ -2407,26 +2437,21 @@ impl Blockchain {
                         .record_epoch(true, Duration::from_millis(0));
                     self.check_badges();
                 }
-                if self.block_height % self.snapshot_interval == 0 {
-                    let r = crate::blockchain::snapshot::write_snapshot(
-                        &self.path,
-                        self.block_height,
-                        &self.accounts,
-                    )
-                    .map_err(|e| PyValueError::new_err(format!("snapshot error: {e}")))?;
+                if self.block_height % self.snapshot.interval == 0 {
+                    let r = self
+                        .snapshot
+                        .write_snapshot(self.block_height, &self.accounts)
+                        .map_err(|e| PyValueError::new_err(format!("snapshot error: {e}")))?;
                     debug_assert_eq!(r, block.state_root);
                 } else {
                     let changes: HashMap<String, Account> = changed
                         .iter()
                         .filter_map(|a| self.accounts.get(a).map(|acc| (a.clone(), acc.clone())))
                         .collect();
-                    let r = crate::blockchain::snapshot::write_diff(
-                        &self.path,
-                        self.block_height,
-                        &changes,
-                        &self.accounts,
-                    )
-                    .map_err(|e| PyValueError::new_err(format!("snapshot diff error: {e}")))?;
+                    let r = self
+                        .snapshot
+                        .write_diff(self.block_height, &changes, &self.accounts)
+                        .map_err(|e| PyValueError::new_err(format!("snapshot diff error: {e}")))?;
                     debug_assert_eq!(r, block.state_root);
                 }
 

@@ -7,6 +7,9 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use super::ban_store::BAN_STORE;
 
 /// Thread-safe peer set used by the gossip layer.
 #[derive(Clone, Default)]
@@ -56,6 +59,9 @@ impl PeerSet {
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
+        if BAN_STORE.lock().unwrap().is_banned(pk) {
+            return Err(PeerErrorCode::Banned);
+        }
         let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
@@ -76,7 +82,14 @@ impl PeerSet {
         }
         entry.count += 1;
         if entry.count > *P2P_MAX_PER_SEC {
-            entry.banned_until = Some(Instant::now() + Duration::from_secs(*P2P_BAN_SECS));
+            let until = Instant::now() + Duration::from_secs(*P2P_BAN_SECS);
+            entry.banned_until = Some(until);
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + *P2P_BAN_SECS as u64;
+            BAN_STORE.lock().unwrap().ban(pk, ts);
             return Err(PeerErrorCode::RateLimit);
         }
         Ok(())

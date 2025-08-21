@@ -75,7 +75,8 @@ fn reopen_from_snapshot() {
     let accounts_before;
     {
         let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
-        for _ in 0..1200 {
+        bc.snapshot.set_interval(10);
+        for _ in 0..25 {
             bc.mine_block("miner").unwrap();
         }
         accounts_before = bc.accounts.clone();

@@ -8,8 +8,8 @@ use ed25519_dalek::SigningKey;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::{
-    generate_keypair, rpc::run_rpc_server, sign_tx, spawn_purge_loop_thread, Blockchain,
-    RawTxPayload, ShutdownFlag,
+    compute_market::courier::CourierStore, generate_keypair, rpc::run_rpc_server, sign_tx,
+    spawn_purge_loop_thread, Blockchain, RawTxPayload, ShutdownFlag,
 };
 
 fn key_dir() -> PathBuf {
@@ -71,6 +71,10 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         mempool_purge_interval: u64,
 
+        /// Interval in blocks between full snapshots
+        #[arg(long, default_value_t = 600)]
+        snapshot_interval: u64,
+
         /// Expose Prometheus metrics on this address (requires `--features telemetry`)
         #[arg(long, value_name = "ADDR")]
         metrics_addr: Option<String>,
@@ -87,6 +91,28 @@ enum Commands {
     ShowAddress { key_id: String },
     /// Sign a transaction JSON payload with the given key
     SignTx { key_id: String, tx_json: String },
+    /// Compute-related utilities
+    Compute {
+        #[command(subcommand)]
+        cmd: ComputeCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ComputeCmd {
+    /// Courier receipt operations
+    Courier {
+        #[command(subcommand)]
+        action: CourierCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum CourierCmd {
+    /// Send a bundle and store a courier receipt
+    Send { file: String, sender: String },
+    /// Flush stored receipts
+    Flush,
 }
 
 #[tokio::main]
@@ -96,10 +122,13 @@ async fn main() -> std::process::ExitCode {
         Commands::Run {
             rpc_addr,
             mempool_purge_interval,
+            snapshot_interval,
             metrics_addr,
             data_dir,
         } => {
-            let bc = Arc::new(Mutex::new(Blockchain::new(&data_dir)));
+            let mut inner = Blockchain::new(&data_dir);
+            inner.snapshot.set_interval(snapshot_interval);
+            let bc = Arc::new(Mutex::new(inner));
 
             #[cfg(feature = "telemetry")]
             if let Some(addr) = &metrics_addr {
@@ -169,6 +198,26 @@ async fn main() -> std::process::ExitCode {
             println!("{}", hex::encode(bytes));
             std::process::ExitCode::SUCCESS
         }
+        Commands::Compute { cmd } => match cmd {
+            ComputeCmd::Courier { action } => match action {
+                CourierCmd::Send { file, sender } => {
+                    let data = fs::read(&file).expect("read bundle");
+                    let store = CourierStore::open("courier.db");
+                    let _ = store.send(&data, &sender);
+                    std::process::ExitCode::SUCCESS
+                }
+                CourierCmd::Flush => {
+                    let store = CourierStore::open("courier.db");
+                    match store.flush(|_| true) {
+                        Ok(_) => std::process::ExitCode::SUCCESS,
+                        Err(e) => {
+                            eprintln!("flush failed: {e}");
+                            std::process::ExitCode::FAILURE
+                        }
+                    }
+                }
+            },
+        },
     };
     code
 }

@@ -1,3 +1,4 @@
+pub mod ban_store;
 mod message;
 mod peer;
 
@@ -18,7 +19,8 @@ pub use peer::PeerSet;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Feature bits required for peer connections.
-pub const REQUIRED_FEATURES: u32 = crate::p2p::FeatureBits::FEE_ROUTING_V2;
+pub const COMPUTE_MARKET_V1: u32 = crate::p2p::FeatureBits::COMPUTE_MARKET_V1;
+pub const REQUIRED_FEATURES: u32 = crate::p2p::FeatureBits::FEE_ROUTING_V2 | COMPUTE_MARKET_V1;
 
 /// Feature bits this node advertises.
 pub const LOCAL_FEATURES: u32 = REQUIRED_FEATURES;
@@ -35,6 +37,7 @@ impl Node {
     /// Create a new node bound to `addr` and seeded with `peers`.
     pub fn new(addr: SocketAddr, peers: Vec<SocketAddr>, bc: Blockchain) -> Self {
         let key = load_net_key();
+        ban_store::BAN_STORE.lock().unwrap().purge_expired();
         Self {
             addr,
             peers: PeerSet::new(peers),

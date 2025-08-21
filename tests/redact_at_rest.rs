@@ -1,7 +1,7 @@
 #![cfg(feature = "telemetry")]
 
-use tempfile::tempdir;
 use std::fs;
+use tempfile::tempdir;
 use the_block::redact_at_rest;
 
 #[test]

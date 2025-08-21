@@ -5,13 +5,16 @@
 3. [Quick Start](#quick-start)
 4. [Installation & Bootstrap](#installation--bootstrap)
 5. [Build & Test Matrix](#build--test-matrix)
-6. [Using the Python Module](#using-the-python-module)
-7. [Architecture Primer](#architecture-primer)
-8. [Project Layout](#project-layout)
-9. [Status & Roadmap](#status--roadmap)
-10. [Contribution Guidelines](#contribution-guidelines)
-11. [Security Model](#security-model)
-12. [License](#license)
+6. [Node CLI and JSON-RPC](#node-cli-and-json-rpc)
+7. [Using the Python Module](#using-the-python-module)
+8. [Architecture Primer](#architecture-primer)
+9. [Project Layout](#project-layout)
+10. [Status & Roadmap](#status--roadmap)
+11. [Contribution Guidelines](#contribution-guidelines)
+12. [Security Model](#security-model)
+13. [Telemetry & Metrics](#telemetry--metrics)
+14. [Disclaimer](#disclaimer)
+15. [License](#license)
 
 ---
 
@@ -48,9 +51,8 @@ Upcoming work adds durable storage, authenticated peer discovery,
 micro‑shard bundle roots, quantum‑ready crypto, and the full badge‑based
 governance stack. See:
 
-- [AGENTS.md §16 — Vision & Strategy (Authoritative)](AGENTS.md#16-vision--strategy-authoritative) for the full narrative.
-- [AGENTS.md §17 — Agent Playbooks](AGENTS.md#17-agent-playbooks--consolidated) for actionable phases and deliverables.
-- [AGENTS.md — Audit Appendix](AGENTS.md#audit-appendix) for detailed risks and corrective directives.
+- [AGENTS.md §16 — Vision & Strategy](AGENTS.md#16-vision-strategy) for the full narrative.
+- [AGENTS.md §17 — Agent Playbooks](AGENTS.md#17-agent-playbooks-consolidated) for actionable phases and deliverables.
 ---
 
 ## Quick Start
@@ -92,10 +94,6 @@ to spawn and cleanly stop the background thread. CI runs the demo with
 flag/handle variant is covered separately in `tests/test_spawn_purge_loop.py`
 using the same 1‑second interval to keep it fast.
 
-## Disclaimer
-
-This repository houses a production‑grade blockchain kernel under active development. Running the demo does **not** create or transfer any real cryptocurrency. Nothing herein constitutes financial advice or an invitation to invest. Use the code at your own risk and review the license terms carefully.
-
 ---
 
 ## Installation & Bootstrap
@@ -127,6 +125,9 @@ Bootstrap steps:
 | Rust unit + property tests | `cargo test --all --release` | All tests green |
 | In-place dev install | `maturin develop --release --features telemetry` | Module importable in venv |
 | Python tests | `.venv/bin/python -m pytest` | All tests pass |
+| Formal proofs | `make -C formal` | F★ checks succeed (auto-installs F★) |
+| WAL fuzz harness | `cargo fuzz run wal_fuzz` | No crashes; artifacts in `fuzz/wal/` |
+| Snapshot restore | `scripts/snapshot_ci.sh` | Restored root matches live node |
 | End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` (requires `--features telemetry`) |
 | Lint / Style | `cargo fmt -- --check` | No diffs |
 | Markdown anchors | `python scripts/check_anchors.py --md-anchors` | No output |
@@ -169,7 +170,8 @@ purges. Enable the `telemetry` feature to expose Prometheus metrics:
 
 ```bash
 cargo run --features telemetry --bin node -- run --rpc-addr 127.0.0.1:3030 \
-    --mempool-purge-interval 5 --metrics-addr 127.0.0.1:9100
+    --mempool-purge-interval 5 --metrics-addr 127.0.0.1:9100 \
+    --snapshot-interval 600
 ```
 Supplying `--metrics-addr` without `--features telemetry` exits with an error.
 
@@ -240,6 +242,23 @@ curl -s -X POST 127.0.0.1:3030 \
   -d '{"jsonrpc":"2.0","id":5,"method":"balance","params":{"address":"'$ADDR'"}}'
 ```
 
+### Snapshot CLI
+
+```
+cargo run --bin snapshot -- list node-data
+cargo run --bin snapshot -- create node-data
+cargo run --bin snapshot -- apply node-data
+```
+
+### Governance CLI
+
+```bash
+cargo run --bin gov -- submit --start 0 --end 10
+cargo run --bin gov -- vote --id 1 --house ops --approve true
+```
+
+See [docs/governance.md](docs/governance.md) for proposal lifecycles and sample JSON under `examples/governance/`.
+
 Environment variables influence node behaviour during these sessions:
 
 ```
@@ -247,6 +266,20 @@ TB_PURGE_LOOP_SECS=1      # (optional) purge loop interval; demo.py defaults to 
 PYTHONUNBUFFERED=1        # unbuffered output for Python demos/tests
 TB_DEMO_MANUAL_PURGE=1    # require manual purge-loop shutdown
 TB_NET_KEY_PATH=/tmp/net_key  # override gossip key location for tests
+```
+
+### Compute-market helpers
+
+Courier-mode receipts persist until forwarded. The `compute courier` subcommands
+store and flush receipts, while the price board exposes quantile bands over RPC:
+
+```bash
+cargo run --bin node -- compute courier send bundle.json alice
+cargo run --bin node -- compute courier flush
+
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":99,"method":"price_board_get"}'
 ```
 
 Interact with the node via JSON-RPC; requests use `jsonrpc` and an incrementing `id`:
@@ -456,28 +489,35 @@ What this means for you:
 
 ```text
 src/
-  ├── lib.rs           # PyO3 module + re‑exports
-  ├── blockchain/      # blocks, headers, mining, validation
-  ├── crypto/          # hash, signature, canonical serialization
-  └── utils/           # hex helpers, logging, config
+  ├── bin/              # CLI node and subcommands
+  ├── compute_market/   # workloads, price board, courier receipts
+  ├── net/              # gossip peers and durable ban store
+  ├── lib.rs            # PyO3 module + re‑exports
+  └── …                 # blockchain, crypto, utils
 
-bootstrap.sh           # Unix setup script
-bootstrap.ps1          # Windows setup script
-
-tests/                 # Rust tests (unit + proptest)
-benches/               # Criterion benches
-demo.py                # Python end‑to‑end demo
-docs/                  # Markdown specs (rendered by mdBook)
-docs/detailed_updates.md  # in-depth change log for auditors
-AGENTS.md §21 (API Changelog) # Python errors and telemetry endpoint history
-AGENTS.md              # Developer handbook (authoritative: embeds vision, playbooks, audit)
+monitoring/             # Prometheus & Grafana configs (`make monitor`)
+examples/governance/    # sample proposal JSON files
+fuzz/wal/               # write‑ahead log fuzz artifacts
+formal/                 # F★ lemmas (`make -C formal`)
+scripts/                # install_fstar.sh, snapshot_ci.sh, …
+tests/                  # Rust tests (unit + proptest)
+benches/                # Criterion benches
+demo.py                 # Python end‑to‑end demo
+docs/
+  compute_market.md     # workload formats and courier mode
+  wal.md                # WAL fuzz signatures
+  snapshots.md          # snapshot restore guide
+  monitoring.md         # monitor stack instructions
+  formal.md             # F★ verification steps
+  detailed_updates.md   # change log for auditors
+AGENTS.md               # Developer handbook (vision, playbooks)
 ```
 
 ---
 
 ## Status & Roadmap
 
-For sequencing and immediate next steps, see [AGENTS.md §17 — Agent Playbooks](AGENTS.md#17-agent-playbooks--consolidated). The audit appendix in AGENTS.md enumerates risks and missing deliverables.
+For sequencing and immediate next steps, see [AGENTS.md §17 — Agent Playbooks](AGENTS.md#17-agent-playbooks-consolidated). The audit appendix in AGENTS.md enumerates risks and missing deliverables.
 
 ### Accomplishments
 
@@ -538,8 +578,7 @@ For sequencing and immediate next steps, see [AGENTS.md §17 — Agent Playbooks
 > 🛑  **Never** push directly to `main`.  Squash‑merge only.
 
 See also:
-- [AGENTS.md §9 — Commit & PR Protocol](AGENTS.md#9--commit--pr-protocol)
-- [AGENTS.md §17.4 — Handoff Checklist](AGENTS.md#174-handoff-checklist)
+- [AGENTS.md §17 — Agent Playbooks](AGENTS.md#17-agent-playbooks-consolidated)
 
 ---
 
@@ -563,8 +602,10 @@ reasons for ops tooling.
 ```bash
 TB_TELEMETRY=1 ./target/release/the-block &
 curl -s localhost:9000/metrics \
-  | grep -E 'mempool_size|startup_ttl_drop_total|invalid_selector_reject_total|tx_rejected_total'
+  | grep -E 'mempool_size|startup_ttl_drop_total|banned_peers_total|price_band_median|tx_rejected_total'
 ```
+
+A default Prometheus + Grafana stack lives under `monitoring/`. Run `make monitor` to expose metrics on port 9090 and load the bundled dashboard at <http://localhost:3000>. See [docs/monitoring.md](docs/monitoring.md) for details and a screenshot.
 
 Use `with PurgeLoop(bc):` to honor `TB_PURGE_LOOP_SECS` and spawn a background
 thread that automatically triggers shutdown and joins when the block exits.
@@ -623,7 +664,9 @@ Key metrics: `mempool_size`, `evictions_total`, `fee_floor_reject_total`,
 `dup_tx_reject_total`, `ttl_drop_total`, `startup_ttl_drop_total` (expired mempool entries dropped during startup),
 `lock_poison_total`, `orphan_sweep_total`,
 `invalid_selector_reject_total`, `balance_overflow_reject_total`,
-`drop_not_found_total`, and `tx_rejected_total{reason=*}`. Spans
+`drop_not_found_total`, `banned_peers_total`,
+`price_band_p25`, `price_band_median`, `price_band_p75`, and
+`tx_rejected_total{reason=*}`. Spans
 [`mempool_mutex`](src/lib.rs#L1132-L1145), [`admission_lock`](src/lib.rs#L1596-L1608),
 [`eviction_sweep`](src/lib.rs#L1684-L1704), and [`startup_rebuild`](src/lib.rs#L936-L948) annotate
 sender, nonce, fee-per-byte, and sweep details.
