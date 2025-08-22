@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use blake3::Hasher;
-use hex;
 use the_block::Blockchain;
 
 mod util;

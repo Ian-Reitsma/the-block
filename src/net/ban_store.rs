@@ -9,8 +9,10 @@ pub struct BanStore {
 
 impl BanStore {
     pub fn open(path: &str) -> Self {
-        let db = sled::open(path).unwrap();
-        let tree = db.open_tree("bans").unwrap();
+        let db = sled::open(path).unwrap_or_else(|e| panic!("open ban db: {e}"));
+        let tree = db
+            .open_tree("bans")
+            .unwrap_or_else(|e| panic!("open bans tree: {e}"));
         Self { tree }
     }
 
@@ -67,7 +69,7 @@ impl BanStore {
 fn current_ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|e| panic!("time error: {e}"))
         .as_secs()
 }
 

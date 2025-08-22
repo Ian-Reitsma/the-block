@@ -25,7 +25,8 @@ pub fn record_request(base: &str, agency: &str, case_id: &str) -> std::io::Resul
         agency: agency.to_string(),
         case_hash: case_hash.clone(),
     };
-    let line = serde_json::to_string(&entry).unwrap();
+    let line =
+        serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE request: {e}"));
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)

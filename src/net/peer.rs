@@ -59,7 +59,11 @@ impl PeerSet {
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
-        if BAN_STORE.lock().unwrap().is_banned(pk) {
+        if BAN_STORE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_banned(pk)
+        {
             return Err(PeerErrorCode::Banned);
         }
         let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
@@ -86,10 +90,13 @@ impl PeerSet {
             entry.banned_until = Some(until);
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_else(|e| panic!("time error: {e}"))
                 .as_secs()
                 + *P2P_BAN_SECS as u64;
-            BAN_STORE.lock().unwrap().ban(pk, ts);
+            BAN_STORE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .ban(pk, ts);
             return Err(PeerErrorCode::RateLimit);
         }
         Ok(())

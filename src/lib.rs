@@ -255,7 +255,7 @@ pub(crate) fn to_array_64(bytes: &[u8]) -> Option<[u8; 64]> {
 #[allow(clippy::expect_used)]
 fn hex_to_bytes(hex: &str) -> Vec<u8> {
     // Utility used by tests and examples
-    hex::decode(hex).expect("Invalid hex string")
+    hex::decode(hex).unwrap_or_else(|_| panic!("Invalid hex string"))
 }
 
 fn snapshot_interval_from_env() -> u64 {

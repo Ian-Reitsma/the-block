@@ -240,7 +240,11 @@ fi
 # Optional builds
 if [[ -f Makefile ]]; then
   if command -v docker &>/dev/null; then
-    run_step "make" make
+    if docker info &>/dev/null; then
+      run_step "make" make
+    else
+      skip_step "make (docker daemon not running)"
+    fi
   else
     skip_step "make (docker missing)"
   fi

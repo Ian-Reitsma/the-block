@@ -323,18 +323,19 @@ mod tests {
 
     #[test]
     fn price_band_calc() {
-        let bands = price_bands(&[1, 2, 3, 4]).unwrap();
+        let bands = price_bands(&[1, 2, 3, 4]).unwrap_or_else(|| panic!("price bands"));
         assert_eq!(bands, (2, 3, 4));
     }
 
     #[test]
     fn courier_store_forward() {
         use crate::compute_market::courier::CourierStore;
-        let dir = tempfile::tempdir().unwrap();
-        let store = CourierStore::open(dir.path().to_str().unwrap());
+        let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("create temp dir: {e}"));
+        let store = CourierStore::open(dir.path().to_str().unwrap_or_else(|| panic!("temp dir path")));
         let receipt = store.send(b"bundle", "alice");
         assert!(!receipt.delivered);
-        let forwarded = store.flush(|r| r.sender == "alice").unwrap();
+        let forwarded =
+            store.flush(|r| r.sender == "alice").unwrap_or_else(|e| panic!("flush receipts: {e}"));
         assert_eq!(forwarded, 1);
     }
 
@@ -349,7 +350,7 @@ mod tests {
             capacity: 1,
             price: 5,
         };
-        market.post_offer(offer).unwrap();
+        market.post_offer(offer).unwrap_or_else(|e| panic!("post offer: {e}"));
         let mut h = Hasher::new();
         h.update(b"slice");
         let hash = *h.finalize().as_bytes();
@@ -360,14 +361,20 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
         };
-        market.submit_job(job).unwrap();
+        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
         let proof = SliceProof {
             reference: hash,
             output: hash,
             payout: 5,
         };
-        assert_eq!(market.submit_slice(&job_id, proof).unwrap(), 5);
-        let bonds = market.finalize_job(&job_id).unwrap();
+        assert_eq!(
+            market
+                .submit_slice(&job_id, proof)
+                .unwrap_or_else(|e| panic!("submit slice: {e}")),
+            5
+        );
+        let bonds =
+            market.finalize_job(&job_id).unwrap_or_else(|| panic!("finalize job"));
         assert_eq!(bonds, (1, 1));
     }
 
@@ -384,7 +391,7 @@ mod tests {
             capacity: 1,
             price: 5,
         };
-        market.post_offer(offer).unwrap();
+        market.post_offer(offer).unwrap_or_else(|e| panic!("post offer: {e}"));
         let job = Job {
             job_id: "j1".into(),
             slices: vec![hash, hash],
@@ -395,11 +402,13 @@ mod tests {
                 Workload::Transcode(b"a".to_vec()),
             ],
         };
-        market.submit_job(job).unwrap();
+        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
         assert!(market.backlog_factor() > 1.0);
         let mut board = PriceBoard::new(10);
         board.record(5);
-        let adj = board.adjusted_median(market.backlog_factor()).unwrap();
+        let adj = board
+            .adjusted_median(market.backlog_factor())
+            .unwrap_or_else(|| panic!("adjusted median"));
         assert!(adj >= 5);
     }
 
@@ -413,9 +422,13 @@ mod tests {
             capacity: 1,
             price: 5,
         };
-        market.post_offer(offer.clone()).unwrap();
+        market
+            .post_offer(offer.clone())
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
         assert!(market.cancel_offer("j2").is_some());
-        market.post_offer(offer).unwrap();
+        market
+            .post_offer(offer)
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
         let mut h = Hasher::new();
         h.update(b"slice");
         let hash = *h.finalize().as_bytes();
@@ -426,8 +439,10 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
         };
-        market.submit_job(job).unwrap();
-        let bonds = market.cancel_job("j2").unwrap();
+        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
+        let bonds = market
+            .cancel_job("j2")
+            .unwrap_or_else(|| panic!("cancel job"));
         assert_eq!(bonds, (1, 1));
     }
 
@@ -442,7 +457,7 @@ mod tests {
             capacity: 1,
             price: 2,
         };
-        market.post_offer(offer).unwrap();
+        market.post_offer(offer).unwrap_or_else(|e| panic!("post offer: {e}"));
         let mut h = Hasher::new();
         h.update(b"a");
         let hash = *h.finalize().as_bytes();
@@ -453,10 +468,13 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"a".to_vec())],
         };
-        market.submit_job(job).unwrap();
-        let total = market.execute_job(&job_id).unwrap();
+        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
+        let total = market
+            .execute_job(&job_id)
+            .unwrap_or_else(|e| panic!("execute job: {e}"));
         assert_eq!(total, 2);
-        let bonds = market.finalize_job(&job_id).unwrap();
+        let bonds =
+            market.finalize_job(&job_id).unwrap_or_else(|| panic!("finalize job"));
         assert_eq!(bonds, (1, 1));
     }
 }
