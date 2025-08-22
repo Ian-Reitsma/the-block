@@ -1,15 +1,18 @@
 use blake3::Hasher;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sled::Tree;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Receipt stored for carry-to-earn courier mode.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CourierReceipt {
+    pub id: u64,
     pub bundle_hash: String,
     pub sender: String,
     pub timestamp: u64,
-    pub delivered: bool,
+    pub acknowledged: bool,
 }
 
 pub struct CourierStore {
@@ -33,45 +36,83 @@ impl CourierStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|e| panic!("time error: {e}"))
             .as_secs();
+        let id = rand::rngs::OsRng.next_u64();
         let receipt = CourierReceipt {
-            bundle_hash: bundle_hash.clone(),
+            id,
+            bundle_hash,
             sender: sender.to_string(),
             timestamp: ts,
-            delivered: false,
+            acknowledged: false,
         };
         let bytes =
             bincode::serialize(&receipt).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
-        let _ = self.tree.insert(bundle_hash.as_bytes(), bytes);
+        let _ = self.tree.insert(id.to_be_bytes(), bytes);
         receipt
     }
 
     pub fn flush<F: Fn(&CourierReceipt) -> bool>(&self, forward: F) -> Result<u64, sled::Error> {
-        let mut forwarded = 0u64;
+        let mut acknowledged = 0u64;
         let mut iter = self.tree.iter();
         while let Some(next) = iter.next() {
             let (k, v) = match next {
                 Ok(kv) => kv,
                 Err(e) => {
                     #[cfg(feature = "telemetry")]
-                    log::error!("courier scan failed: {e}");
+                    tracing::error!("courier scan failed: {e}");
                     #[cfg(not(feature = "telemetry"))]
                     eprintln!("courier scan failed: {e}");
                     return Err(e);
                 }
             };
-            if let Ok(rec) = bincode::deserialize::<CourierReceipt>(&v) {
-                if forward(&rec) {
-                    if let Err(e) = self.tree.remove(&k) {
-                        #[cfg(feature = "telemetry")]
-                        log::error!("courier remove failed: {e}");
-                        #[cfg(not(feature = "telemetry"))]
-                        eprintln!("courier remove failed: {e}");
-                        return Err(e);
+            if let Ok(mut rec) = bincode::deserialize::<CourierReceipt>(&v) {
+                if rec.acknowledged {
+                    continue;
+                }
+                let mut attempt = 0u32;
+                let mut delay = Duration::from_millis(100);
+                loop {
+                    #[cfg(feature = "telemetry")]
+                    {
+                        crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
+                        tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                     }
-                    forwarded += 1;
+                    if forward(&rec) {
+                        rec.acknowledged = true;
+                        let bytes = bincode::serialize(&rec)
+                            .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+                        if let Err(e) = self.tree.insert(&k, bytes) {
+                            #[cfg(feature = "telemetry")]
+                            tracing::error!("courier update failed: {e}");
+                            #[cfg(not(feature = "telemetry"))]
+                            eprintln!("courier update failed: {e}");
+                            return Err(e);
+                        }
+                        acknowledged += 1;
+                        break;
+                    } else {
+                        #[cfg(feature = "telemetry")]
+                        {
+                            crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
+                            tracing::warn!(id = rec.id, attempt, "courier forward failed");
+                        }
+                        attempt += 1;
+                        if attempt >= 5 {
+                            break;
+                        }
+                        thread::sleep(delay);
+                        delay *= 2;
+                    }
                 }
             }
         }
-        Ok(forwarded)
+        Ok(acknowledged)
+    }
+
+    pub fn get(&self, id: u64) -> Option<CourierReceipt> {
+        self.tree
+            .get(id.to_be_bytes())
+            .ok()
+            .flatten()
+            .and_then(|v| bincode::deserialize(&v).ok())
     }
 }

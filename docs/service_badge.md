@@ -31,7 +31,11 @@ Nodes expose `/badge/status` on the RPC port for external monitoring. The
 endpoint returns a JSON object:
 
 ```json
-{"active": true}
+{"active": true, "last_mint": 1700000000, "last_burn": null}
 ```
 
-`active: true` indicates a badge is currently minted; otherwise `false`.
+`active` indicates whether a badge is currently minted. `last_mint` and
+`last_burn` expose UNIX timestamps of the most recent transitions, allowing
+external monitors to track heartbeat cadence. Prometheus gauges
+`badge_active` and `badge_last_change_seconds` surface the same information for
+scrapes.

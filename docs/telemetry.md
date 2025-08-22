@@ -16,7 +16,16 @@ The logger permits up to 100 events per second before sampling kicks in. Once th
 Counters `peer_error_total{code}` and `rpc_client_error_total{code}` track rate‑limited and banned peers and RPC clients for observability.
 
 The gauge `banned_peers_total` exposes the number of peers currently banned and
-is updated whenever bans are added or expire.
+is updated whenever bans are added or expire. Each ban's expiry is also tracked
+via `banned_peer_expiration_seconds{peer}`.
+
+Manage the persistent ban store with the `ban` CLI:
+
+```bash
+ban list               # show active bans and expiration timestamps
+ban ban <peer> <secs>  # ban a peer for N seconds
+ban unban <peer>       # remove a peer ban
+```
 
 Histogram `log_size_bytes` records the serialized size of each emitted log.
 Panels on the default Grafana dashboard derive average log size from this

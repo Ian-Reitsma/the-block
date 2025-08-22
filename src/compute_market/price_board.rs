@@ -1,22 +1,20 @@
-use once_cell::sync::Lazy;
+use once_cell::sync::{Lazy, OnceCell};
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use std::fs;
 
 #[cfg(feature = "telemetry")]
 use prometheus::IntGauge;
 
 /// Sliding window of recent prices with quantile bands.
 pub struct PriceBoard {
-    window: usize,
-    prices: VecDeque<u64>,
+    pub window: usize,
+    pub prices: VecDeque<u64>,
 }
 
 impl PriceBoard {
     pub fn new(window: usize) -> Self {
-        Self {
-            window,
-            prices: VecDeque::with_capacity(window),
-        }
+        Self { window, prices: VecDeque::with_capacity(window) }
     }
 
     pub fn record(&mut self, price: u64) {
@@ -62,6 +60,31 @@ impl PriceBoard {
 }
 
 static BOARD: Lazy<Mutex<PriceBoard>> = Lazy::new(|| Mutex::new(PriceBoard::new(100)));
+static BOARD_PATH: OnceCell<String> = OnceCell::new();
+
+pub fn init(path: String, window: usize) {
+    let _ = BOARD_PATH.set(path.clone());
+    if let Ok(mut b) = BOARD.lock() {
+        b.window = window;
+        b.prices = VecDeque::with_capacity(window);
+        if let Ok(bytes) = fs::read(&path) {
+            if let Ok(saved) = bincode::deserialize::<VecDeque<u64>>(&bytes) {
+                b.prices = saved;
+            }
+        }
+        b.update_metrics();
+    }
+}
+
+pub fn persist() {
+    if let Some(path) = BOARD_PATH.get() {
+        if let Ok(b) = BOARD.lock() {
+            if let Ok(bytes) = bincode::serialize(&b.prices) {
+                let _ = fs::write(path, bytes);
+            }
+        }
+    }
+}
 
 #[cfg(feature = "telemetry")]
 static PRICE_P25: Lazy<IntGauge> = Lazy::new(|| {

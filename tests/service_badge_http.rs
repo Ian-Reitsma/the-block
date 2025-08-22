@@ -27,11 +27,13 @@ async fn badge_status_endpoint() {
         .write_all(b"GET /badge/status HTTP/1.1\r\n\r\n")
         .await
         .unwrap();
-    let mut resp = vec![0u8; 128];
+    let mut resp = vec![0u8; 256];
     let n = stream.read(&mut resp).await.unwrap();
     let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
     let body: serde_json::Value = serde_json::from_slice(&resp[body_idx + 4..n]).unwrap();
     assert!(!body["active"].as_bool().unwrap());
+    assert!(body["last_mint"].is_null());
+    assert!(body["last_burn"].is_null());
 
     // Mint a badge and verify the endpoint reflects it.
     {
@@ -52,4 +54,5 @@ async fn badge_status_endpoint() {
     let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
     let body: serde_json::Value = serde_json::from_slice(&resp[body_idx + 4..n]).unwrap();
     assert!(body["active"].as_bool().unwrap());
+    assert!(body["last_mint"].as_u64().is_some());
 }

@@ -8,9 +8,11 @@ The project uses [F★](https://www.fstar-lang.org/) to state and check compute-
 make -C formal
 ```
 
-The `formal/Makefile` will automatically download a pinned F★ release to
-`formal/.fstar/` if `fstar.exe` is not already installed. Override the
-version by setting `FSTAR_VERSION`.
+The `formal/Makefile` calls `scripts/install_fstar.sh`, which detects your OS and
+CPU architecture, downloads the matching release (default `v2025.08.07`),
+verifies its SHA256 checksum, and caches the binaries under
+`formal/.fstar/<version>/`. Override the pinned release with `FSTAR_VERSION` or
+point `FSTAR_HOME` at an existing installation to skip the download.
 
 It then builds:
 

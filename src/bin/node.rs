@@ -96,6 +96,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: ComputeCmd,
     },
+    /// Service badge utilities
+    Badge {
+        #[command(subcommand)]
+        cmd: BadgeCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -104,6 +109,15 @@ enum ComputeCmd {
     Courier {
         #[command(subcommand)]
         action: CourierCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum BadgeCmd {
+    /// Show current badge status
+    Status {
+        #[arg(long, default_value = "node-data")]
+        data_dir: String,
     },
 }
 
@@ -126,8 +140,12 @@ async fn main() -> std::process::ExitCode {
             metrics_addr,
             data_dir,
         } => {
-            let mut inner = Blockchain::new(&data_dir);
-            inner.snapshot.set_interval(snapshot_interval);
+            let mut inner = Blockchain::open(&data_dir).expect("open blockchain");
+            if snapshot_interval != inner.config.snapshot_interval {
+                inner.snapshot.set_interval(snapshot_interval);
+                inner.config.snapshot_interval = snapshot_interval;
+                inner.save_config();
+            }
             let bc = Arc::new(Mutex::new(inner));
 
             #[cfg(feature = "telemetry")]
@@ -156,6 +174,7 @@ async fn main() -> std::process::ExitCode {
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
             let _ = handle.await;
+            the_block::compute_market::price_board::persist();
             std::process::ExitCode::SUCCESS
         }
         Commands::GenerateKey { key_id } => {
@@ -217,6 +236,18 @@ async fn main() -> std::process::ExitCode {
                     }
                 }
             },
+        },
+        Commands::Badge { cmd } => match cmd {
+            BadgeCmd::Status { data_dir } => {
+                let mut chain = Blockchain::open(&data_dir).expect("open blockchain");
+                chain.check_badges();
+                let (active, last_mint, last_burn) = chain.badge_status();
+                println!(
+                    "active: {active}, last_mint: {:?}, last_burn: {:?}",
+                    last_mint, last_burn
+                );
+                std::process::ExitCode::SUCCESS
+            }
         },
     };
     code

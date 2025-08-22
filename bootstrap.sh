@@ -31,10 +31,16 @@ REQUIRED_PYTHON="3.12.3"
 PARTIAL_RUN_FLAG=".bootstrap_partial"
 touch "$PARTIAL_RUN_FLAG"
 
+NATIVE_MONITOR=0
+for arg in "$@"; do
+  [[ "$arg" == "--native-monitor" ]] && NATIVE_MONITOR=1
+done
+
 FAILED_STEPS=()
 SKIPPED_STEPS=()
 FIX_COMMANDS=()
 BROKEN_PYTHON=0
+PY_SHIM=0
 
 trap 'cleanup; exit 1' SIGINT SIGTERM
 
@@ -156,6 +162,19 @@ case "$OS" in
   darwin) install_deps_brew ;;
 esac
 
+if ! command -v python &>/dev/null && command -v python3 &>/dev/null; then
+  if ln -sf "$(command -v python3)" /usr/local/bin/python 2>/dev/null; then
+    cecho green "   + linked python -> $(command -v python3)"
+  else
+    PY_SHIM=1
+    mkdir -p bin
+    ln -sf "$(command -v python3)" bin/python
+    cecho yellow "   → 'python' command missing; added ./bin/python shim"
+    export PATH="$PWD/bin:$PATH"
+    cecho yellow "   → temporarily added $(pwd)/bin to PATH"
+  fi
+fi
+
 # python & venv, pyenv fallback
 PY_BIN=""
 if command -v python3.12 &>/dev/null; then
@@ -188,6 +207,9 @@ fi
 source .venv/bin/activate
 export PYO3_PYTHON="$(pwd)/.venv/bin/python"
 hash -r
+if (( PY_SHIM == 1 )); then
+  ln -sf "$(pwd)/.venv/bin/python" bin/python
+fi
 if [[ -z "${VIRTUAL_ENV:-}" || "$(command -v python)" != "$(pwd)/.venv/bin/python" ]]; then
   cecho red "Python interpreter mismatch. Activate the project's venv first."
   exit 1
@@ -239,14 +261,10 @@ fi
 
 # Optional builds
 if [[ -f Makefile ]]; then
-  if command -v docker &>/dev/null; then
-    if docker info &>/dev/null; then
-      run_step "make" make
-    else
-      skip_step "make (docker daemon not running)"
-    fi
+  if (( NATIVE_MONITOR == 1 )); then
+    run_step "monitor (native)" make monitor --native-monitor
   else
-    skip_step "make (docker missing)"
+    run_step "monitor" make monitor
   fi
 fi
 [[ -f CMakeLists.txt ]] && run_step "cmake build" bash -c 'mkdir -p build && cd build && cmake .. && make'
@@ -329,6 +347,10 @@ for exe in python cargo just docker; do
     cecho yellow "   $exe not found"
   fi
 done
+
+if (( PY_SHIM == 1 )); then
+  cecho yellow "   python shim active; add $(pwd)/bin to PATH or use python3"
+fi
 
 if (( ${#FAILED_STEPS[@]} )); then
   cecho red "\n⚠  Some steps failed:"

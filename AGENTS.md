@@ -240,7 +240,9 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Logging and observability: instrument changes; silent failures are bugs.
 - Security assumptions: treat inputs as adversarial; validations must be total and explicit.
 - Granular commits: single logical changes; every commit builds, tests, and lints cleanly.
-- Formal proofs: `make -C formal` auto-installs F★ to `formal/.fstar`; set `FSTAR_VERSION` to override.
+- Formal proofs: `make -C formal` runs `scripts/install_fstar.sh` (default `v2025.08.07`) which verifies checksums and caches an OS/arch-specific release under `formal/.fstar/<version>`; override with `FSTAR_VERSION` or point `FSTAR_HOME` at an existing install.
+- Monitoring dashboards: run `npm ci` then `make -C monitoring lint` (via `npx jsonnet-lint`); CI runs it after monitor smoke tests.
+- WAL fuzzing: `make fuzz-wal` stores artifacts and RNG seeds under `fuzz/wal/`; reproduce with `cargo fuzz run wal_fuzz -- -seed=<seed> fuzz/wal/<file>`.
 
 ### 17.5 Architecture & Telemetry Highlights (from Agents‑Sup)
 
@@ -249,6 +251,10 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC.
 - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`.
+ - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds` and `snapshot_fail_total`.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.
+- Governance CLI: `gov submit`, `vote`, `exec`, and `status` persist proposals under `examples/governance/proposals.db`.
+- Workload samples under `examples/workloads/` demonstrate slice formats and can
+  be executed with `cargo run --example run_workload <file>`.
 

@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Basic proposal shared by both houses.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proposal {
     pub id: u64,
     pub start: u64,
@@ -88,6 +90,31 @@ impl Governance {
         }
     }
 
+    pub fn load(path: &str, quorum_ops: u32, quorum_builders: u32, timelock_secs: u64) -> Self {
+        if let Ok(bytes) = fs::read(path) {
+            if let Ok((next_id, props)) =
+                serde_json::from_slice::<(u64, Vec<Proposal>)>(&bytes)
+            {
+                let mut map = std::collections::HashMap::new();
+                for p in props {
+                    map.insert(p.id, p);
+                }
+                return Self {
+                    bicameral: Bicameral::new(quorum_ops, quorum_builders, timelock_secs),
+                    proposals: map,
+                    next_id,
+                };
+            }
+        }
+        Self::new(quorum_ops, quorum_builders, timelock_secs)
+    }
+
+    pub fn persist(&self, path: &str) -> std::io::Result<()> {
+        let props: Vec<&Proposal> = self.proposals.values().collect();
+        let bytes = serde_json::to_vec(&(self.next_id, props)).expect("serialize proposals");
+        fs::write(path, bytes)
+    }
+
     pub fn submit(&mut self, start: u64, end: u64) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -112,5 +139,12 @@ impl Governance {
         } else {
             Err("quorum or timelock not satisfied")
         }
+    }
+
+    pub fn status(&self, id: u64, now: u64) -> Result<(Proposal, u64), &'static str> {
+        let p = self.proposals.get(&id).ok_or("proposal not found")?.clone();
+        let end = p.end + self.bicameral.timelock_secs;
+        let remaining = if now >= end { 0 } else { end - now };
+        Ok((p, remaining))
     }
 }
