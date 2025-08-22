@@ -18,6 +18,15 @@ impl BanStore {
 
     pub fn ban(&self, pk: &[u8; 32], until: u64) {
         let _ = self.tree.insert(pk, &until.to_be_bytes());
+        #[cfg(feature = "telemetry")]
+        tracing::info!(peer = %hex::encode(pk), until, "peer banned");
+        self.update_metric();
+    }
+
+    pub fn unban(&self, pk: &[u8; 32]) {
+        let _ = self.tree.remove(pk);
+        #[cfg(feature = "telemetry")]
+        tracing::info!(peer = %hex::encode(pk), "peer unbanned");
         self.update_metric();
     }
 
@@ -58,10 +67,33 @@ impl BanStore {
         self.update_metric();
     }
 
+    pub fn list(&self) -> Vec<(String, u64)> {
+        self.purge_expired();
+        self.tree
+            .iter()
+            .filter_map(|res| res.ok())
+            .map(|(k, v)| {
+                let mut arr = [0u8; 8];
+                arr.copy_from_slice(&v);
+                let ts = u64::from_be_bytes(arr);
+                (hex::encode(k.as_ref()), ts)
+            })
+            .collect()
+    }
+
     fn update_metric(&self) {
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::BANNED_PEERS_TOTAL.set(self.tree.len() as i64);
+            crate::telemetry::BANNED_PEER_EXPIRATION.reset();
+            for res in self.tree.iter().filter_map(|r| r.ok()) {
+                let mut arr = [0u8; 8];
+                arr.copy_from_slice(&res.1);
+                let ts = u64::from_be_bytes(arr);
+                crate::telemetry::BANNED_PEER_EXPIRATION
+                    .with_label_values(&[&hex::encode(res.0.as_ref())])
+                    .set(ts as i64);
+            }
         }
     }
 }

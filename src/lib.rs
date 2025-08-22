@@ -34,8 +34,10 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 mod simple_db;
+pub mod config;
 pub use simple_db::SimpleDb;
 use simple_db::SimpleDb as Db;
+use config::NodeConfig;
 use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
@@ -553,6 +555,7 @@ pub struct Blockchain {
     #[pyo3(get)]
     pub skipped_nonce_gap: u64,
     badge_tracker: ServiceBadgeTracker,
+    pub config: NodeConfig,
 }
 
 #[pyclass]
@@ -618,11 +621,26 @@ impl Default for Blockchain {
             skipped: Vec::new(),
             skipped_nonce_gap: 0,
             badge_tracker: ServiceBadgeTracker::new(),
+            config: NodeConfig::default(),
+        }
+    }
+}
+
+impl Drop for Blockchain {
+    fn drop(&mut self) {
+        if std::env::var("TB_PRESERVE").is_ok() {
+            return;
+        }
+        if !self.path.is_empty() {
+            let _ = std::fs::remove_dir_all(&self.path);
         }
     }
 }
 
 impl Blockchain {
+    pub fn save_config(&self) {
+        let _ = self.config.save(&self.path);
+    }
     #[cfg(feature = "telemetry")]
     fn inc_mempool_size(&self) -> usize {
         let size = self
@@ -682,6 +700,13 @@ impl Blockchain {
         let before = self.badge_tracker.has_badge();
         self.badge_tracker.check_badges();
         let after = self.badge_tracker.has_badge();
+        #[cfg(feature = "telemetry")]
+        {
+            telemetry::BADGE_ACTIVE.set(if after { 1 } else { 0 });
+            if let Some(ts) = self.badge_tracker.last_mint().or(self.badge_tracker.last_burn()) {
+                telemetry::BADGE_LAST_CHANGE_SECONDS.set(ts as i64);
+            }
+        }
         if before != after {
             #[cfg(feature = "telemetry-json")]
             log_event(
@@ -696,6 +721,8 @@ impl Blockchain {
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("service") {
+                let span = tracing::info_span!("badge", from = before, to = after);
+                let _e = span.enter();
                 info!("badge {}", if after { "minted" } else { "revoked" });
             }
         }
@@ -708,6 +735,15 @@ impl Blockchain {
     /// Whether this chain has earned a service badge.
     pub fn has_badge(&self) -> bool {
         self.badge_tracker.has_badge()
+    }
+
+    /// Current badge status and timestamps.
+    pub fn badge_status(&self) -> (bool, Option<u64>, Option<u64>) {
+        (
+            self.badge_tracker.has_badge(),
+            self.badge_tracker.last_mint(),
+            self.badge_tracker.last_burn(),
+        )
     }
 
     /// Mutable access to the service badge tracker.
@@ -1098,7 +1134,13 @@ impl Blockchain {
         }
         bc.block_height = bc.chain.len() as u64;
         bc.snapshot.set_base(path.to_string());
-        bc.snapshot.set_interval(snapshot_interval_from_env());
+        let cfg = NodeConfig::load(path);
+        bc.snapshot.set_interval(cfg.snapshot_interval);
+        let pb = std::path::Path::new(path).join(&cfg.price_board_path);
+        crate::compute_market::price_board::init(pb.to_string_lossy().into_owned(), cfg.price_board_window);
+        bc.config = cfg.clone();
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::SNAPSHOT_INTERVAL.set(cfg.snapshot_interval as i64);
 
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
@@ -3226,14 +3268,6 @@ pub fn maybe_spawn_purge_loop_py(
 #[doc(hidden)]
 pub fn poison_mempool(bc: &Blockchain) {
     bc.poison_mempool();
-}
-
-impl Drop for Blockchain {
-    fn drop(&mut self) {
-        if !self.path.is_empty() {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
-    }
 }
 
 impl Blockchain {

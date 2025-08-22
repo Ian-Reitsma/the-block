@@ -67,6 +67,11 @@ python demo.py               # demo with background purge loop (TB_PURGE_LOOP_SE
 python demo.py
 ```
 
+If `python` is not available after bootstrapping, the script places a shim in
+`./bin` and adds it to `PATH` for the current session. For new shells, either
+`source .venv/bin/activate`, add `$PWD/bin` to your `PATH`, or invoke
+`python3`.
+
 > Look for `🎉 demo completed` in the console—if you see it, the kernel, bindings, and demo all worked.
 
 Running `demo.py` will attempt to build the `the_block` extension with
@@ -296,29 +301,35 @@ curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":2,"method":"submit_tx","params":{"tx":"<hex>"}}'
 # => {"jsonrpc":"2.0","result":{"status":"ok"},"id":2}
+# Adjust snapshot interval
+curl -s -X POST 127.0.0.1:3030 \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"set_snapshot_interval","params":{"interval":1200}}'
+# => {"jsonrpc":"2.0","result":{"status":"ok"},"id":4}
+
 
 # Register and resolve @handles
 curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"register_handle","params":{"handle":"@alice","address":"alice"}}'
-# => {"jsonrpc":"2.0","result":{"status":"ok"},"id":3}
+  -d '{"jsonrpc":"2.0","id":4,"method":"register_handle","params":{"handle":"@alice","address":"alice"}}'
+# => {"jsonrpc":"2.0","result":{"status":"ok"},"id":4}
 curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":4,"method":"resolve_handle","params":{"handle":"@alice"}}'
-# => {"jsonrpc":"2.0","result":{"address":"alice"},"id":4}
+  -d '{"jsonrpc":"2.0","id":5,"method":"resolve_handle","params":{"handle":"@alice"}}'
+# => {"jsonrpc":"2.0","result":{"address":"alice"},"id":5}
 
 # Start and stop mining
 curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"start_mining","params":{"miner":"miner"}}'
+  -d '{"jsonrpc":"2.0","id":6,"method":"start_mining","params":{"miner":"miner"}}'
 curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":4,"method":"stop_mining"}'
+  -d '{"jsonrpc":"2.0","id":7,"method":"stop_mining"}'
 
 # Dump metrics over RPC
 curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":5,"method":"metrics"}'
+  -d '{"jsonrpc":"2.0","id":8,"method":"metrics"}'
 ```
 
 A minimal Python client for quick experimentation:
@@ -497,6 +508,7 @@ src/
 
 monitoring/             # Prometheus & Grafana configs (`make monitor`)
 examples/governance/    # sample proposal JSON files
+examples/workloads/     # sample slice files and generators
 fuzz/wal/               # write‑ahead log fuzz artifacts
 formal/                 # F★ lemmas (`make -C formal`)
 scripts/                # install_fstar.sh, snapshot_ci.sh, …
@@ -505,13 +517,18 @@ benches/                # Criterion benches
 demo.py                 # Python end‑to‑end demo
 docs/
   compute_market.md     # workload formats and courier mode
+  service_badge.md      # badge heartbeat semantics
   wal.md                # WAL fuzz signatures
-  snapshots.md          # snapshot restore guide
+  snapshots.md          # snapshot restore guide and metrics
   monitoring.md         # monitor stack instructions
   formal.md             # F★ verification steps
   detailed_updates.md   # change log for auditors
 AGENTS.md               # Developer handbook (vision, playbooks)
 ```
+
+See `docs/service_badge.md` for badge heartbeat semantics, `docs/snapshots.md`
+for snapshot metrics and restore procedures, and `docs/formal.md` for the F★
+proof harness.
 
 ---
 

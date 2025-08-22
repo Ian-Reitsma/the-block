@@ -7,6 +7,8 @@ pub struct ServiceBadgeTracker {
     total_epochs: u64,
     badge_minted: bool,
     latency_samples: Vec<Duration>,
+    last_mint: Option<u64>,
+    last_burn: Option<u64>,
 }
 
 impl ServiceBadgeTracker {
@@ -42,10 +44,12 @@ impl ServiceBadgeTracker {
         if !self.badge_minted {
             if self.total_epochs >= 90 && self.uptime_percent() >= 99.0 {
                 self.badge_minted = true;
+                self.last_mint = Some(current_ts());
             }
         } else if self.uptime_percent() < 95.0 {
             // Revoke the badge if uptime slips below 95% after minting.
             self.badge_minted = false;
+            self.last_burn = Some(current_ts());
         }
     }
 
@@ -53,4 +57,20 @@ impl ServiceBadgeTracker {
     pub fn has_badge(&self) -> bool {
         self.badge_minted
     }
+
+    pub fn last_mint(&self) -> Option<u64> {
+        self.last_mint
+    }
+
+    pub fn last_burn(&self) -> Option<u64> {
+        self.last_burn
+    }
+}
+
+fn current_ts() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|e| panic!("time error: {e}"))
+        .as_secs()
 }

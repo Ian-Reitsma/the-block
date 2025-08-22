@@ -14,7 +14,9 @@ Two chambers participate in ratifying upgrades:
 1. Draft a JSON proposal (see `examples/governance/`).
 2. Submit with `gov submit <file>` to receive an id.
 3. Cast votes via `gov vote <id> --house ops|builders`.
-4. After both houses reach quorum and the timelock elapses, the proposal may be executed.
+4. After both houses reach quorum and the timelock elapses, execute with `gov exec <id>`.
+5. Inspect progress at any time with `gov status <id>` which reports vote totals,
+   execution state and remaining timelock.
 
 Both houses must reach quorum before a proposal enters a timelock period,
 after which it may be executed on-chain.

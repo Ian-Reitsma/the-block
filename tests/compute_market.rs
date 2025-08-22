@@ -39,9 +39,11 @@ fn courier_receipt_forwarding() {
     let dir = tempfile::tempdir().unwrap();
     let store = CourierStore::open(dir.path().to_str().unwrap());
     let receipt = store.send(b"bundle", "alice");
-    assert!(!receipt.delivered);
+    assert!(!receipt.acknowledged);
     let forwarded = store.flush(|r| r.sender == "alice").unwrap();
     assert_eq!(forwarded, 1);
+    let rec = store.get(receipt.id).unwrap();
+    assert!(rec.acknowledged);
 }
 
 #[test]

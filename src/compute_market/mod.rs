@@ -74,19 +74,32 @@ pub enum Workload {
     Inference(Vec<u8>),
 }
 
-/// Execute workloads and produce proof hashes.
-pub struct WorkloadRunner;
+/// Execute workloads and produce proof hashes with per-slice caching.
+pub struct WorkloadRunner {
+    cache: std::sync::Arc<std::sync::Mutex<HashMap<usize, [u8; 32]>>>,
+}
 
 impl WorkloadRunner {
     pub fn new() -> Self {
-        Self
+        Self {
+            cache: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+        }
     }
 
-    pub fn run(&self, w: &Workload) -> [u8; 32] {
-        match w {
-            Workload::Transcode(data) => workloads::transcode::run(data),
-            Workload::Inference(data) => workloads::inference::run(data),
+    /// Run the workload for a given slice ID asynchronously. Results are cached so
+    /// repeated executions avoid recomputation.
+    pub async fn run(&self, slice_id: usize, w: Workload) -> [u8; 32] {
+        if let Some(cached) = self.cache.lock().unwrap().get(&slice_id) {
+            return *cached;
         }
+        let res = tokio::task::spawn_blocking(move || match w {
+            Workload::Transcode(data) => workloads::transcode::run(&data),
+            Workload::Inference(data) => workloads::inference::run(&data),
+        })
+        .await
+        .unwrap();
+        self.cache.lock().unwrap().insert(slice_id, res);
+        res
     }
 }
 
@@ -209,7 +222,7 @@ impl Market {
     }
 
     /// Execute a job by submitting slice outputs and returning total payout.
-    pub fn execute_job(&mut self, job_id: &str) -> Result<u64, &'static str> {
+    pub async fn execute_job(&mut self, job_id: &str) -> Result<u64, &'static str> {
         let (slices, workloads, price) = {
             let state = self.jobs.get(job_id).ok_or("unknown job")?;
             (
@@ -219,9 +232,13 @@ impl Market {
             )
         };
         let runner = WorkloadRunner::new();
+        let mut handles = Vec::new();
+        for (i, w) in workloads.into_iter().enumerate() {
+            handles.push(runner.run(i, w));
+        }
+        let results = futures::future::join_all(handles).await;
         let mut total = 0;
-        for (expected, w) in slices.into_iter().zip(workloads.iter()) {
-            let output = runner.run(w);
+        for (expected, output) in slices.into_iter().zip(results.into_iter()) {
             let proof = SliceProof {
                 reference: expected,
                 output,
@@ -333,10 +350,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("create temp dir: {e}"));
         let store = CourierStore::open(dir.path().to_str().unwrap_or_else(|| panic!("temp dir path")));
         let receipt = store.send(b"bundle", "alice");
-        assert!(!receipt.delivered);
+        assert!(!receipt.acknowledged);
         let forwarded =
             store.flush(|r| r.sender == "alice").unwrap_or_else(|e| panic!("flush receipts: {e}"));
         assert_eq!(forwarded, 1);
+        let stored = store
+            .get(receipt.id)
+            .unwrap_or_else(|| panic!("missing receipt"));
+        assert!(stored.acknowledged);
     }
 
     #[test]
@@ -469,8 +490,9 @@ mod tests {
             workloads: vec![Workload::Transcode(b"a".to_vec())],
         };
         market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
-        let total = market
-            .execute_job(&job_id)
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let total = rt
+            .block_on(market.execute_job(&job_id))
             .unwrap_or_else(|e| panic!("execute job: {e}"));
         assert_eq!(total, 2);
         let bonds =

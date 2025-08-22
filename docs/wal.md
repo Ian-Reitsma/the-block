@@ -8,10 +8,15 @@ replayed state matches the expected account balances.
 For deeper coverage, run the libFuzzer target:
 
 ```bash
-make fuzz-wal # runs `cargo fuzz run wal_fuzz --max-iters=1000`
+make fuzz-wal # runs `cargo fuzz run wal_fuzz --max-total-time=60 -- -artifact_prefix=fuzz/wal/`
 ```
 
-Artifacts from `cargo fuzz` are retained under `fuzz/wal/` for triage.
+Artifacts from `cargo fuzz` are retained under `fuzz/wal/` along with the RNG
+seed for deterministic reproduction. To reproduce a failing case:
+
+```bash
+cargo fuzz run wal_fuzz -- -seed=<seed> fuzz/wal/<file>
+```
 
 Known failure signatures:
 

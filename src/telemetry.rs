@@ -1,7 +1,8 @@
 use blake3;
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Registry, TextEncoder,
+    Encoder, GaugeVec, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry, TextEncoder,
 };
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,6 +17,39 @@ pub static MEMPOOL_SIZE: Lazy<IntGauge> = Lazy::new(|| {
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     g
+});
+
+pub static SNAPSHOT_INTERVAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("snapshot_interval", "Snapshot interval in blocks")
+        .unwrap_or_else(|e| panic!("gauge snapshot interval: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry snapshot interval: {e}"));
+    g
+});
+
+pub static SNAPSHOT_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "snapshot_duration_seconds",
+        "Snapshot operation duration",
+    );
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram snapshot duration: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry snapshot duration: {e}"));
+    h
+});
+
+pub static SNAPSHOT_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "snapshot_fail_total",
+        "Total snapshot operation failures",
+    )
+    .unwrap_or_else(|e| panic!("counter snapshot fail: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry snapshot fail: {e}"));
+    c
 });
 
 pub static EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
@@ -132,6 +166,45 @@ pub static BANNED_PEERS_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static BANNED_PEER_EXPIRATION: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "banned_peer_expiration_seconds",
+            "Expiration timestamp for active peer bans",
+        ),
+        &["peer"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static COURIER_FLUSH_ATTEMPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "courier_flush_attempt_total",
+        "Total courier receipt flush attempts",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static COURIER_FLUSH_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "courier_flush_failure_total",
+        "Failed courier receipt flush attempts",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static ORPHAN_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "orphan_sweep_total",
@@ -205,6 +278,51 @@ pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
+});
+
+pub static RPC_TOKENS: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "rpc_tokens_available",
+            "Current RPC rate limiter tokens per client",
+        ),
+        &["client"],
+    )
+    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static RPC_BANS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("rpc_bans_total", "Total RPC bans issued")
+        .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static BADGE_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("badge_active", "Whether a service badge is active (1/0)")
+        .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static BADGE_LAST_CHANGE_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "badge_last_change_seconds",
+        "Unix timestamp of the last badge mint/burn",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
 });
 
 pub struct Recorder;

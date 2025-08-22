@@ -12,11 +12,26 @@ jobs:
           toolchain: stable
           override: true
       - uses: Swatinem/rust-cache@v2
+      - name: install node deps
+        run: npm ci
+      - name: monitor smoke
+        run: |
+          set -e
+          make monitor --native-monitor &
+          pid=$!
+          sleep 5
+          kill $pid
+          wait $pid || true
       - name: lint grafana dashboard
-        run: npx grafonnet lint monitoring/grafana/dashboard.json
-      - name: cargo test
-        run: cargo test --all-features
+        run: make -C monitoring lint
+      - name: fstar installer failure check
+        run: scripts/test_install_fstar.sh
+      - uses: taiki-e/setup-nextest@v0
+      - name: cargo nextest
+        run: cargo nextest run --all-features
+      - name: doc tests
+        run: cargo test --doc --all-features
       - name: snapshot restore
         run: scripts/snapshot_ci.sh
       - name: wal fuzz smoke
-        run: cargo fuzz run wal_fuzz --max-iters=1000
+        run: cargo fuzz run wal_fuzz --max-total-time=60 -- -artifact_prefix=fuzz/wal/

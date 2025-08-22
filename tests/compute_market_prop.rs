@@ -20,7 +20,8 @@ proptest! {
         }
         let job = Job { job_id: job_id.clone(), slices: refs, price_per_slice: price, consumer_bond: 1, workloads: wls };
         market.submit_job(job).unwrap();
-        let total = market.execute_job(&job_id).unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let total = rt.block_on(market.execute_job(&job_id)).unwrap();
         prop_assert_eq!(total, price * slices as u64);
         prop_assert_eq!(market.finalize_job(&job_id).unwrap(), (1,1));
     }
