@@ -65,28 +65,31 @@ static BOARD: Lazy<Mutex<PriceBoard>> = Lazy::new(|| Mutex::new(PriceBoard::new(
 
 #[cfg(feature = "telemetry")]
 static PRICE_P25: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("price_band_p25", "25th percentile compute price").unwrap();
+    let g = IntGauge::new("price_band_p25", "25th percentile compute price")
+        .unwrap_or_else(|e| panic!("gauge p25: {e}"));
     crate::telemetry::REGISTRY
         .register(Box::new(g.clone()))
-        .unwrap();
+        .unwrap_or_else(|e| panic!("register p25 gauge: {e}"));
     g
 });
 
 #[cfg(feature = "telemetry")]
 static PRICE_MEDIAN: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("price_band_median", "Median compute price").unwrap();
+    let g = IntGauge::new("price_band_median", "Median compute price")
+        .unwrap_or_else(|e| panic!("gauge median: {e}"));
     crate::telemetry::REGISTRY
         .register(Box::new(g.clone()))
-        .unwrap();
+        .unwrap_or_else(|e| panic!("register median gauge: {e}"));
     g
 });
 
 #[cfg(feature = "telemetry")]
 static PRICE_P75: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("price_band_p75", "75th percentile compute price").unwrap();
+    let g = IntGauge::new("price_band_p75", "75th percentile compute price")
+        .unwrap_or_else(|e| panic!("gauge p75: {e}"));
     crate::telemetry::REGISTRY
         .register(Box::new(g.clone()))
-        .unwrap();
+        .unwrap_or_else(|e| panic!("register p75 gauge: {e}"));
     g
 });
 

@@ -509,7 +509,7 @@ pub async fn run_rpc_server(
                 error: err,
                 id: None,
             })
-            .unwrap();
+            .unwrap_or_else(|e| panic!("serialize RPC error response: {e}"));
             let response = format!(
                 "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                 body.len(), body

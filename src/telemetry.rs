@@ -261,7 +261,10 @@ pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static LOG_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("log_size_bytes", "Size of serialized log events in bytes")
-        .buckets(prometheus::exponential_buckets(64.0, 2.0, 8).unwrap());
+        .buckets(
+            prometheus::exponential_buckets(64.0, 2.0, 8)
+                .unwrap_or_else(|e| panic!("histogram buckets: {e}")),
+        );
     let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))

@@ -8,6 +8,10 @@ The default dashboard bundles Prometheus and Grafana to visualize subsystem metr
 make monitor
 ```
 
+The command expects a running Docker daemon. If Docker is not available, the
+bootstrap script will skip this step and continue without launching the
+monitoring stack.
+
 Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves a preloaded dashboard on <http://localhost:3000>.
 
 Panels include mempool size, banned peers, and average log size derived from

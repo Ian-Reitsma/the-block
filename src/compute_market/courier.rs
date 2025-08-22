@@ -18,8 +18,10 @@ pub struct CourierStore {
 
 impl CourierStore {
     pub fn open(path: &str) -> Self {
-        let db = sled::open(path).unwrap();
-        let tree = db.open_tree("courier").unwrap();
+        let db = sled::open(path).unwrap_or_else(|e| panic!("open courier db: {e}"));
+        let tree = db
+            .open_tree("courier")
+            .unwrap_or_else(|e| panic!("open courier tree: {e}"));
         Self { tree }
     }
 
@@ -29,7 +31,7 @@ impl CourierStore {
         let bundle_hash = h.finalize().to_hex().to_string();
         let ts = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|e| panic!("time error: {e}"))
             .as_secs();
         let receipt = CourierReceipt {
             bundle_hash: bundle_hash.clone(),
@@ -37,7 +39,8 @@ impl CourierStore {
             timestamp: ts,
             delivered: false,
         };
-        let bytes = bincode::serialize(&receipt).unwrap();
+        let bytes =
+            bincode::serialize(&receipt).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
         let _ = self.tree.insert(bundle_hash.as_bytes(), bytes);
         receipt
     }
