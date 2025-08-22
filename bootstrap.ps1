@@ -114,11 +114,21 @@ Ensure-Python
 Ensure-Pip
 Ensure-Venv
 
+$env:PYO3_PYTHON = (Resolve-Path ".\$PYTHON_VENV\Scripts\python.exe")
+
 Write-Color Cyan "Upgrading pip, setuptools, wheel..."
 .\$PYTHON_VENV\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
 
 Ensure-Rust
 Ensure-Maturin
+if (Test-Path "Cargo.toml") {
+    Write-Color Cyan "Running database migrations..."
+    cargo run --quiet --bin db_migrate
+    if (Test-Path "db_compact.sh" -and (Get-Command bash -ErrorAction SilentlyContinue)) {
+        Write-Color Cyan "Compacting database..."
+        bash ./db_compact.sh
+    }
+}
 Run-Maturin-Develop
 
 # Python project deps
