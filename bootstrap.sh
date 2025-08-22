@@ -103,12 +103,6 @@ else
   cecho yellow "   → No .env.example found, skipping env sync."
 fi
 
-# Run database migrations and compaction
-if [[ -x ./db_compact.sh ]]; then
-  run_step "database migrations" cargo run --quiet --bin db_migrate
-  run_step "database compaction" ./db_compact.sh
-fi
-
 # requirements.txt/package.json sanity
 if [[ -f requirements.txt ]]; then
   if [[ ! -s requirements.txt ]] || ! grep -q '[^[:space:]]' requirements.txt; then
@@ -192,6 +186,7 @@ fi
 
 [[ -d .venv ]] || run_step "python -m venv" "$PY_BIN" -m venv .venv
 source .venv/bin/activate
+export PYO3_PYTHON="$(pwd)/.venv/bin/python"
 hash -r
 if [[ -z "${VIRTUAL_ENV:-}" || "$(command -v python)" != "$(pwd)/.venv/bin/python" ]]; then
   cecho red "Python interpreter mismatch. Activate the project's venv first."
@@ -231,13 +226,25 @@ else
   skip_step "maturin/pip install (Python broken: sqlite3 missing)"
 fi
 
+# Run database migrations and compaction now that Rust and Python are ready
+if [[ -x ./db_compact.sh ]]; then
+  run_step "database migrations" cargo run --quiet --bin db_migrate
+  run_step "database compaction" ./db_compact.sh
+fi
+
 # Skeleton files
 [[ -f requirements.txt ]]         || echo "# placeholder" > requirements.txt
 [[ -f README.md       ]]         || echo -e "# $APP_NAME\n\nBootstrap complete. Next steps:\n- Edit README\n- Push code\n" > README.md
 [[ -f .pre-commit-config.yaml ]] || echo "# See https://pre-commit.com" > .pre-commit-config.yaml
 
 # Optional builds
-[[ -f Makefile       ]] && run_step "make" make
+if [[ -f Makefile ]]; then
+  if command -v docker &>/dev/null; then
+    run_step "make" make
+  else
+    skip_step "make (docker missing)"
+  fi
+fi
 [[ -f CMakeLists.txt ]] && run_step "cmake build" bash -c 'mkdir -p build && cd build && cmake .. && make'
 [[ -f justfile || -f Justfile ]] && run_step "just" just
 
