@@ -162,17 +162,8 @@ case "$OS" in
   darwin) install_deps_brew ;;
 esac
 
-if ! command -v python &>/dev/null && command -v python3 &>/dev/null; then
-  if ln -sf "$(command -v python3)" /usr/local/bin/python 2>/dev/null; then
-    cecho green "   + linked python -> $(command -v python3)"
-  else
-    PY_SHIM=1
-    mkdir -p bin
-    ln -sf "$(command -v python3)" bin/python
-    cecho yellow "   → 'python' command missing; added ./bin/python shim"
-    export PATH="$PWD/bin:$PATH"
-    cecho yellow "   → temporarily added $(pwd)/bin to PATH"
-  fi
+if ! command -v python &>/dev/null; then
+  PY_SHIM=1
 fi
 
 # python & venv, pyenv fallback
@@ -204,12 +195,16 @@ else
 fi
 
 [[ -d .venv ]] || run_step "python -m venv" "$PY_BIN" -m venv .venv
+export PATH="$PWD/.venv/bin:$PATH"
+if (( PY_SHIM == 1 )); then
+  mkdir -p bin
+  ln -sf "$(pwd)/.venv/bin/python" bin/python
+  export PATH="$PWD/bin:$PATH"
+fi
 source .venv/bin/activate
 export PYO3_PYTHON="$(pwd)/.venv/bin/python"
 hash -r
-if (( PY_SHIM == 1 )); then
-  ln -sf "$(pwd)/.venv/bin/python" bin/python
-fi
+cecho cyan "   project python on PATH; python demo.py works without activation"
 if [[ -z "${VIRTUAL_ENV:-}" || "$(command -v python)" != "$(pwd)/.venv/bin/python" ]]; then
   cecho red "Python interpreter mismatch. Activate the project's venv first."
   exit 1
@@ -240,6 +235,11 @@ if ! command -v cargo &>/dev/null; then
 fi
 command -v just      &>/dev/null || run_step "cargo install just" cargo install just
 command -v cargo-make&>/dev/null || run_step "cargo install cargo-make" cargo install cargo-make
+if cargo nextest --version >/dev/null 2>&1; then
+  cecho green "   ✓ cargo-nextest already installed"
+else
+  run_step "cargo install cargo-nextest" cargo +1.87.0 install cargo-nextest
+fi
 
 # Only install maturin/pip if Python build is not broken
 if (( BROKEN_PYTHON == 0 )); then
@@ -334,8 +334,7 @@ if [[ -f .env ]] && grep -q 'changeme' .env; then
 fi
 
 cecho green "==> [$APP_NAME] bootstrap complete"
-cecho cyan "   Activate venv:   source .venv/bin/activate"
-
+cecho cyan "   python demo.py now works without activation"
 for exe in python cargo just docker; do
   if command -v $exe &>/dev/null; then
     if [[ "$exe" == "python" ]]; then

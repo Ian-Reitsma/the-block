@@ -39,13 +39,14 @@ launches them with these same configs.
 
 ## Validation
 
-CI briefly launches the stack and then lints the dashboard JSON. Run the lint
-locally with:
+CI launches the stack and lints the dashboard whenever files under `monitoring/` change.
+The workflow runs `npm ci --prefix monitoring && make -C monitoring lint` and uploads the lint log as an artifact.
+Run the lint locally with:
 
 First install the Node dev dependencies (requires Node 20+):
 
 ```bash
-npm ci
+npm ci --prefix monitoring
 make -C monitoring lint
 ```
 

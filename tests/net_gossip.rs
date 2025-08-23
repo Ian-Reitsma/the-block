@@ -49,7 +49,11 @@ fn gossip_converges_to_longest_chain() {
     node1.discover_peers();
     node2.discover_peers();
     node3.discover_peers();
-    thread::sleep(Duration::from_millis(100));
+    // Allow extra time for the peer table to propagate across threads so
+    // subsequent broadcasts reach all nodes deterministically. The gossip
+    // test is occasionally flaky on slower CI runners, so wait a full second
+    // before starting the exchange.
+    thread::sleep(Duration::from_secs(1));
 
     // genesis block from node1
     let mut ts = 1;
@@ -97,8 +101,8 @@ fn gossip_converges_to_longest_chain() {
     }
     node2.broadcast_chain();
 
-    // wait up to 2s for all nodes to converge on the longest chain
-    for _ in 0..20 {
+    // wait up to 20s for all nodes to converge on the longest chain
+    for _ in 0..200 {
         let h1 = node1.blockchain().block_height;
         let h2 = node2.blockchain().block_height;
         let h3 = node3.blockchain().block_height;

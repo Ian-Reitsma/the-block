@@ -8,6 +8,12 @@ Snapshot operations export the following Prometheus metrics:
 
 - `snapshot_duration_seconds` (histogram) – time spent creating or applying a snapshot.
 - `snapshot_fail_total` (counter) – failures during snapshot operations.
+- `snapshot_interval` (gauge) – current interval in blocks.
+- `snapshot_interval_changed` (gauge) – last requested interval via RPC.
+
+The default Grafana dashboard includes **Snapshot Duration** (90th percentile)
+and **Snapshot Failures** panels so operators can watch latency and errors in
+real time.
 
 ## CI Validation
 
@@ -34,3 +40,17 @@ curl -s -X POST 127.0.0.1:3030 \
 
 The new value is persisted to `node-data/config.toml` so restarts honour the
 updated interval.
+
+```toml
+# node-data/config.toml
+snapshot_interval = 1200
+price_board_path = "price_board.bin"
+price_board_window = 100
+```
+
+### Troubleshooting
+
+- **Interval too small** – requests below 10 blocks return `{"error":{"message":"interval too small"}}` and leave the existing value unchanged.
+- **Defaults after corruption** – if `config.toml` is unreadable the node falls back to the compile-time default (`1024`).
+
+See [AGENTS.md](../AGENTS.md#17-agent-playbooks--consolidated) for contributor guidance when modifying snapshot code.

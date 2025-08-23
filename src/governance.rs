@@ -92,9 +92,7 @@ impl Governance {
 
     pub fn load(path: &str, quorum_ops: u32, quorum_builders: u32, timelock_secs: u64) -> Self {
         if let Ok(bytes) = fs::read(path) {
-            if let Ok((next_id, props)) =
-                serde_json::from_slice::<(u64, Vec<Proposal>)>(&bytes)
-            {
+            if let Ok((next_id, props)) = serde_json::from_slice::<(u64, Vec<Proposal>)>(&bytes) {
                 let mut map = std::collections::HashMap::new();
                 for p in props {
                     map.insert(p.id, p);

@@ -27,6 +27,13 @@ ban ban <peer> <secs>  # ban a peer for N seconds
 ban unban <peer>       # remove a peer ban
 ```
 
+Unit tests for the CLI mock the store in memory so no files are written. They
+assert that `banned_peers_total` and `banned_peer_expiration_seconds{peer}`
+advance on ban/unban and that expired entries are purged on `list`.
+When contributing to compute-market or price-board code, run
+`cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board`
+to verify telemetry and persistence behaviour end-to-end.
+
 Histogram `log_size_bytes` records the serialized size of each emitted log.
 Panels on the default Grafana dashboard derive average log size from this
 histogram, helping operators tune retention and export costs.

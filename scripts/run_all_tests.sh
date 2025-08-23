@@ -14,6 +14,17 @@ if [[ -z "${VIRTUAL_ENV:-}" || "$(which python)" != "$REPO_ROOT/.venv/bin/python
     echo "Error: activate the venv at $REPO_ROOT/.venv before running." >&2
     exit 1
   fi
+
+PY_LDFLAGS=$(python3-config --ldflags 2>/dev/null || true)
+if [[ "$PY_LDFLAGS" =~ -L([^[:space:]]+) ]]; then
+  PY_LIB_PATH="${BASH_REMATCH[1]}"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    export DYLD_LIBRARY_PATH="$PY_LIB_PATH:${DYLD_LIBRARY_PATH:-}"
+  else
+    export LD_LIBRARY_PATH="$PY_LIB_PATH:${LD_LIBRARY_PATH:-}"
+  fi
+fi
+
 fi
 
 FEATURE_CANDIDATES=(fuzzy telemetry)

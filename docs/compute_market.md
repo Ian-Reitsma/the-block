@@ -53,9 +53,35 @@ counters for observability. Flushing streams entries directly from the
 underlying database iterator, so memory usage remains constant even with large
 receipt queues.
 
+Integration tests exercise the backoff logic and metric counters. Run
+
+```bash
+cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics
+```
+
+to verify the retry behaviour and metrics.
+
 ## Price Board Persistence
 
 Recent offer prices feed a sliding window that derives quantile bands. The board
 persists to `node-data/price_board.bin` on shutdown and reloads on startup. If
 the file is missing or corrupted the board starts empty. The persistence path
-and window size are configurable via `node-data/config.toml`.
+and window size are configurable via `node-data/config.toml`:
+
+```toml
+price_board_path = "price_board.bin"
+price_board_window = 100
+```
+
+Each entry is an unsigned 64‑bit integer, so disk usage is `8 * price_board_window`
+bytes (≈800 B for the default). Older prices are dropped as new ones arrive.
+
+Clear the board by deleting the persistence file:
+
+```bash
+rm node-data/price_board.bin
+```
+
+Logs emit `loaded price board` and `saved price board` messages, while metrics
+`price_band_p25`, `price_band_median`, and `price_band_p75` track quantile
+bands.

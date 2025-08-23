@@ -1,8 +1,8 @@
 use blake3;
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, GaugeVec, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge,
-    IntGaugeVec, Opts, Registry, TextEncoder,
+    Encoder, GaugeVec, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    Opts, Registry, TextEncoder,
 };
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -28,12 +28,22 @@ pub static SNAPSHOT_INTERVAL: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static SNAPSHOT_INTERVAL_CHANGED: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "snapshot_interval_changed",
+        "Last requested snapshot interval",
+    )
+    .unwrap_or_else(|e| panic!("gauge snapshot interval changed: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry snapshot interval changed: {e}"));
+    g
+});
+
 pub static SNAPSHOT_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    let opts = HistogramOpts::new(
-        "snapshot_duration_seconds",
-        "Snapshot operation duration",
-    );
-    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram snapshot duration: {e}"));
+    let opts = HistogramOpts::new("snapshot_duration_seconds", "Snapshot operation duration");
+    let h =
+        Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram snapshot duration: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot duration: {e}"));
@@ -41,11 +51,8 @@ pub static SNAPSHOT_DURATION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
 });
 
 pub static SNAPSHOT_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new(
-        "snapshot_fail_total",
-        "Total snapshot operation failures",
-    )
-    .unwrap_or_else(|e| panic!("counter snapshot fail: {e}"));
+    let c = IntCounter::new("snapshot_fail_total", "Total snapshot operation failures")
+        .unwrap_or_else(|e| panic!("counter snapshot fail: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snapshot fail: {e}"));
