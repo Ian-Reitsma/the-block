@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DETACH="${DETACH:-0}"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MON_DIR="$ROOT_DIR/monitoring"
 BIN_DIR="$MON_DIR/bin"
@@ -66,6 +68,16 @@ providers:
     options:
       path: $GRAF_HOME/provisioning/dashboards
 YAML
+
+if [[ "$DETACH" -eq 1 ]]; then
+  "$BIN_DIR/prometheus" --config.file="$MON_DIR/prometheus.yml" >/dev/null 2>&1 &
+  PROM_PID=$!
+  "$GRAF_HOME/bin/grafana-server" --homepath "$GRAF_HOME" >/dev/null 2>&1 &
+  GRAF_PID=$!
+  echo "Prometheus running on http://localhost:9090 (PID $PROM_PID)"
+  echo "Grafana running on http://localhost:3000 (PID $GRAF_PID)"
+  exit 0
+fi
 
 "$BIN_DIR/prometheus" --config.file="$MON_DIR/prometheus.yml" &
 PROM_PID=$!

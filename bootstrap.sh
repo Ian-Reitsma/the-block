@@ -135,12 +135,12 @@ install_deps_apt() {
   run_step "apt-get update" timeout 60s sudo apt-get update
   run_step "apt-get install build deps" sudo apt-get install -y build-essential zlib1g-dev libffi-dev libssl-dev \
       libbz2-dev libreadline-dev libsqlite3-dev curl git jq lsof pkg-config \
-      python3 python3-venv python3-pip cmake make
+      python3 python3-venv python3-pip cmake make unzip
 }
 install_deps_dnf() {
   run_step "dnf install nodejs/npm" sudo dnf install -y nodejs npm
   run_step "dnf install build deps" sudo dnf install -y gcc gcc-c++ make openssl-devel zlib-devel readline-devel \
-      curl git jq lsof pkg-config patch cmake sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel
+      curl git jq lsof pkg-config patch cmake sqlite-devel bzip2-devel xz-devel libffi-devel tk-devel unzip
   run_step "dnf install python3" sudo dnf install -y python3 python3-pip python3-virtualenv
   if ! python3 --version 2>/dev/null | grep -q '3\.12'; then
     cecho yellow "⚠  Fedora does not ship python3.12 as a separate package. You have: $(python3 --version)"
@@ -153,7 +153,7 @@ install_deps_brew() {
     eval "$(/opt/homebrew/bin/brew shellenv)"
   fi
   run_step "brew update" brew update
-  run_step "brew install build deps" brew install git jq lsof pkg-config openssl@3 python@3.12 cmake make
+  run_step "brew install build deps" brew install git jq lsof pkg-config openssl@3 python@3.12 cmake make unzip
 }
 
 case "$OS" in
@@ -233,12 +233,60 @@ if ! command -v cargo &>/dev/null; then
   run_step "install Rust" curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   source "$HOME/.cargo/env"
 fi
-command -v just      &>/dev/null || run_step "cargo install just" cargo install just
-command -v cargo-make&>/dev/null || run_step "cargo install cargo-make" cargo install cargo-make
-if cargo nextest --version >/dev/null 2>&1; then
+command -v just >/dev/null 2>&1 || run_step "cargo install just" cargo install just
+
+CARGO_MAKE_VERSION=0.37.24
+if cargo make --version 2>/dev/null | grep -q "$CARGO_MAKE_VERSION"; then
+  cecho green "   ✓ cargo-make already installed"
+else
+  arch=$(uname -m)
+  os=$(uname -s)
+  case "${arch}-${os}" in
+    x86_64-Linux)
+      pkg="cargo-make-v${CARGO_MAKE_VERSION}-x86_64-unknown-linux-gnu.zip"
+      ;;
+    aarch64-Linux)
+      pkg="cargo-make-v${CARGO_MAKE_VERSION}-aarch64-unknown-linux-gnu.zip"
+      ;;
+    *)
+      cecho red "unsupported architecture: ${arch}-${os}"
+      exit 1
+      ;;
+  esac
+  url="https://github.com/sagiegurari/cargo-make/releases/download/${CARGO_MAKE_VERSION}/${pkg}"
+  tmpdir=$(mktemp -d)
+  run_step "download cargo-make" curl -Ls "$url" -o "$tmpdir/$pkg"
+  bindir="${CARGO_HOME:-$HOME/.cargo}/bin"
+  mkdir -p "$bindir"
+  run_step "install cargo-make" unzip -j "$tmpdir/$pkg" -d "$bindir"
+  chmod +x "$bindir/cargo-make"
+fi
+
+NEXTEST_VERSION=0.9.102
+if cargo nextest --version 2>/dev/null | grep -q "$NEXTEST_VERSION"; then
   cecho green "   ✓ cargo-nextest already installed"
 else
-  run_step "cargo install cargo-nextest" cargo +1.87.0 install cargo-nextest
+  arch=$(uname -m)
+  os=$(uname -s)
+  case "${arch}-${os}" in
+    x86_64-Linux)
+      pkg="cargo-nextest-${NEXTEST_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+      ;;
+    aarch64-Linux)
+      pkg="cargo-nextest-${NEXTEST_VERSION}-aarch64-unknown-linux-gnu.tar.gz"
+      ;;
+    *)
+      cecho red "unsupported architecture: ${arch}-${os}"
+      exit 1
+      ;;
+  esac
+  url="https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-${NEXTEST_VERSION}/${pkg}"
+  tmpdir=$(mktemp -d)
+  run_step "download cargo-nextest" bash -c "curl -Ls '$url' | tar -xz -C '$tmpdir'"
+  bindir="${CARGO_HOME:-$HOME/.cargo}/bin"
+  mkdir -p "$bindir"
+  run_step "install cargo-nextest" mv "$tmpdir/cargo-nextest" "$bindir/"
+  chmod +x "$bindir/cargo-nextest"
 fi
 
 # Only install maturin/pip if Python build is not broken
@@ -262,9 +310,9 @@ fi
 # Optional builds
 if [[ -f Makefile ]]; then
   if (( NATIVE_MONITOR == 1 )); then
-    run_step "monitor (native)" make monitor --native-monitor
+    run_step "monitor (native)" env DETACH=1 make monitor --native-monitor
   else
-    run_step "monitor" make monitor
+    run_step "monitor" env DETACH=1 make monitor
   fi
 fi
 [[ -f CMakeLists.txt ]] && run_step "cmake build" bash -c 'mkdir -p build && cd build && cmake .. && make'
@@ -335,7 +383,7 @@ fi
 
 cecho green "==> [$APP_NAME] bootstrap complete"
 cecho cyan "   python demo.py now works without activation"
-for exe in python cargo just docker; do
+for exe in python cargo just docker cargo-nextest; do
   if command -v $exe &>/dev/null; then
     if [[ "$exe" == "python" ]]; then
       cecho blue "   $($exe -V 2>&1 | head -n1)"
@@ -346,6 +394,12 @@ for exe in python cargo just docker; do
     cecho yellow "   $exe not found"
   fi
 done
+
+if command -v cargo-make &>/dev/null; then
+  cecho blue "   $(cargo make --version 2>&1 | head -n1)"
+else
+  cecho yellow "   cargo-make not found"
+fi
 
 if (( PY_SHIM == 1 )); then
   cecho yellow "   python shim active; add $(pwd)/bin to PATH or use python3"

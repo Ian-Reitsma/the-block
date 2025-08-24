@@ -120,9 +120,10 @@ Bootstrap steps:
 3. `pip install maturin black pytest` into the venv.
 4. `cargo install maturin` (if missing) and build wheel via `maturin develop --release --features telemetry`.
 5. Optional: install **Node 20** via `nvm` (for tooling not yet in repo).
-6. Run `cargo test --all --release`, `.venv/bin/python -m pytest`, and
-   `.venv/bin/python demo.py` to verify the toolchain and bindings.
-   The demo asserts metrics only if the module was built with `--features telemetry`.
+6. Run `cargo test --all --features test-telemetry --release`,
+   `.venv/bin/python -m pytest`, and `.venv/bin/python demo.py` to verify the
+   toolchain and bindings. The demo asserts metrics only if the module was built
+   with `--features telemetry`.
 
 > Need CUDA, Docker, or GPU?  Not here—this repo is CPU‑only and self‑contained.
 
@@ -132,7 +133,7 @@ Bootstrap steps:
 
 | Task | Command | Expected Output |
 | --- | --- | --- |
-| Rust unit + property tests | `cargo test --all --release` | All tests green |
+| Rust unit + property tests | `cargo test --all --features test-telemetry --release` | All tests green |
 | In-place dev install | `maturin develop --release --features telemetry` | Module importable in venv |
 | Python tests | `.venv/bin/python -m pytest` | All tests pass |
 | Formal proofs | `make -C formal` | F★ checks succeed (use `FSTAR_VERSION`/`FSTAR_HOME` to override) |

@@ -27,7 +27,7 @@ fi
 
 fi
 
-FEATURE_CANDIDATES=(fuzzy telemetry)
+FEATURE_CANDIDATES=(fuzzy test-telemetry)
 SELECTED_FEATURES=()
 if command -v jq >/dev/null 2>&1; then
   AVAILABLE_FEATURES=$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name=="the_block") | .features | keys[]')

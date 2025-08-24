@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 #[cfg(feature = "telemetry")]
 use prometheus::IntGauge;
-#[cfg(feature = "telemetry")]
+#[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use tracing::{info, warn};
 
 /// Sliding window of recent prices with quantile bands.
@@ -85,19 +85,19 @@ pub fn init(path: String, window: usize) {
         match fs::read(&path_buf) {
             Ok(bytes) => match bincode::deserialize::<VecDeque<u64>>(&bytes) {
                 Ok(saved) => {
-                    #[cfg(feature = "telemetry")]
+                    #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                     info!("loaded price board from {}", path);
                     b.prices = saved;
                 }
                 Err(e) => {
-                    #[cfg(feature = "telemetry")]
+                    #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                     warn!("failed to parse price board {}: {e}; starting empty", path);
-                    #[cfg(not(feature = "telemetry"))]
+                    #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
                     let _ = e;
                 }
             },
             Err(_) => {
-                #[cfg(feature = "telemetry")]
+                #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                 info!("no price board at {}; starting empty", path);
             }
         }
@@ -111,12 +111,12 @@ pub fn persist() {
             if let Ok(b) = BOARD.lock() {
                 if let Ok(bytes) = bincode::serialize(&b.prices) {
                     if let Err(e) = fs::write(&path, bytes) {
-                        #[cfg(feature = "telemetry")]
+                        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                         warn!("failed to write price board {}: {e}", path.display());
-                        #[cfg(not(feature = "telemetry"))]
+                        #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
                         let _ = e;
                     } else {
-                        #[cfg(feature = "telemetry")]
+                        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                         info!("saved price board to {}", path.display());
                     }
                 }

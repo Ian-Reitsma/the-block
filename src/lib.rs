@@ -3583,10 +3583,17 @@ mod reservation_tests {
             let lock = Mutex::new(());
             let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
             let res = ReservationGuard::new(guard, &mut acc, cons, ind, 1);
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+
+            // Silence the expected panic to avoid noisy output when telemetry is enabled.
+            let hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
                 drop(res);
                 panic!("boom");
             }));
+            std::panic::set_hook(hook);
+
+            assert!(result.is_err());
             assert_eq!(acc.pending_consumer, 0);
             assert_eq!(acc.pending_industrial, 0);
             assert_eq!(acc.pending_nonce, 0);

@@ -67,18 +67,17 @@ impl CourierStore {
                     let mut delay = Duration::from_millis(100);
                     loop {
                         #[cfg(feature = "telemetry")]
-                        {
-                            crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
-                            tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
-                        }
+                        crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
+                        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                        tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec) {
                             rec.acknowledged = true;
                             let bytes = bincode::serialize(&rec)
                                 .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
                             if let Err(e) = self.tree.insert(&k, bytes) {
-                                #[cfg(feature = "telemetry")]
+                                #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                                 tracing::error!("courier update failed: {e}");
-                                #[cfg(not(feature = "telemetry"))]
+                                #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
                                 eprintln!("courier update failed: {e}");
                                 return Err(e);
                             }
@@ -86,10 +85,9 @@ impl CourierStore {
                             break;
                         } else {
                             #[cfg(feature = "telemetry")]
-                            {
-                                crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
-                                tracing::warn!(id = rec.id, attempt, "courier forward failed");
-                            }
+                            crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
+                            #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                            tracing::warn!(id = rec.id, attempt, "courier forward failed");
                             attempt += 1;
                             if attempt >= 5 {
                                 break;

@@ -26,14 +26,14 @@ impl BanStore {
 
     pub fn ban(&self, pk: &[u8; 32], until: u64) {
         let _ = self.tree.insert(pk, &until.to_be_bytes());
-        #[cfg(feature = "telemetry")]
+        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         tracing::info!(peer = %hex::encode(pk), until, "peer banned");
         self.update_metric();
     }
 
     pub fn unban(&self, pk: &[u8; 32]) {
         let _ = self.tree.remove(pk);
-        #[cfg(feature = "telemetry")]
+        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         tracing::info!(peer = %hex::encode(pk), "peer unbanned");
         self.update_metric();
     }
