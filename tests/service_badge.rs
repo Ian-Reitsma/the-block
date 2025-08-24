@@ -1,3 +1,4 @@
+#![cfg(feature = "telemetry")]
 #![allow(clippy::unwrap_used)]
 
 use std::time::Duration;

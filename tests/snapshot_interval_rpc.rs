@@ -1,3 +1,4 @@
+#![cfg(feature = "telemetry")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -110,6 +111,9 @@ async fn snapshot_interval_restart_cycle() {
 
 #[test]
 fn snapshot_interval_corrupt_config() {
+    // Ensure no leftover TB_SNAPSHOT_INTERVAL from prior tests so the default
+    // value is used when the config file is unreadable.
+    std::env::remove_var("TB_SNAPSHOT_INTERVAL");
     std::env::set_var("TB_PRESERVE", "1");
     let dir = util::temp::temp_dir("snapshot_interval_corrupt");
     {

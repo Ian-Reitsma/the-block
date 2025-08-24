@@ -90,7 +90,10 @@ impl SimpleDb {
                 value: Some(value.clone()),
             },
         );
-        self.map.insert(key.to_string(), value)
+        let prev = self.map.insert(key.to_string(), value);
+        // Persist immediately so a truncated WAL can't drop committed writes.
+        self.flush();
+        prev
     }
 
     pub fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
@@ -101,7 +104,10 @@ impl SimpleDb {
                 value: None,
             },
         );
-        self.map.remove(key)
+        let prev = self.map.remove(key);
+        // Persist immediately so a truncated WAL can't resurrect removed keys.
+        self.flush();
+        prev
     }
 
     pub fn flush(&self) {

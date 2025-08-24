@@ -3,6 +3,9 @@ name: ci
 on:
   pull_request:
 
+env:
+  FSTAR_VERSION: v2025.08.07
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -83,6 +86,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
+          profile: minimal
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: install cargo-fuzz

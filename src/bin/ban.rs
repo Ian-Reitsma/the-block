@@ -58,7 +58,7 @@ fn current_ts() -> u64 {
         .as_secs()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "telemetry"))]
 mod tests {
     use super::*;
     use std::collections::HashMap;

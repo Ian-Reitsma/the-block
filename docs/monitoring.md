@@ -10,6 +10,12 @@ Docker (default):
 make monitor
 ```
 
+To run the stack in the background (as used by `bootstrap.sh`):
+
+```bash
+DETACH=1 make monitor
+```
+
 Native (no Docker or `--native-monitor`):
 
 ```bash
@@ -21,7 +27,8 @@ same script. When Docker isn't installed or the daemon is stopped, these
 commands automatically fall back to the native binaries.
 
 The native script verifies SHA256 checksums for the downloaded Prometheus and
-Grafana archives before extracting them.
+Grafana archives before extracting them. Add `DETACH=1` to run it without
+blocking the calling shell.
 
 Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves a preloaded dashboard on <http://localhost:3000>.
 

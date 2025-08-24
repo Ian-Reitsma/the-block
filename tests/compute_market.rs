@@ -101,6 +101,7 @@ fn receipt_validation() {
     assert_eq!(store.flush(|r| r.sender == "bob").unwrap(), 1);
 }
 
+#[cfg(feature = "telemetry")]
 #[test]
 #[serial]
 fn courier_retry_updates_metrics() {

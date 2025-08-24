@@ -234,7 +234,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 
 ### 17.3 Operating Mindset
 
-- Production standard: spec citations, `cargo test --all`, zero warnings.
+- Production standard: spec citations, `cargo test --all --features test-telemetry --release`, zero warnings.
 - Atomicity and determinism: no partial writes, no nondeterminism.
 - Spec‑first: patch specs before code when unclear.
 - Logging and observability: instrument changes; silent failures are bugs.

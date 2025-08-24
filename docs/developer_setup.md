@@ -12,15 +12,10 @@ cargo run --example run_workload examples/workloads/inference.slice
 
 ## Installing nextest
 
-The test suite uses [`cargo nextest`](https://nexte.st). If your host toolchain
-is older than the minimum required to build it, fetch a prebuilt binary:
-
-```bash
-curl -L https://get.nexte.st/latest/linux | tar xz
-mv cargo-nextest ~/.cargo/bin/
-```
-
-Running `cargo nextest --version` should then report a matching release.
+The test suite uses [`cargo nextest`](https://nexte.st). `bootstrap.sh`
+automatically downloads a matching prebuilt binary, so no manual installation
+is required. Running `cargo nextest --version` after bootstrapping should report
+the pinned release.
 
 ## Troubleshooting libpython
 
