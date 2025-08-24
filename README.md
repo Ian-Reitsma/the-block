@@ -61,16 +61,15 @@ governance stack. See:
 # Unix/macOS
 bash ./bootstrap.sh          # installs toolchains + builds + tests + wheel
 python demo.py               # demo with background purge loop (TB_PURGE_LOOP_SECS defaults to 1)
+just demo                    # same demo via just, fails if bootstrap missing
 
 # Windows (PowerShell)
 ./bootstrap.ps1              # run as admin to install VS Build Tools via choco
 python demo.py
 ```
 
-If `python` is not available after bootstrapping, the script places a shim in
-`./bin` and adds it to `PATH` for the current session. For new shells, either
-`source .venv/bin/activate`, add `$PWD/bin` to your `PATH`, or invoke
-`python3`.
+`bootstrap.sh` prepends `.venv/bin` to `PATH` so `python demo.py` works
+immediately. If no system `python` exists, a `./bin/python` shim is created.
 
 > Look for `🎉 demo completed` in the console—if you see it, the kernel, bindings, and demo all worked.
 
@@ -79,6 +78,12 @@ Running `demo.py` will attempt to build the `the_block` extension with
 the fly when missing, so only a Rust toolchain and build prerequisites are
 required. On Linux, `patchelf` is also installed to adjust shared-library
 paths; macOS users do not need `patchelf` and the demo runs without it.
+
+Sample workloads live under `examples/workloads/` and can be executed with:
+
+```bash
+cargo run --example run_workload examples/workloads/transcode.slice
+```
 
 ### Manual purge-loop demonstration
 
@@ -115,9 +120,10 @@ Bootstrap steps:
 3. `pip install maturin black pytest` into the venv.
 4. `cargo install maturin` (if missing) and build wheel via `maturin develop --release --features telemetry`.
 5. Optional: install **Node 20** via `nvm` (for tooling not yet in repo).
-6. Run `cargo test --all --release`, `.venv/bin/python -m pytest`, and
-   `.venv/bin/python demo.py` to verify the toolchain and bindings.
-   The demo asserts metrics only if the module was built with `--features telemetry`.
+6. Run `cargo test --all --features test-telemetry --release`,
+   `.venv/bin/python -m pytest`, and `.venv/bin/python demo.py` to verify the
+   toolchain and bindings. The demo asserts metrics only if the module was built
+   with `--features telemetry`.
 
 > Need CUDA, Docker, or GPU?  Not here—this repo is CPU‑only and self‑contained.
 
@@ -127,10 +133,10 @@ Bootstrap steps:
 
 | Task | Command | Expected Output |
 | --- | --- | --- |
-| Rust unit + property tests | `cargo test --all --release` | All tests green |
+| Rust unit + property tests | `cargo test --all --features test-telemetry --release` | All tests green |
 | In-place dev install | `maturin develop --release --features telemetry` | Module importable in venv |
 | Python tests | `.venv/bin/python -m pytest` | All tests pass |
-| Formal proofs | `make -C formal` | F★ checks succeed (auto-installs F★) |
+| Formal proofs | `make -C formal` | F★ checks succeed (use `FSTAR_VERSION`/`FSTAR_HOME` to override) |
 | WAL fuzz harness | `cargo fuzz run wal_fuzz` | No crashes; artifacts in `fuzz/wal/` |
 | Snapshot restore | `scripts/snapshot_ci.sh` | Restored root matches live node |
 | End-to-end demo | `.venv/bin/python demo.py` | `✅ demo completed` (requires `--features telemetry`) |
@@ -286,6 +292,9 @@ curl -s -X POST 127.0.0.1:3030 \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":99,"method":"price_board_get"}'
 ```
+
+Price board persistence and courier-mode behaviour are documented in
+[docs/compute_market.md](docs/compute_market.md).
 
 Interact with the node via JSON-RPC; requests use `jsonrpc` and an incrementing `id`:
 

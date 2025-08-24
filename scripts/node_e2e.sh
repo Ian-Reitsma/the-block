@@ -12,6 +12,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
+PY_LDFLAGS=$(python3-config --ldflags 2>/dev/null || true)
+if [[ "$PY_LDFLAGS" =~ -L([^[:space:]]+) ]]; then
+  PY_LIB_PATH="${BASH_REMATCH[1]}"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    export DYLD_LIBRARY_PATH="$PY_LIB_PATH:${DYLD_LIBRARY_PATH:-}"
+  else
+    export LD_LIBRARY_PATH="$PY_LIB_PATH:${LD_LIBRARY_PATH:-}"
+  fi
+fi
+
 
 RPC_DEFAULT="127.0.0.1:3050"
 METRICS_DEFAULT="127.0.0.1:9150"

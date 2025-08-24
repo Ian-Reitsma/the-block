@@ -36,6 +36,7 @@ futures = "0.3"
 fuzzy = ["proptest"]
 telemetry = ["log", "prometheus", "tracing"]
 telemetry-json = ["telemetry"]
+test-telemetry = ["tracing", "log"]
 
 [package.metadata.maturin]
 features = ["pyo3/extension-module", "pyo3/auto-initialize", "telemetry"]
@@ -48,6 +49,10 @@ csv = "1"
 serial_test = "3"
 wait-timeout = "0.2"
 arbitrary = { version = "1", features = ["derive"] }
+env_logger = "0.11"
+tracing-test = { version = "0.2" }
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+tracing = "0.1"
 
 [[bench]]
 name = "startup_rebuild"

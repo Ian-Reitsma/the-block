@@ -348,11 +348,16 @@ mod tests {
     fn courier_store_forward() {
         use crate::compute_market::courier::CourierStore;
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("create temp dir: {e}"));
-        let store = CourierStore::open(dir.path().to_str().unwrap_or_else(|| panic!("temp dir path")));
+        let store = CourierStore::open(
+            dir.path()
+                .to_str()
+                .unwrap_or_else(|| panic!("temp dir path")),
+        );
         let receipt = store.send(b"bundle", "alice");
         assert!(!receipt.acknowledged);
-        let forwarded =
-            store.flush(|r| r.sender == "alice").unwrap_or_else(|e| panic!("flush receipts: {e}"));
+        let forwarded = store
+            .flush(|r| r.sender == "alice")
+            .unwrap_or_else(|e| panic!("flush receipts: {e}"));
         assert_eq!(forwarded, 1);
         let stored = store
             .get(receipt.id)
@@ -371,7 +376,9 @@ mod tests {
             capacity: 1,
             price: 5,
         };
-        market.post_offer(offer).unwrap_or_else(|e| panic!("post offer: {e}"));
+        market
+            .post_offer(offer)
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
         let mut h = Hasher::new();
         h.update(b"slice");
         let hash = *h.finalize().as_bytes();
@@ -382,7 +389,9 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
         };
-        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
+        market
+            .submit_job(job)
+            .unwrap_or_else(|e| panic!("submit job: {e}"));
         let proof = SliceProof {
             reference: hash,
             output: hash,
@@ -394,8 +403,9 @@ mod tests {
                 .unwrap_or_else(|e| panic!("submit slice: {e}")),
             5
         );
-        let bonds =
-            market.finalize_job(&job_id).unwrap_or_else(|| panic!("finalize job"));
+        let bonds = market
+            .finalize_job(&job_id)
+            .unwrap_or_else(|| panic!("finalize job"));
         assert_eq!(bonds, (1, 1));
     }
 
@@ -412,7 +422,9 @@ mod tests {
             capacity: 1,
             price: 5,
         };
-        market.post_offer(offer).unwrap_or_else(|e| panic!("post offer: {e}"));
+        market
+            .post_offer(offer)
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
         let job = Job {
             job_id: "j1".into(),
             slices: vec![hash, hash],
@@ -423,7 +435,9 @@ mod tests {
                 Workload::Transcode(b"a".to_vec()),
             ],
         };
-        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
+        market
+            .submit_job(job)
+            .unwrap_or_else(|e| panic!("submit job: {e}"));
         assert!(market.backlog_factor() > 1.0);
         let mut board = PriceBoard::new(10);
         board.record(5);
@@ -460,7 +474,9 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
         };
-        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
+        market
+            .submit_job(job)
+            .unwrap_or_else(|e| panic!("submit job: {e}"));
         let bonds = market
             .cancel_job("j2")
             .unwrap_or_else(|| panic!("cancel job"));
@@ -478,7 +494,9 @@ mod tests {
             capacity: 1,
             price: 2,
         };
-        market.post_offer(offer).unwrap_or_else(|e| panic!("post offer: {e}"));
+        market
+            .post_offer(offer)
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
         let mut h = Hasher::new();
         h.update(b"a");
         let hash = *h.finalize().as_bytes();
@@ -489,14 +507,17 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"a".to_vec())],
         };
-        market.submit_job(job).unwrap_or_else(|e| panic!("submit job: {e}"));
+        market
+            .submit_job(job)
+            .unwrap_or_else(|e| panic!("submit job: {e}"));
         let rt = tokio::runtime::Runtime::new().unwrap();
         let total = rt
             .block_on(market.execute_job(&job_id))
             .unwrap_or_else(|e| panic!("execute job: {e}"));
         assert_eq!(total, 2);
-        let bonds =
-            market.finalize_job(&job_id).unwrap_or_else(|| panic!("finalize job"));
+        let bonds = market
+            .finalize_job(&job_id)
+            .unwrap_or_else(|| panic!("finalize job"));
         assert_eq!(bonds, (1, 1));
     }
 }

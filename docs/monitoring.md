@@ -10,6 +10,12 @@ Docker (default):
 make monitor
 ```
 
+To run the stack in the background (as used by `bootstrap.sh`):
+
+```bash
+DETACH=1 make monitor
+```
+
 Native (no Docker or `--native-monitor`):
 
 ```bash
@@ -21,7 +27,8 @@ same script. When Docker isn't installed or the daemon is stopped, these
 commands automatically fall back to the native binaries.
 
 The native script verifies SHA256 checksums for the downloaded Prometheus and
-Grafana archives before extracting them.
+Grafana archives before extracting them. Add `DETACH=1` to run it without
+blocking the calling shell.
 
 Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves a preloaded dashboard on <http://localhost:3000>.
 
@@ -39,13 +46,14 @@ launches them with these same configs.
 
 ## Validation
 
-CI briefly launches the stack and then lints the dashboard JSON. Run the lint
-locally with:
+CI launches the stack and lints the dashboard whenever files under `monitoring/` change.
+The workflow runs `npm ci --prefix monitoring && make -C monitoring lint` and uploads the lint log as an artifact.
+Run the lint locally with:
 
 First install the Node dev dependencies (requires Node 20+):
 
 ```bash
-npm ci
+npm ci --prefix monitoring
 make -C monitoring lint
 ```
 

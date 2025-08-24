@@ -7,6 +7,14 @@ pub struct BanStore {
     tree: Tree,
 }
 
+/// Minimal trait so callers (and tests) can provide an alternate backend
+/// without touching the on-disk `sled` database.
+pub trait BanStoreLike {
+    fn ban(&self, pk: &[u8; 32], until: u64);
+    fn unban(&self, pk: &[u8; 32]);
+    fn list(&self) -> Vec<(String, u64)>;
+}
+
 impl BanStore {
     pub fn open(path: &str) -> Self {
         let db = sled::open(path).unwrap_or_else(|e| panic!("open ban db: {e}"));
@@ -18,14 +26,14 @@ impl BanStore {
 
     pub fn ban(&self, pk: &[u8; 32], until: u64) {
         let _ = self.tree.insert(pk, &until.to_be_bytes());
-        #[cfg(feature = "telemetry")]
+        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         tracing::info!(peer = %hex::encode(pk), until, "peer banned");
         self.update_metric();
     }
 
     pub fn unban(&self, pk: &[u8; 32]) {
         let _ = self.tree.remove(pk);
-        #[cfg(feature = "telemetry")]
+        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         tracing::info!(peer = %hex::encode(pk), "peer unbanned");
         self.update_metric();
     }
@@ -95,6 +103,20 @@ impl BanStore {
                     .set(ts as i64);
             }
         }
+    }
+}
+
+impl BanStoreLike for BanStore {
+    fn ban(&self, pk: &[u8; 32], until: u64) {
+        BanStore::ban(self, pk, until);
+    }
+
+    fn unban(&self, pk: &[u8; 32]) {
+        BanStore::unban(self, pk);
+    }
+
+    fn list(&self) -> Vec<(String, u64)> {
+        BanStore::list(self)
     }
 }
 

@@ -1,6 +1,11 @@
 use serial_test::serial;
+use std::fs;
 use tempfile::tempdir;
-use the_block::compute_market::price_board::{backlog_adjusted_bid, bands, record_price, reset, init, persist};
+use the_block::compute_market::price_board::{
+    backlog_adjusted_bid, bands, init, persist, record_price, reset, reset_path_for_test,
+};
+
+use tracing_test::traced_test;
 
 #[test]
 #[serial]
@@ -26,16 +31,32 @@ fn backlog_adjusts_bid() {
     assert!(adj > 10);
 }
 
+#[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 #[test]
 #[serial]
+#[traced_test]
 fn persists_across_restart() {
+    reset_path_for_test();
     let dir = tempdir().unwrap();
     let path = dir.path().join("board.bin").to_str().unwrap().to_string();
     init(path.clone(), 10);
     record_price(5);
     persist();
     reset();
-    init(path, 10);
+    init(path.clone(), 10);
     let b = bands().unwrap();
     assert_eq!(b.1, 5);
+}
+
+#[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+#[test]
+#[serial]
+#[traced_test]
+fn resets_on_corrupted_file() {
+    reset_path_for_test();
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("board.bin");
+    fs::write(&path, b"bad").unwrap();
+    init(path.to_str().unwrap().to_string(), 10);
+    assert!(bands().is_none());
 }

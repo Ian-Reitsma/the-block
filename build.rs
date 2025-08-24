@@ -1,9 +1,26 @@
 use blake3::Hasher;
-use std::{env, fs, path::Path};
+use std::{env, fs, path::Path, process::Command};
 
 fn main() {
     println!("cargo:rerun-if-changed=src/constants.rs");
     println!("cargo:rerun-if-env-changed=PYTHONHOME");
+    let ld = Command::new("python3-config")
+        .arg("--ldflags")
+        .output()
+        .expect("python3-config missing");
+    if !ld.status.success() {
+        eprintln!("::error::python3-config --ldflags failed");
+        std::process::exit(1);
+    }
+    let flags = String::from_utf8_lossy(&ld.stdout);
+    let lib_path = flags.split_whitespace().find_map(|s| s.strip_prefix("-L"));
+    if let Some(p) = lib_path {
+        println!("cargo:rustc-link-search=native={}", p);
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", p);
+    } else {
+        eprintln!("::error::unable to locate Python shared library");
+        std::process::exit(1);
+    }
     if cfg!(target_os = "macos") {
         if let Ok(py_home) = env::var("PYTHONHOME") {
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}/lib", py_home);

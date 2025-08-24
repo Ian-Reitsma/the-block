@@ -52,55 +52,49 @@ impl CourierStore {
 
     pub fn flush<F: Fn(&CourierReceipt) -> bool>(&self, forward: F) -> Result<u64, sled::Error> {
         let mut acknowledged = 0u64;
-        let mut iter = self.tree.iter();
-        while let Some(next) = iter.next() {
-            let (k, v) = match next {
-                Ok(kv) => kv,
-                Err(e) => {
-                    #[cfg(feature = "telemetry")]
-                    tracing::error!("courier scan failed: {e}");
-                    #[cfg(not(feature = "telemetry"))]
-                    eprintln!("courier scan failed: {e}");
-                    return Err(e);
-                }
-            };
-            if let Ok(mut rec) = bincode::deserialize::<CourierReceipt>(&v) {
-                if rec.acknowledged {
-                    continue;
-                }
-                let mut attempt = 0u32;
-                let mut delay = Duration::from_millis(100);
-                loop {
-                    #[cfg(feature = "telemetry")]
-                    {
-                        crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
-                        tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
+        let keys: Vec<_> = self
+            .tree
+            .iter()
+            .map(|res| res.map(|(k, _v)| k))
+            .collect::<Result<Vec<_>, _>>()?;
+        for k in keys {
+            if let Some(v) = self.tree.get(&k)? {
+                if let Ok(mut rec) = bincode::deserialize::<CourierReceipt>(&v) {
+                    if rec.acknowledged {
+                        continue;
                     }
-                    if forward(&rec) {
-                        rec.acknowledged = true;
-                        let bytes = bincode::serialize(&rec)
-                            .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
-                        if let Err(e) = self.tree.insert(&k, bytes) {
-                            #[cfg(feature = "telemetry")]
-                            tracing::error!("courier update failed: {e}");
-                            #[cfg(not(feature = "telemetry"))]
-                            eprintln!("courier update failed: {e}");
-                            return Err(e);
-                        }
-                        acknowledged += 1;
-                        break;
-                    } else {
+                    let mut attempt = 0u32;
+                    let mut delay = Duration::from_millis(100);
+                    loop {
                         #[cfg(feature = "telemetry")]
-                        {
-                            crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
-                            tracing::warn!(id = rec.id, attempt, "courier forward failed");
-                        }
-                        attempt += 1;
-                        if attempt >= 5 {
+                        crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
+                        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                        tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
+                        if forward(&rec) {
+                            rec.acknowledged = true;
+                            let bytes = bincode::serialize(&rec)
+                                .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+                            if let Err(e) = self.tree.insert(&k, bytes) {
+                                #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                                tracing::error!("courier update failed: {e}");
+                                #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
+                                eprintln!("courier update failed: {e}");
+                                return Err(e);
+                            }
+                            acknowledged += 1;
                             break;
+                        } else {
+                            #[cfg(feature = "telemetry")]
+                            crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
+                            #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                            tracing::warn!(id = rec.id, attempt, "courier forward failed");
+                            attempt += 1;
+                            if attempt >= 5 {
+                                break;
+                            }
+                            thread::sleep(delay);
+                            delay *= 2;
                         }
-                        thread::sleep(delay);
-                        delay *= 2;
                     }
                 }
             }

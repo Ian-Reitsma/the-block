@@ -25,13 +25,29 @@
       "type": "graph",
       "title": "Snapshot Duration",
       "targets": [{"expr": "histogram_quantile(0.9, sum(rate(snapshot_duration_seconds_bucket[5m])) by (le))"}],
+      "fieldConfig": {"defaults": {"unit": "s"}},
       "id": 4
     },
     {
       "type": "graph",
       "title": "Snapshot Failures",
       "targets": [{"expr": "snapshot_fail_total"}],
+      "fieldConfig": {"defaults": {"unit": "none"}},
       "id": 5
+    },
+    {
+      "type": "graph",
+      "title": "Badge Active",
+      "targets": [{"expr": "badge_active"}],
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "id": 6
+    },
+    {
+      "type": "graph",
+      "title": "Badge Last Change",
+      "targets": [{"expr": "badge_last_change_seconds"}],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "id": 7
     }
   ]
 }

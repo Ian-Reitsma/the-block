@@ -39,3 +39,15 @@ endpoint returns a JSON object:
 external monitors to track heartbeat cadence. Prometheus gauges
 `badge_active` and `badge_last_change_seconds` surface the same information for
 scrapes.
+
+Query the status from the CLI:
+
+```bash
+curl -s localhost:9898/badge/status | jq
+```
+
+### Troubleshooting
+
+- If `badge_active` or `badge_last_change_seconds` are missing from `/metrics`,
+  ensure the node started with telemetry enabled and that `monitoring/prometheus.yml`
+  scrapes the correct address.

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DETACH="${DETACH:-0}"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MON_DIR="$ROOT_DIR/monitoring"
 BIN_DIR="$MON_DIR/bin"
@@ -31,9 +33,9 @@ if [[ ! -x "$BIN_DIR/prometheus" ]]; then
   curl -L --fail --show-error "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/${PROM_TAR}" -o "$BIN_DIR/${PROM_TAR}"
   curl -L --fail --show-error "$CHECKS" -o "$BIN_DIR/sha256sums.txt"
   if command -v sha256sum >/dev/null 2>&1; then
-    grep "  ${PROM_TAR}" "$BIN_DIR/sha256sums.txt" | sha256sum -c - || { echo "Prometheus checksum mismatch" >&2; exit 1; }
+    (cd "$BIN_DIR" && grep "  ${PROM_TAR}" sha256sums.txt | sha256sum -c -) || { echo "Prometheus checksum mismatch" >&2; exit 1; }
   else
-    grep "  ${PROM_TAR}" "$BIN_DIR/sha256sums.txt" | shasum -a 256 -c - || { echo "Prometheus checksum mismatch" >&2; exit 1; }
+    (cd "$BIN_DIR" && grep "  ${PROM_TAR}" sha256sums.txt | shasum -a 256 -c -) || { echo "Prometheus checksum mismatch" >&2; exit 1; }
   fi
   tar -xzf "$BIN_DIR/${PROM_TAR}" -C "$BIN_DIR"
   mv "$BIN_DIR/prometheus-${PROM_VERSION}.${PROM_OS}-${PROM_ARCH}/prometheus" "$BIN_DIR/prometheus"
@@ -46,12 +48,12 @@ if [[ ! -x "$BIN_DIR/grafana/bin/grafana-server" ]]; then
   curl -L --fail --show-error "https://dl.grafana.com/oss/release/${GRAF_TAR}" -o "$BIN_DIR/${GRAF_TAR}"
   curl -L --fail --show-error "https://dl.grafana.com/oss/release/${GRAF_TAR}.sha256" -o "$BIN_DIR/${GRAF_TAR}.sha256"
   if command -v sha256sum >/dev/null 2>&1; then
-    (cd "$BIN_DIR" && sha256sum -c "${GRAF_TAR}.sha256") || { echo "Grafana checksum mismatch" >&2; exit 1; }
+    echo "$(cat "$BIN_DIR/${GRAF_TAR}.sha256")  ${GRAF_TAR}" | (cd "$BIN_DIR" && sha256sum -c -) || { echo "Grafana checksum mismatch" >&2; exit 1; }
   else
-    (cd "$BIN_DIR" && shasum -a 256 -c "${GRAF_TAR}.sha256") || { echo "Grafana checksum mismatch" >&2; exit 1; }
+    echo "$(cat "$BIN_DIR/${GRAF_TAR}.sha256")  ${GRAF_TAR}" | (cd "$BIN_DIR" && shasum -a 256 -c -) || { echo "Grafana checksum mismatch" >&2; exit 1; }
   fi
   tar -xzf "$BIN_DIR/${GRAF_TAR}" -C "$BIN_DIR"
-  mv "$BIN_DIR/grafana-${GRAF_VERSION}" "$BIN_DIR/grafana"
+  mv "$BIN_DIR/grafana-v${GRAF_VERSION}" "$BIN_DIR/grafana"
   rm "$BIN_DIR/${GRAF_TAR}" "$BIN_DIR/${GRAF_TAR}.sha256"
 fi
 
@@ -66,6 +68,16 @@ providers:
     options:
       path: $GRAF_HOME/provisioning/dashboards
 YAML
+
+if [[ "$DETACH" -eq 1 ]]; then
+  "$BIN_DIR/prometheus" --config.file="$MON_DIR/prometheus.yml" >/dev/null 2>&1 &
+  PROM_PID=$!
+  "$GRAF_HOME/bin/grafana-server" --homepath "$GRAF_HOME" >/dev/null 2>&1 &
+  GRAF_PID=$!
+  echo "Prometheus running on http://localhost:9090 (PID $PROM_PID)"
+  echo "Grafana running on http://localhost:3000 (PID $GRAF_PID)"
+  exit 0
+fi
 
 "$BIN_DIR/prometheus" --config.file="$MON_DIR/prometheus.yml" &
 PROM_PID=$!

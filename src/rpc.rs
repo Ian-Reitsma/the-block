@@ -50,16 +50,22 @@ enum SnapshotError {
 }
 
 impl SnapshotError {
-    fn code(&self) -> i32 { -32050 }
-    fn message(&self) -> &'static str { "interval too small" }
+    fn code(&self) -> i32 {
+        -32050
+    }
+    fn message(&self) -> &'static str {
+        "interval too small"
+    }
 }
 
 impl From<SnapshotError> for RpcError {
     fn from(e: SnapshotError) -> Self {
-        Self { code: e.code(), message: e.message() }
+        Self {
+            code: e.code(),
+            message: e.message(),
+        }
     }
 }
-
 
 impl From<crate::compute_market::MarketError> for RpcError {
     fn from(e: crate::compute_market::MarketError) -> Self {
@@ -461,7 +467,14 @@ fn dispatch(
             }
         }
         "set_snapshot_interval" => {
-            let interval = req.params.get("interval").and_then(|v| v.as_u64()).ok_or(RpcError { code: -32602, message: "invalid params" })?;
+            let interval = req
+                .params
+                .get("interval")
+                .and_then(|v| v.as_u64())
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })?;
             if interval < 10 {
                 return Err(SnapshotError::IntervalTooSmall.into());
             }
@@ -470,14 +483,20 @@ fn dispatch(
                 guard.config.snapshot_interval = interval;
                 guard.save_config();
             } else {
-                return Err(RpcError { code: -32603, message: "lock poisoned" });
+                return Err(RpcError {
+                    code: -32603,
+                    message: "lock poisoned",
+                });
             }
             #[cfg(feature = "telemetry")]
-            crate::telemetry::SNAPSHOT_INTERVAL.set(interval as i64);
+            {
+                crate::telemetry::SNAPSHOT_INTERVAL.set(interval as i64);
+                crate::telemetry::SNAPSHOT_INTERVAL_CHANGED.set(interval as i64);
+            }
             #[cfg(feature = "telemetry")]
             log::info!("snapshot_interval_changed {interval}");
             serde_json::json!({"status": "ok"})
-        },
+        }
         "start_mining" => {
             check_nonce(&req.params, &nonces)?;
             let miner = req
@@ -557,7 +576,13 @@ pub async fn run_rpc_server(
         .unwrap_or(300);
     loop {
         let (mut stream, addr) = listener.accept().await?;
-        if let Err(code) = check_client(&addr.ip(), &clients, tokens_per_sec, ban_secs, client_timeout) {
+        if let Err(code) = check_client(
+            &addr.ip(),
+            &clients,
+            tokens_per_sec,
+            ban_secs,
+            client_timeout,
+        ) {
             telemetry_rpc_error(code);
             let err = RpcError {
                 code: code.rpc_code(),

@@ -11,6 +11,7 @@
 - Stress tests spawn overlapping purge loops, log start/stop times, and assert metrics after each join ([tests/test_spawn_purge_loop.py](tests/test_spawn_purge_loop.py)).
 - Test harness installs `maturin` on demand and builds the Python extension before running tests ([tests/conftest.py](tests/conftest.py)).
 - Prototype service-badge tracker mints placeholder badges after high-uptime epochs ([src/service_badge.rs](src/service_badge.rs), [tests/service_badge.rs](tests/service_badge.rs)).
+- Grafana dashboard now graphs snapshot duration/failures and service badge metrics (`badge_active`, `badge_last_change_seconds`) for monitoring.
 - Network topology diagrams and an RPC walkthrough illustrate partition tests and end-to-end transaction flow ([docs/network_topologies.md](docs/network_topologies.md), [README.md](README.md), [AGENTS.md](AGENTS.md)).
 
 ### Changed

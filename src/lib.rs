@@ -33,11 +33,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-mod simple_db;
 pub mod config;
+mod simple_db;
+use config::NodeConfig;
 pub use simple_db::SimpleDb;
 use simple_db::SimpleDb as Db;
-use config::NodeConfig;
 use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
@@ -703,7 +703,11 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         {
             telemetry::BADGE_ACTIVE.set(if after { 1 } else { 0 });
-            if let Some(ts) = self.badge_tracker.last_mint().or(self.badge_tracker.last_burn()) {
+            if let Some(ts) = self
+                .badge_tracker
+                .last_mint()
+                .or(self.badge_tracker.last_burn())
+            {
                 telemetry::BADGE_LAST_CHANGE_SECONDS.set(ts as i64);
             }
         }
@@ -1137,10 +1141,16 @@ impl Blockchain {
         let cfg = NodeConfig::load(path);
         bc.snapshot.set_interval(cfg.snapshot_interval);
         let pb = std::path::Path::new(path).join(&cfg.price_board_path);
-        crate::compute_market::price_board::init(pb.to_string_lossy().into_owned(), cfg.price_board_window);
+        crate::compute_market::price_board::init(
+            pb.to_string_lossy().into_owned(),
+            cfg.price_board_window,
+        );
         bc.config = cfg.clone();
         #[cfg(feature = "telemetry")]
-        crate::telemetry::SNAPSHOT_INTERVAL.set(cfg.snapshot_interval as i64);
+        {
+            crate::telemetry::SNAPSHOT_INTERVAL.set(cfg.snapshot_interval as i64);
+            crate::telemetry::SNAPSHOT_INTERVAL_CHANGED.set(cfg.snapshot_interval as i64);
+        }
 
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
@@ -3573,10 +3583,17 @@ mod reservation_tests {
             let lock = Mutex::new(());
             let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
             let res = ReservationGuard::new(guard, &mut acc, cons, ind, 1);
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+
+            // Silence the expected panic to avoid noisy output when telemetry is enabled.
+            let hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
                 drop(res);
                 panic!("boom");
             }));
+            std::panic::set_hook(hook);
+
+            assert!(result.is_err());
             assert_eq!(acc.pending_consumer, 0);
             assert_eq!(acc.pending_industrial, 0);
             assert_eq!(acc.pending_nonce, 0);

@@ -1,6 +1,6 @@
-use crate::{Account, TokenBalance};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{SNAPSHOT_DURATION_SECONDS, SNAPSHOT_FAIL_TOTAL};
+use crate::{Account, TokenBalance};
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

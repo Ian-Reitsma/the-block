@@ -72,6 +72,7 @@ The chain now stores explicit coinbase values in each `Block`, wraps all amounts
 - **Feature-Bit Handshake** – Peers negotiate protocol versions and feature bits; connections missing required bits (`0x0004`) are dropped.
 - **Peer Rate Limits & Ban List** – Nodes track per-peer message rates, banning noisy peers and exporting `peer_error_total{code}` counters.
 - **RPC Token-Bucket Limiter** – Clients consume from a token bucket refilled at `TB_RPC_TOKENS_PER_SEC`. Metrics `rpc_tokens_available{client}` and `rpc_bans_total` track current tokens and total bans while typed errors (`-32001` rate limit, `-32002` banned) surface over RPC.
+- **RPC Limiter Stress Tests** – Integration tests burst multiple clients, verify per-client gauges, ban counters, and eviction of idle entries, and log processing time so throttling can be tuned via `TB_RPC_TOKENS_PER_SEC` and `TB_RPC_CLIENT_TIMEOUT_SECS`.
 - **RPC Nonce Guard** – Mutating RPC methods require a unique `nonce` parameter and reject replays.
 - **Crash-safe WAL** – `SimpleDb` appends all writes to a BLAKE3‑checked write‑ahead log and replays it on restart before truncating.
 - **Snapshot Rotation & Diffs** – The node emits full snapshots every `TB_SNAPSHOT_INTERVAL` blocks and incremental diffs in between; CI now restores from the latest snapshot + diffs via `scripts/snapshot_ci.sh`.
