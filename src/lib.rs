@@ -42,7 +42,7 @@ use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
 
-pub mod handles;
+pub mod identity;
 pub mod net;
 pub mod p2p;
 pub mod rpc;
@@ -81,6 +81,7 @@ pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
 pub mod storage;
+pub mod util;
 
 // === Transaction admission errors ===
 
@@ -517,7 +518,6 @@ pub struct Blockchain {
     pub chain: Vec<Block>,
     #[pyo3(get)]
     pub accounts: HashMap<String, Account>,
-    pub handles: handles::HandleRegistry,
     #[pyo3(get, set)]
     pub difficulty: u64,
     pub mempool: DashMap<(String, u64), MempoolEntry>,
@@ -596,7 +596,6 @@ impl Default for Blockchain {
         Self {
             chain: Vec::new(),
             accounts: HashMap::new(),
-            handles: handles::HandleRegistry::default(),
             difficulty: difficulty::expected_difficulty(&[] as &[Block]),
             mempool: DashMap::new(),
             mempool_size: std::sync::atomic::AtomicUsize::new(0),
@@ -1272,21 +1271,6 @@ impl Blockchain {
         Ok(bc)
     }
 
-    /// Register a human-readable `@handle` for an existing account address.
-    /// Returns `true` on success and `false` if the handle is taken or address missing.
-    pub fn register_handle(&mut self, handle: &str, address: &str) -> bool {
-        if self.accounts.contains_key(address) {
-            self.handles
-                .register(handle.to_string(), address.to_string())
-        } else {
-            false
-        }
-    }
-
-    /// Resolve an `@handle` to the bound account address, if any.
-    pub fn resolve_handle(&self, handle: &str) -> Option<String> {
-        self.handles.resolve(handle).cloned()
-    }
 
     /// Return the on-disk schema version
     #[getter]

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::ban_store::BAN_STORE;
+use super::ban_store;
 
 /// Thread-safe peer set used by the gossip layer.
 #[derive(Clone, Default)]
@@ -59,7 +59,7 @@ impl PeerSet {
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
-        if BAN_STORE
+        if ban_store::store()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .is_banned(pk)
@@ -93,7 +93,7 @@ impl PeerSet {
                 .unwrap_or_else(|e| panic!("time error: {e}"))
                 .as_secs()
                 + *P2P_BAN_SECS as u64;
-            BAN_STORE
+            ban_store::store()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .ban(pk, ts);

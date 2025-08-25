@@ -37,7 +37,7 @@ impl Node {
     /// Create a new node bound to `addr` and seeded with `peers`.
     pub fn new(addr: SocketAddr, peers: Vec<SocketAddr>, bc: Blockchain) -> Self {
         let key = load_net_key();
-        ban_store::BAN_STORE
+        ban_store::store()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .purge_expired();

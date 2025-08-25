@@ -80,6 +80,42 @@ pub static FEE_FLOOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static IDENTITY_REGISTRATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("identity_registrations_total", "Handle registration attempts"),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static IDENTITY_REPLAYS_BLOCKED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "identity_replays_blocked_total",
+        "Rejected identity replay attempts",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static IDENTITY_NONCE_SKIPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "identity_nonce_skips_total",
+        "Non-contiguous nonce submissions",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static DUP_TX_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("dup_tx_reject_total", "Transactions rejected as duplicate")
         .unwrap_or_else(|e| panic!("counter: {e}"));
@@ -122,6 +158,30 @@ pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 pub static BLOCK_MINED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("block_mined_total", "Total mined blocks")
         .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static GOSSIP_CONVERGENCE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "gossip_convergence_seconds",
+        "Time for all peers to agree on the network tip",
+    );
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static FORK_REORG_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("fork_reorg_total", "Total observed fork reorgs"),
+        &["depth"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -478,6 +538,8 @@ fn gather() -> String {
         &*TX_SUBMITTED_TOTAL,
         &*TX_REJECTED_TOTAL,
         &*BLOCK_MINED_TOTAL,
+        &*GOSSIP_CONVERGENCE_SECONDS,
+        FORK_REORG_TOTAL.with_label_values(&["0"]),
         &*TTL_DROP_TOTAL,
         &*STARTUP_TTL_DROP_TOTAL,
         &*LOCK_POISON_TOTAL,

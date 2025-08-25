@@ -1,4 +1,4 @@
-use crate::{Blockchain, SignedTransaction};
+use crate::{identity::handle_registry::HandleRegistry, Blockchain, SignedTransaction};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
@@ -11,6 +11,8 @@ use tokio::time::{timeout, Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
+
+pub mod identity;
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -197,6 +199,7 @@ async fn handle_conn(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
     nonces: Arc<Mutex<HashSet<u64>>>,
+    handles: Arc<Mutex<HandleRegistry>>,
 ) {
     let mut reader = BufReader::new(stream);
 
@@ -289,6 +292,7 @@ async fn handle_conn(
                 Arc::clone(&bc),
                 Arc::clone(&mining),
                 Arc::clone(&nonces),
+                Arc::clone(&handles),
             ) {
                 Ok(v) => RpcResponse::Result {
                     jsonrpc: "2.0",
@@ -335,6 +339,7 @@ fn dispatch(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
     nonces: Arc<Mutex<HashSet<u64>>>,
+    handles: Arc<Mutex<HandleRegistry>>,
 ) -> Result<serde_json::Value, RpcError> {
     Ok(match req.method.as_str() {
         "set_difficulty" => {
@@ -369,38 +374,24 @@ fn dispatch(
         }
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
-            let handle = req
-                .params
-                .get("handle")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let addr = req
-                .params
-                .get("address")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            match bc.lock() {
-                Ok(mut guard) => {
-                    if guard.register_handle(handle, addr) {
-                        serde_json::json!({"status": "ok"})
-                    } else {
-                        serde_json::json!({"error": "handle taken or address missing"})
-                    }
-                }
+            match handles.lock() {
+                Ok(mut reg) => match identity::register_handle(&req.params, &mut reg) {
+                    Ok(v) => v,
+                    Err(e) => serde_json::json!({"error": e.code()}),
+                },
                 Err(_) => serde_json::json!({"error": "lock poisoned"}),
             }
         }
         "resolve_handle" => {
-            let handle = req
-                .params
-                .get("handle")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(addr) = guard.resolve_handle(handle) {
-                serde_json::json!({"address": addr})
-            } else {
-                serde_json::json!({"address": null})
+            match handles.lock() {
+                Ok(reg) => identity::resolve_handle(&req.params, &reg),
+                Err(_) => serde_json::json!({"address": null}),
+            }
+        }
+        "whoami" => {
+            match handles.lock() {
+                Ok(reg) => identity::whoami(&req.params, &reg),
+                Err(_) => serde_json::json!({"address": null, "handle": null}),
             }
         }
         "record_le_request" => {
@@ -561,6 +552,7 @@ pub async fn run_rpc_server(
     let local = listener.local_addr()?.to_string();
     let _ = ready.send(local);
     let nonces = Arc::new(Mutex::new(HashSet::new()));
+    let handles = Arc::new(Mutex::new(HandleRegistry::open("identity_db")));
     let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
     let tokens_per_sec = std::env::var("TB_RPC_TOKENS_PER_SEC")
         .ok()
@@ -605,8 +597,9 @@ pub async fn run_rpc_server(
         let bc = Arc::clone(&bc);
         let mining = Arc::clone(&mining);
         let nonces = Arc::clone(&nonces);
+        let handles_cl = Arc::clone(&handles);
         tokio::spawn(async move {
-            handle_conn(stream, bc, mining, nonces).await;
+            handle_conn(stream, bc, mining, nonces, handles_cl).await;
         });
     }
 }

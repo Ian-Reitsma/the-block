@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use once_cell::sync::OnceCell;
 use sled::Tree;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -127,7 +127,23 @@ fn current_ts() -> u64 {
         .as_secs()
 }
 
-pub static BAN_STORE: Lazy<Mutex<BanStore>> = Lazy::new(|| {
-    let path = std::env::var("TB_BAN_DB").unwrap_or_else(|_| "ban_db".into());
-    Mutex::new(BanStore::open(&path))
-});
+static BAN_STORE: OnceCell<Mutex<BanStore>> = OnceCell::new();
+
+/// Obtain the global ban store.
+pub fn store() -> &'static Mutex<BanStore> {
+    BAN_STORE.get_or_init(|| {
+        let path = std::env::var("TB_BAN_DB").unwrap_or_else(|_| "ban_db".into());
+        Mutex::new(BanStore::open(&path))
+    })
+}
+
+/// Replace the global ban store with one backed by `path`.
+/// Primarily used by tests to isolate state.
+pub fn init(path: &str) {
+    if let Some(store) = BAN_STORE.get() {
+        let mut guard = store.lock().unwrap();
+        *guard = BanStore::open(path);
+    } else {
+        let _ = BAN_STORE.set(Mutex::new(BanStore::open(path)));
+    }
+}
