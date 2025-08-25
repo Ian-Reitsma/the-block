@@ -6,3 +6,11 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ['host.docker.internal:9898']
+  - job_name: 'swarm'
+    static_configs:
+      - targets:
+          - 'localhost:9021'
+          - 'localhost:9022'
+          - 'localhost:9023'
+          - 'localhost:9024'
+          - 'localhost:9025'

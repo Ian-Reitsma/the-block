@@ -9,5 +9,27 @@ demo:
     fi
     .venv/bin/python demo.py
 
-test:gossip:
-    RUST_LOG=info cargo nextest run --all-features gossip_converges_to_longest_chain
+test-gossip:
+    if command -v cargo-nextest >/dev/null 2>&1; then \
+        RUST_LOG=info cargo nextest run --all-features gossip_converges_to_longest_chain; \
+    else \
+        RUST_LOG=info cargo test --all-features gossip_converges_to_longest_chain; \
+    fi
+
+swarm-up:
+    sh scripts/swarm.sh up
+
+swarm-down:
+    sh scripts/swarm.sh down
+
+swarm-logs:
+    sh scripts/swarm.sh logs
+
+swarm-test:
+    sh scripts/swarm.sh up
+    if command -v cargo-nextest >/dev/null 2>&1; then \
+        cargo nextest run --all-features --tests net_gossip; \
+    else \
+        cargo test --all-features --tests net_gossip; \
+    fi
+    sh scripts/swarm.sh down

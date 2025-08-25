@@ -6,7 +6,8 @@ def make_chain(tmp_path):
     path = tmp_path / "code_chain"
     bc = the_block.Blockchain.with_difficulty(str(path), 1)
     bc.genesis_block()
-    bc.min_fee_per_byte = 0
+    bc.min_fee_per_byte_consumer = 0
+    bc.min_fee_per_byte_industrial = 0
     return bc
 
 
@@ -194,7 +195,8 @@ def trigger_fee_overflow(tmp_path):
 
 def trigger_fee_too_low(tmp_path):
     bc = make_chain(tmp_path)
-    bc.min_fee_per_byte = 1
+    bc.min_fee_per_byte_consumer = 1
+    bc.min_fee_per_byte_industrial = 1
     priv, _ = the_block.generate_keypair()
     bc.add_account("alice", 10, 0)
     payload = the_block.RawTxPayload(
@@ -213,7 +215,7 @@ def trigger_fee_too_low(tmp_path):
 
 def trigger_mempool_full(tmp_path):
     bc = make_chain(tmp_path)
-    bc.max_mempool_size = 0
+    bc.max_mempool_size_consumer = 0
     priv, _ = the_block.generate_keypair()
     bc.add_account("alice", 10, 0)
     payload = the_block.RawTxPayload(

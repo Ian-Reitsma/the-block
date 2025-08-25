@@ -4,7 +4,7 @@ use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
-    generate_keypair, sign_tx, Blockchain, MempoolEntry, RawTxPayload, SignedTransaction,
+    generate_keypair, sign_tx, Blockchain, FeeLane, MempoolEntry, RawTxPayload, SignedTransaction,
     TokenAmount, TxAdmissionError,
 };
 
@@ -59,7 +59,7 @@ fn mine_block_skips_nonce_gaps() {
     bc.mine_block("miner").unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "miner", "alice", 1, 1, 1000, 5);
-    bc.mempool.insert(
+    bc.mempool_consumer.insert(
         ("miner".into(), 5),
         MempoolEntry {
             tx: tx.clone(),
@@ -112,6 +112,7 @@ fn validate_block_rejects_nonce_gap() {
         },
         public_key: vec![],
         signature: vec![],
+        lane: FeeLane::Consumer,
     };
     let txs = vec![coinbase, tx1.clone(), tx3.clone()];
     let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();
@@ -182,7 +183,7 @@ fn mempool_full_evicts_lowest() {
     init();
     let dir = temp_dir("temp_full");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 1;
+    bc.max_mempool_size_consumer = 1;
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 10_000, 0).unwrap();
     let (ska, _pka) = generate_keypair();
@@ -191,8 +192,8 @@ fn mempool_full_evicts_lowest() {
     let tx2 = build_signed_tx(&skb, "b", "a", 1, 0, 2000, 1);
     bc.submit_transaction(tx1).unwrap();
     bc.submit_transaction(tx2.clone()).unwrap();
-    assert_eq!(bc.mempool.len(), 1);
-    assert!(bc.mempool.contains_key(&("b".to_string(), 1)));
+    assert_eq!(bc.mempool_consumer.len(), 1);
+    assert!(bc.mempool_consumer.contains_key(&("b".to_string(), 1)));
 }
 
 #[test]
@@ -202,7 +203,7 @@ fn fee_per_byte_boundary() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
-    bc.min_fee_per_byte = 5;
+    bc.min_fee_per_byte_consumer = 5;
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "a".into(),
@@ -217,16 +218,62 @@ fn fee_per_byte_boundary() {
     let tx_tmp = sign_tx(sk.clone(), payload.clone()).unwrap();
     let size = bincode::serialize(&tx_tmp).unwrap().len() as u64;
     let mut low = payload.clone();
-    low.fee = size * bc.min_fee_per_byte - 1;
+    low.fee = size * bc.min_fee_per_byte_consumer - 1;
     let tx_low = sign_tx(sk.clone(), low).unwrap();
     assert_eq!(
         bc.submit_transaction(tx_low),
         Err(TxAdmissionError::FeeTooLow)
     );
     let mut ok = payload;
-    ok.fee = size * bc.min_fee_per_byte;
+    ok.fee = size * bc.min_fee_per_byte_consumer;
     let tx_ok = sign_tx(sk, ok).unwrap();
     assert_eq!(bc.submit_transaction(tx_ok), Ok(()));
+}
+
+#[cfg(feature = "telemetry")]
+#[test]
+fn industrial_deferred_when_consumer_fees_high() {
+    init();
+    let dir = temp_dir("temp_defer");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    bc.comfort_threshold_p90 = 10;
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
+    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("b".into(), 0, 0).unwrap();
+    let (sk, _pk) = generate_keypair();
+    telemetry::INDUSTRIAL_DEFERRED_TOTAL.reset();
+    // high-fee consumer tx to raise p90 above threshold
+    let payload = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 0,
+        fee: 20,
+        fee_selector: 0,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx_c = sign_tx(sk.clone(), payload).unwrap();
+    bc.submit_transaction(tx_c).unwrap();
+    // industrial tx should be deferred
+    let payload_i = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 0,
+        amount_industrial: 1,
+        fee: 1,
+        fee_selector: 1,
+        nonce: 2,
+        memo: Vec::new(),
+    };
+    let mut tx_i = sign_tx(sk, payload_i).unwrap();
+    tx_i.lane = FeeLane::Industrial;
+    assert_eq!(
+        bc.submit_transaction(tx_i),
+        Err(TxAdmissionError::FeeTooLow)
+    );
+    assert_eq!(telemetry::INDUSTRIAL_DEFERRED_TOTAL.get(), 1);
 }
 
 #[test]
@@ -353,6 +400,6 @@ fn admission_panic_rolls_back_all_steps() {
         assert_eq!(acc.pending_consumer, 0);
         assert_eq!(acc.pending_industrial, 0);
         assert!(acc.pending_nonces.is_empty());
-        assert!(bc.mempool.is_empty());
+        assert!(bc.mempool_consumer.is_empty());
     }
 }

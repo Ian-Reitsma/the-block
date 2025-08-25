@@ -56,7 +56,8 @@ proptest! {
         init();
         let dir = temp_dir("temp_orphan_fuzz");
         let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-        bc.min_fee_per_byte = 0;
+        bc.min_fee_per_byte_consumer = 0;
+        bc.min_fee_per_byte_industrial = 0;
         bc.add_account("sink".into(), 0, 0).unwrap();
         for i in 0..ACCOUNTS {
             let name = format!("acc{i}");
@@ -65,7 +66,7 @@ proptest! {
             let tx = build_signed_tx(&sk, &name, "sink", 1, 0, 1_000, 1);
             bc.submit_transaction(tx).unwrap();
         }
-        for mut entry in bc.mempool.iter_mut() {
+        for mut entry in bc.mempool_consumer.iter_mut() {
             entry.value_mut().timestamp_millis = 0;
         }
         let bc = Arc::new(RwLock::new(bc));
@@ -86,7 +87,7 @@ proptest! {
         }
         let guard = bc.read().unwrap();
         let orphans = guard.orphan_count();
-        let size = guard.mempool.len();
+        let size = guard.mempool_consumer.len();
         assert_ne!(orphans, usize::MAX);
         assert!(orphans <= size);
     }

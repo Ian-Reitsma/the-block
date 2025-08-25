@@ -165,7 +165,7 @@ async fn rpc_concurrent_controls() {
         let _ = h.await;
     }
     let _ = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":999}}"#).await;
-    assert!(bc.lock().unwrap().mempool.len() <= 1);
+    assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
 
     handle.abort();
 }

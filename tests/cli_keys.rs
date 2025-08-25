@@ -5,15 +5,8 @@ mod util;
 #[test]
 fn import_missing_key() {
     let tmp = util::temp::temp_dir("missing_key_home");
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "node",
-            "--",
-            "import-key",
-            "nonexistent.pem",
-        ])
+    let output = Command::new(env!("CARGO_BIN_EXE_node"))
+        .args(["import-key", "nonexistent.pem"])
         .env("HOME", tmp.path())
         .output()
         .expect("run node");

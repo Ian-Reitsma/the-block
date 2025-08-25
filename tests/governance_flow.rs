@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used)]
-use the_block::governance::{Governance, House};
+use the_block::governance::{BicameralGovernance as Governance, House};
 
 #[test]
 fn submit_vote_exec_cycle() {

@@ -19,8 +19,9 @@ pub use peer::PeerSet;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Feature bits required for peer connections.
-pub const COMPUTE_MARKET_V1: u32 = crate::p2p::FeatureBits::COMPUTE_MARKET_V1;
-pub const REQUIRED_FEATURES: u32 = crate::p2p::FeatureBits::FEE_ROUTING_V2 | COMPUTE_MARKET_V1;
+pub const COMPUTE_MARKET_V1: u32 = crate::p2p::FeatureBit::ComputeMarketV1 as u32;
+pub const REQUIRED_FEATURES: u32 =
+    (crate::p2p::FeatureBit::FeeRoutingV2 as u32) | COMPUTE_MARKET_V1;
 
 /// Feature bits this node advertises.
 pub const LOCAL_FEATURES: u32 = REQUIRED_FEATURES;

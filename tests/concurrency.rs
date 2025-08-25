@@ -61,7 +61,7 @@ fn concurrent_duplicate_submission() {
     };
     assert_eq!(pending_nonce, 1);
     bc.write().unwrap().drop_transaction("alice", 1).unwrap();
-    assert!(bc.read().unwrap().mempool.is_empty());
+    assert!(bc.read().unwrap().mempool_consumer.is_empty());
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn cross_thread_fuzz() {
         h.join().unwrap();
     }
     let guard = bc.read().unwrap();
-    assert!(guard.mempool.len() <= guard.max_mempool_size);
+    assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
     for acc in guard.accounts.values() {
         assert_eq!(acc.pending_nonce as usize, acc.pending_nonces.len());
     }
@@ -114,7 +114,7 @@ fn cap_race_respects_limit() {
     init();
     let dir = temp_dir("temp_cap_race");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 32;
+    bc.max_mempool_size_consumer = 32;
     bc.max_pending_per_account = 64;
     bc.add_account("alice".into(), 1_000_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
@@ -134,7 +134,7 @@ fn cap_race_respects_limit() {
         h.join().unwrap();
     }
     let guard = bc.read().unwrap();
-    assert!(guard.mempool.len() <= guard.max_mempool_size);
+    assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
 }
 
 // Flood the mempool from many threads and track the peak size, ensuring the cap is never exceeded.
@@ -144,7 +144,7 @@ fn flood_mempool_never_over_cap() {
     init();
     let dir = temp_dir("temp_flood_cap");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 16;
+    bc.max_mempool_size_consumer = 16;
     bc.max_pending_per_account = 64;
     bc.add_account("alice".into(), 1_000_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
@@ -159,7 +159,7 @@ fn flood_mempool_never_over_cap() {
             let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, i as u64 + 1);
             std::thread::spawn(move || {
                 let _ = bc_cl.write().unwrap().submit_transaction(tx);
-                let len = bc_cl.read().unwrap().mempool.len();
+                let len = bc_cl.read().unwrap().mempool_consumer.len();
                 peak_cl.fetch_max(len, Ordering::SeqCst);
             })
         })
@@ -168,8 +168,8 @@ fn flood_mempool_never_over_cap() {
         h.join().unwrap();
     }
     let guard = bc.read().unwrap();
-    assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size);
-    assert!(guard.mempool.len() <= guard.max_mempool_size);
+    assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size_consumer);
+    assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
 }
 
 // Concurrent admission and mining can't push the mempool over its cap.
@@ -179,7 +179,7 @@ fn admit_and_mine_never_over_cap() {
     init();
     let dir = temp_dir("temp_admit_mine_cap");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 16;
+    bc.max_mempool_size_consumer = 16;
     bc.max_pending_per_account = 64;
     bc.add_account("alice".into(), 1_000_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
@@ -200,7 +200,7 @@ fn admit_and_mine_never_over_cap() {
             if let Some(last) = guard.chain.last_mut() {
                 last.timestamp_millis = first_ts + (len_chain - 1) * 1_000;
             }
-            let len = guard.mempool.len();
+            let len = guard.mempool_consumer.len();
             drop(guard);
             peak_miner.fetch_max(len, Ordering::SeqCst);
         }
@@ -213,7 +213,7 @@ fn admit_and_mine_never_over_cap() {
             let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, i as u64 + 1);
             std::thread::spawn(move || {
                 let _ = bc_cl.write().unwrap().submit_transaction(tx);
-                let len = bc_cl.read().unwrap().mempool.len();
+                let len = bc_cl.read().unwrap().mempool_consumer.len();
                 peak_cl.fetch_max(len, Ordering::SeqCst);
             })
         })
@@ -223,6 +223,6 @@ fn admit_and_mine_never_over_cap() {
     }
     miner_handle.join().unwrap();
     let guard = bc.read().unwrap();
-    assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size);
-    assert!(guard.mempool.len() <= guard.max_mempool_size);
+    assert!(peak.load(Ordering::SeqCst) <= guard.max_mempool_size_consumer);
+    assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
 }

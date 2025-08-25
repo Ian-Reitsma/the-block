@@ -1,4 +1,9 @@
-use crate::{identity::handle_registry::HandleRegistry, Blockchain, SignedTransaction};
+use crate::{
+    governance::{GovStore, Params},
+    identity::handle_registry::HandleRegistry,
+    Blockchain, SignedTransaction,
+};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
@@ -6,13 +11,20 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{timeout, Duration};
+
+pub mod limiter;
+use limiter::{ClientState, RpcClientErrorCode};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
+pub mod governance;
 pub mod identity;
+
+static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
+static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -41,7 +53,7 @@ enum RpcResponse {
 }
 
 #[derive(Serialize)]
-struct RpcError {
+pub struct RpcError {
     code: i32,
     message: &'static str,
 }
@@ -79,39 +91,6 @@ impl From<crate::compute_market::MarketError> for RpcError {
 }
 
 #[doc(hidden)]
-pub struct ClientState {
-    tokens: f64,
-    last: Instant,
-    banned_until: Option<Instant>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum RpcClientErrorCode {
-    RateLimit,
-    Banned,
-}
-
-#[allow(dead_code)]
-impl RpcClientErrorCode {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::RateLimit => "2000",
-            Self::Banned => "2001",
-        }
-    }
-    fn rpc_code(&self) -> i32 {
-        match self {
-            Self::RateLimit => -32001,
-            Self::Banned => -32002,
-        }
-    }
-    fn message(&self) -> &'static str {
-        match self {
-            Self::RateLimit => "rate limited",
-            Self::Banned => "banned",
-        }
-    }
-}
 
 fn telemetry_rpc_error(code: RpcClientErrorCode) {
     #[cfg(feature = "telemetry")]
@@ -122,52 +101,6 @@ fn telemetry_rpc_error(code: RpcClientErrorCode) {
     }
     #[cfg(not(feature = "telemetry"))]
     let _ = code;
-}
-
-#[doc(hidden)]
-pub fn check_client(
-    addr: &IpAddr,
-    clients: &Arc<Mutex<HashMap<IpAddr, ClientState>>>,
-    tokens_per_sec: f64,
-    ban_secs: u64,
-    timeout_secs: u64,
-) -> Result<(), RpcClientErrorCode> {
-    let mut map = clients.lock().unwrap_or_else(|e| e.into_inner());
-    let now = Instant::now();
-    map.retain(|_, c| now.duration_since(c.last).as_secs() <= timeout_secs);
-    let entry = map.entry(*addr).or_insert(ClientState {
-        tokens: tokens_per_sec,
-        last: Instant::now(),
-        banned_until: None,
-    });
-    let now = Instant::now();
-    if let Some(until) = entry.banned_until {
-        if until > now {
-            return Err(RpcClientErrorCode::Banned);
-        } else {
-            entry.banned_until = None;
-        }
-    }
-    let elapsed = now.duration_since(entry.last).as_secs_f64();
-    entry.tokens = (entry.tokens + elapsed * tokens_per_sec).min(tokens_per_sec);
-    entry.last = now;
-    if entry.tokens >= 1.0 {
-        entry.tokens -= 1.0;
-        #[cfg(feature = "telemetry")]
-        crate::telemetry::RPC_TOKENS
-            .with_label_values(&[&addr.to_string()])
-            .set(entry.tokens);
-        return Ok(());
-    }
-    entry.banned_until = Some(now + Duration::from_secs(ban_secs));
-    #[cfg(feature = "telemetry")]
-    {
-        crate::telemetry::RPC_TOKENS
-            .with_label_values(&[&addr.to_string()])
-            .set(entry.tokens);
-        crate::telemetry::RPC_BANS_TOTAL.inc();
-    }
-    Err(RpcClientErrorCode::RateLimit)
 }
 
 fn check_nonce(
@@ -382,18 +315,14 @@ fn dispatch(
                 Err(_) => serde_json::json!({"error": "lock poisoned"}),
             }
         }
-        "resolve_handle" => {
-            match handles.lock() {
-                Ok(reg) => identity::resolve_handle(&req.params, &reg),
-                Err(_) => serde_json::json!({"address": null}),
-            }
-        }
-        "whoami" => {
-            match handles.lock() {
-                Ok(reg) => identity::whoami(&req.params, &reg),
-                Err(_) => serde_json::json!({"address": null, "handle": null}),
-            }
-        }
+        "resolve_handle" => match handles.lock() {
+            Ok(reg) => identity::resolve_handle(&req.params, &reg),
+            Err(_) => serde_json::json!({"address": null}),
+        },
+        "whoami" => match handles.lock() {
+            Ok(reg) => identity::whoami(&req.params, &reg),
+            Err(_) => serde_json::json!({"address": null, "handle": null}),
+        },
         "record_le_request" => {
             check_nonce(&req.params, &nonces)?;
             let agency = req
@@ -533,6 +462,78 @@ fn dispatch(
                 return Err(crate::compute_market::MarketError::NoPriceData.into());
             }
         },
+        "gov_propose" => {
+            let proposer = req
+                .params
+                .get("proposer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let key = req.params.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            let new_value = req
+                .params
+                .get("new_value")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let min = req.params.get("min").and_then(|v| v.as_i64()).unwrap_or(0);
+            let max = req.params.get("max").and_then(|v| v.as_i64()).unwrap_or(0);
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let deadline = req
+                .params
+                .get("vote_deadline")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(epoch);
+            governance::gov_propose(
+                &GOV_STORE, proposer, key, new_value, min, max, epoch, deadline,
+            )?
+        }
+        "gov_vote" => {
+            let voter = req
+                .params
+                .get("voter")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pid = req
+                .params
+                .get("proposal_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let choice = req
+                .params
+                .get("choice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("yes");
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            governance::gov_vote(&GOV_STORE, voter, pid, choice, epoch)?
+        }
+        "gov_list" => governance::gov_list(&GOV_STORE)?,
+        "gov_params" => {
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let params = GOV_PARAMS.lock().unwrap();
+            governance::gov_params(&params, epoch)?
+        }
+        "gov_rollback_last" => {
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let mut params = GOV_PARAMS.lock().unwrap();
+            governance::gov_rollback_last(&GOV_STORE, &mut params, epoch)?
+        }
         _ => {
             return Err(RpcError {
                 code: -32601,
@@ -568,7 +569,7 @@ pub async fn run_rpc_server(
         .unwrap_or(300);
     loop {
         let (mut stream, addr) = listener.accept().await?;
-        if let Err(code) = check_client(
+        if let Err(code) = limiter::check_client(
             &addr.ip(),
             &clients,
             tokens_per_sec,

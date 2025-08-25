@@ -1,9 +1,15 @@
+#[cfg(feature = "telemetry")]
+use crate::telemetry;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
+pub mod admission;
 pub mod courier;
+pub mod courier_store;
 pub mod errors;
+pub mod matcher;
 pub mod price_board;
+pub mod receipt;
 pub mod workloads;
 
 pub use errors::MarketError;
@@ -15,6 +21,7 @@ pub const MIN_BOND: u64 = 1;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Offer {
     pub job_id: String,
+    pub provider: String,
     pub provider_bond: u64,
     pub consumer_bond: u64,
     pub capacity: u64,
@@ -107,6 +114,7 @@ impl WorkloadRunner {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Job {
     pub job_id: String,
+    pub buyer: String,
     pub slices: Vec<[u8; 32]>,
     pub price_per_slice: u64,
     pub consumer_bond: u64,
@@ -132,6 +140,7 @@ pub struct Market {
 impl Market {
     /// Create an empty market.
     pub fn new() -> Self {
+        admission::record_available_shards(100);
         Self::default()
     }
 
@@ -152,14 +161,56 @@ impl Market {
     }
 
     /// Submit a job from the consumer side, matching an existing offer.
-    pub fn submit_job(&mut self, job: Job) -> Result<(), &'static str> {
+    pub fn submit_job(&mut self, job: Job) -> Result<(), MarketError> {
         if job.consumer_bond < MIN_BOND {
-            return Err("consumer bond too low");
+            return Err(MarketError::InvalidWorkload);
         }
         if job.workloads.len() != job.slices.len() {
-            return Err("workload count mismatch");
+            return Err(MarketError::InvalidWorkload);
         }
-        let offer = self.offers.remove(&job.job_id).ok_or("no offer for job")?;
+        let offer = self
+            .offers
+            .get(&job.job_id)
+            .cloned()
+            .ok_or(MarketError::JobNotFound)?;
+        let demand = job.slices.len() as u64;
+        if let Err(reason) = admission::check_and_record(&job.buyer, &offer.provider, demand) {
+            #[cfg(feature = "telemetry")]
+            {
+                use admission::RejectReason::*;
+                match reason {
+                    Capacity => {
+                        telemetry::ADMISSION_REJECT_TOTAL
+                            .with_label_values(&["capacity"])
+                            .inc();
+                        telemetry::INDUSTRIAL_DEFERRED_TOTAL.inc();
+                        return Err(MarketError::Capacity);
+                    }
+                    FairShare => {
+                        telemetry::ADMISSION_REJECT_TOTAL
+                            .with_label_values(&["fair_share"])
+                            .inc();
+                        return Err(MarketError::FairShare);
+                    }
+                    BurstExhausted => {
+                        telemetry::ADMISSION_REJECT_TOTAL
+                            .with_label_values(&["burst_exhausted"])
+                            .inc();
+                        return Err(MarketError::BurstExhausted);
+                    }
+                }
+            }
+            #[cfg(not(feature = "telemetry"))]
+            {
+                use admission::RejectReason::*;
+                return Err(match reason {
+                    Capacity => MarketError::Capacity,
+                    FairShare => MarketError::FairShare,
+                    BurstExhausted => MarketError::BurstExhausted,
+                });
+            }
+        }
+        let offer = self.offers.remove(&job.job_id).unwrap();
         price_board::record_price(offer.price);
         let state = JobState {
             job,
@@ -168,6 +219,8 @@ impl Market {
             completed: false,
         };
         self.jobs.insert(state.job.job_id.clone(), state);
+        #[cfg(feature = "telemetry")]
+        telemetry::INDUSTRIAL_ADMITTED_TOTAL.inc();
         Ok(())
     }
 
@@ -316,6 +369,7 @@ mod tests {
     fn offer_requires_bonds() {
         let offer = Offer {
             job_id: "job".into(),
+            provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
             capacity: 10,
@@ -371,6 +425,7 @@ mod tests {
         let job_id = "job1".to_string();
         let offer = Offer {
             job_id: job_id.clone(),
+            provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
             capacity: 1,
@@ -384,6 +439,7 @@ mod tests {
         let hash = *h.finalize().as_bytes();
         let job = Job {
             job_id: job_id.clone(),
+            buyer: "buyer".into(),
             slices: vec![hash],
             price_per_slice: 5,
             consumer_bond: 1,
@@ -417,6 +473,7 @@ mod tests {
         let hash = *h.finalize().as_bytes();
         let offer = Offer {
             job_id: "j1".into(),
+            provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
             capacity: 1,
@@ -427,6 +484,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("post offer: {e}"));
         let job = Job {
             job_id: "j1".into(),
+            buyer: "buyer".into(),
             slices: vec![hash, hash],
             price_per_slice: 5,
             consumer_bond: 1,
@@ -452,6 +510,7 @@ mod tests {
         let mut market = Market::new();
         let offer = Offer {
             job_id: "j2".into(),
+            provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
             capacity: 1,
@@ -469,6 +528,7 @@ mod tests {
         let hash = *h.finalize().as_bytes();
         let job = Job {
             job_id: "j2".into(),
+            buyer: "buyer".into(),
             slices: vec![hash],
             price_per_slice: 5,
             consumer_bond: 1,
@@ -489,6 +549,7 @@ mod tests {
         let job_id = "exec".to_string();
         let offer = Offer {
             job_id: job_id.clone(),
+            provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
             capacity: 1,
@@ -502,6 +563,7 @@ mod tests {
         let hash = *h.finalize().as_bytes();
         let job = Job {
             job_id: job_id.clone(),
+            buyer: "buyer".into(),
             slices: vec![hash],
             price_per_slice: 2,
             consumer_bond: 1,

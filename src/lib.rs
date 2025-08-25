@@ -18,6 +18,8 @@ use hex;
 use log::info;
 #[cfg(feature = "telemetry")]
 use log::warn;
+#[cfg(feature = "telemetry")]
+use crate::consensus::observer;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -59,7 +61,11 @@ pub mod service_badge;
 pub use service_badge::ServiceBadgeTracker;
 
 pub mod governance;
-pub use governance::{Bicameral, Governance, House, Proposal};
+pub use governance::{
+    Bicameral, BicameralGovernance as Governance, BicameralProposal as LegacyProposal, GovStore,
+    House, ParamKey, Params, Proposal, ProposalStatus, Vote, VoteChoice, ACTIVATION_DELAY, QUORUM,
+    ROLLBACK_WINDOW_EPOCHS,
+};
 
 pub mod compute_market;
 pub mod le_portal;
@@ -68,7 +74,7 @@ pub mod transaction;
 pub use transaction::{
     canonical_payload_bytes, canonical_payload_py as canonical_payload,
     decode_payload_py as decode_payload, sign_tx_py as sign_tx,
-    verify_signed_tx_py as verify_signed_tx, RawTxPayload, SignedTransaction,
+    verify_signed_tx_py as verify_signed_tx, FeeLane, RawTxPayload, SignedTransaction,
 };
 // Python helper re-exported at the crate root
 pub use self::mine_block_py as mine_block;
@@ -77,6 +83,8 @@ pub mod consensus;
 pub mod constants;
 pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
 pub mod fee;
+#[cfg(feature = "telemetry")]
+pub mod fees;
 pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
@@ -520,17 +528,26 @@ pub struct Blockchain {
     pub accounts: HashMap<String, Account>,
     #[pyo3(get, set)]
     pub difficulty: u64,
-    pub mempool: DashMap<(String, u64), MempoolEntry>,
-    mempool_size: std::sync::atomic::AtomicUsize,
+    /// Consumer lane mempool entries keyed by `(sender, nonce)`.
+    pub mempool_consumer: DashMap<(String, u64), MempoolEntry>,
+    /// Industrial lane mempool entries keyed by `(sender, nonce)`.
+    pub mempool_industrial: DashMap<(String, u64), MempoolEntry>,
+    mempool_size_consumer: std::sync::atomic::AtomicUsize,
+    mempool_size_industrial: std::sync::atomic::AtomicUsize,
     mempool_mutex: Mutex<()>,
     orphan_counter: std::sync::atomic::AtomicUsize,
     panic_on_evict: std::sync::atomic::AtomicBool,
     panic_on_admit: std::sync::atomic::AtomicI32,
     panic_on_purge: std::sync::atomic::AtomicBool,
     #[pyo3(get, set)]
-    pub max_mempool_size: usize,
+    pub max_mempool_size_consumer: usize,
+    pub max_mempool_size_industrial: usize,
     #[pyo3(get, set)]
-    pub min_fee_per_byte: u64,
+    pub min_fee_per_byte_consumer: u64,
+    #[pyo3(get, set)]
+    pub min_fee_per_byte_industrial: u64,
+    #[pyo3(get, set)]
+    pub comfort_threshold_p90: u64,
     #[pyo3(get, set)]
     pub tx_ttl: u64,
     #[pyo3(get, set)]
@@ -597,15 +614,20 @@ impl Default for Blockchain {
             chain: Vec::new(),
             accounts: HashMap::new(),
             difficulty: difficulty::expected_difficulty(&[] as &[Block]),
-            mempool: DashMap::new(),
-            mempool_size: std::sync::atomic::AtomicUsize::new(0),
+            mempool_consumer: DashMap::new(),
+            mempool_industrial: DashMap::new(),
+            mempool_size_consumer: std::sync::atomic::AtomicUsize::new(0),
+            mempool_size_industrial: std::sync::atomic::AtomicUsize::new(0),
             mempool_mutex: Mutex::new(()),
             orphan_counter: std::sync::atomic::AtomicUsize::new(0),
             panic_on_evict: std::sync::atomic::AtomicBool::new(false),
             panic_on_admit: std::sync::atomic::AtomicI32::new(-1),
             panic_on_purge: std::sync::atomic::AtomicBool::new(false),
-            max_mempool_size: 1024,
-            min_fee_per_byte: 1,
+            max_mempool_size_consumer: 1024,
+            max_mempool_size_industrial: 1024,
+            min_fee_per_byte_consumer: 1,
+            min_fee_per_byte_industrial: 1,
+            comfort_threshold_p90: 0,
             tx_ttl: 1800,
             max_pending_per_account: 16,
             admission_locks: DashMap::new(),
@@ -640,38 +662,47 @@ impl Blockchain {
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
     }
-    #[cfg(feature = "telemetry")]
-    fn inc_mempool_size(&self) -> usize {
-        let size = self
-            .mempool_size
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1;
-        telemetry::MEMPOOL_SIZE.set(size as i64);
+    fn adjust_mempool_size(&self, lane: FeeLane, delta: isize) -> usize {
+        use std::sync::atomic::Ordering::SeqCst;
+        let size = match lane {
+            FeeLane::Consumer => {
+                if delta > 0 {
+                    self.mempool_size_consumer.fetch_add(delta as usize, SeqCst)
+                        + delta as usize
+                } else {
+                    self.mempool_size_consumer.fetch_sub((-delta) as usize, SeqCst)
+                        - (-delta as usize)
+                }
+            }
+            FeeLane::Industrial => {
+                if delta > 0 {
+                    self.mempool_size_industrial.fetch_add(delta as usize, SeqCst)
+                        + delta as usize
+                } else {
+                    self.mempool_size_industrial.fetch_sub((-delta) as usize, SeqCst)
+                        - (-delta as usize)
+                }
+            }
+        };
+
+        #[cfg(feature = "telemetry")]
+        {
+            let total = self.mempool_size_consumer.load(SeqCst)
+                + self.mempool_size_industrial.load(SeqCst);
+            telemetry::MEMPOOL_SIZE.set(total as i64);
+        }
+
         size
     }
 
-    #[cfg(not(feature = "telemetry"))]
-    fn inc_mempool_size(&self) -> usize {
-        self.mempool_size
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-            + 1
+    #[inline]
+    fn inc_mempool_size(&self, lane: FeeLane) -> usize {
+        self.adjust_mempool_size(lane, 1)
     }
 
-    #[cfg(feature = "telemetry")]
-    fn dec_mempool_size(&self) -> usize {
-        let size = self
-            .mempool_size
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
-            - 1;
-        telemetry::MEMPOOL_SIZE.set(size as i64);
-        size
-    }
-
-    #[cfg(not(feature = "telemetry"))]
-    fn dec_mempool_size(&self) -> usize {
-        self.mempool_size
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
-            - 1
+    #[inline]
+    fn dec_mempool_size(&self, lane: FeeLane) -> usize {
+        self.adjust_mempool_size(lane, -1)
     }
 
     #[cfg(feature = "telemetry")]
@@ -1153,12 +1184,29 @@ impl Blockchain {
 
         if let Ok(v) = std::env::var("TB_MEMPOOL_MAX") {
             if let Ok(n) = v.parse() {
-                bc.max_mempool_size = n;
+                bc.max_mempool_size_consumer = n;
+                bc.max_mempool_size_industrial = n;
             }
         }
         if let Ok(v) = std::env::var("TB_MIN_FEE_PER_BYTE") {
             if let Ok(n) = v.parse() {
-                bc.min_fee_per_byte = n;
+                bc.min_fee_per_byte_consumer = n;
+                bc.min_fee_per_byte_industrial = n;
+            }
+        }
+        if let Ok(v) = std::env::var("TB_MIN_FEE_PER_BYTE_CONSUMER") {
+            if let Ok(n) = v.parse() {
+                bc.min_fee_per_byte_consumer = n;
+            }
+        }
+        if let Ok(v) = std::env::var("TB_MIN_FEE_PER_BYTE_INDUSTRIAL") {
+            if let Ok(n) = v.parse() {
+                bc.min_fee_per_byte_industrial = n;
+            }
+        }
+        if let Ok(v) = std::env::var("TB_COMFORT_THRESHOLD_P90") {
+            if let Ok(n) = v.parse() {
+                bc.comfort_threshold_p90 = n;
             }
         }
         if let Ok(v) = std::env::var("TB_MEMPOOL_TTL_SECS") {
@@ -1202,9 +1250,8 @@ impl Blockchain {
                     sender = %scrub(&e.sender),
                     nonce = e.nonce,
                     fpb,
-                    mempool_size = bc
-                        .mempool_size
-                        .load(std::sync::atomic::Ordering::SeqCst)
+                    mempool_size = bc.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+                        + bc.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
                 )
                 .entered();
                 #[cfg(not(feature = "telemetry"))]
@@ -1213,7 +1260,11 @@ impl Blockchain {
                     let size = bincode::serialize(&e.tx)
                         .map(|b| b.len() as u64)
                         .unwrap_or(0);
-                    bc.mempool.insert(
+                    let pool = match e.tx.lane {
+                        FeeLane::Consumer => &bc.mempool_consumer,
+                        FeeLane::Industrial => &bc.mempool_industrial,
+                    };
+                    pool.insert(
                         (e.sender.clone(), e.nonce),
                         MempoolEntry {
                             tx: e.tx.clone(),
@@ -1222,7 +1273,7 @@ impl Blockchain {
                             serialized_size: size,
                         },
                     );
-                    bc.inc_mempool_size();
+                    bc.inc_mempool_size(e.tx.lane);
                     if let Some(acc) = bc.accounts.get_mut(&e.sender) {
                         if let Ok((fee_consumer, fee_industrial)) =
                             crate::fee::decompose(e.tx.payload.fee_selector, e.tx.payload.fee)
@@ -1271,7 +1322,6 @@ impl Blockchain {
         Ok(bc)
     }
 
-
     /// Return the on-disk schema version
     #[getter]
     pub fn schema_version(&self) -> usize {
@@ -1283,8 +1333,9 @@ impl Blockchain {
     /// Persist the entire chain + state under the current schema
     pub fn persist_chain(&mut self) -> PyResult<()> {
         let mempool: Vec<MempoolEntryDisk> = self
-            .mempool
+            .mempool_consumer
             .iter()
+            .chain(self.mempool_industrial.iter())
             .map(|e| MempoolEntryDisk {
                 sender: e.key().0.clone(),
                 nonce: e.key().1,
@@ -1385,7 +1436,10 @@ impl Blockchain {
     /// Backdate a mempool entry's timestamp for testing purposes.
     #[doc(hidden)]
     pub fn backdate_mempool_entry(&self, sender: &str, nonce: u64, millis: u64) {
-        if let Some(mut entry) = self.mempool.get_mut(&(sender.to_string(), nonce)) {
+        if let Some(mut entry) = self.mempool_consumer.get_mut(&(sender.to_string(), nonce)) {
+            entry.timestamp_millis = millis;
+            entry.timestamp_ticks = millis;
+        } else if let Some(mut entry) = self.mempool_industrial.get_mut(&(sender.to_string(), nonce)) {
             entry.timestamp_millis = millis;
             entry.timestamp_ticks = millis;
         }
@@ -1428,9 +1482,8 @@ impl Blockchain {
                 sender = %scrub(&sender_addr),
                 nonce,
                 fpb = fee_per_byte,
-                mempool_size = self
-                    .mempool_size
-                    .load(std::sync::atomic::Ordering::SeqCst)
+                mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+                    + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
             );
             span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
@@ -1544,12 +1597,27 @@ impl Blockchain {
         };
 
         // capacity check after basic validation
-        if self.mempool_size.load(std::sync::atomic::Ordering::SeqCst) >= self.max_mempool_size {
+        let lane = tx.lane;
+        let (mempool, max_size, pool_size) = match lane {
+            FeeLane::Consumer => (
+                &self.mempool_consumer,
+                self.max_mempool_size_consumer,
+                self.mempool_size_consumer
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            ),
+            FeeLane::Industrial => (
+                &self.mempool_industrial,
+                self.max_mempool_size_industrial,
+                self.mempool_size_industrial
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            ),
+        };
+        if pool_size >= max_size {
             #[cfg(feature = "telemetry")]
             telemetry::EVICTIONS_TOTAL.inc();
             // find lowest-priority entry for eviction
             let mut victim: Option<((String, u64), MempoolEntry)> = None;
-            for entry in self.mempool.iter() {
+            for entry in mempool.iter() {
                 let key = (entry.key().0.clone(), entry.key().1);
                 let val = entry.value().clone();
                 victim = match victim {
@@ -1594,8 +1662,8 @@ impl Blockchain {
                         TxAdmissionError::LockPoisoned
                     })?;
                 }
-                self.mempool.remove(&(ev_sender.clone(), ev_nonce));
-                self.dec_mempool_size();
+                mempool.remove(&(ev_sender.clone(), ev_nonce));
+                self.dec_mempool_size(lane);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
                     if let Ok((c, i)) = crate::fee::decompose(
                         ev_entry.tx.payload.fee_selector,
@@ -1638,7 +1706,7 @@ impl Blockchain {
             }
         }
 
-        match self.mempool.entry((sender_addr.clone(), nonce)) {
+        match mempool.entry((sender_addr.clone(), nonce)) {
             dashmap::mapref::entry::Entry::Occupied(_) => {
                 #[cfg(feature = "telemetry")]
                 #[cfg(feature = "telemetry-json")]
@@ -1771,8 +1839,39 @@ impl Blockchain {
                     self.record_reject("nonce_gap");
                     return Err(TxAdmissionError::NonceGap);
                 }
-                // fee per byte check
-                if fee_per_byte < self.min_fee_per_byte {
+                #[cfg(feature = "telemetry")]
+                {
+                    let is_tight = crate::fees::policy::consumer_p90() > self.comfort_threshold_p90;
+                    if is_tight {
+                        telemetry::ADMISSION_MODE
+                            .with_label_values(&["tight"])
+                            .set(1);
+                        telemetry::ADMISSION_MODE
+                            .with_label_values(&["normal"])
+                            .set(0);
+                    } else {
+                        telemetry::ADMISSION_MODE
+                            .with_label_values(&["normal"])
+                            .set(1);
+                        telemetry::ADMISSION_MODE
+                            .with_label_values(&["tight"])
+                            .set(0);
+                    }
+                    telemetry::ADMISSION_MODE
+                        .with_label_values(&["brownout"])
+                        .set(0);
+                    if matches!(lane, FeeLane::Industrial) && is_tight {
+                        telemetry::INDUSTRIAL_DEFERRED_TOTAL.inc();
+                        self.record_reject("comfort_guard");
+                        return Err(TxAdmissionError::FeeTooLow);
+                    }
+                }
+                // fee per byte check with lane-specific floor
+                let lane_min = match lane {
+                    FeeLane::Consumer => self.min_fee_per_byte_consumer,
+                    FeeLane::Industrial => self.min_fee_per_byte_industrial,
+                };
+                if fee_per_byte < lane_min {
                     #[cfg(feature = "telemetry")]
                     #[cfg(feature = "telemetry-json")]
                     log_event(
@@ -1845,6 +1944,8 @@ impl Blockchain {
                     }
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     let tx_id = tx.id();
+                    #[cfg(feature = "telemetry")]
+                    let fee_val = tx.payload.fee;
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_else(|e| panic!("time: {e}"));
@@ -1856,7 +1957,13 @@ impl Blockchain {
                     });
                     guard.commit();
                     #[cfg(feature = "telemetry")]
-                    self.record_admit();
+                    {
+                        self.record_admit();
+                        match lane {
+                            FeeLane::Industrial => telemetry::INDUSTRIAL_ADMITTED_TOTAL.inc(),
+                            FeeLane::Consumer => crate::fees::policy::record_consumer_fee(fee_val),
+                        }
+                    }
                     #[cfg(feature = "telemetry-json")]
                     log_event(
                         "mempool",
@@ -1878,7 +1985,7 @@ impl Blockchain {
                         );
                     }
                 }
-                self.inc_mempool_size();
+                self.inc_mempool_size(lane);
                 Ok(())
             }
         }
@@ -1891,15 +1998,15 @@ impl Blockchain {
     pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> Result<(), TxAdmissionError> {
         #[cfg(feature = "telemetry")]
         let _pool_guard = {
+            let size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+                + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst);
             let span = tracing::span!(
                 tracing::Level::TRACE,
                 "mempool_mutex",
                 sender = %scrub(sender),
                 nonce,
                 fpb = 0u64,
-                mempool_size = self
-                    .mempool_size
-                    .load(std::sync::atomic::Ordering::SeqCst)
+                mempool_size = size
             );
             span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
@@ -1939,8 +2046,8 @@ impl Blockchain {
             }
             TxAdmissionError::LockPoisoned
         })?;
-        if let Some((_, entry)) = self.mempool.remove(&(sender.to_string(), nonce)) {
-            self.dec_mempool_size();
+        if let Some((_, entry)) = self.mempool_consumer.remove(&(sender.to_string(), nonce)) {
+            self.dec_mempool_size(entry.tx.lane);
             let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
@@ -1949,8 +2056,58 @@ impl Blockchain {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
                     acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
-                    acc.pending_industrial =
-                        acc.pending_industrial.saturating_sub(total_industrial);
+                    acc.pending_industrial = acc
+                        .pending_industrial
+                        .saturating_sub(total_industrial);
+                    acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                    acc.pending_nonces.remove(&nonce);
+                }
+            }
+            if !self.accounts.contains_key(sender) {
+                if self
+                    .orphan_counter
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    > 0
+                {
+                    self.orphan_counter
+                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            #[cfg(feature = "telemetry-json")]
+            log_event(
+                "mempool",
+                log::Level::Info,
+                "drop",
+                sender,
+                nonce,
+                "dropped",
+                ERR_OK,
+                None,
+            );
+            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+            if telemetry::should_log("mempool") {
+                info!(
+                    "tx dropped sender={} nonce={} reason=dropped",
+                    scrub(sender),
+                    nonce
+                );
+            }
+            Ok(())
+        } else if let Some((_, entry)) =
+            self.mempool_industrial.remove(&(sender.to_string(), nonce))
+        {
+            self.dec_mempool_size(entry.tx.lane);
+            let tx = entry.tx;
+            if let Some(acc) = self.accounts.get_mut(sender) {
+                if let Ok((fee_consumer, fee_industrial)) =
+                    crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                {
+                    let total_consumer = tx.payload.amount_consumer + fee_consumer;
+                    let total_industrial = tx.payload.amount_industrial + fee_industrial;
+                    acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
+                    acc.pending_industrial = acc
+                        .pending_industrial
+                        .saturating_sub(total_industrial);
                     acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
                     acc.pending_nonces.remove(&nonce);
                 }
@@ -2022,7 +2179,21 @@ impl Blockchain {
             .as_millis() as u64;
         let mut expired: Vec<(String, u64, u64)> = Vec::new();
         let mut orphaned: Vec<(String, u64, u64)> = Vec::new();
-        for entry in self.mempool.iter() {
+        for entry in self.mempool_consumer.iter() {
+            let sender = entry.key().0.clone();
+            let nonce = entry.key().1;
+            let fpb = entry.value().fee_per_byte();
+            if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
+                #[cfg(feature = "telemetry")]
+                if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
+                    telemetry::TTL_DROP_TOTAL.inc();
+                }
+                expired.push((sender, nonce, fpb));
+            } else if !self.accounts.contains_key(&sender) {
+                orphaned.push((sender, nonce, fpb));
+            }
+        }
+        for entry in self.mempool_industrial.iter() {
             let sender = entry.key().0.clone();
             let nonce = entry.key().1;
             let fpb = entry.value().fee_per_byte();
@@ -2045,9 +2216,8 @@ impl Blockchain {
                 sender = %scrub(&sender),
                 nonce,
                 fpb,
-                mempool_size = self
-                    .mempool_size
-                    .load(std::sync::atomic::Ordering::SeqCst)
+                mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+                    + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
             )
             .entered();
             #[cfg(not(feature = "telemetry"))]
@@ -2057,7 +2227,8 @@ impl Blockchain {
         // track current orphan count after removing expired entries
         self.orphan_counter
             .store(orphaned.len(), std::sync::atomic::Ordering::SeqCst);
-        let size = self.mempool_size.load(std::sync::atomic::Ordering::SeqCst);
+        let size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+            + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst);
         let orphans = orphaned.len();
         if size > 0 && orphans * 2 > size {
             #[cfg(feature = "telemetry")]
@@ -2072,9 +2243,8 @@ impl Blockchain {
                     sender = %scrub(&sender),
                     nonce,
                     fpb,
-                    mempool_size = self
-                        .mempool_size
-                        .load(std::sync::atomic::Ordering::SeqCst)
+                    mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+                        + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
                 )
                 .entered();
                 #[cfg(not(feature = "telemetry"))]
@@ -2151,8 +2321,16 @@ impl Blockchain {
         }
 
         self.skipped.clear();
-        let mut pending: Vec<SignedTransaction> =
-            self.mempool.iter().map(|e| e.value().tx.clone()).collect();
+        let mut pending: Vec<SignedTransaction> = self
+            .mempool_consumer
+            .iter()
+            .map(|e| e.value().tx.clone())
+            .chain(
+                self.mempool_industrial
+                    .iter()
+                    .map(|e| e.value().tx.clone()),
+            )
+            .collect();
         pending.sort_unstable_by(|a, b| {
             a.payload
                 .from_
@@ -2217,6 +2395,7 @@ impl Blockchain {
             },
             public_key: vec![],
             signature: vec![],
+            lane: transaction::FeeLane::Consumer,
         };
         let mut txs = vec![coinbase.clone()];
         txs.extend(included.clone());
@@ -2332,9 +2511,8 @@ impl Blockchain {
                         sender = %scrub(&miner_addr),
                         nonce = 0u64,
                         fpb = 0u64,
-                        mempool_size = self
-                            .mempool_size
-                            .load(std::sync::atomic::Ordering::SeqCst)
+                        mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
+                            + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
                     );
                     span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                         telemetry::LOCK_POISON_TOTAL.inc();
@@ -2420,9 +2598,17 @@ impl Blockchain {
                     r.balance.industrial += tx.payload.amount_industrial;
                     changed.insert(tx.payload.to.clone());
 
-                    self.mempool
-                        .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
-                    self.dec_mempool_size();
+                    match tx.lane {
+                        FeeLane::Consumer => {
+                            self.mempool_consumer
+                                .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
+                        }
+                        FeeLane::Industrial => {
+                            self.mempool_industrial
+                                .remove(&(tx.payload.from_.clone(), tx.payload.nonce));
+                        }
+                    }
+                    self.dec_mempool_size(tx.lane);
                 }
                 drop(_pool_guard);
 
@@ -2622,6 +2808,17 @@ impl Blockchain {
             return Err(PyValueError::new_err("Invalid incoming chain"));
         }
 
+        let old_chain = self.chain.clone();
+        let lca = old_chain
+            .iter()
+            .zip(&new_chain)
+            .take_while(|(a, b)| a.hash == b.hash)
+            .count();
+        let depth = old_chain.len().saturating_sub(lca);
+        if depth > 0 {
+            #[cfg(feature = "telemetry")]
+            observer::record_reorg(depth as u64);
+        }
         self.chain.clear();
         self.accounts.clear();
         self.emission_consumer = 0;
@@ -2921,40 +3118,45 @@ pub fn spawn_purge_loop_thread(
                         telemetry::ORPHAN_SWEEP_TOTAL.get(),
                     );
                     let _ = guard.purge_expired();
-                    let (ttl_delta, orphan_delta) = (
-                        telemetry::TTL_DROP_TOTAL.get().saturating_sub(ttl_before),
-                        telemetry::ORPHAN_SWEEP_TOTAL
-                            .get()
-                            .saturating_sub(orphan_before),
-                    );
+                    let ttl_after = telemetry::TTL_DROP_TOTAL.get();
+                    let orphan_after = telemetry::ORPHAN_SWEEP_TOTAL.get();
+                    let ttl_delta = ttl_after.saturating_sub(ttl_before);
+                    let orphan_delta = orphan_after.saturating_sub(orphan_before);
                     #[cfg(not(feature = "telemetry-json"))]
                     if telemetry::should_log("mempool") {
-                        info!(
-                            "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
-                        );
+                        if ttl_delta > 0 {
+                            info!("ttl_drop_total={ttl_after}");
+                        }
+                        if orphan_delta > 0 {
+                            info!("orphan_sweep_total={orphan_after}");
+                        }
                     }
                     #[cfg(feature = "telemetry-json")]
                     {
-                        log_event(
-                            "mempool",
-                            log::Level::Info,
-                            "purge_loop",
-                            "",
-                            0,
-                            "ttl_drop_total",
-                            ERR_OK,
-                            Some(ttl_delta),
-                        );
-                        log_event(
-                            "mempool",
-                            log::Level::Info,
-                            "purge_loop",
-                            "",
-                            0,
-                            "orphan_sweep_total",
-                            ERR_OK,
-                            Some(orphan_delta),
-                        );
+                        if ttl_delta > 0 {
+                            log_event(
+                                "mempool",
+                                log::Level::Info,
+                                "purge_loop",
+                                "",
+                                0,
+                                "ttl_drop_total",
+                                ERR_OK,
+                                Some(ttl_after),
+                            );
+                        }
+                        if orphan_delta > 0 {
+                            log_event(
+                                "mempool",
+                                log::Level::Info,
+                                "purge_loop",
+                                "",
+                                0,
+                                "orphan_sweep_total",
+                                ERR_OK,
+                                Some(orphan_after),
+                            );
+                        }
                     }
                 }
                 #[cfg(not(feature = "telemetry"))]
@@ -2996,40 +3198,45 @@ pub fn spawn_purge_loop(
                         telemetry::ORPHAN_SWEEP_TOTAL.get(),
                     );
                     let _ = bc.purge_expired();
-                    let (ttl_delta, orphan_delta) = (
-                        telemetry::TTL_DROP_TOTAL.get().saturating_sub(ttl_before),
-                        telemetry::ORPHAN_SWEEP_TOTAL
-                            .get()
-                            .saturating_sub(orphan_before),
-                    );
+                    let ttl_after = telemetry::TTL_DROP_TOTAL.get();
+                    let orphan_after = telemetry::ORPHAN_SWEEP_TOTAL.get();
+                    let ttl_delta = ttl_after.saturating_sub(ttl_before);
+                    let orphan_delta = orphan_after.saturating_sub(orphan_before);
                     #[cfg(not(feature = "telemetry-json"))]
                     if telemetry::should_log("mempool") {
-                        info!(
-                            "purge_loop ttl_drop_total={ttl_delta} orphan_sweep_total={orphan_delta}"
-                        );
+                        if ttl_delta > 0 {
+                            info!("ttl_drop_total={ttl_after}");
+                        }
+                        if orphan_delta > 0 {
+                            info!("orphan_sweep_total={orphan_after}");
+                        }
                     }
                     #[cfg(feature = "telemetry-json")]
                     {
-                        log_event(
-                            "mempool",
-                            log::Level::Info,
-                            "purge_loop",
-                            "",
-                            0,
-                            "ttl_drop_total",
-                            ERR_OK,
-                            Some(ttl_delta),
-                        );
-                        log_event(
-                            "mempool",
-                            log::Level::Info,
-                            "purge_loop",
-                            "",
-                            0,
-                            "orphan_sweep_total",
-                            ERR_OK,
-                            Some(orphan_delta),
-                        );
+                        if ttl_delta > 0 {
+                            log_event(
+                                "mempool",
+                                log::Level::Info,
+                                "purge_loop",
+                                "",
+                                0,
+                                "ttl_drop_total",
+                                ERR_OK,
+                                Some(ttl_after),
+                            );
+                        }
+                        if orphan_delta > 0 {
+                            log_event(
+                                "mempool",
+                                log::Level::Info,
+                                "purge_loop",
+                                "",
+                                0,
+                                "orphan_sweep_total",
+                                ERR_OK,
+                                Some(orphan_after),
+                            );
+                        }
                     }
                 }
                 #[cfg(not(feature = "telemetry"))]
@@ -3440,7 +3647,8 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
 pub fn mine_block_py(txs: Vec<SignedTransaction>) -> PyResult<Block> {
     let mut bc = Blockchain::default();
     bc.genesis_block()?;
-    bc.min_fee_per_byte = 0;
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     for tx in txs {
         let sender = tx.payload.from_.clone();
         if sender != "0".repeat(34) && !bc.accounts.contains_key(&sender) {
@@ -3485,6 +3693,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Block>()?;
     m.add_class::<Account>()?;
     m.add_class::<SignedTransaction>()?;
+    m.add_class::<FeeLane>()?;
     m.add_class::<RawTxPayload>()?;
     m.add_class::<TokenBalance>()?;
     m.add_class::<ShutdownFlag>()?;

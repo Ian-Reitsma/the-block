@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use the_block::governance::{Governance, House};
+use the_block::{Governance, governance::House};
 
 #[derive(Parser)]
 #[command(author, version, about = "Governance helpers")]

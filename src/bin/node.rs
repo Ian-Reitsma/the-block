@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use tokio_util::sync::CancellationToken;
 
 use clap::{Parser, Subcommand};
 use ed25519_dalek::SigningKey;
@@ -8,8 +9,10 @@ use ed25519_dalek::SigningKey;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::{
-    compute_market::courier::CourierStore, generate_keypair, rpc::run_rpc_server, sign_tx,
-    spawn_purge_loop_thread, Blockchain, RawTxPayload, ShutdownFlag,
+    compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
+    generate_keypair,
+    rpc::run_rpc_server,
+    sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ShutdownFlag,
 };
 
 fn key_dir() -> PathBuf {
@@ -82,6 +85,10 @@ enum Commands {
         /// Directory for chain data
         #[arg(long, default_value = "node-data")]
         data_dir: String,
+
+        /// Dry-run compute-market matches (default true)
+        #[arg(long, default_value_t = true)]
+        dry_run: bool,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -139,6 +146,7 @@ async fn main() -> std::process::ExitCode {
             snapshot_interval,
             metrics_addr,
             data_dir,
+            dry_run,
         } => {
             let mut inner = Blockchain::open(&data_dir).expect("open blockchain");
             if snapshot_interval != inner.config.snapshot_interval {
@@ -147,6 +155,14 @@ async fn main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
+
+            let receipt_store = ReceiptStore::open(&format!("{data_dir}/receipts"));
+            let match_stop = CancellationToken::new();
+            tokio::spawn(matcher::match_loop(
+                receipt_store.clone(),
+                dry_run,
+                match_stop.clone(),
+            ));
 
             #[cfg(feature = "telemetry")]
             if let Some(addr) = &metrics_addr {
@@ -174,6 +190,7 @@ async fn main() -> std::process::ExitCode {
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
             let _ = handle.await;
+            match_stop.cancel();
             the_block::compute_market::price_board::persist();
             std::process::ExitCode::SUCCESS
         }

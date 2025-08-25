@@ -129,6 +129,8 @@ async fn gossip_converges_to_longest_chain() {
     assert_eq!(h1, h2);
     assert_eq!(h2, h3);
     assert_eq!(h1, 3);
+    #[cfg(feature = "telemetry")]
+    assert!(the_block::telemetry::GOSSIP_CONVERGENCE_SECONDS.get_sample_count() > 0);
 }
 
 /// Start two nodes, then introduce a third with a longer fork to ensure
@@ -216,7 +218,7 @@ fn invalid_gossip_tx_rejected() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     send(addr, &kp, Payload::Tx(tx));
 
-    assert!(node.blockchain().mempool.is_empty());
+    assert!(node.blockchain().mempool_consumer.is_empty());
 }
 
 /// Invalid blocks are ignored and do not crash peers.
@@ -322,7 +324,7 @@ fn handshake_version_mismatch_rejected() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     send(addr, &kp, Payload::Tx(tx));
 
-    assert!(node.blockchain().mempool.is_empty());
+    assert!(node.blockchain().mempool_consumer.is_empty());
 }
 
 /// Peers missing required feature bits are ignored.
@@ -359,7 +361,7 @@ fn handshake_feature_mismatch_rejected() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     send(addr, &kp, Payload::Tx(tx));
 
-    assert!(node.blockchain().mempool.is_empty());
+    assert!(node.blockchain().mempool_consumer.is_empty());
 }
 
 /// Nodes can load seed peers from a config file.
@@ -419,7 +421,7 @@ fn peer_rate_limit_and_ban() {
     };
     let tx = sign_tx(sk_tx.to_vec(), payload).unwrap();
     send(addr, &sk, Payload::Tx(tx));
-    assert!(node.blockchain().mempool.is_empty());
+    assert!(node.blockchain().mempool_consumer.is_empty());
     std::env::remove_var("TB_P2P_MAX_PER_SEC");
     std::env::remove_var("TB_P2P_BAN_SECS");
     std::env::remove_var("TB_NET_KEY_PATH");

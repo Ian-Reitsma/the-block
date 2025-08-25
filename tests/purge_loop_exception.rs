@@ -24,7 +24,8 @@ fn purge_loop_shutdowns_on_exception() {
     let dir = temp_dir("purge_loop_exception");
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    bc.min_fee_per_byte = 0;
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -41,7 +42,7 @@ fn purge_loop_shutdowns_on_exception() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     bc.submit_transaction(tx).unwrap();
     let key = (String::from("a"), 1u64);
-    if let Some(mut entry) = bc.mempool.get_mut(&key) {
+    if let Some(mut entry) = bc.mempool_consumer.get_mut(&key) {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     };
@@ -92,7 +93,7 @@ def boom(bc):
         let tx = sign_tx(sk.to_vec(), payload).unwrap();
         bc_ref.submit_transaction(tx).unwrap();
         let key = (String::from("a"), 1u64);
-        if let Some(mut entry) = bc_ref.mempool.get_mut(&key) {
+        if let Some(mut entry) = bc_ref.mempool_consumer.get_mut(&key) {
             entry.timestamp_millis = 0;
             entry.timestamp_ticks = 0;
         };
@@ -105,7 +106,7 @@ def boom(bc):
 
     Python::with_gil(|py| {
         let bc_ref = bc_py.borrow(py);
-        assert_eq!(1, bc_ref.mempool.len());
+        assert_eq!(1, bc_ref.mempool_consumer.len());
     });
 
     #[cfg(feature = "telemetry")]

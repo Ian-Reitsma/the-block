@@ -24,7 +24,8 @@ static TEST_MUTEX: Mutex<()> = Mutex::new(());
 fn prepare_purge_inputs(prefix: &str) -> (TempDir, Blockchain, Vec<u8>) {
     let dir = temp_dir(prefix);
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    bc.min_fee_per_byte = 0;
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -40,7 +41,7 @@ fn prepare_purge_inputs(prefix: &str) -> (TempDir, Blockchain, Vec<u8>) {
     };
     let tx = sign_tx(sk.clone(), payload).unwrap();
     bc.submit_transaction(tx).unwrap();
-    if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+    if let Some(mut entry) = bc.mempool_consumer.get_mut(&("a".into(), 1)) {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     }
@@ -81,7 +82,7 @@ fn purge_loop_drops_expired_entries() {
     shutdown.store(true, Ordering::SeqCst);
     handle.join().unwrap();
     let guard = bc.lock().unwrap();
-    assert!(guard.mempool.is_empty());
+    assert!(guard.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
     telemetry::TTL_DROP_TOTAL.reset();
 }
@@ -92,7 +93,7 @@ fn counters_saturate_at_u64_max() {
     let _guard = TEST_MUTEX.lock().unwrap();
     init();
     let (_dir, mut bc, sk) = prepare_purge_inputs("purge_saturate");
-    if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+    if let Some(mut entry) = bc.mempool_consumer.get_mut(&("a".into(), 1)) {
         entry.timestamp_millis = u64::MAX;
         entry.timestamp_ticks = u64::MAX;
     }
@@ -108,7 +109,7 @@ fn counters_saturate_at_u64_max() {
     };
     let tx = sign_tx(sk.clone(), payload).unwrap();
     bc.submit_transaction(tx).unwrap();
-    for mut entry in bc.mempool.iter_mut() {
+    for mut entry in bc.mempool_consumer.iter_mut() {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     }

@@ -45,7 +45,7 @@ fn fuzz_mempool_random_fees_nonces() {
 
     let dir = temp_dir("temp_fuzz");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 128;
+    bc.max_mempool_size_consumer = 128;
     bc.max_pending_per_account = 128;
     bc.add_account("sink".into(), 0, 0).unwrap();
 
@@ -100,21 +100,21 @@ fn fuzz_mempool_random_fees_nonces() {
     }
 
     let guard = bc.read().unwrap();
-    assert!(guard.mempool.len() <= guard.max_mempool_size);
+    assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
 
     let mut seen = std::collections::HashSet::new();
-    for entry in guard.mempool.iter() {
+    for entry in guard.mempool_consumer.iter() {
         assert!(seen.insert((entry.key().0.clone(), entry.key().1)));
     }
 
     let rec = records.lock().unwrap().clone();
     let mem_keys: std::collections::HashSet<_> = guard
-        .mempool
+        .mempool_consumer
         .iter()
         .map(|e| (e.key().0.clone(), e.key().1))
         .collect();
     let ttl = guard.tx_ttl;
-    let mut entries: Vec<_> = guard.mempool.iter().map(|e| e.value().clone()).collect();
+    let mut entries: Vec<_> = guard.mempool_consumer.iter().map(|e| e.value().clone()).collect();
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
     for w in entries.windows(2) {
         assert!(mempool_cmp(&w[0], &w[1], ttl) != std::cmp::Ordering::Greater);
