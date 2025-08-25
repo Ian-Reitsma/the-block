@@ -1,6 +1,8 @@
 use super::{load_net_key, send_msg, PROTOCOL_VERSION};
 use crate::net::message::{Message, Payload};
 use crate::Blockchain;
+#[cfg(feature = "telemetry")]
+use crate::consensus::observer;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
@@ -196,7 +198,11 @@ impl PeerSet {
                 }
                 if let Ok(mut bc) = chain.lock() {
                     if new_chain.len() > bc.chain.len() {
+                        #[cfg(feature = "telemetry")]
+                        let start = Instant::now();
                         let _ = bc.import_chain(new_chain);
+                        #[cfg(feature = "telemetry")]
+                        observer::observe_convergence(start);
                     }
                 }
             }

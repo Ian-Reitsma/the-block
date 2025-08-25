@@ -323,9 +323,9 @@ fn test_mempool_flush_on_block_mine() {
         let tx = testutil::build_signed_tx(&privkey, "miner", "alice", 1, 1, 1000, n + 1);
         let _ = bc.submit_transaction(tx);
     }
-    assert!(!bc.mempool.is_empty());
+    assert!(!bc.mempool_consumer.is_empty());
     bc.mine_block("miner").unwrap();
-    assert!(bc.mempool.is_empty());
+    assert!(bc.mempool_consumer.is_empty());
 }
 
 // 8b. Duplicate transaction IDs in block are rejected
@@ -425,7 +425,7 @@ fn test_drop_transaction_releases_pending() {
     assert_eq!(sender.pending_nonce, 0);
     assert_eq!(sender.pending_consumer, 0);
     assert_eq!(sender.pending_industrial, 0);
-    assert!(bc.mempool.is_empty());
+    assert!(bc.mempool_consumer.is_empty());
 }
 
 // 8f. Fee checksum must match computed totals
@@ -796,7 +796,7 @@ fn test_schema_upgrade_compatibility() {
         h.update(&fi.to_le_bytes());
         assert_eq!(blk.fee_checksum, h.finalize().to_hex().to_string());
     }
-    let migrated = bc.mempool.get(&(String::from("a"), 2)).unwrap();
+    let migrated = bc.mempool_consumer.get(&(String::from("a"), 2)).unwrap();
     assert_eq!(migrated.timestamp_ticks, migrated.timestamp_millis);
 }
 

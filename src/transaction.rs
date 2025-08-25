@@ -11,6 +11,22 @@ use serde::{Deserialize, Serialize};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
+/// Distinct fee lanes for transaction scheduling.
+#[pyclass]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum FeeLane {
+    /// Standard retail transactions sharing the consumer lane.
+    Consumer,
+    /// High-throughput industrial transactions.
+    Industrial,
+}
+
+impl Default for FeeLane {
+    fn default() -> Self {
+        FeeLane::Consumer
+    }
+}
+
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct RawTxPayload {
@@ -92,25 +108,36 @@ pub struct SignedTransaction {
     pub public_key: Vec<u8>,
     #[pyo3(get, set)]
     pub signature: Vec<u8>,
+    /// Fee lane classification for admission and scheduling.
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub lane: FeeLane,
 }
 
 #[pymethods]
 impl SignedTransaction {
     #[new]
-    pub fn new(payload: RawTxPayload, public_key: Vec<u8>, signature: Vec<u8>) -> Self {
+    pub fn new(
+        payload: RawTxPayload,
+        public_key: Vec<u8>,
+        signature: Vec<u8>,
+        lane: FeeLane,
+    ) -> Self {
         SignedTransaction {
             payload,
             public_key,
             signature,
+            lane,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{} bytes>)",
+            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{} bytes>, lane={:?})",
             self.payload.__repr__(),
             self.public_key.len(),
             self.signature.len(),
+            self.lane,
         )
     }
 }
@@ -149,6 +176,7 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
         payload: payload.clone(),
         public_key: sk.verifying_key().to_bytes().to_vec(),
         signature: sig.to_bytes().to_vec(),
+        lane: FeeLane::Consumer,
     })
 }
 

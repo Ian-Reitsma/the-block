@@ -43,7 +43,7 @@ fn eviction_panic_rolls_back() {
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("evict_panic");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    bc.max_mempool_size = 1;
+    bc.max_mempool_size_consumer = 1;
     bc.add_account("a".into(), 10_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     bc.mine_block("a").unwrap();
@@ -61,7 +61,7 @@ fn eviction_panic_rolls_back() {
     let result =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| bc.submit_transaction(tx2)));
     assert!(result.is_err());
-    assert!(bc.mempool.is_empty());
+    assert!(bc.mempool_consumer.is_empty());
     let acc = bc.accounts.get("a").unwrap();
     assert_eq!(acc.pending_nonce, 0);
     assert_eq!(acc.pending_consumer, 0);

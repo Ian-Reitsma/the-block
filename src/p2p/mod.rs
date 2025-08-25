@@ -1,22 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// Feature bits advertised during peer handshakes.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct FeatureBits(pub u32);
-
-impl FeatureBits {
-    /// P2P protocol supporting future fee routing.
-    pub const FEE_ROUTING_V2: u32 = 0x0004;
-    /// Compute-market RPCs and workloads.
-    pub const COMPUTE_MARKET_V1: u32 = 0x0008;
-}
-
-/// Initial handshake exchanged between peers prior to gossip.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Handshake {
-    pub version: u32,
-    pub features: u32,
-}
+pub mod handshake;
+pub use handshake::*;
 
 /// Messages exchanged between peers once a connection is established.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,7 +13,7 @@ pub enum WireMessage {
     /// Request headers or blocks starting at `from` up to `to` (inclusive).
     ChainRequest { from: u64, to: u64 },
     /// Initial handshake message.
-    Handshake(Handshake),
+    Handshake(Hello),
 }
 
 #[cfg(test)]

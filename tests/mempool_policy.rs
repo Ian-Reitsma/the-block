@@ -58,7 +58,7 @@ fn eviction_via_drop_transaction() {
     init();
     let dir = temp_dir("temp_evict");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 1;
+    bc.max_mempool_size_consumer = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
     let (sk_a, _pk_a) = generate_keypair();
@@ -67,7 +67,7 @@ fn eviction_via_drop_transaction() {
     bc.submit_transaction(tx1).unwrap();
     let tx2 = build_signed_tx(&sk_b, "bob", "alice", 1, 0, 2000, 1);
     bc.submit_transaction(tx2.clone()).unwrap();
-    assert!(bc.mempool.contains_key(&("bob".to_string(), 1)));
+    assert!(bc.mempool_consumer.contains_key(&("bob".to_string(), 1)));
     bc.drop_transaction("bob", 1).unwrap();
     let tx3 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx3).unwrap();
@@ -84,7 +84,7 @@ fn ttl_expiry_purges_and_counts() {
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx).unwrap();
-    if let Some(mut entry) = bc.mempool.get_mut(&("alice".into(), 1)) {
+    if let Some(mut entry) = bc.mempool_consumer.get_mut(&("alice".into(), 1)) {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     }
@@ -92,7 +92,7 @@ fn ttl_expiry_purges_and_counts() {
     telemetry::TTL_DROP_TOTAL.reset();
     let dropped = bc.purge_expired();
     assert_eq!(1, dropped);
-    assert!(bc.mempool.is_empty());
+    assert!(bc.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
     assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
 }
@@ -123,7 +123,7 @@ fn orphan_sweep_removes_missing_sender() {
     #[cfg(feature = "telemetry")]
     telemetry::ORPHAN_SWEEP_TOTAL.reset();
     let _ = bc.purge_expired();
-    assert!(bc.mempool.is_empty());
+    assert!(bc.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
     assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
 }
@@ -142,7 +142,7 @@ fn orphan_ratio_triggers_rebuild() {
     }
     bc.accounts.remove("alice");
     let _ = bc.purge_expired();
-    assert_eq!(bc.mempool.len(), 0);
+    assert_eq!(bc.mempool_consumer.len(), 0);
     assert_eq!(bc.orphan_count(), 0);
 }
 
@@ -151,7 +151,7 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
     init();
     let dir = temp_dir("temp_heap_orphan");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 16;
+    bc.max_mempool_size_consumer = 16;
     bc.add_account("sink".into(), 0, 0).unwrap();
     let mut keys = Vec::new();
     for i in 0..7 {
@@ -170,12 +170,12 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
     #[cfg(feature = "telemetry")]
     telemetry::ORPHAN_SWEEP_TOTAL.reset();
     let _ = bc.purge_expired();
-    assert_eq!(bc.mempool.len(), 3);
+    assert_eq!(bc.mempool_consumer.len(), 3);
     assert_eq!(bc.orphan_count(), 0);
     #[cfg(feature = "telemetry")]
     assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
     let ttl = bc.tx_ttl;
-    let mut entries: Vec<_> = bc.mempool.iter().map(|e| e.value().clone()).collect();
+    let mut entries: Vec<_> = bc.mempool_consumer.iter().map(|e| e.value().clone()).collect();
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
     for w in entries.windows(2) {
         assert!(mempool_cmp(&w[0], &w[1], ttl) != std::cmp::Ordering::Greater);
@@ -221,14 +221,14 @@ fn ttl_purge_drops_orphan_and_decrements_counter() {
     bc.accounts.remove("alice");
     let _ = bc.purge_expired();
     assert_eq!(bc.orphan_count(), 1);
-    if let Some(mut entry) = bc.mempool.get_mut(&("alice".into(), 1)) {
+    if let Some(mut entry) = bc.mempool_consumer.get_mut(&("alice".into(), 1)) {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     }
     let dropped = bc.purge_expired();
     assert_eq!(dropped, 1);
     assert_eq!(bc.orphan_count(), 0);
-    assert_eq!(bc.mempool.len(), 1);
+    assert_eq!(bc.mempool_consumer.len(), 1);
 }
 
 #[test]
@@ -303,7 +303,7 @@ fn eviction_panic_rolls_back() {
     init();
     let dir = temp_dir("temp_evict_panic");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.max_mempool_size = 1;
+    bc.max_mempool_size_consumer = 1;
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 10_000, 0).unwrap();
     let (sk_a, _pk_a) = generate_keypair();
@@ -319,9 +319,9 @@ fn eviction_panic_rolls_back() {
     bc.heal_mempool();
     bc.heal_lock("alice");
     bc.heal_lock("bob");
-    assert_eq!(bc.mempool.len(), 0);
+    assert_eq!(bc.mempool_consumer.len(), 0);
     bc.submit_transaction(tx2).unwrap();
-    assert_eq!(bc.mempool.len(), 1);
+    assert_eq!(bc.mempool_consumer.len(), 1);
 }
 
 #[test]
@@ -343,7 +343,7 @@ fn admission_panic_rolls_back() {
         bc.heal_admission();
         bc.heal_mempool();
         bc.heal_lock("alice");
-        assert!(bc.mempool.is_empty());
+        assert!(bc.mempool_consumer.is_empty());
         let acc = bc.accounts.get("alice").unwrap();
         assert_eq!(acc.pending_consumer, 0);
         assert_eq!(acc.pending_nonce, 0);

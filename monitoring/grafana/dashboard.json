@@ -48,6 +48,12 @@
       "targets": [{"expr": "badge_last_change_seconds"}],
       "fieldConfig": {"defaults": {"unit": "s"}},
       "id": 7
+    },
+    {
+      "type": "graph",
+      "title": "Matches per Minute",
+      "targets": [{"expr": "rate(matches_total[1m])"}],
+      "id": 8
     }
   ]
 }

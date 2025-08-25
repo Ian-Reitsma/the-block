@@ -2,7 +2,9 @@ use std::{collections::HashMap, fs};
 
 use proptest::prelude::*;
 use rand::{Rng, SeedableRng};
-use the_block::{fee, Block, Blockchain, ChainDisk, RawTxPayload, SignedTransaction, TokenAmount};
+use the_block::{
+    fee, Block, Blockchain, ChainDisk, FeeLane, RawTxPayload, SignedTransaction, TokenAmount,
+};
 
 mod util;
 use util::temp::temp_dir;
@@ -44,6 +46,7 @@ proptest! {
                 },
                 public_key: vec![],
                 signature: vec![],
+                lane: FeeLane::Consumer,
             };
             let tx_count = rng.gen_range(0..5);
             let mut txs = vec![coinbase.clone()];
@@ -63,6 +66,7 @@ proptest! {
                     },
                     public_key: vec![],
                     signature: vec![],
+                    lane: FeeLane::Consumer,
                 };
                 txs.push(tx);
             }

@@ -100,19 +100,19 @@ fn ordering_stable_after_heap_rebuild() {
         .unwrap()
         .as_millis() as u64;
     for (from, offset) in ["a", "b", "c", "d", "e"].iter().zip([0, 0, 10, 0, 0]) {
-        if let Some(mut entry) = bc.mempool.get_mut(&(from.to_string(), 1)) {
+        if let Some(mut entry) = bc.mempool_consumer.get_mut(&(from.to_string(), 1)) {
             entry.timestamp_millis = base + offset;
             entry.timestamp_ticks = base + offset;
         }
     }
 
     let entry_a = bc
-        .mempool
+        .mempool_consumer
         .get(&(String::from("a"), 1))
         .map(|e| e.clone())
         .unwrap();
     let entry_e = bc
-        .mempool
+        .mempool_consumer
         .get(&(String::from("e"), 1))
         .map(|e| e.clone())
         .unwrap();
@@ -125,7 +125,7 @@ fn ordering_stable_after_heap_rebuild() {
     bc.accounts.remove("d");
     bc.purge_expired();
 
-    let mut after: Vec<MempoolEntry> = bc.mempool.iter().map(|e| e.value().clone()).collect();
+    let mut after: Vec<MempoolEntry> = bc.mempool_consumer.iter().map(|e| e.value().clone()).collect();
     after.sort_by(|a, b| mempool_cmp(a, b, bc.tx_ttl));
     let actual: Vec<[u8; 32]> = after.iter().map(|e| e.tx.id()).collect();
 

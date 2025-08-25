@@ -149,7 +149,7 @@ fn ttl_expired_purged_on_restart() {
         };
         let tx = sign_tx(sk.to_vec(), payload).unwrap();
         bc.submit_transaction(tx).unwrap();
-        if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+        if let Some(mut entry) = bc.mempool_consumer.get_mut(&("a".into(), 1)) {
             entry.timestamp_millis = 0;
             entry.timestamp_ticks = 0;
         }
@@ -157,7 +157,7 @@ fn ttl_expired_purged_on_restart() {
         bc.path.clear();
     }
     let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    assert!(bc2.mempool.is_empty());
+    assert!(bc2.mempool_consumer.is_empty());
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn startup_ttl_purge_increments_metrics() {
         };
         let tx = sign_tx(sk.to_vec(), payload).unwrap();
         bc.submit_transaction(tx).unwrap();
-        if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+        if let Some(mut entry) = bc.mempool_consumer.get_mut(&("a".into(), 1)) {
             entry.timestamp_millis = 0;
             entry.timestamp_ticks = 0;
         }
@@ -202,7 +202,7 @@ fn startup_ttl_purge_increments_metrics() {
     #[cfg(feature = "telemetry")]
     let start_ttl = telemetry::STARTUP_TTL_DROP_TOTAL.get();
     let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    assert_eq!(0, bc2.mempool.len());
+    assert_eq!(0, bc2.mempool_consumer.len());
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(1, telemetry::TTL_DROP_TOTAL.get() - start_ttl);
@@ -267,7 +267,7 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
         fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
     }
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    assert!(bc.mempool.is_empty());
+    assert!(bc.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
     {
         // Missing-account drops come from orphaned bundles that never earned
@@ -303,7 +303,7 @@ fn timestamp_ticks_persist_across_restart() {
         let tx = sign_tx(sk.to_vec(), payload).unwrap();
         bc.submit_transaction(tx).unwrap();
         first = bc
-            .mempool
+            .mempool_consumer
             .get(&("a".into(), 1))
             .map(|e| e.timestamp_ticks)
             .unwrap();
@@ -312,7 +312,7 @@ fn timestamp_ticks_persist_across_restart() {
     }
     let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let persisted = bc2
-        .mempool
+        .mempool_consumer
         .get(&("a".into(), 1))
         .map(|e| e.timestamp_ticks)
         .unwrap();
@@ -390,6 +390,6 @@ fn schema_upgrade_compatibility() {
     fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    let migrated = bc.mempool.get(&(String::from("a"), 1)).unwrap();
+    let migrated = bc.mempool_consumer.get(&(String::from("a"), 1)).unwrap();
     assert_eq!(migrated.timestamp_ticks, migrated.timestamp_millis);
 }

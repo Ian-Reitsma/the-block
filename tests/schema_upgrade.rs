@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fs};
-use the_block::{Block, Blockchain, ChainDisk, RawTxPayload, SignedTransaction, TokenAmount};
+use the_block::{
+    Block, Blockchain, ChainDisk, FeeLane, RawTxPayload, SignedTransaction, TokenAmount,
+};
 
 mod util;
 use util::temp::temp_dir;
@@ -30,6 +32,7 @@ fn migrate_v3_recomputes_supply() {
         },
         public_key: vec![],
         signature: vec![],
+        lane: FeeLane::Consumer,
     };
     let tx = SignedTransaction {
         payload: RawTxPayload {
@@ -44,6 +47,7 @@ fn migrate_v3_recomputes_supply() {
         },
         public_key: vec![],
         signature: vec![],
+        lane: FeeLane::Consumer,
     };
     let block = Block {
         index: 0,

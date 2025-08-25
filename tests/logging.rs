@@ -212,10 +212,18 @@ fn scenario_purge_loop_counters(logger: &mut Logger) {
 
     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
     {
-        assert!(logs.iter().any(|r| r.args().contains("ttl_drop_total=1")));
-        assert!(logs
-            .iter()
-            .any(|r| r.args().contains("orphan_sweep_total=1")));
+        assert_eq!(
+            logs.iter()
+                .filter(|r| r.args().contains("ttl_drop_total="))
+                .count(),
+            1
+        );
+        assert_eq!(
+            logs.iter()
+                .filter(|r| r.args().contains("orphan_sweep_total="))
+                .count(),
+            1
+        );
     }
 }
 

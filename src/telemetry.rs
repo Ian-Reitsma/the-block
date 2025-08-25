@@ -80,9 +80,199 @@ pub static FEE_FLOOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static INDUSTRIAL_ADMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "industrial_admitted_total",
+        "Industrial lane transactions admitted",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static INDUSTRIAL_DEFERRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "industrial_deferred_total",
+        "Industrial lane submissions deferred",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static ADMISSION_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "admission_rejected_total",
+            "Industrial admission rejections by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static ACTIVE_BURST_QUOTA: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("active_burst_quota", "Remaining burst quota"),
+        &["identity"],
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static ADMISSION_MODE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("admission_mode", "Current industrial admission mode"),
+        &["mode"],
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static CONSUMER_FEE_P50: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("consumer_fee_p50", "Median consumer fee")
+        .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static CONSUMER_FEE_P90: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("consumer_fee_p90", "p90 consumer fee")
+        .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("matches_total", "Total matched jobs"),
+        &["dry_run"],
+    )
+    .unwrap_or_else(|e| panic!("counter matches_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry matches_total: {e}"));
+    c
+});
+
+pub static RECEIPT_PERSIST_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("receipt_persist_fail_total", "Receipt persistence failures")
+        .unwrap_or_else(|e| panic!("counter receipt persist fail: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry receipt persist fail: {e}"));
+    c
+});
+
+pub static MATCH_LOOP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("match_loop_latency_seconds", "Settlement loop latency");
+    let h =
+        Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram match loop latency: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry match loop latency: {e}"));
+    h
+});
+
+pub static GOV_PROPOSALS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("gov_proposals_total", "Governance proposals by status"),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("counter gov_proposals_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_proposals_total: {e}"));
+    c
+});
+
+pub static GOV_VOTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("gov_votes_total", "Governance votes"),
+        &["choice"],
+    )
+    .unwrap_or_else(|e| panic!("counter gov_votes_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_votes_total: {e}"));
+    c
+});
+
+pub static GOV_ACTIVATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("gov_activation_total", "Governance activations"),
+        &["key"],
+    )
+    .unwrap_or_else(|e| panic!("counter gov_activation_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_activation_total: {e}"));
+    c
+});
+
+pub static GOV_ROLLBACK_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("gov_rollback_total", "Governance rollbacks"),
+        &["key"],
+    )
+    .unwrap_or_else(|e| panic!("counter gov_rollback_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_rollback_total: {e}"));
+    c
+});
+
+pub static GOV_OPEN_PROPOSALS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("gov_open_proposals", "Open governance proposals")
+        .unwrap_or_else(|e| panic!("gauge gov_open_proposals: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_open_proposals: {e}"));
+    g
+});
+
+pub static GOV_QUORUM_REQUIRED: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("gov_quorum_required", "Governance quorum")
+        .unwrap_or_else(|e| panic!("gauge gov_quorum_required: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_quorum_required: {e}"));
+    g
+});
+
+pub static RECEIPT_CORRUPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("receipt_corrupt_total", "Corrupted receipt entries on load")
+        .unwrap_or_else(|e| panic!("counter receipt corrupt: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry receipt corrupt: {e}"));
+    c
+});
+
 pub static IDENTITY_REGISTRATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        Opts::new("identity_registrations_total", "Handle registration attempts"),
+        Opts::new(
+            "identity_registrations_total",
+            "Handle registration attempts",
+        ),
         &["status"],
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
@@ -365,6 +555,60 @@ pub static RPC_TOKENS: Lazy<GaugeVec> = Lazy::new(|| {
 pub static RPC_BANS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("rpc_bans_total", "Total RPC bans issued")
         .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static RPC_RATE_LIMIT_ATTEMPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "rpc_rate_limit_attempt_total",
+        "RPC requests checked against the rate limiter",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static RPC_RATE_LIMIT_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "rpc_rate_limit_reject_total",
+        "RPC requests rejected by the rate limiter",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static P2P_HANDSHAKE_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "p2p_handshake_reject_total",
+            "Handshakes rejected by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static P2P_HANDSHAKE_ACCEPT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "p2p_handshake_accept_total",
+            "Successful handshakes by feature mask",
+        ),
+        &["features"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));

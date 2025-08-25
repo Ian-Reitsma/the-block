@@ -30,7 +30,8 @@ fn env_driven_purge_loop_drops_entries() {
     let dir = temp_dir("maybe_purge_loop");
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    bc.min_fee_per_byte = 0;
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
@@ -46,7 +47,7 @@ fn env_driven_purge_loop_drops_entries() {
     };
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     bc.submit_transaction(tx).unwrap();
-    if let Some(mut entry) = bc.mempool.get_mut(&("a".into(), 1)) {
+    if let Some(mut entry) = bc.mempool_consumer.get_mut(&("a".into(), 1)) {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     }
@@ -65,7 +66,7 @@ fn env_driven_purge_loop_drops_entries() {
     thread::sleep(Duration::from_millis(50));
     std::env::remove_var("TB_PURGE_LOOP_SECS");
     let guard = bc.lock().unwrap();
-    assert!(guard.mempool.is_empty());
+    assert!(guard.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
     {
         assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());

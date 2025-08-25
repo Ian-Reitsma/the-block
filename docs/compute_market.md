@@ -85,3 +85,57 @@ rm node-data/price_board.bin
 Logs emit `loaded price board` and `saved price board` messages, while metrics
 `price_band_p25`, `price_band_median`, and `price_band_p75` track quantile
 bands.
+
+## Dry-Run Settlement Loop
+
+The compute market currently runs in a dry-run mode that forms notional matches
+between bids and asks without transferring real fees. Each successful match
+emits a `Receipt`:
+
+```text
+{ version: 1, job_id, buyer, provider, quote_price, dry_run: true,
+  issued_at, idempotency_key }
+```
+
+The `idempotency_key` is `BLAKE3(job_id || buyer || provider || quote_price ||
+version)` and is used as the primary index in the `ReceiptStore`. Receipts are
+persisted via `sled` with `compare_and_swap` to guarantee exactly-once
+insertion. On startup the store reloads existing entries and skips corrupted
+records, incrementing the `receipt_corrupt_total` counter.
+
+`match_loop` greedily pairs bids and asks on a fixed interval and records
+metrics:
+
+- `matches_total{dry_run}` – receipts successfully persisted.
+- `receipt_persist_fail_total` – database write errors.
+- `match_loop_latency_seconds` – time spent per loop iteration.
+
+Dry-run mode is the default and can be disabled with the `--dry-run=false`
+flag on `node run`. Once the receipt path is battle-tested the same interface
+can attach real debits and credits by toggling this flag.
+
+## Industrial Admission & Fee Lanes
+
+Every transaction declares a `lane` identifying it as `Consumer` or
+`Industrial`. Consumer traffic always takes priority. Industrial jobs are
+admitted only when a moving-window capacity estimator reports enough shard
+headroom. If median consumer fees drift above the configured
+`comfort_threshold_p90`, the system enters a `tight` admission mode that
+defers new industrial jobs until fees recover.
+
+Telemetry gauges and counters surface admission behaviour:
+
+- `consumer_fee_p50`, `consumer_fee_p90`
+- `industrial_admitted_total`
+- `industrial_deferred_total`
+- `admission_mode{mode}`
+
+These metrics drive Grafana panels tracking fee health and industrial
+throttling. Future patches will expose user-facing rejection codes and make
+the comfort threshold governable.
+
+Admission decisions are logged with job identifiers, requested shards, and current mode to aid post-mortems.
+
+## Developer notes
+
+When modifying compute-market code, run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` in addition to the full test suite to exercise persistence paths.
