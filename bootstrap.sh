@@ -371,6 +371,7 @@ fi
 # --------------------------------------------------------------------
 # Only build if Python is not broken, maturin is installed, and Cargo.toml exists (i.e. this is a Rust/PyO3 project)
 if (( BROKEN_PYTHON == 0 )) && command -v maturin &>/dev/null && [[ -f Cargo.toml ]]; then
+  command -v patchelf &>/dev/null || run_step "pip install patchelf" pip install patchelf
   run_step "maturin develop --release (build Python native module)" maturin develop --release
 else
   skip_step "maturin develop (no maturin, no Cargo.toml, or Python is broken)"

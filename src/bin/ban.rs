@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use the_block::net::ban_store::{BanStoreLike, BAN_STORE};
+use the_block::net::ban_store::{self, BanStoreLike};
 
 #[derive(Parser)]
 #[command(author, version, about = "Manage persistent peer bans")]
@@ -43,7 +43,7 @@ fn run<S: BanStoreLike>(store: &S, cmd: Command) -> Vec<(String, u64)> {
 
 fn main() {
     let cli = Cli::parse();
-    let store = BAN_STORE.lock().unwrap();
+    let store = ban_store::store().lock().unwrap();
     let out = run(&*store, cli.cmd);
     for (peer, until) in out {
         println!("{peer} {until}");

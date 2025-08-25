@@ -4,14 +4,14 @@ use serial_test::serial;
 use std::fs;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::thread;
 use std::time::Duration;
 use tempfile::tempdir;
 use the_block::{
     generate_keypair,
-    net::{Handshake, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
+    net::{self, Handshake, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
     sign_tx, Block, Blockchain, RawTxPayload, TokenAmount,
 };
+use tokio::time::Instant;
 
 fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
     let msg = Message::new(body, sk);
@@ -27,13 +27,33 @@ fn free_addr() -> SocketAddr {
         .unwrap()
 }
 
+fn init_env() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
+    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    dir
+}
+
+async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        let first = nodes[0].blockchain().block_height;
+        if nodes.iter().all(|n| n.blockchain().block_height == first) {
+            return true;
+        }
+        if start.elapsed() > max {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 /// Spin up three nodes that exchange transactions and blocks, ensuring
 /// they converge to the same chain height even after a temporary fork.
-#[test]
+#[tokio::test]
 #[serial]
-fn gossip_converges_to_longest_chain() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+async fn gossip_converges_to_longest_chain() {
+    let _dir = init_env();
     let addr1 = free_addr();
     let addr2 = free_addr();
     let addr3 = free_addr();
@@ -53,7 +73,7 @@ fn gossip_converges_to_longest_chain() {
     // subsequent broadcasts reach all nodes deterministically. The gossip
     // test is occasionally flaky on slower CI runners, so wait a full second
     // before starting the exchange.
-    thread::sleep(Duration::from_secs(1));
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // genesis block from node1
     let mut ts = 1;
@@ -63,7 +83,7 @@ fn gossip_converges_to_longest_chain() {
         ts += 1;
     }
     node1.broadcast_chain();
-    thread::sleep(Duration::from_millis(100));
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // broadcast a transaction from miner1 to miner2
     let (sk, _pk) = generate_keypair();
@@ -101,16 +121,7 @@ fn gossip_converges_to_longest_chain() {
     }
     node2.broadcast_chain();
 
-    // wait up to 20s for all nodes to converge on the longest chain
-    for _ in 0..200 {
-        let h1 = node1.blockchain().block_height;
-        let h2 = node2.blockchain().block_height;
-        let h3 = node3.blockchain().block_height;
-        if h1 == h2 && h2 == h3 && h1 == 3 {
-            break;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
+    assert!(wait_until_converged(&[&node1, &node2, &node3], Duration::from_secs(20)).await);
 
     let h1 = node1.blockchain().block_height;
     let h2 = node2.blockchain().block_height;
@@ -122,11 +133,10 @@ fn gossip_converges_to_longest_chain() {
 
 /// Start two nodes, then introduce a third with a longer fork to ensure
 /// the network adopts the longest chain after reconnection.
-#[test]
+#[tokio::test]
 #[serial]
-fn partition_rejoins_longest_chain() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+async fn partition_rejoins_longest_chain() {
+    let _dir = init_env();
     let addr1 = free_addr();
     let addr2 = free_addr();
     let addr3 = free_addr();
@@ -149,9 +159,8 @@ fn partition_rejoins_longest_chain() {
         ts += 1;
     }
     node1.broadcast_chain();
-    thread::sleep(Duration::from_millis(100));
 
-    // Third node mines a longer chain while isolated then broadcasts it
+    // Third node mines a longer chain while isolated
     let node3 = Node::new(addr3, vec![addr1, addr2], Blockchain::default());
     let _h3 = node3.start();
     {
@@ -162,22 +171,24 @@ fn partition_rejoins_longest_chain() {
         ts += 1;
         bc.mine_block_at("miner3", ts).unwrap();
     }
-    node3.broadcast_chain();
     node3.discover_peers();
+    node3.broadcast_chain();
 
-    thread::sleep(Duration::from_millis(200));
+    assert!(wait_until_converged(&[&node1, &node2, &node3], Duration::from_secs(20)).await);
 
-    assert_eq!(node1.blockchain().block_height, 3);
-    assert_eq!(node2.blockchain().block_height, 3);
-    assert_eq!(node3.blockchain().block_height, 3);
+    let h1 = node1.blockchain().block_height;
+    let h2 = node2.blockchain().block_height;
+    let h3 = node3.blockchain().block_height;
+    assert_eq!(h1, h2);
+    assert_eq!(h2, h3);
+    assert_eq!(h1, 3);
 }
 
 /// Invalid transactions broadcast over the network are ignored.
 #[test]
 #[serial]
 fn invalid_gossip_tx_rejected() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let _dir = init_env();
     let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
@@ -205,8 +216,6 @@ fn invalid_gossip_tx_rejected() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     send(addr, &kp, Payload::Tx(tx));
 
-    thread::sleep(Duration::from_millis(100));
-
     assert!(node.blockchain().mempool.is_empty());
 }
 
@@ -214,8 +223,7 @@ fn invalid_gossip_tx_rejected() {
 #[test]
 #[serial]
 fn invalid_gossip_block_rejected() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let _dir = init_env();
     let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
@@ -245,8 +253,6 @@ fn invalid_gossip_block_rejected() {
     };
     send(addr, &kp, Payload::Block(block));
 
-    thread::sleep(Duration::from_millis(100));
-
     assert!(node.blockchain().chain.is_empty());
 }
 
@@ -254,8 +260,7 @@ fn invalid_gossip_block_rejected() {
 #[test]
 #[serial]
 fn forged_identity_rejected() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let _dir = init_env();
     let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
@@ -280,7 +285,6 @@ fn forged_identity_rejected() {
     };
     send(addr, &kp, Payload::Block(block));
 
-    thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().chain.is_empty());
 }
 
@@ -288,8 +292,7 @@ fn forged_identity_rejected() {
 #[test]
 #[serial]
 fn handshake_version_mismatch_rejected() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let _dir = init_env();
     let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
@@ -319,7 +322,6 @@ fn handshake_version_mismatch_rejected() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     send(addr, &kp, Payload::Tx(tx));
 
-    thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().mempool.is_empty());
 }
 
@@ -327,8 +329,7 @@ fn handshake_version_mismatch_rejected() {
 #[test]
 #[serial]
 fn handshake_feature_mismatch_rejected() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let _dir = init_env();
     let addr = free_addr();
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
@@ -358,7 +359,6 @@ fn handshake_feature_mismatch_rejected() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     send(addr, &kp, Payload::Tx(tx));
 
-    thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().mempool.is_empty());
 }
 
@@ -366,8 +366,7 @@ fn handshake_feature_mismatch_rejected() {
 #[test]
 #[serial]
 fn discover_peers_from_file_loads_seeds() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let dir = init_env();
     let addr1 = free_addr();
     let addr2 = free_addr();
     let node1 = Node::new(addr1, vec![], Blockchain::default());
@@ -376,7 +375,6 @@ fn discover_peers_from_file_loads_seeds() {
     let cfg = dir.path().join("seeds.txt");
     fs::write(&cfg, format!("{}\n", addr2)).unwrap();
     node1.discover_peers_from_file(&cfg);
-    thread::sleep(Duration::from_millis(100));
     assert!(node1.peer_addrs().contains(&addr2));
 }
 
@@ -385,8 +383,7 @@ fn discover_peers_from_file_loads_seeds() {
 fn peer_rate_limit_and_ban() {
     std::env::set_var("TB_P2P_MAX_PER_SEC", "3");
     std::env::set_var("TB_P2P_BAN_SECS", "60");
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    let _dir = init_env();
     let addr = free_addr();
     let mut bc = Blockchain::default();
     bc.add_account("alice".into(), 100, 0).unwrap();
@@ -422,18 +419,16 @@ fn peer_rate_limit_and_ban() {
     };
     let tx = sign_tx(sk_tx.to_vec(), payload).unwrap();
     send(addr, &sk, Payload::Tx(tx));
-    thread::sleep(Duration::from_millis(100));
     assert!(node.blockchain().mempool.is_empty());
     std::env::remove_var("TB_P2P_MAX_PER_SEC");
     std::env::remove_var("TB_P2P_BAN_SECS");
     std::env::remove_var("TB_NET_KEY_PATH");
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn partition_state_replay() {
-    let dir = tempdir().unwrap();
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+async fn partition_state_replay() {
+    let _dir = init_env();
     let addr1 = free_addr();
     let addr2 = free_addr();
 
@@ -480,7 +475,8 @@ fn partition_state_replay() {
     node2.discover_peers();
     node1.broadcast_chain();
     node2.broadcast_chain();
-    thread::sleep(Duration::from_millis(200));
+
+    assert!(wait_until_converged(&[&node1, &node2], Duration::from_secs(20)).await);
 
     assert_eq!(node1.blockchain().block_height, 2);
     assert_eq!(node2.blockchain().block_height, 2);

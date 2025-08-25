@@ -9,3 +9,5 @@ demo:
     fi
     .venv/bin/python demo.py
 
+test:gossip:
+    RUST_LOG=info cargo nextest run --all-features gossip_converges_to_longest_chain

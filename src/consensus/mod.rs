@@ -6,6 +6,10 @@ macro_rules! consensus {
     };
 }
 
+pub mod fork_choice;
+#[cfg(feature = "telemetry")]
+pub mod observer;
+
 use crate::hash_genesis;
 
 consensus!(
