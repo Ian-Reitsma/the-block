@@ -125,7 +125,11 @@ fn ordering_stable_after_heap_rebuild() {
     bc.accounts.remove("d");
     bc.purge_expired();
 
-    let mut after: Vec<MempoolEntry> = bc.mempool_consumer.iter().map(|e| e.value().clone()).collect();
+    let mut after: Vec<MempoolEntry> = bc
+        .mempool_consumer
+        .iter()
+        .map(|e| e.value().clone())
+        .collect();
     after.sort_by(|a, b| mempool_cmp(a, b, bc.tx_ttl));
     let actual: Vec<[u8; 32]> = after.iter().map(|e| e.tx.id()).collect();
 

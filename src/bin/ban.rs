@@ -19,8 +19,8 @@ enum Command {
 }
 
 fn parse_pk(hexstr: &str) -> [u8; 32] {
-    let bytes = hex::decode(hexstr).expect("hex pk");
-    let arr: [u8; 32] = bytes.try_into().expect("pk length");
+    let bytes = hex::decode(hexstr).unwrap_or_else(|e| panic!("hex pk: {e}"));
+    let arr: [u8; 32] = bytes.try_into().unwrap_or_else(|_| panic!("pk length"));
     arr
 }
 
@@ -43,7 +43,7 @@ fn run<S: BanStoreLike>(store: &S, cmd: Command) -> Vec<(String, u64)> {
 
 fn main() {
     let cli = Cli::parse();
-    let store = ban_store::store().lock().unwrap();
+    let store = ban_store::store().lock().unwrap_or_else(|e| e.into_inner());
     let out = run(&*store, cli.cmd);
     for (peer, until) in out {
         println!("{peer} {until}");
@@ -54,7 +54,7 @@ fn current_ts() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|e| panic!("time error: {e}"))
         .as_secs()
 }
 
@@ -74,12 +74,15 @@ mod tests {
 
     impl MockStore {
         fn insert_raw(&self, pk: [u8; 32], until: u64) {
-            self.map.lock().unwrap().insert(pk, until);
+            self.map
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(pk, until);
             self.update_metric();
         }
 
         fn update_metric(&self) {
-            let map = self.map.lock().unwrap();
+            let map = self.map.lock().unwrap_or_else(|e| e.into_inner());
             BANNED_PEERS_TOTAL.set(map.len() as i64);
             BANNED_PEER_EXPIRATION.reset();
             for (k, v) in map.iter() {
@@ -92,25 +95,31 @@ mod tests {
 
     impl BanStoreLike for MockStore {
         fn ban(&self, pk: &[u8; 32], until: u64) {
-            self.map.lock().unwrap().insert(*pk, until);
+            self.map
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(*pk, until);
             self.update_metric();
         }
 
         fn unban(&self, pk: &[u8; 32]) {
-            self.map.lock().unwrap().remove(pk);
+            self.map
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(pk);
             self.update_metric();
         }
 
         fn list(&self) -> Vec<(String, u64)> {
             let now = current_ts();
             {
-                let mut map = self.map.lock().unwrap();
+                let mut map = self.map.lock().unwrap_or_else(|e| e.into_inner());
                 map.retain(|_, ts| *ts > now);
             }
             self.update_metric();
             self.map
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .iter()
                 .map(|(k, v)| (hex::encode(k), *v))
                 .collect()

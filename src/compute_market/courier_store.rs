@@ -18,19 +18,23 @@ impl ReceiptStore {
         let mut seen = HashSet::new();
         for entry in tree.iter() {
             match entry {
-                Ok((k, v)) => {
+                Ok((key, v)) => {
                     if let Ok(r) = bincode::deserialize::<Receipt>(&v) {
                         seen.insert(r.idempotency_key);
                     } else {
                         #[cfg(feature = "telemetry")]
                         crate::telemetry::RECEIPT_CORRUPT_TOTAL.inc();
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                        tracing::warn!("corrupt receipt for key {:?}", k);
+                        tracing::warn!("corrupt receipt for key {:?}", key);
+                        #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
+                        let _ = key;
                     }
                 }
-                Err(e) => {
+                Err(err) => {
                     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                    tracing::error!("iterate receipts: {e}");
+                    tracing::error!("iterate receipts: {err}");
+                    #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
+                    let _ = err;
                 }
             }
         }
@@ -48,7 +52,10 @@ impl ReceiptStore {
             .tree
             .compare_and_swap(key, None as Option<Vec<u8>>, Some(bytes))?;
         if res.is_ok() {
-            self.seen.lock().unwrap().insert(key);
+            self.seen
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(key);
             Ok(true)
         } else {
             Ok(false)

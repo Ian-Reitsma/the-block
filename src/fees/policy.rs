@@ -17,7 +17,7 @@ static CONSUMER_FEES: Mutex<FeeStats> = Mutex::new(FeeStats {
 
 /// Record a consumer lane fee and update p50/p90 gauges.
 pub fn record_consumer_fee(fee: u64) {
-    let mut stats = CONSUMER_FEES.lock().unwrap();
+    let mut stats = CONSUMER_FEES.lock().unwrap_or_else(|e| e.into_inner());
     if stats.window.len() == WINDOW {
         if let Some(old) = stats.window.pop_front() {
             if let Some(count) = stats.counts.get_mut(&old) {
@@ -45,7 +45,12 @@ fn percentile(stats: &FeeStats, q: f64) -> u64 {
             return *fee;
         }
     }
-    *stats.counts.iter().next_back().unwrap().0
+    stats
+        .counts
+        .iter()
+        .next_back()
+        .map(|(fee, _)| *fee)
+        .unwrap_or(0)
 }
 
 fn update_metrics(stats: &FeeStats) {
@@ -62,12 +67,12 @@ fn update_metrics(stats: &FeeStats) {
 
 /// Return the current consumer fee p90 value.
 pub fn consumer_p90() -> u64 {
-    let stats = CONSUMER_FEES.lock().unwrap();
+    let stats = CONSUMER_FEES.lock().unwrap_or_else(|e| e.into_inner());
     percentile(&stats, 0.9)
 }
 
 /// Return the current consumer fee median.
 pub fn consumer_p50() -> u64 {
-    let stats = CONSUMER_FEES.lock().unwrap();
+    let stats = CONSUMER_FEES.lock().unwrap_or_else(|e| e.into_inner());
     percentile(&stats, 0.5)
 }

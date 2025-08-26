@@ -6,14 +6,16 @@ pub struct NodeConfig {
     pub snapshot_interval: u64,
     pub price_board_path: String,
     pub price_board_window: usize,
+    pub price_board_save_interval: u64,
 }
 
 impl Default for NodeConfig {
     fn default() -> Self {
         Self {
             snapshot_interval: crate::DEFAULT_SNAPSHOT_INTERVAL,
-            price_board_path: "price_board.bin".to_string(),
+            price_board_path: "state/price_board.v1.bin".to_string(),
             price_board_window: 100,
+            price_board_save_interval: 30,
         }
     }
 }
@@ -34,7 +36,8 @@ impl NodeConfig {
     pub fn save(&self, dir: &str) -> std::io::Result<()> {
         fs::create_dir_all(dir)?;
         let path = format!("{}/config.toml", dir);
-        let data = toml::to_string(self).unwrap();
+        let data =
+            toml::to_string(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         fs::write(path, data)
     }
 }

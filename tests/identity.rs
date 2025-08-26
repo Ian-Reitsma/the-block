@@ -1,8 +1,8 @@
-use the_block::identity::handle_registry::{HandleRegistry, HandleError};
-use ed25519_dalek::{SigningKey, Signer};
+use ed25519_dalek::{Signer, SigningKey};
 use tempfile::tempdir;
-use unicode_normalization::UnicodeNormalization;
 use the_block::generate_keypair;
+use the_block::identity::handle_registry::{HandleError, HandleRegistry};
+use unicode_normalization::UnicodeNormalization;
 
 fn sign_msg(handle: &str, sk: &SigningKey, nonce: u64) -> (Vec<u8>, Vec<u8>) {
     let handle_norm = handle.nfc().collect::<String>().to_lowercase();

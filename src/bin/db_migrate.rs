@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use the_block::storage::migrate;
 
 fn main() {

@@ -245,7 +245,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - WAL fuzzing (nightly toolchain required): `make fuzz-wal` stores artifacts and RNG seeds under `fuzz/wal/`; reproduce with `cargo fuzz run wal_fuzz -- -seed=<seed> fuzz/wal/<file>`.
   Use `scripts/extract_wal_seeds.sh` to list seeds and see [docs/wal.md](docs/wal.md) for failure triage.
 
-- Compute market changes: run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` to cover courier retries and price board persistence.
+- Compute market changes: run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` to cover courier retries and price board persistence. Install `cargo-nextest` (v0.9.97-b.2 works with Rust 1.82) if the command is unavailable.
 
 ### 17.5 Architecture & Telemetry Highlights (from Agents‑Sup)
 

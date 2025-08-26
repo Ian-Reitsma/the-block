@@ -19,13 +19,13 @@ impl PausedClock {
 
     /// Manually advance the clock by `delta`.
     pub fn advance(&self, delta: Duration) {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         *guard = *guard + delta;
     }
 }
 
 impl Clock for PausedClock {
     fn now(&self) -> Instant {
-        *self.inner.lock().unwrap()
+        *self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use clap::{Parser, Subcommand};
 use the_block::{Blockchain, SnapshotManager};
 

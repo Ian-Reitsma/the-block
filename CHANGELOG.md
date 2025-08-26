@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Added
+- Atomic file writer consolidates durable write‑rename‑sync persistence ([src/util/atomic_file.rs](src/util/atomic_file.rs)).
+- Versioned blob framing encodes magic bytes, version tags, and CRC32 checksums for on‑disk schemas ([src/util/versioned_blob.rs](src/util/versioned_blob.rs)).
 - Python: `mine_block(txs)` helper to mine a block from signed transactions for scripts and demos ([src/lib.rs](src/lib.rs)).
 - Asynchronous JSON-RPC server built on `tokio` replaces the thread-per-connection model and dispatches requests with async tasks while preserving spec-compliant errors ([src/rpc.rs](src/rpc.rs), [src/bin/node.rs](src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
 - Network partition/rejoin and invalid gossip cases ensure longest-chain convergence ([tests/net_gossip.rs](tests/net_gossip.rs)).
@@ -17,6 +19,7 @@
 ### Changed
 - Moving-average difficulty retargeting validates block headers against expected difficulty ([src/lib.rs](src/lib.rs)).
 - README and agent handbooks document JSON-RPC sessions, networking demos, and purge-loop defaults ([README.md](README.md), [AGENTS.md](AGENTS.md), [Agents-Sup.md](Agents-Sup.md)).
+- Bootstraps pin `cargo-nextest` v0.9.97-b.2 to match the Rust 1.82 toolchain ([bootstrap.sh](bootstrap.sh), [bootstrap.ps1](bootstrap.ps1), [scripts/bootstrap_test.sh](scripts/bootstrap_test.sh)).
 
 ### Fixed
 - Telemetry exporter always emits keys such as `orphan_sweep_total` even before they increment ([src/telemetry.rs](src/telemetry.rs)).

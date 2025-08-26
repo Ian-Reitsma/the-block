@@ -141,7 +141,7 @@ pub fn store() -> &'static Mutex<BanStore> {
 /// Primarily used by tests to isolate state.
 pub fn init(path: &str) {
     if let Some(store) = BAN_STORE.get() {
-        let mut guard = store.lock().unwrap();
+        let mut guard = store.lock().unwrap_or_else(|e| e.into_inner());
         *guard = BanStore::open(path);
     } else {
         let _ = BAN_STORE.set(Mutex::new(BanStore::open(path)));

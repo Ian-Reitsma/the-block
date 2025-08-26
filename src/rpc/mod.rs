@@ -522,7 +522,7 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let params = GOV_PARAMS.lock().unwrap();
+            let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             governance::gov_params(&params, epoch)?
         }
         "gov_rollback_last" => {
@@ -531,7 +531,7 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let mut params = GOV_PARAMS.lock().unwrap();
+            let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             governance::gov_rollback_last(&GOV_STORE, &mut params, epoch)?
         }
         _ => {

@@ -1,12 +1,14 @@
 pub mod bicameral;
-mod store;
 mod params;
+mod store;
 
-pub use bicameral::{Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal};
-pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, ROLLBACK_WINDOW_EPOCHS, QUORUM};
-pub use params::{ParamSpec, Params, registry};
+pub use bicameral::{
+    Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
+};
+pub use params::{registry, ParamSpec, Params};
+pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// Simplified address type reused across governance records.
 pub type Address = String;
@@ -56,4 +58,3 @@ pub struct Vote {
     pub weight: u64,
     pub received_at: u64,
 }
-
