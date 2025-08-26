@@ -27,12 +27,15 @@ static ASKS: Lazy<Mutex<Vec<Ask>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 /// Replace the current order book with the provided bids and asks.
 pub fn seed_orders(bids: Vec<Bid>, asks: Vec<Ask>) {
-    *BIDS.lock().unwrap() = bids;
-    *ASKS.lock().unwrap() = asks;
+    *BIDS.lock().unwrap_or_else(|e| e.into_inner()) = bids;
+    *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = asks;
 }
 
 fn snapshot() -> (Vec<Bid>, Vec<Ask>) {
-    (BIDS.lock().unwrap().clone(), ASKS.lock().unwrap().clone())
+    (
+        BIDS.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        ASKS.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+    )
 }
 
 fn stable_match(mut bids: Vec<Bid>, mut asks: Vec<Ask>) -> Vec<(Bid, Ask)> {
@@ -84,16 +87,18 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
                     tracing::info!(job = %receipt.job_id, buyer = %receipt.buyer, provider = %receipt.provider, price = receipt.quote_price, dry = receipt.dry_run, "match");
                 }
                 Ok(false) => {}
-                Err(e) => {
+                Err(err) => {
                     #[cfg(feature = "telemetry")]
                     crate::telemetry::RECEIPT_PERSIST_FAIL_TOTAL.inc();
                     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                    tracing::error!("receipt insert failed: {e}");
+                    tracing::error!("receipt insert failed: {err}");
+                    #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
+                    let _ = err;
                 }
             }
         }
-        BIDS.lock().unwrap().clear();
-        ASKS.lock().unwrap().clear();
+        BIDS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        ASKS.lock().unwrap_or_else(|e| e.into_inner()).clear();
         #[cfg(feature = "telemetry")]
         crate::telemetry::MATCH_LOOP_LATENCY_SECONDS.observe(_start.elapsed().as_secs_f64());
         tokio::time::sleep(MATCH_INTERVAL).await;

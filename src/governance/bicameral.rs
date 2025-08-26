@@ -109,7 +109,8 @@ impl Governance {
 
     pub fn persist(&self, path: &str) -> std::io::Result<()> {
         let props: Vec<&Proposal> = self.proposals.values().collect();
-        let bytes = serde_json::to_vec(&(self.next_id, props)).expect("serialize proposals");
+        let bytes = serde_json::to_vec(&(self.next_id, props))
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         fs::write(path, bytes)
     }
 

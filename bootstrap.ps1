@@ -94,6 +94,25 @@ Function Ensure-Maturin {
     }
 }
 
+Function Ensure-Nextest {
+    param([string]$Version = "0.9.97-b.2")
+    $nextestPath = Join-Path $CARGO_BIN "cargo-nextest.exe"
+    if ((Test-Path $nextestPath) -and ((& $nextestPath --version) -like "*$Version*")) {
+        Write-Color Green "cargo-nextest $Version already installed"
+        return
+    }
+    Write-Color Cyan "Installing cargo-nextest $Version..."
+    $arch = "x86_64-pc-windows-msvc"
+    $zip = "cargo-nextest-$Version-$arch.zip"
+    $url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$Version/$zip"
+    $tmpDir = New-Item -ItemType Directory -Force -Path ([System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), [System.Guid]::NewGuid().ToString()))
+    Invoke-WebRequest $url -OutFile (Join-Path $tmpDir $zip)
+    Expand-Archive (Join-Path $tmpDir $zip) -DestinationPath $tmpDir -Force
+    Move-Item -Force (Join-Path $tmpDir "cargo-nextest.exe") $nextestPath
+    Remove-Item -Recurse -Force $tmpDir
+    cargo nextest --version | Out-Null
+}
+
 Function Run-Maturin-Develop {
     $maturinPath = ".\$PYTHON_VENV\Scripts\maturin.exe"
     if (Test-Path $maturinPath -and (Test-Path "Cargo.toml")) {
@@ -121,6 +140,7 @@ Write-Color Cyan "Upgrading pip, setuptools, wheel..."
 
 Ensure-Rust
 Ensure-Maturin
+Ensure-Nextest
 if (Test-Path "Cargo.toml") {
     Write-Color Cyan "Running database migrations..."
     cargo run --quiet --bin db_migrate
@@ -157,6 +177,7 @@ Write-Color Cyan "Activate venv:  .\$PYTHON_VENV\Scripts\Activate.ps1"
 Write-Color Cyan "Python: $(.\$PYTHON_VENV\Scripts\python.exe --version)"
 Write-Color Cyan "Rust: $(rustc --version)"
 Write-Color Cyan "Cargo: $(cargo --version)"
+Write-Color Cyan "Nextest: $(cargo nextest --version)"
 
 # Show other tools if present
 if (Get-Command docker -ErrorAction SilentlyContinue) {

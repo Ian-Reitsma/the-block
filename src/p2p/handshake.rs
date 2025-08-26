@@ -88,7 +88,7 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
     telemetry::P2P_HANDSHAKE_ACCEPT_TOTAL
         .with_label_values(&[&format!("{accepted:#x}")])
         .inc();
-    let mut peers = PEERS.lock().unwrap();
+    let mut peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
     peers.insert(
         peer_id.to_string(),
         PeerInfo {
@@ -105,6 +105,6 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
 }
 
 pub fn list_peers() -> Vec<(String, PeerInfo)> {
-    let peers = PEERS.lock().unwrap();
+    let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
     peers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }

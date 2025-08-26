@@ -77,7 +77,10 @@ impl CourierStore {
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                                 tracing::error!("courier update failed: {e}");
-                                #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
+                                #[cfg(all(
+                                    not(feature = "telemetry"),
+                                    not(feature = "test-telemetry")
+                                ))]
                                 eprintln!("courier update failed: {e}");
                                 return Err(e);
                             }

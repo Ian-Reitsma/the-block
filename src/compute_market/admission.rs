@@ -75,12 +75,10 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
         return Err(RejectReason::Capacity);
     }
 
-    let mut b_entry = BUYER_USAGE
-        .entry(buyer.to_string())
-        .or_insert(Usage {
-            shards_seconds: 0.0,
-            last_update: now,
-        });
+    let mut b_entry = BUYER_USAGE.entry(buyer.to_string()).or_insert(Usage {
+        shards_seconds: 0.0,
+        last_update: now,
+    });
     decay_usage(&mut *b_entry, now);
     let buyer_proj = b_entry.shards_seconds + demand_f;
     let buyer_share = if window_cap > 0.0 {
@@ -90,12 +88,10 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
     };
     drop(b_entry);
 
-    let mut p_entry = PROVIDER_USAGE
-        .entry(provider.to_string())
-        .or_insert(Usage {
-            shards_seconds: 0.0,
-            last_update: now,
-        });
+    let mut p_entry = PROVIDER_USAGE.entry(provider.to_string()).or_insert(Usage {
+        shards_seconds: 0.0,
+        last_update: now,
+    });
     decay_usage(&mut *p_entry, now);
     let provider_proj = p_entry.shards_seconds + demand_f;
     let provider_share = if window_cap > 0.0 {
@@ -106,19 +102,15 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
     drop(p_entry);
 
     if buyer_share > FAIR_SHARE_CAP || provider_share > FAIR_SHARE_CAP {
-        let mut bq = BUYER_QUOTA
-            .entry(buyer.to_string())
-            .or_insert(Quota {
-                remaining: BURST_QUOTA,
-                last_refill: now,
-            });
+        let mut bq = BUYER_QUOTA.entry(buyer.to_string()).or_insert(Quota {
+            remaining: BURST_QUOTA,
+            last_refill: now,
+        });
         refill_quota(&mut *bq, now);
-        let mut pq = PROVIDER_QUOTA
-            .entry(provider.to_string())
-            .or_insert(Quota {
-                remaining: BURST_QUOTA,
-                last_refill: now,
-            });
+        let mut pq = PROVIDER_QUOTA.entry(provider.to_string()).or_insert(Quota {
+            remaining: BURST_QUOTA,
+            last_refill: now,
+        });
         refill_quota(&mut *pq, now);
         if bq.remaining >= demand_f && pq.remaining >= demand_f {
             bq.remaining -= demand_f;
@@ -140,22 +132,18 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
         }
     }
 
-    let mut b_entry = BUYER_USAGE
-        .entry(buyer.to_string())
-        .or_insert(Usage {
-            shards_seconds: 0.0,
-            last_update: now,
-        });
+    let mut b_entry = BUYER_USAGE.entry(buyer.to_string()).or_insert(Usage {
+        shards_seconds: 0.0,
+        last_update: now,
+    });
     b_entry.shards_seconds += demand_f;
     b_entry.last_update = now;
     drop(b_entry);
 
-    let mut p_entry = PROVIDER_USAGE
-        .entry(provider.to_string())
-        .or_insert(Usage {
-            shards_seconds: 0.0,
-            last_update: now,
-        });
+    let mut p_entry = PROVIDER_USAGE.entry(provider.to_string()).or_insert(Usage {
+        shards_seconds: 0.0,
+        last_update: now,
+    });
     p_entry.shards_seconds += demand_f;
     p_entry.last_update = now;
 
@@ -164,7 +152,7 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
 
 /// Record observed available shard throughput.
 pub fn record_available_shards(shards: u64) {
-    let mut h = HISTORY.lock().unwrap();
+    let mut h = HISTORY.lock().unwrap_or_else(|e| e.into_inner());
     if h.len() == WINDOW {
         h.pop_front();
     }
@@ -173,7 +161,7 @@ pub fn record_available_shards(shards: u64) {
 
 /// Estimate current capacity using a moving average over the sample window.
 pub fn capacity_estimator() -> Capacity {
-    let h = HISTORY.lock().unwrap();
+    let h = HISTORY.lock().unwrap_or_else(|e| e.into_inner());
     if h.is_empty() {
         Capacity { shards_per_sec: 0 }
     } else {
@@ -189,5 +177,5 @@ pub fn reset() {
     PROVIDER_USAGE.clear();
     BUYER_QUOTA.clear();
     PROVIDER_QUOTA.clear();
-    HISTORY.lock().unwrap().clear();
+    HISTORY.lock().unwrap_or_else(|e| e.into_inner()).clear();
 }

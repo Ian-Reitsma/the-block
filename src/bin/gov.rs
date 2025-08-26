@@ -1,8 +1,10 @@
+#![allow(clippy::expect_used)]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use the_block::{Governance, governance::House};
+use the_block::{governance::House, Governance};
 
 #[derive(Parser)]
 #[command(author, version, about = "Governance helpers")]

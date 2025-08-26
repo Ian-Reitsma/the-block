@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Redundancy {
@@ -7,7 +7,7 @@ pub enum Redundancy {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChunkRef {
-    pub id: [u8;32],
+    pub id: [u8; 32],
     pub nodes: Vec<String>,
 }
 
@@ -19,12 +19,12 @@ pub struct ObjectManifest {
     pub chunks: Vec<ChunkRef>,
     pub redundancy: Redundancy,
     pub content_key_enc: Vec<u8>,
-    pub blake3: [u8;32],
+    pub blake3: [u8; 32],
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct StoreReceipt {
-    pub manifest_hash: [u8;32],
+    pub manifest_hash: [u8; 32],
     pub chunk_count: u32,
     pub redundancy: Redundancy,
     pub lane: String,

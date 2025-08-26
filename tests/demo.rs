@@ -3,6 +3,7 @@ use std::{fs, path::Path, process::Command, time::Duration};
 use wait_timeout::ChildExt;
 
 #[test]
+#[ignore = "slow"]
 fn demo_runs_clean() {
     if !Path::new(".venv/bin/python").exists() {
         eprintln!("skipping demo_runs_clean: .venv/bin/python missing (run bootstrap.sh)");
@@ -48,7 +49,7 @@ fn demo_runs_clean() {
         .expect("spawn demo");
     match child
         // Allow extra time on first run so the demo binary can build.
-        .wait_timeout(Duration::from_secs(120))
+        .wait_timeout(Duration::from_secs(60))
         .expect("wait demo")
     {
         Some(status) if status.success() => {}

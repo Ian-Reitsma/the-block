@@ -96,7 +96,12 @@ impl WorkloadRunner {
     /// Run the workload for a given slice ID asynchronously. Results are cached so
     /// repeated executions avoid recomputation.
     pub async fn run(&self, slice_id: usize, w: Workload) -> [u8; 32] {
-        if let Some(cached) = self.cache.lock().unwrap().get(&slice_id) {
+        if let Some(cached) = self
+            .cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&slice_id)
+        {
             return *cached;
         }
         let res = tokio::task::spawn_blocking(move || match w {
@@ -104,8 +109,11 @@ impl WorkloadRunner {
             Workload::Inference(data) => workloads::inference::run(&data),
         })
         .await
-        .unwrap();
-        self.cache.lock().unwrap().insert(slice_id, res);
+        .unwrap_or_else(|e| panic!("workload failed: {e}"));
+        self.cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(slice_id, res);
         res
     }
 }
@@ -210,7 +218,10 @@ impl Market {
                 });
             }
         }
-        let offer = self.offers.remove(&job.job_id).unwrap();
+        let offer = self
+            .offers
+            .remove(&job.job_id)
+            .ok_or(MarketError::JobNotFound)?;
         price_board::record_price(offer.price);
         let state = JobState {
             job,
@@ -572,7 +583,7 @@ mod tests {
         market
             .submit_job(job)
             .unwrap_or_else(|e| panic!("submit job: {e}"));
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| panic!("runtime: {e}"));
         let total = rt
             .block_on(market.execute_job(&job_id))
             .unwrap_or_else(|e| panic!("execute job: {e}"));

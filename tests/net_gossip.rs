@@ -121,7 +121,7 @@ async fn gossip_converges_to_longest_chain() {
     }
     node2.broadcast_chain();
 
-    assert!(wait_until_converged(&[&node1, &node2, &node3], Duration::from_secs(20)).await);
+    assert!(wait_until_converged(&[&node1, &node2, &node3], Duration::from_secs(5)).await);
 
     let h1 = node1.blockchain().block_height;
     let h2 = node2.blockchain().block_height;
@@ -176,7 +176,7 @@ async fn partition_rejoins_longest_chain() {
     node3.discover_peers();
     node3.broadcast_chain();
 
-    assert!(wait_until_converged(&[&node1, &node2, &node3], Duration::from_secs(20)).await);
+    assert!(wait_until_converged(&[&node1, &node2, &node3], Duration::from_secs(5)).await);
 
     let h1 = node1.blockchain().block_height;
     let h2 = node2.blockchain().block_height;
@@ -478,7 +478,7 @@ async fn partition_state_replay() {
     node1.broadcast_chain();
     node2.broadcast_chain();
 
-    assert!(wait_until_converged(&[&node1, &node2], Duration::from_secs(20)).await);
+    assert!(wait_until_converged(&[&node1, &node2], Duration::from_secs(5)).await);
 
     assert_eq!(node1.blockchain().block_height, 2);
     assert_eq!(node2.blockchain().block_height, 2);

@@ -1,8 +1,8 @@
 use super::{load_net_key, send_msg, PROTOCOL_VERSION};
-use crate::net::message::{Message, Payload};
-use crate::Blockchain;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
+use crate::net::message::{Message, Payload};
+use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};

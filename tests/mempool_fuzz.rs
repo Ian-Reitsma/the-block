@@ -114,7 +114,11 @@ fn fuzz_mempool_random_fees_nonces() {
         .map(|e| (e.key().0.clone(), e.key().1))
         .collect();
     let ttl = guard.tx_ttl;
-    let mut entries: Vec<_> = guard.mempool_consumer.iter().map(|e| e.value().clone()).collect();
+    let mut entries: Vec<_> = guard
+        .mempool_consumer
+        .iter()
+        .map(|e| e.value().clone())
+        .collect();
     entries.sort_by(|a, b| mempool_cmp(a, b, ttl));
     for w in entries.windows(2) {
         assert!(mempool_cmp(&w[0], &w[1], ttl) != std::cmp::Ordering::Greater);

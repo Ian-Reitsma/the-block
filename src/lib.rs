@@ -10,6 +10,8 @@
 //! through dual Consumer/Industrial tokens and a service-credit meter. See
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
+#[cfg(feature = "telemetry")]
+use crate::consensus::observer;
 use blake3;
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -18,8 +20,6 @@ use hex;
 use log::info;
 #[cfg(feature = "telemetry")]
 use log::warn;
-#[cfg(feature = "telemetry")]
-use crate::consensus::observer;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -667,19 +667,21 @@ impl Blockchain {
         let size = match lane {
             FeeLane::Consumer => {
                 if delta > 0 {
-                    self.mempool_size_consumer.fetch_add(delta as usize, SeqCst)
-                        + delta as usize
+                    self.mempool_size_consumer.fetch_add(delta as usize, SeqCst) + delta as usize
                 } else {
-                    self.mempool_size_consumer.fetch_sub((-delta) as usize, SeqCst)
+                    self.mempool_size_consumer
+                        .fetch_sub((-delta) as usize, SeqCst)
                         - (-delta as usize)
                 }
             }
             FeeLane::Industrial => {
                 if delta > 0 {
-                    self.mempool_size_industrial.fetch_add(delta as usize, SeqCst)
+                    self.mempool_size_industrial
+                        .fetch_add(delta as usize, SeqCst)
                         + delta as usize
                 } else {
-                    self.mempool_size_industrial.fetch_sub((-delta) as usize, SeqCst)
+                    self.mempool_size_industrial
+                        .fetch_sub((-delta) as usize, SeqCst)
                         - (-delta as usize)
                 }
             }
@@ -687,8 +689,8 @@ impl Blockchain {
 
         #[cfg(feature = "telemetry")]
         {
-            let total = self.mempool_size_consumer.load(SeqCst)
-                + self.mempool_size_industrial.load(SeqCst);
+            let total =
+                self.mempool_size_consumer.load(SeqCst) + self.mempool_size_industrial.load(SeqCst);
             telemetry::MEMPOOL_SIZE.set(total as i64);
         }
 
@@ -1174,6 +1176,7 @@ impl Blockchain {
         crate::compute_market::price_board::init(
             pb.to_string_lossy().into_owned(),
             cfg.price_board_window,
+            cfg.price_board_save_interval,
         );
         bc.config = cfg.clone();
         #[cfg(feature = "telemetry")]
@@ -1439,7 +1442,10 @@ impl Blockchain {
         if let Some(mut entry) = self.mempool_consumer.get_mut(&(sender.to_string(), nonce)) {
             entry.timestamp_millis = millis;
             entry.timestamp_ticks = millis;
-        } else if let Some(mut entry) = self.mempool_industrial.get_mut(&(sender.to_string(), nonce)) {
+        } else if let Some(mut entry) = self
+            .mempool_industrial
+            .get_mut(&(sender.to_string(), nonce))
+        {
             entry.timestamp_millis = millis;
             entry.timestamp_ticks = millis;
         }
@@ -1998,8 +2004,12 @@ impl Blockchain {
     pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> Result<(), TxAdmissionError> {
         #[cfg(feature = "telemetry")]
         let _pool_guard = {
-            let size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-                + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst);
+            let size = self
+                .mempool_size_consumer
+                .load(std::sync::atomic::Ordering::SeqCst)
+                + self
+                    .mempool_size_industrial
+                    .load(std::sync::atomic::Ordering::SeqCst);
             let span = tracing::span!(
                 tracing::Level::TRACE,
                 "mempool_mutex",
@@ -2056,9 +2066,8 @@ impl Blockchain {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
                     acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
-                    acc.pending_industrial = acc
-                        .pending_industrial
-                        .saturating_sub(total_industrial);
+                    acc.pending_industrial =
+                        acc.pending_industrial.saturating_sub(total_industrial);
                     acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
                     acc.pending_nonces.remove(&nonce);
                 }
@@ -2105,9 +2114,8 @@ impl Blockchain {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
                     acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
-                    acc.pending_industrial = acc
-                        .pending_industrial
-                        .saturating_sub(total_industrial);
+                    acc.pending_industrial =
+                        acc.pending_industrial.saturating_sub(total_industrial);
                     acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
                     acc.pending_nonces.remove(&nonce);
                 }
@@ -2227,8 +2235,12 @@ impl Blockchain {
         // track current orphan count after removing expired entries
         self.orphan_counter
             .store(orphaned.len(), std::sync::atomic::Ordering::SeqCst);
-        let size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-            + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst);
+        let size = self
+            .mempool_size_consumer
+            .load(std::sync::atomic::Ordering::SeqCst)
+            + self
+                .mempool_size_industrial
+                .load(std::sync::atomic::Ordering::SeqCst);
         let orphans = orphaned.len();
         if size > 0 && orphans * 2 > size {
             #[cfg(feature = "telemetry")]
@@ -2325,11 +2337,7 @@ impl Blockchain {
             .mempool_consumer
             .iter()
             .map(|e| e.value().tx.clone())
-            .chain(
-                self.mempool_industrial
-                    .iter()
-                    .map(|e| e.value().tx.clone()),
-            )
+            .chain(self.mempool_industrial.iter().map(|e| e.value().tx.clone()))
             .collect();
         pending.sort_unstable_by(|a, b| {
             a.payload

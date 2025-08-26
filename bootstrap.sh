@@ -262,7 +262,8 @@ else
   chmod +x "$bindir/cargo-make"
 fi
 
-NEXTEST_VERSION=0.9.102
+# Last version compatible with rustc 1.82 bundled in this repo
+NEXTEST_VERSION=0.9.97-b.2
 if cargo nextest --version 2>/dev/null | grep -q "$NEXTEST_VERSION"; then
   cecho green "   ✓ cargo-nextest already installed"
 else
@@ -287,6 +288,7 @@ else
   mkdir -p "$bindir"
   run_step "install cargo-nextest" mv "$tmpdir/cargo-nextest" "$bindir/"
   chmod +x "$bindir/cargo-nextest"
+  run_step "verify cargo-nextest" cargo nextest --version
 fi
 
 # Only install maturin/pip if Python build is not broken
@@ -395,6 +397,10 @@ for exe in python cargo just docker cargo-nextest; do
     cecho yellow "   $exe not found"
   fi
 done
+
+if command -v cargo-nextest &>/dev/null; then
+  cecho blue "   $(cargo nextest --version 2>&1 | head -n1)"
+fi
 
 if command -v cargo-make &>/dev/null; then
   cecho blue "   $(cargo make --version 2>&1 | head -n1)"

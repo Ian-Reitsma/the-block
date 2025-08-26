@@ -1,5 +1,5 @@
-use crate::governance::{GovStore, ParamKey, Proposal, ProposalStatus, Vote, VoteChoice, Params};
 use super::RpcError;
+use crate::governance::{GovStore, ParamKey, Params, Proposal, ProposalStatus, Vote, VoteChoice};
 use serde_json::json;
 
 fn parse_key(k: &str) -> Option<ParamKey> {
@@ -11,8 +11,20 @@ fn parse_key(k: &str) -> Option<ParamKey> {
     }
 }
 
-pub fn gov_propose(store: &GovStore, proposer: String, key: &str, new_value: i64, min: i64, max: i64, current_epoch: u64, vote_deadline: u64) -> Result<serde_json::Value, RpcError> {
-    let key = parse_key(key).ok_or(RpcError{code:-32060, message:"bad key"})?;
+pub fn gov_propose(
+    store: &GovStore,
+    proposer: String,
+    key: &str,
+    new_value: i64,
+    min: i64,
+    max: i64,
+    current_epoch: u64,
+    vote_deadline: u64,
+) -> Result<serde_json::Value, RpcError> {
+    let key = parse_key(key).ok_or(RpcError {
+        code: -32060,
+        message: "bad key",
+    })?;
     let p = Proposal {
         id: 0,
         key,
@@ -25,25 +37,59 @@ pub fn gov_propose(store: &GovStore, proposer: String, key: &str, new_value: i64
         activation_epoch: None,
         status: ProposalStatus::Open,
     };
-    let id = store.submit(p).map_err(|_| RpcError{code:-32061, message:"submit failed"})?;
+    let id = store.submit(p).map_err(|_| RpcError {
+        code: -32061,
+        message: "submit failed",
+    })?;
     Ok(json!({"id": id}))
 }
 
-pub fn gov_vote(store: &GovStore, voter: String, proposal_id: u64, choice: &str, current_epoch: u64) -> Result<serde_json::Value, RpcError> {
-    let choice = match choice {"yes"=>VoteChoice::Yes, "no"=>VoteChoice::No, _=>VoteChoice::Abstain};
-    let v = Vote { proposal_id, voter, choice, weight:1, received_at: current_epoch};
-    store.vote(proposal_id, v, current_epoch).map_err(|_| RpcError{code:-32062, message:"vote failed"})?;
+pub fn gov_vote(
+    store: &GovStore,
+    voter: String,
+    proposal_id: u64,
+    choice: &str,
+    current_epoch: u64,
+) -> Result<serde_json::Value, RpcError> {
+    let choice = match choice {
+        "yes" => VoteChoice::Yes,
+        "no" => VoteChoice::No,
+        _ => VoteChoice::Abstain,
+    };
+    let v = Vote {
+        proposal_id,
+        voter,
+        choice,
+        weight: 1,
+        received_at: current_epoch,
+    };
+    store
+        .vote(proposal_id, v, current_epoch)
+        .map_err(|_| RpcError {
+            code: -32062,
+            message: "vote failed",
+        })?;
     Ok(json!({"ok":true}))
 }
 
 pub fn gov_list(store: &GovStore) -> Result<serde_json::Value, RpcError> {
     let mut arr = vec![];
-    for item in store.proposals().iter() { // need access; make proposals() pub
-        let (_, raw) = item.map_err(|_| RpcError{code:-32063, message:"iter"})?;
-        let p: Proposal = bincode::deserialize(&raw).unwrap();
+    for item in store.proposals().iter() {
+        // need access; make proposals() pub
+        let (_, raw) = item.map_err(|_| RpcError {
+            code: -32063,
+            message: "iter",
+        })?;
+        let p: Proposal = bincode::deserialize(&raw).map_err(|_| RpcError {
+            code: -32065,
+            message: "decode",
+        })?;
         arr.push(p);
     }
-    Ok(serde_json::to_value(arr).unwrap())
+    Ok(serde_json::to_value(arr).map_err(|_| RpcError {
+        code: -32066,
+        message: "json",
+    })?)
 }
 
 pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcError> {
@@ -55,8 +101,16 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
     }))
 }
 
-pub fn gov_rollback_last(store: &GovStore, params: &mut Params, current_epoch: u64) -> Result<serde_json::Value, RpcError> {
-    store.rollback_last(current_epoch, params).map_err(|_| RpcError{code:-32064, message:"rollback failed"})?;
+pub fn gov_rollback_last(
+    store: &GovStore,
+    params: &mut Params,
+    current_epoch: u64,
+) -> Result<serde_json::Value, RpcError> {
+    store
+        .rollback_last(current_epoch, params)
+        .map_err(|_| RpcError {
+            code: -32064,
+            message: "rollback failed",
+        })?;
     Ok(json!({"ok":true}))
 }
-

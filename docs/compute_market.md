@@ -64,13 +64,15 @@ to verify the retry behaviour and metrics.
 ## Price Board Persistence
 
 Recent offer prices feed a sliding window that derives quantile bands. The board
-persists to `node-data/price_board.bin` on shutdown and reloads on startup. If
-the file is missing or corrupted the board starts empty. The persistence path
-and window size are configurable via `node-data/config.toml`:
+persists to `node-data/state/price_board.v1.bin` on shutdown and every
+`price_board_save_interval` seconds. If the file is missing or corrupted the
+board starts empty. The persistence path, window size, and save interval are
+configurable via `node-data/config.toml`:
 
 ```toml
-price_board_path = "price_board.bin"
+price_board_path = "state/price_board.v1.bin"
 price_board_window = 100
+price_board_save_interval = 30
 ```
 
 Each entry is an unsigned 64‑bit integer, so disk usage is `8 * price_board_window`
@@ -79,7 +81,7 @@ bytes (≈800 B for the default). Older prices are dropped as new ones arrive.
 Clear the board by deleting the persistence file:
 
 ```bash
-rm node-data/price_board.bin
+rm node-data/state/price_board.v1.bin
 ```
 
 Logs emit `loaded price board` and `saved price board` messages, while metrics

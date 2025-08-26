@@ -1,6 +1,6 @@
-use the_block::storage::pipeline::StoragePipeline;
-use rand::{RngCore, rngs::OsRng};
+use rand::{rngs::OsRng, RngCore};
 use tempfile::tempdir;
+use the_block::storage::pipeline::StoragePipeline;
 
 #[test]
 fn put_and_get_roundtrip() {

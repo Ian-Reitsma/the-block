@@ -2,8 +2,8 @@ use crate::SimpleDb;
 use blake3::Hasher;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
-use unicode_normalization::UnicodeNormalization;
 use std::time::{SystemTime, UNIX_EPOCH};
+use unicode_normalization::UnicodeNormalization;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HandleRecord {
@@ -20,6 +20,7 @@ pub enum HandleError {
     BadSig,
     LowNonce,
     Reserved,
+    Storage,
 }
 
 impl HandleError {
@@ -29,6 +30,7 @@ impl HandleError {
             HandleError::BadSig => "E_BAD_SIG",
             HandleError::LowNonce => "E_LOW_NONCE",
             HandleError::Reserved => "E_RESERVED",
+            HandleError::Storage => "E_STORAGE",
         }
     }
 }
@@ -39,13 +41,17 @@ pub struct HandleRegistry {
 
 impl HandleRegistry {
     pub fn open(path: &str) -> Self {
-        Self { db: SimpleDb::open(path) }
+        Self {
+            db: SimpleDb::open(path),
+        }
     }
 
     fn normalize(handle: &str) -> Option<String> {
         let h: String = handle.nfc().collect();
         let h = h.trim();
-        if h.is_empty() { return None; }
+        if h.is_empty() {
+            return None;
+        }
         Some(h.to_lowercase())
     }
 
@@ -98,14 +104,11 @@ impl HandleRegistry {
         h.update(&nonce.to_le_bytes());
         let msg = h.finalize();
         // verify
-        let vk = VerifyingKey::from_bytes(
-            &crate::to_array_32(pubkey).ok_or(HandleError::BadSig)?,
-        )
-        .map_err(|_| HandleError::BadSig)?;
-        let sig = Signature::from_bytes(
-            &crate::to_array_64(sig).ok_or(HandleError::BadSig)?,
-        );
-        vk.verify(msg.as_bytes(), &sig).map_err(|_| HandleError::BadSig)?;
+        let vk = VerifyingKey::from_bytes(&crate::to_array_32(pubkey).ok_or(HandleError::BadSig)?)
+            .map_err(|_| HandleError::BadSig)?;
+        let sig = Signature::from_bytes(&crate::to_array_64(sig).ok_or(HandleError::BadSig)?);
+        vk.verify(msg.as_bytes(), &sig)
+            .map_err(|_| HandleError::BadSig)?;
         // handle duplication
         let key = Self::handle_key(&handle_norm);
         if let Some(raw) = self.db.get(&key) {
@@ -139,16 +142,14 @@ impl HandleRegistry {
             nonce,
             version: 1,
         };
-        let bytes = bincode::serialize(&record).unwrap();
+        let bytes = bincode::serialize(&record).map_err(|_| HandleError::Storage)?;
         self.db.insert(&key, bytes);
         // index owner
-        self.db.insert(
-            &Self::owner_key(&address),
-            bincode::serialize(&handle_norm).unwrap(),
-        );
+        let owner_bytes = bincode::serialize(&handle_norm).map_err(|_| HandleError::Storage)?;
+        self.db.insert(&Self::owner_key(&address), owner_bytes);
         // update nonce
-        self.db
-            .insert(&nonce_key, bincode::serialize(&nonce).unwrap());
+        let nonce_bytes = bincode::serialize(&nonce).map_err(|_| HandleError::Storage)?;
+        self.db.insert(&nonce_key, nonce_bytes);
         #[cfg(feature = "telemetry")]
         crate::telemetry::IDENTITY_REGISTRATIONS_TOTAL
             .with_label_values(&["ok"])

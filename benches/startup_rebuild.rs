@@ -20,10 +20,10 @@ fn sample_entries(count: usize) -> (Vec<MempoolEntryDisk>, Account) {
             nonce: i as u64,
             memo: Vec::new(),
         };
-        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+        let tx = sign_tx(sk.to_vec(), payload).unwrap_or_else(|e| panic!("sign_tx: {e}"));
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|e| panic!("time: {e}"))
             .as_millis() as u64;
         entries.push(MempoolEntryDisk {
             sender: "a".into(),
@@ -55,7 +55,7 @@ fn rebuild_naive(entries: &[MempoolEntryDisk], acc: &Account) {
         let size = bincode::serialize(&e.tx)
             .map(|b| b.len() as u64)
             .unwrap_or(0);
-        bc.mempool.insert(
+        bc.mempool_consumer.insert(
             (e.sender.clone(), e.nonce),
             MempoolEntry {
                 tx: e.tx.clone(),
@@ -87,7 +87,7 @@ fn rebuild_batched(entries: &[MempoolEntryDisk], acc: &Account) {
             let size = bincode::serialize(&e.tx)
                 .map(|b| b.len() as u64)
                 .unwrap_or(0);
-            bc.mempool.insert(
+            bc.mempool_consumer.insert(
                 (e.sender.clone(), e.nonce),
                 MempoolEntry {
                     tx: e.tx.clone(),
