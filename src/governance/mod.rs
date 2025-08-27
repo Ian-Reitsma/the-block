@@ -5,7 +5,7 @@ mod store;
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
-pub use params::{registry, ParamSpec, Params};
+pub use params::{registry, ParamSpec, Params, Runtime};
 pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS};
 
 use serde::{Deserialize, Serialize};

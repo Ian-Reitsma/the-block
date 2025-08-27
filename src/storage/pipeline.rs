@@ -1,14 +1,70 @@
 use super::types::{ChunkRef, ObjectManifest, Redundancy, StoreReceipt};
 use crate::simple_db::SimpleDb;
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{
+    STORAGE_CHUNK_SIZE_BYTES, STORAGE_FINAL_CHUNK_SIZE, STORAGE_INITIAL_CHUNK_SIZE,
+    STORAGE_PROVIDER_LOSS_RATE, STORAGE_PROVIDER_RTT_MS, STORAGE_PUT_CHUNK_SECONDS,
+    STORAGE_PUT_ETA_SECONDS,
+};
 use blake3::Hasher;
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
 use rand::{rngs::OsRng, RngCore};
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 const VERSION: u16 = 1;
-const DEFAULT_CHUNK: usize = 1024 * 1024; // 1 MiB
+const DEFAULT_CHUNK: u32 = 1024 * 1024; // 1 MiB
+const CHUNK_LADDER: [u32; 5] = [
+    256 * 1024,
+    512 * 1024,
+    1024 * 1024,
+    2 * 1024 * 1024,
+    4 * 1024 * 1024,
+];
+const TARGET_TIME_SECS: f64 = 3.0;
+const LOSS_HI: f64 = 0.02; // 2%
+const LOSS_LO: f64 = 0.002; // 0.2%
+const RTT_HI_MS: f64 = 200.0;
+const RTT_LO_MS: f64 = 80.0;
+
+pub trait Provider {
+    fn id(&self) -> &str;
+    fn send_chunk(&self, _data: &[u8]) -> Result<(), String> {
+        Ok(())
+    }
+    fn rtt_ewma(&self) -> f64 {
+        0.0
+    }
+    fn loss_ewma(&self) -> f64 {
+        0.0
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProviderProfile {
+    pub bw_ewma: f64,
+    pub rtt_ewma: f64,
+    pub loss_ewma: f64,
+    pub preferred_chunk: u32,
+    pub stable_chunks: u32,
+    pub updated_at: u64,
+}
+
+impl ProviderProfile {
+    fn new() -> Self {
+        Self {
+            bw_ewma: 0.0,
+            rtt_ewma: 0.0,
+            loss_ewma: 0.0,
+            preferred_chunk: DEFAULT_CHUNK,
+            stable_chunks: 0,
+            updated_at: 0,
+        }
+    }
+}
 
 pub struct StoragePipeline {
     db: SimpleDb,
@@ -21,23 +77,80 @@ impl StoragePipeline {
         }
     }
 
-    pub fn put_object(&mut self, data: &[u8], lane: &str) -> Result<StoreReceipt, String> {
+    fn profile_key(provider: &str) -> String {
+        format!("provider_profiles/{}", provider)
+    }
+
+    fn load_profile(&self, provider: &str) -> ProviderProfile {
+        let key = Self::profile_key(provider);
+        self.db
+            .get(&key)
+            .and_then(|b| bincode::deserialize(&b).ok())
+            .unwrap_or_else(ProviderProfile::new)
+    }
+
+    fn save_profile(&mut self, provider: &str, profile: &ProviderProfile) {
+        let key = Self::profile_key(provider);
+        if let Ok(bytes) = bincode::serialize(profile) {
+            let _ = self.db.insert(&key, bytes);
+        }
+    }
+
+    pub fn get_profile(&self, provider: &str) -> Option<ProviderProfile> {
+        let key = Self::profile_key(provider);
+        self.db
+            .get(&key)
+            .and_then(|b| bincode::deserialize(&b).ok())
+    }
+
+    fn clamp_to_ladder(bytes: f64) -> u32 {
+        let mut chosen = CHUNK_LADDER[0];
+        for step in CHUNK_LADDER.iter() {
+            if *step as f64 <= bytes {
+                chosen = *step;
+            }
+        }
+        chosen
+    }
+
+    fn ewma(prev: f64, new: f64) -> f64 {
+        if prev == 0.0 {
+            new
+        } else {
+            prev * 0.8 + new * 0.2
+        }
+    }
+
+    pub fn put_object<P: Provider>(
+        &mut self,
+        data: &[u8],
+        lane: &str,
+        provider: &P,
+    ) -> Result<StoreReceipt, String> {
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
         let key = Key::from_slice(&key_bytes);
         let cipher = ChaCha20Poly1305::new(key);
 
+        let mut profile = self.load_profile(provider.id());
+        let chunk_len = profile.preferred_chunk as usize;
+        #[cfg(feature = "telemetry")]
+        STORAGE_INITIAL_CHUNK_SIZE.set(chunk_len as i64);
+
         let mut chunks = Vec::new();
         let mut offset = 0;
         while offset < data.len() {
-            let end = (offset + DEFAULT_CHUNK).min(data.len());
+            let end = (offset + chunk_len).min(data.len());
             let chunk = &data[offset..end];
             let mut nonce = [0u8; 12];
             OsRng.fill_bytes(&mut nonce);
             let nonce = Nonce::from_slice(&nonce);
+            let start = Instant::now();
             let ciphertext = cipher.encrypt(nonce, chunk).map_err(|e| e.to_string())?;
             let mut blob = nonce.to_vec();
             blob.extend_from_slice(&ciphertext);
+            provider.send_chunk(&blob)?;
+            let dur = start.elapsed();
             let mut h = Hasher::new();
             h.update(&blob);
             let id = *h.finalize().as_bytes();
@@ -47,12 +160,55 @@ impl StoragePipeline {
                 id,
                 nodes: vec!["local".into()],
             });
+            let throughput = chunk.len() as f64 / dur.as_secs_f64();
+            profile.bw_ewma = Self::ewma(profile.bw_ewma, throughput);
+            profile.rtt_ewma = Self::ewma(profile.rtt_ewma, provider.rtt_ewma());
+            profile.loss_ewma = Self::ewma(profile.loss_ewma, provider.loss_ewma());
+            profile.stable_chunks += 1;
+            #[cfg(feature = "telemetry")]
+            {
+                STORAGE_CHUNK_SIZE_BYTES.observe(chunk.len() as f64);
+                STORAGE_PUT_CHUNK_SECONDS.observe(dur.as_secs_f64());
+                STORAGE_PROVIDER_RTT_MS.observe(provider.rtt_ewma());
+                STORAGE_PROVIDER_LOSS_RATE.observe(provider.loss_ewma());
+            }
             offset = end;
         }
+
+        // Decide next chunk size using hysteresis
+        let mut desired = Self::clamp_to_ladder(profile.bw_ewma * TARGET_TIME_SECS);
+        let current = profile.preferred_chunk;
+        let step_idx = CHUNK_LADDER.iter().position(|s| *s == current).unwrap_or(2);
+        let desired_idx = CHUNK_LADDER
+            .iter()
+            .position(|s| *s == desired)
+            .unwrap_or(step_idx);
+        let diff = desired_idx as i32 - step_idx as i32;
+
+        if profile.loss_ewma > LOSS_HI || profile.rtt_ewma > RTT_HI_MS {
+            desired = CHUNK_LADDER[step_idx.saturating_sub(1)]
+        } else if profile.loss_ewma < LOSS_LO && profile.rtt_ewma < RTT_LO_MS {
+            // allow desired as computed
+        } else {
+            desired = current;
+        }
+
+        if desired != current && profile.stable_chunks >= 3 {
+            if (diff.abs() as usize) >= 1 {
+                profile.preferred_chunk = desired;
+                profile.stable_chunks = 0;
+            }
+        }
+
+        if let Ok(secs) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            profile.updated_at = secs.as_secs();
+        }
+        self.save_profile(provider.id(), &profile);
+
         let mut manifest = ObjectManifest {
             version: VERSION,
             total_len: data.len() as u64,
-            chunk_len: DEFAULT_CHUNK as u32,
+            chunk_len: chunk_len as u32,
             chunks,
             redundancy: Redundancy::None,
             content_key_enc: key_bytes.to_vec(),
@@ -77,6 +233,14 @@ impl StoragePipeline {
         let rec_bytes = bincode::serialize(&receipt).map_err(|e| e.to_string())?;
         self.db
             .insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes);
+        #[cfg(feature = "telemetry")]
+        {
+            STORAGE_FINAL_CHUNK_SIZE.set(profile.preferred_chunk as i64);
+            if profile.bw_ewma > 0.0 {
+                let eta = data.len() as f64 / profile.bw_ewma;
+                STORAGE_PUT_ETA_SECONDS.set(eta as i64);
+            }
+        }
         Ok(receipt)
     }
 
@@ -104,5 +268,13 @@ impl StoragePipeline {
             out.extend_from_slice(&plain);
         }
         Ok(out)
+    }
+
+    #[cfg(test)]
+    pub fn get_manifest(&self, manifest_hash: &[u8; 32]) -> Option<ObjectManifest> {
+        let key = format!("manifest/{}", hex::encode(manifest_hash));
+        self.db
+            .get(&key)
+            .and_then(|b| bincode::deserialize(&b).ok())
     }
 }

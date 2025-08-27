@@ -127,11 +127,13 @@ fn save_with_metrics(path: &Path) {
                 }
             }
         }
-        Err(e) => {
+        Err(err) => {
             #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-            warn!("failed to write price board {}: {e}", path.display());
+            warn!("failed to write price board {}: {err}", path.display());
             #[cfg(feature = "telemetry")]
             PRICE_BOARD_SAVE_TOTAL.with_label_values(&["io_err"]).inc();
+            #[cfg(not(any(feature = "telemetry", feature = "test-telemetry")))]
+            let _ = err;
         }
     }
 }
@@ -142,7 +144,7 @@ fn spawn_saver<C: Clock>(path: PathBuf, interval: Duration, clock: C) {
     let handle = thread::spawn(move || {
         let mut last = clock.now();
         while !stop_clone.load(Ordering::SeqCst) {
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(Duration::from_millis(50));
             let now = clock.now();
             if now.duration_since(last) >= interval {
                 last = now;

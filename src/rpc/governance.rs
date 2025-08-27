@@ -1,5 +1,7 @@
 use super::RpcError;
-use crate::governance::{GovStore, ParamKey, Params, Proposal, ProposalStatus, Vote, VoteChoice};
+use crate::governance::{
+    GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
+};
 use serde_json::json;
 
 fn parse_key(k: &str) -> Option<ParamKey> {
@@ -104,10 +106,11 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
 pub fn gov_rollback_last(
     store: &GovStore,
     params: &mut Params,
+    rt: &mut Runtime,
     current_epoch: u64,
 ) -> Result<serde_json::Value, RpcError> {
     store
-        .rollback_last(current_epoch, params)
+        .rollback_last(current_epoch, rt, params)
         .map_err(|_| RpcError {
             code: -32064,
             message: "rollback failed",

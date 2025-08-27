@@ -1,6 +1,7 @@
 #![allow(clippy::needless_range_loop)]
 
 use std::fs;
+use std::sync::Once;
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
@@ -10,10 +11,15 @@ use the_block::{
 
 mod util;
 use util::temp::temp_dir;
+use serial_test::serial;
+
+static PY_INIT: Once = Once::new();
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
+    PY_INIT.call_once(|| {
+        pyo3::prepare_freethreaded_python();
+    });
 }
 
 fn build_signed_tx(
@@ -39,6 +45,7 @@ fn build_signed_tx(
 }
 
 #[test]
+#[serial]
 fn replacement_rejected() {
     init();
     let dir = temp_dir("temp_replace");
@@ -54,6 +61,7 @@ fn replacement_rejected() {
 }
 
 #[test]
+#[serial]
 fn eviction_via_drop_transaction() {
     init();
     let dir = temp_dir("temp_evict");
@@ -74,6 +82,7 @@ fn eviction_via_drop_transaction() {
 }
 
 #[test]
+#[serial]
 fn ttl_expiry_purges_and_counts() {
     init();
     let dir = temp_dir("temp_ttl");
@@ -98,6 +107,7 @@ fn ttl_expiry_purges_and_counts() {
 }
 
 #[test]
+#[serial]
 fn fee_floor_enforced() {
     init();
     let dir = temp_dir("temp_fee_floor");
@@ -110,6 +120,7 @@ fn fee_floor_enforced() {
 }
 
 #[test]
+#[serial]
 fn orphan_sweep_removes_missing_sender() {
     init();
     let dir = temp_dir("temp_orphan");
@@ -129,6 +140,7 @@ fn orphan_sweep_removes_missing_sender() {
 }
 
 #[test]
+#[serial]
 fn orphan_ratio_triggers_rebuild() {
     init();
     let dir = temp_dir("temp_orphan_ratio");
@@ -147,6 +159,7 @@ fn orphan_ratio_triggers_rebuild() {
 }
 
 #[test]
+#[serial]
 fn heap_orphan_stress_triggers_rebuild_and_orders() {
     init();
     let dir = temp_dir("temp_heap_orphan");
@@ -187,6 +200,7 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
 }
 
 #[test]
+#[serial]
 fn orphan_drop_decrements_counter() {
     init();
     let dir = temp_dir("temp_orphan_drop");
@@ -208,6 +222,7 @@ fn orphan_drop_decrements_counter() {
 }
 
 #[test]
+#[serial]
 fn ttl_purge_drops_orphan_and_decrements_counter() {
     init();
     let dir = temp_dir("temp_orphan_ttl");
@@ -236,6 +251,7 @@ fn ttl_purge_drops_orphan_and_decrements_counter() {
 }
 
 #[test]
+#[serial]
 fn drop_lock_poisoned_error_and_recovery() {
     init();
     let dir = temp_dir("temp_drop_poison");
@@ -270,6 +286,7 @@ fn drop_lock_poisoned_error_and_recovery() {
 }
 
 #[test]
+#[serial]
 fn submit_lock_poisoned_error_and_recovery() {
     init();
     let dir = temp_dir("temp_submit_poison");
@@ -303,6 +320,7 @@ fn submit_lock_poisoned_error_and_recovery() {
 }
 
 #[test]
+#[serial]
 fn eviction_panic_rolls_back() {
     init();
     let dir = temp_dir("temp_evict_panic");
@@ -329,6 +347,7 @@ fn eviction_panic_rolls_back() {
 }
 
 #[test]
+#[serial]
 fn admission_panic_rolls_back() {
     init();
     let dir = temp_dir("temp_admit_panic");
@@ -356,6 +375,7 @@ fn admission_panic_rolls_back() {
 }
 
 #[test]
+#[serial]
 fn comparator_orders_by_fee_expiry_hash() {
     init();
     let ttl = 10;

@@ -25,5 +25,19 @@ The exporter currently tracks:
 - `tx_rejected_total{reason}` – transactions rejected with a labeled reason
 - `block_mined_total` – blocks successfully mined
 - `mempool_size` – gauge of current mempool size
+- `storage_chunk_size_bytes` – distribution of chunk sizes written during uploads
+- `storage_put_chunk_seconds` – time taken to store individual chunks
+- `storage_provider_rtt_ms` – observed storage provider round-trip time
+- `storage_provider_loss_rate` – observed storage provider loss rate
+- `storage_initial_chunk_size` / `storage_final_chunk_size` – first and last chunk sizes per object
+- `storage_put_eta_seconds` – estimated total upload time for the current object
+- `settle_applied_total` – receipts successfully debited and credited
+- `settle_failed_total{reason}` – settlement failures by reason
+- `settle_mode_change_total{to}` – settlement mode transitions
+- `param_change_pending{key}` – governance parameter changes queued for activation
+- `param_change_active{key}` – current active governance parameter values
+- `synthetic_convergence_seconds` – end-to-end probe duration emitted by scripts/synthetic.sh
+- `synthetic_success_total` – successful synthetic runs
+- `synthetic_fail_total{step}` – probe failures by step
 
 For a full list of counters, see `src/telemetry.rs`.

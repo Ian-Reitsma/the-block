@@ -1,0 +1,24 @@
+groups:
+  - name: chain-health
+    rules:
+      - alert: ConvergenceLag
+        expr: histogram_quantile(0.95, sum(rate(gossip_convergence_seconds_bucket[5m])) by (le)) > 30
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Chain convergence p95 above 30s"
+      - alert: ConsumerFeeComfortBreached
+        expr: max_over_time(CONSUMER_FEE_P90[10m]) > on() param_change_active{key="ConsumerFeeComfortP90Microunits"}
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Consumer fee p90 above comfort threshold"
+      - alert: IndustrialDeferralRatioHigh
+        expr: (increase(INDUSTRIAL_DEFERRED_TOTAL[10m]) / clamp_min(increase(INDUSTRIAL_ADMITTED_TOTAL[10m]) + increase(INDUSTRIAL_DEFERRED_TOTAL[10m]), 1)) > 0.3
+        for: 20m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Industrial deferral ratio above 30%"

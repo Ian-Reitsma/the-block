@@ -1,6 +1,7 @@
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -12,6 +13,8 @@ pub struct Capacity {
 
 static HISTORY: Mutex<VecDeque<u64>> = Mutex::new(VecDeque::new());
 const WINDOW: usize = 8;
+
+static MIN_CAPACITY: AtomicU64 = AtomicU64::new(10);
 
 // --- Fair-share accounting -------------------------------------------------
 
@@ -66,6 +69,9 @@ fn refill_quota(q: &mut Quota, now: Instant) {
 /// Check fair-share and burst quotas. `demand` is in micro-shard-seconds.
 pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), RejectReason> {
     let cap = capacity_estimator();
+    if cap.shards_per_sec < MIN_CAPACITY.load(Ordering::Relaxed) {
+        return Err(RejectReason::Capacity);
+    }
     let window_cap = cap.shards_per_sec as f64 * WINDOW_SECS;
     let demand_f = demand as f64;
     let now = Instant::now();
@@ -178,4 +184,12 @@ pub fn reset() {
     BUYER_QUOTA.clear();
     PROVIDER_QUOTA.clear();
     HISTORY.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
+pub fn set_min_capacity(v: u64) {
+    MIN_CAPACITY.store(v, Ordering::Relaxed);
+}
+
+pub fn min_capacity() -> u64 {
+    MIN_CAPACITY.load(Ordering::Relaxed)
 }

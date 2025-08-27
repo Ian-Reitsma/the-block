@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
 use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 #[cfg(feature = "telemetry")]
@@ -10,10 +11,15 @@ use the_block::{
 
 mod util;
 use util::temp::temp_dir;
+use serial_test::serial;
+
+static PY_INIT: Once = Once::new();
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
-    pyo3::prepare_freethreaded_python();
+    PY_INIT.call_once(|| {
+        pyo3::prepare_freethreaded_python();
+    });
 }
 
 fn build_signed_tx(
@@ -39,6 +45,7 @@ fn build_signed_tx(
 }
 
 #[test]
+#[serial]
 fn rejects_unknown_sender() {
     init();
     let dir = temp_dir("temp_admission");
@@ -50,6 +57,7 @@ fn rejects_unknown_sender() {
 }
 
 #[test]
+#[serial]
 fn mine_block_skips_nonce_gaps() {
     init();
     let dir = temp_dir("temp_admission");
@@ -81,6 +89,7 @@ fn mine_block_skips_nonce_gaps() {
 }
 
 #[test]
+#[serial]
 fn validate_block_rejects_nonce_gap() {
     init();
     let dir = temp_dir("temp_admission");
@@ -167,6 +176,7 @@ fn validate_block_rejects_nonce_gap() {
 }
 
 #[test]
+#[serial]
 fn rejects_fee_below_min() {
     init();
     let dir = temp_dir("temp_fee");
@@ -179,6 +189,7 @@ fn rejects_fee_below_min() {
 }
 
 #[test]
+#[serial]
 fn mempool_full_evicts_lowest() {
     init();
     let dir = temp_dir("temp_full");
@@ -197,6 +208,7 @@ fn mempool_full_evicts_lowest() {
 }
 
 #[test]
+#[serial]
 fn fee_per_byte_boundary() {
     init();
     let dir = temp_dir("temp_fpb");
@@ -232,6 +244,7 @@ fn fee_per_byte_boundary() {
 
 #[cfg(feature = "telemetry")]
 #[test]
+#[serial]
 fn industrial_deferred_when_consumer_fees_high() {
     init();
     let dir = temp_dir("temp_defer");
@@ -277,6 +290,7 @@ fn industrial_deferred_when_consumer_fees_high() {
 }
 
 #[test]
+#[serial]
 fn lock_poisoned_error_and_recovery() {
     init();
     let dir = temp_dir("temp_poison");
@@ -315,6 +329,7 @@ fn lock_poisoned_error_and_recovery() {
 }
 
 #[test]
+#[serial]
 fn enforces_per_account_pending_limit() {
     init();
     let dir = temp_dir("temp_pending");
@@ -333,6 +348,7 @@ fn enforces_per_account_pending_limit() {
 }
 
 #[test]
+#[serial]
 fn reject_overspend_multiple_nonces() {
     init();
     let dir = temp_dir("temp_overspend_multi");
@@ -350,6 +366,7 @@ fn reject_overspend_multiple_nonces() {
 }
 
 #[test]
+#[serial]
 fn validate_block_rejects_wrong_difficulty() {
     init();
     let dir = temp_dir("temp_admission");
@@ -380,6 +397,7 @@ fn validate_block_rejects_wrong_difficulty() {
 }
 
 #[test]
+#[serial]
 fn admission_panic_rolls_back_all_steps() {
     init();
     let (sk, _pk) = generate_keypair();

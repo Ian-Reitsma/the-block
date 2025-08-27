@@ -1,0 +1,53 @@
+name: release-gate
+
+on:
+  workflow_call:
+
+jobs:
+  gate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.82.0
+          profile: minimal
+          override: true
+      - name: Unit and integration tests
+        run: cargo nextest run --all-features
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+      - name: WAL fuzz (120s)
+        run: cargo +nightly fuzz run wal_fuzz -- -max_total_time=120 -artifact_prefix=fuzz/wal/ -runs=0
+      - name: Upload WAL artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wal-fuzz
+          path: fuzz/wal/
+      - name: Chaos tests
+        run: cargo test --features test-telemetry --release --test chaos -- --test-threads=1
+      - name: Probe suite
+        run: ./scripts/synthetic.sh
+      - name: Dashboard lint
+        run: make -C monitoring lint
+      - name: Build release binary
+        run: cargo build --release
+      - name: Explorer smoke
+        run: ./scripts/explorer_smoke.sh
+      - name: Reproducible build & verify
+        run: |
+          ./scripts/generate_sbom.sh SBOM.json
+          ./scripts/release_provenance.sh > provenance.json
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@$(git log -1 --format=%ct) -C target/release -cf node.tar node
+          gzip -n node.tar
+          sha256sum node.tar.gz > checksums.txt
+          cosign sign-blob --output-signature checksums.txt.sig checksums.txt || true
+          ./scripts/verify_release.sh node.tar.gz checksums.txt checksums.txt.sig
+          ! readelf -S target/release/node | grep -q debug
+          size=$(stat -c%s target/release/node)
+          echo "node_size_bytes=$size" >> $GITHUB_STEP_SUMMARY
+      - name: Gate summary
+        run: echo "release gate passed" >> $GITHUB_STEP_SUMMARY

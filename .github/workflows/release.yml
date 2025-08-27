@@ -1,0 +1,66 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  gate:
+    uses: ./.github/workflows/release_gate.yml
+
+  publish:
+    needs: gate
+    runs-on: ${{ matrix.os }}
+    env:
+      TZ: UTC
+      LC_ALL: C
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+          - os: macos-14
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.82.0
+          profile: minimal
+          override: true
+      - name: Set build metadata
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> $GITHUB_ENV
+      - name: Build
+        env:
+          RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--build-id=sha1"
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          BIN=node
+          STRIP=strip
+          if [[ '${{ matrix.os }}' == 'macos-14' ]]; then STRIP='strip -x'; fi
+          $STRIP target/${{ matrix.target }}/release/$BIN
+          tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@$SOURCE_DATE_EPOCH -C target/${{ matrix.target }}/release -cf $BIN.tar $BIN
+          gzip -n $BIN.tar
+          mv $BIN.tar.gz $BIN-${{ matrix.target }}.tar.gz
+          sha256sum $BIN-${{ matrix.target }}.tar.gz > checksums.txt
+          ./scripts/generate_sbom.sh SBOM-${{ matrix.target }}.json
+          rustc -Vv | tee toolchain.txt
+          printf '{"commit":"%s","repo":"%s"}' $(git rev-parse HEAD) $GITHUB_SERVER_URL/$GITHUB_REPOSITORY > provenance.json
+          cosign sign-blob --output-signature checksums.txt.sig checksums.txt || true
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            node-${{ matrix.target }}.tar.gz
+            checksums.txt
+            checksums.txt.sig
+            SBOM-${{ matrix.target }}.json
+            provenance.json
+            toolchain.txt

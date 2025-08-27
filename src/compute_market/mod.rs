@@ -10,6 +10,7 @@ pub mod errors;
 pub mod matcher;
 pub mod price_board;
 pub mod receipt;
+pub mod settlement;
 pub mod workloads;
 
 pub use errors::MarketError;

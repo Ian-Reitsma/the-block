@@ -33,3 +33,14 @@ swarm-test:
         cargo test --all-features --tests net_gossip; \
     fi
     sh scripts/swarm.sh down
+probe:tip:
+    cargo run -p probe -- tip --timeout 5
+
+probe:mine:
+    cargo run -p probe -- mine-one --timeout 5
+
+probe:gossip:
+    cargo run -p probe -- gossip-check --timeout 10
+
+support:bundle:
+    bash scripts/support_bundle.sh

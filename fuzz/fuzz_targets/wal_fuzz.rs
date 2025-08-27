@@ -1,14 +1,48 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use arbitrary::Arbitrary;
+use arbitrary::{Arbitrary, Unstructured};
 use std::collections::HashMap;
 use tempfile::tempdir;
 use the_block::SimpleDb;
 
+const MAX_BYTES: usize = 1 << 20; // 1 MiB
+const MAX_OPS: usize = 32;
+
+fn small_vec(u: &mut Unstructured<'_>) -> arbitrary::Result<Vec<u8>> {
+    let len = u.int_in_range(0..=MAX_BYTES as u64)? as usize;
+    let mut v = vec![0u8; len];
+    u.fill_buffer(&mut v)?;
+    Ok(v)
+}
+
+fn limited_ops(u: &mut Unstructured<'_>) -> arbitrary::Result<Vec<Op>> {
+    let len = u.int_in_range(0..=MAX_OPS as u64)? as usize;
+    let mut ops = Vec::with_capacity(len);
+    for _ in 0..len {
+        ops.push(Op::arbitrary(u)?);
+    }
+    Ok(ops)
+}
+
 #[derive(Arbitrary, Debug)]
+struct Input {
+    #[arbitrary(with = limited_ops)]
+    ops: Vec<Op>,
+}
+
+#[derive(Debug)]
 enum Op {
     Put(Vec<u8>, Vec<u8>),
     Del(Vec<u8>),
+}
+
+impl<'a> Arbitrary<'a> for Op {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        match u.int_in_range(0..=1)? {
+            0 => Ok(Op::Put(small_vec(u)?, small_vec(u)?)),
+            _ => Ok(Op::Del(small_vec(u)?)),
+        }
+    }
 }
 
 fn apply_ops(ops: &[Op], trunc: Option<u64>) -> HashMap<String, Vec<u8>> {
@@ -52,9 +86,9 @@ fn apply_ops(ops: &[Op], trunc: Option<u64>) -> HashMap<String, Vec<u8>> {
     result
 }
 
-fuzz_target!(|ops: Vec<Op>| {
-    let map = apply_ops(&ops, Some(256));
-    let map2 = apply_ops(&ops, None);
+fuzz_target!(|input: Input| {
+    let map = apply_ops(&input.ops, Some(256));
+    let map2 = apply_ops(&input.ops, None);
     for (k, v) in map.iter() {
         assert_eq!(map2.get(k), Some(v));
     }

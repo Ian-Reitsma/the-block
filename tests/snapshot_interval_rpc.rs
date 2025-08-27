@@ -14,13 +14,17 @@ use tokio::net::TcpStream;
 
 mod util;
 
-async fn rpc(addr: &str, body: &str) -> Value {
+async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let req = format!(
-        "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
+    let mut req = format!(
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
+        body.len()
     );
+    if let Some(t) = token {
+        req.push_str(&format!("Authorization: Bearer {}\r\n", t));
+    }
+    req.push_str("\r\n");
+    req.push_str(body);
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut resp = vec![0u8; 1024];
     let n = stream.read(&mut resp).await.unwrap();
@@ -37,10 +41,18 @@ async fn snapshot_interval_persist() {
     std::fs::create_dir_all(dir.path()).unwrap();
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "testtoken").unwrap();
+    let rpc_cfg = the_block::config::RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        ..Default::default()
+    };
     let handle = tokio::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        rpc_cfg,
         tx,
     ));
     let addr = rx.await.unwrap();
@@ -48,6 +60,7 @@ async fn snapshot_interval_persist() {
     let small = rpc(
         &addr,
         r#"{"method":"set_snapshot_interval","params":{"interval":5}}"#,
+        Some("testtoken"),
     )
     .await;
     assert_eq!(small["error"]["message"], "interval too small");
@@ -55,6 +68,7 @@ async fn snapshot_interval_persist() {
     let ok = rpc(
         &addr,
         r#"{"method":"set_snapshot_interval","params":{"interval":20}}"#,
+        Some("testtoken"),
     )
     .await;
     assert!(ok["error"].is_null());
@@ -83,16 +97,24 @@ async fn snapshot_interval_restart_cycle() {
     for interval in [30u64, 40, 50] {
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = tokio::sync::oneshot::channel();
+        let token_file = dir.path().join(format!("token{interval}"));
+        std::fs::write(&token_file, "testtoken").unwrap();
+        let rpc_cfg = the_block::config::RpcConfig {
+            admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+            enable_debug: true,
+            ..Default::default()
+        };
         let handle = tokio::spawn(run_rpc_server(
             Arc::clone(&bc),
             Arc::clone(&mining),
             "127.0.0.1:0".to_string(),
+            rpc_cfg,
             tx,
         ));
         let addr = rx.await.unwrap();
         let body =
             format!(r#"{{"method":"set_snapshot_interval","params":{{"interval":{interval}}}}}"#);
-        let _ = rpc(&addr, &body).await;
+        let _ = rpc(&addr, &body, Some("testtoken")).await;
         handle.abort();
         let _ = handle.await;
         log::logger().flush();

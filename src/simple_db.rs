@@ -1,3 +1,5 @@
+#[cfg(feature = "telemetry")]
+use crate::telemetry::WAL_CORRUPT_RECOVERY_TOTAL;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -62,6 +64,11 @@ impl SimpleDb {
                         None => {
                             map.remove(&entry.record.key);
                         }
+                    }
+                } else {
+                    #[cfg(feature = "telemetry")]
+                    {
+                        WAL_CORRUPT_RECOVERY_TOTAL.inc();
                     }
                 }
             }
