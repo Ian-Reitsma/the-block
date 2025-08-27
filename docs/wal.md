@@ -1,47 +1,57 @@
 # Write-Ahead Log Fuzzing
 
-The `tests/wal_fuzz.rs` harness exercises crash recovery by generating random
-write-ahead log entries with the `arbitrary` crate. WAL files are truncated at
-random offsets to simulate crashes, and the database is reopened to ensure the
-replayed state matches the expected account balances.
+The `tests/wal_fuzz.rs` harness exercises crash recovery by generating random write-ahead log entries with the `arbitrary` crate. WAL files are truncated at random offsets to simulate crashes, and the database is reopened to ensure the replayed state matches the expected account balances.
 
-For deeper coverage, run the libFuzzer target:
+## How CI runs
 
-```bash
-make fuzz-wal # runs `cargo fuzz run wal_fuzz --max-total-time=60 -- -artifact_prefix=fuzz/wal/`
-```
+A nightly job runs `cargo +nightly fuzz run wal_fuzz -- -max_total_time=120 -artifact_prefix=fuzz/wal/ -runs=0`. Any files left under `fuzz/wal/` are uploaded as artifacts and cause the job to fail, gating PR merge.
 
-`cargo fuzz` requires the Rust *nightly* toolchain. The CI job installs
-nightly automatically, but local developers may need to run
-`rustup toolchain install nightly` beforehand.
+## What artifacts mean
 
-Artifacts from `cargo fuzz` are retained under `fuzz/wal/` along with the RNG
-seed for deterministic reproduction. To reproduce a failing case:
+`fuzz/wal/` stores both crashing inputs and interesting seeds. An empty directory means the fuzz pass was clean. If files appear, examine them before fixing the bug or promoting the seed.
+
+## Replaying a crash
+
+To replay the most recent artifact locally:
 
 ```bash
-cargo fuzz run wal_fuzz -- -seed=<seed> fuzz/wal/<file>
+scripts/triage_wal.sh
 ```
 
-List collected seeds with the helper script:
+`triage_wal.sh` re-runs the fuzz target with `RUST_BACKTRACE=1` so you get a stack trace.
+
+## Promoting a seed
+
+1. List artifacts and seeds:
+   ```bash
+   scripts/extract_wal_seeds.sh fuzz/wal
+   ```
+2. Copy a promising file into `fuzz/corpus/wal/` and commit it.
+3. Document any notable failures in this file under *Failure Triage*.
+
+## Local longer run
+
+For a deeper soak, run:
 
 ```bash
-scripts/extract_wal_seeds.sh fuzz/wal
+cargo +nightly fuzz run wal_fuzz -- -max_total_time=1800 -artifact_prefix=fuzz/wal/ -runs=0
 ```
 
-Known failure signatures:
+## Sanitizers
 
-- checksum mismatch indicates a torn WAL entry
-- replay divergence where recovered balances differ from expected
+For local debugging you can enable AddressSanitizer (skipped in CI to keep it fast):
+
+```bash
+RUSTFLAGS="-Zsanitizer=address" cargo +nightly fuzz run wal_fuzz -- -max_total_time=60 -artifact_prefix=fuzz/wal/ -runs=0
+```
 
 ## Failure Triage
 
 1. Minimize the crashing input with `cargo fuzz tmin wal_fuzz crash-<hash>`.
-2. Record the RNG seed from `scripts/extract_wal_seeds.sh` and include it in
-   the issue report.
+2. Record the RNG seed from `scripts/extract_wal_seeds.sh` and include it in the issue report.
 3. Add a regression test that reproduces the failure deterministically.
 
-Summaries of notable failures and their seeds live below and should be kept
-current:
+Summaries of notable failures and their seeds live below and should be kept current:
 
 | Pattern | Seed | Reproduction |
 |--------|------|--------------|

@@ -652,6 +652,7 @@ impl Drop for Blockchain {
         if std::env::var("TB_PRESERVE").is_ok() {
             return;
         }
+        crate::compute_market::settlement::Settlement::shutdown();
         if !self.path.is_empty() {
             let _ = std::fs::remove_dir_all(&self.path);
         }
@@ -661,6 +662,9 @@ impl Drop for Blockchain {
 impl Blockchain {
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+    pub fn set_consumer_p90_comfort(&mut self, v: u64) {
+        self.comfort_threshold_p90 = v;
     }
     fn adjust_mempool_size(&self, lane: FeeLane, delta: isize) -> usize {
         use std::sync::atomic::Ordering::SeqCst;
@@ -1177,6 +1181,12 @@ impl Blockchain {
             pb.to_string_lossy().into_owned(),
             cfg.price_board_window,
             cfg.price_board_save_interval,
+        );
+        let settle_path = std::path::Path::new(path).join("settlement");
+        crate::compute_market::settlement::Settlement::init(
+            settle_path.to_string_lossy().as_ref(),
+            cfg.compute_market.settle_mode,
+            cfg.compute_market.min_fee_micros,
         );
         bc.config = cfg.clone();
         #[cfg(feature = "telemetry")]

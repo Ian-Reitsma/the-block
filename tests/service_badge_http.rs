@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
-use the_block::{rpc::run_rpc_server, Blockchain};
+use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -17,6 +17,7 @@ async fn badge_status_endpoint() {
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".into(),
+        RpcConfig::default(),
         tx,
     ));
     let addr = rx.await.unwrap();
@@ -24,7 +25,7 @@ async fn badge_status_endpoint() {
     // Initially no badge should be active.
     let mut stream = TcpStream::connect(&addr).await.unwrap();
     stream
-        .write_all(b"GET /badge/status HTTP/1.1\r\n\r\n")
+        .write_all(b"GET /badge/status HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
         .unwrap();
     let mut resp = vec![0u8; 256];
@@ -47,7 +48,7 @@ async fn badge_status_endpoint() {
 
     let mut stream = TcpStream::connect(&addr).await.unwrap();
     stream
-        .write_all(b"GET /badge/status HTTP/1.1\r\n\r\n")
+        .write_all(b"GET /badge/status HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .await
         .unwrap();
     let n = stream.read(&mut resp).await.unwrap();

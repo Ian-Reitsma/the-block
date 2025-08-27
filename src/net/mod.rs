@@ -2,15 +2,16 @@ pub mod ban_store;
 mod message;
 mod peer;
 
-use crate::{Blockchain, SignedTransaction};
+use crate::{Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 pub use message::{Handshake, Message, Payload};
 pub use peer::PeerSet;
@@ -52,13 +53,26 @@ impl Node {
 
     /// Start the listener thread handling inbound gossip.
     pub fn start(&self) -> thread::JoinHandle<()> {
+        let flag = ShutdownFlag::new();
+        self.start_with_flag(&flag)
+    }
+
+    /// Start the listener thread handling inbound gossip that stops when `shutdown` is triggered.
+    pub fn start_with_flag(&self, shutdown: &ShutdownFlag) -> thread::JoinHandle<()> {
         let listener = TcpListener::bind(self.addr).unwrap_or_else(|e| panic!("bind: {e}"));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|e| panic!("nonblock: {e}"));
+        let stop = shutdown.as_arc();
         let peers = self.peers.clone();
         let chain = Arc::clone(&self.chain);
-        thread::spawn(move || {
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let addr = stream.peer_addr().ok();
+        thread::spawn(move || loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match listener.accept() {
+                Ok((mut stream, addr)) => {
+                    let addr = Some(addr);
                     let mut buf = Vec::new();
                     if stream.read_to_end(&mut buf).is_ok() {
                         if let Ok(msg) = bincode::deserialize::<Message>(&buf) {
@@ -66,6 +80,10 @@ impl Node {
                         }
                     }
                 }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => break,
             }
         })
     }
@@ -109,6 +127,26 @@ impl Node {
         self.peers.list()
     }
 
+    /// Add a peer address to this node.
+    pub fn add_peer(&self, addr: SocketAddr) {
+        self.peers.add(addr);
+    }
+
+    /// Remove a peer address from this node.
+    pub fn remove_peer(&self, addr: SocketAddr) {
+        self.peers.remove(addr);
+    }
+
+    /// Clear all peers from this node.
+    pub fn clear_peers(&self) {
+        self.peers.clear();
+    }
+
+    /// Return this node's listening address.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
     /// Load seed peer addresses from `config` and perform discovery.
     pub fn discover_peers_from_file<P: AsRef<std::path::Path>>(&self, config: P) {
         if let Ok(data) = fs::read_to_string(config) {
@@ -139,7 +177,7 @@ impl Node {
 }
 
 pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
-    let mut stream = TcpStream::connect(addr)?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     stream.write_all(&bytes)?;
     Ok(())

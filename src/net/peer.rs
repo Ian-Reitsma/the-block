@@ -39,6 +39,20 @@ impl PeerSet {
         }
     }
 
+    /// Remove a peer from the set.
+    pub fn remove(&self, addr: SocketAddr) {
+        if let Ok(mut guard) = self.addrs.lock() {
+            guard.remove(&addr);
+        }
+    }
+
+    /// Clear all peers from the set.
+    pub fn clear(&self) {
+        if let Ok(mut guard) = self.addrs.lock() {
+            guard.clear();
+        }
+    }
+
     /// Return a snapshot of known peers.
     pub fn list(&self) -> Vec<SocketAddr> {
         self.addrs

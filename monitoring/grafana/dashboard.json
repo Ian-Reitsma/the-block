@@ -4,55 +4,165 @@
   "version": 1,
   "panels": [
     {
+      "type": "stat",
+      "title": "Probe Success Rate 10m",
+      "targets": [
+        {
+          "expr": "rate(synthetic_success_total[10m]) / (rate(synthetic_success_total[10m]) + rate(synthetic_fail_total[10m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1
+        }
+      },
+      "id": 9
+    },
+    {
+      "type": "stat",
+      "title": "Convergence p95 (s)",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(gossip_convergence_seconds_bucket[5m])) by (le))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "id": 10
+    },
+    {
+      "type": "stat",
+      "title": "Consumer fee p90 vs comfort",
+      "targets": [
+        {
+          "expr": "CONSUMER_FEE_P90"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
+      "id": 11
+    },
+    {
+      "type": "stat",
+      "title": "Industrial defer ratio 10m",
+      "targets": [
+        {
+          "expr": "(increase(INDUSTRIAL_DEFERRED_TOTAL[10m]) / clamp_min(increase(INDUSTRIAL_ADMITTED_TOTAL[10m]) + increase(INDUSTRIAL_DEFERRED_TOTAL[10m]),1))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1
+        }
+      },
+      "id": 12
+    },
+    {
       "type": "graph",
       "title": "Mempool Size",
-      "targets": [{"expr": "mempool_size"}],
+      "targets": [
+        {
+          "expr": "mempool_size"
+        }
+      ],
       "id": 1
     },
     {
       "type": "graph",
       "title": "Banned Peers",
-      "targets": [{"expr": "banned_peers_total"}],
+      "targets": [
+        {
+          "expr": "banned_peers_total"
+        }
+      ],
       "id": 2
     },
     {
       "type": "graph",
       "title": "Log Size Avg",
-      "targets": [{"expr": "sum(rate(log_size_bytes_sum[5m])) / sum(rate(log_size_bytes_count[5m]))"}],
+      "targets": [
+        {
+          "expr": "sum(rate(log_size_bytes_sum[5m])) / sum(rate(log_size_bytes_count[5m]))"
+        }
+      ],
       "id": 3
     },
     {
       "type": "graph",
       "title": "Snapshot Duration",
-      "targets": [{"expr": "histogram_quantile(0.9, sum(rate(snapshot_duration_seconds_bucket[5m])) by (le))"}],
-      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.9, sum(rate(snapshot_duration_seconds_bucket[5m])) by (le))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
       "id": 4
     },
     {
       "type": "graph",
       "title": "Snapshot Failures",
-      "targets": [{"expr": "snapshot_fail_total"}],
-      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {
+          "expr": "snapshot_fail_total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
       "id": 5
     },
     {
       "type": "graph",
       "title": "Badge Active",
-      "targets": [{"expr": "badge_active"}],
-      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {
+          "expr": "badge_active"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        }
+      },
       "id": 6
     },
     {
       "type": "graph",
       "title": "Badge Last Change",
-      "targets": [{"expr": "badge_last_change_seconds"}],
-      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {
+          "expr": "badge_last_change_seconds"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
       "id": 7
     },
     {
       "type": "graph",
       "title": "Matches per Minute",
-      "targets": [{"expr": "rate(matches_total[1m])"}],
+      "targets": [
+        {
+          "expr": "rate(matches_total[1m])"
+        }
+      ],
       "id": 8
     }
   ]

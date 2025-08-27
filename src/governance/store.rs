@@ -1,4 +1,7 @@
-use super::{registry, ParamKey, Params, Proposal, ProposalStatus, Vote, VoteChoice};
+use super::{registry, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice};
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING};
+use log::info;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
 use std::path::Path;
@@ -26,6 +29,15 @@ fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
 
 fn de<T: DeserializeOwned>(bytes: &[u8]) -> sled::Result<T> {
     bincode::deserialize(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
+}
+
+#[cfg(feature = "telemetry")]
+fn key_name(k: ParamKey) -> &'static str {
+    match k {
+        ParamKey::SnapshotIntervalSecs => "snapshot_interval_secs",
+        ParamKey::ConsumerFeeComfortP90Microunits => "consumer_fee_comfort_p90_microunits",
+        ParamKey::IndustrialAdmissionMinCapacity => "industrial_admission_min_capacity",
+    }
 }
 
 impl GovStore {
@@ -140,14 +152,31 @@ impl GovStore {
                 .unwrap_or_else(|| vec![]);
             list.push(proposal_id);
             self.activation_queue().insert(key_epoch, ser(&list)?)?;
+            #[cfg(feature = "telemetry")]
+            {
+                PARAM_CHANGE_PENDING
+                    .with_label_values(&[key_name(prop.key)])
+                    .set(1);
+            }
         } else {
             prop.status = ProposalStatus::Rejected;
+            #[cfg(feature = "telemetry")]
+            {
+                PARAM_CHANGE_PENDING
+                    .with_label_values(&[key_name(prop.key)])
+                    .set(0);
+            }
         }
         self.proposals().insert(&key, ser(&prop)?)?;
         Ok(prop.status)
     }
 
-    pub fn activate_ready(&self, current_epoch: u64, params: &mut Params) -> sled::Result<()> {
+    pub fn activate_ready(
+        &self,
+        current_epoch: u64,
+        rt: &mut Runtime,
+        params: &mut Params,
+    ) -> sled::Result<()> {
         let queue = self.activation_queue();
         let mut to_remove = vec![];
         for item in queue.iter() {
@@ -172,6 +201,8 @@ impl GovStore {
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
                                     .map_err(|_| sled::Error::Unsupported("apply".into()))?;
+                                (spec.apply_runtime)(prop.new_value, rt)
+                                    .map_err(|_| sled::Error::Unsupported("apply".into()))?;
                             }
                             let last = LastActivation {
                                 proposal_id: prop.id,
@@ -185,6 +216,19 @@ impl GovStore {
                             self.proposals().insert(&key, ser(&prop)?)?;
                             self.active_params()
                                 .insert(ser(&prop.key)?, ser(&prop.new_value)?)?;
+                            #[cfg(feature = "telemetry")]
+                            {
+                                PARAM_CHANGE_PENDING
+                                    .with_label_values(&[key_name(prop.key)])
+                                    .set(0);
+                                PARAM_CHANGE_ACTIVE
+                                    .with_label_values(&[key_name(prop.key)])
+                                    .set(prop.new_value);
+                            }
+                            info!(
+                                "gov_param_activated key={:?} new={} old={} epoch={}",
+                                prop.key, prop.new_value, old, current_epoch
+                            );
                         }
                     }
                 }
@@ -197,7 +241,12 @@ impl GovStore {
         Ok(())
     }
 
-    pub fn rollback_last(&self, current_epoch: u64, params: &mut Params) -> sled::Result<()> {
+    pub fn rollback_last(
+        &self,
+        current_epoch: u64,
+        rt: &mut Runtime,
+        params: &mut Params,
+    ) -> sled::Result<()> {
         if let Some(raw) = self.last_activation().get("last")? {
             let last: LastActivation = de(&raw)?;
             if current_epoch > last.activated_epoch + ROLLBACK_WINDOW_EPOCHS {
@@ -205,6 +254,8 @@ impl GovStore {
             }
             if let Some(spec) = registry().iter().find(|s| s.key == last.key) {
                 (spec.apply)(last.old_value, params)
+                    .map_err(|_| sled::Error::Unsupported("apply".into()))?;
+                (spec.apply_runtime)(last.old_value, rt)
                     .map_err(|_| sled::Error::Unsupported("apply".into()))?;
             }
             self.active_params()
@@ -215,6 +266,12 @@ impl GovStore {
                 self.proposals().insert(ser(&prop.id)?, ser(&prop)?)?;
             }
             self.last_activation().remove("last")?;
+            #[cfg(feature = "telemetry")]
+            {
+                PARAM_CHANGE_ACTIVE
+                    .with_label_values(&[key_name(last.key)])
+                    .set(last.old_value);
+            }
             return Ok(());
         }
         Err(sled::Error::ReportableBug("no activation".into()))

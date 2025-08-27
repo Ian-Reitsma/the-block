@@ -183,10 +183,12 @@ async fn main() -> std::process::ExitCode {
 
             let mining = Arc::new(AtomicBool::new(false));
             let (tx, rx) = tokio::sync::oneshot::channel();
+            let rpc_cfg = bc.lock().unwrap().config.rpc.clone();
             let handle = tokio::spawn(run_rpc_server(
                 Arc::clone(&bc),
                 Arc::clone(&mining),
                 rpc_addr.clone(),
+                rpc_cfg,
                 tx,
             ));
             let rpc_addr = rx.await.expect("rpc addr");

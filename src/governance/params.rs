@@ -1,4 +1,22 @@
 use super::ParamKey;
+use crate::Blockchain;
+use std::time::Duration;
+
+pub struct Runtime<'a> {
+    pub bc: &'a mut Blockchain,
+}
+
+impl<'a> Runtime<'a> {
+    pub fn set_consumer_p90_comfort(&mut self, v: u64) {
+        self.bc.set_consumer_p90_comfort(v);
+    }
+    pub fn set_min_capacity(&mut self, v: u64) {
+        crate::compute_market::admission::set_min_capacity(v);
+    }
+    pub fn set_snapshot_interval(&mut self, d: Duration) {
+        self.bc.snapshot.set_interval(d.as_secs());
+    }
+}
 
 pub struct ParamSpec {
     pub key: ParamKey,
@@ -7,6 +25,7 @@ pub struct ParamSpec {
     pub max: i64,
     pub unit: &'static str,
     pub apply: fn(i64, &mut Params) -> Result<(), ()>,
+    pub apply_runtime: fn(i64, &mut Runtime) -> Result<(), ()>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,8 +39,8 @@ impl Default for Params {
     fn default() -> Self {
         Self {
             snapshot_interval_secs: 30,
-            consumer_fee_comfort_p90_microunits: 1_000,
-            industrial_admission_min_capacity: 0,
+            consumer_fee_comfort_p90_microunits: 2_500,
+            industrial_admission_min_capacity: 10,
         }
     }
 }
@@ -46,24 +65,36 @@ pub fn registry() -> &'static [ParamSpec] {
             default: 30,
             min: 5,
             max: 600,
-            unit: "secs",
+            unit: "seconds",
             apply: apply_snapshot_interval,
+            apply_runtime: |v, rt| {
+                rt.set_snapshot_interval(Duration::from_secs(v as u64));
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::ConsumerFeeComfortP90Microunits,
-            default: 1_000,
-            min: 0,
-            max: 1_000_000_000,
-            unit: "micro",
+            default: 2_500,
+            min: 500,
+            max: 25_000,
+            unit: "microunits",
             apply: apply_consumer_fee_p90,
+            apply_runtime: |v, rt| {
+                rt.set_consumer_p90_comfort(v as u64);
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::IndustrialAdmissionMinCapacity,
-            default: 0,
-            min: 0,
-            max: 1_000_000,
-            unit: "shards_per_sec",
+            default: 10,
+            min: 1,
+            max: 10_000,
+            unit: "microshards/sec",
             apply: apply_industrial_capacity,
+            apply_runtime: |v, rt| {
+                rt.set_min_capacity(v as u64);
+                Ok(())
+            },
         },
     ];
     &REGS

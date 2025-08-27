@@ -3,6 +3,9 @@ name = "the_block"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
+
+[workspace]
+members = ["crates/probe"]
  
 [dependencies]
 pyo3 = { version = "0.24.2", default-features = false, features = ["macros", "auto-initialize"], optional = false }

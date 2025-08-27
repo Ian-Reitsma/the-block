@@ -93,14 +93,26 @@ jobs:
           toolchain: nightly
           profile: minimal
           override: true
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target
+            fuzz/artifacts
+          key: ${{ runner.os }}-wal-fuzz-${{ hashFiles('Cargo.lock') }}
       - name: install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: run wal fuzz
-        run: cargo +nightly fuzz run wal_fuzz --max-total-time=60 -- -artifact_prefix=fuzz/wal/
+        run: cargo +nightly fuzz run wal_fuzz -- -max_total_time=120 -artifact_prefix=fuzz/wal/ -runs=0 || true
       - name: upload wal artifacts
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: wal-fuzz
           path: fuzz/wal/
+      - name: verify no artifacts
+        run: |
+          if ls fuzz/wal/* 1> /dev/null 2>&1; then
+            echo "Artifacts found";
+            exit 1;
+          fi

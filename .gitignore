@@ -31,3 +31,6 @@ formal/.fstar/
 formal/*.checked
 # Documentation artifacts
 docs/images/
+# Fuzz artifacts
+fuzz/wal/
+fuzz/artifacts/

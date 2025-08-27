@@ -143,6 +143,36 @@ pub static ADMISSION_MODE: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static PARAM_CHANGE_PENDING: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "param_change_pending",
+            "Governance parameter changes pending activation",
+        ),
+        &["key"],
+    )
+    .unwrap_or_else(|e| panic!("gauge param_change_pending: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry param_change_pending: {e}"));
+    g
+});
+
+pub static PARAM_CHANGE_ACTIVE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "param_change_active",
+            "Current active governance parameter values",
+        ),
+        &["key"],
+    )
+    .unwrap_or_else(|e| panic!("gauge param_change_active: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry param_change_active: {e}"));
+    g
+});
+
 pub static CONSUMER_FEE_P50: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("consumer_fee_p50", "Median consumer fee")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
@@ -155,6 +185,84 @@ pub static CONSUMER_FEE_P50: Lazy<IntGauge> = Lazy::new(|| {
 pub static CONSUMER_FEE_P90: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("consumer_fee_p90", "p90 consumer fee")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "storage_chunk_size_bytes",
+        "Size of chunks put into storage",
+    );
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static STORAGE_PUT_CHUNK_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("storage_put_chunk_seconds", "Time to put a single chunk");
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static STORAGE_PROVIDER_RTT_MS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "storage_provider_rtt_ms",
+        "Observed provider RTT in milliseconds",
+    );
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static STORAGE_PROVIDER_LOSS_RATE: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new("storage_provider_loss_rate", "Observed provider loss rate");
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static STORAGE_INITIAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "storage_initial_chunk_size",
+        "Initial chunk size used for object upload",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static STORAGE_FINAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "storage_final_chunk_size",
+        "Final preferred chunk size after upload",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static STORAGE_PUT_ETA_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "storage_put_eta_seconds",
+        "Estimated time to upload object in seconds",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -190,6 +298,39 @@ pub static MATCH_LOOP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry match loop latency: {e}"));
     h
+});
+
+pub static SETTLE_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("settle_applied_total", "Receipts applied")
+        .unwrap_or_else(|e| panic!("counter settle_applied_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry settle_applied_total: {e}"));
+    c
+});
+
+pub static SETTLE_FAILED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("settle_failed_total", "Settlement failures"),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter settle_failed_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry settle_failed_total: {e}"));
+    c
+});
+
+pub static SETTLE_MODE_CHANGE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("settle_mode_change_total", "Settlement mode changes"),
+        &["to"],
+    )
+    .unwrap_or_else(|e| panic!("counter settle_mode_change_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry settle_mode_change_total: {e}"));
+    c
 });
 
 pub static GOV_PROPOSALS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -264,6 +405,18 @@ pub static RECEIPT_CORRUPT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry receipt corrupt: {e}"));
+    c
+});
+
+pub static WAL_CORRUPT_RECOVERY_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "wal_corrupt_recovery_total",
+        "WAL entries skipped due to checksum mismatch",
+    )
+    .unwrap_or_else(|e| panic!("counter wal corrupt recovery: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry wal corrupt recovery: {e}"));
     c
 });
 

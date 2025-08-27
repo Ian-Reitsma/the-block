@@ -3,20 +3,26 @@ use std::time::Duration;
 
 use serde_json::Value;
 use serial_test::serial;
-use the_block::{generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload};
+use the_block::{
+    config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
+};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 mod util;
 
-async fn rpc(addr: &str, body: &str) -> Value {
+async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     let mut stream = TcpStream::connect(addr).await.unwrap();
-    let req = format!(
-        "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
+    let mut req = format!(
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
+        body.len()
     );
+    if let Some(t) = token {
+        req.push_str(&format!("Authorization: Bearer {}\r\n", t));
+    }
+    req.push_str("\r\n");
+    req.push_str(body);
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut resp = Vec::new();
     stream.read_to_end(&mut resp).await.unwrap();
@@ -37,16 +43,24 @@ async fn rpc_smoke() {
     }
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "testtoken").unwrap();
+    let rpc_cfg = RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        ..Default::default()
+    };
     let handle = tokio::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        rpc_cfg,
         tx,
     ));
     let addr = rx.await.unwrap();
 
     // metrics endpoint
-    let val = rpc(&addr, r#"{"method":"metrics"}"#).await;
+    let val = rpc(&addr, r#"{"method":"metrics"}"#, None).await;
     #[cfg(feature = "telemetry")]
     assert!(val["result"].as_str().unwrap().contains("mempool_size"));
     #[cfg(not(feature = "telemetry"))]
@@ -56,6 +70,7 @@ async fn rpc_smoke() {
     let bal = rpc(
         &addr,
         r#"{"method":"balance","params":{"address":"alice"}}"#,
+        None,
     )
     .await;
     assert_eq!(bal["result"]["consumer"].as_u64().unwrap(), 42);
@@ -64,10 +79,16 @@ async fn rpc_smoke() {
     let start = rpc(
         &addr,
         r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
+        Some("testtoken"),
     )
     .await;
     assert_eq!(start["result"]["status"], "ok");
-    let stop = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":2}}"#).await;
+    let stop = rpc(
+        &addr,
+        r#"{"method":"stop_mining","params":{"nonce":2}}"#,
+        Some("testtoken"),
+    )
+    .await;
     assert_eq!(stop["result"]["status"], "ok");
 
     handle.abort();
@@ -80,10 +101,18 @@ async fn rpc_nonce_replay_rejected() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "testtoken").unwrap();
+    let rpc_cfg = RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        ..Default::default()
+    };
     let handle = tokio::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        rpc_cfg,
         tx,
     ));
     let addr = rx.await.unwrap();
@@ -91,10 +120,16 @@ async fn rpc_nonce_replay_rejected() {
     let first = rpc(
         &addr,
         r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
+        Some("testtoken"),
     )
     .await;
     assert_eq!(first["result"]["status"], "ok");
-    let replay = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":1}}"#).await;
+    let replay = rpc(
+        &addr,
+        r#"{"method":"stop_mining","params":{"nonce":1}}"#,
+        Some("testtoken"),
+    )
+    .await;
     assert_eq!(
         replay["error"]["message"].as_str().unwrap(),
         "replayed nonce"
@@ -118,10 +153,18 @@ async fn rpc_concurrent_controls() {
     }
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "testtoken").unwrap();
+    let rpc_cfg = RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        ..Default::default()
+    };
     let handle = tokio::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        rpc_cfg,
         tx,
     ));
     let addr = rx.await.unwrap();
@@ -158,13 +201,18 @@ async fn rpc_concurrent_controls() {
                     i = i
                 ),
             };
-            let _ = rpc(&addr, &body).await;
+            let _ = rpc(&addr, &body, Some("testtoken")).await;
         }));
     }
     for h in handles {
         let _ = h.await;
     }
-    let _ = rpc(&addr, r#"{"method":"stop_mining","params":{"nonce":999}}"#).await;
+    let _ = rpc(
+        &addr,
+        r#"{"method":"stop_mining","params":{"nonce":999}}"#,
+        Some("testtoken"),
+    )
+    .await;
     assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
 
     handle.abort();
@@ -177,10 +225,18 @@ async fn rpc_error_responses() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "testtoken").unwrap();
+    let rpc_cfg = RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        ..Default::default()
+    };
     let handle = tokio::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        rpc_cfg,
         tx,
     ));
     let addr = rx.await.unwrap();
@@ -189,7 +245,7 @@ async fn rpc_error_responses() {
     let mut stream = TcpStream::connect(&addr).await.unwrap();
     let bad = "{\"method\":\"balance\""; // missing closing brace
     let req = format!(
-        "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         bad.len(),
         bad
     );
@@ -202,7 +258,7 @@ async fn rpc_error_responses() {
     assert_eq!(val["error"]["code"].as_i64().unwrap(), -32700);
 
     // unknown method
-    let val = rpc(&addr, r#"{"method":"unknown"}"#).await;
+    let val = rpc(&addr, r#"{"method":"unknown"}"#, None).await;
     assert_eq!(val["error"]["code"].as_i64().unwrap(), -32601);
 
     handle.abort();
@@ -215,17 +271,25 @@ async fn rpc_fragmented_request() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "testtoken").unwrap();
+    let rpc_cfg = RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        ..Default::default()
+    };
     let handle = tokio::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        rpc_cfg,
         tx,
     ));
     let addr = rx.await.unwrap();
 
     let body = r#"{"method":"stop_mining","params":{"nonce":1}}"#;
     let req = format!(
-        "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer testtoken\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );

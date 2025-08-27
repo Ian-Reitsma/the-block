@@ -1,13 +1,17 @@
 use tempfile::tempdir;
 use the_block::governance::{
-    GovStore, ParamKey, Params, Proposal, ProposalStatus, Vote, VoteChoice, ACTIVATION_DELAY,
+    GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
+    ACTIVATION_DELAY,
 };
+use the_block::Blockchain;
 
 #[test]
 fn proposal_vote_activation_rollback() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut params = Params::default();
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    let mut rt = Runtime { bc: &mut bc };
 
     // invalid proposal (out of bounds)
     let bad = Proposal {
@@ -77,22 +81,22 @@ fn proposal_vote_activation_rollback() {
     );
 
     // no activation yet
-    store.activate_ready(1, &mut params).unwrap();
+    store.activate_ready(1, &mut rt, &mut params).unwrap();
     assert_ne!(params.snapshot_interval_secs, 10);
     // activation after delay
     store
-        .activate_ready(1 + ACTIVATION_DELAY, &mut params)
+        .activate_ready(1 + ACTIVATION_DELAY, &mut rt, &mut params)
         .unwrap();
     assert_eq!(params.snapshot_interval_secs, 10);
 
     // rollback within window
     store
-        .rollback_last(1 + ACTIVATION_DELAY + 1, &mut params)
+        .rollback_last(1 + ACTIVATION_DELAY + 1, &mut rt, &mut params)
         .unwrap();
     assert_ne!(params.snapshot_interval_secs, 10);
     // second rollback fails
     assert!(store
-        .rollback_last(1 + ACTIVATION_DELAY + 1, &mut params)
+        .rollback_last(1 + ACTIVATION_DELAY + 1, &mut rt, &mut params)
         .is_err());
 
     // proposal without votes -> Rejected

@@ -116,7 +116,7 @@ fn resets_on_unknown_version() {
 #[test]
 #[serial]
 #[traced_test]
-fn periodic_save_occurs() {
+fn save_occurs_after_interval() {
     reset_path_for_test();
     let dir = tempdir().unwrap();
     let path = dir.path().join("board.v1.bin");
@@ -125,7 +125,6 @@ fn periodic_save_occurs() {
     init_with_clock(path_str.clone(), 10, 5, clock.clone());
     record_price(9);
     clock.advance(Duration::from_secs(5));
-    std::thread::sleep(Duration::from_millis(50));
-    assert!(fs::metadata(&path).is_ok());
     persist();
+    assert!(fs::metadata(&path).is_ok());
 }

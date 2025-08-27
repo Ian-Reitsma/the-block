@@ -3,7 +3,7 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use serde_json::Value;
 use serial_test::serial;
-use the_block::{rpc::run_rpc_server, Blockchain};
+use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -12,7 +12,7 @@ mod util;
 async fn rpc(addr: &str, body: &str) -> Value {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
-        "POST / HTTP/1.1\r\nContent-Length: {}\r\n\r\n{}",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );
@@ -34,6 +34,7 @@ async fn price_board_no_data_errors() {
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
+        RpcConfig::default(),
         tx,
     ));
     let addr = rx.await.unwrap();

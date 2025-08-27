@@ -59,3 +59,29 @@ make -C monitoring lint
 
 The lint uses `npx jsonnet-lint` to validate `grafana/dashboard.json` and will
 fail on unsupported panel types.
+
+## Synthetic chain health checks
+
+`scripts/synthetic.sh` runs a mine → gossip → tip cycle using the `probe` CLI and emits Prometheus metrics:
+
+- `synthetic_convergence_seconds` – wall-clock time from mining start until tip is observed.
+- `synthetic_success_total` – number of successful end-to-end runs.
+- `synthetic_fail_total{step}` – failed step counters for `mine`, `gossip`, and `tip`.
+
+Just targets:
+
+```bash
+just probe:mine
+just probe:gossip
+just probe:tip
+```
+
+## Alerting
+
+Prometheus rules under `monitoring/alert.rules.yml` watch for:
+
+- Convergence lag (p95 over 30s for 10m, pages).
+- Consumer fee p90 exceeding `ConsumerFeeComfortP90Microunits` (warns).
+- Industrial deferral ratio above 30% over 10m (warns).
+
+`scripts/telemetry_sweep.sh` runs the synthetic check, queries Prometheus for headline numbers, and writes a timestamped `status/index.html` colored green/orange/red.

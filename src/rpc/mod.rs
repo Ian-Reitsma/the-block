@@ -1,4 +1,5 @@
 use crate::{
+    config::RpcConfig,
     governance::{GovStore, Params},
     identity::handle_registry::HandleRegistry,
     Blockchain, SignedTransaction,
@@ -6,11 +7,13 @@ use crate::{
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::net::IpAddr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
 
 pub mod limiter;
@@ -25,6 +28,42 @@ pub mod identity;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
+
+struct RpcRuntimeConfig {
+    allowed_hosts: Vec<String>,
+    cors_allow_origins: Vec<String>,
+    max_body_bytes: usize,
+    request_timeout: Duration,
+    enable_debug: bool,
+    admin_token: Option<String>,
+}
+
+const PUBLIC_METHODS: &[&str] = &[
+    "balance",
+    "register_handle",
+    "resolve_handle",
+    "whoami",
+    "submit_tx",
+    "tx_status",
+    "price_board_get",
+    "metrics",
+];
+
+const ADMIN_METHODS: &[&str] = &[
+    "set_snapshot_interval",
+    "compute_arm_real",
+    "compute_cancel_arm",
+    "compute_back_to_dry_run",
+    "gov_propose",
+    "gov_vote",
+    "gov_list",
+    "gov_params",
+    "gov_rollback_last",
+    "record_le_request",
+    "warrant_canary",
+];
+
+const DEBUG_METHODS: &[&str] = &["set_difficulty", "start_mining", "stop_mining"];
 
 #[derive(Deserialize)]
 struct RpcRequest {
@@ -133,12 +172,13 @@ async fn handle_conn(
     mining: Arc<AtomicBool>,
     nonces: Arc<Mutex<HashSet<u64>>>,
     handles: Arc<Mutex<HandleRegistry>>,
+    cfg: Arc<RpcRuntimeConfig>,
 ) {
     let mut reader = BufReader::new(stream);
 
     // Read request line with timeout to avoid hanging connections.
     let mut line = String::new();
-    match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
+    match timeout(cfg.request_timeout, reader.read_line(&mut line)).await {
         Ok(Ok(_)) => {}
         _ => return,
     }
@@ -150,9 +190,12 @@ async fn handle_conn(
     // Parse headers. Accept both CRLF and LF-only terminators.
     let mut content_len = 0usize;
     let mut expect_continue = false;
+    let mut host = String::new();
+    let mut origin = String::new();
+    let mut auth: Option<String> = None;
     loop {
         line.clear();
-        let read = match timeout(Duration::from_secs(3), reader.read_line(&mut line)).await {
+        let read = match timeout(cfg.request_timeout, reader.read_line(&mut line)).await {
             Ok(Ok(n)) => n,
             _ => return,
         };
@@ -170,6 +213,12 @@ async fn handle_conn(
             if val.trim().starts_with("100-continue") {
                 expect_continue = true;
             }
+        } else if let Some(val) = lower.strip_prefix("host:") {
+            host = val.trim().to_string();
+        } else if let Some(val) = lower.strip_prefix("origin:") {
+            origin = val.trim().to_string();
+        } else if lower.starts_with("authorization:") {
+            auth = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
         }
     }
 
@@ -178,6 +227,42 @@ async fn handle_conn(
         let stream = reader.get_mut();
         let _ = stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await;
         let _ = stream.flush().await;
+    }
+
+    if method == "OPTIONS" {
+        let mut stream = reader.into_inner();
+        if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+            let resp = format!("HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\n\r\n");
+            let _ = stream.write_all(resp.as_bytes()).await;
+        } else {
+            let _ = stream
+                .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                .await;
+        }
+        let _ = stream.shutdown().await;
+        return;
+    }
+
+    if !cfg
+        .allowed_hosts
+        .iter()
+        .any(|h| h.eq_ignore_ascii_case(host.trim()))
+    {
+        let mut stream = reader.into_inner();
+        let _ = stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            .await;
+        let _ = stream.shutdown().await;
+        return;
+    }
+
+    if content_len > cfg.max_body_bytes {
+        let mut stream = reader.into_inner();
+        let _ = stream
+            .write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
+            .await;
+        let _ = stream.shutdown().await;
+        return;
     }
 
     if method == "GET" && path == "/badge/status" {
@@ -192,11 +277,15 @@ async fn handle_conn(
             last_mint.map_or("null".into(), |v| v.to_string()),
             last_burn.map_or("null".into(), |v| v.to_string())
         );
-        let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
+        let mut headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
+            body.len()
         );
+        if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+            headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
+        }
+        headers.push_str("\r\n");
+        let resp = format!("{}{}", headers, body);
         let mut stream = reader.into_inner();
         let _ = stream.write_all(resp.as_bytes()).await;
         let _ = stream.shutdown().await;
@@ -206,7 +295,7 @@ async fn handle_conn(
     // Read body (if any) with timeout; default to empty on missing Content-Length.
     let mut body_bytes = vec![0u8; content_len];
     if content_len > 0 {
-        if timeout(Duration::from_secs(3), reader.read_exact(&mut body_bytes))
+        if timeout(cfg.request_timeout, reader.read_exact(&mut body_bytes))
             .await
             .ok()
             .is_none()
@@ -220,23 +309,99 @@ async fn handle_conn(
     let resp = match req {
         Ok(r) => {
             let id = r.id.clone();
-            match dispatch(
-                &r,
-                Arc::clone(&bc),
-                Arc::clone(&mining),
-                Arc::clone(&nonces),
-                Arc::clone(&handles),
-            ) {
-                Ok(v) => RpcResponse::Result {
+            let method_str = r.method.as_str();
+            let authorized = match cfg.admin_token.as_ref() {
+                Some(t) => auth.as_deref() == Some(&format!("Bearer {t}")),
+                None => false,
+            };
+            if DEBUG_METHODS.contains(&method_str) {
+                if !cfg.enable_debug || !authorized {
+                    RpcResponse::Error {
+                        jsonrpc: "2.0",
+                        error: RpcError {
+                            code: -32601,
+                            message: "method not found",
+                        },
+                        id,
+                    }
+                } else {
+                    match dispatch(
+                        &r,
+                        Arc::clone(&bc),
+                        Arc::clone(&mining),
+                        Arc::clone(&nonces),
+                        Arc::clone(&handles),
+                    ) {
+                        Ok(v) => RpcResponse::Result {
+                            jsonrpc: "2.0",
+                            result: v,
+                            id,
+                        },
+                        Err(e) => RpcResponse::Error {
+                            jsonrpc: "2.0",
+                            error: e,
+                            id,
+                        },
+                    }
+                }
+            } else if ADMIN_METHODS.contains(&method_str) {
+                if !authorized {
+                    RpcResponse::Error {
+                        jsonrpc: "2.0",
+                        error: RpcError {
+                            code: -32601,
+                            message: "method not found",
+                        },
+                        id,
+                    }
+                } else {
+                    match dispatch(
+                        &r,
+                        Arc::clone(&bc),
+                        Arc::clone(&mining),
+                        Arc::clone(&nonces),
+                        Arc::clone(&handles),
+                    ) {
+                        Ok(v) => RpcResponse::Result {
+                            jsonrpc: "2.0",
+                            result: v,
+                            id,
+                        },
+                        Err(e) => RpcResponse::Error {
+                            jsonrpc: "2.0",
+                            error: e,
+                            id,
+                        },
+                    }
+                }
+            } else if PUBLIC_METHODS.contains(&method_str) {
+                match dispatch(
+                    &r,
+                    Arc::clone(&bc),
+                    Arc::clone(&mining),
+                    Arc::clone(&nonces),
+                    Arc::clone(&handles),
+                ) {
+                    Ok(v) => RpcResponse::Result {
+                        jsonrpc: "2.0",
+                        result: v,
+                        id,
+                    },
+                    Err(e) => RpcResponse::Error {
+                        jsonrpc: "2.0",
+                        error: e,
+                        id,
+                    },
+                }
+            } else {
+                RpcResponse::Error {
                     jsonrpc: "2.0",
-                    result: v,
+                    error: RpcError {
+                        code: -32601,
+                        message: "method not found",
+                    },
                     id,
-                },
-                Err(e) => RpcResponse::Error {
-                    jsonrpc: "2.0",
-                    error: e,
-                    id,
-                },
+                }
             }
         }
         Err(_) => RpcResponse::Error {
@@ -258,11 +423,15 @@ async fn handle_conn(
         .to_string()
     });
     let mut stream = reader.into_inner();
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
+    let mut headers = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
     );
+    if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+        headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
+    }
+    headers.push_str("\r\n");
+    let response = format!("{}{}", headers, body);
     let _ = stream.write_all(response.as_bytes()).await;
     let _ = stream.shutdown().await;
 }
@@ -462,6 +631,29 @@ fn dispatch(
                 return Err(crate::compute_market::MarketError::NoPriceData.into());
             }
         },
+        "compute_arm_real" => {
+            let delay = req
+                .params
+                .get("activate_in_blocks")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let height = bc.lock().unwrap_or_else(|e| e.into_inner()).block_height;
+            crate::compute_market::settlement::Settlement::arm(delay, height);
+            serde_json::json!({"status": "ok"})
+        }
+        "compute_cancel_arm" => {
+            crate::compute_market::settlement::Settlement::cancel_arm();
+            serde_json::json!({"status": "ok"})
+        }
+        "compute_back_to_dry_run" => {
+            let reason = req
+                .params
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            crate::compute_market::settlement::Settlement::back_to_dry_run(reason);
+            serde_json::json!({"status": "ok"})
+        }
         "gov_propose" => {
             let proposer = req
                 .params
@@ -532,7 +724,9 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
-            governance::gov_rollback_last(&GOV_STORE, &mut params, epoch)?
+            let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
+            let mut rt = crate::governance::Runtime { bc: &mut *chain };
+            governance::gov_rollback_last(&GOV_STORE, &mut params, &mut rt, epoch)?
         }
         _ => {
             return Err(RpcError {
@@ -547,6 +741,7 @@ pub async fn run_rpc_server(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
     addr: String,
+    cfg: RpcConfig,
     ready: oneshot::Sender<String>,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(&addr).await?;
@@ -567,8 +762,27 @@ pub async fn run_rpc_server(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(300);
+
+    let admin_token = cfg
+        .admin_token_file
+        .as_ref()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .map(|s| s.trim().to_string());
+    let runtime_cfg = Arc::new(RpcRuntimeConfig {
+        allowed_hosts: cfg.allowed_hosts,
+        cors_allow_origins: cfg.cors_allow_origins,
+        max_body_bytes: cfg.max_body_bytes,
+        request_timeout: Duration::from_millis(cfg.request_timeout_ms),
+        enable_debug: cfg.enable_debug,
+        admin_token,
+    });
+    let global = Arc::new(Semaphore::new(1024));
     loop {
         let (mut stream, addr) = listener.accept().await?;
+        let permit = match global.clone().acquire_owned().await {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
         if let Err(code) = limiter::check_client(
             &addr.ip(),
             &clients,
@@ -599,8 +813,10 @@ pub async fn run_rpc_server(
         let mining = Arc::clone(&mining);
         let nonces = Arc::clone(&nonces);
         let handles_cl = Arc::clone(&handles);
+        let cfg_cl = Arc::clone(&runtime_cfg);
         tokio::spawn(async move {
-            handle_conn(stream, bc, mining, nonces, handles_cl).await;
+            let _p = permit;
+            handle_conn(stream, bc, mining, nonces, handles_cl, cfg_cl).await;
         });
     }
 }

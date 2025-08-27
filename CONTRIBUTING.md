@@ -11,7 +11,7 @@ Any pull request that touches account balance logic or nonce handling **must**:
 2. Provide migration notes in `docs/schema_migrations/` if the on‑disk schema is
    affected.
 3. Update the diagrams in `docs/ledger_invariants.md` when state flows change.
-4. Provide a Signed-off-by line in each commit message (Developer Certificate of Origin).
+4. Provide a Signed-off-by line in each commit message (Developer Certificate of Origin) and verify it locally with `scripts/check_cla.sh`.
 5. Update `formal/nonce_pending.fst` and attach the new SMT proof log.
 
 Patches that do not satisfy these points will be rejected during review.
