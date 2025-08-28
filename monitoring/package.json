@@ -2,6 +2,6 @@
   "name": "the-block-monitoring",
   "private": true,
   "devDependencies": {
-    "@grafana/jsonnet-lint": "file:../tools/jsonnet-lint"
+    "@grafana/jsonnet-lint": "file:./tools/jsonnet-lint"
   }
 }

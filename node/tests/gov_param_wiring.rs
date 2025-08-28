@@ -1,5 +1,6 @@
 #![cfg(feature = "telemetry")]
 use serial_test::serial;
+use std::time::Duration;
 use tempfile::tempdir;
 use the_block::{
     compute_market::admission,
@@ -10,9 +11,11 @@ use the_block::{
     },
     sign_tx, Blockchain, FeeLane, RawTxPayload, TxAdmissionError,
 };
-use std::time::Duration;
 #[cfg(feature = "telemetry")]
-use the_block::{fees::policy, telemetry::{PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING}};
+use the_block::{
+    fees::policy,
+    telemetry::{PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING},
+};
 
 fn build_signed_tx(
     sk: &[u8],

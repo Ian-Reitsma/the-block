@@ -113,11 +113,25 @@ Function Ensure-Nextest {
     cargo nextest --version | Out-Null
 }
 
+Function Ensure-Nightly {
+    if (-not (& "$CARGO_BIN\rustup.exe" toolchain list | Select-String -Pattern "nightly")) {
+        Write-Color Cyan "Installing nightly Rust toolchain..."
+        & "$CARGO_BIN\rustup.exe" toolchain install nightly
+    }
+}
+
+Function Ensure-CargoFuzz {
+    if (-not (Get-Command cargo-fuzz -ErrorAction SilentlyContinue)) {
+        Write-Color Cyan "Installing cargo-fuzz..."
+        cargo install cargo-fuzz --locked
+    }
+}
+
 Function Run-Maturin-Develop {
     $maturinPath = ".\$PYTHON_VENV\Scripts\maturin.exe"
     if (Test-Path $maturinPath -and (Test-Path "Cargo.toml")) {
         Write-Color Cyan "Running 'maturin develop --release' to build Python native module..."
-        & $maturinPath develop --release
+        & $maturinPath develop --release --manifest-path node/Cargo.toml
     } else {
         Write-Color Yellow "maturin or Cargo.toml missing. Skipping Rust-Python build."
     }
@@ -141,9 +155,11 @@ Write-Color Cyan "Upgrading pip, setuptools, wheel..."
 Ensure-Rust
 Ensure-Maturin
 Ensure-Nextest
+Ensure-Nightly
+Ensure-CargoFuzz
 if (Test-Path "Cargo.toml") {
     Write-Color Cyan "Running database migrations..."
-    cargo run --quiet --bin db_migrate
+    cargo run --quiet -p the_block --bin db_migrate
     if (Test-Path "db_compact.sh" -and (Get-Command bash -ErrorAction SilentlyContinue)) {
         Write-Color Cyan "Compacting database..."
         bash ./db_compact.sh

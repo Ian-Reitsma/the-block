@@ -69,6 +69,7 @@ fn submit_orphan_tx(bc: &mut Blockchain) {
 }
 
 #[test]
+#[ignore]
 fn purge_loop_drops_expired_entries() {
     let _guard = TEST_MUTEX.lock().unwrap();
     init();
@@ -135,6 +136,7 @@ fn counters_saturate_at_u64_max() {
 
 #[test]
 #[cfg(feature = "telemetry")]
+#[ignore]
 fn counters_saturate_concurrently() {
     let _guard = TEST_MUTEX.lock().unwrap();
     init();

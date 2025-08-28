@@ -1,7 +1,0 @@
-{
-  "name": "the-block",
-  "version": "0.0.0",
-  "devDependencies": {
-    "@grafana/jsonnet-lint": "file:tools/jsonnet-lint"
-  }
-}

@@ -233,6 +233,8 @@ if ! command -v cargo &>/dev/null; then
   run_step "install Rust" curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   source "$HOME/.cargo/env"
 fi
+rustup toolchain list 2>/dev/null | grep -q nightly || run_step "install nightly Rust" rustup toolchain install nightly
+command -v cargo-fuzz >/dev/null 2>&1 || run_step "cargo install cargo-fuzz" cargo install cargo-fuzz --locked
 command -v just >/dev/null 2>&1 || run_step "cargo install just" cargo install just
 
 CARGO_MAKE_VERSION=0.37.24
@@ -300,7 +302,7 @@ fi
 
 # Run database migrations and compaction now that Rust and Python are ready
 if [[ -x ./db_compact.sh ]]; then
-  run_step "database migrations" cargo run --quiet --bin db_migrate
+run_step "database migrations" cargo run --quiet -p the_block --bin db_migrate
   run_step "database compaction" ./db_compact.sh
 fi
 
@@ -318,7 +320,7 @@ if [[ -f Makefile ]]; then
   fi
 fi
 [[ -f CMakeLists.txt ]] && run_step "cmake build" bash -c 'mkdir -p build && cd build && cmake .. && make'
-[[ -f justfile || -f Justfile ]] && run_step "just" just
+[[ -f justfile || -f Justfile ]] && run_step "just --version" just --version
 
 # Python/Node deps (all pip/poetry only if not broken)
 if (( BROKEN_PYTHON == 0 )); then
@@ -348,10 +350,12 @@ else
   cecho yellow "   → No valid package.json found or file is empty; skipping Node deps."
   SKIPPED_STEPS+=("npm install skipped (no valid package.json)")
 fi
-if ! node -e 'require("./package.json")' 2>/dev/null; then
-  cecho red "   → package.json is STILL invalid after rewrite. Please fix it."
-  FAILED_STEPS+=("package.json invalid even after auto-fix")
-  FIX_COMMANDS+=("echo '{}' > package.json")
+if [[ -f package.json ]]; then
+  if ! node -e 'require("./package.json")' 2>/dev/null; then
+    cecho red "   → package.json is STILL invalid after rewrite. Please fix it."
+    FAILED_STEPS+=("package.json invalid even after auto-fix")
+    FIX_COMMANDS+=("echo '{}' > package.json")
+  fi
 fi
 
 # Docker check
@@ -374,7 +378,7 @@ fi
 # Only build if Python is not broken, maturin is installed, and Cargo.toml exists (i.e. this is a Rust/PyO3 project)
 if (( BROKEN_PYTHON == 0 )) && command -v maturin &>/dev/null && [[ -f Cargo.toml ]]; then
   command -v patchelf &>/dev/null || run_step "pip install patchelf" pip install patchelf
-  run_step "maturin develop --release (build Python native module)" maturin develop --release
+  run_step "maturin develop --release (build Python native module)" maturin develop --release --manifest-path node/Cargo.toml
 else
   skip_step "maturin develop (no maturin, no Cargo.toml, or Python is broken)"
 fi

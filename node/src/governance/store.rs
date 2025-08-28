@@ -1,6 +1,7 @@
 use super::{registry, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING};
+#[cfg(feature = "telemetry")]
 use log::info;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
@@ -224,11 +225,11 @@ impl GovStore {
                                 PARAM_CHANGE_ACTIVE
                                     .with_label_values(&[key_name(prop.key)])
                                     .set(prop.new_value);
+                                info!(
+                                    "gov_param_activated key={:?} new={} old={} epoch={}",
+                                    prop.key, prop.new_value, old, current_epoch
+                                );
                             }
-                            info!(
-                                "gov_param_activated key={:?} new={} old={} epoch={}",
-                                prop.key, prop.new_value, old, current_epoch
-                            );
                         }
                     }
                 }

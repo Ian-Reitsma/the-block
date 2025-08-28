@@ -22,19 +22,16 @@ jobs:
           filters: |
             monitoring:
               - 'monitoring/**'
-      - name: install node deps
-        run: npm ci
-      - name: monitor smoke
-        run: |
-          set -e
-          make monitor --native-monitor &
-          pid=$!
-          sleep 5
-          kill $pid
-          wait $pid || true
-      - name: install monitoring deps
-        if: steps.changes.outputs.monitoring == 'true'
-        run: npm ci --prefix monitoring
+        - name: install monitoring deps
+          run: npm ci --prefix monitoring
+        - name: monitor smoke
+          run: |
+            set -e
+            make monitor --native-monitor &
+            pid=$!
+            sleep 5
+            kill $pid
+            wait $pid || true
       - name: lint grafana dashboard
         if: steps.changes.outputs.monitoring == 'true'
         run: |

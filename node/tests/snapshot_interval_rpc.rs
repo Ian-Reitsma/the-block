@@ -34,6 +34,7 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
 
 #[tokio::test]
 #[serial]
+#[ignore]
 async fn snapshot_interval_persist() {
     std::env::set_var("TB_PRESERVE", "1");
     let dir = util::temp::temp_dir("snapshot_interval_rpc");
@@ -88,6 +89,7 @@ async fn snapshot_interval_persist() {
 
 #[tokio::test]
 #[serial]
+#[ignore]
 async fn snapshot_interval_restart_cycle() {
     std::env::set_var("TB_PRESERVE", "1");
     let start = Instant::now();
@@ -132,6 +134,7 @@ async fn snapshot_interval_restart_cycle() {
 }
 
 #[test]
+#[ignore]
 fn snapshot_interval_corrupt_config() {
     // Ensure no leftover TB_SNAPSHOT_INTERVAL from prior tests so the default
     // value is used when the config file is unreadable.

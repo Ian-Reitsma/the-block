@@ -11,7 +11,7 @@ fn random_hex(rng: &mut StdRng) -> String {
 #[test]
 fn serialize_roundtrip_vectors() {
     let mut rng = StdRng::seed_from_u64(42);
-    let mut w = csv::Writer::from_path("target/serialization_equiv.csv").unwrap();
+    let mut w = csv::Writer::from_path("../target/serialization_equiv.csv").unwrap();
     for _ in 0..1000 {
         let payload = RawTxPayload {
             from_: random_hex(&mut rng),
@@ -32,5 +32,5 @@ fn serialize_roundtrip_vectors() {
         w.write_record([hex::encode(bytes)]).unwrap();
     }
     w.flush().unwrap();
-    assert!(fs::metadata("target/serialization_equiv.csv").is_ok());
+    assert!(fs::metadata("../target/serialization_equiv.csv").is_ok());
 }

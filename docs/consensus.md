@@ -60,7 +60,7 @@ amount_T + fee_component_T ≤ MAX_SUPPLY_T
 fee_component_T ≤ 2^63 − 1
 ```
 
-See [`ECONOMICS.md`](ECONOMICS.md#inv-fee-02) for the algebraic proof.
+See [`ECONOMICS.md`](economics.md#inv-fee-02) for the algebraic proof.
 
 ## Genesis Hash
 
@@ -89,7 +89,7 @@ block, and `validate_block`/`is_valid_chain` recompute
 `Blockchain::mempool` is backed by a `DashMap` keyed by `(sender, nonce)` with
 mutations guarded by a global `mempool_mutex`.
 A tracing span captures each admission at this lock boundary
-([src/lib.rs](src/lib.rs#L1067-L1082)).
+([node/src/lib.rs](../node/src/lib.rs#L1067-L1082)).
 A binary heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`
 provides `O(log n)` eviction. Example ordering:
 
@@ -114,12 +114,12 @@ and advancing `ttl_drop_total`. In schema v4 each mempool record serializes
 is a monotonic counter used for deterministic tie breaking. `Blockchain::open`
 rebuilds the heap from this list, skips entries whose sender account is missing,
 invokes `purge_expired` to drop any whose TTL has elapsed, and restores
-`mempool_size` from the survivors ([src/lib.rs](src/lib.rs#L855-L916)).
+`mempool_size` from the survivors ([node/src/lib.rs](../node/src/lib.rs#L855-L916)).
 Transactions whose sender account has been removed are counted in an
 `orphan_counter`. TTL purges and explicit drops decrement this counter. When
 `orphan_counter > mempool_size / 2` (orphans exceed half of the pool) a sweep
 rebuilds the heap, drops all orphans, emits `ORPHAN_SWEEP_TOTAL`, and resets the
-counter ([src/lib.rs](src/lib.rs#L1638-L1663)).
+counter ([node/src/lib.rs](../node/src/lib.rs#L1638-L1663)).
 Nodes may optionally run a background purge loop to enforce TTL even when
 no new transactions arrive. Calling `maybe_spawn_purge_loop` after opening the
 chain reads `TB_PURGE_LOOP_SECS` (or the `--mempool-purge-interval` CLI flag)
@@ -131,11 +131,11 @@ entries age out.
 
 On restart `Blockchain::open` rehydrates mempool entries from disk, incrementing
 `mempool_size` for each inserted record and counting missing-account entries.
-After hydration it calls [`purge_expired`](src/lib.rs#L1597-L1666) to drop
-TTL-expired entries, update [`orphan_counter`](src/lib.rs#L1638-L1663), and
+After hydration it calls [`purge_expired`](../node/src/lib.rs#L1597-L1666) to drop
+TTL-expired entries, update [`orphan_counter`](../node/src/lib.rs#L1638-L1663), and
 return the number removed. The sum of these drops is reported as
 `expired_drop_total`; `TTL_DROP_TOTAL` and `STARTUP_TTL_DROP_TOTAL` advance for visibility as entries load in 256-entry batches
-([src/lib.rs](src/lib.rs#L918-L935)).
+([node/src/lib.rs](../node/src/lib.rs#L918-L935)).
 
 Transactions from unknown senders are rejected. Nodes must provision accounts via
 `add_account` before submitting any transaction.
