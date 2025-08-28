@@ -51,6 +51,45 @@ The repository owns exactly four responsibility domains:
 | Memory- & Thread-Safety       | `#![forbid(unsafe_code)]`; FFI boundary capped at 2 % LOC; Miri & AddressSanitizer in nightly CI. | 0 undefined-behaviour findings in continuous fuzz. |
 | Portability                   | Cross-compile matrix: Linux glibc & musl, macOS, Windows‑WSL; reproducible Docker images. | Successful `cargo test --release` on all targets per PR. |
 
+## 2 · Repository Layout
+
+```
+node/
+  src/
+    bin/
+    compute_market/
+    net/
+    lib.rs
+    ...
+  tests/
+  benches/
+crates/
+monitoring/
+examples/governance/
+examples/workloads/
+fuzz/wal/
+formal/
+scripts/
+demo.py
+docs/
+  compute_market.md
+  service_badge.md
+  wal.md
+  snapshots.md
+  monitoring.md
+  formal.md
+  detailed_updates.md
+AGENTS.md
+```
+
+Tests and benches live under `node/`. If your tree differs, run the repo re‑layout task in this file.
+
+## 3 · System Requirements
+
+- Rust 1.82+, `cargo-nextest`, `cargo-fuzz` (nightly), and `maturin` for Python bindings.
+- Python 3.12.3 in a virtualenv; bootstrap creates `bin/python` shim and prepends `.venv/bin` to `PATH`.
+- Node 18+ for the monitoring stack; `npm ci --prefix monitoring` must succeed when `monitoring/**` changes.
+- On Linux, `patchelf` is required for wheel installs (bootstrap installs it automatically).
 ### Disclaimer → Production Readiness Statement
 
 No longer a toy. The‑Block codebase targets production-grade deployment under real economic value.

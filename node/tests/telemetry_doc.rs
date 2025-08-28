@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 #[test]
 fn telemetry_fields_documented() {
-    let docs = std::fs::read_to_string("docs/telemetry.md").expect("read docs");
+    let docs = std::fs::read_to_string("../docs/telemetry.md").expect("read docs");
     let expected: HashSet<&str> = [
         "subsystem",
         "op",

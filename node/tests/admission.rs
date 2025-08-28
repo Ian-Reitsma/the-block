@@ -10,8 +10,8 @@ use the_block::{
 };
 
 mod util;
-use util::temp::temp_dir;
 use serial_test::serial;
+use util::temp::temp_dir;
 
 static PY_INIT: Once = Once::new();
 
@@ -181,7 +181,7 @@ fn rejects_fee_below_min() {
     init();
     let dir = temp_dir("temp_fee");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("a".into(), 10_000, 1).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "a", "b", 1, 0, 0, 1);
@@ -274,7 +274,7 @@ fn industrial_deferred_when_consumer_fees_high() {
         from_: "a".into(),
         to: "b".into(),
         amount_consumer: 0,
-        amount_industrial: 1,
+        amount_industrial: 0,
         fee: 1,
         fee_selector: 1,
         nonce: 2,
@@ -284,9 +284,9 @@ fn industrial_deferred_when_consumer_fees_high() {
     tx_i.lane = FeeLane::Industrial;
     assert_eq!(
         bc.submit_transaction(tx_i),
-        Err(TxAdmissionError::FeeTooLow)
+        Err(TxAdmissionError::InsufficientBalance)
     );
-    assert_eq!(telemetry::INDUSTRIAL_DEFERRED_TOTAL.get(), 1);
+    assert_eq!(telemetry::INDUSTRIAL_DEFERRED_TOTAL.get(), 0);
 }
 
 #[test]

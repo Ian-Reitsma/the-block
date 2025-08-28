@@ -4,6 +4,21 @@ use the_block::telemetry;
 
 #[test]
 fn log_sampling_rate_limits() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    telemetry::reset_log_counters();
+    let start = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    while SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        == start
+    {
+        std::hint::spin_loop();
+    }
     telemetry::reset_log_counters();
 
     for _ in 0..telemetry::LOG_LIMIT {

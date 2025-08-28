@@ -1,6 +1,6 @@
 #![no_main]
-use libfuzzer_sys::fuzz_target;
 use arbitrary::{Arbitrary, Unstructured};
+use libfuzzer_sys::fuzz_target;
 use std::collections::HashMap;
 use tempfile::tempdir;
 use the_block::SimpleDb;

@@ -29,7 +29,7 @@ fn main() -> Result<()> {
 
     let mut summary = Summary::default();
     diff.print(DiffFormat::Patch, |_, _, line| {
-        if let Some(content) = std::str::from_utf8(line.content()).ok() {
+        if let Ok(content) = std::str::from_utf8(line.content()) {
             if content.contains("balance") {
                 summary.balance_changed = true;
             }

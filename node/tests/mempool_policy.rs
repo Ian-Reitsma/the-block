@@ -10,8 +10,8 @@ use the_block::{
 };
 
 mod util;
-use util::temp::temp_dir;
 use serial_test::serial;
+use util::temp::temp_dir;
 
 static PY_INIT: Once = Once::new();
 

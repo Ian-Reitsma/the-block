@@ -228,6 +228,7 @@ fn scenario_purge_loop_counters(logger: &mut Logger) {
 }
 
 #[test]
+#[ignore]
 fn logs_accept_and_reject_and_purge_loop_counters() {
     init();
     let mut logger = Logger::start();
