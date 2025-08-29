@@ -63,6 +63,7 @@ node/
     ...
   tests/
   benches/
+  .env.example
 crates/
 monitoring/
 examples/governance/
@@ -70,6 +71,11 @@ examples/workloads/
 fuzz/wal/
 formal/
 scripts/
+  bootstrap.sh
+  bootstrap.ps1
+  requirements.txt
+  requirements-lock.txt
+  docker/
 demo.py
 docs/
   compute_market.md
@@ -204,10 +210,6 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 10. SDKs
 - Provenance: sensor‑edge signing, proof bundles, content hash anchoring; explainable citations.
-- Bonded Contact: stake‑backed messages (refundable on accept); escrowed leads; spam‑proof inbox.
-- Commerce: “Pay with compute” toggle; receipts; instant refunds; hosted checkout + plugins; USDC settlement.
-- Ownership Card: dynamic receipts; warranty/transfer; recall alerts; resale provenance.
-- AI Minutes: per‑app minutes (transcribe/summarize/enhance) settled behind the scenes by CBM.
 
 ## 11. Security, Legal & Governance Posture <a id="11-security--cryptography"></a>
 - End‑to‑end encryption; protocol sees pointers and hashed receipts only; no master keys.
@@ -256,7 +258,7 @@ This section consolidates actionable playbooks from §§18–19. It is included 
   - Carry‑to‑Earn sealed bundle courier for commuter routes; privacy explainer; Neighborhood Update Accelerator for instant large downloads.
 - Phase C (6–10 weeks): Industrial canary lanes + SDKs v1
   - Transcode and authenticity‑check lanes; sealed‑bid batches; small deposits; per‑slice pricing; daily payout caps; operator diagnostics.
-  - SDKs: Provenance, Bonded Contact, Commerce, Ownership Card, AI Minutes; sample apps and docs.
+  - SDKs: Provenance; sample apps and docs.
   - Legal/Policy: law‑enforcement guidelines (metadata‑only), transparency log schema, jurisdiction modules, SBOM/licensing, CLA; reproducible builds; privileged RPCs disabled by default; founder irrevocability plan.
 - Phase D (10–16 weeks): CBM & Instant Apps; marketplace expansion
   - Daily CBM redeem curves; minimal backstop from marketplace fees.
@@ -292,11 +294,10 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `fee_selector` with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC.
-- Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`.
 - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.
-- Quick start: `just demo` runs the Python walkthrough after `./bootstrap.sh` and fails fast if the virtualenv is missing.
+- Quick start: `just demo` runs the Python walkthrough after `./scripts/bootstrap.sh` and fails fast if the virtualenv is missing.
 - Governance CLI: `gov submit`, `vote`, `exec`, and `status` persist proposals under `examples/governance/proposals.db`.
 - Workload samples under `examples/workloads/` demonstrate slice formats and can
   be executed with `cargo run --example run_workload <file>`; rerun these examples after modifying workload code.
