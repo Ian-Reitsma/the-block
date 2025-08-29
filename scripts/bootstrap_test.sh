@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tmp=$(mktemp -d)
-cp bootstrap.sh "$tmp/bootstrap.sh"
+cp "$SCRIPT_DIR/bootstrap.sh" "$tmp/bootstrap.sh"
 # create minimal npm files so bootstrap doesn't warn about missing package.json
 cat <<'EOF' > "$tmp/package.json"
 {}

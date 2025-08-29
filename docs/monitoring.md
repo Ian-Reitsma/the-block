@@ -10,7 +10,7 @@ Docker (default):
 make monitor
 ```
 
-To run the stack in the background (as used by `bootstrap.sh`):
+To run the stack in the background (as used by `scripts/bootstrap.sh`):
 
 ```bash
 DETACH=1 make monitor
@@ -22,7 +22,7 @@ Native (no Docker or `--native-monitor`):
 scripts/monitor_native.sh
 ```
 
-`make monitor --native-monitor` and `./bootstrap.sh --native-monitor` call the
+`make monitor --native-monitor` and `./scripts/bootstrap.sh --native-monitor` call the
 same script. When Docker isn't installed or the daemon is stopped, these
 commands automatically fall back to the native binaries.
 

@@ -1,7 +1,6 @@
 # Reproducible Builds
 
-The project pins the Rust toolchain in `rust-toolchain.toml` and provides a
-Dockerfile that compiles the node with `cargo build --release --locked`.
+The project pins the Rust toolchain in `rust-toolchain.toml` and provides `scripts/docker/Dockerfile` that compiles the node with `cargo build --release --locked`.
 
 ```
 $ docker build -t the-block-repro .

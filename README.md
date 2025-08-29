@@ -54,11 +54,11 @@
 
 ```bash
 # Unix/macOS
-bash ./bootstrap.sh          # installs toolchains, pins cargo-nextest, builds wheel; installs patchelf on Linux
+bash ./scripts/bootstrap.sh          # installs toolchains, pins cargo-nextest, builds wheel; installs patchelf on Linux
 python demo.py               # demo with background purge loop
 
 # Windows (PowerShell)
-./bootstrap.ps1              # run as admin for VS Build Tools
+./scripts/bootstrap.ps1              # run as admin for VS Build Tools
 python demo.py
 ```
 
@@ -92,8 +92,8 @@ This test uses deterministic sleeps and a height→weight→tip-hash tie-break t
 
 | OS                   | Command                     | Notes |
 | -------------------- | --------------------------- | ----- |
-| **Linux/macOS/WSL2** | `bash ./bootstrap.sh`       | prepends `.venv/bin` to `PATH`, creates `bin/python` shim if needed, installs `patchelf` on Linux |
-| **Windows 10/11**    | `./bootstrap.ps1` *(Admin)* | creates `bin/python` shim if needed |
+| **Linux/macOS/WSL2** | `bash ./scripts/bootstrap.sh`       | prepends `.venv/bin` to `PATH`, creates `bin/python` shim if needed, installs `patchelf` on Linux |
+| **Windows 10/11**    | `./scripts/bootstrap.ps1` *(Admin)* | creates `bin/python` shim if needed |
 
 - `build.rs` detects `libpython` via `python3-config --ldflags` and sets rpath; errors early if missing.
 - `cargo-nextest` (v0.9.97-b.2) is installed by bootstrap; devs must run `nextest` or the `Justfile` fallback runs `cargo test`.
@@ -191,6 +191,7 @@ node/
     ...
   tests/
   benches/
+  .env.example
 crates/
 monitoring/
 examples/governance/
@@ -198,6 +199,11 @@ examples/workloads/
 fuzz/wal/
 formal/
 scripts/
+  bootstrap.sh
+  bootstrap.ps1
+  requirements.txt
+  requirements-lock.txt
+  docker/
 demo.py
 docs/
   compute_market.md
@@ -286,7 +292,7 @@ make monitor   # Prom+Grafana; scrape :9100, open :3000
 ## Final Acceptance Checklist
 
 - README shows the canonical repo layout and `node/` holds tests and benches.
-- Commands copy/paste-run after `./bootstrap.sh` on Linux/macOS and `./bootstrap.ps1` on Windows.
+- Commands copy/paste-run after `./scripts/bootstrap.sh` on Linux/macOS and `./scripts/bootstrap.ps1` on Windows.
 - RPC names and parameters match the code (lane tags, identity, governance, price board, courier).
 - Metric names match exporter output when the node runs with `--features telemetry` and `--metrics-addr`.
 - Quick Start node example exposes `/metrics`, and the curl scrape command succeeds.

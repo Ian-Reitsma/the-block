@@ -31,6 +31,15 @@ REQUIRED_PYTHON="3.12.3"
 PARTIAL_RUN_FLAG=".bootstrap_partial"
 touch "$PARTIAL_RUN_FLAG"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -f "$REPO_ROOT/Cargo.toml" ]]; then
+  cd "$REPO_ROOT"
+else
+  REPO_ROOT="$SCRIPT_DIR"
+  cd "$REPO_ROOT"
+fi
+
 NATIVE_MONITOR=0
 for arg in "$@"; do
   [[ "$arg" == "--native-monitor" ]] && NATIVE_MONITOR=1
@@ -101,20 +110,20 @@ if grep -q "Microsoft" /proc/version 2>/dev/null && ! grep -q "WSL2" /proc/versi
 fi
 
 # .env sync (idempotent)
-if [[ -f .env.example ]]; then
-  [[ -f .env ]] || cp .env.example .env
-  missing=$(comm -23 <(grep -v '^#' .env.example | cut -d= -f1 | sort) <(grep -v '^#' .env | cut -d= -f1 | sort)) || true
-  for k in ${missing:-}; do grep "^$k=" .env.example >> .env; cecho green "   + added env key $k"; done
+if [[ -f node/.env.example ]]; then
+  [[ -f node/.env ]] || cp node/.env.example node/.env
+  missing=$(comm -23 <(grep -v '^#' node/.env.example | cut -d= -f1 | sort) <(grep -v '^#' node/.env | cut -d= -f1 | sort)) || true
+  for k in ${missing:-}; do grep "^$k=" node/.env.example >> node/.env; cecho green "   + added env key $k"; done
 else
-  cecho yellow "   → No .env.example found, skipping env sync."
+  cecho yellow "   → No node/.env.example found, skipping env sync."
 fi
 
 # requirements.txt/package.json sanity
-if [[ -f requirements.txt ]]; then
-  if [[ ! -s requirements.txt ]] || ! grep -q '[^[:space:]]' requirements.txt; then
-    cecho yellow "   → requirements.txt present but empty; skipping pip install."
-    SKIPPED_STEPS+=("requirements.txt present but empty, pip install skipped")
-    rm -f requirements.txt
+if [[ -f scripts/requirements.txt ]]; then
+  if [[ ! -s scripts/requirements.txt ]] || ! grep -q '[^[:space:]]' scripts/requirements.txt; then
+    cecho yellow "   → scripts/requirements.txt present but empty; skipping pip install."
+    SKIPPED_STEPS+=("scripts/requirements.txt present but empty, pip install skipped")
+    rm -f scripts/requirements.txt
   fi
 fi
 
@@ -307,9 +316,9 @@ run_step "database migrations" cargo run --quiet -p the_block --bin db_migrate
 fi
 
 # Skeleton files
-[[ -f requirements.txt ]]         || echo "# placeholder" > requirements.txt
-[[ -f README.md       ]]         || echo -e "# $APP_NAME\n\nBootstrap complete. Next steps:\n- Edit README\n- Push code\n" > README.md
-[[ -f .pre-commit-config.yaml ]] || echo "# See https://pre-commit.com" > .pre-commit-config.yaml
+[[ -f scripts/requirements.txt ]]         || echo "# placeholder" > scripts/requirements.txt
+[[ -f README.md       ]]                 || echo -e "# $APP_NAME\n\nBootstrap complete. Next steps:\n- Edit README\n- Push code\n" > README.md
+[[ -f scripts/.pre-commit-config.yaml ]] || echo "# See https://pre-commit.com" > scripts/.pre-commit-config.yaml
 
 # Optional builds
 if [[ -f Makefile ]]; then
@@ -324,17 +333,17 @@ fi
 
 # Python/Node deps (all pip/poetry only if not broken)
 if (( BROKEN_PYTHON == 0 )); then
-  if [[ -s requirements.txt ]]; then
-    if ! run_step "pip install requirements" pip install -r requirements.txt; then
+  if [[ -s scripts/requirements.txt ]]; then
+    if ! run_step "pip install requirements" pip install -r scripts/requirements.txt; then
       cecho yellow "   → continuing without optional Python deps"
     fi
   fi
   if [[ -f pyproject.toml ]] && command -v poetry &>/dev/null; then
     run_step "poetry install" poetry install
   fi
-  if [[ -f .pre-commit-config.yaml ]] && [[ "${CI:-}" == "" ]]; then
+  if [[ -f scripts/.pre-commit-config.yaml ]] && [[ "${CI:-}" == "" ]]; then
     run_step "pip install pre-commit" pip install pre-commit
-    run_step "pre-commit install" pre-commit install
+    run_step "pre-commit install" pre-commit install --config scripts/.pre-commit-config.yaml
   fi
 else
   skip_step "pip/poetry/pre-commit install (Python broken: sqlite3 missing)"
@@ -368,8 +377,8 @@ fi
 if command -v direnv &>/dev/null && [[ -f .envrc ]]; then
   cecho cyan "   → direnv detected; run 'direnv allow' if needed."
 fi
-if command -v pipx &>/dev/null && [[ -f requirements.txt ]]; then
-  cecho cyan "   → pipx detected; you may want to run 'pipx install -r requirements.txt'"
+if command -v pipx &>/dev/null && [[ -f scripts/requirements.txt ]]; then
+  cecho cyan "   → pipx detected; you may want to run 'pipx install -r scripts/requirements.txt'"
 fi
 
 # --------------------------------------------------------------------

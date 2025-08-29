@@ -5,7 +5,7 @@ default:
 
 demo:
     @if [ ! -x .venv/bin/python ]; then \
-        echo "virtualenv missing; run ./bootstrap.sh" >&2; exit 1; \
+        echo "virtualenv missing; run ./scripts/bootstrap.sh" >&2; exit 1; \
     fi
     .venv/bin/python demo.py
 

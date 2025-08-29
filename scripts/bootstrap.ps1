@@ -7,6 +7,15 @@ $REQUIRED_PYTHON = "3.12.3"
 $PYTHON_VENV = ".venv"
 $CARGO_BIN = "$env:USERPROFILE\.cargo\bin"
 
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Resolve-Path (Join-Path $ScriptDir "..")
+if (Test-Path (Join-Path $RepoRoot "Cargo.toml")) {
+    Set-Location $RepoRoot
+} else {
+    $RepoRoot = $ScriptDir
+    Set-Location $RepoRoot
+}
+
 Function Write-Color($Color, $Text) {
     Write-Host $Text -ForegroundColor $Color
 }
@@ -168,9 +177,9 @@ if (Test-Path "Cargo.toml") {
 Run-Maturin-Develop
 
 # Python project deps
-if (Test-Path "requirements.txt" -and (Get-Content requirements.txt | Where-Object {$_ -match '\S'})) {
+if (Test-Path "scripts/requirements.txt" -and (Get-Content "scripts/requirements.txt" | Where-Object {$_ -match '\S'})) {
     Write-Color Cyan "Installing Python requirements..."
-    .\$PYTHON_VENV\Scripts\pip.exe install -r requirements.txt
+    .\$PYTHON_VENV\Scripts\pip.exe install -r scripts/requirements.txt
 }
 if (Test-Path "pyproject.toml" -and (Get-Command poetry -ErrorAction SilentlyContinue)) {
     Write-Color Cyan "Installing poetry deps..."
@@ -182,10 +191,10 @@ if (Test-Path "pyproject.toml" -and (Get-Command poetry -ErrorAction SilentlyCon
   }
 
 # Optional: Pre-commit hooks (if desired)
-if (Test-Path ".pre-commit-config.yaml") {
+if (Test-Path "scripts/.pre-commit-config.yaml") {
     Write-Color Cyan "Installing pre-commit..."
     .\$PYTHON_VENV\Scripts\pip.exe install pre-commit
-    .\$PYTHON_VENV\Scripts\pre-commit.exe install
+    .\$PYTHON_VENV\Scripts\pre-commit.exe install --config scripts/.pre-commit-config.yaml
 }
 
 Write-Color Green "==> [$APP_NAME] bootstrap complete."

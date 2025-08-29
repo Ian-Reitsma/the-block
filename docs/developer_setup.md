@@ -1,6 +1,6 @@
 # Developer Setup
 
-Run `./bootstrap.sh` to install toolchains. The script creates `.venv` and prepends its `bin` directory to `PATH`, so `python demo.py` works immediately. If a system `python` is missing, a shim is installed at `bin/python` and added to the path.
+Run `./scripts/bootstrap.sh` to install toolchains. The script creates `.venv` and prepends its `bin` directory to `PATH`, so `python demo.py` works immediately. If a system `python` is missing, a shim is installed at `bin/python` and added to the path.
 
 After bootstrapping, `just demo` runs the same walkthrough without manually
 activating the environment. Sample compute workloads under
@@ -12,7 +12,7 @@ cargo run --example run_workload examples/workloads/inference.slice
 
 ## Installing nextest
 
-The test suite uses [`cargo nextest`](https://nexte.st). `bootstrap.sh`
+The test suite uses [`cargo nextest`](https://nexte.st). `scripts/bootstrap.sh`
 automatically downloads a matching prebuilt binary, so no manual installation
 is required. Running `cargo nextest --version` after bootstrapping should report
 the pinned release.

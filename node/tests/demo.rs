@@ -6,7 +6,7 @@ use wait_timeout::ChildExt;
 #[ignore = "slow"]
 fn demo_runs_clean() {
     if !Path::new(".venv/bin/python").exists() {
-        eprintln!("skipping demo_runs_clean: .venv/bin/python missing (run bootstrap.sh)");
+        eprintln!("skipping demo_runs_clean: .venv/bin/python missing (run scripts/bootstrap.sh)");
         return;
     }
 
