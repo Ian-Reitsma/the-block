@@ -22,7 +22,7 @@
 ## Why The Block
 
 - Dual fee lanes (Consumer | Industrial) with lane-aware mempools and a comfort guard that defers industrial when consumer p90 fees exceed threshold.
-- Service credits: non-transferable, expiring credits to offset writes and priority *(coming soon).* 
+- Service credits ledger: non-transferable credits to offset writes and priority with CLI top-up and balance queries.
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
 - Rust: `#![forbid(unsafe_code)]`, Ed25519 + BLAKE3, schema-versioned state, reproducible builds.
 - PyO3 bindings for rapid prototyping.
@@ -34,8 +34,9 @@
 - 1-second L1 metronome and difficulty retargeting (MA of last 120 blocks, ±4× clamp).
 - Dual fee lanes embedded in `SignedTransaction` and lane-specific mempools with p50/p90 fee sampling.
 - Industrial admission with capacity estimator, fair-share caps, and burst budgets; structured rejection reasons: `Capacity` | `FairShare` | `BurstExhausted`.
-- Storage pipeline MVP: 1 MiB chunking, ChaCha20-Poly1305 encryption, manifest receipts, reassembly with integrity checks.
-- Compute-market dry-run settlement: greedy matcher, BLAKE3 idempotency key, compare-and-swap persistence, restart-safe.
+- Storage pipeline with Reed–Solomon erasure coding, multi-provider placement, manifest receipts, reassembly with integrity checks.
+- Paid compute-market settlement: credits ledger debits buyers and accrues providers with idempotent BLAKE3-keyed receipts.
+- Disk-backed service credits ledger with CLI top-up and balance queries.
 - Identity handles: normalized, nonce-protected registrations; `register_handle` / `resolve_handle` RPC.
 - Governance MVP: propose/vote with delayed activation and single-shot rollback; parameter registry includes snapshot interval & comfort thresholds.
 - P2P handshake with feature bits; token-bucket RPC limiter; TTL/orphan purge loop with metrics.
@@ -45,10 +46,8 @@
 
 ### Planned
 
-- Service credits engine (non-transferable, expiring).
-- Erasure coding & multi-provider placement in storage.
-- Real debit/credit settlement for compute-market (dry-run → paid).
-- Peer discovery, inventory exchange hardening.
+- Credit expiry and burn policies for service credits.
+- Peer discovery and inventory exchange hardening.
 
 ## Quick Start
 
@@ -87,6 +86,15 @@ cargo nextest run tests/net_gossip.rs
 ```
 
 This test uses deterministic sleeps and a height→weight→tip-hash tie-break to guarantee reproducible convergence.
+
+Inspect and manage service credits:
+
+```bash
+cargo run --bin node -- credits top-up --provider alice --amount 100
+cargo run --bin node -- credits balance alice
+```
+
+See [`docs/credits.md`](docs/credits.md) for ledger details and additional examples under `examples/governance/CREDITS.md`.
 
 ## Installation & Bootstrap
 
@@ -173,8 +181,8 @@ Set `PYO3_PYTHON` or `PYTHONHOME` on macOS if the linker cannot find Python.
 
 - Dual fee lanes: lane tag covered by signatures; lane-specific mempools; comfort guard tied to consumer p90 fees.
 - Industrial admission: moving-window capacity estimator; fair-share & burst budgets; labeled rejections.
-- Storage pipeline: 1 MiB chunks; ChaCha20-Poly1305; manifest receipts; integrity verified at read; erasure coding planned.
-- Compute market: dry-run settlement with idempotency; paid settlement planned.
+- Storage pipeline: 1 MiB chunks with Reed–Solomon parity; ChaCha20-Poly1305; manifest receipts; integrity verified at read; multi-provider placement.
+- Compute market: paid settlement via credits ledger with idempotent receipt tracking.
 - Governance MVP: parameter registry with delayed activation & single-shot rollback (keys: `SnapshotIntervalSecs`, `ConsumerFeeComfortP90Microunits`, `IndustrialAdmissionMinCapacity`).
 - P2P: feature-bit handshake; token-bucket RPC limiter; purge loop.
 - Hashing/signature: Ed25519 + BLAKE3; `#![forbid(unsafe_code)]`.
@@ -207,7 +215,9 @@ scripts/
 demo.py
 docs/
   compute_market.md
+  credits.md
   service_badge.md
+  governance_rollback.md
   wal.md
   snapshots.md
   monitoring.md
@@ -238,13 +248,11 @@ Progress: ~71/100.
 - Persistence hardening.
 - Fuzz coverage expansion.
 - Governance docs/API polish.
-- Credits scaffold.
 
 **Near term**
 
-- Service credits engine.
-- Erasure coding & multi-provider placement.
-- Paid compute-market settlement.
+- Credit expiry and burn policies.
+- Settlement auditing and explorer integration.
 
 ## Contribution Guidelines
 

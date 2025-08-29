@@ -19,6 +19,10 @@ The gauge `banned_peers_total` exposes the number of peers currently banned and
 is updated whenever bans are added or expire. Each ban's expiry is also tracked
 via `banned_peer_expiration_seconds{peer}`.
 
+Network-level drop behaviour is surfaced via `ttl_drop_total` and
+`startup_ttl_drop_total`, while `orphan_sweep_total` records the number of
+orphan blocks purged during maintenance passes.
+
 Manage the persistent ban store with the `ban` CLI:
 
 ```bash
@@ -33,6 +37,10 @@ advance on ban/unban and that expired entries are purged on `list`.
 When contributing to compute-market or price-board code, run
 `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board`
 to verify telemetry and persistence behaviour end-to-end.
+
+Integration tests start the metrics exporter with
+`serve_metrics_with_shutdown` so background tasks terminate cleanly. New tests
+should do the same to avoid hanging suites.
 
 Histogram `log_size_bytes` records the serialized size of each emitted log.
 Panels on the default Grafana dashboard derive average log size from this

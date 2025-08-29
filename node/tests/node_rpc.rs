@@ -3,17 +3,19 @@ use std::time::Duration;
 
 use serde_json::Value;
 use serial_test::serial;
+use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
     config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
 };
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use util::timeout::expect_timeout;
 
 mod util;
 
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
-    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let mut req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
         body.len()
@@ -23,9 +25,11 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     }
     req.push_str("\r\n");
     req.push_str(body);
-    stream.write_all(req.as_bytes()).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
     let mut resp = Vec::new();
-    stream.read_to_end(&mut resp).await.unwrap();
+    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let body = &resp[body_idx + 4..];
@@ -41,6 +45,7 @@ async fn rpc_smoke() {
         let mut guard = bc.lock().unwrap();
         guard.add_account("alice".to_string(), 42, 0).unwrap();
     }
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0);
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
     let token_file = dir.path().join("token");
@@ -57,39 +62,47 @@ async fn rpc_smoke() {
         rpc_cfg,
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
     // metrics endpoint
-    let val = rpc(&addr, r#"{"method":"metrics"}"#, None).await;
+    let val = expect_timeout(rpc(&addr, r#"{"method":"metrics"}"#, None)).await;
     #[cfg(feature = "telemetry")]
     assert!(val["result"].as_str().unwrap().contains("mempool_size"));
     #[cfg(not(feature = "telemetry"))]
     assert_eq!(val["result"].as_str().unwrap(), "telemetry disabled");
 
     // balance query
-    let bal = rpc(
+    let bal = expect_timeout(rpc(
         &addr,
         r#"{"method":"balance","params":{"address":"alice"}}"#,
         None,
-    )
+    ))
     .await;
     assert_eq!(bal["result"]["consumer"].as_u64().unwrap(), 42);
 
+    // settlement status
+    let status = expect_timeout(rpc(&addr, r#"{"method":"settlement_status"}"#, None)).await;
+    let mode = status["result"]["mode"]
+        .as_str()
+        .or_else(|| status["result"].as_str());
+    assert_eq!(mode, Some("dryrun"));
+
     // start and stop mining
-    let start = rpc(
+    let start = expect_timeout(rpc(
         &addr,
         r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert_eq!(start["result"]["status"], "ok");
-    let stop = rpc(
+    let stop = expect_timeout(rpc(
         &addr,
         r#"{"method":"stop_mining","params":{"nonce":2}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert_eq!(stop["result"]["status"], "ok");
+    Settlement::shutdown();
 
     handle.abort();
 }
@@ -115,20 +128,20 @@ async fn rpc_nonce_replay_rejected() {
         rpc_cfg,
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
-    let first = rpc(
+    let first = expect_timeout(rpc(
         &addr,
         r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert_eq!(first["result"]["status"], "ok");
-    let replay = rpc(
+    let replay = expect_timeout(rpc(
         &addr,
         r#"{"method":"stop_mining","params":{"nonce":1}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert_eq!(
         replay["error"]["message"].as_str().unwrap(),
@@ -136,6 +149,7 @@ async fn rpc_nonce_replay_rejected() {
     );
 
     handle.abort();
+    let _ = handle.await;
 }
 
 #[tokio::test]
@@ -167,7 +181,7 @@ async fn rpc_concurrent_controls() {
         rpc_cfg,
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
@@ -201,21 +215,22 @@ async fn rpc_concurrent_controls() {
                     i = i
                 ),
             };
-            let _ = rpc(&addr, &body, Some("testtoken")).await;
+            let _ = expect_timeout(rpc(&addr, &body, Some("testtoken"))).await;
         }));
     }
     for h in handles {
         let _ = h.await;
     }
-    let _ = rpc(
+    let _ = expect_timeout(rpc(
         &addr,
         r#"{"method":"stop_mining","params":{"nonce":999}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
 
     handle.abort();
+    let _ = handle.await;
 }
 
 #[tokio::test]
@@ -239,29 +254,32 @@ async fn rpc_error_responses() {
         rpc_cfg,
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
     // malformed JSON
-    let mut stream = TcpStream::connect(&addr).await.unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(&addr)).await.unwrap();
     let bad = "{\"method\":\"balance\""; // missing closing brace
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         bad.len(),
         bad
     );
-    stream.write_all(req.as_bytes()).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
     let mut resp = Vec::new();
-    stream.read_to_end(&mut resp).await.unwrap();
+    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
     let body = String::from_utf8(resp).unwrap();
     let body = body.split("\r\n\r\n").nth(1).unwrap();
     let val: Value = serde_json::from_str(body).unwrap();
     assert_eq!(val["error"]["code"].as_i64().unwrap(), -32700);
 
     // unknown method
-    let val = rpc(&addr, r#"{"method":"unknown"}"#, None).await;
+    let val = expect_timeout(rpc(&addr, r#"{"method":"unknown"}"#, None)).await;
     assert_eq!(val["error"]["code"].as_i64().unwrap(), -32601);
 
     handle.abort();
+    let _ = handle.await;
 }
 
 #[tokio::test]
@@ -285,7 +303,7 @@ async fn rpc_fragmented_request() {
         rpc_cfg,
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
     let body = r#"{"method":"stop_mining","params":{"nonce":1}}"#;
     let req = format!(

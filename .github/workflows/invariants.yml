@@ -13,9 +13,10 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Check anchors
         run: python scripts/check_anchors.py --md-anchors
+      - uses: taiki-e/setup-nextest@v0
       - name: Run tests
         id: vars
         run: |
-          cargo test --quiet && echo "status=passing" >> "$GITHUB_OUTPUT"
+          cargo nextest run --all-features --quiet && echo "status=passing" >> "$GITHUB_OUTPUT"
       - name: Serialization determinism
         run: python scripts/serialization_equiv.py

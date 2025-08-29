@@ -53,3 +53,10 @@ pub enum Payload {
     /// Share an entire chain snapshot for fork resolution.
     Chain(Vec<Block>),
 }
+
+/// Attempt to decode a [`Message`] from raw bytes.
+#[cfg(feature = "fuzzy")]
+#[allow(dead_code)]
+pub fn decode(bytes: &[u8]) -> bincode::Result<Message> {
+    bincode::deserialize(bytes)
+}

@@ -34,6 +34,10 @@ The exporter currently tracks:
 - `settle_applied_total` – receipts successfully debited and credited
 - `settle_failed_total{reason}` – settlement failures by reason
 - `settle_mode_change_total{to}` – settlement mode transitions
+- `ttl_drop_total` / `startup_ttl_drop_total` – messages dropped due to TTL expiry during runtime and startup
+- `orphan_sweep_total` – orphan blocks removed during periodic sweeps
+- `snapshot_duration_seconds` / `snapshot_fail_total` – snapshot round-trip time and failure counts
+- `snapshot_interval` / `snapshot_interval_changed` – active snapshot interval and gauge of interval changes
 - `param_change_pending{key}` – governance parameter changes queued for activation
 - `param_change_active{key}` – current active governance parameter values
 - `synthetic_convergence_seconds` – end-to-end probe duration emitted by scripts/synthetic.sh

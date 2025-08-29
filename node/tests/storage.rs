@@ -2,6 +2,7 @@ use rand::{rngs::OsRng, RngCore};
 use tempfile::tempdir;
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 
+#[derive(Clone, Copy)]
 struct NoopProvider;
 
 impl Provider for NoopProvider {
@@ -18,7 +19,7 @@ fn put_and_get_roundtrip() {
     let mut data = vec![0u8; 1024 * 1024];
     OsRng.fill_bytes(&mut data);
     let receipt = pipe
-        .put_object(&data, "consumer", &provider)
+        .put_object(&data, "consumer", &[&provider])
         .expect("store");
     drop(pipe);
     let pipe = StoragePipeline::open(dir.path().to_str().unwrap());

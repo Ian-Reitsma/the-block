@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "node",
+  "crates/credits",
   "crates/probe",
   "fuzz",
   "tools/xtask"

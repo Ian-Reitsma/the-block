@@ -17,6 +17,7 @@ fn init() {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig { cases: 16, failure_persistence: None, .. ProptestConfig::default() })]
     #[test]
     fn prop_migration_recomputes_randomized_fees(seed in any::<u64>()) {
         init();

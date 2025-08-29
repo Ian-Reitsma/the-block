@@ -33,3 +33,13 @@ the network, demonstrating partition recovery.
 | 0x0008 | COMPUTE_MARKET_V1 | Compute-market RPCs and workloads |
 
 Peers lacking required bits are rejected during handshake.
+
+## Fuzzed handshake and gossip decoding
+
+The `fuzz/network` harness feeds randomized bytes into
+`node::net::message::decode` and the handshake parser.  This ensures malformed
+inputs are rejected without panics or resource leaks.  Any crash seeds are saved
+under `fuzz/network/artifacts/` with a `repro.sh` helper for triage.
+
+CI runs `cargo fuzz run network` nightly to guard the decoder against
+regressions.

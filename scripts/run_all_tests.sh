@@ -48,7 +48,13 @@ else
 fi
 
 maturin develop --release $FEATURE_FLAG
-cargo test --all --release $FEATURE_FLAG
+TIMEOUT="${TEST_TIMEOUT:-60}"
+if cargo nextest run --help 2>&1 | grep -q -- '--test-timeout'; then
+  TIMEOUT_FLAG=("--test-timeout" "${TIMEOUT}s")
+else
+  TIMEOUT_FLAG=()
+fi
+cargo nextest run --all-features --release "${TIMEOUT_FLAG[@]}"
 python -m pytest -q
 
 # Run fuzz target when `cargo fuzz` is available. `cargo fuzz --help` returns

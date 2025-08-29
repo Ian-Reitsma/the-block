@@ -14,3 +14,10 @@ pub fn temp_blockchain(prefix: &str) -> (TempDir, Blockchain) {
     let bc = Blockchain::new(dir.path().to_str().unwrap());
     (dir, bc)
 }
+
+#[allow(dead_code)]
+pub fn temp_blockchain_with_difficulty(prefix: &str, diff: u64) -> (TempDir, Blockchain) {
+    let dir = temp_dir(prefix);
+    let bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), diff).unwrap();
+    (dir, bc)
+}

@@ -1,4 +1,5 @@
 use crate::{
+    compute_market::settlement::{SettleMode, Settlement},
     config::RpcConfig,
     governance::{GovStore, Params},
     identity::handle_registry::HandleRegistry,
@@ -47,6 +48,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "tx_status",
     "price_board_get",
     "metrics",
+    "settlement_status",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -472,6 +474,20 @@ fn dispatch(
                 })
             } else {
                 serde_json::json!({"consumer": 0, "industrial": 0})
+            }
+        }
+        "settlement_status" => {
+            let provider = req.params.get("provider").and_then(|v| v.as_str());
+            let mode = match Settlement::mode() {
+                SettleMode::DryRun => "dryrun",
+                SettleMode::Real => "real",
+                SettleMode::Armed { .. } => "armed",
+            };
+            if let Some(p) = provider {
+                let bal = Settlement::balance(p);
+                serde_json::json!({"mode": mode, "balance": bal})
+            } else {
+                serde_json::json!({"mode": mode})
             }
         }
         "register_handle" => {

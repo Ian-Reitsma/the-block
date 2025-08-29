@@ -6,19 +6,20 @@ use serial_test::serial;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use util::timeout::expect_timeout;
 
 mod util;
 
 async fn rpc(addr: &str, body: &str) -> Value {
-    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );
-    stream.write_all(req.as_bytes()).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes())).await.unwrap();
     let mut resp = vec![0u8; 1024];
-    let n = stream.read(&mut resp).await.unwrap();
+    let n = expect_timeout(stream.read(&mut resp)).await.unwrap();
     let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
     serde_json::from_slice(&resp[body_idx + 4..n]).unwrap()
 }
@@ -37,11 +38,12 @@ async fn price_board_no_data_errors() {
         RpcConfig::default(),
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
     let req = r#"{"method":"price_board_get"}"#;
-    let val = rpc(&addr, req).await;
+    let val = expect_timeout(rpc(&addr, req)).await;
     assert_eq!(val["error"]["code"], -33000);
     assert_eq!(val["error"]["message"], "no price data");
     handle.abort();
+    let _ = handle.await;
 }

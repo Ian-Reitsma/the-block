@@ -88,33 +88,45 @@ Logs emit `loaded price board` and `saved price board` messages, while metrics
 `price_band_p25`, `price_band_median`, and `price_band_p75` track quantile
 bands.
 
-## Dry-Run Settlement Loop
+## Receipt Settlement and Credits Ledger
 
-The compute market currently runs in a dry-run mode that forms notional matches
-between bids and asks without transferring real fees. Each successful match
-emits a `Receipt`:
+Matches between bids and asks produce `Receipt` objects that debit the buyer and
+credit the provider. Settlement uses the [`credits` ledger](credits.md) crate and
+tracks applied receipts in a sled tree to guarantee idempotency across restarts.
 
 ```text
-{ version: 1, job_id, buyer, provider, quote_price, dry_run: true,
-  issued_at, idempotency_key }
+{ version: 1, job_id, buyer, provider, quote_price, issued_at, idempotency_key }
 ```
 
 The `idempotency_key` is `BLAKE3(job_id || buyer || provider || quote_price ||
-version)` and is used as the primary index in the `ReceiptStore`. Receipts are
-persisted via `sled` with `compare_and_swap` to guarantee exactly-once
-insertion. On startup the store reloads existing entries and skips corrupted
-records, incrementing the `receipt_corrupt_total` counter.
+version)` and is used as the primary index in the `ReceiptStore`.  Receipts are
+persisted via `compare_and_swap` so duplicates are ignored.  On startup the
+store reloads existing entries and increments `receipt_corrupt_total` for any
+damaged records.
 
-`match_loop` greedily pairs bids and asks on a fixed interval and records
-metrics:
+`Settlement` operates in one of three modes:
 
-- `matches_total{dry_run}` – receipts successfully persisted.
+- **DryRun** – records receipts without moving balances (default).
+- **Armed** – after a configured delay, transitions to `Real`.
+- **Real** – debits buyers and accrues credits to providers.
+
+Operators can toggle modes via CLI and inspect the current state with the
+`settlement_status` RPC, which reports balances and mode.
+
+When `Real`, each finalized receipt subtracts `quote_price` from the buyer and
+accrues the same amount for the provider with an event tag.  Failures (e.g.,
+insufficient funds) are archived and cause the system to revert to `DryRun`.
+Metrics track behaviour:
+
+- `settle_applied_total` – receipts successfully debited and credited.
+- `settle_failed_total{reason}` – settlement failures.
+- `settle_mode_change_total{to}` – mode transitions.
+- `matches_total{dry_run}` – receipts processed by the match loop.
 - `receipt_persist_fail_total` – database write errors.
-- `match_loop_latency_seconds` – time spent per loop iteration.
+- `match_loop_latency_seconds` – time per match-loop iteration.
 
-Dry-run mode is the default and can be disabled with the `--dry-run=false`
-flag on `node run`. Once the receipt path is battle-tested the same interface
-can attach real debits and credits by toggling this flag.
+The `settlement_cluster` test exercises idempotency by applying receipts across
+node restarts and asserting that metrics record exactly one application.
 
 ## Industrial Admission & Fee Lanes
 

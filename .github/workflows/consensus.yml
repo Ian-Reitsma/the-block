@@ -54,8 +54,9 @@ jobs:
           tool: cargo-geiger
       - name: cargo geiger
         run: cargo geiger --all --skip build
-      - name: cargo test
-        run: cargo test --all-features
+      - uses: taiki-e/setup-nextest@v0
+      - name: cargo nextest
+        run: cargo nextest run --all-features
       - name: minimal versions
         run: |
           rustup toolchain install nightly --profile minimal

@@ -34,12 +34,14 @@ libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio
 futures = "0.3"
 unicode-normalization = "0.1"
 tokio-util = "0.7"
+credits = { path = "../crates/credits" }
+reed-solomon-erasure = "6"
 
 [features]
 fuzzy = ["proptest"]
 telemetry = ["log", "prometheus", "tracing"]
 telemetry-json = ["telemetry"]
-test-telemetry = ["tracing", "log"]
+test-telemetry = ["telemetry"]
 
 [package.metadata.maturin]
 features = ["pyo3/extension-module", "pyo3/auto-initialize", "telemetry"]

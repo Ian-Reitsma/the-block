@@ -21,5 +21,5 @@ for _ in {1..20}; do
 done
 
 curl -sSf "http://127.0.0.1:$RPC_PORT/health" >/dev/null
-curl -sSf "http://127.0.0.1:$RPC_PORT/tip" >/dev/null
-curl -sSf "http://127.0.0.1:$RPC_PORT/peers" >/dev/null
+curl -sSf "http://127.0.0.1:$RPC_PORT/api/blocks" | jq -e '.blocks' >/dev/null
+curl -sSf "http://127.0.0.1:$RPC_PORT/api/tx" | jq -e '.tx' >/dev/null
