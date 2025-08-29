@@ -21,6 +21,8 @@ jobs:
           profile: minimal
       - name: WAL fuzz (120s)
         run: cargo +nightly fuzz run wal_fuzz -- -max_total_time=120 -artifact_prefix=fuzz/wal/ -runs=0
+      - name: Promote WAL seeds
+        run: ./scripts/promote_wal_seeds.sh fuzz/wal fuzz/corpus/wal
       - name: Upload WAL artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -28,11 +30,15 @@ jobs:
           name: wal-fuzz
           path: fuzz/wal/
       - name: Chaos tests
-        run: cargo test --features test-telemetry --release --test chaos -- --test-threads=1
+        run: cargo test --features test-telemetry --release --test chaos -- --test-threads=1 --ignored
       - name: Probe suite
         run: ./scripts/synthetic.sh
+      - name: Dashboard deps
+        run: npm ci --prefix monitoring
       - name: Dashboard lint
         run: make -C monitoring lint
+      - name: Alert rule tests
+        run: ./scripts/alert_test.sh
       - name: Build release binary
         run: cargo build --release
       - name: Explorer smoke
@@ -44,7 +50,7 @@ jobs:
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@$(git log -1 --format=%ct) -C target/release -cf node.tar node
           gzip -n node.tar
           sha256sum node.tar.gz > checksums.txt
-          cosign sign-blob --output-signature checksums.txt.sig checksums.txt || true
+          cosign sign-blob --output-signature checksums.txt.sig checksums.txt
           ./scripts/verify_release.sh node.tar.gz checksums.txt checksums.txt.sig
           ! readelf -S target/release/node | grep -q debug
           size=$(stat -c%s target/release/node)

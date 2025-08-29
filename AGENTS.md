@@ -225,9 +225,30 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 - Policy: emissions curve; live R(t,b); reserve inventory; jurisdiction pack hashes; transparency log.
 
 ## 13. Roadmap
-- Now: 1‑second engine; RPC; purge loops; tests/benches; docs; dual‑token model; launch tooling.
-- Next: Consumer TGE; LocalNet + Range Boost; offline money & carrierless messaging; canary lanes; SDK v1; Industrial readiness; coverage bounties; lighthouse reference.
-- Later: heavier shards (diffusion/vector search); WISP/ISP gateways; formal proofs of invariants; PQ crypto; broader jurisdiction packs.
+
+Progress: ~71/100.
+
+**Recent**
+
+- Support bundle redaction regression test.
+- Automated WAL fuzz seed promotion.
+- Alert rule simulations for convergence lag and fee breaches.
+- Metrics server shutdown handle and restart-aware settlement test.
+- Release gate runs chaos tests and enforces cosign signatures.
+
+**Immediate**
+
+- Stabilize `cargo test --all --features test-telemetry --release`.
+- Persistence hardening.
+- Fuzz coverage expansion.
+- Governance docs/API polish.
+- Credits scaffold.
+
+**Near term**
+
+- Service credits engine.
+- Erasure coding & multi-provider placement.
+- Paid compute-market settlement.
 
 ## 14. Differentiators
 - Utility first: instant wins (works with no bars, instant starts, offline pay, find‑anything) with no partner permission.

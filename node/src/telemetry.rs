@@ -977,26 +977,77 @@ pub fn gather_metrics() -> PyResult<String> {
 ///
 /// This helper is intentionally lightweight and meant for tests or local
 /// demos; production deployments should place a reverse proxy in front of it.
-#[pyfunction]
-pub fn serve_metrics(addr: &str) -> PyResult<String> {
+pub struct MetricsServer {
+    shutdown: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl MetricsServer {
+    pub fn shutdown(mut self) {
+        use std::sync::atomic::Ordering;
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for MetricsServer {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServer)> {
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::{atomic::AtomicBool, Arc};
+    use std::time::Duration;
 
     let listener = TcpListener::bind(addr)?;
+    listener
+        .set_nonblocking(true)
+        .unwrap_or_else(|e| panic!("nonblocking: {e}"));
     let local = listener.local_addr()?;
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                let mut _req = [0u8; 512];
-                let _ = stream.read(&mut _req);
-                let body = gather_metrics().unwrap_or_else(|e| e.to_string());
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(), body
-                );
-                let _ = stream.write_all(response.as_bytes());
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&shutdown);
+    let handle = std::thread::spawn(move || {
+        use std::io::ErrorKind;
+        while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut _req = [0u8; 512];
+                    let _ = stream.read(&mut _req);
+                    let body = gather_metrics().unwrap_or_else(|e| e.to_string());
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
+                        body.len(), body
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(_) => break,
             }
         }
     });
-    Ok(local.to_string())
+    Ok((
+        local.to_string(),
+        MetricsServer {
+            shutdown,
+            handle: Some(handle),
+        },
+    ))
+}
+
+#[pyfunction]
+pub fn serve_metrics(addr: &str) -> PyResult<String> {
+    let (addr, handle) = serve_metrics_with_shutdown(addr)?;
+    std::mem::forget(handle);
+    Ok(addr)
 }

@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use std::thread;
 
 use rand::Rng;
@@ -20,12 +19,23 @@ fn crash_simulated_write_is_atomic() {
         let _ = write_atomic(&path_clone, &new_clone);
     });
 
-    let mut tmp_os = path.as_os_str().to_owned();
-    tmp_os.push(".tmp");
-    let tmp_path = PathBuf::from(tmp_os);
-    while !tmp_path.exists() {
+    let tmp_path = 'outer: loop {
+        if let Ok(entries) = fs::read_dir(dir.path()) {
+            for entry in entries.flatten() {
+                if entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("state.bin.tmp")
+                {
+                    let p = entry.path();
+                    if p.exists() {
+                        break 'outer p;
+                    }
+                }
+            }
+        }
         thread::yield_now();
-    }
+    };
     let _ = fs::rename(&tmp_path, &path);
     handle.join().unwrap();
 

@@ -44,3 +44,6 @@ probe:gossip:
 
 support:bundle:
     bash scripts/support_bundle.sh
+
+fuzz:promote:
+    bash scripts/promote_wal_seeds.sh

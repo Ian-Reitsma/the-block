@@ -222,22 +222,22 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 ## Status & Roadmap
 
-Progress: ~68.5/100.
+Progress: ~71/100.
 
 **Recent**
 
-- Dual fee lanes with comfort guard.
-- Industrial admission with structured rejects.
-- Storage pipeline MVP with manifest receipts.
-- Governance MVP with rollback.
-- Identity handles and price board.
+- Support bundle redaction verified by regression test.
+- Automated WAL fuzz seed promotion and corpus refresh.
+- Alert rule simulations for convergence lag and fee breaches.
+- Metrics server shutdown handle and restart-aware settlement test.
+- Release gate runs chaos tests and enforces cosign signatures.
 
 **Immediate**
 
+- Stabilize `cargo test --all --features test-telemetry --release`.
 - Persistence hardening.
 - Fuzz coverage expansion.
 - Governance docs/API polish.
-- Monitoring gating.
 - Credits scaffold.
 
 **Near term**
@@ -299,7 +299,7 @@ make monitor   # Prom+Grafana; scrape :9100, open :3000
 - Links to `docs/*` and `examples/*` validate via `python scripts/check_anchors.py --md-anchors`.
 - Nightly toolchain is required only for `cargo fuzz`.
 - macOS rpath guidance for PyO3 (`PYO3_PYTHON`/`PYTHONHOME`) is documented.
-- Status & Roadmap states ~68.5/100 and maps to concrete next tasks.
+- Status & Roadmap states ~71/100 and maps to concrete next tasks.
 
 ## Disclaimer
 

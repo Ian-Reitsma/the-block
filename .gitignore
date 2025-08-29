@@ -22,11 +22,16 @@ snapshot/
 # RustSec advisory database cache
 # NPM artifacts
 node_modules/
+# Build artifacts from monitoring stack
+monitoring/bin/
 # Local node data and logs
 node-data/
 node-data-*/
 demo_logs/
 db
+data/
+node/ban_db/
+node/snapshots/
 formal/.fstar/
 formal/*.checked
 # Documentation artifacts

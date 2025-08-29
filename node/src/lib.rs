@@ -52,7 +52,9 @@ pub mod rpc;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
-pub use telemetry::{gather_metrics, redact_at_rest, serve_metrics};
+pub use telemetry::{
+    gather_metrics, redact_at_rest, serve_metrics, serve_metrics_with_shutdown, MetricsServer,
+};
 
 pub mod blockchain;
 use blockchain::difficulty;

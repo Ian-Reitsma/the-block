@@ -3,7 +3,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-use the_block::{serve_metrics, telemetry};
+use the_block::{serve_metrics_with_shutdown, telemetry};
 
 fn init() {
     pyo3::prepare_freethreaded_python();
@@ -16,8 +16,8 @@ fn metrics_http_exporter_serves_prometheus_text() {
     telemetry::RECORDER.tx_submitted();
     telemetry::RECORDER.tx_rejected("bad_sig");
     telemetry::RECORDER.block_mined();
-    let addr = serve_metrics("127.0.0.1:0").expect("start server");
-    let mut stream = TcpStream::connect(addr).expect("connect metrics");
+    let (addr, handle) = serve_metrics_with_shutdown("127.0.0.1:0").expect("start server");
+    let mut stream = TcpStream::connect(&addr).expect("connect metrics");
     stream
         .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
         .unwrap();
@@ -29,4 +29,5 @@ fn metrics_http_exporter_serves_prometheus_text() {
     assert!(buf.contains("tx_submitted_total 1"));
     assert!(buf.contains("tx_rejected_total{reason=\"bad_sig\"} 1"));
     assert!(buf.contains("block_mined_total 1"));
+    handle.shutdown();
 }
