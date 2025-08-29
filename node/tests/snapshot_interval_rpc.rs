@@ -11,11 +11,12 @@ use the_block::{
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use util::timeout::expect_timeout;
 
 mod util;
 
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
-    let mut stream = TcpStream::connect(addr).await.unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let mut req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
         body.len()
@@ -25,9 +26,9 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     }
     req.push_str("\r\n");
     req.push_str(body);
-    stream.write_all(req.as_bytes()).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes())).await.unwrap();
     let mut resp = vec![0u8; 1024];
-    let n = stream.read(&mut resp).await.unwrap();
+    let n = expect_timeout(stream.read(&mut resp)).await.unwrap();
     let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
     serde_json::from_slice(&resp[body_idx + 4..n]).unwrap()
 }
@@ -56,21 +57,21 @@ async fn snapshot_interval_persist() {
         rpc_cfg,
         tx,
     ));
-    let addr = rx.await.unwrap();
+    let addr = expect_timeout(rx).await.unwrap();
 
-    let small = rpc(
+    let small = expect_timeout(rpc(
         &addr,
         r#"{"method":"set_snapshot_interval","params":{"interval":5}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert_eq!(small["error"]["message"], "interval too small");
 
-    let ok = rpc(
+    let ok = expect_timeout(rpc(
         &addr,
         r#"{"method":"set_snapshot_interval","params":{"interval":20}}"#,
         Some("testtoken"),
-    )
+    ))
     .await;
     assert!(ok["error"].is_null());
 
@@ -113,10 +114,10 @@ async fn snapshot_interval_restart_cycle() {
             rpc_cfg,
             tx,
         ));
-        let addr = rx.await.unwrap();
+        let addr = expect_timeout(rx).await.unwrap();
         let body =
             format!(r#"{{"method":"set_snapshot_interval","params":{{"interval":{interval}}}}}"#);
-        let _ = rpc(&addr, &body, Some("testtoken")).await;
+        let _ = expect_timeout(rpc(&addr, &body, Some("testtoken"))).await;
         handle.abort();
         let _ = handle.await;
         log::logger().flush();

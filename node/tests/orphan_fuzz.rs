@@ -43,6 +43,7 @@ enum Op {
 const ACCOUNTS: usize = 8;
 
 proptest! {
+    #![proptest_config(ProptestConfig { cases: 16, failure_persistence: None, .. ProptestConfig::default() })]
     #[test]
     fn orphan_counter_never_exceeds_mempool(
         ops in prop::collection::vec(

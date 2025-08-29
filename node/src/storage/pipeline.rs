@@ -1,3 +1,4 @@
+use super::erasure;
 use super::types::{ChunkRef, ObjectManifest, Redundancy, StoreReceipt};
 use crate::simple_db::SimpleDb;
 #[cfg(feature = "telemetry")]
@@ -121,24 +122,25 @@ impl StoragePipeline {
         }
     }
 
-    pub fn put_object<P: Provider>(
+    pub fn put_object(
         &mut self,
         data: &[u8],
         lane: &str,
-        provider: &P,
+        providers: &[&dyn Provider],
     ) -> Result<StoreReceipt, String> {
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
         let key = Key::from_slice(&key_bytes);
         let cipher = ChaCha20Poly1305::new(key);
 
-        let mut profile = self.load_profile(provider.id());
+        let mut profile = self.load_profile(providers[0].id());
         let chunk_len = profile.preferred_chunk as usize;
         #[cfg(feature = "telemetry")]
         STORAGE_INITIAL_CHUNK_SIZE.set(chunk_len as i64);
 
         let mut chunks = Vec::new();
         let mut offset = 0;
+        let mut provider_idx = 0;
         while offset < data.len() {
             let end = (offset + chunk_len).min(data.len());
             let chunk = &data[offset..end];
@@ -149,28 +151,34 @@ impl StoragePipeline {
             let ciphertext = cipher.encrypt(nonce, chunk).map_err(|e| e.to_string())?;
             let mut blob = nonce.to_vec();
             blob.extend_from_slice(&ciphertext);
-            provider.send_chunk(&blob)?;
+            let shards = erasure::encode(&blob)?;
+            for (idx, shard) in shards.into_iter().enumerate() {
+                let prov = &providers[provider_idx % providers.len()];
+                prov.send_chunk(&shard)?;
+                provider_idx += 1;
+                let mut h = Hasher::new();
+                h.update(&[idx as u8]);
+                h.update(&shard);
+                let id = *h.finalize().as_bytes();
+                self.db
+                    .insert(&format!("chunk/{}", hex::encode(id)), shard.clone());
+                chunks.push(ChunkRef {
+                    id,
+                    nodes: vec![prov.id().into()],
+                });
+            }
             let dur = start.elapsed();
-            let mut h = Hasher::new();
-            h.update(&blob);
-            let id = *h.finalize().as_bytes();
-            self.db
-                .insert(&format!("chunk/{}", hex::encode(id)), blob.clone());
-            chunks.push(ChunkRef {
-                id,
-                nodes: vec!["local".into()],
-            });
             let throughput = chunk.len() as f64 / dur.as_secs_f64();
             profile.bw_ewma = Self::ewma(profile.bw_ewma, throughput);
-            profile.rtt_ewma = Self::ewma(profile.rtt_ewma, provider.rtt_ewma());
-            profile.loss_ewma = Self::ewma(profile.loss_ewma, provider.loss_ewma());
+            profile.rtt_ewma = Self::ewma(profile.rtt_ewma, providers[0].rtt_ewma());
+            profile.loss_ewma = Self::ewma(profile.loss_ewma, providers[0].loss_ewma());
             profile.stable_chunks += 1;
             #[cfg(feature = "telemetry")]
             {
                 STORAGE_CHUNK_SIZE_BYTES.observe(chunk.len() as f64);
                 STORAGE_PUT_CHUNK_SECONDS.observe(dur.as_secs_f64());
-                STORAGE_PROVIDER_RTT_MS.observe(provider.rtt_ewma());
-                STORAGE_PROVIDER_LOSS_RATE.observe(provider.loss_ewma());
+                STORAGE_PROVIDER_RTT_MS.observe(providers[0].rtt_ewma());
+                STORAGE_PROVIDER_LOSS_RATE.observe(providers[0].loss_ewma());
             }
             offset = end;
         }
@@ -203,14 +211,14 @@ impl StoragePipeline {
         if let Ok(secs) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
             profile.updated_at = secs.as_secs();
         }
-        self.save_profile(provider.id(), &profile);
+        self.save_profile(providers[0].id(), &profile);
 
         let mut manifest = ObjectManifest {
             version: VERSION,
             total_len: data.len() as u64,
             chunk_len: chunk_len as u32,
             chunks,
-            redundancy: Redundancy::None,
+            redundancy: Redundancy::ReedSolomon { data: 1, parity: 1 },
             content_key_enc: key_bytes.to_vec(),
             blake3: [0u8; 32],
         };
@@ -227,7 +235,7 @@ impl StoragePipeline {
         let receipt = StoreReceipt {
             manifest_hash: man_hash,
             chunk_count: manifest.chunks.len() as u32,
-            redundancy: Redundancy::None,
+            redundancy: Redundancy::ReedSolomon { data: 1, parity: 1 },
             lane: lane.to_string(),
         };
         let rec_bytes = bincode::serialize(&receipt).map_err(|e| e.to_string())?;
@@ -252,29 +260,57 @@ impl StoragePipeline {
         let key_bytes = manifest.content_key_enc.clone();
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&key_bytes));
         let mut out = Vec::with_capacity(manifest.total_len as usize);
-        for ch in manifest.chunks.iter() {
-            let blob = self
-                .db
-                .get(&format!("chunk/{}", hex::encode(ch.id)))
-                .ok_or("missing chunk")?;
-            if blob.len() < 12 {
-                return Err("corrupt chunk".into());
+        match manifest.redundancy {
+            Redundancy::None => {
+                for ch in manifest.chunks.iter() {
+                    let blob = self
+                        .db
+                        .get(&format!("chunk/{}", hex::encode(ch.id)))
+                        .ok_or("missing chunk")?;
+                    if blob.len() < 12 {
+                        return Err("corrupt chunk".into());
+                    }
+                    let (nonce_bytes, ct) = blob.split_at(12);
+                    let nonce = Nonce::from_slice(nonce_bytes);
+                    let plain = cipher
+                        .decrypt(nonce, ct)
+                        .map_err(|_| "decrypt fail".to_string())?;
+                    out.extend_from_slice(&plain);
+                }
             }
-            let (nonce_bytes, ct) = blob.split_at(12);
-            let nonce = Nonce::from_slice(nonce_bytes);
-            let plain = cipher
-                .decrypt(nonce, ct)
-                .map_err(|_| "decrypt fail".to_string())?;
-            out.extend_from_slice(&plain);
+            Redundancy::ReedSolomon { data: d, parity: p } => {
+                let step = (d + p) as usize;
+                for group in manifest.chunks.chunks(step) {
+                    let mut shards: Vec<Option<Vec<u8>>> = Vec::new();
+                    for r in group {
+                        let blob = self.db.get(&format!("chunk/{}", hex::encode(r.id)));
+                        shards.push(blob);
+                    }
+                    let blob = erasure::reconstruct(shards)?;
+                    if blob.len() < 12 {
+                        return Err("corrupt chunk".into());
+                    }
+                    let (nonce_bytes, ct) = blob.split_at(12);
+                    let nonce = Nonce::from_slice(nonce_bytes);
+                    let plain = cipher
+                        .decrypt(nonce, ct)
+                        .map_err(|_| "decrypt fail".to_string())?;
+                    out.extend_from_slice(&plain);
+                }
+            }
         }
+        out.truncate(manifest.total_len as usize);
         Ok(out)
     }
 
-    #[cfg(test)]
     pub fn get_manifest(&self, manifest_hash: &[u8; 32]) -> Option<ObjectManifest> {
         let key = format!("manifest/{}", hex::encode(manifest_hash));
         self.db
             .get(&key)
             .and_then(|b| bincode::deserialize(&b).ok())
+    }
+
+    pub fn db_mut(&mut self) -> &mut SimpleDb {
+        &mut self.db
     }
 }

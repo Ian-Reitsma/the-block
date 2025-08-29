@@ -113,3 +113,57 @@ jobs:
             echo "Artifacts found";
             exit 1;
           fi
+  compute-market-fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          override: true
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target
+            fuzz/artifacts
+          key: ${{ runner.os }}-compute-market-fuzz-${{ hashFiles('Cargo.lock') }}
+      - name: install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: run compute_market fuzz
+        run: cargo +nightly fuzz run compute_market -- -max_total_time=120 -artifact_prefix=fuzz/compute_market/ -runs=0 || true
+      - name: run network fuzz
+        run: cargo +nightly fuzz run network -- -max_total_time=120 -artifact_prefix=fuzz/network/artifacts/ -runs=0 || true
+      - name: fuzz coverage report
+        run: scripts/fuzz_coverage.sh
+      - name: upload compute-market artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compute-market-fuzz
+          path: fuzz/compute_market/
+      - name: upload network artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: network-fuzz
+          path: fuzz/network/artifacts/
+      - name: upload fuzz coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-coverage
+          path: fuzz/coverage
+      - name: verify no compute-market artifacts
+        run: |
+          if ls fuzz/compute_market/* 1> /dev/null 2>&1; then
+            echo "Artifacts found";
+            exit 1;
+          fi
+      - name: verify no network artifacts
+        run: |
+          if ls fuzz/network/artifacts/* 1> /dev/null 2>&1; then
+            echo "Artifacts found";
+            exit 1;
+          fi

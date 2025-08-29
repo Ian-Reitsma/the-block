@@ -21,6 +21,11 @@ Two chambers participate in ratifying upgrades:
 Both houses must reach quorum before a proposal enters a timelock period,
 after which it may be executed on-chain.
 
+Rollback semantics and CLI usage are documented in
+[governance_rollback.md](governance_rollback.md). The `gov status` command
+exposes rollback-related metrics so operators can verify that gauges reset after
+reverts.
+
 ## Proposing an Upgrade
 
 1. Draft a feature flag JSON file under `governance/feature_flags/` describing

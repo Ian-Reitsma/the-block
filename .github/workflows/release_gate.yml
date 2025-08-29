@@ -13,6 +13,7 @@ jobs:
           toolchain: 1.82.0
           profile: minimal
           override: true
+      - uses: taiki-e/setup-nextest@v0
       - name: Unit and integration tests
         run: cargo nextest run --all-features
       - uses: actions-rs/toolchain@v1
@@ -30,7 +31,22 @@ jobs:
           name: wal-fuzz
           path: fuzz/wal/
       - name: Chaos tests
-        run: cargo test --features test-telemetry --release --test chaos -- --test-threads=1 --ignored
+        run: |
+          ./scripts/chaos.sh --nodes 3 --duration 30 2>&1 | tee chaos.log
+          tar -xf chaos_artifacts.tar.gz
+          max=$(rg -o 'rejoin_time_seconds=([0-9]+)' -r '$1' swarm/logs/*.log | sort -nr | head -n1)
+          if [ "${max:-0}" -gt 30 ]; then
+            echo "rejoin_time_seconds too high: $max" >&2
+            exit 1
+          fi
+      - name: Upload chaos logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaos-logs
+          path: |
+            chaos.log
+            chaos_artifacts.tar.gz
       - name: Probe suite
         run: ./scripts/synthetic.sh
       - name: Dashboard deps
@@ -43,10 +59,26 @@ jobs:
         run: cargo build --release
       - name: Explorer smoke
         run: ./scripts/explorer_smoke.sh
-      - name: Reproducible build & verify
+      - name: Generate SBOM
         run: |
           ./scripts/generate_sbom.sh SBOM.json
-          ./scripts/release_provenance.sh > provenance.json
+          cosign attest --predicate SBOM.json --type cyclonedx SBOM.json
+      - name: Release provenance
+        run: ./scripts/release_provenance.sh test-tag
+      - name: Verify attestations
+        run: |
+          cosign verify-attestation --type cyclonedx SBOM.json
+          cosign verify-attestation --type slsa-provenance releases/test-tag/checksums.txt
+      - name: Upload SBOM artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            SBOM.json
+            releases/test-tag/
+      - name: Reproducible build & verify
+        run: |
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@$(git log -1 --format=%ct) -C target/release -cf node.tar node
           gzip -n node.tar
           sha256sum node.tar.gz > checksums.txt

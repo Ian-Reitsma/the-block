@@ -10,11 +10,21 @@ arbitrary = { version = "1", features = ["derive"] }
 tempfile = "3"
 hex = "0.4"
 
-the_block = { path = "../node" }
+the_block = { path = "../node", features = ["fuzzy"] }
 
 [[bin]]
 name = "wal_fuzz"
 path = "fuzz_targets/wal_fuzz.rs"
+test = false
+
+[[bin]]
+name = "compute_market"
+path = "fuzz_targets/compute_market.rs"
+test = false
+
+[[bin]]
+name = "network"
+path = "fuzz_targets/network.rs"
 test = false
 
 [package.metadata]

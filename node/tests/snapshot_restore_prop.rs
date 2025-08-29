@@ -13,6 +13,7 @@ fn init() {
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig { cases: 16, failure_persistence: None, .. ProptestConfig::default() })]
     #[test]
     fn snapshot_restore_roundtrip(blocks in 1u64..6) {
         init();

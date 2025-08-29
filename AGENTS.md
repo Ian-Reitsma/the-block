@@ -235,6 +235,8 @@ Progress: ~71/100.
 - Alert rule simulations for convergence lag and fee breaches.
 - Metrics server shutdown handle and restart-aware settlement test.
 - Release gate runs chaos tests and enforces cosign signatures.
+- Governance rollback semantics documented ([docs/governance_rollback.md](docs/governance_rollback.md)).
+- Disk-backed credits ledger with paid compute-market settlement and CLI commands.
 
 **Immediate**
 
@@ -243,6 +245,10 @@ Progress: ~71/100.
 - Fuzz coverage expansion.
 - Governance docs/API polish.
 - Credits scaffold.
+- Audit tests for unbounded async work.
+  - **Problem**: some integration tests spawn tasks or servers without enforcing timeouts, risking hangs.
+  - **Next steps**: wrap long `await` calls with `expect_timeout` from `node/tests/util/timeout.rs` and ensure services use `serve_metrics_with_shutdown`.
+  - **Considerations**: watch for platform-specific timing and ensure tokio timeouts don't mask genuine deadlocks.
 
 **Near term**
 

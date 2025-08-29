@@ -56,3 +56,11 @@ Summaries of notable failures and their seeds live below and should be kept curr
 | Pattern | Seed | Reproduction |
 |--------|------|--------------|
 | *(none reported)* | – | – |
+
+## Compaction Crash Recovery
+
+During log compaction, a crash after writing the data file but before the WAL
+is rotated can leave a fully applied record in both places. The
+`wal_replays_once_after_compaction_crash` test ensures that on restart the log
+is replayed exactly once and then removed, so reopened databases see no
+duplicate entries.

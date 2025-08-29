@@ -20,6 +20,7 @@ fn arm_and_activate() {
     Settlement::tick(15, &[r2.clone()]);
     assert_eq!(Settlement::balance("buyer"), 90);
     assert_eq!(Settlement::balance("prov"), 10);
+    assert!(Settlement::receipt_applied(&r2.idempotency_key));
 }
 
 #[test]
@@ -58,8 +59,10 @@ fn idempotent_replay() {
     Settlement::set_balance("buyer", 50);
     Settlement::set_balance("prov", 0);
     let r = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 20, false);
+    let key = r.idempotency_key;
     Settlement::tick(1, &[r.clone()]);
     Settlement::tick(2, &[r]);
     assert_eq!(Settlement::balance("buyer"), 30);
     assert_eq!(Settlement::balance("prov"), 20);
+    assert!(Settlement::receipt_applied(&key));
 }

@@ -1,7 +1,9 @@
 use crate::compute_market::receipt::Receipt;
+use credits::Ledger;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use sled::{transaction::TransactionError, Tree};
+use sled::Tree;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,7 +43,8 @@ impl<'de> Deserialize<'de> for SettleMode {
 
 pub struct Settlement {
     mode: SettleMode,
-    accounts: Tree,
+    ledger: Ledger,
+    ledger_path: PathBuf,
     applied: Tree,
     failures: Tree,
     #[allow(dead_code)]
@@ -53,18 +56,18 @@ static GLOBAL: Lazy<Mutex<Option<Settlement>>> = Lazy::new(|| Mutex::new(None));
 impl Settlement {
     pub fn init(path: &str, mode: SettleMode, min_fee_micros: u64) {
         let db = sled::open(path).unwrap_or_else(|e| panic!("open settle db: {e}"));
-        let accounts = db
-            .open_tree("accounts")
-            .unwrap_or_else(|e| panic!("open accounts: {e}"));
         let applied = db
             .open_tree("receipts_applied")
             .unwrap_or_else(|e| panic!("open applied: {e}"));
         let failures = db
             .open_tree("failures")
             .unwrap_or_else(|e| panic!("open failures: {e}"));
+        let ledger_path = Path::new(path).join("credits.bin");
+        let ledger = Ledger::load(&ledger_path).unwrap_or_else(|e| panic!("load ledger: {e}"));
         *GLOBAL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Self {
             mode,
-            accounts,
+            ledger,
+            ledger_path,
             applied,
             failures,
             min_fee_micros,
@@ -114,29 +117,15 @@ impl Settlement {
 
     pub fn set_balance(acct: &str, amt: u64) {
         Self::with(|s| {
-            s.accounts
-                .insert(
-                    acct,
-                    bincode::serialize(&amt).unwrap_or_else(|e| panic!("serialize balance: {e}")),
-                )
-                .unwrap_or_else(|e| panic!("set balance: {e}"));
-            s.accounts
-                .flush()
-                .unwrap_or_else(|e| panic!("flush balance: {e}"));
+            s.ledger.set_balance(acct, amt);
+            s.ledger
+                .save(&s.ledger_path)
+                .unwrap_or_else(|e| panic!("save ledger: {e}"));
         });
     }
 
     pub fn balance(acct: &str) -> u64 {
-        Self::with(|s| {
-            s.accounts
-                .get(acct)
-                .unwrap_or_else(|e| panic!("get balance: {e}"))
-                .map(|v| {
-                    bincode::deserialize::<u64>(&v)
-                        .unwrap_or_else(|e| panic!("deserialize balance: {e}"))
-                })
-                .unwrap_or(0)
-        })
+        Self::with(|s| s.ledger.balance(acct))
     }
 
     pub fn mode() -> SettleMode {
@@ -144,81 +133,52 @@ impl Settlement {
     }
 
     fn apply_receipt(&mut self, r: &Receipt, height: u64) -> Result<(), ()> {
-        use sled::transaction::Transactional;
         let amount = r.quote_price;
         let key = r.idempotency_key;
-        let res =
-            (&self.accounts, &self.applied, &self.failures).transaction(|(acc, app, fail)| {
-                if app.get(&key)?.is_some() {
-                    return Ok(());
-                }
-                let buyer_key = r.buyer.as_bytes();
-                let provider_key = r.provider.as_bytes();
-                let buyer_bal = acc
-                    .get(buyer_key)?
-                    .map(|v| {
-                        bincode::deserialize::<u64>(&v)
-                            .unwrap_or_else(|e| panic!("deserialize buyer balance: {e}"))
-                    })
-                    .unwrap_or(0);
-                if buyer_bal < amount {
-                    let bytes =
-                        bincode::serialize(r).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
-                    fail.insert(&key, bytes)?;
-                    return Err(sled::transaction::ConflictableTransactionError::Abort(()));
-                }
-                let prov_bal = acc
-                    .get(provider_key)?
-                    .map(|v| {
-                        bincode::deserialize::<u64>(&v)
-                            .unwrap_or_else(|e| panic!("deserialize provider balance: {e}"))
-                    })
-                    .unwrap_or(0);
-                acc.insert(
-                    buyer_key,
-                    bincode::serialize(&(buyer_bal - amount))
-                        .unwrap_or_else(|e| panic!("serialize debit: {e}")),
-                )?;
-                acc.insert(
-                    provider_key,
-                    bincode::serialize(&(prov_bal + amount))
-                        .unwrap_or_else(|e| panic!("serialize credit: {e}")),
-                )?;
-                app.insert(
-                    &key,
-                    bincode::serialize(&height).unwrap_or_else(|e| panic!("serialize height: {e}")),
-                )?;
-                Ok(())
-            });
-        match res {
-            Ok(_) => {
-                self.accounts
-                    .flush()
-                    .unwrap_or_else(|e| panic!("flush accounts: {e}"));
-                self.applied
-                    .flush()
-                    .unwrap_or_else(|e| panic!("flush applied: {e}"));
-                #[cfg(feature = "telemetry")]
-                crate::telemetry::SETTLE_APPLIED_TOTAL.inc();
-                Ok(())
-            }
-            Err(TransactionError::Abort(_)) => {
-                self.failures
-                    .flush()
-                    .unwrap_or_else(|e| panic!("flush failures: {e}"));
-                #[cfg(feature = "telemetry")]
-                crate::telemetry::SETTLE_FAILED_TOTAL
-                    .with_label_values(&["insufficient_funds"])
-                    .inc();
-                self.mode = SettleMode::DryRun;
-                #[cfg(feature = "telemetry")]
-                crate::telemetry::SETTLE_MODE_CHANGE_TOTAL
-                    .with_label_values(&["dryrun"])
-                    .inc();
-                Err(())
-            }
-            Err(_) => Err(()),
+        if self
+            .applied
+            .get(&key)
+            .unwrap_or_else(|e| panic!("applied get: {e}"))
+            .is_some()
+        {
+            return Ok(());
         }
+        if self.ledger.spend(&r.buyer, amount).is_err() {
+            let bytes = bincode::serialize(r).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+            self.failures
+                .insert(&key, bytes)
+                .unwrap_or_else(|e| panic!("record failure: {e}"));
+            self.failures
+                .flush()
+                .unwrap_or_else(|e| panic!("flush failures: {e}"));
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::SETTLE_FAILED_TOTAL
+                .with_label_values(&["insufficient_funds"])
+                .inc();
+            self.mode = SettleMode::DryRun;
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::SETTLE_MODE_CHANGE_TOTAL
+                .with_label_values(&["dryrun"])
+                .inc();
+            return Err(());
+        }
+        let event = format!("settle:{}", hex::encode(key));
+        self.ledger.accrue(&r.provider, &event, amount);
+        self.ledger
+            .save(&self.ledger_path)
+            .unwrap_or_else(|e| panic!("save ledger: {e}"));
+        self.applied
+            .insert(
+                &key,
+                bincode::serialize(&height).unwrap_or_else(|e| panic!("serialize height: {e}")),
+            )
+            .unwrap_or_else(|e| panic!("record applied: {e}"));
+        self.applied
+            .flush()
+            .unwrap_or_else(|e| panic!("flush applied: {e}"));
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::SETTLE_APPLIED_TOTAL.inc();
+        Ok(())
     }
 
     pub fn tick(height: u64, receipts: &[Receipt]) {
@@ -241,5 +201,14 @@ impl Settlement {
                 }
             }
         });
+    }
+
+    pub fn receipt_applied(key: &[u8; 32]) -> bool {
+        Self::with(|s| {
+            s.applied
+                .get(key)
+                .unwrap_or_else(|e| panic!("get applied: {e}"))
+                .is_some()
+        })
     }
 }

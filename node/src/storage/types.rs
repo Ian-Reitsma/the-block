@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Redundancy {
     None,
+    ReedSolomon { data: u8, parity: u8 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -24,4 +24,22 @@ Metrics exported via the telemetry feature include:
 - `storage_put_eta_seconds`
 
 Profiles persist across restarts so subsequent uploads reuse the last known
-chunk size.
+chunk size. The `profile_persists_across_multiple_restarts` test restarts a node
+twice and asserts that the provider profile and chosen chunk size remain
+constant.
+
+## Erasure Coding and Multi-Provider Placement
+
+Each chunk is encrypted with ChaCha20-Poly1305 and then split into data and
+parity shards using Reed–Solomon coding (`1+1` configuration).  Shards are
+round-robined across the provided storage backends, allowing any single shard to
+be lost without data loss.  A manifest records the mapping of shard IDs to
+provider IDs and includes a redundancy hint:
+
+```json
+{"version":1,"chunk_len":1048576,"redundancy":{"ReedSolomon":{"data":1,"parity":1}},...}
+```
+
+On retrieval the pipeline loads the manifest, fetches available shards, and
+reconstructs missing data via `reed_solomon_erasure`.  Integration tests cover
+shard loss and recovery under `node/tests/storage_erasure.rs`.
