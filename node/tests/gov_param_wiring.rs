@@ -177,11 +177,25 @@ fn industrial_min_capacity_param_wires_and_rollback() {
         admission::check_and_record("buyer", "prov", 5),
         Err(admission::RejectReason::Capacity)
     ));
+    #[cfg(feature = "telemetry")]
+    assert_eq!(
+        PARAM_CHANGE_ACTIVE
+            .with_label_values(&["industrial_admission_min_capacity"])
+            .get(),
+        20
+    );
     store
         .rollback_last(1 + ACTIVATION_DELAY + 1, &mut rt, &mut params)
         .unwrap();
     assert_eq!(admission::min_capacity(), 10);
     assert!(admission::check_and_record("buyer", "prov", 5).is_ok());
+    #[cfg(feature = "telemetry")]
+    assert_eq!(
+        PARAM_CHANGE_ACTIVE
+            .with_label_values(&["industrial_admission_min_capacity"])
+            .get(),
+        10
+    );
 }
 
 #[test]

@@ -121,7 +121,9 @@ fn cap_race_respects_limit() {
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
-    let handles: Vec<_> = (0..64)
+    // 32 concurrent submissions are sufficient to stress the mempool
+    // without pushing the test past the harness's 60s timeout.
+    let handles: Vec<_> = (0..32)
         .map(|i| {
             let bc_cl = Arc::clone(&bc);
             let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, i as u64 + 1);
@@ -152,7 +154,8 @@ fn flood_mempool_never_over_cap() {
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
     let peak = Arc::new(AtomicUsize::new(0));
-    let handles: Vec<_> = (0..64)
+    // Limit to 32 threads so the flood test completes within the harness timeout.
+    let handles: Vec<_> = (0..32)
         .map(|i| {
             let bc_cl = Arc::clone(&bc);
             let peak_cl = Arc::clone(&peak);

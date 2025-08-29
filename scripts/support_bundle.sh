@@ -22,5 +22,6 @@ fi
 uname -a > "$TMP/uname.txt"
 
 ( cd "$TMP" && tar --sort=name --owner=0 --group=0 --numeric-owner -czf "$OUT" . )
+mv "$TMP/$OUT" "$OUT"
 rm -rf "$TMP"
 echo "Bundle written to $OUT"

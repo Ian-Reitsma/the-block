@@ -1,0 +1,41 @@
+rule_files:
+  - alert.rules.yml
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'gossip_convergence_seconds_bucket{le="30"}'
+        values: '0+10x31'
+      - series: 'gossip_convergence_seconds_bucket{le="60"}'
+        values: '0+20x31'
+      - series: 'gossip_convergence_seconds_bucket{le="+Inf"}'
+        values: '0+20x31'
+      - series: 'CONSUMER_FEE_P90'
+        values: '1000000+0x31'
+      - series: 'param_change_active{key="ConsumerFeeComfortP90Microunits"}'
+        values: '500000+0x31'
+      - series: 'INDUSTRIAL_DEFERRED_TOTAL'
+        values: '0+4x31'
+      - series: 'INDUSTRIAL_ADMITTED_TOTAL'
+        values: '0+6x31'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ConvergenceLag
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: "Chain convergence p95 above 30s"
+      - eval_time: 20m
+        alertname: ConsumerFeeComfortBreached
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+            exp_annotations:
+              summary: "Consumer fee p90 above comfort threshold"
+      - eval_time: 30m
+        alertname: IndustrialDeferralRatioHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+            exp_annotations:
+              summary: "Industrial deferral ratio above 30%"

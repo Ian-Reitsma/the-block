@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -13,9 +14,9 @@ const RENAME_RETRIES: u32 = 5;
 /// it.
 pub fn write_atomic<P: AsRef<Path>>(path: P, bytes: &[u8]) -> io::Result<()> {
     let path = path.as_ref();
-    let tmp_path = tmp_path(path);
-
-    // Ensure only one writer creates the temp file at a time.
+    // Ensure only one writer creates the temp file at a time by using
+    // uniquely-suffixed temp paths on collision.
+    let mut tmp_path = tmp_path_for(path);
     let mut create_attempts = 0;
     loop {
         match OpenOptions::new()
@@ -32,6 +33,7 @@ pub fn write_atomic<P: AsRef<Path>>(path: P, bytes: &[u8]) -> io::Result<()> {
                 if e.kind() == io::ErrorKind::AlreadyExists && create_attempts < RENAME_RETRIES =>
             {
                 create_attempts += 1;
+                tmp_path = tmp_path_for(path);
                 thread::sleep(Duration::from_millis(10));
                 continue;
             }
@@ -63,9 +65,11 @@ pub fn write_atomic<P: AsRef<Path>>(path: P, bytes: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-fn tmp_path(path: &Path) -> PathBuf {
+fn tmp_path_for(path: &Path) -> PathBuf {
+    let mut rng = rand::thread_rng();
+    let rand: u64 = rng.gen();
     let mut os = path.as_os_str().to_owned();
-    os.push(".tmp");
+    os.push(format!(".tmp.{rand}"));
     PathBuf::from(os)
 }
 

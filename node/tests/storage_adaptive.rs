@@ -93,6 +93,7 @@ fn loss_triggers_downgrade() {
 #[test]
 fn profile_persists_across_restarts() {
     let dir = tempdir().unwrap();
+    let preferred_chunk;
     {
         let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
         let provider = MockProvider::new("persist", 50.0, 10.0, 0.0, None);
@@ -100,17 +101,16 @@ fn profile_persists_across_restarts() {
         pipe.put_object(&data, "lane", &provider).unwrap();
         let profile = pipe.get_profile("persist").unwrap();
         assert!(profile.preferred_chunk >= 2 * 1024 * 1024);
+        preferred_chunk = profile.preferred_chunk;
     }
     {
         let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
         let profile = pipe.get_profile("persist").unwrap();
+        assert_eq!(profile.preferred_chunk, preferred_chunk);
         let provider = MockProvider::new("persist", 50.0, 10.0, 0.0, None);
         let data = vec![0u8; 1024 * 1024];
         let receipt = pipe.put_object(&data, "lane", &provider).unwrap();
-        if profile.preferred_chunk as usize > data.len() {
-            assert_eq!(receipt.chunk_count, 1);
-        } else {
-            assert!(receipt.chunk_count > 1);
-        }
+        let expected = (data.len() as u32 + preferred_chunk - 1) / preferred_chunk;
+        assert_eq!(receipt.chunk_count, expected);
     }
 }
