@@ -44,7 +44,8 @@ static FAIR_SHARE_CAP_MICRO: AtomicU64 = AtomicU64::new(250_000); // 25% express
 const BURST_QUOTA: f64 = 3.0; // micro-shard-seconds
 #[cfg(not(test))]
 const BURST_QUOTA: f64 = 30.0; // micro-shard-seconds
-static BURST_REFILL_RATE_MICRO: AtomicU64 = AtomicU64::new((BURST_QUOTA / WINDOW_SECS * 1_000_000.0) as u64);
+static BURST_REFILL_RATE_MICRO: AtomicU64 =
+    AtomicU64::new((BURST_QUOTA / WINDOW_SECS * 1_000_000.0) as u64);
 
 fn fair_share_cap() -> f64 {
     FAIR_SHARE_CAP_MICRO.load(Ordering::Relaxed) as f64 / 1_000_000.0

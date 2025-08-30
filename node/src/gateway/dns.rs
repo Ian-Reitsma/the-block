@@ -1,11 +1,11 @@
 use crate::simple_db::SimpleDb;
 use crate::ERR_DNS_SIG_INVALID;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey, SIGNATURE_LENGTH, PUBLIC_KEY_LENGTH};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
+use hex;
 use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::convert::TryInto;
 use std::sync::Mutex;
-use hex;
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_DNS_DB_PATH").unwrap_or_else(|_| "dns_db".into());
@@ -32,29 +32,76 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
     let sig_hex = params.get("sig").and_then(|v| v.as_str()).unwrap_or("");
     let pk_vec = hex::decode(pk_hex).ok().ok_or(DnsError::SigInvalid)?;
     let sig_vec = hex::decode(sig_hex).ok().ok_or(DnsError::SigInvalid)?;
-    let pk: [u8; PUBLIC_KEY_LENGTH] = pk_vec.as_slice().try_into().map_err(|_| DnsError::SigInvalid)?;
-    let sig_bytes: [u8; SIGNATURE_LENGTH] = sig_vec.as_slice().try_into().map_err(|_| DnsError::SigInvalid)?;
+    let pk: [u8; PUBLIC_KEY_LENGTH] = pk_vec
+        .as_slice()
+        .try_into()
+        .map_err(|_| DnsError::SigInvalid)?;
+    let sig_bytes: [u8; SIGNATURE_LENGTH] = sig_vec
+        .as_slice()
+        .try_into()
+        .map_err(|_| DnsError::SigInvalid)?;
     let vk = VerifyingKey::from_bytes(&pk).map_err(|_| DnsError::SigInvalid)?;
     let sig = Signature::from_bytes(&sig_bytes);
     let mut msg = Vec::new();
     msg.extend(domain.as_bytes());
     msg.extend(txt.as_bytes());
     vk.verify(&msg, &sig).map_err(|_| DnsError::SigInvalid)?;
-    DNS_DB
-        .lock()
-        .unwrap()
-        .insert(&format!("dns_records/{}", domain), txt.as_bytes().to_vec());
+    let mut db = DNS_DB.lock().unwrap();
+    db.insert(&format!("dns_records/{}", domain), txt.as_bytes().to_vec());
+    if let Ok(val) = serde_json::from_str::<Value>(txt) {
+        if let Some(pol) = val.get("gw_policy") {
+            let fee = pol.get("read_fee_μc").and_then(|v| v.as_u64()).unwrap_or(0);
+            let budget = pol.get("budget_μc").and_then(|v| v.as_u64()).unwrap_or(0);
+            db.insert(
+                &format!("dns_budget/{}", domain),
+                budget.to_le_bytes().to_vec(),
+            );
+            db.insert(&format!("dns_fee/{}", domain), fee.to_le_bytes().to_vec());
+            let offset = pol
+                .get("credit_offset")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            db.insert(
+                &format!("dns_offset/{}", domain),
+                offset.to_le_bytes().to_vec(),
+            );
+        }
+    }
     Ok(serde_json::json!({"status":"ok"}))
 }
 
 pub fn gateway_policy(params: &Value) -> serde_json::Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let key = format!("dns_records/{}", domain);
-    let db = DNS_DB.lock().unwrap();
+    let mut db = DNS_DB.lock().unwrap();
     if let Some(bytes) = db.get(&key) {
         if let Ok(txt) = String::from_utf8(bytes) {
-            return serde_json::json!({"record": txt});
+            let fee_key = format!("dns_fee/{}", domain);
+            let budget_key = format!("dns_budget/{}", domain);
+            let offset_key = format!("dns_offset/{}", domain);
+            let mut remaining = if let Some(b) = db.get(&budget_key) {
+                u64::from_le_bytes(b.as_slice().try_into().unwrap_or([0; 8]))
+            } else {
+                0
+            };
+            let fee = db
+                .get(&fee_key)
+                .map(|v| u64::from_le_bytes(v.as_slice().try_into().unwrap_or([0; 8])))
+                .unwrap_or(0);
+            let offset = db
+                .get(&offset_key)
+                .map(|v| u64::from_le_bytes(v.as_slice().try_into().unwrap_or([0; 8])))
+                .unwrap_or(0);
+            if remaining > 0 && fee > offset {
+                let charge = fee - offset;
+                remaining = remaining.saturating_sub(charge);
+                db.insert(&budget_key, remaining.to_le_bytes().to_vec());
+            }
+            return serde_json::json!({
+                "record": txt,
+                "remaining_budget_μc": remaining,
+            });
         }
     }
-    serde_json::json!({"record": null})
+    serde_json::json!({"record": null, "remaining_budget_μc": 0})
 }

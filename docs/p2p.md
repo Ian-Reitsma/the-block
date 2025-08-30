@@ -24,4 +24,13 @@ struct HelloAck {
 ```
 
 Handshake rejections increment `p2p_handshake_reject_total{reason}`, while successful exchanges record `p2p_handshake_accept_total{features}`.
-The `agent` string and accepted features are retained per peer and surfaced via RPC for observability.
+The `proto_version` field gates compatibility. A node disconnects peers that advertise a different protocol version and increments `peer_rejected_total{reason="protocol"}`. The `agent` string and accepted features are retained per peer and surfaced via RPC for observability.
+
+Example rejection:
+
+```
+Hello { proto_version: 2 } -> peer running version 1
+disconnect (peer_rejected_total{reason="protocol"}++)
+```
+
+See [`node/tests/handshake_version.rs`](../node/tests/handshake_version.rs) to reproduce a mismatched handshake.

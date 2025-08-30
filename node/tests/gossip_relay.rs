@@ -1,8 +1,8 @@
-use the_block::gossip::relay::Relay;
-use the_block::net::{Message, Payload};
 use ed25519_dalek::SigningKey;
 use std::net::SocketAddr;
 use std::time::Duration;
+use the_block::gossip::relay::Relay;
+use the_block::net::{Message, Payload};
 
 #[test]
 fn relay_dedup_and_fanout() {

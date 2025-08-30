@@ -8,9 +8,9 @@ use tempfile::tempdir;
 #[cfg(feature = "test-telemetry")]
 use the_block::compute_market::price_board::init_with_clock;
 use the_block::compute_market::price_board::{backlog_adjusted_bid, bands, record_price, reset};
-use the_block::transaction::FeeLane;
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use the_block::compute_market::price_board::{init, persist, reset_path_for_test};
+use the_block::transaction::FeeLane;
 #[cfg(feature = "test-telemetry")]
 use the_block::util::test_clock::PausedClock;
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]

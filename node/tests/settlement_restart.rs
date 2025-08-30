@@ -9,7 +9,7 @@ fn receipts_not_double_applied_across_restart() {
     let dir = tempdir().unwrap();
     let path = dir.path().to_str().unwrap();
 
-    Settlement::init(path, SettleMode::Real, 0, 0.0);
+    Settlement::init(path, SettleMode::Real, 0, 0.0, 0);
     Settlement::set_balance("buyer", 100);
     Settlement::set_balance("provider", 0);
 
@@ -23,7 +23,7 @@ fn receipts_not_double_applied_across_restart() {
 
     Settlement::shutdown();
 
-    Settlement::init(path, SettleMode::Real, 0, 0.0);
+    Settlement::init(path, SettleMode::Real, 0, 0.0, 0);
     Settlement::tick(2, &[receipt]);
     assert_eq!(Settlement::balance("buyer"), 90);
     assert_eq!(Settlement::balance("provider"), 10);

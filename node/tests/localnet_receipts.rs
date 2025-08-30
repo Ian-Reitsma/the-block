@@ -1,14 +1,15 @@
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use ed25519_dalek::{Signer, SigningKey};
-use std::convert::TryInto;
-use serial_test::serial;
 use serde_json::Value;
+use serial_test::serial;
+use std::convert::TryInto;
+use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
     config::RpcConfig,
-    localnet::AssistReceipt,
+    generate_keypair,
+    localnet::{AssistReceipt, DeviceClass},
     rpc::run_rpc_server,
-    Blockchain, generate_keypair,
+    Blockchain,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -20,9 +21,12 @@ async fn rpc(addr: &str, body: &str) -> Value {
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(), body
+        body.len(),
+        body
     );
-    expect_timeout(stream.write_all(req.as_bytes())).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
     let mut resp = Vec::new();
     expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();
@@ -40,7 +44,7 @@ async fn localnet_receipt_dedups_and_accrues() {
         dir.path().join("receipts_db").to_str().unwrap(),
     );
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
     let rpc_cfg = RpcConfig::default();
@@ -61,6 +65,7 @@ async fn localnet_receipt_dedups_and_accrues() {
     let mut msg = Vec::new();
     msg.extend(b"alice");
     msg.extend(b"us-west");
+    msg.push(DeviceClass::Phone as u8);
     msg.push(rssi as u8);
     msg.extend(&rtt.to_le_bytes());
     let sig = sk.sign(&msg);
@@ -69,6 +74,7 @@ async fn localnet_receipt_dedups_and_accrues() {
         region: "us-west".into(),
         pubkey: sk.verifying_key().to_bytes().to_vec(),
         sig: sig.to_bytes().to_vec(),
+        device: DeviceClass::Phone,
         rssi,
         rtt_ms: rtt,
     };

@@ -135,6 +135,8 @@ jobs:
         run: cargo +nightly fuzz run compute_market -- -max_total_time=120 -artifact_prefix=fuzz/compute_market/ -runs=0 || true
       - name: run network fuzz
         run: cargo +nightly fuzz run network -- -max_total_time=120 -artifact_prefix=fuzz/network/artifacts/ -runs=0 || true
+      - name: run localnet proximity fuzz
+        run: cargo +nightly fuzz run localnet_proximity -- -max_total_time=120 -artifact_prefix=fuzz/localnet_proximity/ -runs=0 || true
       - name: fuzz coverage report
         run: scripts/fuzz_coverage.sh
       - name: upload compute-market artifacts

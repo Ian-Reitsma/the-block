@@ -17,7 +17,7 @@ impl Provider for NoopProvider {
 #[test]
 fn put_and_get_roundtrip() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("consumer", 10_000);
     let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let provider = Arc::new(NoopProvider);

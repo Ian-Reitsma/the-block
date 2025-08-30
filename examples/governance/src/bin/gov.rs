@@ -23,7 +23,7 @@ enum Command {
     /// Show proposal status and rollback metrics
     Status { id: u64 },
     /// Roll back the last activation
-    RollbackLast,
+    Rollback { id: u64 },
     /// Convenience helper to craft fair-share proposals
     SetFairshare {
         #[arg(help = "global max fair share in ppm (parts per million)")]
@@ -35,6 +35,11 @@ enum Command {
     SetCreditDecay {
         #[arg(help = "credit decay lambda per hour in ppm")]
         lambda_ppm: u64,
+    },
+    /// Convenience helper to adjust dispute window epochs
+    SetDisputeWindow {
+        #[arg(help = "number of epochs receipts remain disputable")]
+        epochs: u64,
     },
 }
 
@@ -109,9 +114,8 @@ fn main() {
                 }
             }
         }
-        Command::RollbackLast => {
-            // placeholder for future expanded CLI
-            println!("rollback not supported in simple governance");
+        Command::Rollback { id } => {
+            println!("request rollback of proposal {id}");
         }
         Command::SetFairshare {
             global_max_ppm,
@@ -127,6 +131,9 @@ fn main() {
                 "submit proposal with key credits_decay_lambda_per_hour_ppm={}",
                 lambda_ppm
             );
+        }
+        Command::SetDisputeWindow { epochs } => {
+            println!("submit proposal with key dispute_window_epochs={}", epochs);
         }
     }
 }

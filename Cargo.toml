@@ -4,6 +4,7 @@ members = [
   "crates/credits",
   "crates/probe",
   "fuzz",
+  "sim",
   "tools/xtask"
 ]
 default-members = [

@@ -4,6 +4,7 @@ use credits::{CreditError, Ledger, Source};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sled::Tree;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::SystemTime;
@@ -56,12 +57,22 @@ pub struct Settlement {
     #[allow(dead_code)]
     min_fee_micros: u64,
     decay_lambda_per_hour: f64,
+    dispute_window_epochs: u64,
+    receipts_dir: PathBuf,
+    daily_payout_cap: u64,
+    payouts_today: HashMap<String, (u64, u64)>,
 }
 
 static GLOBAL: Lazy<Mutex<Option<Settlement>>> = Lazy::new(|| Mutex::new(None));
 
 impl Settlement {
-    pub fn init(path: &str, mode: SettleMode, min_fee_micros: u64, decay_lambda_per_hour: f64) {
+    pub fn init(
+        path: &str,
+        mode: SettleMode,
+        min_fee_micros: u64,
+        decay_lambda_per_hour: f64,
+        dispute_window_epochs: u64,
+    ) {
         let db = sled::open(path).unwrap_or_else(|e| panic!("open settle db: {e}"));
         let applied = db
             .open_tree("receipts_applied")
@@ -70,6 +81,9 @@ impl Settlement {
             .open_tree("failures")
             .unwrap_or_else(|e| panic!("open failures: {e}"));
         let ledger_path = Path::new(path).join("credits.bin");
+        let receipts_dir = Path::new(path).join("receipts");
+        let _ = std::fs::create_dir_all(receipts_dir.join("pending"));
+        let _ = std::fs::create_dir_all(receipts_dir.join("finalized"));
         let roots = db
             .open_tree("microshard_roots")
             .unwrap_or_else(|e| panic!("open roots: {e}"));
@@ -83,6 +97,10 @@ impl Settlement {
             roots,
             min_fee_micros,
             decay_lambda_per_hour,
+            dispute_window_epochs,
+            receipts_dir,
+            daily_payout_cap: u64::MAX,
+            payouts_today: HashMap::new(),
         });
     }
 
@@ -144,6 +162,13 @@ impl Settlement {
         });
     }
 
+    pub fn meter(provider: &str) -> HashMap<Source, (u64, u64)> {
+        Self::with(|s| {
+            s.ledger
+                .meter(provider, s.decay_lambda_per_hour, SystemTime::now())
+        })
+    }
+
     pub fn balance(acct: &str) -> u64 {
         Self::with(|s| s.ledger.balance(acct))
     }
@@ -161,6 +186,24 @@ impl Settlement {
             }
             Ok(())
         })
+    }
+
+    pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), CreditError> {
+        Self::with(|s| {
+            s.ledger.spend(provider, amount)?;
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::INDUSTRIAL_REJECTED_TOTAL
+                .with_label_values(&["SLA"])
+                .inc();
+            s.ledger
+                .save(&s.ledger_path)
+                .unwrap_or_else(|e| panic!("save ledger: {e}"));
+            Ok(())
+        })
+    }
+
+    pub fn set_daily_payout_cap(cap: u64) {
+        Self::with(|s| s.daily_payout_cap = cap);
     }
 
     pub fn accrue(provider: &str, event: &str, source: Source, amount: u64, expiry_days: u64) {
@@ -214,7 +257,36 @@ impl Settlement {
             return Err(());
         }
         let event = format!("settle:{}", hex::encode(key));
-        self.ledger.accrue(&r.provider, &event, amount);
+        let mut to_credit = amount;
+        if self.daily_payout_cap < u64::MAX {
+            let today = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                / 86_400;
+            let entry = self
+                .payouts_today
+                .entry(r.provider.clone())
+                .or_insert((today, 0));
+            if entry.0 != today {
+                *entry = (today, 0);
+            }
+            if entry.1 >= self.daily_payout_cap {
+                to_credit = 0;
+            } else if entry.1 + to_credit > self.daily_payout_cap {
+                to_credit = self.daily_payout_cap - entry.1;
+            }
+            entry.1 += to_credit;
+            if to_credit < amount {
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::PAYOUT_CAP_HITS_TOTAL
+                    .with_label_values(&[&r.provider])
+                    .inc();
+            }
+        }
+        if to_credit > 0 {
+            self.ledger.accrue(&r.provider, &event, to_credit);
+        }
         self.ledger
             .save(&self.ledger_path)
             .unwrap_or_else(|e| panic!("save ledger: {e}"));
@@ -248,9 +320,29 @@ impl Settlement {
                 }
                 _ => {}
             }
-            if let SettleMode::Real = s.mode {
-                for r in receipts {
-                    let _ = s.apply_receipt(r, height);
+            // persist receipts for dispute window
+            if !receipts.is_empty() {
+                let pending = s.receipts_dir.join("pending").join(height.to_string());
+                let bytes = bincode::serialize(receipts)
+                    .unwrap_or_else(|e| panic!("serialize receipts: {e}"));
+                std::fs::write(&pending, bytes).unwrap_or_else(|e| panic!("write pending: {e}"));
+            }
+            if height >= s.dispute_window_epochs {
+                let finalize_h = height - s.dispute_window_epochs;
+                let pending = s.receipts_dir.join("pending").join(finalize_h.to_string());
+                if let Ok(bytes) = std::fs::read(&pending) {
+                    if let Ok(list) = bincode::deserialize::<Vec<Receipt>>(&bytes) {
+                        if let SettleMode::Real = s.mode {
+                            for r in &list {
+                                let _ = s.apply_receipt(r, finalize_h);
+                            }
+                        }
+                    }
+                    let finalized = s
+                        .receipts_dir
+                        .join("finalized")
+                        .join(finalize_h.to_string());
+                    let _ = std::fs::rename(pending, finalized);
                 }
             }
             // post root for this batch
@@ -273,6 +365,38 @@ impl Settlement {
                 .is_some()
         })
     }
+
+    pub fn dispute(height: u64, key: [u8; 32]) -> bool {
+        Self::with(|s| {
+            if s.applied
+                .get(&key)
+                .unwrap_or_else(|e| panic!("applied get: {e}"))
+                .is_some()
+            {
+                let event = format!("settle:{}", hex::encode(key));
+                s.ledger.rollback_by_event(&event);
+                let _ = s.applied.remove(&key);
+                s.ledger
+                    .save(&s.ledger_path)
+                    .unwrap_or_else(|e| panic!("save ledger: {e}"));
+                return true;
+            }
+            let path = s.receipts_dir.join("pending").join(height.to_string());
+            if let Ok(bytes) = std::fs::read(&path) {
+                if let Ok(mut list) = bincode::deserialize::<Vec<Receipt>>(&bytes) {
+                    if let Some(pos) = list.iter().position(|r| r.idempotency_key == key) {
+                        list.remove(pos);
+                        let bytes =
+                            bincode::serialize(&list).unwrap_or_else(|e| panic!("serialize: {e}"));
+                        std::fs::write(&path, bytes)
+                            .unwrap_or_else(|e| panic!("write pending: {e}"));
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+    }
 }
 
 impl Settlement {
@@ -287,4 +411,48 @@ impl Settlement {
                 .collect()
         })
     }
+
+    /// Audit pending receipt checkpoints and verify idempotency keys.
+    pub fn audit() -> Vec<AuditSummary> {
+        Self::with(|s| {
+            let mut out = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(s.receipts_dir.join("pending")) {
+                for ent in entries.flatten() {
+                    if let Ok(epoch) = ent.file_name().to_string_lossy().parse::<u64>() {
+                        if let Ok(bytes) = std::fs::read(ent.path()) {
+                            if let Ok(list) = bincode::deserialize::<Vec<Receipt>>(&bytes) {
+                                let mut invalid = 0;
+                                for r in &list {
+                                    let recompute = Receipt::new(
+                                        r.job_id.clone(),
+                                        r.buyer.clone(),
+                                        r.provider.clone(),
+                                        r.quote_price,
+                                        r.dry_run,
+                                    );
+                                    if recompute.idempotency_key != r.idempotency_key {
+                                        invalid += 1;
+                                    }
+                                }
+                                out.push(AuditSummary {
+                                    epoch,
+                                    receipts: list.len() as u64,
+                                    invalid: invalid as u64,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            out
+        })
+    }
+}
+
+/// Summary of receipt verification for an epoch.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AuditSummary {
+    pub epoch: u64,
+    pub receipts: u64,
+    pub invalid: u64,
 }

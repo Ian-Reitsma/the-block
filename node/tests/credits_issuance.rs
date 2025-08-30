@@ -10,7 +10,7 @@ use the_block::{
 #[serial]
 fn credits_issuance_caps() {
     let dir = tempfile::tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
 
     let mut weights = HashMap::new();
     weights.insert(Source::LocalNetAssist, 2_000_000); // 2x
@@ -27,6 +27,7 @@ fn credits_issuance_caps() {
         cap_per_identity: 3,
         cap_per_region: 10,
         expiry_days: expiry,
+        lighthouse_low_density_multiplier_max: 1_000_000,
     });
 
     issue("alice", "r1", Source::LocalNetAssist, "e1", 1);

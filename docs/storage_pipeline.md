@@ -43,3 +43,22 @@ provider IDs and includes a redundancy hint:
 On retrieval the pipeline loads the manifest, fetches available shards, and
 reconstructs missing data via `reed_solomon_erasure`.  Integration tests cover
 shard loss and recovery under `node/tests/storage_erasure.rs`.
+
+## Provider Catalog Health Checks
+
+Uploads consult a `NodeCatalog` that tracks registered storage providers. Each
+provider exposes a `probe()` method returning an estimated RTT or an error. The
+catalog periodically probes all entries, prunes those reporting timeouts or
+excessive loss, and ranks the remainder by recent latency. During `put_object`
+the pipeline selects the healthiest providers from this catalog. See
+[`node/tests/provider_catalog.rs`](../node/tests/provider_catalog.rs) for
+examples.
+
+## Background Repair Loop
+
+`node/src/storage/repair.rs` spawns a periodic task that scans manifests and
+reconstructs missing shards. Rebuilt bytes are written back to the local store
+and counted via `storage_repair_bytes_total`; failures increment
+`storage_repair_failures_total`. The asynchronous job runs every few seconds and
+keeps redundancy intact even if a chunk is lost. For a demonstration, consult
+[`node/tests/storage_repair.rs`](../node/tests/storage_repair.rs).

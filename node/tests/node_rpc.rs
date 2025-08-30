@@ -45,7 +45,7 @@ async fn rpc_smoke() {
         let mut guard = bc.lock().unwrap();
         guard.add_account("alice".to_string(), 42, 0).unwrap();
     }
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
     let token_file = dir.path().join("token");

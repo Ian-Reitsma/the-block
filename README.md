@@ -22,10 +22,10 @@
 ## Why The Block
 
 - Dual fee lanes (Consumer | Industrial) with lane-aware mempools and a comfort guard that defers industrial when consumer p90 fees exceed threshold.
-- Service credits ledger: non-transferable credits to offset writes (reads are free) and priority with CLI top-up and balance queries.
+- Service credits ledger: non-transferable credits to offset writes (reads are free) and priority with CLI top-up (development only) and balance queries.
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
 - TTL-based gossip relay with duplicate suppression and sqrt-N fanout.
-- LocalNet assist receipts earn credits and on-chain DNS TXT records expose gateway policy.
+- LocalNet assist receipts earn credits and on-chain DNS TXT records expose gateway policy; see [docs/localnet.md](docs/localnet.md) for discovery and session details.
 - Rust: `#![forbid(unsafe_code)]`, Ed25519 + BLAKE3, schema-versioned state, reproducible builds.
 - PyO3 bindings for rapid prototyping.
 
@@ -95,7 +95,7 @@ cargo nextest run tests/net_gossip.rs
 
 This test uses deterministic sleeps and a height→weight→tip-hash tie-break to guarantee reproducible convergence.
 
-Inspect and manage service credits:
+Inspect and manage service credits (top-up is a development convenience only):
 
 ```bash
 cargo run --bin node -- credits top-up --provider alice --amount 100
@@ -179,6 +179,8 @@ Submit a LocalNet assist receipt:
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":9,"method":"localnet.submit_receipt","params":{"receipt":"<hex>"}}'
 ```
+
+Discovery, handshake, and proximity rules are detailed in [docs/localnet.md](docs/localnet.md).
 
 Publish a DNS TXT record and query gateway policy:
 
@@ -270,29 +272,41 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 ## Status & Roadmap
 
-Progress: ~82/100.
+Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
 
 **Recent**
 
-- TTL-based gossip relay with duplicate suppression and bounded fanout metrics.
-- Per-lane mempool stats RPC and comfort guard for consumer latency.
-- Gateway DNS module with signed TXT records and policy lookups.
-- LocalNet assist receipt submission with replay protection and credit awards.
-- Provider catalog health checks with automatic storage repair loop.
-- Crash-safe WAL with end-of-compaction marker and idempotency keys.
-- Credit decay and per-source expiry with governance-controlled issuance.
+- DHT-based peer discovery with persisted peer databases.
+- Optional post-quantum key registration gated by `pq-crypto`.
+- Settlement dispute windows with checkpointed receipts and rollback support.
+- Credit meter RPC/CLI with lighthouse issuance multipliers.
+- Gateway read-fee policy with optional credit offsets and budget tracking.
+- Finder/WebDAV quota enforcement with OS-specific `ENOSPC` mapping.
+- Range-boost relays and carry-to-earn courier flow with receipt settlement.
+- Telemetry summarizer and gossip chaos harness for loss/jitter testing.
 
 **Immediate**
 
-- Stabilize `cargo test --all --features test-telemetry --release`.
-- Persistence hardening.
-- Fuzz coverage expansion.
-- Governance docs/API polish.
+- Finalize gossip longest-chain convergence
+  - Remove `#[ignore]` and run chaos harness with 15% drop/200 ms jitter.
+- Replace dev-only credit top-up with governed issuance
+  - Migrate providers to on-chain credit awards and retire the CLI helper.
+- Expand settlement audit coverage
+  - Surface `settlement.audit` in the explorer and schedule periodic verification.
+- Harden DHT bootstrapping
+  - Persist peer DBs, fuzz inventory exchange, and document recovery.
+- Broaden fuzz/chaos testing across gateway and storage paths.
 
 **Near term**
 
-- Settlement auditing and explorer integration.
-- Peer discovery and inventory exchange hardening.
+- Launch industrial lane SLA enforcement and dashboard surfacing
+  - Slash tardy providers, expose payout-cap metrics, and show job ETAs.
+- Range-boost mesh trials and mobile energy heuristics
+  - Validate BLE/Wi‑Fi Direct hops and tune lighthouse multipliers.
+- Economic simulator runs for emission/fee policy tuning
+  - Publish top scenarios and feed parameters into governance.
+- Compute-backed money and instant-app groundwork
+  - Define redeem curves and prototype local instant-app execution.
 
 ## Contribution Guidelines
 

@@ -7,7 +7,13 @@ use the_block::compute_market::settlement::{SettleMode, Settlement};
 #[serial]
 fn arm_and_activate() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 100, 0.0);
+    Settlement::init(
+        dir.path().to_str().unwrap(),
+        SettleMode::DryRun,
+        100,
+        0.0,
+        0,
+    );
     Settlement::set_balance("buyer", 100);
     Settlement::set_balance("prov", 0);
     let r1 = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 10, false);
@@ -27,7 +33,7 @@ fn arm_and_activate() {
 #[serial]
 fn insufficient_funds_flips() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::Real, 100, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::Real, 100, 0.0, 0);
     Settlement::set_balance("buyer", 5);
     Settlement::set_balance("prov", 0);
     let r = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 10, false);
@@ -41,7 +47,13 @@ fn insufficient_funds_flips() {
 #[serial]
 fn cancel_arm_before_activation() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 100, 0.0);
+    Settlement::init(
+        dir.path().to_str().unwrap(),
+        SettleMode::DryRun,
+        100,
+        0.0,
+        0,
+    );
     Settlement::arm(5, 10);
     Settlement::cancel_arm();
     let r = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 10, false);
@@ -55,7 +67,7 @@ fn cancel_arm_before_activation() {
 #[serial]
 fn idempotent_replay() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::Real, 100, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::Real, 100, 0.0, 0);
     Settlement::set_balance("buyer", 50);
     Settlement::set_balance("prov", 0);
     let r = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 20, false);

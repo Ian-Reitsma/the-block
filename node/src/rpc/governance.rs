@@ -119,3 +119,19 @@ pub fn gov_rollback_last(
         })?;
     Ok(json!({"ok":true}))
 }
+
+pub fn gov_rollback(
+    store: &GovStore,
+    proposal_id: u64,
+    params: &mut Params,
+    rt: &mut Runtime,
+    current_epoch: u64,
+) -> Result<serde_json::Value, RpcError> {
+    store
+        .rollback_proposal(proposal_id, current_epoch, rt, params)
+        .map_err(|_| RpcError {
+            code: -32067,
+            message: "rollback failed",
+        })?;
+    Ok(json!({"ok":true}))
+}

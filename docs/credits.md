@@ -21,8 +21,9 @@ The node binary exposes a `credits` subcommand for inspection and manual adjustm
 ```bash
 cargo run --bin node -- credits top-up --provider alice --amount 100
 cargo run --bin node -- credits balance alice
-cargo run --bin node -- credits transfer --from alice --to bob --amount 5
 ```
+
+`top-up` is a development convenience; production credit issuance occurs through governance.
 
 All commands persist changes through the ledger crate so subsequent runs observe the updated totals. Temporary directories in tests use isolated sled paths to avoid cross-test contamination.
 

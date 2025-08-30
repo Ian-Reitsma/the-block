@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -51,7 +51,7 @@ struct ProviderEntry {
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Ledger {
     providers: HashMap<ProviderId, ProviderEntry>,
-    processed: HashSet<EventId>,
+    processed: HashMap<EventId, (ProviderId, f64)>,
 }
 
 impl Ledger {
@@ -108,7 +108,7 @@ impl Ledger {
         now: SystemTime,
         expiry_days: u64,
     ) {
-        if !self.processed.insert(event.to_owned()) {
+        if self.processed.contains_key(event) {
             return;
         }
         let now_secs = now
@@ -124,15 +124,17 @@ impl Ledger {
             .providers
             .entry(provider.to_owned())
             .or_insert_with(ProviderEntry::default);
-        let src = prov
-            .sources
-            .entry(source)
-            .or_insert(SourceEntry { amount: 0.0, expiry });
+        let src = prov.sources.entry(source).or_insert(SourceEntry {
+            amount: 0.0,
+            expiry,
+        });
         if expiry > src.expiry {
             src.expiry = expiry;
         }
         src.amount += amount as f64;
         prov.last_update = now_secs;
+        self.processed
+            .insert(event.to_owned(), (provider.to_owned(), amount as f64));
     }
 
     /// Accrue credits with default `Source::Civic` and no expiry.
@@ -169,12 +171,43 @@ impl Ledger {
         Ok(())
     }
 
+    /// Roll back a previously processed event, refunding credits.
+    pub fn rollback_by_event(&mut self, event: &str) {
+        if let Some((prov_id, amt)) = self.processed.remove(event) {
+            if let Some(prov) = self.providers.get_mut(&prov_id) {
+                if let Some(entry) = prov.sources.get_mut(&Source::Civic) {
+                    entry.amount = (entry.amount - amt).max(0.0);
+                }
+            }
+        }
+    }
+
     /// Return the balance for `provider`.
     pub fn balance(&self, provider: &str) -> u64 {
         self.providers
             .get(provider)
             .map(|p| p.sources.values().map(|s| s.amount).sum::<f64>() as u64)
             .unwrap_or(0)
+    }
+
+    /// Return per-source balances and expiries without mutating the ledger.
+    pub fn meter(
+        &self,
+        provider: &str,
+        lambda_per_hour: f64,
+        now: SystemTime,
+    ) -> HashMap<Source, (u64, u64)> {
+        let mut tmp = self.clone();
+        tmp.decay_and_expire(lambda_per_hour, now);
+        tmp.providers
+            .get(provider)
+            .map(|p| {
+                p.sources
+                    .iter()
+                    .map(|(src, entry)| (*src, (entry.amount as u64, entry.expiry)))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Apply exponential decay to all balances and expire sources past their window.

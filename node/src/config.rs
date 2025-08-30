@@ -11,6 +11,9 @@ pub struct NodeConfig {
     pub rpc: RpcConfig,
     #[serde(default)]
     pub compute_market: ComputeMarketConfig,
+    pub telemetry_summary_interval: u64,
+    #[serde(default)]
+    pub lighthouse: LighthouseConfig,
 }
 
 impl Default for NodeConfig {
@@ -22,6 +25,8 @@ impl Default for NodeConfig {
             price_board_save_interval: 30,
             rpc: RpcConfig::default(),
             compute_market: ComputeMarketConfig::default(),
+            telemetry_summary_interval: 0,
+            lighthouse: LighthouseConfig::default(),
         }
     }
 }
@@ -30,6 +35,19 @@ impl Default for NodeConfig {
 pub struct ComputeMarketConfig {
     pub settle_mode: crate::compute_market::settlement::SettleMode,
     pub min_fee_micros: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct LighthouseConfig {
+    pub low_density_multiplier_max: u64,
+}
+
+impl Default for LighthouseConfig {
+    fn default() -> Self {
+        Self {
+            low_density_multiplier_max: 1_000_000,
+        }
+    }
 }
 
 impl Default for ComputeMarketConfig {
@@ -49,6 +67,8 @@ pub struct RpcConfig {
     pub request_timeout_ms: u64,
     pub enable_debug: bool,
     pub admin_token_file: Option<String>,
+    #[serde(default)]
+    pub dispute_window_epochs: u64,
 }
 
 impl Default for RpcConfig {
@@ -60,6 +80,7 @@ impl Default for RpcConfig {
             request_timeout_ms: 5_000,
             enable_debug: false,
             admin_token_file: Some("secrets/admin.token".into()),
+            dispute_window_epochs: 0,
         }
     }
 }

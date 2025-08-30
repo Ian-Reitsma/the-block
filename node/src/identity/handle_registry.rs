@@ -12,6 +12,8 @@ pub struct HandleRecord {
     pub attest_sig: Vec<u8>,
     pub nonce: u64,
     pub version: u16,
+    #[cfg(feature = "pq-crypto")]
+    pub pq_pubkey: Option<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -73,6 +75,7 @@ impl HandleRegistry {
         &mut self,
         handle: &str,
         pubkey: &[u8],
+        #[cfg(feature = "pq-crypto")] pq_pubkey: Option<&[u8]>,
         sig: &[u8],
         nonce: u64,
     ) -> Result<String, HandleError> {
@@ -141,6 +144,8 @@ impl HandleRegistry {
             attest_sig: sig.to_vec(),
             nonce,
             version: 1,
+            #[cfg(feature = "pq-crypto")]
+            pq_pubkey: pq_pubkey.map(|p| p.to_vec()),
         };
         let bytes = bincode::serialize(&record).map_err(|_| HandleError::Storage)?;
         self.db.insert(&key, bytes);
@@ -171,5 +176,15 @@ impl HandleRegistry {
         self.db
             .get(&key)
             .and_then(|raw| bincode::deserialize::<String>(&raw).ok())
+    }
+
+    #[cfg(feature = "pq-crypto")]
+    pub fn pq_key_of(&self, handle: &str) -> Option<Vec<u8>> {
+        let handle_norm = Self::normalize(handle)?;
+        let key = Self::handle_key(&handle_norm);
+        self.db
+            .get(&key)
+            .and_then(|raw| bincode::deserialize::<HandleRecord>(&raw).ok())
+            .and_then(|r| r.pq_pubkey)
     }
 }

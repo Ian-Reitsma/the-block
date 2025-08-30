@@ -61,11 +61,13 @@ const PUBLIC_METHODS: &[&str] = &[
     "price_board_get",
     "metrics",
     "settlement_status",
+    "settlement.audit",
     "localnet.submit_receipt",
     "dns.publish_record",
     "gateway.policy",
     "microshard.roots.last",
     "mempool.stats",
+    "credits.meter",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -78,6 +80,7 @@ const ADMIN_METHODS: &[&str] = &[
     "gov_list",
     "gov_params",
     "gov_rollback_last",
+    "gov_rollback",
     "record_le_request",
     "warrant_canary",
 ];
@@ -310,6 +313,22 @@ pub async fn handle_conn(
         let _ = stream.shutdown().await;
         return;
     }
+    if method == "GET" && path == "/dashboard" {
+        let body = include_str!("../../../dashboard/index.html");
+        let mut headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n",
+            body.len()
+        );
+        if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+            headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
+        }
+        headers.push_str("\r\n");
+        let resp = format!("{}{}", headers, body);
+        let mut stream = reader.into_inner();
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.shutdown().await;
+        return;
+    }
 
     // Read body (if any) with timeout; default to empty on missing Content-Length.
     let mut body_bytes = vec![0u8; content_len];
@@ -507,6 +526,19 @@ fn dispatch(
                 serde_json::json!({"mode": mode})
             }
         }
+        "settlement.audit" => {
+            let res = Settlement::audit();
+            serde_json::to_value(res).unwrap_or_else(|_| serde_json::json!([]))
+        }
+        "credits.meter" => {
+            let provider = req
+                .params
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let map = Settlement::meter(provider);
+            serde_json::to_value(&map).unwrap_or_else(|_| serde_json::json!({}))
+        }
         "localnet.submit_receipt" => {
             let hex = req
                 .params
@@ -531,7 +563,9 @@ fn dispatch(
                     })
                 }
             };
-            if !receipt.verify() || !validate_proximity(receipt.rssi, receipt.rtt_ms) {
+            if !receipt.verify()
+                || !validate_proximity(receipt.device, receipt.rssi, receipt.rtt_ms)
+            {
                 return Err(RpcError {
                     code: -32002,
                     message: "invalid receipt",
@@ -854,6 +888,18 @@ fn dispatch(
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime { bc: &mut *chain };
             governance::gov_rollback_last(&GOV_STORE, &mut params, &mut rt, epoch)?
+        }
+        "gov_rollback" => {
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let mut params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
+            let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
+            let mut rt = crate::governance::Runtime { bc: &mut *chain };
+            governance::gov_rollback(&GOV_STORE, id, &mut params, &mut rt, epoch)?
         }
         _ => {
             return Err(RpcError {

@@ -34,3 +34,8 @@ cargo-fuzz = true
 name = "rpc"
 path = "fuzz_targets/rpc.rs"
 test = false
+
+[[bin]]
+name = "localnet_proximity"
+path = "fuzz_targets/localnet_proximity.rs"
+test = false
