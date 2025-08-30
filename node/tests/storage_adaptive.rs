@@ -40,7 +40,7 @@ impl Provider for MockProvider {
 #[test]
 fn fast_provider_scales_up() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);
     let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let provider = Arc::new(MockProvider::new("fast", 50.0, 10.0));
@@ -57,7 +57,7 @@ fn fast_provider_scales_up() {
 #[test]
 fn slow_provider_limits_size() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);
     let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let provider = Arc::new(MockProvider::new("slow", 5.0, 120.0));

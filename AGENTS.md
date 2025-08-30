@@ -226,39 +226,51 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Progress: ~82/100.
+Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
 
 **Recent**
 
-- TTL-based gossip relay with duplicate suppression and bounded fanout metrics.
-- Per-lane mempool stats RPC and comfort guard for consumer latency.
-- Gateway DNS module with signed TXT records and policy lookups.
-- LocalNet assist receipt submission with replay protection and credit awards.
-- Provider catalog health checks with automatic storage repair loop.
-- Crash-safe WAL with end-of-compaction marker and idempotency keys.
-- Credit decay and per-source expiry with governance-controlled issuance.
+- DHT-based peer discovery with persisted peer databases.
+- Optional post-quantum key registration behind the `pq-crypto` feature.
+- Settlement dispute windows with checkpointed receipts and rollback support.
+- Credit meter RPC/CLI with lighthouse issuance multipliers.
+- Gateway read-fee policy with optional credit offsets and budget tracking.
+- Finder/WebDAV quota enforcement with OS-specific `ENOSPC` mapping.
+- Range-boost relays and carry-to-earn courier flow with receipt settlement.
+- Telemetry summarizer and gossip chaos harness for loss/jitter testing.
 
 **Immediate**
 
-- Stabilize `cargo test --all --features test-telemetry --release`.
-- Persistence hardening.
-- Fuzz coverage expansion.
-- Governance docs/API polish.
-- Audit tests for unbounded async work.
-  - **Problem**: some integration tests spawn tasks or servers without enforcing timeouts, risking hangs.
-  - **Next steps**: wrap long `await` calls with `expect_timeout` from `node/tests/util/timeout.rs` and ensure services use `serve_metrics_with_shutdown`.
-  - **Considerations**: watch for platform-specific timing and ensure tokio timeouts don't mask genuine deadlocks.
+- Finalize gossip longest-chain convergence
+  - Remove `#[ignore]` and run chaos harness with 15% drop/200 ms jitter.
+- Replace dev-only credit top-up with governed issuance
+  - Migrate providers to on-chain credit awards and retire the CLI helper.
+- Expand settlement audit coverage
+  - Surface `settlement.audit` in the explorer and schedule periodic verification.
+- Harden DHT bootstrapping
+  - Persist peer DBs, fuzz inventory exchange, and document recovery.
+- Broaden fuzz/chaos testing across gateway and storage paths.
 
 **Near term**
 
-- Settlement auditing and explorer integration.
-- Peer discovery and inventory exchange hardening.
+- Launch industrial lane SLA enforcement and dashboard surfacing
+  - Slash tardy providers, expose payout-cap metrics, and show job ETAs.
+- Range-boost mesh trials and mobile energy heuristics
+  - Validate BLE/Wi‑Fi Direct hops and tune lighthouse multipliers.
+- Economic simulator runs for emission/fee policy tuning
+  - Publish top scenarios and feed parameters into governance.
+- Compute-backed money and instant-app groundwork
+  - Define redeem curves and prototype local instant-app execution.
 
 ## 14. Differentiators
 - Utility first: instant wins (works with no bars, instant starts, offline pay, find‑anything) with no partner permission.
 - Earn‑by‑helping: proximity and motion become infrastructure; coverage and delivery pay where scarce; compute pays for accepted results.
 - Honest money: CBM redeemability; predictable emissions; no backdoors.
 - Civic spine: service‑based franchise; catalogs—not protocol—carry social policy; founder exit is verifiable.
+
+## 15 · Outstanding Blockers & Directives
+
+- Credits `top-up` CLI remains development-only. Next agent: devise a production issuance or remove the command.
 
 ---
 This document supersedes earlier “vision” notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.

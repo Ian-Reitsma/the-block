@@ -15,7 +15,7 @@ fn cluster_settlement_idempotent() {
     let key = receipt.idempotency_key;
 
     // Node A first run
-    Settlement::init(dir1.path().to_str().unwrap(), SettleMode::Real, 0, 0.0);
+    Settlement::init(dir1.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
     Settlement::set_balance("buyer", 100);
     Settlement::set_balance("provider", 0);
     #[cfg(feature = "telemetry")]
@@ -27,7 +27,7 @@ fn cluster_settlement_idempotent() {
     Settlement::shutdown();
 
     // Node A restart should not reapply
-    Settlement::init(dir1.path().to_str().unwrap(), SettleMode::Real, 0, 0.0);
+    Settlement::init(dir1.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
     Settlement::tick(2, &[receipt.clone()]);
     assert_eq!(Settlement::balance("buyer"), 90);
     #[cfg(feature = "telemetry")]
@@ -35,7 +35,7 @@ fn cluster_settlement_idempotent() {
     Settlement::shutdown();
 
     // Node B first run
-    Settlement::init(dir2.path().to_str().unwrap(), SettleMode::Real, 0, 0.0);
+    Settlement::init(dir2.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
     Settlement::set_balance("buyer", 100);
     Settlement::set_balance("provider", 0);
     Settlement::tick(1, &[receipt.clone()]);
@@ -45,7 +45,7 @@ fn cluster_settlement_idempotent() {
     Settlement::shutdown();
 
     // Node B restart should also avoid reapplication
-    Settlement::init(dir2.path().to_str().unwrap(), SettleMode::Real, 0, 0.0);
+    Settlement::init(dir2.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
     Settlement::tick(2, &[receipt]);
     assert_eq!(Settlement::balance("buyer"), 90);
     #[cfg(feature = "telemetry")]

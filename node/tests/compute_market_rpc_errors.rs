@@ -17,7 +17,9 @@ async fn rpc(addr: &str, body: &str) -> Value {
         body.len(),
         body
     );
-    expect_timeout(stream.write_all(req.as_bytes())).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
     let mut resp = vec![0u8; 1024];
     let n = expect_timeout(stream.read(&mut resp)).await.unwrap();
     let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();

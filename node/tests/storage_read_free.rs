@@ -16,7 +16,7 @@ impl Provider for NoopProvider {
 #[test]
 fn reads_do_not_burn() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("alice", 10);
     let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let provider = Arc::new(NoopProvider);

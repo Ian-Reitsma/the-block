@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use blake3::hash;
 use rand::seq::SliceRandom;
 
-use crate::net::Message;
 use crate::net::send_msg;
+use crate::net::Message;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE};
 
@@ -64,12 +64,21 @@ impl Relay {
         if !self.should_process(msg) {
             return;
         }
-        let fanout = Self::compute_fanout(peers.len()).min(peers.len().max(1));
+        let fanout_all = std::env::var("TB_GOSSIP_FANOUT")
+            .map(|v| v == "all")
+            .unwrap_or(false);
+        let fanout = if fanout_all {
+            peers.len()
+        } else {
+            Self::compute_fanout(peers.len()).min(peers.len().max(1))
+        };
         #[cfg(feature = "telemetry")]
         GOSSIP_FANOUT_GAUGE.set(fanout as i64);
-        let mut rng = rand::thread_rng();
         let mut list = peers.to_vec();
-        list.shuffle(&mut rng);
+        if !fanout_all {
+            let mut rng = rand::thread_rng();
+            list.shuffle(&mut rng);
+        }
         for addr in list.into_iter().take(fanout) {
             send(addr, msg);
         }

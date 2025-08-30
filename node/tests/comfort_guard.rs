@@ -3,13 +3,18 @@ use serial_test::serial;
 use tempfile::tempdir;
 use the_block::{
     fees::policy,
-    generate_keypair,
-    sign_tx,
+    generate_keypair, sign_tx,
     telemetry::{ADMISSION_MODE, INDUSTRIAL_REJECTED_TOTAL},
     Blockchain, FeeLane, RawTxPayload, TxAdmissionError,
 };
 
-fn build_signed_tx(sk: &[u8], from: &str, to: &str, fee: u64, nonce: u64) -> the_block::SignedTransaction {
+fn build_signed_tx(
+    sk: &[u8],
+    from: &str,
+    to: &str,
+    fee: u64,
+    nonce: u64,
+) -> the_block::SignedTransaction {
     let payload = RawTxPayload {
         from_: from.to_string(),
         to: to.to_string(),

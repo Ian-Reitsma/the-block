@@ -1,0 +1,11 @@
+[phone]
+rssi_min = -75
+rtt_max_ms = 150
+
+[laptop]
+rssi_min = -80
+rtt_max_ms = 200
+
+[router]
+rssi_min = -85
+rtt_max_ms = 250

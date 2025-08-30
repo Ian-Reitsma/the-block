@@ -1,4 +1,5 @@
 pub mod erasure;
+pub mod fs;
 pub mod migrate;
 pub mod pipeline;
 pub mod placement;

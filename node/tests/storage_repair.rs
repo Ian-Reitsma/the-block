@@ -18,7 +18,7 @@ impl Provider for NoopProvider {
 #[tokio::test]
 async fn rebuilds_missing_shard() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);
     let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let provider = NoopProvider;

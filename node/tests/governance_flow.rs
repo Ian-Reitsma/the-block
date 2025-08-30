@@ -25,13 +25,13 @@ fn status_reports_timelock() {
 
 #[test]
 fn rollback_resets_metrics() {
+    use std::time::Duration;
+    use tempfile::tempdir;
     use the_block::governance::{
         GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
         ACTIVATION_DELAY,
     };
     use the_block::telemetry::PARAM_CHANGE_ACTIVE;
-    use tempfile::tempdir;
-    use std::time::Duration;
 
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
@@ -69,7 +69,10 @@ fn rollback_resets_metrics() {
             0,
         )
         .unwrap();
-    assert_eq!(store.tally_and_queue(pid, 1).unwrap(), ProposalStatus::Passed);
+    assert_eq!(
+        store.tally_and_queue(pid, 1).unwrap(),
+        ProposalStatus::Passed
+    );
     store
         .activate_ready(1 + ACTIVATION_DELAY, &mut rt, &mut params)
         .unwrap();

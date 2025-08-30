@@ -21,6 +21,7 @@ pub enum ParamKey {
     FairshareGlobalMax,
     BurstRefillRatePerS,
     CreditsDecayLambdaPerHourPpm,
+    DailyPayoutCap,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

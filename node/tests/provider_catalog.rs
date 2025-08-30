@@ -36,7 +36,7 @@ impl Provider for MockProvider {
 #[test]
 fn unhealthy_nodes_skipped() {
     let dir = tempdir().unwrap();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10);
     let mut pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let good = Arc::new(MockProvider::new("good", Ok(50.0)));

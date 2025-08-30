@@ -1,12 +1,12 @@
-use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
-use serde::{Deserialize, Serialize};
-use blake3;
 use bincode;
+use blake3;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
 use hex;
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 
 pub mod proximity;
-pub use proximity::validate_proximity;
+pub use proximity::{validate_proximity, DeviceClass};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AssistReceipt {
@@ -14,6 +14,7 @@ pub struct AssistReceipt {
     pub region: String,
     pub pubkey: Vec<u8>,
     pub sig: Vec<u8>,
+    pub device: DeviceClass,
     pub rssi: i8,
     pub rtt_ms: u32,
 }
@@ -33,6 +34,7 @@ impl AssistReceipt {
             let mut msg = Vec::new();
             msg.extend(self.provider.as_bytes());
             msg.extend(self.region.as_bytes());
+            msg.push(self.device as u8);
             msg.push(self.rssi as u8);
             msg.extend_from_slice(&self.rtt_ms.to_le_bytes());
             return vk.verify(&msg, &sig).is_ok();

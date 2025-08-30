@@ -50,6 +50,7 @@ pub mod identity;
 pub mod localnet;
 pub mod net;
 pub mod p2p;
+pub mod range_boost;
 pub mod rpc;
 
 #[cfg(feature = "telemetry")]
@@ -1229,7 +1230,14 @@ impl Blockchain {
             cfg.compute_market.settle_mode,
             cfg.compute_market.min_fee_micros,
             0.0,
+            cfg.rpc.dispute_window_epochs,
         );
+        credits::issuance::set_params(credits::issuance::IssuanceParams {
+            lighthouse_low_density_multiplier_max: cfg.lighthouse.low_density_multiplier_max,
+            ..Default::default()
+        });
+        #[cfg(feature = "telemetry")]
+        telemetry::summary::spawn(cfg.telemetry_summary_interval);
         bc.config = cfg.clone();
         #[cfg(feature = "telemetry")]
         {

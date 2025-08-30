@@ -15,6 +15,7 @@ pub struct IssuanceParams {
     pub cap_per_identity: u64,
     pub cap_per_region: u64,
     pub expiry_days: HashMap<Source, u64>,
+    pub lighthouse_low_density_multiplier_max: u64,
 }
 
 impl Default for IssuanceParams {
@@ -34,6 +35,7 @@ impl Default for IssuanceParams {
             cap_per_identity: u64::MAX,
             cap_per_region: u64::MAX,
             expiry_days,
+            lighthouse_low_density_multiplier_max: 1_000_000,
         }
     }
 }
@@ -43,6 +45,7 @@ struct IssuanceState {
     params: IssuanceParams,
     identity_totals: HashMap<String, u64>,
     region_totals: HashMap<String, u64>,
+    region_density: HashMap<String, u64>,
 }
 
 static STATE: Lazy<RwLock<IssuanceState>> = Lazy::new(|| RwLock::new(IssuanceState::default()));
@@ -62,11 +65,26 @@ pub fn set_params(p: IssuanceParams) {
     st.params = p;
 }
 
+pub fn set_region_density(region: &str, density_ppm: u64) {
+    let mut st = STATE.write().unwrap();
+    st.region_density.insert(region.to_owned(), density_ppm);
+}
+
 pub fn issue(provider: &str, region: &str, source: Source, event: &str, base_amount: u64) {
     let mut st = STATE.write().unwrap();
     let params = st.params.clone();
     let weight_ppm = *params.weights_ppm.get(&source).unwrap_or(&1_000_000);
-    let amount = ((base_amount as u128 * weight_ppm as u128) / 1_000_000u128) as u64;
+    let density = *st.region_density.get(region).unwrap_or(&1_000_000);
+    let mult = if density < 1_000_000 {
+        1_000_000
+            + ((params.lighthouse_low_density_multiplier_max - 1_000_000) * (1_000_000 - density)
+                / 1_000_000)
+    } else {
+        1_000_000
+    };
+    let amount = ((base_amount as u128 * weight_ppm as u128 * mult as u128)
+        / 1_000_000u128
+        / 1_000_000u128) as u64;
     let id_total = *st.identity_totals.get(provider).unwrap_or(&0);
     if id_total + amount > params.cap_per_identity {
         #[cfg(feature = "telemetry")]
@@ -94,7 +112,7 @@ pub fn issue(provider: &str, region: &str, source: Source, event: &str, base_amo
     #[cfg(feature = "telemetry")]
     {
         CREDIT_ISSUED_TOTAL
-            .with_label_values(&[src_label(source)])
+            .with_label_values(&[src_label(source), region])
             .inc_by(amount);
     }
 }

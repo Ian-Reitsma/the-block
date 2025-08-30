@@ -1,4 +1,5 @@
 pub mod ban_store;
+pub mod discovery;
 mod message;
 mod peer;
 

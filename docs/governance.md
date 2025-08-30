@@ -35,6 +35,26 @@ link to any specification updates.
 3. On merge, operators include the flag file in their configs. When the block
 height reaches the activation point, nodes begin enforcing the new rules.
 
+## Runtime Parameters
+
+Governance can adjust several runtime knobs without code changes:
+
+| Parameter Key | Effect | Metrics |
+|---------------|--------|---------|
+| `fairshare.global_max` | caps aggregate industrial usage as parts-per-million of capacity | `industrial_rejected_total{reason="fairshare"}` |
+| `burst.refill_rate_per_s` | rate at which burst buckets replenish | `industrial_rejected_total{reason="burst"}` |
+| `credits.decay.lambda_per_hour` | exponential credit decay per hour | `credit_burn_total{sink="decay"}` |
+
+The `gov` helper CLI provides shortcuts for crafting proposals:
+
+```bash
+cargo run --bin gov -- SetFairshare 50000 1000
+cargo run --bin gov -- SetCreditDecay 7200
+```
+
+See [`examples/governance/src/bin/gov.rs`](../examples/governance/src/bin/gov.rs)
+for additional subcommands that submit, vote, and execute proposals.
+
 ## Handshake Signaling
 
 Peers exchange protocol versions and required feature bits (`0x0004` for fee

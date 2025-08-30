@@ -1,5 +1,6 @@
 use super::ParamKey;
 use crate::Blockchain;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub struct Runtime<'a> {
@@ -37,7 +38,7 @@ pub struct ParamSpec {
     pub apply_runtime: fn(i64, &mut Runtime) -> Result<(), ()>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Params {
     pub snapshot_interval_secs: i64,
     pub consumer_fee_comfort_p90_microunits: i64,
@@ -45,6 +46,7 @@ pub struct Params {
     pub fairshare_global_max_ppm: i64,
     pub burst_refill_rate_per_s_ppm: i64,
     pub credits_decay_lambda_per_hour_ppm: i64,
+    pub daily_payout_cap: u64,
 }
 
 impl Default for Params {
@@ -56,6 +58,7 @@ impl Default for Params {
             fairshare_global_max_ppm: 250_000,
             burst_refill_rate_per_s_ppm: ((30.0 / 60.0) * 1_000_000.0) as i64,
             credits_decay_lambda_per_hour_ppm: 0,
+            daily_payout_cap: u64::MAX,
         }
     }
 }
@@ -85,8 +88,13 @@ fn apply_credit_decay_lambda(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_daily_payout_cap(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.daily_payout_cap = v as u64;
+    Ok(())
+}
+
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 6] = [
+    static REGS: [ParamSpec; 7] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -156,6 +164,18 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_credit_decay_lambda,
             apply_runtime: |v, rt| {
                 rt.set_credit_decay_lambda(v as f64 / 1_000_000.0);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::DailyPayoutCap,
+            default: i64::MAX,
+            min: 0,
+            max: i64::MAX,
+            unit: "credits",
+            apply: apply_daily_payout_cap,
+            apply_runtime: |v, _rt| {
+                crate::compute_market::settlement::Settlement::set_daily_payout_cap(v as u64);
                 Ok(())
             },
         },

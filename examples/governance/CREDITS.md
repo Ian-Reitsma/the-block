@@ -9,8 +9,4 @@ cargo run --bin node -- credits top-up --provider alice --amount 50
 cargo run --bin node -- credits balance alice
 ```
 
-Transfer credits between providers:
-
-```bash
-cargo run --bin node -- credits transfer --from alice --to bob --amount 10
-```
+`top-up` is a development convenience; production credit issuance is governed on-chain.

@@ -81,6 +81,12 @@ impl StoragePipeline {
         }
     }
 
+    /// Logical quota in bytes derived from the provider's credit balance.
+    /// Each credit grants one kilobyte of storage.
+    pub fn logical_quota_bytes(provider: &str) -> u64 {
+        Settlement::balance(provider) * 1024
+    }
+
     fn profile_key(provider: &str) -> String {
         format!("provider_profiles/{}", provider)
     }

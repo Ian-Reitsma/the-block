@@ -19,7 +19,9 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     }
     req.push_str("\r\n");
     req.push_str(body);
-    expect_timeout(stream.write_all(req.as_bytes())).await.unwrap();
+    expect_timeout(stream.write_all(req.as_bytes()))
+        .await
+        .unwrap();
     let mut resp = Vec::new();
     expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();

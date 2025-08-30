@@ -8,6 +8,8 @@ use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod summary;
+
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
 pub static MEMPOOL_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -121,6 +123,21 @@ pub static INDUSTRIAL_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static PAYOUT_CAP_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "payout_cap_hits_total",
+            "Number of settlement payouts capped per identity",
+        ),
+        &["identity"],
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static ACTIVE_BURST_QUOTA: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
         Opts::new("active_burst_quota", "Remaining burst quota"),
@@ -207,8 +224,8 @@ pub static CREDIT_BURN_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static CREDIT_ISSUED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        Opts::new("credit_issued_total", "Credits issued by source"),
-        &["source"],
+        Opts::new("credit_issued_total", "Credits issued by source and region"),
+        &["source", "region"],
     )
     .unwrap_or_else(|e| panic!("counter credit issued: {e}"));
     REGISTRY

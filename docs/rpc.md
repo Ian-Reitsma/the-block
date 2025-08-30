@@ -15,7 +15,8 @@
   for the requested lane.
 - `localnet.submit_receipt` – accepts a hex‑encoded assist receipt, verifies
   signature and proximity, accrues credits, and stores the receipt hash to
-  prevent replays.
+  prevent replays. See [docs/localnet.md](localnet.md) for discovery and
+  session setup.
 - `dns.publish_record` – publishes a signed DNS TXT record to the on-chain
   gateway store.
 - `gateway.policy` – fetches the JSON policy document for a domain.

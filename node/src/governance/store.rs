@@ -22,6 +22,7 @@ pub struct LastActivation {
 
 pub struct GovStore {
     db: sled::Db,
+    base_path: std::path::PathBuf,
 }
 
 fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
@@ -41,16 +42,25 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::FairshareGlobalMax => "fairshare_global_max_ppm",
         ParamKey::BurstRefillRatePerS => "burst_refill_rate_per_s_ppm",
         ParamKey::CreditsDecayLambdaPerHourPpm => "credits_decay_lambda_per_hour_ppm",
+        ParamKey::DailyPayoutCap => "daily_payout_cap",
     }
 }
 
 impl GovStore {
     pub fn open(path: impl AsRef<Path>) -> Self {
+        let db_path = path.as_ref();
         let db = Config::new()
-            .path(path)
+            .path(db_path)
             .open()
             .unwrap_or_else(|e| panic!("open db: {e}"));
-        Self { db }
+        let base = db_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| Path::new(".").to_path_buf());
+        Self {
+            db,
+            base_path: base,
+        }
     }
 
     pub(crate) fn proposals(&self) -> sled::Tree {
@@ -181,6 +191,12 @@ impl GovStore {
         rt: &mut Runtime,
         params: &mut Params,
     ) -> sled::Result<()> {
+        // snapshot current params before applying any changes
+        let hist_dir = self.base_path.join("governance/history");
+        let _ = std::fs::create_dir_all(&hist_dir);
+        let snap_path = hist_dir.join(format!("{}.json", current_epoch));
+        let _ = std::fs::write(&snap_path, serde_json::to_vec(params).unwrap());
+
         let queue = self.activation_queue();
         let mut to_remove = vec![];
         for item in queue.iter() {
@@ -202,12 +218,11 @@ impl GovStore {
                                     params.industrial_admission_min_capacity
                                 }
                                 ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
-                                ParamKey::BurstRefillRatePerS => {
-                                    params.burst_refill_rate_per_s_ppm
-                                }
+                                ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
                                 ParamKey::CreditsDecayLambdaPerHourPpm => {
                                     params.credits_decay_lambda_per_hour_ppm
                                 }
+                                ParamKey::DailyPayoutCap => params.daily_payout_cap as i64,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -286,5 +301,56 @@ impl GovStore {
             return Ok(());
         }
         Err(sled::Error::ReportableBug("no activation".into()))
+    }
+
+    pub fn rollback_proposal(
+        &self,
+        proposal_id: u64,
+        current_epoch: u64,
+        rt: &mut Runtime,
+        params: &mut Params,
+    ) -> sled::Result<()> {
+        let key = ser(&proposal_id)?;
+        let prop_raw = self
+            .proposals()
+            .get(&key)?
+            .ok_or_else(|| sled::Error::Unsupported("missing proposal".into()))?;
+        let mut prop: Proposal = de(&prop_raw)?;
+        let act_epoch = prop
+            .activation_epoch
+            .ok_or_else(|| sled::Error::Unsupported("not activated".into()))?;
+        if current_epoch > act_epoch + ROLLBACK_WINDOW_EPOCHS {
+            return Err(sled::Error::Unsupported("expired".into()));
+        }
+        let snap_path = self
+            .base_path
+            .join("governance/history")
+            .join(format!("{}.json", act_epoch));
+        let bytes =
+            std::fs::read(&snap_path).map_err(|_| sled::Error::Unsupported("snapshot".into()))?;
+        let prev: Params =
+            serde_json::from_slice(&bytes).map_err(|_| sled::Error::Unsupported("parse".into()))?;
+        *params = prev.clone();
+        for spec in registry() {
+            let val = match spec.key {
+                ParamKey::SnapshotIntervalSecs => params.snapshot_interval_secs,
+                ParamKey::ConsumerFeeComfortP90Microunits => {
+                    params.consumer_fee_comfort_p90_microunits
+                }
+                ParamKey::IndustrialAdmissionMinCapacity => {
+                    params.industrial_admission_min_capacity
+                }
+                ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
+                ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
+                ParamKey::CreditsDecayLambdaPerHourPpm => params.credits_decay_lambda_per_hour_ppm,
+                ParamKey::DailyPayoutCap => params.daily_payout_cap as i64,
+            };
+            (spec.apply_runtime)(val, rt)
+                .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
+            self.active_params().insert(ser(&spec.key)?, ser(&val)?)?;
+        }
+        prop.status = ProposalStatus::RolledBack;
+        self.proposals().insert(key, ser(&prop)?)?;
+        Ok(())
     }
 }
