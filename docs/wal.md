@@ -64,3 +64,11 @@ is rotated can leave a fully applied record in both places. The
 `wal_replays_once_after_compaction_crash` test ensures that on restart the log
 is replayed exactly once and then removed, so reopened databases see no
 duplicate entries.
+
+## End-of-Compaction Marker
+
+Each flush appends an `End` marker carrying the last applied id to the WAL
+before the file is removed. If a crash happens after this marker is written but
+before deletion, startup detects the marker and discards the log without
+replaying it. The database also tracks a monotonic id, skipping any WAL records
+that were already persisted to the main data file.

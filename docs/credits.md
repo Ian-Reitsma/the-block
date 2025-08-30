@@ -2,6 +2,8 @@
 
 Service credits track non-transferable balances used to pay for compute and network workloads. Each provider maintains a ledger entry persisted on disk so balances survive restarts.
 
+Reads are free; credits are only burned on write operations such as storing new objects.
+
 ## Ledger Operations
 
 The `credits` crate exposes APIs for:
@@ -31,4 +33,28 @@ Compute-market receipts settle against the ledger in `Real` mode, debiting buyer
 ### Examples
 
 Sample governance workflows demonstrating credit usage live under [`examples/governance/`](../examples/governance/). The `CREDITS.md` file lists common commands, and the `gov status` output exposes rollback metrics alongside current balances.
+
+## Issuance Sources
+
+Credits accrue from distinct sources so rewards can be tuned independently:
+
+- `Uptime` – awarded for keeping nodes online.
+- `LocalNetAssist` – granted for validated local networking help.
+- `ProvenStorage` – credited for storage proofs.
+- `Civic` – community chores and governance duties.
+
+Weights and per-identity or per-region caps are controlled by `credits.issuance.*`
+governance parameters. Prometheus counters
+`credit_issued_total{source}` and `credit_issue_rejected_total{reason}` expose
+issuance behaviour.
+
+## Decay and Expiry
+
+Balances decay exponentially so idle credits eventually lapse. Each provider
+record stores a `last_update` timestamp; `decay_and_expire(now)` scales balances by
+`exp(-λ·Δt)` and zeroes sources that exceed their configured expiry window. The
+decay rate `credits.decay.lambda_per_hour_ppm` and per-source
+`credits.expiry_days.*` windows are adjustable via governance. Settlement invokes
+the decay routine on every hourly tick before applying new receipts.
+
 

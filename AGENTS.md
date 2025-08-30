@@ -226,17 +226,17 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Progress: ~71/100.
+Progress: ~82/100.
 
 **Recent**
 
-- Support bundle redaction regression test.
-- Automated WAL fuzz seed promotion.
-- Alert rule simulations for convergence lag and fee breaches.
-- Metrics server shutdown handle and restart-aware settlement test.
-- Release gate runs chaos tests and enforces cosign signatures.
-- Governance rollback semantics documented ([docs/governance_rollback.md](docs/governance_rollback.md)).
-- Disk-backed credits ledger with paid compute-market settlement and CLI commands.
+- TTL-based gossip relay with duplicate suppression and bounded fanout metrics.
+- Per-lane mempool stats RPC and comfort guard for consumer latency.
+- Gateway DNS module with signed TXT records and policy lookups.
+- LocalNet assist receipt submission with replay protection and credit awards.
+- Provider catalog health checks with automatic storage repair loop.
+- Crash-safe WAL with end-of-compaction marker and idempotency keys.
+- Credit decay and per-source expiry with governance-controlled issuance.
 
 **Immediate**
 
@@ -244,7 +244,6 @@ Progress: ~71/100.
 - Persistence hardening.
 - Fuzz coverage expansion.
 - Governance docs/API polish.
-- Credits scaffold.
 - Audit tests for unbounded async work.
   - **Problem**: some integration tests spawn tasks or servers without enforcing timeouts, risking hangs.
   - **Next steps**: wrap long `await` calls with `expect_timeout` from `node/tests/util/timeout.rs` and ensure services use `serve_metrics_with_shutdown`.
@@ -252,9 +251,8 @@ Progress: ~71/100.
 
 **Near term**
 
-- Service credits engine.
-- Erasure coding & multi-provider placement.
-- Paid compute-market settlement.
+- Settlement auditing and explorer integration.
+- Peer discovery and inventory exchange hardening.
 
 ## 14. Differentiators
 - Utility first: instant wins (works with no bars, instant starts, offline pay, find‑anything) with no partner permission.
@@ -320,7 +318,8 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Consensus & Mining: PoW with BLAKE3; dynamic retarget over ~120 blocks with clamp [¼, ×4]; headers carry difficulty; coinbase fields must match tx[0]; decay rewards.
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `fee_selector` with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
-- Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC.
+- Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
+- Credits: ledger with governance-controlled issuance, decay, and per-source expiry; reads remain free while writes burn credits.
 - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.

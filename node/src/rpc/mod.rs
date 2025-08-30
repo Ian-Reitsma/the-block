@@ -1,10 +1,18 @@
 use crate::{
     compute_market::settlement::{SettleMode, Settlement},
     config::RpcConfig,
+    credits::issuance,
+    gateway,
     governance::{GovStore, Params},
     identity::handle_registry::HandleRegistry,
+    localnet::{validate_proximity, AssistReceipt},
+    simple_db::SimpleDb,
+    transaction::FeeLane,
     Blockchain, SignedTransaction,
 };
+use bincode;
+use credits::Source;
+use hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -29,8 +37,12 @@ pub mod identity;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
+static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
+    let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
+    Mutex::new(SimpleDb::open(&path))
+});
 
-struct RpcRuntimeConfig {
+pub struct RpcRuntimeConfig {
     allowed_hosts: Vec<String>,
     cors_allow_origins: Vec<String>,
     max_body_bytes: usize,
@@ -49,6 +61,11 @@ const PUBLIC_METHODS: &[&str] = &[
     "price_board_get",
     "metrics",
     "settlement_status",
+    "localnet.submit_receipt",
+    "dns.publish_record",
+    "gateway.policy",
+    "microshard.roots.last",
+    "mempool.stats",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -168,7 +185,7 @@ fn check_nonce(
     Ok(())
 }
 
-async fn handle_conn(
+pub async fn handle_conn(
     stream: TcpStream,
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
@@ -490,6 +507,88 @@ fn dispatch(
                 serde_json::json!({"mode": mode})
             }
         }
+        "localnet.submit_receipt" => {
+            let hex = req
+                .params
+                .get("receipt")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bytes = match hex::decode(hex) {
+                Ok(b) => b,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let receipt: AssistReceipt = match bincode::deserialize(&bytes) {
+                Ok(r) => r,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            if !receipt.verify() || !validate_proximity(receipt.rssi, receipt.rtt_ms) {
+                return Err(RpcError {
+                    code: -32002,
+                    message: "invalid receipt",
+                });
+            }
+            let hash = receipt.hash();
+            let key = format!("localnet_receipts/{}", hash);
+            let mut db = LOCALNET_RECEIPTS.lock().unwrap();
+            if db.get(&key).is_some() {
+                serde_json::json!({"status":"ignored"})
+            } else {
+                db.insert(&key, Vec::new());
+                issuance::issue(
+                    &receipt.provider,
+                    &receipt.region,
+                    Source::LocalNetAssist,
+                    &hash,
+                    1,
+                );
+                serde_json::json!({"status":"ok"})
+            }
+        }
+        "dns.publish_record" => match gateway::dns::publish_record(&req.params) {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(RpcError {
+                    code: e.code(),
+                    message: e.message(),
+                })
+            }
+        },
+        "gateway.policy" => gateway::dns::gateway_policy(&req.params),
+        "microshard.roots.last" => {
+            let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            let roots = Settlement::recent_roots(n);
+            serde_json::json!({"roots": roots})
+        }
+        "mempool.stats" => {
+            let lane_str = req
+                .params
+                .get("lane")
+                .and_then(|v| v.as_str())
+                .unwrap_or("consumer");
+            let lane = match lane_str {
+                "industrial" => FeeLane::Industrial,
+                _ => FeeLane::Consumer,
+            };
+            let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+            let (size, age_p50, age_p95, fee_p50, fee_p90) = guard.mempool_stats(lane);
+            serde_json::json!({
+                "size": size,
+                "age_p50": age_p50,
+                "age_p95": age_p95,
+                "fee_p50": fee_p50,
+                "fee_p90": fee_p90,
+            })
+        }
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
             match handles.lock() {
@@ -639,14 +738,26 @@ fn dispatch(
                 serde_json::json!("telemetry disabled")
             }
         }
-        "price_board_get" => match crate::compute_market::price_board::bands() {
-            Some((p25, median, p75)) => {
-                serde_json::json!({"p25": p25, "median": median, "p75": p75})
+        "price_board_get" => {
+            let lane = req
+                .params
+                .get("lane")
+                .and_then(|v| v.as_str())
+                .unwrap_or("consumer");
+            let lane = if lane == "industrial" {
+                FeeLane::Industrial
+            } else {
+                FeeLane::Consumer
+            };
+            match crate::compute_market::price_board::bands(lane) {
+                Some((p25, median, p75)) => {
+                    serde_json::json!({"p25": p25, "median": median, "p75": p75})
+                }
+                None => {
+                    return Err(crate::compute_market::MarketError::NoPriceData.into());
+                }
             }
-            None => {
-                return Err(crate::compute_market::MarketError::NoPriceData.into());
-            }
-        },
+        }
         "compute_arm_real" => {
             let delay = req
                 .params
@@ -835,4 +946,16 @@ pub async fn run_rpc_server(
             handle_conn(stream, bc, mining, nonces, handles_cl, cfg_cl).await;
         });
     }
+}
+
+#[cfg(test)]
+pub fn fuzz_runtime_config() -> Arc<RpcRuntimeConfig> {
+    Arc::new(RpcRuntimeConfig {
+        allowed_hosts: vec!["localhost".into()],
+        cors_allow_origins: Vec::new(),
+        max_body_bytes: 1024,
+        request_timeout: Duration::from_secs(1),
+        enable_debug: false,
+        admin_token: None,
+    })
 }

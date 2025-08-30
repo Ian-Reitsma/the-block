@@ -7,7 +7,7 @@
 
 ## High consumer fees
 - Check proposals adjusting `ConsumerFeeComfortP90Microunits`.
-- Review `mempool` pressure and pending activations.
+- Review consumer `mempool` pressure and pending activations.
 - Consider proposing a higher comfort threshold.
 
 ## Industrial stalls

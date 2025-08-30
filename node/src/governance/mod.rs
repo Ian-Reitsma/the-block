@@ -18,6 +18,9 @@ pub enum ParamKey {
     SnapshotIntervalSecs,
     ConsumerFeeComfortP90Microunits,
     IndustrialAdmissionMinCapacity,
+    FairshareGlobalMax,
+    BurstRefillRatePerS,
+    CreditsDecayLambdaPerHourPpm,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

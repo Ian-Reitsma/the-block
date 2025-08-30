@@ -12,7 +12,7 @@ fn init() {
 #[test]
 fn metrics_http_exporter_serves_prometheus_text() {
     init();
-    telemetry::MEMPOOL_SIZE.set(42);
+    telemetry::MEMPOOL_SIZE.with_label_values(&["consumer"]).set(42);
     telemetry::RECORDER.tx_submitted();
     telemetry::RECORDER.tx_rejected("bad_sig");
     telemetry::RECORDER.block_mined();

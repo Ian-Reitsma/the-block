@@ -44,7 +44,10 @@ use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
 
+pub mod gateway;
+pub mod gossip;
 pub mod identity;
+pub mod localnet;
 pub mod net;
 pub mod p2p;
 pub mod rpc;
@@ -70,6 +73,7 @@ pub use governance::{
 };
 
 pub mod compute_market;
+pub mod credits;
 pub mod le_portal;
 
 pub mod transaction;
@@ -695,9 +699,9 @@ impl Blockchain {
 
         #[cfg(feature = "telemetry")]
         {
-            let total =
-                self.mempool_size_consumer.load(SeqCst) + self.mempool_size_industrial.load(SeqCst);
-            telemetry::MEMPOOL_SIZE.set(total as i64);
+            telemetry::MEMPOOL_SIZE
+                .with_label_values(&[lane.as_str()])
+                .set(size as i64);
         }
 
         size
@@ -711,6 +715,41 @@ impl Blockchain {
     #[inline]
     fn dec_mempool_size(&self, lane: FeeLane) -> usize {
         self.adjust_mempool_size(lane, -1)
+    }
+
+    pub fn mempool_stats(&self, lane: FeeLane) -> (usize, u64, u64, u64, u64) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let map = match lane {
+            FeeLane::Consumer => &self.mempool_consumer,
+            FeeLane::Industrial => &self.mempool_industrial,
+        };
+        let mut ages = Vec::new();
+        let mut fees = Vec::new();
+        for entry in map.iter() {
+            ages.push(now.saturating_sub(entry.timestamp_millis));
+            fees.push(entry.tx.payload.fee);
+        }
+        ages.sort_unstable();
+        fees.sort_unstable();
+        let size = ages.len();
+        let q = |v: &Vec<u64>, p: f64| -> u64 {
+            if v.is_empty() {
+                0
+            } else {
+                let idx = ((v.len() as f64 - 1.0) * p).round() as usize;
+                v[idx]
+            }
+        };
+        (
+            size,
+            q(&ages, 0.50),
+            q(&ages, 0.95),
+            q(&fees, 0.50),
+            q(&fees, 0.90),
+        )
     }
 
     #[cfg(feature = "telemetry")]
@@ -1189,6 +1228,7 @@ impl Blockchain {
             settle_path.to_string_lossy().as_ref(),
             cfg.compute_market.settle_mode,
             cfg.compute_market.min_fee_micros,
+            0.0,
         );
         bc.config = cfg.clone();
         #[cfg(feature = "telemetry")]
@@ -1880,6 +1920,9 @@ impl Blockchain {
                         .set(0);
                     if matches!(lane, FeeLane::Industrial) && is_tight {
                         telemetry::INDUSTRIAL_DEFERRED_TOTAL.inc();
+                        telemetry::INDUSTRIAL_REJECTED_TOTAL
+                            .with_label_values(&["comfort_guard"])
+                            .inc();
                         self.record_reject("comfort_guard");
                         return Err(TxAdmissionError::FeeTooLow);
                     }
@@ -3695,6 +3738,8 @@ pub const ERR_MEMPOOL_FULL: u16 = 11;
 pub const ERR_LOCK_POISONED: u16 = 12;
 pub const ERR_PENDING_LIMIT: u16 = 13;
 pub const ERR_FEE_TOO_LARGE: u16 = 14;
+pub const ERR_STORAGE_QUOTA_CREDITS: u16 = 15;
+pub const ERR_DNS_SIG_INVALID: u16 = 16;
 
 /// Return the integer network identifier used in domain separation.
 #[must_use]
@@ -3768,6 +3813,8 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ERR_MEMPOOL_FULL", ERR_MEMPOOL_FULL)?;
     m.add("ERR_LOCK_POISONED", ERR_LOCK_POISONED)?;
     m.add("ERR_PENDING_LIMIT", ERR_PENDING_LIMIT)?;
+    m.add("ERR_STORAGE_QUOTA_CREDITS", ERR_STORAGE_QUOTA_CREDITS)?;
+    m.add("ERR_DNS_SIG_INVALID", ERR_DNS_SIG_INVALID)?;
     #[cfg(feature = "telemetry")]
     {
         m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;

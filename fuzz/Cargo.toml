@@ -29,3 +29,8 @@ test = false
 
 [package.metadata]
 cargo-fuzz = true
+
+[[bin]]
+name = "rpc"
+path = "fuzz_targets/rpc.rs"
+test = false

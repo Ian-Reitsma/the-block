@@ -32,10 +32,11 @@ blocking the calling shell.
 
 Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves a preloaded dashboard on <http://localhost:3000>.
 
-Panels include mempool size, banned peers, and average log size derived from
-the `log_size_bytes` histogram. The repository omits screenshot assets to keep
-the tree lightweight; after running a monitor command, open Grafana and import
-`monitoring/grafana/dashboard.json` to explore the dashboard.
+Panels include per-lane mempool size, banned peers, gossip duplicate counts, and
+average log size derived from the `log_size_bytes` histogram. The repository
+omits screenshot assets to keep the tree lightweight; after running a monitor
+command, open Grafana and import `monitoring/grafana/dashboard.json` to explore
+the dashboard.
 
 ## Docker setup
 

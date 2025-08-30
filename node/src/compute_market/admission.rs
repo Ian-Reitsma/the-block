@@ -39,11 +39,20 @@ static PROVIDER_QUOTA: Lazy<DashMap<String, Quota>> = Lazy::new(DashMap::new);
 const WINDOW_SECS: f64 = 6.0;
 #[cfg(not(test))]
 const WINDOW_SECS: f64 = 60.0;
-const FAIR_SHARE_CAP: f64 = 0.25; // 25% of capacity window
+static FAIR_SHARE_CAP_MICRO: AtomicU64 = AtomicU64::new(250_000); // 25% expressed in ppm
 #[cfg(test)]
 const BURST_QUOTA: f64 = 3.0; // micro-shard-seconds
 #[cfg(not(test))]
 const BURST_QUOTA: f64 = 30.0; // micro-shard-seconds
+static BURST_REFILL_RATE_MICRO: AtomicU64 = AtomicU64::new((BURST_QUOTA / WINDOW_SECS * 1_000_000.0) as u64);
+
+fn fair_share_cap() -> f64 {
+    FAIR_SHARE_CAP_MICRO.load(Ordering::Relaxed) as f64 / 1_000_000.0
+}
+
+fn burst_refill_rate() -> f64 {
+    BURST_REFILL_RATE_MICRO.load(Ordering::Relaxed) as f64 / 1_000_000.0
+}
 
 /// Reasons an admission can be rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +71,7 @@ fn decay_usage(u: &mut Usage, now: Instant) {
 
 fn refill_quota(q: &mut Quota, now: Instant) {
     let elapsed = now.duration_since(q.last_refill).as_secs_f64();
-    q.remaining = (q.remaining + elapsed * BURST_QUOTA / WINDOW_SECS).min(BURST_QUOTA);
+    q.remaining = (q.remaining + elapsed * burst_refill_rate()).min(BURST_QUOTA);
     q.last_refill = now;
 }
 
@@ -107,7 +116,7 @@ pub fn check_and_record(buyer: &str, provider: &str, demand: u64) -> Result<(), 
     };
     drop(p_entry);
 
-    if buyer_share > FAIR_SHARE_CAP || provider_share > FAIR_SHARE_CAP {
+    if buyer_share > fair_share_cap() || provider_share > fair_share_cap() {
         let mut bq = BUYER_QUOTA.entry(buyer.to_string()).or_insert(Quota {
             remaining: BURST_QUOTA,
             last_refill: now,
@@ -192,4 +201,12 @@ pub fn set_min_capacity(v: u64) {
 
 pub fn min_capacity() -> u64 {
     MIN_CAPACITY.load(Ordering::Relaxed)
+}
+
+pub fn set_fair_share_cap(v: f64) {
+    FAIR_SHARE_CAP_MICRO.store((v * 1_000_000.0) as u64, Ordering::Relaxed);
+}
+
+pub fn set_burst_refill_rate(v: f64) {
+    BURST_REFILL_RATE_MICRO.store((v * 1_000_000.0) as u64, Ordering::Relaxed);
 }

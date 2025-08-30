@@ -21,6 +21,15 @@ pub enum FeeLane {
     Industrial,
 }
 
+impl FeeLane {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FeeLane::Consumer => "consumer",
+            FeeLane::Industrial => "industrial",
+        }
+    }
+}
+
 impl Default for FeeLane {
     fn default() -> Self {
         FeeLane::Consumer

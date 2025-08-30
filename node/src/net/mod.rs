@@ -2,7 +2,7 @@ pub mod ban_store;
 mod message;
 mod peer;
 
-use crate::{Blockchain, ShutdownFlag, SignedTransaction};
+use crate::{gossip::relay::Relay, Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
 use std::fs;
@@ -13,11 +13,11 @@ use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-pub use message::{Handshake, Message, Payload};
+pub use message::{Handshake, Message, Payload, SUPPORTED_VERSION};
 pub use peer::PeerSet;
 
 /// Current gossip protocol version.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = SUPPORTED_VERSION;
 
 /// Feature bits required for peer connections.
 pub const COMPUTE_MARKET_V1: u32 = crate::p2p::FeatureBit::ComputeMarketV1 as u32;
@@ -31,6 +31,7 @@ pub const LOCAL_FEATURES: u32 = REQUIRED_FEATURES;
 pub struct Node {
     addr: SocketAddr,
     peers: PeerSet,
+    relay: std::sync::Arc<Relay>,
     chain: Arc<Mutex<Blockchain>>,
     key: SigningKey,
 }
@@ -43,11 +44,13 @@ impl Node {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .purge_expired();
+        let relay = std::sync::Arc::new(Relay::default());
         Self {
             addr,
             peers: PeerSet::new(peers),
             chain: Arc::new(Mutex::new(bc)),
             key,
+            relay,
         }
     }
 
@@ -170,9 +173,8 @@ impl Node {
     }
 
     fn broadcast(&self, msg: &Message) {
-        for peer in self.peers.list() {
-            let _ = send_msg(peer, msg);
-        }
+        let peers = self.peers.list();
+        self.relay.broadcast(msg, &peers);
     }
 }
 

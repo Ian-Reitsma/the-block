@@ -179,7 +179,8 @@ fn startup_ttl_purge_increments_metrics() {
     {
         telemetry::TTL_DROP_TOTAL.reset();
         telemetry::STARTUP_TTL_DROP_TOTAL.reset();
-        telemetry::MEMPOOL_SIZE.set(0);
+        telemetry::MEMPOOL_SIZE.with_label_values(&["consumer"]).set(0);
+        telemetry::MEMPOOL_SIZE.with_label_values(&["industrial"]).set(0);
     }
     {
         let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
@@ -214,7 +215,7 @@ fn startup_ttl_purge_increments_metrics() {
     {
         assert_eq!(1, telemetry::TTL_DROP_TOTAL.get() - start_ttl);
         assert_eq!(start_ttl + 1, telemetry::STARTUP_TTL_DROP_TOTAL.get());
-        assert_eq!(0, telemetry::MEMPOOL_SIZE.get());
+        assert_eq!(0, telemetry::MEMPOOL_SIZE.with_label_values(&["consumer"]).get());
     }
 }
 
@@ -231,7 +232,8 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     {
         telemetry::STARTUP_TTL_DROP_TOTAL.reset();
         telemetry::ORPHAN_SWEEP_TOTAL.reset();
-        telemetry::MEMPOOL_SIZE.set(0);
+        telemetry::MEMPOOL_SIZE.with_label_values(&["consumer"]).set(0);
+        telemetry::MEMPOOL_SIZE.with_label_values(&["industrial"]).set(0);
     }
     {
         let (sk, _pk) = generate_keypair();

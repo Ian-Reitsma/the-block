@@ -85,8 +85,9 @@ rm node-data/state/price_board.v1.bin
 ```
 
 Logs emit `loaded price board` and `saved price board` messages, while metrics
-`price_band_p25`, `price_band_median`, and `price_band_p75` track quantile
-bands.
+`price_band_p25{lane}`, `price_band_median{lane}`, and `price_band_p75{lane}`
+track quantile bands. Suggested bids are adjusted by a backlog factor of
+`1 + backlog/window` computed per lane, excluding deferred industrial jobs.
 
 ## Receipt Settlement and Credits Ledger
 
@@ -131,17 +132,21 @@ node restarts and asserting that metrics record exactly one application.
 ## Industrial Admission & Fee Lanes
 
 Every transaction declares a `lane` identifying it as `Consumer` or
-`Industrial`. Consumer traffic always takes priority. Industrial jobs are
-admitted only when a moving-window capacity estimator reports enough shard
-headroom. If median consumer fees drift above the configured
-`comfort_threshold_p90`, the system enters a `tight` admission mode that
-defers new industrial jobs until fees recover.
+`Industrial`. Transactions queue in separate mempools per lane so consumer
+traffic stays latency sensitive. Industrial jobs are admitted only when a
+moving-window capacity estimator reports enough shard headroom and the comfort
+guard is `loose`. When median consumer fees drift above the configured
+`comfort_threshold_p90` or the consumer mempool's age p95 exceeds limits, the
+system enters a `tight` mode that rejects new industrial jobs until conditions
+recover.
 
 Telemetry gauges and counters surface admission behaviour:
 
+- `mempool_size{lane}`
 - `consumer_fee_p50`, `consumer_fee_p90`
 - `industrial_admitted_total`
 - `industrial_deferred_total`
+- `industrial_rejected_total{reason}`
 - `admission_mode{mode}`
 
 These metrics drive Grafana panels tracking fee health and industrial

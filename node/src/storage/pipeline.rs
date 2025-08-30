@@ -1,5 +1,7 @@
 use super::erasure;
+use super::placement::NodeCatalog;
 use super::types::{ChunkRef, ObjectManifest, Redundancy, StoreReceipt};
+use crate::compute_market::settlement::Settlement;
 use crate::simple_db::SimpleDb;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -12,9 +14,10 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
+use credits::CreditError;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const VERSION: u16 = 1;
 const DEFAULT_CHUNK: u32 = 1024 * 1024; // 1 MiB
@@ -26,21 +29,18 @@ const CHUNK_LADDER: [u32; 5] = [
     4 * 1024 * 1024,
 ];
 const TARGET_TIME_SECS: f64 = 3.0;
-const LOSS_HI: f64 = 0.02; // 2%
+pub const LOSS_HI: f64 = 0.02; // 2%
 const LOSS_LO: f64 = 0.002; // 0.2%
-const RTT_HI_MS: f64 = 200.0;
+pub const RTT_HI_MS: f64 = 200.0;
 const RTT_LO_MS: f64 = 80.0;
 
-pub trait Provider {
+pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
     fn send_chunk(&self, _data: &[u8]) -> Result<(), String> {
         Ok(())
     }
-    fn rtt_ewma(&self) -> f64 {
-        0.0
-    }
-    fn loss_ewma(&self) -> f64 {
-        0.0
+    fn probe(&self) -> Result<f64, String> {
+        Ok(0.0)
     }
 }
 
@@ -73,6 +73,9 @@ pub struct StoragePipeline {
 
 impl StoragePipeline {
     pub fn open(path: &str) -> Self {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            super::repair::spawn(path.to_string(), Duration::from_secs(60));
+        }
         Self {
             db: SimpleDb::open(path),
         }
@@ -126,13 +129,23 @@ impl StoragePipeline {
         &mut self,
         data: &[u8],
         lane: &str,
-        providers: &[&dyn Provider],
+        catalog: &NodeCatalog,
     ) -> Result<StoreReceipt, String> {
+        let kb = ((data.len() as u64) + 1023) / 1024;
+        if let Err(e) = Settlement::spend(lane, "write_kb", kb) {
+            return Err(match e {
+                CreditError::Insufficient => "ERR_STORAGE_QUOTA_CREDITS".into(),
+                _ => e.to_string(),
+            });
+        }
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
         let key = Key::from_slice(&key_bytes);
         let cipher = ChaCha20Poly1305::new(key);
-
+        let providers = catalog.healthy_nodes();
+        if providers.is_empty() {
+            return Err("no providers".into());
+        }
         let mut profile = self.load_profile(providers[0].id());
         let chunk_len = profile.preferred_chunk as usize;
         #[cfg(feature = "telemetry")]
@@ -170,15 +183,16 @@ impl StoragePipeline {
             let dur = start.elapsed();
             let throughput = chunk.len() as f64 / dur.as_secs_f64();
             profile.bw_ewma = Self::ewma(profile.bw_ewma, throughput);
-            profile.rtt_ewma = Self::ewma(profile.rtt_ewma, providers[0].rtt_ewma());
-            profile.loss_ewma = Self::ewma(profile.loss_ewma, providers[0].loss_ewma());
+            let (rtt, loss) = catalog.stats(providers[0].id());
+            profile.rtt_ewma = Self::ewma(profile.rtt_ewma, rtt);
+            profile.loss_ewma = Self::ewma(profile.loss_ewma, loss);
             profile.stable_chunks += 1;
             #[cfg(feature = "telemetry")]
             {
                 STORAGE_CHUNK_SIZE_BYTES.observe(chunk.len() as f64);
                 STORAGE_PUT_CHUNK_SECONDS.observe(dur.as_secs_f64());
-                STORAGE_PROVIDER_RTT_MS.observe(providers[0].rtt_ewma());
-                STORAGE_PROVIDER_LOSS_RATE.observe(providers[0].loss_ewma());
+                STORAGE_PROVIDER_RTT_MS.observe(rtt);
+                STORAGE_PROVIDER_LOSS_RATE.observe(loss);
             }
             offset = end;
         }

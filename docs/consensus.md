@@ -86,12 +86,13 @@ block, and `validate_block`/`is_valid_chain` recompute
 
 ## Mempool Semantics
 
-`Blockchain::mempool` is backed by a `DashMap` keyed by `(sender, nonce)` with
-mutations guarded by a global `mempool_mutex`.
-A tracing span captures each admission at this lock boundary
-([node/src/lib.rs](../node/src/lib.rs#L1067-L1082)).
-A binary heap ordered by `(fee_per_byte DESC, expires_at ASC, tx_hash ASC)`
-provides `O(log n)` eviction. Example ordering:
+`Blockchain` maintains lane-specific mempools, `mempool_consumer` and
+`mempool_industrial`, each backed by a `DashMap<(sender, nonce), MempoolEntry>`.
+Mutations across both lanes are guarded by a global `mempool_mutex`. A tracing
+span captures each admission at this lock boundary
+([node/src/lib.rs](../node/src/lib.rs#L1539-L1553)).
+Each lane owns a binary heap ordered by `(fee_per_byte DESC, expires_at ASC,
+tx_hash ASC)` for `O(log n)` eviction. Example ordering:
 
 | fee_per_byte | expires_at | tx_hash | rank |
 |-------------:|-----------:|--------:|-----:|
@@ -99,27 +100,28 @@ provides `O(log n)` eviction. Example ordering:
 |        1000  |          8 | 0x02…   | 2    |
 |        1000  |          9 | 0x01…   | 3    |
 
-An atomic counter enforces a maximum size of 1024
-entries. Each transaction must pay at least the `min_fee_per_byte` (default `1`);
-lower fees yield `FeeTooLow`. When full, the lowest-priority entry is evicted
-and its reserved balances unwound atomically. All mutations acquire
+An atomic counter per lane enforces a maximum size of 1024 entries. Each
+transaction must pay at least the `min_fee_per_byte` (default `1`); lower fees
+yield `FeeTooLow`. When a lane is full, the lowest-priority entry is evicted and
+its reserved balances unwound atomically. All mutations acquire
 `mempool_mutex` before the per-sender lock to preserve atomicity. Counter
 updates, heap pushes/pops, and pending balance/nonces occur within this order,
-guaranteeing `mempool_size ≤ max_mempool_size`. Each sender is
-limited to 16 pending transactions. Entries expire after `tx_ttl` seconds
-(default 1800) based on the persisted admission timestamp and are purged on new
+guaranteeing `mempool_size{lane} ≤ max_mempool_size`. Each sender is limited to
+16 pending transactions per lane. Entries expire after `tx_ttl` seconds (default
+1800) based on the persisted admission timestamp and are purged on new
 submissions and at startup via `purge_expired()`, logging `expired_drop_total`
-and advancing `ttl_drop_total`. In schema v4 each mempool record serializes
+and advancing `ttl_drop_total`. In schema v4 each record serializes
 `[sender, nonce, tx, timestamp_millis, timestamp_ticks]` where `timestamp_ticks`
 is a monotonic counter used for deterministic tie breaking. `Blockchain::open`
-rebuilds the heap from this list, skips entries whose sender account is missing,
-invokes `purge_expired` to drop any whose TTL has elapsed, and restores
-`mempool_size` from the survivors ([node/src/lib.rs](../node/src/lib.rs#L855-L916)).
-Transactions whose sender account has been removed are counted in an
-`orphan_counter`. TTL purges and explicit drops decrement this counter. When
-`orphan_counter > mempool_size / 2` (orphans exceed half of the pool) a sweep
-rebuilds the heap, drops all orphans, emits `ORPHAN_SWEEP_TOTAL`, and resets the
-counter ([node/src/lib.rs](../node/src/lib.rs#L1638-L1663)).
+rebuilds each heap from this list, skips entries whose sender account is
+missing, invokes `purge_expired` to drop any whose TTL has elapsed, and restores
+`mempool_size{lane}` from the survivors
+([node/src/lib.rs](../node/src/lib.rs#L855-L916)). Transactions whose sender
+account has been removed are counted in an `orphan_counter`. TTL purges and
+explicit drops decrement this counter. When `orphan_counter > mempool_size / 2`
+(orphans exceed half of the pool) a sweep rebuilds both heaps, drops all
+orphans, emits `ORPHAN_SWEEP_TOTAL`, and resets the counter
+([node/src/lib.rs](../node/src/lib.rs#L1638-L1663)).
 Nodes may optionally run a background purge loop to enforce TTL even when
 no new transactions arrive. Calling `maybe_spawn_purge_loop` after opening the
 chain reads `TB_PURGE_LOOP_SECS` (or the `--mempool-purge-interval` CLI flag)
@@ -129,25 +131,28 @@ entries age out.
 
 ### Startup Rebuild & TTL Purge
 
-On restart `Blockchain::open` rehydrates mempool entries from disk, incrementing
-`mempool_size` for each inserted record and counting missing-account entries.
-After hydration it calls [`purge_expired`](../node/src/lib.rs#L1597-L1666) to drop
-TTL-expired entries, update [`orphan_counter`](../node/src/lib.rs#L1638-L1663), and
-return the number removed. The sum of these drops is reported as
-`expired_drop_total`; `TTL_DROP_TOTAL` and `STARTUP_TTL_DROP_TOTAL` advance for visibility as entries load in 256-entry batches
+On restart `Blockchain::open` rehydrates each lane's mempool from disk,
+incrementing `mempool_size{lane}` for every inserted record and counting
+missing-account entries. After hydration it calls
+[`purge_expired`](../node/src/lib.rs#L1597-L1666) to drop TTL-expired entries,
+update [`orphan_counter`](../node/src/lib.rs#L1638-L1663), and return the number
+removed. The sum of these drops is reported as `expired_drop_total`;
+`TTL_DROP_TOTAL` and `STARTUP_TTL_DROP_TOTAL` advance for visibility as entries
+load in 256-entry batches
 ([node/src/lib.rs](../node/src/lib.rs#L918-L935)).
 
 Transactions from unknown senders are rejected. Nodes must provision accounts via
 `add_account` before submitting any transaction.
 
-Telemetry counters exported: `mempool_size`, `evictions_total`,
+Telemetry counters exported: `mempool_size{lane}`, `evictions_total`,
 `fee_floor_reject_total`, `dup_tx_reject_total`, `ttl_drop_total`,
-`startup_ttl_drop_total` (expired mempool entries dropped during startup), `lock_poison_total`, `orphan_sweep_total`,
-`invalid_selector_reject_total`, `balance_overflow_reject_total`,
-`drop_not_found_total`, `tx_rejected_total{reason=*}`. `serve_metrics(addr)`
-exposes these metrics over HTTP; e.g. `curl -s localhost:9000/metrics | grep
-invalid_selector_reject_total`. See `API_CHANGELOG.md` for Python error and
-telemetry endpoint history.
+`startup_ttl_drop_total` (expired entries dropped during startup),
+`industrial_rejected_total{reason}`, `admission_mode{mode}`, `lock_poison_total`,
+`orphan_sweep_total`, `invalid_selector_reject_total`,
+`balance_overflow_reject_total`, `drop_not_found_total`,
+`tx_rejected_total{reason=*}`. `serve_metrics(addr)` exposes these metrics over
+HTTP; e.g. `curl -s localhost:9000/metrics | grep invalid_selector_reject_total`.
+See `API_CHANGELOG.md` for Python error and telemetry endpoint history.
 
 ### Transaction Admission Error Codes
 

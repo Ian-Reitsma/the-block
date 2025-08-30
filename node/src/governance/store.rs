@@ -38,6 +38,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::SnapshotIntervalSecs => "snapshot_interval_secs",
         ParamKey::ConsumerFeeComfortP90Microunits => "consumer_fee_comfort_p90_microunits",
         ParamKey::IndustrialAdmissionMinCapacity => "industrial_admission_min_capacity",
+        ParamKey::FairshareGlobalMax => "fairshare_global_max_ppm",
+        ParamKey::BurstRefillRatePerS => "burst_refill_rate_per_s_ppm",
+        ParamKey::CreditsDecayLambdaPerHourPpm => "credits_decay_lambda_per_hour_ppm",
     }
 }
 
@@ -197,6 +200,13 @@ impl GovStore {
                                 }
                                 ParamKey::IndustrialAdmissionMinCapacity => {
                                     params.industrial_admission_min_capacity
+                                }
+                                ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
+                                ParamKey::BurstRefillRatePerS => {
+                                    params.burst_refill_rate_per_s_ppm
+                                }
+                                ParamKey::CreditsDecayLambdaPerHourPpm => {
+                                    params.credits_decay_lambda_per_hour_ppm
                                 }
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
