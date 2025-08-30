@@ -160,6 +160,12 @@ impl PeerSet {
             Payload::Handshake(hs) => {
                 if hs.protocol_version != PROTOCOL_VERSION {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
+                    #[cfg(feature = "telemetry")]
+                    {
+                        crate::telemetry::PEER_REJECTED_TOTAL
+                            .with_label_values(&["protocol"])
+                            .inc();
+                    }
                     return;
                 }
                 if (hs.features & crate::net::REQUIRED_FEATURES) != crate::net::REQUIRED_FEATURES {

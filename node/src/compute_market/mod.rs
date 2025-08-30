@@ -1,5 +1,6 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
+use crate::transaction::FeeLane;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
@@ -158,7 +159,7 @@ impl Market {
         let mut offer = offer;
         offer.validate()?;
         if offer.price == 0 {
-            if let Some(p) = price_board::backlog_adjusted_bid(self.jobs.len()) {
+            if let Some(p) = price_board::backlog_adjusted_bid(FeeLane::Consumer, self.jobs.len()) {
                 offer.price = p;
             }
         }
@@ -189,20 +190,20 @@ impl Market {
                 use admission::RejectReason::*;
                 match reason {
                     Capacity => {
-                        telemetry::ADMISSION_REJECT_TOTAL
+                        telemetry::INDUSTRIAL_REJECTED_TOTAL
                             .with_label_values(&["capacity"])
                             .inc();
                         telemetry::INDUSTRIAL_DEFERRED_TOTAL.inc();
                         return Err(MarketError::Capacity);
                     }
                     FairShare => {
-                        telemetry::ADMISSION_REJECT_TOTAL
+                        telemetry::INDUSTRIAL_REJECTED_TOTAL
                             .with_label_values(&["fair_share"])
                             .inc();
                         return Err(MarketError::FairShare);
                     }
                     BurstExhausted => {
-                        telemetry::ADMISSION_REJECT_TOTAL
+                        telemetry::INDUSTRIAL_REJECTED_TOTAL
                             .with_label_values(&["burst_exhausted"])
                             .inc();
                         return Err(MarketError::BurstExhausted);
@@ -223,7 +224,7 @@ impl Market {
             .offers
             .remove(&job.job_id)
             .ok_or(MarketError::JobNotFound)?;
-        price_board::record_price(offer.price);
+        price_board::record_price(FeeLane::Consumer, offer.price);
         let state = JobState {
             job,
             provider_bond: offer.provider_bond,

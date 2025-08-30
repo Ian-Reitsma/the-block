@@ -8,6 +8,7 @@ use tempfile::tempdir;
 #[cfg(feature = "test-telemetry")]
 use the_block::compute_market::price_board::init_with_clock;
 use the_block::compute_market::price_board::{backlog_adjusted_bid, bands, record_price, reset};
+use the_block::transaction::FeeLane;
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use the_block::compute_market::price_board::{init, persist, reset_path_for_test};
 #[cfg(feature = "test-telemetry")]
@@ -23,9 +24,9 @@ use tracing_test::traced_test;
 fn computes_bands() {
     reset();
     for p in [1, 2, 3, 4, 5] {
-        record_price(p);
+        record_price(FeeLane::Consumer, p);
     }
-    let b = bands().unwrap();
+    let b = bands(FeeLane::Consumer).unwrap();
     assert_eq!(b.0, 2);
     assert_eq!(b.1, 3);
     assert_eq!(b.2, 4);
@@ -36,9 +37,9 @@ fn computes_bands() {
 fn backlog_adjusts_bid() {
     reset();
     for p in [10, 10, 10, 10] {
-        record_price(p);
+        record_price(FeeLane::Consumer, p);
     }
-    let adj = backlog_adjusted_bid(4).unwrap();
+    let adj = backlog_adjusted_bid(FeeLane::Consumer, 4).unwrap();
     assert!(adj > 10);
 }
 
@@ -56,11 +57,11 @@ fn persists_across_restart() {
         .unwrap()
         .to_string();
     init(path.clone(), 10, 30);
-    record_price(5);
+    record_price(FeeLane::Consumer, 5);
     persist();
     reset();
     init(path.clone(), 10, 30);
-    let b = bands().unwrap();
+    let b = bands(FeeLane::Consumer).unwrap();
     assert_eq!(b.1, 5);
 }
 
@@ -74,7 +75,7 @@ fn resets_on_corrupted_file() {
     let path = dir.path().join("board.v1.bin");
     fs::write(&path, b"bad").unwrap();
     init(path.to_str().unwrap().to_string(), 10, 30);
-    assert!(bands().is_none());
+    assert!(bands(FeeLane::Consumer).is_none());
 }
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
@@ -87,14 +88,14 @@ fn ignores_tmp_crash_file() {
     let path = dir.path().join("board.v1.bin");
     let path_str = path.to_str().unwrap().to_string();
     init(path_str.clone(), 10, 30);
-    record_price(7);
+    record_price(FeeLane::Consumer, 7);
     persist();
     // Simulate crash leaving .tmp behind
     let tmp = path.with_extension("v1.bin.tmp");
     fs::write(&tmp, b"partial").unwrap();
     reset();
     init(path_str.clone(), 10, 30);
-    let b = bands().unwrap();
+    let b = bands(FeeLane::Consumer).unwrap();
     assert_eq!(b.1, 7);
 }
 
@@ -109,7 +110,7 @@ fn resets_on_unknown_version() {
     let blob = encode_blob(MAGIC_PRICE_BOARD, 999, &[]);
     fs::write(&path, blob).unwrap();
     init(path.to_str().unwrap().to_string(), 10, 30);
-    assert!(bands().is_none());
+    assert!(bands(FeeLane::Consumer).is_none());
 }
 
 #[cfg(feature = "test-telemetry")]
@@ -123,7 +124,7 @@ fn save_occurs_after_interval() {
     let path_str = path.to_str().unwrap().to_string();
     let clock = PausedClock::new(Instant::now());
     init_with_clock(path_str.clone(), 10, 5, clock.clone());
-    record_price(9);
+    record_price(FeeLane::Consumer, 9);
     clock.advance(Duration::from_secs(5));
     persist();
     assert!(fs::metadata(&path).is_ok());

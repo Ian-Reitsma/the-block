@@ -2,86 +2,91 @@
 use crate::telemetry::WAL_CORRUPT_RECOVERY_TOTAL;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs,
-    io::{Read, Write},
-    path::Path,
-};
-/// Minimal file-backed key-value store emulating the subset of `sled::Db`
-/// used by the project. Data is serialized via `bincode` to `<path>/db` on
-/// `flush()` and deserialized on open. A write-ahead log at `<path>/wal`
-/// guarantees crash-safe writes: operations are appended with a BLAKE3
-/// checksum and replayed on open before the log is truncated.
+use std::{collections::HashMap, fs, io::Write, path::Path};
+
+#[derive(Serialize, Deserialize)]
+struct WalRecord {
+    key: String,
+    value: Option<Vec<u8>>,
+    id: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+enum WalOp {
+    Record(WalRecord),
+    End { last_id: u64 },
+}
+
+#[derive(Serialize, Deserialize)]
+struct WalEntry {
+    op: WalOp,
+    checksum: [u8; 32],
+}
+
+/// Minimal file-backed key-value store.
 #[derive(Default)]
 pub struct SimpleDb {
     map: HashMap<String, Vec<u8>>,
     path: String,
+    next_id: u64,
 }
 
 impl SimpleDb {
     pub fn open(path: &str) -> Self {
         let db_path = Path::new(path).join("db");
-        let mut map = fs::read(&db_path)
+        let mut map: HashMap<String, Vec<u8>> = fs::read(&db_path)
             .ok()
-            .and_then(|b| {
-                bincode::deserialize(&b).ok().or_else(|| {
-                    use std::io::Cursor;
-                    let mut cur = Cursor::new(&b);
-                    let count: u64 = bincode::deserialize_from(&mut cur).ok()?;
-                    if count == 0 {
-                        return None;
-                    }
-                    let key_len: u64 = bincode::deserialize_from(&mut cur).ok()?;
-                    let mut key = vec![0u8; key_len as usize];
-                    cur.read_exact(&mut key).ok()?;
-                    if key != b"chain" {
-                        return None;
-                    }
-                    let val_len: u64 = bincode::deserialize_from(&mut cur).ok()?;
-                    let mut val = vec![0u8; val_len as usize];
-                    cur.read_exact(&mut val).ok()?;
-                    let mut m = HashMap::new();
-                    m.insert("chain".to_string(), val);
-                    Some(m)
-                })
-            })
+            .and_then(|b| bincode::deserialize(&b).ok())
             .unwrap_or_default();
-
-        // Replay any pending WAL entries
+        let last_id = map
+            .get("__wal_id")
+            .and_then(|b| bincode::deserialize(b).ok())
+            .unwrap_or(0u64);
         let wal_path = Path::new(path).join("wal");
         if let Ok(bytes) = fs::read(&wal_path) {
             let mut cur = std::io::Cursor::new(bytes);
+            let mut entries = Vec::new();
             while let Ok(entry) = bincode::deserialize_from::<_, WalEntry>(&mut cur) {
-                let rec_bytes = bincode::serialize(&entry.record).unwrap_or_default();
-                let mut h = Hasher::new();
-                h.update(&rec_bytes);
-                if entry.checksum == *h.finalize().as_bytes() {
-                    match entry.record.value {
-                        Some(val) => {
-                            map.insert(entry.record.key.clone(), val);
-                        }
-                        None => {
-                            map.remove(&entry.record.key);
-                        }
-                    }
-                } else {
-                    #[cfg(feature = "telemetry")]
-                    {
+                entries.push(entry);
+            }
+            if matches!(entries.last().map(|e| &e.op), Some(WalOp::End { .. })) {
+                let _ = fs::remove_file(&wal_path);
+            } else {
+                let mut applied = last_id;
+                for entry in entries {
+                    let op_bytes = bincode::serialize(&entry.op).unwrap_or_default();
+                    let mut h = Hasher::new();
+                    h.update(&op_bytes);
+                    if entry.checksum != *h.finalize().as_bytes() {
+                        #[cfg(feature = "telemetry")]
                         WAL_CORRUPT_RECOVERY_TOTAL.inc();
+                        continue;
+                    }
+                    if let WalOp::Record(rec) = entry.op {
+                        if rec.id > applied {
+                            match rec.value {
+                                Some(val) => {
+                                    map.insert(rec.key, val);
+                                }
+                                None => {
+                                    map.remove(&rec.key);
+                                }
+                            }
+                            applied = rec.id;
+                        }
                     }
                 }
-            }
-            // Commit replayed state and clear WAL
-            let _ = fs::remove_file(&wal_path);
-            if let Ok(bytes) = bincode::serialize(&map) {
-                let _ = fs::write(&db_path, bytes);
+                let _ = fs::remove_file(&wal_path);
+                map.insert("__wal_id".into(), bincode::serialize(&applied).unwrap());
+                if let Ok(bytes) = bincode::serialize(&map) {
+                    let _ = fs::write(&db_path, bytes);
+                }
             }
         }
-
         Self {
             map,
             path: path.to_string(),
+            next_id: last_id + 1,
         }
     }
 
@@ -90,31 +95,47 @@ impl SimpleDb {
     }
 
     pub fn insert(&mut self, key: &str, value: Vec<u8>) -> Option<Vec<u8>> {
+        let id = self.next_id;
+        self.next_id += 1;
         log_wal(
             &self.path,
-            WalRecord {
+            WalOp::Record(WalRecord {
                 key: key.to_string(),
                 value: Some(value.clone()),
-            },
+                id,
+            }),
         );
+        self.map
+            .insert("__wal_id".into(), bincode::serialize(&id).unwrap());
         let prev = self.map.insert(key.to_string(), value);
-        // Persist immediately so a truncated WAL can't drop committed writes.
         self.flush();
         prev
     }
 
     pub fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
+        let id = self.next_id;
+        self.next_id += 1;
         log_wal(
             &self.path,
-            WalRecord {
+            WalOp::Record(WalRecord {
                 key: key.to_string(),
                 value: None,
-            },
+                id,
+            }),
         );
+        self.map
+            .insert("__wal_id".into(), bincode::serialize(&id).unwrap());
         let prev = self.map.remove(key);
-        // Persist immediately so a truncated WAL can't resurrect removed keys.
         self.flush();
         prev
+    }
+
+    pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
+        self.map
+            .keys()
+            .filter(|k| k.starts_with(prefix))
+            .cloned()
+            .collect()
     }
 
     pub fn flush(&self) {
@@ -125,40 +146,49 @@ impl SimpleDb {
         if let Ok(bytes) = bincode::serialize(&self.map) {
             let _ = fs::write(&db_path, bytes);
             let wal_path = Path::new(&self.path).join("wal");
-            let _ = fs::remove_file(wal_path);
+            if let Ok(mut f) = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&wal_path)
+            {
+                let last = self
+                    .map
+                    .get("__wal_id")
+                    .and_then(|b| bincode::deserialize(b).ok())
+                    .unwrap_or(0);
+                let op = WalOp::End { last_id: last };
+                let op_bytes = bincode::serialize(&op).unwrap();
+                let mut h = Hasher::new();
+                h.update(&op_bytes);
+                let entry = WalEntry {
+                    op,
+                    checksum: *h.finalize().as_bytes(),
+                };
+                if let Ok(bytes) = bincode::serialize(&entry) {
+                    let _ = f.write_all(&bytes);
+                }
+            }
+            let _ = fs::remove_file(&wal_path);
         }
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct WalRecord {
-    key: String,
-    value: Option<Vec<u8>>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct WalEntry {
-    record: WalRecord,
-    checksum: [u8; 32],
-}
-
-fn log_wal(path: &str, record: WalRecord) {
+fn log_wal(path: &str, op: WalOp) {
     let wal_path = Path::new(path).join("wal");
-    if let Ok(rec_bytes) = bincode::serialize(&record) {
-        let mut h = Hasher::new();
-        h.update(&rec_bytes);
-        let entry = WalEntry {
-            record,
-            checksum: *h.finalize().as_bytes(),
-        };
-        if let Ok(bytes) = bincode::serialize(&entry) {
-            if let Ok(mut f) = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(wal_path)
-            {
-                let _ = f.write_all(&bytes);
-            }
+    let op_bytes = bincode::serialize(&op).unwrap();
+    let mut h = Hasher::new();
+    h.update(&op_bytes);
+    let entry = WalEntry {
+        op,
+        checksum: *h.finalize().as_bytes(),
+    };
+    if let Ok(bytes) = bincode::serialize(&entry) {
+        if let Ok(mut f) = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(wal_path)
+        {
+            let _ = f.write_all(&bytes);
         }
     }
 }

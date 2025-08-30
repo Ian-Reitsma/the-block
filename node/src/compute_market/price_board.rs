@@ -1,3 +1,4 @@
+use crate::transaction::FeeLane;
 use once_cell::sync::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
@@ -17,51 +18,67 @@ use crate::util::clock::{Clock, MonotonicClock};
 use crate::util::versioned_blob::{decode_blob, encode_blob, DecodeErr, MAGIC_PRICE_BOARD};
 
 #[cfg(feature = "telemetry")]
-use prometheus::{IntCounterVec, IntGauge, Opts};
+use prometheus::{IntCounterVec, IntGauge, IntGaugeVec, Opts};
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use tracing::{info, warn};
 
 const MAGIC: [u8; 4] = MAGIC_PRICE_BOARD;
 const VERSION: u16 = 1;
 
-/// Sliding window of recent prices with quantile bands.
+/// Sliding window of recent prices with quantile bands per lane.
 #[derive(Serialize, Deserialize)]
 pub struct PriceBoard {
     pub window: usize,
-    pub prices: VecDeque<u64>,
+    pub consumer: VecDeque<u64>,
+    pub industrial: VecDeque<u64>,
 }
 
 impl PriceBoard {
     pub fn new(window: usize) -> Self {
         Self {
             window,
-            prices: VecDeque::with_capacity(window),
+            consumer: VecDeque::with_capacity(window),
+            industrial: VecDeque::with_capacity(window),
         }
     }
 
-    pub fn record(&mut self, price: u64) {
-        if self.prices.len() == self.window {
-            self.prices.pop_front();
+    pub fn record(&mut self, lane: FeeLane, price: u64) {
+        let prices = match lane {
+            FeeLane::Consumer => &mut self.consumer,
+            FeeLane::Industrial => &mut self.industrial,
+        };
+        if prices.len() == self.window {
+            prices.pop_front();
         }
-        self.prices.push_back(price);
-        self.update_metrics();
+        prices.push_back(price);
+        self.update_metrics(lane);
     }
 
-    fn update_metrics(&self) {
+    fn update_metrics(&self, lane: FeeLane) {
+        #[cfg(not(feature = "telemetry"))]
+        let _ = lane;
         #[cfg(feature = "telemetry")]
-        if let Some((p25, med, p75)) = self.bands() {
-            PRICE_P25.set(p25 as i64);
-            PRICE_MEDIAN.set(med as i64);
-            PRICE_P75.set(p75 as i64);
+        if let Some((p25, med, p75)) = self.bands(lane) {
+            let l = match lane {
+                FeeLane::Consumer => "consumer",
+                FeeLane::Industrial => "industrial",
+            };
+            PRICE_BAND_P25.with_label_values(&[l]).set(p25 as i64);
+            PRICE_BAND_MEDIAN.with_label_values(&[l]).set(med as i64);
+            PRICE_BAND_P75.with_label_values(&[l]).set(p75 as i64);
         }
     }
 
-    /// Return p25, median and p75 bands.
-    pub fn bands(&self) -> Option<(u64, u64, u64)> {
-        if self.prices.is_empty() {
+    /// Return p25, median and p75 bands for a lane.
+    pub fn bands(&self, lane: FeeLane) -> Option<(u64, u64, u64)> {
+        let prices = match lane {
+            FeeLane::Consumer => &self.consumer,
+            FeeLane::Industrial => &self.industrial,
+        };
+        if prices.is_empty() {
             return None;
         }
-        let mut v: Vec<_> = self.prices.iter().copied().collect();
+        let mut v: Vec<_> = prices.iter().copied().collect();
         v.sort_unstable();
         let median = v[v.len() / 2];
         let p25 = v[(v.len() as f64 * 0.25).floor() as usize];
@@ -69,15 +86,15 @@ impl PriceBoard {
         Some((p25, median, p75))
     }
 
-    pub fn backlog_adjusted_bid(&self, backlog: usize) -> Option<u64> {
-        let (_, median, _) = self.bands()?;
+    pub fn backlog_adjusted_bid(&self, lane: FeeLane, backlog: usize) -> Option<u64> {
+        let (_, median, _) = self.bands(lane)?;
         let factor = 1.0 + backlog as f64 / self.window as f64;
         Some((median as f64 * factor).ceil() as u64)
     }
 
     fn clear(&mut self) {
-        self.prices.clear();
-        self.update_metrics();
+        self.consumer.clear();
+        self.industrial.clear();
     }
 }
 
@@ -181,7 +198,8 @@ pub fn init_with_clock<C: Clock>(path: String, window: usize, save_interval_secs
                         Ok(saved) => {
                             let mut guard = BOARD.write().unwrap_or_else(|e| e.into_inner());
                             *guard = saved;
-                            guard.update_metrics();
+                            guard.update_metrics(FeeLane::Consumer);
+                            guard.update_metrics(FeeLane::Industrial);
                             "ok"
                         }
                         Err(_) => {
@@ -202,7 +220,8 @@ pub fn init_with_clock<C: Clock>(path: String, window: usize, save_interval_secs
                         Ok(state) => {
                             let mut guard = BOARD.write().unwrap_or_else(|e| e.into_inner());
                             *guard = state;
-                            guard.update_metrics();
+                            guard.update_metrics(FeeLane::Consumer);
+                            guard.update_metrics(FeeLane::Industrial);
                         }
                         Err(_) => {
                             let mut guard = BOARD.write().unwrap_or_else(|e| e.into_inner());
@@ -255,24 +274,24 @@ pub fn persist() {
     }
 }
 
-/// Record a new price into the global board.
-pub fn record_price(price: u64) {
+/// Record a new price into the global board for a lane.
+pub fn record_price(lane: FeeLane, price: u64) {
     if let Ok(mut b) = BOARD.write() {
-        b.record(price);
+        b.record(lane, price);
     }
 }
 
 /// Fetch current bands.
-pub fn bands() -> Option<(u64, u64, u64)> {
-    BOARD.read().ok().and_then(|b| b.bands())
+pub fn bands(lane: FeeLane) -> Option<(u64, u64, u64)> {
+    BOARD.read().ok().and_then(|b| b.bands(lane))
 }
 
-/// Compute backlog adjusted bid using current bands.
-pub fn backlog_adjusted_bid(backlog: usize) -> Option<u64> {
+/// Compute backlog adjusted bid using current bands for a lane.
+pub fn backlog_adjusted_bid(lane: FeeLane, backlog: usize) -> Option<u64> {
     BOARD
         .read()
         .ok()
-        .and_then(|b| b.backlog_adjusted_bid(backlog))
+        .and_then(|b| b.backlog_adjusted_bid(lane, backlog))
 }
 
 pub fn reset() {
@@ -301,9 +320,12 @@ fn migrate(from_ver: u16, _bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
 }
 
 #[cfg(feature = "telemetry")]
-static PRICE_P25: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("price_band_p25", "25th percentile compute price")
-        .unwrap_or_else(|e| panic!("gauge p25: {e}"));
+static PRICE_BAND_P25: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("price_band_p25", "25th percentile compute price"),
+        &["lane"],
+    )
+    .unwrap_or_else(|e| panic!("gauge p25: {e}"));
     crate::telemetry::REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("register p25 gauge: {e}"));
@@ -311,9 +333,12 @@ static PRICE_P25: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
-static PRICE_MEDIAN: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("price_band_median", "Median compute price")
-        .unwrap_or_else(|e| panic!("gauge median: {e}"));
+static PRICE_BAND_MEDIAN: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("price_band_median", "Median compute price"),
+        &["lane"],
+    )
+    .unwrap_or_else(|e| panic!("gauge median: {e}"));
     crate::telemetry::REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("register median gauge: {e}"));
@@ -321,9 +346,12 @@ static PRICE_MEDIAN: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
-static PRICE_P75: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("price_band_p75", "75th percentile compute price")
-        .unwrap_or_else(|e| panic!("gauge p75: {e}"));
+static PRICE_BAND_P75: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("price_band_p75", "75th percentile compute price"),
+        &["lane"],
+    )
+    .unwrap_or_else(|e| panic!("gauge p75: {e}"));
     crate::telemetry::REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("register p75 gauge: {e}"));

@@ -1,10 +1,15 @@
 use crate::compute_market::receipt::Receipt;
-use credits::Ledger;
+use blake3;
+use credits::{CreditError, Ledger, Source};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use sled::Tree;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::SystemTime;
+
+#[cfg(feature = "telemetry")]
+use crate::telemetry::CREDIT_BURN_TOTAL;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettleMode {
@@ -47,14 +52,16 @@ pub struct Settlement {
     ledger_path: PathBuf,
     applied: Tree,
     failures: Tree,
+    roots: Tree,
     #[allow(dead_code)]
     min_fee_micros: u64,
+    decay_lambda_per_hour: f64,
 }
 
 static GLOBAL: Lazy<Mutex<Option<Settlement>>> = Lazy::new(|| Mutex::new(None));
 
 impl Settlement {
-    pub fn init(path: &str, mode: SettleMode, min_fee_micros: u64) {
+    pub fn init(path: &str, mode: SettleMode, min_fee_micros: u64, decay_lambda_per_hour: f64) {
         let db = sled::open(path).unwrap_or_else(|e| panic!("open settle db: {e}"));
         let applied = db
             .open_tree("receipts_applied")
@@ -63,6 +70,9 @@ impl Settlement {
             .open_tree("failures")
             .unwrap_or_else(|e| panic!("open failures: {e}"));
         let ledger_path = Path::new(path).join("credits.bin");
+        let roots = db
+            .open_tree("microshard_roots")
+            .unwrap_or_else(|e| panic!("open roots: {e}"));
         let ledger = Ledger::load(&ledger_path).unwrap_or_else(|e| panic!("load ledger: {e}"));
         *GLOBAL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Self {
             mode,
@@ -70,7 +80,9 @@ impl Settlement {
             ledger_path,
             applied,
             failures,
+            roots,
             min_fee_micros,
+            decay_lambda_per_hour,
         });
     }
 
@@ -83,6 +95,14 @@ impl Settlement {
             .as_mut()
             .unwrap_or_else(|| panic!("settlement not initialized"));
         f(sett)
+    }
+
+    pub fn set_decay_lambda(lambda: f64) {
+        Self::with(|s| s.decay_lambda_per_hour = lambda);
+    }
+
+    pub fn decay_lambda() -> f64 {
+        Self::with(|s| s.decay_lambda_per_hour)
     }
 
     pub fn arm(delay: u64, current_height: u64) {
@@ -126,6 +146,37 @@ impl Settlement {
 
     pub fn balance(acct: &str) -> u64 {
         Self::with(|s| s.ledger.balance(acct))
+    }
+
+    #[allow(unused_variables)]
+    pub fn spend(provider: &str, sink: &str, amount: u64) -> Result<(), CreditError> {
+        Self::with(|s| {
+            s.ledger.spend(provider, amount)?;
+            s.ledger
+                .save(&s.ledger_path)
+                .unwrap_or_else(|e| panic!("save ledger: {e}"));
+            #[cfg(feature = "telemetry")]
+            {
+                CREDIT_BURN_TOTAL.with_label_values(&[sink]).inc_by(amount);
+            }
+            Ok(())
+        })
+    }
+
+    pub fn accrue(provider: &str, event: &str, source: Source, amount: u64, expiry_days: u64) {
+        Self::with(|s| {
+            s.ledger.accrue_with(
+                provider,
+                event,
+                source,
+                amount,
+                SystemTime::now(),
+                expiry_days,
+            );
+            s.ledger
+                .save(&s.ledger_path)
+                .unwrap_or_else(|e| panic!("save ledger: {e}"));
+        });
     }
 
     pub fn mode() -> SettleMode {
@@ -183,6 +234,8 @@ impl Settlement {
 
     pub fn tick(height: u64, receipts: &[Receipt]) {
         Self::with(|s| {
+            s.ledger
+                .decay_and_expire(s.decay_lambda_per_hour, SystemTime::now());
             match s.mode {
                 SettleMode::Armed { activate_at } => {
                     if height >= activate_at {
@@ -200,6 +253,15 @@ impl Settlement {
                     let _ = s.apply_receipt(r, height);
                 }
             }
+            // post root for this batch
+            let key = height.to_be_bytes();
+            let root = blake3::hash(&key);
+            s.roots
+                .insert(&key, root.as_bytes())
+                .unwrap_or_else(|e| panic!("record root: {e}"));
+            s.roots
+                .flush()
+                .unwrap_or_else(|e| panic!("flush roots: {e}"));
         });
     }
 
@@ -209,6 +271,20 @@ impl Settlement {
                 .get(key)
                 .unwrap_or_else(|e| panic!("get applied: {e}"))
                 .is_some()
+        })
+    }
+}
+
+impl Settlement {
+    pub fn recent_roots(n: usize) -> Vec<String> {
+        Self::with(|s| {
+            s.roots
+                .iter()
+                .rev()
+                .take(n)
+                .filter_map(|res| res.ok())
+                .map(|(_, v)| hex::encode(v.as_ref()))
+                .collect()
         })
     }
 }

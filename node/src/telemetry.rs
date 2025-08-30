@@ -10,12 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
-pub static MEMPOOL_SIZE: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("mempool_size", "Current mempool size")
+pub static MEMPOOL_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(Opts::new("mempool_size", "Current mempool size"), &["lane"])
         .unwrap_or_else(|e| panic!("gauge: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
+    g.with_label_values(&["consumer"]).set(0);
+    g.with_label_values(&["industrial"]).set(0);
     g
 });
 
@@ -104,10 +106,10 @@ pub static INDUSTRIAL_DEFERRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static ADMISSION_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub static INDUSTRIAL_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
-            "admission_rejected_total",
+            "industrial_rejected_total",
             "Industrial admission rejections by reason",
         ),
         &["reason"],
@@ -191,6 +193,45 @@ pub static CONSUMER_FEE_P90: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static CREDIT_BURN_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("credit_burn_total", "Credits burned by sink"),
+        &["sink"],
+    )
+    .unwrap_or_else(|e| panic!("counter credit burn: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry credit burn: {e}"));
+    c
+});
+
+pub static CREDIT_ISSUED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("credit_issued_total", "Credits issued by source"),
+        &["source"],
+    )
+    .unwrap_or_else(|e| panic!("counter credit issued: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry credit issued: {e}"));
+    c
+});
+
+pub static CREDIT_ISSUE_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "credit_issue_rejected_total",
+            "Rejected credit issuance attempts",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter credit issue rejected: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry credit issue rejected: {e}"));
+    c
+});
+
 pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",
@@ -231,6 +272,30 @@ pub static STORAGE_PROVIDER_LOSS_RATE: Lazy<Histogram> = Lazy::new(|| {
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     h
+});
+
+pub static STORAGE_REPAIR_BYTES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_repair_bytes_total",
+        "Total bytes reconstructed by repair loop",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static STORAGE_REPAIR_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_repair_failures_total",
+        "Total storage repair failures",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
 });
 
 pub static STORAGE_INITIAL_CHUNK_SIZE: Lazy<IntGauge> = Lazy::new(|| {
@@ -675,6 +740,39 @@ pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("peer_rejected_total", "Peers rejected grouped by reason"),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static GOSSIP_DUPLICATE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "gossip_duplicate_total",
+        "Duplicate gossip messages dropped",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static GOSSIP_FANOUT_GAUGE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("gossip_fanout_gauge", "Current gossip fanout")
+        .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
 pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
@@ -927,7 +1025,8 @@ fn gather() -> String {
     // Ensure all metrics are registered even if they haven't been used yet so
     // `gather_metrics` always exposes a stable set of counters.
     let _ = (
-        &*MEMPOOL_SIZE,
+        MEMPOOL_SIZE.with_label_values(&["consumer"]),
+        MEMPOOL_SIZE.with_label_values(&["industrial"]),
         &*EVICTIONS_TOTAL,
         &*FEE_FLOOR_REJECT_TOTAL,
         &*DUP_TX_REJECT_TOTAL,
@@ -941,6 +1040,8 @@ fn gather() -> String {
         &*STARTUP_TTL_DROP_TOTAL,
         &*LOCK_POISON_TOTAL,
         &*ORPHAN_SWEEP_TOTAL,
+        &*GOSSIP_DUPLICATE_TOTAL,
+        &*GOSSIP_FANOUT_GAUGE,
         &*INVALID_SELECTOR_REJECT_TOTAL,
         &*BALANCE_OVERFLOW_REJECT_TOTAL,
         &*DROP_NOT_FOUND_TOTAL,

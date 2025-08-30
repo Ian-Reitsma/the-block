@@ -9,6 +9,7 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "SnapshotIntervalSecs" => Some(ParamKey::SnapshotIntervalSecs),
         "ConsumerFeeComfortP90Microunits" => Some(ParamKey::ConsumerFeeComfortP90Microunits),
         "IndustrialAdmissionMinCapacity" => Some(ParamKey::IndustrialAdmissionMinCapacity),
+        "CreditsDecayLambdaPerHourPpm" => Some(ParamKey::CreditsDecayLambdaPerHourPpm),
         _ => None,
     }
 }
@@ -100,6 +101,7 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
         "snapshot_interval_secs": params.snapshot_interval_secs,
         "consumer_fee_comfort_p90_microunits": params.consumer_fee_comfort_p90_microunits,
         "industrial_admission_min_capacity": params.industrial_admission_min_capacity,
+        "credits_decay_lambda_per_hour_ppm": params.credits_decay_lambda_per_hour_ppm,
     }))
 }
 

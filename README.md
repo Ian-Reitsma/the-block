@@ -22,8 +22,10 @@
 ## Why The Block
 
 - Dual fee lanes (Consumer | Industrial) with lane-aware mempools and a comfort guard that defers industrial when consumer p90 fees exceed threshold.
-- Service credits ledger: non-transferable credits to offset writes and priority with CLI top-up and balance queries.
+- Service credits ledger: non-transferable credits to offset writes (reads are free) and priority with CLI top-up and balance queries.
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
+- TTL-based gossip relay with duplicate suppression and sqrt-N fanout.
+- LocalNet assist receipts earn credits and on-chain DNS TXT records expose gateway policy.
 - Rust: `#![forbid(unsafe_code)]`, Ed25519 + BLAKE3, schema-versioned state, reproducible builds.
 - PyO3 bindings for rapid prototyping.
 
@@ -36,17 +38,23 @@
 - Industrial admission with capacity estimator, fair-share caps, and burst budgets; structured rejection reasons: `Capacity` | `FairShare` | `BurstExhausted`.
 - Storage pipeline with Reed–Solomon erasure coding, multi-provider placement, manifest receipts, reassembly with integrity checks.
 - Paid compute-market settlement: credits ledger debits buyers and accrues providers with idempotent BLAKE3-keyed receipts.
-- Disk-backed service credits ledger with CLI top-up and balance queries.
+- Disk-backed service credits ledger with governance-controlled issuance, decay,
+  and per-source expiry.
 - Identity handles: normalized, nonce-protected registrations; `register_handle` / `resolve_handle` RPC.
 - Governance MVP: propose/vote with delayed activation and single-shot rollback; parameter registry includes snapshot interval & comfort thresholds.
 - P2P handshake with feature bits; token-bucket RPC limiter; TTL/orphan purge loop with metrics.
 - Devnet swarm tooling with chaos mode; deterministic gossip test with deterministic sleeps and a height→weight→tip-hash tie-break for reproducible convergence.
 - Grafana/Prometheus dashboards for snapshot, badge, mempool, admission, gossip convergence, price board.
 - WAL fuzzing infra (nightly), F★ installer with caching, formal docs.
+- TTL-based gossip relay with duplicate suppression and bounded √N fanout.
+- Per-lane mempool stats RPC and `mempool_size{lane}` gauges.
+- LocalNet assist receipt submission with replay protection and credit awards.
+- On-chain DNS TXT records and `gateway.policy` lookups.
+- Provider catalog with RTT/loss probes and background storage repair loop.
+- Crash-safe WAL with end-of-compaction marker and replay idempotency keys.
 
 ### Planned
 
-- Credit expiry and burn policies for service credits.
 - Peer discovery and inventory exchange hardening.
 
 ## Quick Start
@@ -158,6 +166,36 @@ curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":4,"method":"price_board_get"}'
 ```
 
+Mempool stats per lane:
+
+```bash
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":8,"method":"mempool.stats","params":{"lane":"Consumer"}}'
+```
+
+Submit a LocalNet assist receipt:
+
+```bash
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":9,"method":"localnet.submit_receipt","params":{"receipt":"<hex>"}}'
+```
+
+Publish a DNS TXT record and query gateway policy:
+
+```bash
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":10,"method":"dns.publish_record","params":{"domain":"example.com","record":{"txt":"policy"},"sig":"<hex>"}}'
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":11,"method":"gateway.policy","params":{"domain":"example.com"}}'
+```
+
+Fetch recent micro‑shard roots:
+
+```bash
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":12,"method":"microshard.roots.last","params":{"n":5}}'
+```
+
 Compute courier:
 
 ```bash
@@ -232,15 +270,17 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 ## Status & Roadmap
 
-Progress: ~71/100.
+Progress: ~82/100.
 
 **Recent**
 
-- Support bundle redaction verified by regression test.
-- Automated WAL fuzz seed promotion and corpus refresh.
-- Alert rule simulations for convergence lag and fee breaches.
-- Metrics server shutdown handle and restart-aware settlement test.
-- Release gate runs chaos tests and enforces cosign signatures.
+- TTL-based gossip relay with duplicate suppression and bounded fanout metrics.
+- Per-lane mempool stats RPC and comfort guard for consumer latency.
+- Gateway DNS module with signed TXT records and policy lookups.
+- LocalNet assist receipt submission with replay protection and credit awards.
+- Provider catalog health checks with automatic storage repair loop.
+- Crash-safe WAL with end-of-compaction marker and idempotency keys.
+- Credit decay and per-source expiry with governance-controlled issuance.
 
 **Immediate**
 
@@ -251,8 +291,8 @@ Progress: ~71/100.
 
 **Near term**
 
-- Credit expiry and burn policies.
 - Settlement auditing and explorer integration.
+- Peer discovery and inventory exchange hardening.
 
 ## Contribution Guidelines
 
@@ -274,13 +314,14 @@ Progress: ~71/100.
 
 Key counters and gauges:
 
-- `MEMPOOL_SIZE{lane}`, `CONSUMER_FEE_P50`, `CONSUMER_FEE_P90`.
+- `mempool_size{lane}`, `consumer_fee_p50`, `consumer_fee_p90`.
 - `admission_mode{mode}`, `industrial_admitted_total`, `industrial_deferred_total`, `industrial_rejected_total{reason}`.
-- `admission_rejected_total{reason}`, `gossip_convergence_seconds`, `fork_reorg_total`.
-- `SNAPSHOT_INTERVAL_CHANGED`, `badge_active`, `badge_last_change_seconds`.
-- `COURIER_FLUSH_ATTEMPT_TOTAL`, `COURIER_FLUSH_FAILURE_TOTAL`.
-- `storage_put_bytes_total`, `storage_chunk_put_seconds`.
-- `price_band_p25`, `price_band_median`, `price_band_p75`.
+- `gossip_duplicate_total`, `gossip_fanout_gauge`, `gossip_convergence_seconds`, `fork_reorg_total`.
+- `credit_issued_total{source}`, `credit_issue_rejected_total{reason}`, `credit_burn_total{sink}`.
+- `snapshot_interval_changed`, `badge_active`, `badge_last_change_seconds`.
+- `courier_flush_attempt_total`, `courier_flush_failure_total`.
+- `storage_put_bytes_total`, `storage_chunk_put_seconds`, `storage_repair_bytes_total`.
+- `price_band_p25{lane}`, `price_band_median{lane}`, `price_band_p75{lane}`.
 
 ```bash
 curl -s 127.0.0.1:9100 | grep -E 'mempool_size|industrial_rejected_total|gossip_convergence_seconds'
@@ -307,7 +348,7 @@ make monitor   # Prom+Grafana; scrape :9100, open :3000
 - Links to `docs/*` and `examples/*` validate via `python scripts/check_anchors.py --md-anchors`.
 - Nightly toolchain is required only for `cargo fuzz`.
 - macOS rpath guidance for PyO3 (`PYO3_PYTHON`/`PYTHONHOME`) is documented.
-- Status & Roadmap states ~71/100 and maps to concrete next tasks.
+- Status & Roadmap states ~82/100 and maps to concrete next tasks.
 
 ## Disclaimer
 

@@ -39,6 +39,8 @@ pub struct Handshake {
     pub features: u32,
 }
 
+pub const SUPPORTED_VERSION: u32 = 1;
+
 /// Network message payloads exchanged between peers.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {

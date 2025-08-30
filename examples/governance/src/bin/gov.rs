@@ -24,6 +24,18 @@ enum Command {
     Status { id: u64 },
     /// Roll back the last activation
     RollbackLast,
+    /// Convenience helper to craft fair-share proposals
+    SetFairshare {
+        #[arg(help = "global max fair share in ppm (parts per million)")]
+        global_max_ppm: u64,
+        #[arg(help = "burst refill rate per second in ppm")]
+        burst_refill_ppm: u64,
+    },
+    /// Convenience helper for credit decay proposals
+    SetCreditDecay {
+        #[arg(help = "credit decay lambda per hour in ppm")]
+        lambda_ppm: u64,
+    },
 }
 
 #[derive(Clone, ValueEnum)]
@@ -100,6 +112,21 @@ fn main() {
         Command::RollbackLast => {
             // placeholder for future expanded CLI
             println!("rollback not supported in simple governance");
+        }
+        Command::SetFairshare {
+            global_max_ppm,
+            burst_refill_ppm,
+        } => {
+            println!(
+                "submit proposal with key fairshare_global_max_ppm={} or burst_refill_rate_per_s_ppm={}",
+                global_max_ppm, burst_refill_ppm
+            );
+        }
+        Command::SetCreditDecay { lambda_ppm } => {
+            println!(
+                "submit proposal with key credits_decay_lambda_per_hour_ppm={}",
+                lambda_ppm
+            );
         }
     }
 }

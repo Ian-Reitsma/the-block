@@ -24,7 +24,16 @@ The exporter currently tracks:
 - `tx_submitted_total` – transactions submitted to the mempool
 - `tx_rejected_total{reason}` – transactions rejected with a labeled reason
 - `block_mined_total` – blocks successfully mined
-- `mempool_size` – gauge of current mempool size
+- `mempool_size{lane}` – gauge of current mempool size per fee lane
+- `consumer_fee_p50` / `consumer_fee_p90` – sampled consumer fees
+- `industrial_rejected_total{reason}` – industrial transactions dropped or deferred
+- `admission_mode{mode}` – comfort guard state
+- `gossip_duplicate_total` – hashes ignored due to TTL deduplication
+- `gossip_fanout_gauge` – number of peers each gossip message relays to
+- `credit_issued_total{source}` – credits awarded by source
+- `credit_issue_rejected_total{reason}` – issuance rejected by reason
+- `credit_burn_total{sink}` – credits burned per sink
+- `storage_repair_bytes_total` / `storage_repair_failures_total` – bytes reconstructed and failed repairs
 - `storage_chunk_size_bytes` – distribution of chunk sizes written during uploads
 - `storage_put_chunk_seconds` – time taken to store individual chunks
 - `storage_provider_rtt_ms` – observed storage provider round-trip time
