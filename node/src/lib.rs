@@ -50,6 +50,8 @@ pub mod identity;
 pub mod localnet;
 pub mod net;
 pub mod p2p;
+pub mod parallel;
+pub mod poh;
 pub mod range_boost;
 pub mod rpc;
 

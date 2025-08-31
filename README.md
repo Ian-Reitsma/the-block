@@ -33,29 +33,21 @@
 
 ### Live now
 
-- 1-second L1 metronome and difficulty retargeting (MA of last 120 blocks, ±4× clamp).
-- Dual fee lanes embedded in `SignedTransaction` and lane-specific mempools with p50/p90 fee sampling.
-- Industrial admission with capacity estimator, fair-share caps, and burst budgets; structured rejection reasons: `Capacity` | `FairShare` | `BurstExhausted`.
-- Storage pipeline with Reed–Solomon erasure coding, multi-provider placement, manifest receipts, reassembly with integrity checks.
-- Paid compute-market settlement: credits ledger debits buyers and accrues providers with idempotent BLAKE3-keyed receipts.
-- Disk-backed service credits ledger with governance-controlled issuance, decay,
-  and per-source expiry.
-- Identity handles: normalized, nonce-protected registrations; `register_handle` / `resolve_handle` RPC.
-- Governance MVP: propose/vote with delayed activation and single-shot rollback; parameter registry includes snapshot interval & comfort thresholds.
-- P2P handshake with feature bits; token-bucket RPC limiter; TTL/orphan purge loop with metrics.
-- Devnet swarm tooling with chaos mode; deterministic gossip test with deterministic sleeps and a height→weight→tip-hash tie-break for reproducible convergence.
-- Grafana/Prometheus dashboards for snapshot, badge, mempool, admission, gossip convergence, price board.
-- WAL fuzzing infra (nightly), F★ installer with caching, formal docs.
-- TTL-based gossip relay with duplicate suppression and bounded √N fanout.
-- Per-lane mempool stats RPC and `mempool_size{lane}` gauges.
-- LocalNet assist receipt submission with replay protection and credit awards.
-- On-chain DNS TXT records and `gateway.policy` lookups.
-- Provider catalog with RTT/loss probes and background storage repair loop.
-- Crash-safe WAL with end-of-compaction marker and replay idempotency keys.
+- Stake-weighted PoS finality with validator registration, bonding/unbonding, and slashing RPCs.
+- Proof-of-History tick generator and Turbine-style gossip for deterministic block propagation.
+- Parallel execution engine running non-overlapping transactions across threads.
+- GPU-optional hash workloads for validators and compute marketplace jobs.
+- Modular wallet framework with hardware signer support and CLI utilities.
+- Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks.
+- Light-client crate with mobile example and FFI helpers.
+- SQLite-backed indexer, HTTP explorer, and profiling CLI.
+- Distributed benchmark harness and economic simulation modules.
+- Installer CLI for signed packages and auto-update stubs.
+- Jurisdiction policy packs, governance metrics, and webhook alerts.
 
-### Planned
+### Roadmap
 
-- Peer discovery and inventory exchange hardening.
+See the [Immediate](#immediate), [Near term](#near-term), [Medium term](#medium-term), and [Long term](#long-term) plans below for detailed milestones.
 
 ## Quick Start
 
@@ -272,15 +264,15 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 ## Status & Roadmap
 
-Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
+Mainnet readiness: ~94/100 · Vision completion: ~68/100.
 
 ### Strategic Pillars
 
 - **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
-  - [ ] UNL-based PoS engine
-  - [ ] Validator staking & governance
+  - [x] UNL-based PoS engine
+  - [x] Validator staking & governance
   - [ ] Finality gadget w/ rollback tests
-  - Progress: 10%
+    - Progress: 60%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
   - [ ] Contract deployment/execution
@@ -292,54 +284,147 @@ Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
   - [ ] Relayer incentives
   - Progress: 5%
 - **Wallets** ([docs/wallets.md](docs/wallets.md))
-  - [ ] CLI enhancements
-  - [ ] Hardware wallet integration
-  - [ ] Key management guides
-  - Progress: 0% *(placeholder)*
+  - [x] CLI enhancements
+  - [x] Hardware wallet integration
+  - [x] Key management guides
+    - Progress: 80%
 - **Performance** ([docs/performance.md](docs/performance.md))
-  - [ ] Consensus benchmarks
+  - [x] Consensus benchmarks
   - [ ] VM throughput measurements
-  - [ ] Profiling harness
-  - Progress: 0% *(placeholder)*
+  - [x] Profiling harness
+    - Progress: 60%
 
-**Recent**
-
-- Merkle state trie with snapshot manager for light clients.
-- Scriptable UTXO ledger with basic interpreter.
-- Trust lines and order-book DEX engine.
-- Cross-chain bridge scaffold with lock/mint flows.
-
-- DHT-based peer discovery with persisted peer databases.
-- Optional post-quantum key registration gated by `pq-crypto`.
-- Settlement dispute windows with checkpointed receipts and rollback support.
-- Credit meter RPC/CLI with lighthouse issuance multipliers.
-- Gateway read-fee policy with optional credit offsets and budget tracking.
-- Finder/WebDAV quota enforcement with OS-specific `ENOSPC` mapping.
-- Range-boost relays and carry-to-earn courier flow with receipt settlement.
-- Telemetry summarizer and gossip chaos harness for loss/jitter testing.
-
-**Immediate**
+### Immediate
 
 - Finalize gossip longest-chain convergence
   - Remove `#[ignore]` and run chaos harness with 15% drop/200 ms jitter.
+  - Capture per-hop latency metrics in the Turbine module.
+  - Document the tie-break algorithm in the consensus guide.
+  - Expose a test fixture for fork injection.
+  - Benchmark orphan rates before and after fanout changes.
 - Replace dev-only credit top-up with governed issuance
-  - Migrate providers to on-chain credit awards and retire the CLI helper.
+  - Finalize governance proposal schema for credit issuance rates.
+  - Wire minting into validator vote execution paths.
+  - Deprecate the `credits top-up` CLI with user warnings.
+  - Add a migration to purge development-only balances.
+  - Document on-chain credit policy in `docs/credits.md`.
 - Expand settlement audit coverage
-  - Surface `settlement.audit` in the explorer and schedule periodic verification.
+  - Index settlement receipts in the explorer database.
+  - Schedule periodic verification jobs in CI.
+  - Expose discrepancies via Prometheus alerts.
+  - Ship a sample audit report in the documentation.
+  - Include rollback tests for mismatched receipts.
 - Harden DHT bootstrapping
-  - Persist peer DBs, fuzz inventory exchange, and document recovery.
-- Broaden fuzz/chaos testing across gateway and storage paths.
+  - Persist peer databases and support recovery on startup.
+  - Fuzz inventory exchange against malformed identifiers.
+  - Randomize bootstrap peer selection to prevent clustering.
+  - Instrument metrics for handshake failures.
+  - Document manual recovery procedures in the troubleshooting guide.
+- Broaden fuzz/chaos testing across gateway and storage paths
+  - Integrate gateway fuzz seeds into continuous integration.
+  - Simulate disk-full conditions for the storage layer.
+  - Randomize RPC timeouts and retry logic in tests.
+  - Use the chaos harness for sudden network partitions.
+  - Capture reproducible seeds for any failures.
 
-**Near term**
+### Near term
 
 - Launch industrial lane SLA enforcement and dashboard surfacing
-  - Slash tardy providers, expose payout-cap metrics, and show job ETAs.
+  - Enforce deadline slashing for tardy providers.
+  - Visualize payout caps and missed jobs in the dashboard.
+  - Track ETAs and on-time percentages per provider.
+  - Ship alerting hooks for SLA violations.
+  - Document remediation steps for operators.
 - Range-boost mesh trials and mobile energy heuristics
-  - Validate BLE/Wi‑Fi Direct hops and tune lighthouse multipliers.
+  - Prototype BLE/Wi-Fi Direct hop relays.
+  - Tune lighthouse multipliers based on measured energy usage.
+  - Log mobile battery and CPU metrics during trials.
+  - Compare mesh performance against baseline deployments.
+  - Publish heuristics guidance for application developers.
 - Economic simulator runs for emission/fee policy tuning
-  - Publish top scenarios and feed parameters into governance.
+  - Parameterize inflation and demand scenarios.
+  - Run Monte Carlo batches via the bench-harness.
+  - Report top results to the governance dashboard.
+  - Adjust fee curves based on simulation findings.
+  - Version-control scenarios for reproducibility.
 - Compute-backed money and instant-app groundwork
-  - Define redeem curves and prototype local instant-app execution.
+  - Define redeem curves for compute-backed money (CBM).
+  - Prototype local instant-app execution hooks.
+  - Record resource consumption metrics for CBM redemption.
+  - Test edge cases in credit-to-CBM conversion.
+  - Expose CLI plumbing for CBM redemptions.
+- Public testnet with PoH/Turbine and parallel executor
+  - Package node configurations for external testers.
+  - Track time-to-finality and fork rates.
+  - Collect validator feedback on GPU workloads.
+  - Iterate on network parameters from telemetry.
+  - Host weekly syncs summarizing testnet findings.
+
+### Medium term
+
+- Full cross-chain exchange routing across major assets
+  - Implement adapters for SushiSwap and Balancer.
+  - Integrate bridge fee estimators and route selectors.
+  - Simulate slippage across multi-hop swaps.
+  - Provide watchdogs for stuck cross-chain swaps.
+  - Document settlement guarantees and failure modes.
+- Distributed benchmark network at scale
+  - Deploy the harness across 100+ nodes and regions.
+  - Automate workload mix permutations.
+  - Gather latency and throughput heatmaps.
+  - Generate regression dashboards from collected metrics.
+  - Publish performance tuning guides.
+- Wallet ecosystem expansion
+  - Add remote signer and multisig modules.
+  - Ship Swift and Kotlin SDKs for mobile clients.
+  - Enable hardware wallet firmware update flows.
+  - Provide secure backup and restore tooling.
+  - Host an interoperability test suite.
+- Governance feature extensions
+  - Roll out a staged upgrade pipeline for node versions.
+  - Support proposal dependencies and queue management.
+  - Add on-chain treasury accounting primitives.
+  - Offer community alert subscriptions.
+  - Finalize rollback simulation playbooks.
+- Mobile light client productionization
+  - Optimize header sync and storage footprints.
+  - Add push-notification hooks for credit events.
+  - Integrate background energy-saving tasks.
+  - Support signing and submitting transactions from mobile.
+  - Run a beta program across varied hardware.
+
+### Long term
+
+- Smart-contract VM and SDK release
+  - Design a deterministic instruction set.
+  - Provide gas accounting and metering infrastructure.
+  - Release developer tooling and ABI specs.
+  - Host example applications and documentation.
+  - Perform audits and formal verification.
+- Permissionless compute marketplace
+  - Integrate heterogeneous GPU/CPU scheduling.
+  - Enable reputation scoring for providers.
+  - Support escrowed cross-chain payments.
+  - Build an SLA arbitration framework.
+  - Release marketplace explorer analytics.
+- Global jurisdiction compliance framework
+  - Publish additional regional policy packs.
+  - Support PQ encryption across networks.
+  - Maintain transparency logs for requests.
+  - Allow per-region feature toggles.
+  - Run forkability trials across packs.
+- Decentralized storage and bandwidth markets
+  - Implement incentive-backed DHT storage.
+  - Reward long-range mesh relays.
+  - Integrate content addressing for data.
+  - Benchmark throughput for large file transfers.
+  - Provide client SDKs for retrieval.
+- Mainnet launch and sustainability
+  - Lock protocol parameters via governance.
+  - Run multi-phase audits and bug bounties.
+  - Schedule staged token releases.
+  - Set up long-term funding mechanisms.
+  - Establish community maintenance committees.
 
 ## Contribution Guidelines
 

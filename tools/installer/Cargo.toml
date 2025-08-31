@@ -1,0 +1,12 @@
+[package]
+name = "installer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+zip = "0.6"
+blake3 = "1"
+self_update = "0.39"
+which = "5"
+anyhow = "1"

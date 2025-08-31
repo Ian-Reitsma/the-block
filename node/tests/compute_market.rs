@@ -61,6 +61,7 @@ fn market_job_flow_and_finalize() {
         price_per_slice: 5,
         consumer_bond: 1,
         workloads: vec![Workload::Transcode(b"input".to_vec())],
+        gpu_required: false,
     };
     market.submit_job(job).unwrap();
     let proof = SliceProof {

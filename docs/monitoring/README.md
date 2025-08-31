@@ -1,5 +1,9 @@
 # Monitoring Dashboards
 
-This directory contains Grafana dashboards for core subsystems. Import
-`compute_market_dashboard.json` into Grafana to visualize log activity and
-compute-market backlog factor metrics exposed on the `/metrics` endpoint.
+This directory contains Grafana dashboards for core subsystems.
+
+- `compute_market_dashboard.json` visualizes backlog factors and courier metrics.
+- `governance_dashboard.json` graphs proposal votes, rollbacks, and activation delays.
+- `network_dashboard.json` tracks PoH ticks, turbine fanout, and gossip convergence.
+
+Import dashboards into Grafana after running `make monitor` and ensure the node is started with `--metrics-addr` and `--features telemetry`.

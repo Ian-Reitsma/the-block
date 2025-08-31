@@ -11,6 +11,8 @@ hash.
   returned as the slice proof.
 - **Inference** – Accepts serialized model input bytes. The reference runner
   hashes the input with BLAKE3 and returns the hash as the proof.
+- **GPUHash** – Offloads BLAKE3 hashing to a CUDA/OpenCL kernel when available
+  and falls back to the CPU otherwise.
 
 Both formats are deterministic; identical inputs always yield the same hash. The
 `WorkloadRunner` dispatches to the appropriate reference job based on the
@@ -19,6 +21,10 @@ slice is processed in a `tokio::task::spawn_blocking` worker, allowing multiple
 slices to execute in parallel. Results are cached per slice ID so repeated
 invocations avoid recomputation. Parallel execution is deterministic—the same
 inputs always yield the same hashes regardless of concurrency.
+
+Jobs may set `gpu_required = true` to schedule only on GPU-capable nodes; other
+jobs run on any provider with deterministic CPU and GPU results checked by
+tests.
 
 ## Slice Files and Hashing
 

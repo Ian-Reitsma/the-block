@@ -1,0 +1,17 @@
+[package]
+name = "wallet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ed25519-dalek = { version = "1", features = ["std"] }
+rand = "0.7"
+thiserror = "1"
+
+[features]
+hid = ["hidapi"]
+webusb = []
+
+[dependencies.hidapi]
+version = "2"
+optional = true

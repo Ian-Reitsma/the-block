@@ -77,6 +77,19 @@ just probe:gossip
 just probe:tip
 ```
 
+## Governance metrics and webhooks
+
+Governance paths emit:
+
+- `gov_votes_total` – vote count by proposal.
+- `gov_activation_total` – successful proposal activations.
+- `gov_rollback_total` – rollbacks triggered by conflicting proposals.
+- `gov_activation_delay_seconds` – histogram of activation latency.
+- `gov_open_proposals` and `gov_quorum_required` gauges.
+
+If `GOV_WEBHOOK_URL` is set, governance events are POSTed to the given URL with
+JSON payloads `{event, proposal_id}`.
+
 ## Alerting
 
 Prometheus rules under `monitoring/alert.rules.yml` watch for:

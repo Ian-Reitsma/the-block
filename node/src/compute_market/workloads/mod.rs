@@ -1,5 +1,6 @@
 pub mod inference;
 pub mod transcode;
+pub mod gpu;
 
 use blake3::Hasher;
 

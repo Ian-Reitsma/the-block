@@ -1,12 +1,17 @@
 # Performance
 
-*Status: Placeholder — benchmarks pending.*
+Tracks benchmarks and profiling for throughput and latency.
 
-Tracks performance targets and benchmarking efforts.
+## Parallel Runtime
 
-## Milestones
-- [ ] Consensus benchmarks
-- [ ] VM throughput measurements
-- [ ] Profiling harness
+`node/src/parallel.rs` partitions read/write sets and executes non-overlapping transactions with Rayon. `node/benches/parallel_runtime.rs` measures speedups versus sequential execution.
 
-Progress: 0%
+## Bench Harness
+
+`tools/bench-harness` deploys multi-node clusters and runs configurable workload mixes, generating regression reports.
+
+## GPU Acceleration
+
+GPU-backed hash workloads live under `node/src/compute_market/workloads/gpu.rs`. Tests ensure CPU/GPU determinism across hardware.
+
+Progress: 30%

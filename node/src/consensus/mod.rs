@@ -11,6 +11,7 @@ pub mod finality;
 pub mod fork_choice;
 #[cfg(feature = "telemetry")]
 pub mod observer;
+pub mod pos;
 pub mod unl;
 
 use crate::hash_genesis;

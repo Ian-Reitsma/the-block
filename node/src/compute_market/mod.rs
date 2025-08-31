@@ -81,6 +81,7 @@ pub fn adjust_price(median: u64, backlog_factor: f64) -> u64 {
 pub enum Workload {
     Transcode(Vec<u8>),
     Inference(Vec<u8>),
+    GpuHash(Vec<u8>),
 }
 
 /// Execute workloads and produce proof hashes with per-slice caching.
@@ -109,6 +110,7 @@ impl WorkloadRunner {
         let res = tokio::task::spawn_blocking(move || match w {
             Workload::Transcode(data) => workloads::transcode::run(&data),
             Workload::Inference(data) => workloads::inference::run(&data),
+            Workload::GpuHash(data) => workloads::gpu::run(&data),
         })
         .await
         .unwrap_or_else(|e| panic!("workload failed: {e}"));
@@ -129,6 +131,8 @@ pub struct Job {
     pub price_per_slice: u64,
     pub consumer_bond: u64,
     pub workloads: Vec<Workload>,
+    /// Whether this job requires GPU execution.
+    pub gpu_required: bool,
 }
 
 /// Internal state for a matched job.
@@ -457,6 +461,7 @@ mod tests {
             price_per_slice: 5,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
+            gpu_required: false,
         };
         market
             .submit_job(job)
@@ -505,6 +510,7 @@ mod tests {
                 Workload::Transcode(b"a".to_vec()),
                 Workload::Transcode(b"a".to_vec()),
             ],
+            gpu_required: false,
         };
         market
             .submit_job(job)
@@ -546,6 +552,7 @@ mod tests {
             price_per_slice: 5,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
+            gpu_required: false,
         };
         market
             .submit_job(job)
@@ -581,6 +588,7 @@ mod tests {
             price_per_slice: 2,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"a".to_vec())],
+            gpu_required: false,
         };
         market
             .submit_job(job)
