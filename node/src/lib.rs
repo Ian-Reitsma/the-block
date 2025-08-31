@@ -95,8 +95,12 @@ pub mod fees;
 pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
+pub mod bridge;
+pub mod dex;
 pub mod storage;
 pub mod util;
+pub mod utxo;
+pub mod vm;
 
 // === Transaction admission errors ===
 

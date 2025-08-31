@@ -3,6 +3,7 @@
 Quick Index
 - Vision & Strategy: see §16
 - Agent Playbooks: see §17
+- Strategic Pillars: see §18
 - Monitoring Stack: see `docs/monitoring.md` and `make monitor`
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
@@ -340,3 +341,30 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Workload samples under `examples/workloads/` demonstrate slice formats and can
   be executed with `cargo run --example run_workload <file>`; rerun these examples after modifying workload code.
 
+## 18 · Strategic Pillars
+
+- **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
+  - [ ] UNL-based PoS finality gadget
+  - [ ] Validator staking & governance controls
+  - [ ] Integration tests for fault/rollback
+  - Progress: 10%
+- **Smart-Contract VM** ([node/src/vm](node/src/vm))
+  - [ ] Runtime scaffold & gas accounting
+  - [ ] Contract deployment/execution
+  - [ ] Tooling & ABI utils
+  - Progress: 5%
+- **Bridges** ([docs/bridges.md](docs/bridges.md))
+  - [ ] Lock/unlock mechanism
+  - [ ] Light client verification
+  - [ ] Relayer incentives
+  - Progress: 5%
+- **Wallets** ([docs/wallets.md](docs/wallets.md))
+  - [ ] CLI enhancements
+  - [ ] Hardware wallet integration
+  - [ ] Key management guides
+  - Progress: 0% *(placeholder)*
+- **Performance** ([docs/performance.md](docs/performance.md))
+  - [ ] Consensus benchmarks
+  - [ ] VM throughput measurements
+  - [ ] Profiling harness
+  - Progress: 0% *(placeholder)*

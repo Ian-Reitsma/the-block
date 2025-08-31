@@ -23,6 +23,7 @@ fn status_reports_timelock() {
     assert_eq!(remaining, 3);
 }
 
+#[cfg(feature = "telemetry")]
 #[test]
 fn rollback_resets_metrics() {
     use std::time::Duration;

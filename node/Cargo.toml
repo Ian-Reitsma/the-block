@@ -37,6 +37,7 @@ futures = "0.3"
 unicode-normalization = "0.1"
 tokio-util = "0.7"
 credits = { path = "../crates/credits" }
+state = { path = "../state" }
 reed-solomon-erasure = "6"
 
 [features]
