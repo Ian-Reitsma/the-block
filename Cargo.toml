@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "node",
+"state",
   "crates/credits",
   "crates/probe",
   "fuzz",
@@ -9,6 +10,7 @@ members = [
 ]
 default-members = [
   "node",
+"state",
   "crates/probe",
   "tools/xtask"
 ]

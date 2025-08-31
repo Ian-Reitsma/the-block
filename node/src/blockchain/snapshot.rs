@@ -1,8 +1,9 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{SNAPSHOT_DURATION_SECONDS, SNAPSHOT_FAIL_TOTAL};
 use crate::{Account, TokenBalance};
-use blake3::Hasher;
+use hex;
 use serde::{Deserialize, Serialize};
+use state::MerkleTrie;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -81,35 +82,15 @@ struct SnapshotDiff {
 }
 
 fn merkle_root(accounts: &[SnapshotAccount]) -> String {
-    let mut leaves: Vec<[u8; 32]> = accounts
-        .iter()
-        .map(|a| {
-            let mut h = Hasher::new();
-            h.update(a.address.as_bytes());
-            h.update(&a.consumer.to_le_bytes());
-            h.update(&a.industrial.to_le_bytes());
-            h.update(&a.nonce.to_le_bytes());
-            *h.finalize().as_bytes()
-        })
-        .collect();
-    if leaves.is_empty() {
-        return String::new();
+    let mut trie = MerkleTrie::new();
+    for a in accounts {
+        let mut data = Vec::new();
+        data.extend_from_slice(&a.consumer.to_le_bytes());
+        data.extend_from_slice(&a.industrial.to_le_bytes());
+        data.extend_from_slice(&a.nonce.to_le_bytes());
+        trie.insert(a.address.as_bytes(), &data);
     }
-    while leaves.len() > 1 {
-        if leaves.len() % 2 == 1 {
-            let last = leaves.last().copied().unwrap_or([0u8; 32]);
-            leaves.push(last);
-        }
-        let mut next = Vec::with_capacity(leaves.len() / 2);
-        for pair in leaves.chunks(2) {
-            let mut h = Hasher::new();
-            h.update(&pair[0]);
-            h.update(&pair[1]);
-            next.push(*h.finalize().as_bytes());
-        }
-        leaves = next;
-    }
-    blake3::Hash::from(leaves[0]).to_hex().to_string()
+    hex::encode(trie.root_hash())
 }
 
 pub fn state_root(accounts: &HashMap<String, Account>) -> String {
@@ -343,50 +324,20 @@ pub fn account_proof(
     accounts: &HashMap<String, Account>,
     address: &str,
 ) -> Option<Vec<(String, bool)>> {
-    let mut accs: Vec<SnapshotAccount> = accounts
-        .iter()
-        .map(|(addr, acc)| SnapshotAccount {
-            address: addr.clone(),
-            consumer: acc.balance.consumer,
-            industrial: acc.balance.industrial,
-            nonce: acc.nonce,
-        })
-        .collect();
-    accs.sort_by(|a, b| a.address.cmp(&b.address));
-    let mut leaves: Vec<[u8; 32]> = accs
-        .iter()
-        .map(|a| {
-            let mut h = Hasher::new();
-            h.update(a.address.as_bytes());
-            h.update(&a.consumer.to_le_bytes());
-            h.update(&a.industrial.to_le_bytes());
-            h.update(&a.nonce.to_le_bytes());
-            *h.finalize().as_bytes()
-        })
-        .collect();
-    let mut index = accs.iter().position(|a| a.address == address)?;
-    if leaves.is_empty() {
-        return None;
+    let mut trie = MerkleTrie::new();
+    for (addr, acc) in accounts {
+        let mut data = Vec::new();
+        data.extend_from_slice(&acc.balance.consumer.to_le_bytes());
+        data.extend_from_slice(&acc.balance.industrial.to_le_bytes());
+        data.extend_from_slice(&acc.nonce.to_le_bytes());
+        trie.insert(addr.as_bytes(), &data);
     }
-    let mut proof = Vec::new();
-    while leaves.len() > 1 {
-        if leaves.len() % 2 == 1 {
-            let last = leaves.last().copied().unwrap_or([0u8; 32]);
-            leaves.push(last);
-        }
-        let sibling_index = if index % 2 == 0 { index + 1 } else { index - 1 };
-        let sibling = leaves.get(sibling_index).copied().unwrap_or([0u8; 32]);
-        let is_left = index % 2 == 1;
-        proof.push((blake3::Hash::from(sibling).to_hex().to_string(), is_left));
-        let mut next = Vec::with_capacity(leaves.len() / 2);
-        for pair in leaves.chunks(2) {
-            let mut h = Hasher::new();
-            h.update(&pair[0]);
-            h.update(&pair[1]);
-            next.push(*h.finalize().as_bytes());
-        }
-        leaves = next;
-        index /= 2;
-    }
-    Some(proof)
+    let proof = trie.prove(address.as_bytes())?;
+    Some(
+        proof
+            .0
+            .into_iter()
+            .map(|(h, is_left)| (hex::encode(h), is_left))
+            .collect(),
+    )
 }

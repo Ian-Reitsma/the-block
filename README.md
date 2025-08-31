@@ -274,7 +274,40 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
 
+### Strategic Pillars
+
+- **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
+  - [ ] UNL-based PoS engine
+  - [ ] Validator staking & governance
+  - [ ] Finality gadget w/ rollback tests
+  - Progress: 10%
+- **Smart-Contract VM** ([node/src/vm](node/src/vm))
+  - [ ] Runtime scaffold & gas accounting
+  - [ ] Contract deployment/execution
+  - [ ] Tooling & ABI utils
+  - Progress: 5%
+- **Bridges** ([docs/bridges.md](docs/bridges.md))
+  - [ ] Lock/unlock mechanism
+  - [ ] Light client verification
+  - [ ] Relayer incentives
+  - Progress: 5%
+- **Wallets** ([docs/wallets.md](docs/wallets.md))
+  - [ ] CLI enhancements
+  - [ ] Hardware wallet integration
+  - [ ] Key management guides
+  - Progress: 0% *(placeholder)*
+- **Performance** ([docs/performance.md](docs/performance.md))
+  - [ ] Consensus benchmarks
+  - [ ] VM throughput measurements
+  - [ ] Profiling harness
+  - Progress: 0% *(placeholder)*
+
 **Recent**
+
+- Merkle state trie with snapshot manager for light clients.
+- Scriptable UTXO ledger with basic interpreter.
+- Trust lines and order-book DEX engine.
+- Cross-chain bridge scaffold with lock/mint flows.
 
 - DHT-based peer discovery with persisted peer databases.
 - Optional post-quantum key registration gated by `pq-crypto`.
