@@ -18,7 +18,7 @@ proptest! {
             refs.push(*h.finalize().as_bytes());
             wls.push(Workload::Transcode(data));
         }
-        let job = Job { job_id: job_id.clone(), buyer: "buyer".into(), slices: refs, price_per_slice: price, consumer_bond: 1, workloads: wls };
+        let job = Job { job_id: job_id.clone(), buyer: "buyer".into(), slices: refs, price_per_slice: price, consumer_bond: 1, workloads: wls, gpu_required: false };
         market.submit_job(job).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let total = rt.block_on(market.execute_job(&job_id)).unwrap();

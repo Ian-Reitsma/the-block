@@ -4,9 +4,15 @@ members = [
 "state",
   "crates/credits",
   "crates/probe",
+  "crates/wallet",
+  "crates/light-client",
+  "crates/jurisdiction",
   "fuzz",
   "sim",
-  "tools/xtask"
+  "tools/xtask",
+  "tools/indexer",
+  "tools/bench-harness",
+  "tools/installer"
 ]
 default-members = [
   "node",

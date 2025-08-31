@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Added
+- Proof-of-History tick generator with optional GPU hashing and Turbine-style packet fanout for deterministic block propagation ([node/src/poh.rs](../node/src/poh.rs), [node/src/net/turbine.rs](../node/src/net/turbine.rs)).
+- Stake-weighted PoS finality with `PosState` ledger and validator staking RPCs ([node/src/consensus/pos/mod.rs](../node/src/consensus/pos/mod.rs), [node/src/rpc/pos.rs](../node/src/rpc/pos.rs)).
+- Parallel execution engine partitions read/write sets for safe concurrency with benchmarks ([node/src/parallel.rs](../node/src/parallel.rs), [node/benches/parallel_runtime.rs](../node/benches/parallel_runtime.rs)).
+- GPU compute workloads with deterministic CPU/GPU hash checks ([node/src/compute_market/workloads/gpu.rs](../node/src/compute_market/workloads/gpu.rs), [node/tests/gpu_determinism.rs](../node/tests/gpu_determinism.rs)).
+- Modular wallet crate, hardware signer support, and CLI tooling ([crates/wallet](../crates/wallet), [node/src/bin/wallet.rs](../node/src/bin/wallet.rs)).
+- Cross-chain exchange adapters for Uniswap and Osmosis with slippage tests ([node/src/dex/exchange_hooks.rs](../node/src/dex/exchange_hooks.rs), [node/tests/dex_hooks.rs](../node/tests/dex_hooks.rs)).
+- Light-client library with FFI helpers and mobile example ([crates/light-client](../crates/light-client), [examples/mobile](../examples/mobile)).
+- SQLite-backed indexer and web explorer ([tools/indexer](../tools/indexer)).
+- Distributed benchmark harness for multi-node deployments ([tools/bench-harness](../tools/bench-harness)).
+- Simulation modules for inflation, liquidity, bridging, and demand with governance exports ([sim/src](../sim/src)).
+- Installer CLI producing signed archives and auto-update stubs ([tools/installer](../tools/installer)).
+- Governance telemetry metrics and webhook alerts ([node/src/telemetry.rs](../node/src/telemetry.rs)).
+- Jurisdiction policy packs and law-enforcement logging ([crates/jurisdiction](../crates/jurisdiction), [node/tests/jurisdiction_packs.rs](../node/tests/jurisdiction_packs.rs)).
 - Atomic file writer consolidates durable write‑rename‑sync persistence ([node/src/util/atomic_file.rs](../node/src/util/atomic_file.rs)).
 - Versioned blob framing encodes magic bytes, version tags, and CRC32 checksums for on‑disk schemas ([node/src/util/versioned_blob.rs](../node/src/util/versioned_blob.rs)).
 - Python: `mine_block(txs)` helper to mine a block from signed transactions for scripts and demos ([node/src/lib.rs](../node/src/lib.rs)).
@@ -17,6 +30,7 @@
 - Network topology diagrams and an RPC walkthrough illustrate partition tests and end-to-end transaction flow ([docs/network_topologies.md](docs/network_topologies.md), [README.md](README.md), [AGENTS.md](AGENTS.md)).
 
 ### Changed
+- README and docs refreshed for wallet framework, performance benchmarks, and monitoring updates.
 - Moving-average difficulty retargeting validates block headers against expected difficulty ([node/src/lib.rs](../node/src/lib.rs)).
 - README and agent handbooks document JSON-RPC sessions, networking demos, and purge-loop defaults ([README.md](README.md), [AGENTS.md](AGENTS.md), [Agents-Sup.md](Agents-Sup.md)).
 - Bootstraps pin `cargo-nextest` v0.9.97-b.2 to match the Rust 1.82 toolchain ([../scripts/bootstrap.sh](../scripts/bootstrap.sh), [../scripts/bootstrap.ps1](../scripts/bootstrap.ps1), [../scripts/bootstrap_test.sh](../scripts/bootstrap_test.sh)).

@@ -33,25 +33,17 @@
 
 ### Live now
 
-- 1-second L1 metronome and difficulty retargeting (MA of last 120 blocks, ±4× clamp).
-- Dual fee lanes embedded in `SignedTransaction` and lane-specific mempools with p50/p90 fee sampling.
-- Industrial admission with capacity estimator, fair-share caps, and burst budgets; structured rejection reasons: `Capacity` | `FairShare` | `BurstExhausted`.
-- Storage pipeline with Reed–Solomon erasure coding, multi-provider placement, manifest receipts, reassembly with integrity checks.
-- Paid compute-market settlement: credits ledger debits buyers and accrues providers with idempotent BLAKE3-keyed receipts.
-- Disk-backed service credits ledger with governance-controlled issuance, decay,
-  and per-source expiry.
-- Identity handles: normalized, nonce-protected registrations; `register_handle` / `resolve_handle` RPC.
-- Governance MVP: propose/vote with delayed activation and single-shot rollback; parameter registry includes snapshot interval & comfort thresholds.
-- P2P handshake with feature bits; token-bucket RPC limiter; TTL/orphan purge loop with metrics.
-- Devnet swarm tooling with chaos mode; deterministic gossip test with deterministic sleeps and a height→weight→tip-hash tie-break for reproducible convergence.
-- Grafana/Prometheus dashboards for snapshot, badge, mempool, admission, gossip convergence, price board.
-- WAL fuzzing infra (nightly), F★ installer with caching, formal docs.
-- TTL-based gossip relay with duplicate suppression and bounded √N fanout.
-- Per-lane mempool stats RPC and `mempool_size{lane}` gauges.
-- LocalNet assist receipt submission with replay protection and credit awards.
-- On-chain DNS TXT records and `gateway.policy` lookups.
-- Provider catalog with RTT/loss probes and background storage repair loop.
-- Crash-safe WAL with end-of-compaction marker and replay idempotency keys.
+- Stake-weighted PoS finality with validator registration, bonding/unbonding, and slashing RPCs.
+- Proof-of-History tick generator and Turbine-style gossip for deterministic block propagation.
+- Parallel execution engine running non-overlapping transactions across threads.
+- GPU-optional hash workloads for validators and compute marketplace jobs.
+- Modular wallet framework with hardware signer support and CLI utilities.
+- Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks.
+- Light-client crate with mobile example and FFI helpers.
+- SQLite-backed indexer, HTTP explorer, and profiling CLI.
+- Distributed benchmark harness and economic simulation modules.
+- Installer CLI for signed packages and auto-update stubs.
+- Jurisdiction policy packs, governance metrics, and webhook alerts.
 
 ### Planned
 
@@ -277,10 +269,10 @@ Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
 ### Strategic Pillars
 
 - **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
-  - [ ] UNL-based PoS engine
-  - [ ] Validator staking & governance
+  - [x] UNL-based PoS engine
+  - [x] Validator staking & governance
   - [ ] Finality gadget w/ rollback tests
-  - Progress: 10%
+  - Progress: 40%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
   - [ ] Contract deployment/execution
@@ -292,31 +284,28 @@ Mainnet readiness: ~92.5/100 · Vision completion: ~61/100.
   - [ ] Relayer incentives
   - Progress: 5%
 - **Wallets** ([docs/wallets.md](docs/wallets.md))
-  - [ ] CLI enhancements
-  - [ ] Hardware wallet integration
-  - [ ] Key management guides
-  - Progress: 0% *(placeholder)*
+  - [x] CLI enhancements
+  - [x] Hardware wallet integration
+  - [x] Key management guides
+  - Progress: 60%
 - **Performance** ([docs/performance.md](docs/performance.md))
-  - [ ] Consensus benchmarks
+  - [x] Consensus benchmarks
   - [ ] VM throughput measurements
-  - [ ] Profiling harness
-  - Progress: 0% *(placeholder)*
+  - [x] Profiling harness
+  - Progress: 30%
 
 **Recent**
 
-- Merkle state trie with snapshot manager for light clients.
-- Scriptable UTXO ledger with basic interpreter.
-- Trust lines and order-book DEX engine.
-- Cross-chain bridge scaffold with lock/mint flows.
-
-- DHT-based peer discovery with persisted peer databases.
-- Optional post-quantum key registration gated by `pq-crypto`.
-- Settlement dispute windows with checkpointed receipts and rollback support.
-- Credit meter RPC/CLI with lighthouse issuance multipliers.
-- Gateway read-fee policy with optional credit offsets and budget tracking.
-- Finder/WebDAV quota enforcement with OS-specific `ENOSPC` mapping.
-- Range-boost relays and carry-to-earn courier flow with receipt settlement.
-- Telemetry summarizer and gossip chaos harness for loss/jitter testing.
+- Proof-of-History tick generator and Turbine-style gossip.
+- Stake-weighted PoS finality with validator RPCs.
+- Parallel execution engine and GPU hash workloads.
+- Modular wallet crate with hardware signer and CLI.
+- Cross-chain exchange adapters for Uniswap and Osmosis.
+- Light-client library and mobile example.
+- SQLite indexer, web explorer, and profiling CLI.
+- Distributed bench harness and economic simulation modules.
+- Installer CLI for signed packages and auto-updates.
+- Jurisdiction policy packs and governance telemetry alerts.
 
 **Immediate**
 

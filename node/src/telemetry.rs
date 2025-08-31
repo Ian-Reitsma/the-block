@@ -1,12 +1,14 @@
 use blake3;
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, GaugeVec, Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
-    Opts, Registry, TextEncoder,
+    Encoder, GaugeVec, Histogram, HistogramVec, HistogramOpts, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry, TextEncoder,
 };
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(feature = "telemetry")]
+use ureq;
 
 pub mod summary;
 
@@ -462,6 +464,29 @@ pub static GOV_ROLLBACK_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("registry gov_rollback_total: {e}"));
     c
 });
+
+pub static GOV_ACTIVATION_DELAY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    let h = HistogramVec::new(
+        HistogramOpts::new(
+            "gov_activation_delay_seconds",
+            "Delay between scheduled and actual activation",
+        ),
+        &["key"],
+    )
+    .unwrap_or_else(|e| panic!("histogram gov_activation_delay_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_activation_delay_seconds: {e}"));
+    h
+});
+
+/// Send governance events to an external webhook if `GOV_WEBHOOK_URL` is set.
+pub fn governance_webhook(event: &str, proposal_id: u64) {
+    if let Ok(url) = std::env::var("GOV_WEBHOOK_URL") {
+        let _ = ureq::post(&url)
+            .send_json(ureq::json!({"event": event, "proposal_id": proposal_id}));
+    }
+}
 
 pub static GOV_OPEN_PROPOSALS: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("gov_open_proposals", "Open governance proposals")

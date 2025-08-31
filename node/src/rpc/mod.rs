@@ -34,6 +34,7 @@ use tokio::sync::oneshot;
 
 pub mod governance;
 pub mod identity;
+pub mod pos;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -68,6 +69,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "microshard.roots.last",
     "mempool.stats",
     "credits.meter",
+    "consensus.pos.register",
+    "consensus.pos.bond",
+    "consensus.pos.unbond",
+    "consensus.pos.slash",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -623,6 +628,10 @@ fn dispatch(
                 "fee_p90": fee_p90,
             })
         }
+        "consensus.pos.register" => pos::register(&req.params)?,
+        "consensus.pos.bond" => pos::bond(&req.params)?,
+        "consensus.pos.unbond" => pos::unbond(&req.params)?,
+        "consensus.pos.slash" => pos::slash(&req.params)?,
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
             match handles.lock() {

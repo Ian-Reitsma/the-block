@@ -38,6 +38,10 @@ The exporter currently tracks:
 - `storage_put_chunk_seconds` – time taken to store individual chunks
 - `storage_provider_rtt_ms` – observed storage provider round-trip time
 - `storage_provider_loss_rate` – observed storage provider loss rate
+- `gov_votes_total` / `gov_activation_total` / `gov_rollback_total` – governance
+  vote, activation, and rollback counters
+- `gov_activation_delay_seconds` – time between proposal commit and activation
+- `gov_open_proposals` / `gov_quorum_required` – gauges for governance state
 - `storage_initial_chunk_size` / `storage_final_chunk_size` – first and last chunk sizes per object
 - `storage_put_eta_seconds` – estimated total upload time for the current object
 - `settle_applied_total` – receipts successfully debited and credited

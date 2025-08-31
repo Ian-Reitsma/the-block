@@ -1,6 +1,9 @@
 use super::{registry, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice};
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING};
+use crate::telemetry::{
+    governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_ROLLBACK_TOTAL, GOV_VOTES_TOTAL,
+    PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
+};
 #[cfg(feature = "telemetry")]
 use log::info;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -122,6 +125,16 @@ impl GovStore {
         v.received_at = current_epoch;
         self.votes(proposal_id)
             .insert(v.voter.as_bytes(), ser(&v)?)?;
+        #[cfg(feature = "telemetry")]
+        {
+            let choice = match v.choice {
+                VoteChoice::Yes => "yes",
+                VoteChoice::No => "no",
+                VoteChoice::Abstain => "abstain",
+            };
+            GOV_VOTES_TOTAL.with_label_values(&[choice]).inc();
+            governance_webhook("vote", proposal_id);
+        }
         Ok(())
     }
 
@@ -250,6 +263,12 @@ impl GovStore {
                                 PARAM_CHANGE_ACTIVE
                                     .with_label_values(&[key_name(prop.key)])
                                     .set(prop.new_value);
+                                let sched = prop.activation_epoch.unwrap_or(current_epoch);
+                                let delay = current_epoch.saturating_sub(sched);
+                                GOV_ACTIVATION_DELAY_SECONDS
+                                    .with_label_values(&[key_name(prop.key)])
+                                    .observe(delay as f64);
+                                governance_webhook("activate", prop.id);
                                 info!(
                                     "gov_param_activated key={:?} new={} old={} epoch={}",
                                     prop.key, prop.new_value, old, current_epoch
@@ -297,6 +316,10 @@ impl GovStore {
                 PARAM_CHANGE_ACTIVE
                     .with_label_values(&[key_name(last.key)])
                     .set(last.old_value);
+                GOV_ROLLBACK_TOTAL
+                    .with_label_values(&[key_name(last.key)])
+                    .inc();
+                governance_webhook("rollback", last.proposal_id);
             }
             return Ok(());
         }
@@ -351,6 +374,13 @@ impl GovStore {
         }
         prop.status = ProposalStatus::RolledBack;
         self.proposals().insert(key, ser(&prop)?)?;
+        #[cfg(feature = "telemetry")]
+        {
+            GOV_ROLLBACK_TOTAL
+                .with_label_values(&[key_name(prop.key)])
+                .inc();
+            governance_webhook("rollback", proposal_id);
+        }
         Ok(())
     }
 }

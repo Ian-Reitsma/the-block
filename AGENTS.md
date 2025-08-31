@@ -344,10 +344,10 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 ## 18 · Strategic Pillars
 
 - **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
-  - [ ] UNL-based PoS finality gadget
-  - [ ] Validator staking & governance controls
+  - [x] UNL-based PoS finality gadget
+  - [x] Validator staking & governance controls
   - [ ] Integration tests for fault/rollback
-  - Progress: 10%
+  - Progress: 40%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
   - [ ] Contract deployment/execution
@@ -359,12 +359,12 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [ ] Relayer incentives
   - Progress: 5%
 - **Wallets** ([docs/wallets.md](docs/wallets.md))
-  - [ ] CLI enhancements
-  - [ ] Hardware wallet integration
-  - [ ] Key management guides
-  - Progress: 0% *(placeholder)*
+  - [x] CLI enhancements
+  - [x] Hardware wallet integration
+  - [x] Key management guides
+  - Progress: 60%
 - **Performance** ([docs/performance.md](docs/performance.md))
-  - [ ] Consensus benchmarks
+  - [x] Consensus benchmarks
   - [ ] VM throughput measurements
-  - [ ] Profiling harness
-  - Progress: 0% *(placeholder)*
+  - [x] Profiling harness
+  - Progress: 30%

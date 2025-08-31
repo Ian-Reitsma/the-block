@@ -2,6 +2,7 @@ pub mod ban_store;
 pub mod discovery;
 mod message;
 mod peer;
+pub mod turbine;
 
 use crate::{gossip::relay::Relay, Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;
@@ -175,7 +176,11 @@ impl Node {
 
     fn broadcast(&self, msg: &Message) {
         let peers = self.peers.list();
-        self.relay.broadcast(msg, &peers);
+        if std::env::var("TB_GOSSIP_ALGO").ok().as_deref() == Some("turbine") {
+            turbine::broadcast(msg, &peers);
+        } else {
+            self.relay.broadcast(msg, &peers);
+        }
     }
 }
 

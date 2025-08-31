@@ -2,6 +2,16 @@
 
 This document codifies the fee routing logic that is baked into consensus after **FORK-FEE-01**.  The algebra below is the single source of truth for how a transaction's `fee` field is decomposed and applied.
 
+## PoS Finality and Propagation
+
+A stake-weighted validator set finalizes proof-of-work blocks. Validators bond
+tokens via `consensus.pos.*` RPCs, and their stake determines membership in the
+UNL for BFT-style votes.
+
+Block production is ordered by a Proof-of-History tick generator, and blocks
+propagate through a Turbine-style tree gossip, reducing orphan rates and
+latency relative to flood gossip.
+
 ## Fee Selector and Base
 
 For every transaction, let:

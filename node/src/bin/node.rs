@@ -7,6 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use clap::{Parser, Subcommand};
 use ed25519_dalek::SigningKey;
+#[cfg(feature = "telemetry")]
+use log::info;
 
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
@@ -171,6 +173,18 @@ enum CourierCmd {
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+    // Load jurisdiction policy pack if provided
+    if let Ok(p) = std::env::var("JURISDICTION_PACK") {
+        match jurisdiction::PolicyPack::load(&p) {
+            Ok(pack) => {
+                #[cfg(feature = "telemetry")]
+                info!("jurisdiction pack loaded region={}", pack.region);
+                #[cfg(not(feature = "telemetry"))]
+                println!("jurisdiction pack loaded region={}", pack.region);
+            }
+            Err(e) => eprintln!("failed to load jurisdiction pack: {e}"),
+        }
+    }
     let code = match cli.command {
         Commands::Run {
             rpc_addr,
