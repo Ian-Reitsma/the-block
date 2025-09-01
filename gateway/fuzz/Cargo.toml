@@ -1,0 +1,17 @@
+[package]
+name = "gateway-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+the_block = { path = "../../node", features = ["fuzzy"] }
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "http_request"
+path = "fuzz_targets/http_request.rs"
+test = false

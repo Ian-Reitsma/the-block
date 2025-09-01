@@ -45,6 +45,16 @@
 - Installer CLI for signed packages and auto-update stubs; release artifacts include reproducible build metadata and updater hooks.
 - Jurisdiction policy packs, governance metrics, and webhook alerts; nodes can load region-specific policies and push governance events to external services.
 - Free-read architecture: receipt-only read logging, execution receipts for dynamic pages, token-bucket rate limits, governance-seeded reward pools, and `gateway.reads_since` analytics.
+- Fee-aware mempool with deterministic priority and EIP-1559 style base fee tracking; low-fee transactions are evicted when capacity is exceeded and each block adjusts the base fee toward a fullness target.
+- Bridge primitives with relayer proofs and a lock/unlock state machine; `blockctl bridge deposit` and `withdraw` commands move funds across chains while verifying relayer attestations.
+- Durable smart-contracts backed by a bincode `ContractStore`; `contract deploy` and `contract call` CLI flows persist code and key/value state under `~/.the_block/state/contracts/` and survive node restarts.
+- Persistent DEX order books and trade logs via `DexStore`; order matching updates trust lines atomically and reloads from disk after crashes or upgrades.
+- Multi-hop trust-line routing uses cost-based path scoring with fallback routes so payments continue even if a preferred hop disappears mid-flight.
+- Credit balance and rate-limit push notifications: wallet hooks expose web push/Firebase endpoints and trigger alerts whenever balances change or throttles engage.
+- Jittered JSON-RPC client with exponential backoff to avoid thundering herds; timeouts and retry windows are configurable via environment variables.
+- Settlement audit task in CI replays recent receipts and fails the build on mismatched anchors to guarantee explorer and ledger consistency.
+- Fuzz coverage harness auto-installs `llvm-profdata`/`llvm-cov`, discovers fuzz binaries under the workspace `target` tree, and warns when instrumentation artifacts are missing.
+- Operator runbook for manual DHT recovery documents purging peer databases, reseeding bootstrap peers, and verifying network convergence.
 
 ### Roadmap
 
@@ -118,6 +128,8 @@ Issuance occurs through validator-approved governance proposals. See [`docs/cred
 - `cargo +nightly fuzz run wal_fuzz -- -max_total_time=60`
 - `make -C formal`
 - `(cd monitoring && npm ci && make lint)`
+- `scripts/fuzz_coverage.sh /tmp/fcov` *(run after generating `.profraw` files via `cargo fuzz` with coverage flags)*
+- `cargo test -p the_block --test settlement_audit --release` *(runs receipt verification against the explorer indexer)*
 
 CI path-gates monitoring lint on `monitoring/**` changes.
 
@@ -268,6 +280,8 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 ## Status & Roadmap
 
 Mainnet readiness: ~94/100 · Vision completion: ~63/100.
+
+For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [docs/progress.md](docs/progress.md).
 
 ### Strategic Pillars
 

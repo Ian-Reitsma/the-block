@@ -59,6 +59,7 @@ fn hash_state(bc: &Blockchain) -> String {
         block_reward_industrial: bc.block_reward_industrial,
         block_height: bc.block_height,
         mempool: Vec::new(),
+        base_fee: bc.base_fee,
     };
     let bytes = bincode::serialize(&disk).unwrap();
     blake3::hash(&bytes).to_hex().to_string()
@@ -751,6 +752,7 @@ fn test_schema_upgrade_compatibility() {
         block_reward_industrial: bc_tmp.block_reward_industrial,
         block_height: bc_tmp.block_height,
         mempool: vec![entry],
+        base_fee: bc_tmp.base_fee,
     };
     let dir = temp_dir("schema_v3");
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();

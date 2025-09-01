@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct BlockHeader {
     pub prev_hash: [u8; 32],
     pub merkle_root: [u8; 32],
+    /// Hash of the PoS checkpoint this PoW block builds upon.
+    pub checkpoint_hash: [u8; 32],
     pub nonce: u64,
     pub difficulty: u64,
     pub timestamp: u64,
@@ -15,6 +17,7 @@ impl BlockHeader {
         let mut h = Hasher::new();
         h.update(&self.prev_hash);
         h.update(&self.merkle_root);
+        h.update(&self.checkpoint_hash);
         h.update(&self.nonce.to_le_bytes());
         h.update(&self.timestamp.to_le_bytes());
         h.finalize().into()
@@ -51,7 +54,12 @@ pub fn adjust_difficulty(prev: u64, actual_secs: u64, target_secs: u64) -> u64 {
 }
 
 /// Helper to build a header template with current time.
-pub fn template(prev_hash: [u8; 32], merkle_root: [u8; 32], difficulty: u64) -> BlockHeader {
+pub fn template(
+    prev_hash: [u8; 32],
+    merkle_root: [u8; 32],
+    checkpoint_hash: [u8; 32],
+    difficulty: u64,
+) -> BlockHeader {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| std::time::Duration::from_secs(0))
@@ -59,6 +67,7 @@ pub fn template(prev_hash: [u8; 32], merkle_root: [u8; 32], difficulty: u64) -> 
     BlockHeader {
         prev_hash,
         merkle_root,
+        checkpoint_hash,
         nonce: 0,
         difficulty,
         timestamp: ts,
@@ -71,7 +80,7 @@ mod tests {
 
     #[test]
     fn mines_block() {
-        let header = template([0u8; 32], [1u8; 32], 1_000_000);
+        let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000);
         let mined = mine(header.clone());
         let hash = mined.hash();
         let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());

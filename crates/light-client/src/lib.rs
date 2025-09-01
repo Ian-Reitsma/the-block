@@ -33,8 +33,32 @@ fn is_charging() -> bool {
     true
 }
 
-fn battery_level() -> f32 {
+fn battery_level() -> f32 { 
     1.0
+}
+
+/// Simplified block header used by the demo light client.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+pub struct Header {
+    pub height: u64,
+}
+
+/// Naive light client tracking headers and a credit counter.
+pub struct LightClient {
+    pub chain: Vec<Header>,
+    pub credits: u64,
+}
+
+impl LightClient {
+    pub fn new(genesis: Header) -> Self {
+        Self { chain: vec![genesis], credits: 0 }
+    }
+
+    pub fn verify_and_append(&mut self, h: Header) -> Result<(), ()> {
+        self.chain.push(h);
+        self.credits += 1;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

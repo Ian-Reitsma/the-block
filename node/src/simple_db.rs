@@ -1,6 +1,6 @@
 use crate::storage::fs::credit_err_to_io;
 #[cfg(feature = "telemetry")]
-use crate::telemetry::WAL_CORRUPT_RECOVERY_TOTAL;
+use crate::telemetry::{STORAGE_DISK_FULL_TOTAL, WAL_CORRUPT_RECOVERY_TOTAL};
 use blake3::Hasher;
 use credits::CreditError;
 use serde::{Deserialize, Serialize};
@@ -169,7 +169,13 @@ impl SimpleDb {
                 return Err(credit_err_to_io(CreditError::Insufficient));
             }
         }
-        fs::write(&db_path, &bytes)?;
+        if let Err(e) = fs::write(&db_path, &bytes) {
+            if e.raw_os_error() == Some(28) {
+                #[cfg(feature = "telemetry")]
+                STORAGE_DISK_FULL_TOTAL.inc();
+            }
+            return Err(e);
+        }
         let wal_path = Path::new(&self.path).join("wal");
         let mut f = fs::OpenOptions::new()
             .create(true)

@@ -306,6 +306,7 @@ fn invalid_gossip_block_rejected() {
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
         state_root: String::new(),
+        base_fee: 1,
     };
     send(addr, &kp, Payload::Block(block));
 
@@ -341,6 +342,7 @@ fn forged_identity_rejected() {
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
         state_root: String::new(),
+        base_fee: 1,
     };
     send(addr, &kp, Payload::Block(block));
 

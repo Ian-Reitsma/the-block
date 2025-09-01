@@ -1,0 +1,11 @@
+[package]
+name = "contract-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+the_block = { path = "../node" }
+bridges = { path = "../bridges" }
+bincode = "1"

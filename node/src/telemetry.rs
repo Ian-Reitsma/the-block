@@ -365,6 +365,18 @@ pub static STORAGE_PUT_ETA_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static STORAGE_DISK_FULL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_disk_full_total",
+        "Number of storage writes that failed due to disk exhaustion",
+    )
+    .unwrap_or_else(|e| panic!("counter storage_disk_full_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_disk_full_total: {e}"));
+    c
+});
+
 pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("matches_total", "Total matched jobs"),

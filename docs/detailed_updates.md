@@ -190,3 +190,50 @@
 - `--mempool-account-cap` / `TB_MEMPOOL_ACCOUNT_CAP`
 - `--mempool-ttl` / `TB_MEMPOOL_TTL_SECS`
 - `--min-fee-per-byte` / `TB_MIN_FEE_PER_BYTE`
+
+### Dynamic Fee Market
+
+- Add `node/src/fees.rs` tracking an EIP‑1559 style `base_fee` per block.
+- Mempool evicts under-priced transactions once `TB_MEMPOOL_MAX` is exceeded and
+  rejects submissions with `fee < base_fee`.
+- Regression tests: `node/tests/base_fee.rs` verifies fee adjustment toward the
+  target fullness and `node/tests/mempool_priority.rs` ensures higher fees take
+  precedence.
+
+### Bridge Primitives
+
+- Introduced a `Bridge` contract with lock/unlock logic and relayer-signed
+  Merkle proofs (`bridges/src/lib.rs`).
+- CLI commands `blockctl bridge deposit|withdraw` handle JSON proof encoding and
+  persist balances.
+- `docs/bridges.md` now walks through the relayer workflow and proof format.
+
+### DEX Persistence & Routing
+
+- `DexStore` persists order books and trade logs under
+  `~/.the_block/state/dex/` for crash recovery.
+- Cost-based multi-hop routing surfaces fallback paths; metrics track order and
+  trade counts.
+- `node/tests/dex_persistence.rs` covers restart recovery and routing fallbacks.
+
+### Contract Durability & Tooling
+
+- `ContractStore` writes code and key/value state to
+  `~/.the_block/state/contracts/` with crash-safe journaling.
+- `contract-cli` provides `deploy` and `call` subcommands; ABI generation
+  produces `opcodes.json` for tooling.
+- `docs/contract_dev.md` details directory layout and CLI usage.
+
+### Networking & RPC
+
+- `rpc/client.rs` randomizes timeouts via `TB_RPC_TIMEOUT_JITTER_MS` and uses
+  exponential backoff to stagger retries.
+- Wallets register web push endpoints so credit balance changes and rate-limit
+  hits trigger notifications.
+- Manual DHT recovery guide lives in `docs/networking.md`.
+
+### Fuzz Coverage
+
+- `scripts/fuzz_coverage.sh` installs `llvm-tools-preview` automatically and
+  fails gracefully when no `.profraw` files exist.
+- Coverage artifacts are ignored via `.gitignore` to prevent accidental check‑in.

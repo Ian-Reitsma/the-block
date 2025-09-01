@@ -1,6 +1,7 @@
 use super::RpcError;
 use crate::governance::{
-    GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
+    BicameralGovernance, GovStore, House, ParamKey, Params, Proposal, ProposalStatus, Runtime,
+    Vote, VoteChoice,
 };
 use serde_json::json;
 
@@ -135,5 +136,36 @@ pub fn gov_rollback(
             code: -32067,
             message: "rollback failed",
         })?;
+    Ok(json!({"ok":true}))
+}
+
+pub fn gov_credit_list(gov: &BicameralGovernance) -> Result<serde_json::Value, RpcError> {
+    Ok(serde_json::to_value(gov.list()).map_err(|_| RpcError {
+        code: -32066,
+        message: "json",
+    })?)
+}
+
+pub fn gov_credit_vote(
+    gov: &std::sync::Mutex<BicameralGovernance>,
+    id: u64,
+    house: &str,
+) -> Result<serde_json::Value, RpcError> {
+    let house = match house {
+        "ops" => House::Operators,
+        _ => House::Builders,
+    };
+    let mut g = gov.lock().map_err(|_| RpcError {
+        code: -32062,
+        message: "vote failed",
+    })?;
+    g.vote(id, house, true).map_err(|_| RpcError {
+        code: -32062,
+        message: "vote failed",
+    })?;
+    g.persist("examples/governance/proposals.db").map_err(|_| RpcError {
+        code: -32061,
+        message: "persist failed",
+    })?;
     Ok(json!({"ok":true}))
 }

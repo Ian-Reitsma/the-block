@@ -2,6 +2,7 @@
 members = [
   "node",
 "state",
+  "ledger",
   "crates/credits",
   "crates/probe",
   "crates/wallet",
@@ -15,7 +16,12 @@ members = [
   "tools/installer",
   "tools/purge-credits",
   "tools/debugger",
-  "tools/gov-ui"
+  "tools/gov-ui",
+  "explorer",
+  "bridges",
+  "cli",
+  "net/fuzz",
+  "gateway/fuzz"
 ]
 default-members = [
   "node",

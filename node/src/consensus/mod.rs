@@ -13,6 +13,7 @@ pub mod leader;
 #[cfg(feature = "telemetry")]
 pub mod observer;
 pub mod pos;
+pub mod pow;
 pub mod unl;
 
 use crate::hash_genesis;

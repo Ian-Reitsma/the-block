@@ -39,3 +39,7 @@ docs/images/
 # Fuzz artifacts
 fuzz/wal/
 fuzz/artifacts/
+net/fuzz/artifacts/
+gateway/fuzz/artifacts/
+*/fuzz/corpus/*/
+*.profraw

@@ -21,7 +21,15 @@ impl Vm {
     pub fn new(vm_type: VmType) -> Self {
         Self {
             vm_type,
-            state: State::default(),
+            state: State::new(),
+        }
+    }
+
+    /// Create a VM backed by persistent storage at the given path.
+    pub fn new_persistent(vm_type: VmType, path: std::path::PathBuf) -> Self {
+        Self {
+            vm_type,
+            state: State::with_path(path),
         }
     }
 
@@ -40,7 +48,7 @@ impl Vm {
         gas_price: u64,
         balance: &mut u64,
     ) -> Result<(Vec<u8>, u64), &'static str> {
-        let code = self.state.code(id).cloned().ok_or("unknown contract")?;
+        let code = self.state.code(id).ok_or("unknown contract")?;
         let mut meter = GasMeter::new(gas_limit);
         // execute bytecode; append input as pushes onto stack
         let mut exec_code = code.clone();
@@ -69,7 +77,7 @@ impl Vm {
     /// Read back contract state.
     #[must_use]
     pub fn read(&self, id: ContractId) -> Option<Vec<u8>> {
-        self.state.code(id).cloned()
+        self.state.storage(id)
     }
 }
 

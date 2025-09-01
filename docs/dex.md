@@ -8,6 +8,15 @@ The in-tree DEX exposes a simple order book with slippage checks and trust-line 
   available price exceeds the caller's `max_slippage_bps`.
 - **Settlement** adjusts trust-line balances between buyer and seller for each
   trade. Path finding over authorized lines allows multi-hop payments.
+- **Routing** uses cost-based path scoring and returns a fallback route when the
+  cheapest path later fails. The primary path minimizes hop count and a secondary
+  path is returned if one exists.
+- **Persistence** stores books and executed trades under `~/.the_block/state/dex/`
+  via a bincode-backed `DexStore`. Order books are rebuilt on startup so restarts
+  or crashes do not lose market depth, and trade logs allow explorers to replay
+  historical fills.
+- **Metrics** expose `dex_orders_total{side=*}` and `dex_trades_total` counters
+  along with per-hop routing costs for observability.
 
 Example:
 
