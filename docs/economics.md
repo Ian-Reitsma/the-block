@@ -40,3 +40,26 @@ Given the pre‑admission clamp `f < 2^{63}`, the split rules guarantee each `fe
 | `f=1,  ν=1`               | `(0,-1)`        | `(0,1)`        | Charge IT only     | INV-FEE-01                         |
 | `f=2^63−1, ν=0`           | `(-(2^63−1),0)`| `(2^63−1,0)`   | Max legal fee      | INV-FEE-02                         |
 | `f=2^63, any ν`           | —               | —              | Reject admission (FeeOverflow) | INV-FEE-02             |
+
+## Simulation Harness
+
+The `sim/` crate models inflation, demand, liquidity, and backlog dynamics. Running
+`cargo run -p tb-sim --example governance_tuning` writes per-step KPIs to
+`/tmp/gov_tuning.csv` with the following columns:
+
+- `inflation_rate` – current annualised inflation
+- `sell_coverage` – liquidity divided by backlog
+- `readiness` – inverse backlog indicator
+
+These scenarios help governance evaluate issuance and demand tuning.
+
+## Compute-Backed Money
+
+Compute-backed tokens (CBTs) redeem for compute credits at a protocol-defined
+curve. A linear redeem curve priced off the marketplace median ensures large
+burns incur a premium, slowing depletion of the fee-funded backstop. Fees from
+compute jobs replenish the backstop reserve.
+
+The `ComputeToken` prototype models this flow. Tokens represent compute units
+and redeem against a `RedeemCurve` while debiting a shared `Backstop` reserve.
+See `node/tests/compute_cbt.rs` for an instant-app style settlement example.

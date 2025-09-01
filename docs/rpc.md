@@ -19,5 +19,6 @@
   session setup.
 - `dns.publish_record` – publishes a signed DNS TXT record to the on-chain
   gateway store.
-- `gateway.policy` – fetches the JSON policy document for a domain.
+- `gateway.policy` – fetches the JSON policy document for a domain and
+  returns `reads_total` and `last_access_ts` counters.
 - `microshard.roots.last?n=` – lists the most recent micro‑shard root headers.

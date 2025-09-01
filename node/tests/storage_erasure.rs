@@ -1,5 +1,8 @@
+mod util;
+
 use hex::encode;
 use rand::{rngs::OsRng, RngCore};
+use serial_test::serial;
 use std::sync::Arc;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -18,7 +21,9 @@ impl Provider for LocalProvider {
 }
 
 #[test]
+#[serial]
 fn recovers_from_missing_shard() {
+    util::rpc::randomize_client_timeout();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);

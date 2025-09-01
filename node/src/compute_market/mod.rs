@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 
 pub mod admission;
+pub mod cbm;
 pub mod courier;
 pub mod courier_store;
 pub mod errors;
@@ -133,12 +134,15 @@ pub struct Job {
     pub workloads: Vec<Workload>,
     /// Whether this job requires GPU execution.
     pub gpu_required: bool,
+    /// Unix timestamp by which the provider must deliver.
+    pub deadline: u64,
 }
 
 /// Internal state for a matched job.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 struct JobState {
     job: Job,
+    provider: String,
     provider_bond: u64,
     paid_slices: usize,
     completed: bool,
@@ -231,6 +235,7 @@ impl Market {
         price_board::record_price(FeeLane::Consumer, offer.price);
         let state = JobState {
             job,
+            provider: offer.provider.clone(),
             provider_bond: offer.provider_bond,
             paid_slices: 0,
             completed: false,
@@ -254,7 +259,17 @@ impl Market {
 
     /// Verify a slice proof and record the payout.
     pub fn submit_slice(&mut self, job_id: &str, proof: SliceProof) -> Result<u64, &'static str> {
+        use std::time::{SystemTime, UNIX_EPOCH};
         let state = self.jobs.get_mut(job_id).ok_or("unknown job")?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|e| panic!("time: {e}"))
+            .as_secs();
+        if now > state.job.deadline {
+            let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
+            self.jobs.remove(job_id);
+            return Err("deadline exceeded");
+        }
         if state.completed {
             return Err("job already completed");
         }
@@ -462,6 +477,7 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
             gpu_required: false,
+            deadline: u64::MAX,
         };
         market
             .submit_job(job)
@@ -511,6 +527,7 @@ mod tests {
                 Workload::Transcode(b"a".to_vec()),
             ],
             gpu_required: false,
+            deadline: u64::MAX,
         };
         market
             .submit_job(job)
@@ -553,6 +570,7 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
             gpu_required: false,
+            deadline: u64::MAX,
         };
         market
             .submit_job(job)
@@ -589,6 +607,7 @@ mod tests {
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"a".to_vec())],
             gpu_required: false,
+            deadline: u64::MAX,
         };
         market
             .submit_job(job)

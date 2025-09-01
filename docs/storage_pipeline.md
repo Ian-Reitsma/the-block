@@ -62,3 +62,14 @@ and counted via `storage_repair_bytes_total`; failures increment
 `storage_repair_failures_total`. The asynchronous job runs every few seconds and
 keeps redundancy intact even if a chunk is lost. For a demonstration, consult
 [`node/tests/storage_repair.rs`](../node/tests/storage_repair.rs).
+
+## Free Reads and Receipts
+
+Gateway fetches are free for clients and domain owners. After serving bytes the
+gateway appends a `ReadReceipt` `{domain, provider_id, bytes_served, ts}` under
+`receipts/read/<epoch>/<seq>.cbor`. Hourly jobs Merklize these receipts and the
+ledger mints credits to providers from a global `read_reward_pool` when roots
+finalize. Abuse is mitigated via in-memory token buckets and logged with
+`read_denied_total{reason}` metrics. Dynamic pages emit a companion
+`ExecutionReceipt` capturing CPU and disk I/O for the reward pool while keeping
+reads free for users.

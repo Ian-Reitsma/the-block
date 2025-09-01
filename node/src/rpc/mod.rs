@@ -5,7 +5,9 @@ use crate::{
     gateway,
     governance::{GovStore, Params},
     identity::handle_registry::HandleRegistry,
+    kyc,
     localnet::{validate_proximity, AssistReceipt},
+    pow::{self, BlockHeader},
     simple_db::SimpleDb,
     transaction::FeeLane,
     Blockchain, SignedTransaction,
@@ -68,6 +70,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "gateway.policy",
     "microshard.roots.last",
     "mempool.stats",
+    "kyc.verify",
+    "pow.get_template",
+    "pow.submit",
     "credits.meter",
     "consensus.pos.register",
     "consensus.pos.bond",
@@ -627,6 +632,85 @@ fn dispatch(
                 "fee_p50": fee_p50,
                 "fee_p90": fee_p90,
             })
+        }
+        "kyc.verify" => {
+            let user = req
+                .params
+                .get("user")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match kyc::verify(user) {
+                Ok(true) => serde_json::json!({"status": "verified"}),
+                Ok(false) => serde_json::json!({"status": "denied"}),
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32080,
+                        message: "kyc failure",
+                    });
+                }
+            }
+        }
+        "pow.get_template" => {
+            // simplistic template: zero prev/merkle
+            let tmpl = pow::template([0u8; 32], [0u8; 32], 1_000_000);
+            serde_json::json!({
+                "prev_hash": hex::encode(tmpl.prev_hash),
+                "merkle_root": hex::encode(tmpl.merkle_root),
+                "difficulty": tmpl.difficulty,
+                "timestamp": tmpl.timestamp
+            })
+        }
+        "pow.submit" => {
+            let header_obj = req.params.get("header").ok_or(RpcError {
+                code: -32602,
+                message: "missing header",
+            })?;
+            let parse32 = |v: &serde_json::Value| -> Result<[u8; 32], RpcError> {
+                let s = v.as_str().ok_or(RpcError {
+                    code: -32602,
+                    message: "bad hex",
+                })?;
+                let bytes = hex::decode(s).map_err(|_| RpcError {
+                    code: -32602,
+                    message: "bad hex",
+                })?;
+                let arr: [u8; 32] = bytes.try_into().map_err(|_| RpcError {
+                    code: -32602,
+                    message: "bad hex",
+                })?;
+                Ok(arr)
+            };
+            let prev_hash = parse32(&header_obj["prev_hash"])?;
+            let merkle_root = parse32(&header_obj["merkle_root"])?;
+            let nonce = header_obj["nonce"].as_u64().ok_or(RpcError {
+                code: -32602,
+                message: "bad nonce",
+            })?;
+            let difficulty = header_obj["difficulty"].as_u64().ok_or(RpcError {
+                code: -32602,
+                message: "bad difficulty",
+            })?;
+            let timestamp = header_obj["timestamp"].as_u64().ok_or(RpcError {
+                code: -32602,
+                message: "bad timestamp",
+            })?;
+            let hdr = BlockHeader {
+                prev_hash,
+                merkle_root,
+                nonce,
+                difficulty,
+                timestamp,
+            };
+            let hash = hdr.hash();
+            let val = u64::from_le_bytes(hash[..8].try_into().unwrap());
+            if val <= u64::MAX / difficulty.max(1) {
+                serde_json::json!({"status":"accepted"})
+            } else {
+                return Err(RpcError {
+                    code: -32082,
+                    message: "invalid pow",
+                });
+            }
         }
         "consensus.pos.register" => pos::register(&req.params)?,
         "consensus.pos.bond" => pos::bond(&req.params)?,

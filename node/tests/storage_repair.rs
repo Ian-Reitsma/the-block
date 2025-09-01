@@ -1,4 +1,7 @@
+mod util;
+
 use hex::encode;
+use serial_test::serial;
 use std::time::Duration;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -16,7 +19,9 @@ impl Provider for NoopProvider {
 }
 
 #[tokio::test]
+#[serial]
 async fn rebuilds_missing_shard() {
+    util::rpc::randomize_client_timeout();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);

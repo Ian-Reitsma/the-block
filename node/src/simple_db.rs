@@ -1,8 +1,10 @@
+use crate::storage::fs::credit_err_to_io;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::WAL_CORRUPT_RECOVERY_TOTAL;
 use blake3::Hasher;
+use credits::CreditError;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, io::Write, path::Path};
+use std::{collections::HashMap, fs, io, io::Write, path::Path};
 
 #[derive(Serialize, Deserialize)]
 struct WalRecord {
@@ -29,6 +31,7 @@ pub struct SimpleDb {
     map: HashMap<String, Vec<u8>>,
     path: String,
     next_id: u64,
+    byte_limit: Option<usize>,
 }
 
 impl SimpleDb {
@@ -87,6 +90,7 @@ impl SimpleDb {
             map,
             path: path.to_string(),
             next_id: last_id + 1,
+            byte_limit: None,
         }
     }
 
@@ -94,7 +98,7 @@ impl SimpleDb {
         self.map.get(key).cloned()
     }
 
-    pub fn insert(&mut self, key: &str, value: Vec<u8>) -> Option<Vec<u8>> {
+    pub fn try_insert(&mut self, key: &str, value: Vec<u8>) -> io::Result<Option<Vec<u8>>> {
         let id = self.next_id;
         self.next_id += 1;
         log_wal(
@@ -104,15 +108,19 @@ impl SimpleDb {
                 value: Some(value.clone()),
                 id,
             }),
-        );
+        )?;
         self.map
             .insert("__wal_id".into(), bincode::serialize(&id).unwrap());
         let prev = self.map.insert(key.to_string(), value);
-        self.flush();
-        prev
+        self.try_flush()?;
+        Ok(prev)
     }
 
-    pub fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
+    pub fn insert(&mut self, key: &str, value: Vec<u8>) -> Option<Vec<u8>> {
+        self.try_insert(key, value).expect("db insert")
+    }
+
+    pub fn try_remove(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
         let id = self.next_id;
         self.next_id += 1;
         log_wal(
@@ -122,12 +130,16 @@ impl SimpleDb {
                 value: None,
                 id,
             }),
-        );
+        )?;
         self.map
             .insert("__wal_id".into(), bincode::serialize(&id).unwrap());
         let prev = self.map.remove(key);
-        self.flush();
-        prev
+        self.try_flush()?;
+        Ok(prev)
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.try_remove(key).expect("db remove")
     }
 
     pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
@@ -138,43 +150,56 @@ impl SimpleDb {
             .collect()
     }
 
-    pub fn flush(&self) {
+    pub fn try_flush(&self) -> io::Result<()> {
         let db_path = Path::new(&self.path).join("db");
         if let Some(parent) = db_path.parent() {
-            let _ = fs::create_dir_all(parent);
+            fs::create_dir_all(parent)?;
         }
-        if let Ok(bytes) = bincode::serialize(&self.map) {
-            let _ = fs::write(&db_path, bytes);
-            let wal_path = Path::new(&self.path).join("wal");
-            if let Ok(mut f) = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&wal_path)
-            {
-                let last = self
-                    .map
-                    .get("__wal_id")
-                    .and_then(|b| bincode::deserialize(b).ok())
-                    .unwrap_or(0);
-                let op = WalOp::End { last_id: last };
-                let op_bytes = bincode::serialize(&op).unwrap();
-                let mut h = Hasher::new();
-                h.update(&op_bytes);
-                let entry = WalEntry {
-                    op,
-                    checksum: *h.finalize().as_bytes(),
-                };
-                if let Ok(bytes) = bincode::serialize(&entry) {
-                    let _ = f.write_all(&bytes);
-                }
+        let bytes = bincode::serialize(&self.map).unwrap();
+        if let Some(limit) = self.byte_limit {
+            if bytes.len() > limit {
+                return Err(credit_err_to_io(CreditError::Insufficient));
             }
-            let _ = fs::remove_file(&wal_path);
         }
+        fs::write(&db_path, &bytes)?;
+        let wal_path = Path::new(&self.path).join("wal");
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&wal_path)?;
+        let last = self
+            .map
+            .get("__wal_id")
+            .and_then(|b| bincode::deserialize(b).ok())
+            .unwrap_or(0);
+        let op = WalOp::End { last_id: last };
+        let op_bytes = bincode::serialize(&op).unwrap();
+        let mut h = Hasher::new();
+        h.update(&op_bytes);
+        let entry = WalEntry {
+            op,
+            checksum: *h.finalize().as_bytes(),
+        };
+        let entry_bytes = bincode::serialize(&entry).unwrap();
+        f.write_all(&entry_bytes)?;
+        let _ = fs::remove_file(&wal_path);
+        Ok(())
+    }
+
+    pub fn flush(&self) {
+        let _ = self.try_flush();
+    }
+
+    pub fn set_byte_limit(&mut self, limit: usize) {
+        self.byte_limit = Some(limit);
     }
 }
 
-fn log_wal(path: &str, op: WalOp) {
+fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
     let wal_path = Path::new(path).join("wal");
+    if let Some(parent) = wal_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let op_bytes = bincode::serialize(&op).unwrap();
     let mut h = Hasher::new();
     h.update(&op_bytes);
@@ -182,13 +207,11 @@ fn log_wal(path: &str, op: WalOp) {
         op,
         checksum: *h.finalize().as_bytes(),
     };
-    if let Ok(bytes) = bincode::serialize(&entry) {
-        if let Ok(mut f) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(wal_path)
-        {
-            let _ = f.write_all(&bytes);
-        }
-    }
+    let bytes = bincode::serialize(&entry).unwrap();
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(wal_path)?;
+    f.write_all(&bytes)?;
+    Ok(())
 }

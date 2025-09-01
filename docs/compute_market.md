@@ -154,12 +154,15 @@ Telemetry gauges and counters surface admission behaviour:
 - `industrial_deferred_total`
 - `industrial_rejected_total{reason}`
 - `admission_mode{mode}`
+- `industrial_rejected_total{reason="SLA"}` – slashes for missed provider deadlines
 
 These metrics drive Grafana panels tracking fee health and industrial
 throttling. Future patches will expose user-facing rejection codes and make
 the comfort threshold governable.
 
 Admission decisions are logged with job identifiers, requested shards, and current mode to aid post-mortems.
+
+Providers that miss declared job deadlines have their bonds slashed via `penalize_sla`, incrementing `industrial_rejected_total{reason="SLA"}` for dashboard alerts. Operators should set Prometheus rules to page when this counter rises.
 
 ## Developer notes
 

@@ -1,3 +1,4 @@
+use serial_test::serial;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -34,6 +35,7 @@ impl Provider for MockProvider {
 }
 
 #[test]
+#[serial]
 fn unhealthy_nodes_skipped() {
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);

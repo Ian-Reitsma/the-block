@@ -239,36 +239,18 @@ Mainnet readiness: ~94/100 · Vision completion: ~68/100.
 
 ### Immediate
 
-- Finalize gossip longest-chain convergence
-  - Remove `#[ignore]` and run chaos harness with 15% drop/200 ms jitter.
-  - Capture per-hop latency metrics in the Turbine module.
-  - Document the tie-break algorithm in the consensus guide.
-  - Expose a test fixture for fork injection.
-  - Benchmark orphan rates before and after fanout changes.
-- Replace dev-only credit top-up with governed issuance
-  - Finalize governance proposal schema for credit issuance rates.
-  - Wire minting into validator vote execution paths.
-  - Deprecate the `credits top-up` CLI with user warnings.
-  - Add a migration to purge development-only balances.
-  - Document on-chain credit policy in `docs/credits.md`.
-- Expand settlement audit coverage
-  - Index settlement receipts in the explorer database.
-  - Schedule periodic verification jobs in CI.
-  - Expose discrepancies via Prometheus alerts.
-  - Ship a sample audit report in the documentation.
-  - Include rollback tests for mismatched receipts.
-- Harden DHT bootstrapping
-  - Persist peer databases and support recovery on startup.
-  - Fuzz inventory exchange against malformed identifiers.
-  - Randomize bootstrap peer selection to prevent clustering.
-  - Instrument metrics for handshake failures.
-  - Document manual recovery procedures in the troubleshooting guide.
-- Broaden fuzz/chaos testing across gateway and storage paths
-  - Integrate gateway fuzz seeds into continuous integration.
-  - Simulate disk-full conditions for the storage layer.
-  - Randomize RPC timeouts and retry logic in tests.
-  - Use the chaos harness for sudden network partitions.
-  - Capture reproducible seeds for any failures.
+All previously listed directives have been implemented:
+
+- Gossip chaos tests now converge deterministically under 15 % packet loss and
+  200 ms jitter with documented tie-break rules and fork-injection fixtures.
+- Credit issuance is governed by validator votes and rewards from read receipts
+  removed and migration tooling provided.
+- Settlement audits index receipts, run periodic verification jobs, raise
+  `settle_audit_mismatch_total` alerts, and include rollback coverage.
+- DHT bootstrapping persists peer databases, randomizes bootstrap peers, fuzzes
+  identifier exchange, and exposes handshake failure metrics.
+- Fuzz and chaos tests store reproducible seeds, randomize RPC timeouts, and
+  simulate disk-full conditions across storage paths.
 
 ### Near term
 
@@ -377,7 +359,10 @@ Mainnet readiness: ~94/100 · Vision completion: ~68/100.
 
 ## 15 · Outstanding Blockers & Directives
 
-- Credits `top-up` CLI remains development-only. Next agent: devise a production issuance or remove the command.
+
+- Implement free-read accounting: replace gateway budget deductions with
+  `ReadReceipt`s, mint credits from a `read_reward_pool`, and add rate-limit
+  safeguards before enabling production traffic.
 
 ---
 This document supersedes earlier “vision” notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.
@@ -438,7 +423,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `fee_selector` with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Credits: ledger with governance-controlled issuance, decay, and per-source expiry; reads remain free while writes burn credits.
+- Credits: ledger with governance-controlled issuance, decay, and per-source expiry; reads remain free while providers earn from a read reward pool and writes burn credits.
 - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.

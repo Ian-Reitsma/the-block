@@ -153,13 +153,6 @@ enum CreditsCmd {
         #[arg(long, default_value = "node-data")]
         data_dir: String,
     },
-    /// Top up credits for a provider
-    TopUp {
-        provider: String,
-        amount: u64,
-        #[arg(long, default_value = "node-data")]
-        data_dir: String,
-    },
 }
 
 #[derive(Subcommand)]
@@ -201,6 +194,11 @@ async fn main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
+            let profiler = if std::env::var("TB_PROFILE").ok().is_some() {
+                Some(pprof::ProfilerGuard::new(100).expect("profiler"))
+            } else {
+                None
+            };
 
             let receipt_store = ReceiptStore::open(&format!("{data_dir}/receipts"));
             let match_stop = CancellationToken::new();
@@ -240,6 +238,12 @@ async fn main() -> std::process::ExitCode {
             let _ = handle.await;
             match_stop.cancel();
             the_block::compute_market::price_board::persist();
+            if let Some(g) = profiler {
+                if let Ok(report) = g.report().build() {
+                    let file = std::fs::File::create("flamegraph.svg").expect("flamegraph");
+                    let _ = report.flamegraph(file);
+                }
+            }
             std::process::ExitCode::SUCCESS
         }
         Commands::GenerateKey { key_id } => {
@@ -338,19 +342,6 @@ async fn main() -> std::process::ExitCode {
                     }
                     let event = format!("transfer:{}:{}:{}", from, to, amount);
                     ledger.accrue(&to, &event, amount);
-                    ledger.save(&path).expect("save ledger");
-                    std::process::ExitCode::SUCCESS
-                }
-                CreditsCmd::TopUp {
-                    provider,
-                    amount,
-                    data_dir,
-                } => {
-                    let path = PathBuf::from(&data_dir).join("credits.bin");
-                    let mut ledger = Ledger::load(&path).expect("load ledger");
-                    let event =
-                        format!("topup:{}:{}", provider, ledger.balance(&provider) + amount);
-                    ledger.accrue(&provider, &event, amount);
                     ledger.save(&path).expect("save ledger");
                     std::process::ExitCode::SUCCESS
                 }

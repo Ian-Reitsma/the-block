@@ -1,8 +1,10 @@
+use serial_test::serial;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::storage::pipeline::StoragePipeline;
 
 #[test]
+#[serial]
 fn quota_matches_balance() {
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);

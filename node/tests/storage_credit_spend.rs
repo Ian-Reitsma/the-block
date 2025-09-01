@@ -1,3 +1,6 @@
+mod util;
+
+use serial_test::serial;
 use std::sync::Arc;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -14,7 +17,9 @@ impl Provider for NoopProvider {
 }
 
 #[test]
+#[serial]
 fn writes_burn_and_limit() {
+    util::rpc::randomize_client_timeout();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("alice", 1);

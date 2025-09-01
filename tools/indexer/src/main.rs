@@ -1,8 +1,9 @@
+use axum::{routing::get, Json, Router};
 use clap::{Parser, Subcommand};
 use indexer::{BlockRecord, Indexer};
 use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
-use axum::{routing::get, Router, Json};
 use tokio::net::TcpListener;
 
 #[derive(Parser)]
@@ -20,6 +21,8 @@ enum Commands {
     Serve { db: String },
     /// Print basic stats from the database.
     Profile { db: String },
+    /// Index checkpointed receipts from a directory.
+    IndexReceipts { dir: String, db: String },
 }
 
 #[tokio::main]
@@ -49,6 +52,10 @@ async fn main() -> anyhow::Result<()> {
         Commands::Profile { db } => {
             let idx = Indexer::open(&db)?;
             println!("indexed blocks: {}", idx.all_blocks()?.len());
+        }
+        Commands::IndexReceipts { dir, db } => {
+            let idx = Indexer::open(&db)?;
+            idx.index_receipts_dir(Path::new(&dir))?;
         }
     }
     Ok(())

@@ -12,6 +12,25 @@ Block production is ordered by a Proof-of-History tick generator, and blocks
 propagate through a Turbine-style tree gossip, reducing orphan rates and
 latency relative to flood gossip.
 
+### Leader Scheduling
+
+Validators take turns producing blocks according to a stake-weighted rotation.
+The `LeaderSchedule` in `consensus/leader.rs` expands each validator's stake
+into proportional slots, yielding a deterministic leader for every round.
+
+### Fork Choice Tie-Break Rules
+
+When competing tips share the same height, fork choice applies a deterministic
+ordering to ensure all nodes converge. The precedence is:
+
+1. Higher block height wins.
+2. If heights match, the chain with greater cumulative weight prevails.
+3. If both height and weight are equal, the lexicographically greater tip hash
+   is selected as a final tie-break.
+
+This mirrors the `choose_tip` function in
+[node/src/consensus/fork_choice.rs](../node/src/consensus/fork_choice.rs).
+
 ## Fee Selector and Base
 
 For every transaction, let:

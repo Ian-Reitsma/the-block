@@ -1,0 +1,11 @@
+{
+  "epoch": 42,
+  "receipts": 3,
+  "invalid": 1,
+  "invalid_receipts": [
+    {
+      "id": "deadbeef",
+      "reason": "bad signature"
+    }
+  ]
+}

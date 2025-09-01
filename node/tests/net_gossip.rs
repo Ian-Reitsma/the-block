@@ -1,3 +1,4 @@
+mod util;
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};
 use serial_test::serial;
@@ -12,6 +13,7 @@ use the_block::{
     sign_tx, Block, Blockchain, RawTxPayload, ShutdownFlag, TokenAmount,
 };
 use tokio::time::Instant;
+use util::fork::inject_fork;
 
 fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
     let msg = Message::new(body, sk);
@@ -31,6 +33,8 @@ fn init_env() -> tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key_default"));
+    std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
+    std::env::set_var("TB_PEER_SEED", "1");
     dir
 }
 
@@ -42,6 +46,8 @@ fn make_node(
     bc: Blockchain,
 ) -> Node {
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join(format!("net_key_{idx}")));
+    std::env::set_var("TB_NET_KEY_SEED", format!("seed{idx}"));
+    std::env::set_var("TB_PEER_DB_PATH", dir.path().join(format!("peers_{idx}")));
     Node::new(addr, peers, bc)
 }
 
@@ -142,33 +148,21 @@ async fn gossip_converges_to_longest_chain() {
 
     // genesis block from node1
     let mut ts = 1;
-    {
-        let mut bc = node1.blockchain();
-        bc.mine_block_at("miner1", ts).unwrap();
-        ts += 1;
-    }
+    inject_fork(&node1, "miner1", ts, 1);
+    ts += 1;
     broadcast_until(&node1, &[&node1, &node2, &node3]).await;
 
     // each secondary node mines a block at height 2 without broadcasting
-    {
-        let mut bc = node2.blockchain();
-        bc.mine_block_at("miner2", ts).unwrap();
-    }
-    {
-        let mut bc = node3.blockchain();
-        bc.mine_block_at("miner3", ts).unwrap();
-    }
+    inject_fork(&node2, "miner2", ts, 1);
+    inject_fork(&node3, "miner3", ts, 1);
+    ts += 1;
 
     // node3 advertises its fork first, node2 follows
     broadcast_until(&node3, &[&node1, &node2, &node3]).await;
     broadcast_until(&node2, &[&node1, &node2, &node3]).await;
 
     // node2 extends its fork to become the longest chain
-    ts += 1;
-    {
-        let mut bc = node2.blockchain();
-        bc.mine_block_at("miner2", ts).unwrap();
-    }
+    inject_fork(&node2, "miner2", ts, 1);
     broadcast_until(&node2, &[&node1, &node2, &node3]).await;
 
     let h1 = node1.blockchain().block_height;
@@ -211,27 +205,17 @@ async fn partition_rejoins_longest_chain() {
     node2.discover_peers();
 
     let mut ts = 1;
-    {
-        let mut bc = node1.blockchain();
-        bc.mine_block_at("miner1", ts).unwrap();
-        ts += 1;
-        bc.mine_block_at("miner1", ts).unwrap();
-        ts += 1;
-    }
+    inject_fork(&node1, "miner1", ts, 1);
+    ts += 1;
+    inject_fork(&node1, "miner1", ts, 1);
+    ts += 1;
     node1.broadcast_chain();
 
     // Third node mines a longer chain while isolated
     let node3 = make_node(&dir, 3, addr3, vec![addr1, addr2], Blockchain::default());
     let flag3 = ShutdownFlag::new();
     let jh3 = node3.start_with_flag(&flag3);
-    {
-        let mut bc = node3.blockchain();
-        bc.mine_block_at("miner3", ts).unwrap();
-        ts += 1;
-        bc.mine_block_at("miner3", ts).unwrap();
-        ts += 1;
-        bc.mine_block_at("miner3", ts).unwrap();
-    }
+    inject_fork(&node3, "miner3", ts, 3);
     node3.discover_peers();
     node3.broadcast_chain();
 

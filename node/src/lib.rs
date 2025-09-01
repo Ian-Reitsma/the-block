@@ -47,13 +47,16 @@ use thiserror::Error;
 pub mod gateway;
 pub mod gossip;
 pub mod identity;
+pub mod kyc;
 pub mod localnet;
 pub mod net;
 pub mod p2p;
 pub mod parallel;
 pub mod poh;
+pub mod pow;
 pub mod range_boost;
 pub mod rpc;
+pub mod scheduler;
 
 #[cfg(feature = "telemetry")]
 pub mod telemetry;

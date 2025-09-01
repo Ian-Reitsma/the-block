@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use the_block::{governance::House, Governance};
+use the_block::{governance::{CreditIssue, House}, Governance};
 
 #[derive(Parser)]
 #[command(author, version, about = "Governance helpers")]
@@ -19,7 +19,11 @@ enum Command {
     /// Vote for a proposal
     Vote { id: u64, house: HouseArg },
     /// Execute a proposal after quorum and timelock
-    Exec { id: u64 },
+    Exec {
+        id: u64,
+        #[arg(long, default_value = "node-data")]
+        data_dir: String,
+    },
     /// Show proposal status and rollback metrics
     Status { id: u64 },
     /// Roll back the last activation
@@ -71,7 +75,11 @@ fn main() {
             let v: serde_json::Value = serde_json::from_str(&text).expect("json");
             let start = v["start"].as_u64().unwrap_or(0);
             let end = v["end"].as_u64().unwrap_or(0);
-            let id = gov.submit(start, end);
+            let credit_issue = v["credit_issue"].as_object().map(|ci| CreditIssue {
+                provider: ci["provider"].as_str().unwrap_or_default().to_string(),
+                amount: ci["amount"].as_u64().unwrap_or(0),
+            });
+            let id = gov.submit(start, end, credit_issue);
             println!("submitted {id}");
             gov.persist(db_path).expect("persist");
         }
@@ -80,12 +88,17 @@ fn main() {
             println!("voted {id}");
             gov.persist(db_path).expect("persist");
         }
-        Command::Exec { id } => {
+        Command::Exec { id, data_dir } => {
+            use credits::Ledger;
+            use std::path::PathBuf;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            gov.execute(id, now).expect("exec");
+            let path = PathBuf::from(&data_dir).join("credits.bin");
+            let mut ledger = Ledger::load(&path).expect("load ledger");
+            gov.execute(id, now, Some(&mut ledger)).expect("exec");
+            ledger.save(&path).expect("save ledger");
             println!("executed {id}");
             gov.persist(db_path).expect("persist");
         }
