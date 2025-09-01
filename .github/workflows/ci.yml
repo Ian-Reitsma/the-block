@@ -96,6 +96,8 @@ jobs:
             ~/.cargo
             target
             fuzz/artifacts
+            net/fuzz/artifacts
+            gateway/fuzz/artifacts
           key: ${{ runner.os }}-wal-fuzz-${{ hashFiles('Cargo.lock') }}
       - name: install cargo-fuzz
         run: cargo install cargo-fuzz --locked
@@ -137,6 +139,12 @@ jobs:
         run: cargo +nightly fuzz run network -- -max_total_time=120 -artifact_prefix=fuzz/network/artifacts/ -runs=0 || true
       - name: run localnet proximity fuzz
         run: cargo +nightly fuzz run localnet_proximity -- -max_total_time=120 -artifact_prefix=fuzz/localnet_proximity/ -runs=0 || true
+      - name: run peer id fuzz
+        working-directory: net/fuzz
+        run: cargo +nightly fuzz run peer_id -- -max_total_time=120 -artifact_prefix=artifacts/ -runs=0 || true
+      - name: run gateway http fuzz
+        working-directory: gateway/fuzz
+        run: cargo +nightly fuzz run http_request -- -max_total_time=120 -artifact_prefix=artifacts/ -runs=0 || true
       - name: fuzz coverage report
         run: scripts/fuzz_coverage.sh
       - name: upload compute-market artifacts
@@ -151,6 +159,18 @@ jobs:
         with:
           name: network-fuzz
           path: fuzz/network/artifacts/
+      - name: upload peer-id artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: peer-id-fuzz
+          path: net/fuzz/artifacts/
+      - name: upload gateway artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-fuzz
+          path: gateway/fuzz/artifacts/
       - name: upload fuzz coverage
         if: always()
         uses: actions/upload-artifact@v4
@@ -169,3 +189,26 @@ jobs:
             echo "Artifacts found";
             exit 1;
           fi
+      - name: verify no peer-id artifacts
+        run: |
+          if ls net/fuzz/artifacts/* 1> /dev/null 2>&1; then
+            echo "Artifacts found";
+            exit 1;
+          fi
+      - name: verify no gateway artifacts
+        run: |
+          if ls gateway/fuzz/artifacts/* 1> /dev/null 2>&1; then
+            echo "Artifacts found";
+            exit 1;
+          fi
+  settlement-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - uses: Swatinem/rust-cache@v2
+      - name: settlement audit
+        run: cargo test -p the_block --test settlement_audit --release

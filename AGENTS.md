@@ -5,6 +5,7 @@ Quick Index
 - Agent Playbooks: see §17
 - Strategic Pillars: see §18
 - Monitoring Stack: see `docs/monitoring.md` and `make monitor`
+- Progress Snapshot: see `docs/progress.md` for subsystem status and gaps
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
@@ -237,6 +238,15 @@ Mainnet readiness: ~94/100 · Vision completion: ~63/100.
 - Modular wallet framework with hardware signer support and CLI utilities.
 - Cross-chain exchange adapters, light-client crate, indexer with explorer, and benchmark/simulation tools.
 - Free-read architecture with receipt batching, execution receipts, governance-seeded read reward pool, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
+- Fee-priority mempool with EIP-1559 base fee evolution; high-fee transactions evict low-fee ones and each block nudges the base fee toward a target fullness.
+- Bridge primitives with relayer proofs and lock/unlock flows exposed via `blockctl bridge deposit`/`withdraw`.
+- Persistent contracts and on-disk key/value state with opcode ABI generation and `contract` CLI for deploy/call.
+- DexStore-backed order books and trade logs with multi-hop trust-line routing that scores paths by cost and surfaces fallback routes.
+- Credit balance and rate-limit webhooks; mobile light client registers push endpoints and triggers notifications on changes.
+- Jittered RPC client with exponential backoff and env-configured timeout windows to prevent request stampedes.
+- CI settlement audit job verifying explorer receipt indexes against ledger anchors.
+- Fuzz coverage harness that installs LLVM tools on demand and reports missing `.profraw` artifacts.
+- Operator runbook for manual DHT recovery detailing peer DB purge, bootstrap reseeding, and convergence checks.
 
 ### Immediate
 
@@ -475,18 +485,18 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
-  - [ ] Integration tests for fault/rollback
-  - Progress: 60%
+  - [x] Integration tests for fault/rollback
+  - Progress: 80%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
-  - [ ] Contract deployment/execution
-  - [ ] Tooling & ABI utils
-  - Progress: 5%
+  - [x] Contract deployment/execution
+  - [x] Tooling & ABI utils
+  - Progress: 40%
 - **Bridges** ([docs/bridges.md](docs/bridges.md))
-  - [ ] Lock/unlock mechanism
+  - [x] Lock/unlock mechanism
   - [ ] Light client verification
   - [ ] Relayer incentives
-  - Progress: 5%
+  - Progress: 20%
 - **Wallets** ([docs/wallets.md](docs/wallets.md))
   - [x] CLI enhancements
   - [x] Hardware wallet integration

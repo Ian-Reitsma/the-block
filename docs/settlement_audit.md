@@ -19,6 +19,9 @@ trigger alerts:
 cargo run -p indexer -- IndexReceipts state/receipts/pending audit.db
 ```
 
+In CI the `settlement-audit` job invokes `cargo test -p the_block --test settlement_audit --release` which replays the most
+recent receipts and fails the build if any explorer index diverges from the ledger anchor.
+
 Set `TB_SETTLE_AUDIT_INTERVAL_MS` to have the node automatically audit pending
 epochs on a schedule, writing reports to `state/receipts/audit_latest.json`
 and incrementing the `settle_audit_mismatch_total` Prometheus counter when

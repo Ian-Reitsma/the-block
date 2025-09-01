@@ -61,6 +61,7 @@ fn migrate_v3_recomputes_supply() {
         coinbase_industrial: TokenAmount::new(0),
         fee_checksum: String::new(),
         state_root: String::new(),
+        base_fee: 1,
     };
     let disk = ChainDisk {
         schema_version: 3,
@@ -72,6 +73,7 @@ fn migrate_v3_recomputes_supply() {
         block_reward_industrial: TokenAmount::new(0),
         block_height: 1,
         mempool: Vec::new(),
+        base_fee: 1,
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

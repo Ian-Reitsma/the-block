@@ -1,31 +1,5 @@
 use crate::vm::gas::GasMeter;
-
-/// Minimal deterministic instruction set for testing.
-/// Bytecode is a sequence of opcodes optionally followed by immediates.
-/// All operations are 64-bit and little-endian.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OpCode {
-    /// Halts execution and returns the stack.
-    Halt = 0x00,
-    /// Push a 64-bit immediate onto the stack.
-    Push = 0x01,
-    /// Pop two values, push their sum.
-    Add = 0x02,
-    /// Pop two values, push the first minus the second.
-    Sub = 0x03,
-}
-
-impl OpCode {
-    fn from_byte(b: u8) -> Option<Self> {
-        match b {
-            0x00 => Some(Self::Halt),
-            0x01 => Some(Self::Push),
-            0x02 => Some(Self::Add),
-            0x03 => Some(Self::Sub),
-            _ => None,
-        }
-    }
-}
+pub use crate::vm::opcodes::OpCode;
 
 /// Execute bytecode returning the final stack as `Vec<u64>` and total gas used.
 /// Each opcode costs 1 gas plus any immediates cost of 1.

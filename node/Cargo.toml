@@ -44,6 +44,10 @@ tokio-util = "0.7"
 credits = { path = "../crates/credits" }
 state = { path = "../state" }
 reed-solomon-erasure = "6"
+# minimal HTTP parsing
+httparse = "1"
+# jittered RPC client
+reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime
 rayon = "1"
 # webhook alerts

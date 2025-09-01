@@ -1,16 +1,17 @@
 #![forbid(unsafe_code)]
 
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
-use super::trust_lines::TrustLedger;
+use super::{trust_lines::TrustLedger, DexStore};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Order {
     pub id: u64,
     pub account: String,
@@ -20,7 +21,7 @@ pub struct Order {
     pub max_slippage_bps: u64,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct OrderBook {
     pub bids: BTreeMap<u64, VecDeque<Order>>, // price -> orders
     pub asks: BTreeMap<u64, VecDeque<Order>>, // price -> orders
@@ -114,12 +115,26 @@ impl OrderBook {
         order: Order,
         ledger: &mut TrustLedger,
     ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
+        self.place_settle_persist(order, ledger, None)
+    }
+
+    pub fn place_settle_persist(
+        &mut self,
+        order: Order,
+        ledger: &mut TrustLedger,
+        mut store: Option<&mut DexStore>,
+    ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
         let trades = self.place(order)?;
         for (buy, sell, qty) in &trades {
             let value = sell.price * *qty;
-            // Buyer owes seller the quoted value, seller owes buyer the asset amount.
             ledger.adjust(&buy.account, &sell.account, value as i64);
             ledger.adjust(&sell.account, &buy.account, -(value as i64));
+            if let Some(st) = store.as_deref_mut() {
+                st.log_trade(&(buy.clone(), sell.clone(), *qty));
+            }
+        }
+        if let Some(st) = store.as_deref_mut() {
+            st.save_book(self);
         }
         Ok(trades)
     }

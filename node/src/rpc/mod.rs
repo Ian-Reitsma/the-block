@@ -1,13 +1,13 @@
 use crate::{
     compute_market::settlement::{SettleMode, Settlement},
     config::RpcConfig,
+    consensus::pow::{self, BlockHeader},
     credits::issuance,
     gateway,
-    governance::{GovStore, Params},
+    governance::{BicameralGovernance, GovStore, Params},
     identity::handle_registry::HandleRegistry,
     kyc,
     localnet::{validate_proximity, AssistReceipt},
-    pow::{self, BlockHeader},
     simple_db::SimpleDb,
     transaction::FeeLane,
     Blockchain, SignedTransaction,
@@ -37,9 +37,18 @@ use tokio::sync::oneshot;
 pub mod governance;
 pub mod identity;
 pub mod pos;
+pub mod client;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
+static CREDIT_GOV: Lazy<Mutex<BicameralGovernance>> = Lazy::new(|| {
+    Mutex::new(BicameralGovernance::load(
+        "examples/governance/proposals.db",
+        1,
+        1,
+        0,
+    ))
+});
 static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
     Mutex::new(SimpleDb::open(&path))
@@ -90,6 +99,8 @@ const ADMIN_METHODS: &[&str] = &[
     "gov_vote",
     "gov_list",
     "gov_params",
+    "gov_credit_list",
+    "gov_credit_vote",
     "gov_rollback_last",
     "gov_rollback",
     "record_le_request",
@@ -654,10 +665,11 @@ fn dispatch(
         }
         "pow.get_template" => {
             // simplistic template: zero prev/merkle
-            let tmpl = pow::template([0u8; 32], [0u8; 32], 1_000_000);
+            let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000);
             serde_json::json!({
                 "prev_hash": hex::encode(tmpl.prev_hash),
                 "merkle_root": hex::encode(tmpl.merkle_root),
+                "checkpoint_hash": hex::encode(tmpl.checkpoint_hash),
                 "difficulty": tmpl.difficulty,
                 "timestamp": tmpl.timestamp
             })
@@ -684,6 +696,7 @@ fn dispatch(
             };
             let prev_hash = parse32(&header_obj["prev_hash"])?;
             let merkle_root = parse32(&header_obj["merkle_root"])?;
+            let checkpoint_hash = parse32(&header_obj["checkpoint_hash"])?;
             let nonce = header_obj["nonce"].as_u64().ok_or(RpcError {
                 code: -32602,
                 message: "bad nonce",
@@ -699,6 +712,7 @@ fn dispatch(
             let hdr = BlockHeader {
                 prev_hash,
                 merkle_root,
+                checkpoint_hash,
                 nonce,
                 difficulty,
                 timestamp,
@@ -972,6 +986,19 @@ fn dispatch(
                 .unwrap_or(0);
             let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             governance::gov_params(&params, epoch)?
+        }
+        "gov_credit_list" => {
+            let g = CREDIT_GOV.lock().unwrap_or_else(|e| e.into_inner());
+            governance::gov_credit_list(&g)?
+        }
+        "gov_credit_vote" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let house = req
+                .params
+                .get("house")
+                .and_then(|v| v.as_str())
+                .unwrap_or("ops");
+            governance::gov_credit_vote(&CREDIT_GOV, id, house)?
         }
         "gov_rollback_last" => {
             let epoch = req

@@ -1,0 +1,17 @@
+[package]
+name = "net-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+libp2p = { version = "0.52", default-features = false, features = ["kad"] }
+
+[package.metadata]
+cargo-fuzz = true
+
+[[bin]]
+name = "peer_id"
+path = "fuzz_targets/peer_id.rs"
+test = false

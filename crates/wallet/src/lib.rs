@@ -114,6 +114,9 @@ pub mod hardware {
     }
 }
 
+pub mod credits;
+pub use credits::CreditNotifier;
+
 #[cfg(test)]
 mod tests {
     use super::*;

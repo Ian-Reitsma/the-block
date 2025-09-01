@@ -171,6 +171,7 @@ fn validate_block_rejects_nonce_gap() {
         coinbase_industrial: TokenAmount::new(reward_i),
         fee_checksum,
         state_root: String::new(),
+        base_fee: 1,
     };
     assert!(!bc.validate_block(&block).unwrap());
 }
@@ -262,7 +263,7 @@ fn industrial_deferred_when_consumer_fees_high() {
         to: "b".into(),
         amount_consumer: 1,
         amount_industrial: 0,
-        fee: 20,
+        fee: 1_000,
         fee_selector: 0,
         nonce: 1,
         memo: Vec::new(),
@@ -275,7 +276,7 @@ fn industrial_deferred_when_consumer_fees_high() {
         to: "b".into(),
         amount_consumer: 0,
         amount_industrial: 0,
-        fee: 1,
+        fee: 1_000,
         fee_selector: 1,
         nonce: 2,
         memo: Vec::new(),

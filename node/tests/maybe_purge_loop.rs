@@ -20,7 +20,10 @@ fn init() {
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn env_guard() -> MutexGuard<'static, ()> {
-    ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 
 #[test]
@@ -32,6 +35,7 @@ fn env_driven_purge_loop_drops_entries() {
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.min_fee_per_byte_consumer = 0;
     bc.min_fee_per_byte_industrial = 0;
+    bc.base_fee = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();

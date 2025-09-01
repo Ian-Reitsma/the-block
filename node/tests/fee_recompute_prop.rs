@@ -83,6 +83,7 @@ proptest! {
                 coinbase_industrial: TokenAmount::new(0),
                 fee_checksum: String::new(),
                 state_root: String::new(),
+                base_fee: 1,
             };
             chain.push(block);
         }
@@ -97,6 +98,7 @@ proptest! {
             block_reward_industrial: TokenAmount::new(0),
             block_height: blocks as u64,
             mempool: Vec::new(),
+            base_fee: 1,
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
         map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

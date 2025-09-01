@@ -9,6 +9,8 @@ pub struct TipMeta {
     pub weight: u128,
     /// Hash of the tip block.
     pub tip_hash: [u8; 32],
+    /// Height of the latest finalized PoS checkpoint referenced by this chain.
+    pub checkpoint_height: u64,
 }
 
 /// Deterministically choose the preferred tip between `a` and `b`.
@@ -20,13 +22,17 @@ pub struct TipMeta {
 ///    a total order and deterministic tie-break.
 pub fn choose_tip(a: &TipMeta, b: &TipMeta) -> Ordering {
     use Ordering::*;
-    match a.height.cmp(&b.height) {
+    match a.checkpoint_height.cmp(&b.checkpoint_height) {
         Greater => Greater,
         Less => Less,
-        Equal => match a.weight.cmp(&b.weight) {
+        Equal => match a.height.cmp(&b.height) {
             Greater => Greater,
             Less => Less,
-            Equal => a.tip_hash.cmp(&b.tip_hash),
+            Equal => match a.weight.cmp(&b.weight) {
+                Greater => Greater,
+                Less => Less,
+                Equal => a.tip_hash.cmp(&b.tip_hash),
+            },
         },
     }
 }

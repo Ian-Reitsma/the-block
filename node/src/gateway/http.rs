@@ -4,6 +4,9 @@ use std::time::Instant;
 
 use once_cell::sync::Lazy;
 
+// lightweight HTTP request parsing for fuzzing
+use httparse;
+
 use super::read_receipt;
 
 #[cfg(feature = "telemetry")]
@@ -72,4 +75,12 @@ pub fn check(
         }
     }
     true
+}
+
+/// Parse an HTTP request and return without panicking on malformed input.
+/// Used by fuzz targets to ensure graceful handling of arbitrary data.
+pub fn parse_request(data: &[u8]) {
+    let mut headers = [httparse::EMPTY_HEADER; 32];
+    let mut req = httparse::Request::new(&mut headers);
+    let _ = req.parse(data);
 }

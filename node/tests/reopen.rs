@@ -284,6 +284,7 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
             block_reward_industrial: TokenAmount::new(0),
             block_height: 0,
             mempool: vec![entry],
+            base_fee: 1,
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
         map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
@@ -409,6 +410,7 @@ fn schema_upgrade_compatibility() {
         block_reward_industrial: TokenAmount::new(0),
         block_height: 0,
         mempool: vec![entry],
+        base_fee: 1,
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

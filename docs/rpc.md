@@ -22,3 +22,6 @@
 - `gateway.policy` – fetches the JSON policy document for a domain and
   returns `reads_total` and `last_access_ts` counters.
 - `microshard.roots.last?n=` – lists the most recent micro‑shard root headers.
+- `gov_credit_list` – returns pending credit issuance proposals including `ReadPoolSeed` migrations.
+- `gov_credit_vote` – submits an approval or rejection for a credit proposal.
+- `settlement.audit` – replays recent receipts and verifies explorer anchors; used in CI to halt mismatched settlements.
