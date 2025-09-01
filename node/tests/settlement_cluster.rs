@@ -20,7 +20,7 @@ fn cluster_settlement_idempotent() {
     Settlement::set_balance("provider", 0);
     #[cfg(feature = "telemetry")]
     assert_eq!(SETTLE_APPLIED_TOTAL.get(), 0);
-    Settlement::tick(1, &[receipt.clone()]);
+    Settlement::tick(1, std::slice::from_ref(&receipt));
     assert_eq!(Settlement::balance("buyer"), 90);
     #[cfg(feature = "telemetry")]
     assert_eq!(SETTLE_APPLIED_TOTAL.get(), 1);
@@ -28,7 +28,7 @@ fn cluster_settlement_idempotent() {
 
     // Node A restart should not reapply
     Settlement::init(dir1.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
-    Settlement::tick(2, &[receipt.clone()]);
+    Settlement::tick(2, std::slice::from_ref(&receipt));
     assert_eq!(Settlement::balance("buyer"), 90);
     #[cfg(feature = "telemetry")]
     assert_eq!(SETTLE_APPLIED_TOTAL.get(), 1);
@@ -38,7 +38,7 @@ fn cluster_settlement_idempotent() {
     Settlement::init(dir2.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
     Settlement::set_balance("buyer", 100);
     Settlement::set_balance("provider", 0);
-    Settlement::tick(1, &[receipt.clone()]);
+    Settlement::tick(1, std::slice::from_ref(&receipt));
     assert_eq!(Settlement::balance("buyer"), 90);
     #[cfg(feature = "telemetry")]
     assert_eq!(SETTLE_APPLIED_TOTAL.get(), 2);
@@ -46,7 +46,7 @@ fn cluster_settlement_idempotent() {
 
     // Node B restart should also avoid reapplication
     Settlement::init(dir2.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 0);
-    Settlement::tick(2, &[receipt]);
+    Settlement::tick(2, std::slice::from_ref(&receipt));
     assert_eq!(Settlement::balance("buyer"), 90);
     #[cfg(feature = "telemetry")]
     assert_eq!(SETTLE_APPLIED_TOTAL.get(), 2);

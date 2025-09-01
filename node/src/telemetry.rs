@@ -251,6 +251,18 @@ pub static CREDIT_ISSUE_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static READ_DENIED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("read_denied_total", "Reads denied by reason"),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter read denied: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry read denied: {e}"));
+    c
+});
+
 pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_chunk_size_bytes",

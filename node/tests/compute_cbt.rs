@@ -9,7 +9,7 @@ fn redeem_tracks_backstop() {
     }; // 5% premium
     let mut backstop = Backstop::new(1_000);
     let credits = token.redeem(&curve, &mut backstop).expect("redeem");
-    assert_eq!(credits, 10 * (2 + 2 * 50_000 / 1_000_000));
+    assert_eq!(credits, 20);
     assert_eq!(backstop.reserve, 1_000 - credits);
     // deplete reserve
     let big = ComputeToken { units: 1_000_000 };

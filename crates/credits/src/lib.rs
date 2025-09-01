@@ -12,18 +12,14 @@ pub type ProviderId = String;
 pub type EventId = String;
 
 /// Sources from which credits may be earned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Source {
     Uptime,
     LocalNetAssist,
     ProvenStorage,
+    #[default]
     Civic,
-}
-
-impl Default for Source {
-    fn default() -> Self {
-        Source::Civic
-    }
+    Read,
 }
 
 #[derive(Debug, Error)]
@@ -52,12 +48,17 @@ struct ProviderEntry {
 pub struct Ledger {
     providers: HashMap<ProviderId, ProviderEntry>,
     processed: HashMap<EventId, (ProviderId, f64)>,
+    pub read_reward_pool: u64,
 }
 
 impl Ledger {
     /// Create an empty ledger.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            providers: HashMap::new(),
+            processed: HashMap::new(),
+            read_reward_pool: 0,
+        }
     }
 
     /// Load a ledger from the given path, if it exists, otherwise create a new one.
@@ -76,16 +77,17 @@ impl Ledger {
         Ok(())
     }
 
+    pub fn seed_read_pool(&mut self, amount: u64) {
+        self.read_reward_pool = self.read_reward_pool.saturating_add(amount);
+    }
+
     /// Directly set the balance for `provider` to `amount` with no expiry.
     pub fn set_balance(&mut self, provider: &str, amount: u64) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0))
             .as_secs();
-        let entry = self
-            .providers
-            .entry(provider.to_owned())
-            .or_insert_with(ProviderEntry::default);
+        let entry = self.providers.entry(provider.to_owned()).or_default();
         entry.sources.clear();
         entry.sources.insert(
             Source::Civic,
@@ -120,10 +122,7 @@ impl Ledger {
         } else {
             now_secs + expiry_days * 24 * 60 * 60
         };
-        let prov = self
-            .providers
-            .entry(provider.to_owned())
-            .or_insert_with(ProviderEntry::default);
+        let prov = self.providers.entry(provider.to_owned()).or_default();
         let src = prov.sources.entry(source).or_insert(SourceEntry {
             amount: 0.0,
             expiry,
@@ -135,6 +134,22 @@ impl Ledger {
         prov.last_update = now_secs;
         self.processed
             .insert(event.to_owned(), (provider.to_owned(), amount as f64));
+    }
+
+    pub fn issue_read(
+        &mut self,
+        provider: &str,
+        event: &str,
+        amount: u64,
+        now: SystemTime,
+        expiry_days: u64,
+    ) -> Result<(), CreditError> {
+        if self.read_reward_pool < amount {
+            return Err(CreditError::Insufficient);
+        }
+        self.read_reward_pool -= amount;
+        self.accrue_with(provider, event, Source::Read, amount, now, expiry_days);
+        Ok(())
     }
 
     /// Accrue credits with default `Source::Civic` and no expiry.
@@ -151,10 +166,7 @@ impl Ledger {
 
     /// Spend `amount` credits from `provider` if available.
     pub fn spend(&mut self, provider: &str, amount: u64) -> Result<(), CreditError> {
-        let prov = self
-            .providers
-            .entry(provider.to_owned())
-            .or_insert_with(ProviderEntry::default);
+        let prov = self.providers.entry(provider.to_owned()).or_default();
         let total: f64 = prov.sources.values().map(|s| s.amount).sum();
         if total < amount as f64 {
             return Err(CreditError::Insufficient);

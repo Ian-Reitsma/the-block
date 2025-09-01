@@ -25,11 +25,13 @@ impl Default for IssuanceParams {
         weights_ppm.insert(Source::LocalNetAssist, 1_000_000);
         weights_ppm.insert(Source::ProvenStorage, 1_000_000);
         weights_ppm.insert(Source::Civic, 1_000_000);
+        weights_ppm.insert(Source::Read, 1_000_000);
         let mut expiry_days = HashMap::new();
         expiry_days.insert(Source::Uptime, u64::MAX);
         expiry_days.insert(Source::LocalNetAssist, u64::MAX);
         expiry_days.insert(Source::ProvenStorage, u64::MAX);
         expiry_days.insert(Source::Civic, u64::MAX);
+        expiry_days.insert(Source::Read, u64::MAX);
         Self {
             weights_ppm,
             cap_per_identity: u64::MAX,
@@ -57,21 +59,22 @@ fn src_label(s: Source) -> &'static str {
         Source::LocalNetAssist => "localnet",
         Source::ProvenStorage => "storage",
         Source::Civic => "civic",
+        Source::Read => "read",
     }
 }
 
 pub fn set_params(p: IssuanceParams) {
-    let mut st = STATE.write().unwrap();
+    let mut st = STATE.write().unwrap_or_else(|e| e.into_inner());
     st.params = p;
 }
 
 pub fn set_region_density(region: &str, density_ppm: u64) {
-    let mut st = STATE.write().unwrap();
+    let mut st = STATE.write().unwrap_or_else(|e| e.into_inner());
     st.region_density.insert(region.to_owned(), density_ppm);
 }
 
 pub fn issue(provider: &str, region: &str, source: Source, event: &str, base_amount: u64) {
-    let mut st = STATE.write().unwrap();
+    let mut st = STATE.write().unwrap_or_else(|e| e.into_inner());
     let params = st.params.clone();
     let weight_ppm = *params.weights_ppm.get(&source).unwrap_or(&1_000_000);
     let density = *st.region_density.get(region).unwrap_or(&1_000_000);
@@ -115,4 +118,12 @@ pub fn issue(provider: &str, region: &str, source: Source, event: &str, base_amo
             .with_label_values(&[src_label(source), region])
             .inc_by(amount);
     }
+}
+
+pub fn issue_read(provider: &str, region: &str, event: &str, bytes: u64) {
+    issue(provider, region, Source::Read, event, bytes);
+}
+
+pub fn seed_read_pool(amount: u64) {
+    Settlement::seed_read_pool(amount);
 }

@@ -8,6 +8,7 @@ Headline panels show:
 - **SLA misses** – monitor `industrial_rejected_total{reason="SLA"}` for deadline violations.
 - **Settlement applied** – watch `settle_applied_total` for receipt activity.
 - **Storage provider RTT/loss** – track `storage_provider_rtt_ms` and `storage_provider_loss_rate`.
+- **Read denials & issuance** – watch `read_denied_total{reason}` and `credit_issued_total{source}`.
 
 To scrape metrics remotely with Prometheus:
 ```yaml

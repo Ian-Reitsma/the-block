@@ -13,7 +13,7 @@ fn bench_parallel(c: &mut Criterion) {
     c.bench_function("parallel", |b| {
         b.iter(|| {
             let tasks: Vec<Task<()>> = (0..8)
-                .map(|i| Task::new(vec![format!("r{i}")], vec![format!("w{i}")], || workload()))
+                .map(|i| Task::new(vec![format!("r{i}")], vec![format!("w{i}")], workload))
                 .collect();
             ParallelExecutor::execute(tasks);
         });
@@ -23,7 +23,7 @@ fn bench_parallel(c: &mut Criterion) {
         b.iter(|| {
             // All tasks share the same write key forcing serialization.
             let tasks: Vec<Task<()>> = (0..8)
-                .map(|_| Task::new(vec!["r".into()], vec!["w".into()], || workload()))
+                .map(|_| Task::new(vec!["r".into()], vec!["w".into()], workload))
                 .collect();
             ParallelExecutor::execute(tasks);
         });

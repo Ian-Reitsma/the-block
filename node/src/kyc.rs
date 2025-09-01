@@ -16,14 +16,16 @@ static PROVIDER: Mutex<Option<Arc<dyn KycProvider>>> = Mutex::new(None);
 
 /// Install a custom KYC provider.
 pub fn set_provider(p: Arc<dyn KycProvider>) {
-    *PROVIDER.lock().unwrap() = Some(p);
+    if let Ok(mut guard) = PROVIDER.lock() {
+        *guard = Some(p);
+    }
 }
 
 fn provider() -> Arc<dyn KycProvider> {
     PROVIDER
         .lock()
-        .unwrap()
-        .clone()
+        .map(|g| g.clone())
+        .unwrap_or_else(|e| e.into_inner().clone())
         .unwrap_or_else(|| Arc::new(NoopKyc))
 }
 
@@ -45,13 +47,17 @@ mod tests {
 
     #[test]
     fn default_allows() {
-        PROVIDER.lock().unwrap().take();
+        if let Ok(mut g) = PROVIDER.lock() {
+            g.take();
+        }
         assert!(verify("alice").unwrap());
     }
 
     #[test]
     fn custom_provider_overrides() {
-        PROVIDER.lock().unwrap().take();
+        if let Ok(mut g) = PROVIDER.lock() {
+            g.take();
+        }
         set_provider(Arc::new(Fail));
         assert!(!verify("alice").unwrap());
     }

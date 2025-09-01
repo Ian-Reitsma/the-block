@@ -28,7 +28,7 @@ fn target(difficulty: u64) -> u64 {
 pub fn mine(mut header: BlockHeader) -> BlockHeader {
     loop {
         let hash = header.hash();
-        let value = u64::from_le_bytes(hash[..8].try_into().unwrap());
+        let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
         if value <= target(header.difficulty) {
             return header;
         }
@@ -54,7 +54,7 @@ pub fn adjust_difficulty(prev: u64, actual_secs: u64, target_secs: u64) -> u64 {
 pub fn template(prev_hash: [u8; 32], merkle_root: [u8; 32], difficulty: u64) -> BlockHeader {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
         .as_secs();
     BlockHeader {
         prev_hash,
@@ -74,7 +74,7 @@ mod tests {
         let header = template([0u8; 32], [1u8; 32], 1_000_000);
         let mined = mine(header.clone());
         let hash = mined.hash();
-        let value = u64::from_le_bytes(hash[..8].try_into().unwrap());
+        let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
         assert!(value <= target(header.difficulty));
     }
 

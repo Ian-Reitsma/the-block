@@ -9,7 +9,7 @@ fn rollback_clears_tampered_receipts() {
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 5);
     let r = Receipt::new("job".into(), "buyer".into(), "prov".into(), 10, false);
-    Settlement::tick(1, &[r.clone()]);
+    Settlement::tick(1, std::slice::from_ref(&r));
     let pending = dir.path().join("receipts/pending/1");
     let mut list: Vec<Receipt> = bincode::deserialize(&std::fs::read(&pending).unwrap()).unwrap();
     list[0].quote_price = 5;

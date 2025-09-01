@@ -26,7 +26,9 @@ impl Wallet {
     pub fn from_seed(seed: &[u8; 32]) -> Self {
         let secret = ed25519_dalek::SecretKey::from_bytes(seed).expect("seed length");
         let public = PublicKey::from(&secret);
-        Self { keypair: Keypair { secret, public } }
+        Self {
+            keypair: Keypair { secret, public },
+        }
     }
 
     /// Generate a new wallet with OS randomness.
@@ -57,14 +59,27 @@ pub mod hardware {
         connected: bool,
     }
 
+    impl Default for MockHardwareWallet {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MockHardwareWallet {
         pub fn new() -> Self {
             let mut rng = OsRng;
             let keypair = Keypair::generate(&mut rng);
-            Self { keypair, connected: false }
+            Self {
+                keypair,
+                connected: false,
+            }
         }
-        pub fn connect(&mut self) { self.connected = true; }
-        pub fn disconnect(&mut self) { self.connected = false; }
+        pub fn connect(&mut self) {
+            self.connected = true;
+        }
+        pub fn disconnect(&mut self) {
+            self.connected = false;
+        }
     }
 
     impl WalletSigner for MockHardwareWallet {

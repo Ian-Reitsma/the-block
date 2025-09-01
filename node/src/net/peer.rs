@@ -82,7 +82,8 @@ impl PeerSet {
             .and_then(|v| v.parse().ok());
         let mut rng: StdRng = match seed {
             Some(s) => StdRng::seed_from_u64(s),
-            None => StdRng::from_rng(rand::thread_rng()).unwrap(),
+            None => StdRng::from_rng(rand::thread_rng())
+                .unwrap_or_else(|_| StdRng::seed_from_u64(0)),
         };
         peers.shuffle(&mut rng);
         peers

@@ -46,6 +46,7 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::BurstRefillRatePerS => "burst_refill_rate_per_s_ppm",
         ParamKey::CreditsDecayLambdaPerHourPpm => "credits_decay_lambda_per_hour_ppm",
         ParamKey::DailyPayoutCap => "daily_payout_cap",
+        ParamKey::ReadPoolSeed => "read_pool_seed",
     }
 }
 
@@ -208,7 +209,9 @@ impl GovStore {
         let hist_dir = self.base_path.join("governance/history");
         let _ = std::fs::create_dir_all(&hist_dir);
         let snap_path = hist_dir.join(format!("{}.json", current_epoch));
-        let _ = std::fs::write(&snap_path, serde_json::to_vec(params).unwrap());
+        if let Ok(bytes) = serde_json::to_vec(params) {
+            let _ = std::fs::write(&snap_path, bytes);
+        }
 
         let queue = self.activation_queue();
         let mut to_remove = vec![];
@@ -236,6 +239,7 @@ impl GovStore {
                                     params.credits_decay_lambda_per_hour_ppm
                                 }
                                 ParamKey::DailyPayoutCap => params.daily_payout_cap as i64,
+                                ParamKey::ReadPoolSeed => params.read_pool_seed as i64,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -367,6 +371,7 @@ impl GovStore {
                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
                 ParamKey::CreditsDecayLambdaPerHourPpm => params.credits_decay_lambda_per_hour_ppm,
                 ParamKey::DailyPayoutCap => params.daily_payout_cap as i64,
+                ParamKey::ReadPoolSeed => params.read_pool_seed as i64,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;

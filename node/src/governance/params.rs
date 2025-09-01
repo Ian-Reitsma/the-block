@@ -26,6 +26,10 @@ impl<'a> Runtime<'a> {
     pub fn set_credit_decay_lambda(&mut self, v: f64) {
         crate::compute_market::settlement::Settlement::set_decay_lambda(v);
     }
+
+    pub fn seed_read_pool(&mut self, amount: u64) {
+        crate::credits::issuance::seed_read_pool(amount);
+    }
 }
 
 pub struct ParamSpec {
@@ -47,6 +51,7 @@ pub struct Params {
     pub burst_refill_rate_per_s_ppm: i64,
     pub credits_decay_lambda_per_hour_ppm: i64,
     pub daily_payout_cap: u64,
+    pub read_pool_seed: u64,
 }
 
 impl Default for Params {
@@ -59,6 +64,7 @@ impl Default for Params {
             burst_refill_rate_per_s_ppm: ((30.0 / 60.0) * 1_000_000.0) as i64,
             credits_decay_lambda_per_hour_ppm: 0,
             daily_payout_cap: u64::MAX,
+            read_pool_seed: 0,
         }
     }
 }
@@ -93,8 +99,13 @@ fn apply_daily_payout_cap(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_read_pool_seed(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.read_pool_seed = v as u64;
+    Ok(())
+}
+
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 7] = [
+    static REGS: [ParamSpec; 8] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -176,6 +187,18 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_daily_payout_cap,
             apply_runtime: |v, _rt| {
                 crate::compute_market::settlement::Settlement::set_daily_payout_cap(v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::ReadPoolSeed,
+            default: 0,
+            min: 0,
+            max: i64::MAX,
+            unit: "credits",
+            apply: apply_read_pool_seed,
+            apply_runtime: |v, rt| {
+                rt.seed_read_pool(v as u64);
                 Ok(())
             },
         },

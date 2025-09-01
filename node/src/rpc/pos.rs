@@ -32,7 +32,7 @@ fn get_amount(params: &Value) -> Result<u64, RpcError> {
 
 pub fn register(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
-    let mut pos = POS_STATE.lock().unwrap();
+    let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.register(id);
     Ok(serde_json::json!({"status": "ok"}))
 }
@@ -40,7 +40,7 @@ pub fn register(params: &Value) -> Result<Value, RpcError> {
 pub fn bond(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
     let amount = get_amount(params)?;
-    let mut pos = POS_STATE.lock().unwrap();
+    let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.bond(&id, amount);
     Ok(serde_json::json!({"stake": pos.stake_of(&id)}))
 }
@@ -48,7 +48,7 @@ pub fn bond(params: &Value) -> Result<Value, RpcError> {
 pub fn unbond(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
     let amount = get_amount(params)?;
-    let mut pos = POS_STATE.lock().unwrap();
+    let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.unbond(&id, amount);
     Ok(serde_json::json!({"stake": pos.stake_of(&id)}))
 }
@@ -56,7 +56,7 @@ pub fn unbond(params: &Value) -> Result<Value, RpcError> {
 pub fn slash(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
     let amount = get_amount(params)?;
-    let mut pos = POS_STATE.lock().unwrap();
+    let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.slash(&id, amount);
     Ok(serde_json::json!({"stake": pos.stake_of(&id)}))
 }
