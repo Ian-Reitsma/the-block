@@ -5,8 +5,11 @@ use crate::net::message::{Message, Payload};
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use once_cell::sync::Lazy;
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,9 +25,16 @@ pub struct PeerSet {
 }
 
 impl PeerSet {
-    /// Create a new set seeded with `initial` peers.
+    /// Create a new set seeded with `initial` peers and any persisted peers.
     pub fn new(initial: Vec<SocketAddr>) -> Self {
-        let set: HashSet<_> = initial.into_iter().collect();
+        let mut set: HashSet<_> = initial.into_iter().collect();
+        if let Ok(data) = fs::read_to_string(peer_db_path()) {
+            for line in data.lines() {
+                if let Ok(addr) = line.trim().parse::<SocketAddr>() {
+                    set.insert(addr);
+                }
+            }
+        }
         Self {
             addrs: Arc::new(Mutex::new(set)),
             authorized: Arc::new(Mutex::new(HashSet::new())),
@@ -36,6 +46,7 @@ impl PeerSet {
     pub fn add(&self, addr: SocketAddr) {
         if let Ok(mut guard) = self.addrs.lock() {
             guard.insert(addr);
+            persist_peers(&guard);
         }
     }
 
@@ -43,6 +54,7 @@ impl PeerSet {
     pub fn remove(&self, addr: SocketAddr) {
         if let Ok(mut guard) = self.addrs.lock() {
             guard.remove(&addr);
+            persist_peers(&guard);
         }
     }
 
@@ -50,6 +62,7 @@ impl PeerSet {
     pub fn clear(&self) {
         if let Ok(mut guard) = self.addrs.lock() {
             guard.clear();
+            persist_peers(&guard);
         }
     }
 
@@ -59,6 +72,20 @@ impl PeerSet {
             .lock()
             .map(|g| g.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// Return a randomized list of peers for bootstrapping.
+    pub fn bootstrap(&self) -> Vec<SocketAddr> {
+        let mut peers = self.list();
+        let seed = std::env::var("TB_PEER_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok());
+        let mut rng: StdRng = match seed {
+            Some(s) => StdRng::seed_from_u64(s),
+            None => StdRng::from_rng(rand::thread_rng()).unwrap(),
+        };
+        peers.shuffle(&mut rng);
+        peers
     }
 
     fn authorize(&self, pk: [u8; 32]) {
@@ -165,11 +192,20 @@ impl PeerSet {
                         crate::telemetry::PEER_REJECTED_TOTAL
                             .with_label_values(&["protocol"])
                             .inc();
+                        crate::telemetry::PEER_HANDSHAKE_FAILURE_TOTAL
+                            .with_label_values(&["protocol"])
+                            .inc();
                     }
                     return;
                 }
                 if (hs.features & crate::net::REQUIRED_FEATURES) != crate::net::REQUIRED_FEATURES {
                     telemetry_peer_error(PeerErrorCode::HandshakeFeature);
+                    #[cfg(feature = "telemetry")]
+                    {
+                        crate::telemetry::PEER_HANDSHAKE_FAILURE_TOTAL
+                            .with_label_values(&["feature"])
+                            .inc();
+                    }
                     return;
                 }
                 self.authorize(msg.pubkey);
@@ -265,6 +301,27 @@ fn telemetry_peer_error(code: PeerErrorCode) {
     }
     #[cfg(not(feature = "telemetry"))]
     let _ = code;
+}
+
+fn peer_db_path() -> PathBuf {
+    std::env::var("TB_PEER_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".the_block")
+                .join("peers.txt")
+        })
+}
+
+fn persist_peers(set: &HashSet<SocketAddr>) {
+    let path = peer_db_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let mut addrs: Vec<String> = set.iter().map(|a| a.to_string()).collect();
+    addrs.sort();
+    let _ = fs::write(path, addrs.join("\n"));
 }
 
 static P2P_MAX_PER_SEC: Lazy<u32> = Lazy::new(|| {

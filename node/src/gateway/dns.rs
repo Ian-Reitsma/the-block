@@ -6,6 +6,7 @@ use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::convert::TryInto;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_DNS_DB_PATH").unwrap_or_else(|_| "dns_db".into());
@@ -48,25 +49,11 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
     vk.verify(&msg, &sig).map_err(|_| DnsError::SigInvalid)?;
     let mut db = DNS_DB.lock().unwrap();
     db.insert(&format!("dns_records/{}", domain), txt.as_bytes().to_vec());
-    if let Ok(val) = serde_json::from_str::<Value>(txt) {
-        if let Some(pol) = val.get("gw_policy") {
-            let fee = pol.get("read_fee_μc").and_then(|v| v.as_u64()).unwrap_or(0);
-            let budget = pol.get("budget_μc").and_then(|v| v.as_u64()).unwrap_or(0);
-            db.insert(
-                &format!("dns_budget/{}", domain),
-                budget.to_le_bytes().to_vec(),
-            );
-            db.insert(&format!("dns_fee/{}", domain), fee.to_le_bytes().to_vec());
-            let offset = pol
-                .get("credit_offset")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            db.insert(
-                &format!("dns_offset/{}", domain),
-                offset.to_le_bytes().to_vec(),
-            );
-        }
-    }
+    db.insert(
+        &format!("dns_reads/{}", domain),
+        0u64.to_le_bytes().to_vec(),
+    );
+    db.insert(&format!("dns_last/{}", domain), 0u64.to_le_bytes().to_vec());
     Ok(serde_json::json!({"status":"ok"}))
 }
 
@@ -76,32 +63,29 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
     let mut db = DNS_DB.lock().unwrap();
     if let Some(bytes) = db.get(&key) {
         if let Ok(txt) = String::from_utf8(bytes) {
-            let fee_key = format!("dns_fee/{}", domain);
-            let budget_key = format!("dns_budget/{}", domain);
-            let offset_key = format!("dns_offset/{}", domain);
-            let mut remaining = if let Some(b) = db.get(&budget_key) {
-                u64::from_le_bytes(b.as_slice().try_into().unwrap_or([0; 8]))
-            } else {
-                0
-            };
-            let fee = db
-                .get(&fee_key)
+            let reads_key = format!("dns_reads/{}", domain);
+            let last_key = format!("dns_last/{}", domain);
+            let mut reads = db
+                .get(&reads_key)
                 .map(|v| u64::from_le_bytes(v.as_slice().try_into().unwrap_or([0; 8])))
                 .unwrap_or(0);
-            let offset = db
-                .get(&offset_key)
-                .map(|v| u64::from_le_bytes(v.as_slice().try_into().unwrap_or([0; 8])))
-                .unwrap_or(0);
-            if remaining > 0 && fee > offset {
-                let charge = fee - offset;
-                remaining = remaining.saturating_sub(charge);
-                db.insert(&budget_key, remaining.to_le_bytes().to_vec());
-            }
+            reads += 1;
+            db.insert(&reads_key, reads.to_le_bytes().to_vec());
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            db.insert(&last_key, ts.to_le_bytes().to_vec());
             return serde_json::json!({
                 "record": txt,
-                "remaining_budget_μc": remaining,
+                "reads_total": reads,
+                "last_access_ts": ts,
             });
         }
     }
-    serde_json::json!({"record": null, "remaining_budget_μc": 0})
+    serde_json::json!({
+        "record": null,
+        "reads_total": 0,
+        "last_access_ts": 0,
+    })
 }

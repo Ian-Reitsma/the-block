@@ -1,8 +1,10 @@
+use serial_test::serial;
 use tempfile::tempdir;
 use the_block::compute_market::receipt::Receipt;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 
 #[test]
+#[serial]
 fn dispute_prevents_finalization() {
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::Real, 0, 0.0, 1);
@@ -17,4 +19,5 @@ fn dispute_prevents_finalization() {
     Settlement::tick(3, &[r2.clone()]);
     Settlement::tick(4, &[]);
     assert_eq!(Settlement::balance(&r2.provider), r2.quote_price);
+    Settlement::shutdown();
 }

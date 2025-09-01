@@ -12,7 +12,10 @@ members = [
   "tools/xtask",
   "tools/indexer",
   "tools/bench-harness",
-  "tools/installer"
+  "tools/installer",
+  "tools/purge-credits",
+  "tools/debugger",
+  "tools/gov-ui"
 ]
 default-members = [
   "node",

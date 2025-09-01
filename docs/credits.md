@@ -2,7 +2,7 @@
 
 Service credits track non-transferable balances used to pay for compute and network workloads. Each provider maintains a ledger entry persisted on disk so balances survive restarts.
 
-Reads are free; credits are only burned on write operations such as storing new objects.
+Reads are free; providers earn from a global `read_reward_pool` when they serve data, and credits are only burned on write operations such as storing new objects.
 
 ## Ledger Operations
 
@@ -19,11 +19,18 @@ Balances are stored in a `sled` tree keyed by provider ID. Updates use `compare_
 The node binary exposes a `credits` subcommand for inspection and manual adjustments:
 
 ```bash
-cargo run --bin node -- credits top-up --provider alice --amount 100
 cargo run --bin node -- credits balance alice
 ```
 
-`top-up` is a development convenience; production credit issuance occurs through governance.
+Credits are issued only through governance proposals approved by validator votes.
+When a credit-issuance proposal executes, the node applies the award directly
+to the ledger and increments `credit_issued_total{source="governance"}`.
+
+To purge legacy development balances, run:
+
+```bash
+cargo run -p purge-credits -- <path/to/credits.bin>
+```
 
 All commands persist changes through the ledger crate so subsequent runs observe the updated totals. Temporary directories in tests use isolated sled paths to avoid cross-test contamination.
 
@@ -43,6 +50,8 @@ Credits accrue from distinct sources so rewards can be tuned independently:
 - `LocalNetAssist` – granted for validated local networking help.
 - `ProvenStorage` – credited for storage proofs.
 - `Civic` – community chores and governance duties.
+- `Read` – minted from the `read_reward_pool` when providers serve finalized
+  `ReadReceipt`s.
 
 Weights and per-identity or per-region caps are controlled by `credits.issuance.*`
 governance parameters. Prometheus counters

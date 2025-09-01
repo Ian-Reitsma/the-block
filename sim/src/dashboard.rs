@@ -12,4 +12,8 @@ pub struct Snapshot {
     pub bridged: f64,
     pub consumer_demand: f64,
     pub industrial_demand: f64,
+    pub backlog: f64,
+    pub inflation_rate: f64,
+    pub sell_coverage: f64,
+    pub readiness: f64,
 }

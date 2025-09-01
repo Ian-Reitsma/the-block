@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use sled::Tree;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::SystemTime;
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::CREDIT_BURN_TOTAL;
@@ -48,6 +50,7 @@ impl<'de> Deserialize<'de> for SettleMode {
 }
 
 pub struct Settlement {
+    db: sled::Db,
     mode: SettleMode,
     ledger: Ledger,
     ledger_path: PathBuf,
@@ -64,6 +67,8 @@ pub struct Settlement {
 }
 
 static GLOBAL: Lazy<Mutex<Option<Settlement>>> = Lazy::new(|| Mutex::new(None));
+static AUDITOR: Lazy<Mutex<Option<thread::JoinHandle<()>>>> = Lazy::new(|| Mutex::new(None));
+static AUDIT_RUN: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(true));
 
 impl Settlement {
     pub fn init(
@@ -89,6 +94,7 @@ impl Settlement {
             .unwrap_or_else(|e| panic!("open roots: {e}"));
         let ledger = Ledger::load(&ledger_path).unwrap_or_else(|e| panic!("load ledger: {e}"));
         *GLOBAL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Self {
+            db,
             mode,
             ledger,
             ledger_path,
@@ -102,6 +108,27 @@ impl Settlement {
             daily_payout_cap: u64::MAX,
             payouts_today: HashMap::new(),
         });
+        if let Some(ms) = std::env::var("TB_SETTLE_AUDIT_INTERVAL_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            AUDIT_RUN.store(true, Ordering::Relaxed);
+            let handle = thread::spawn(move || {
+                let interval = Duration::from_millis(ms);
+                while AUDIT_RUN.load(Ordering::Relaxed) {
+                    let reports = Self::audit();
+                    if !reports.is_empty() {
+                        let dir = Self::with(|s| s.receipts_dir.clone());
+                        let path = dir.join("audit_latest.json");
+                        if let Ok(json) = serde_json::to_vec(&reports) {
+                            let _ = std::fs::write(&path, json);
+                        }
+                    }
+                    thread::sleep(interval);
+                }
+            });
+            *AUDITOR.lock().unwrap() = Some(handle);
+        }
     }
 
     fn with<F, R>(f: F) -> R
@@ -150,7 +177,14 @@ impl Settlement {
     }
 
     pub fn shutdown() {
-        *GLOBAL.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        AUDIT_RUN.store(false, Ordering::Relaxed);
+        if let Some(handle) = AUDITOR.lock().unwrap().take() {
+            let _ = handle.join();
+        }
+        let mut guard = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = guard.take() {
+            let _ = s.db.flush();
+        }
     }
 
     pub fn set_balance(acct: &str, amt: u64) {
@@ -434,11 +468,17 @@ impl Settlement {
                                         invalid += 1;
                                     }
                                 }
-                                out.push(AuditSummary {
+                                let summary = AuditSummary {
                                     epoch,
                                     receipts: list.len() as u64,
                                     invalid: invalid as u64,
-                                });
+                                };
+                                #[cfg(feature = "telemetry")]
+                                if summary.invalid > 0 {
+                                    crate::telemetry::SETTLE_AUDIT_MISMATCH_TOTAL
+                                        .inc_by(summary.invalid);
+                                }
+                                out.push(summary);
                             }
                         }
                     }

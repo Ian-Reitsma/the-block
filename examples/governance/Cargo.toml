@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 the_block = { path = "../../node", features = ["telemetry"] }
+credits = { path = "../../crates/credits" }
 
 [[bin]]
 name = "gov"

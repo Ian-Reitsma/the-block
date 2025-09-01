@@ -6,6 +6,7 @@ pub mod turbine;
 
 use crate::{gossip::relay::Relay, Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;
+use rand::Rng;
 use rand_core::{OsRng, RngCore};
 use std::fs;
 use std::io::{Read, Write};
@@ -107,7 +108,7 @@ impl Node {
 
     /// Perform peer discovery by handshaking with known peers and exchanging address lists.
     pub fn discover_peers(&self) {
-        let peers = self.peers.list();
+        let peers = self.peers.bootstrap();
         // send handshake to each peer
         let hs = Handshake {
             node_id: self.key.verifying_key().to_bytes(),
@@ -185,6 +186,20 @@ impl Node {
 }
 
 pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
+    let mut rng = rand::thread_rng();
+    if let Ok(loss_str) = std::env::var("TB_NET_PACKET_LOSS") {
+        if let Ok(loss) = loss_str.parse::<f64>() {
+            if rng.gen_bool(loss) {
+                return Ok(());
+            }
+        }
+    }
+    if let Ok(jitter_str) = std::env::var("TB_NET_JITTER_MS") {
+        if let Ok(jitter) = jitter_str.parse::<u64>() {
+            let delay = rng.gen_range(0..=jitter);
+            std::thread::sleep(Duration::from_millis(delay));
+        }
+    }
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     stream.write_all(&bytes)?;
@@ -209,9 +224,14 @@ pub(crate) fn load_net_key() -> SigningKey {
             }
         }
     }
-    let mut rng = OsRng;
     let mut seed = [0u8; 32];
-    rng.fill_bytes(&mut seed);
+    if let Ok(s) = std::env::var("TB_NET_KEY_SEED") {
+        let hash = blake3::hash(s.as_bytes());
+        seed.copy_from_slice(hash.as_bytes());
+    } else {
+        let mut rng = OsRng;
+        rng.fill_bytes(&mut seed);
+    }
     let sk = SigningKey::from_bytes(&seed);
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);

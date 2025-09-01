@@ -9,6 +9,7 @@ macro_rules! consensus {
 pub mod engine;
 pub mod finality;
 pub mod fork_choice;
+pub mod leader;
 #[cfg(feature = "telemetry")]
 pub mod observer;
 pub mod pos;

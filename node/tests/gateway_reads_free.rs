@@ -4,13 +4,10 @@ use tempfile::tempdir;
 use the_block::gateway::dns::{gateway_policy, publish_record};
 
 #[test]
-fn read_fee_deducts_budget() {
+fn reads_increment_without_charging() {
     let dir = tempdir().unwrap();
     std::env::set_var("TB_DNS_DB_PATH", dir.path().join("dns").to_str().unwrap());
-    let txt = json!({
-        "gw_policy": {"budget_μc": 100, "read_fee_μc": 10, "credit_offset": 0}
-    })
-    .to_string();
+    let txt = json!({"gw_policy":{}}).to_string();
     let sk = SigningKey::from_bytes(&[1u8; 32]);
     let pk = sk.verifying_key();
     let mut msg = Vec::new();
@@ -25,7 +22,8 @@ fn read_fee_deducts_budget() {
     });
     let _ = publish_record(&params);
     let r1 = gateway_policy(&json!({"domain":"test"}));
-    assert_eq!(r1["remaining_budget_μc"].as_u64().unwrap(), 90);
+    assert_eq!(r1["reads_total"].as_u64().unwrap(), 1);
     let r2 = gateway_policy(&json!({"domain":"test"}));
-    assert_eq!(r2["remaining_budget_μc"].as_u64().unwrap(), 80);
+    assert_eq!(r2["reads_total"].as_u64().unwrap(), 2);
+    assert!(r2["last_access_ts"].as_u64().unwrap() >= r1["last_access_ts"].as_u64().unwrap());
 }

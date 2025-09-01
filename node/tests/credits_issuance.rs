@@ -37,4 +37,5 @@ fn credits_issuance_caps() {
     assert_eq!(Settlement::balance("alice"), 2); // unchanged
 
     set_params(IssuanceParams::default());
+    Settlement::shutdown();
 }

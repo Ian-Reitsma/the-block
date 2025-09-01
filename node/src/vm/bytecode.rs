@@ -1,0 +1,99 @@
+use crate::vm::gas::GasMeter;
+
+/// Minimal deterministic instruction set for testing.
+/// Bytecode is a sequence of opcodes optionally followed by immediates.
+/// All operations are 64-bit and little-endian.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpCode {
+    /// Halts execution and returns the stack.
+    Halt = 0x00,
+    /// Push a 64-bit immediate onto the stack.
+    Push = 0x01,
+    /// Pop two values, push their sum.
+    Add = 0x02,
+    /// Pop two values, push the first minus the second.
+    Sub = 0x03,
+}
+
+impl OpCode {
+    fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0x00 => Some(Self::Halt),
+            0x01 => Some(Self::Push),
+            0x02 => Some(Self::Add),
+            0x03 => Some(Self::Sub),
+            _ => None,
+        }
+    }
+}
+
+/// Execute bytecode returning the final stack as `Vec<u64>` and total gas used.
+/// Each opcode costs 1 gas plus any immediates cost of 1.
+pub fn execute(code: &[u8], meter: &mut GasMeter) -> Result<Vec<u64>, &'static str> {
+    let mut pc = 0usize;
+    let mut stack: Vec<u64> = Vec::new();
+    while pc < code.len() {
+        let op = OpCode::from_byte(code[pc]).ok_or("bad opcode")?;
+        pc += 1;
+        meter.charge(1)?;
+        match op {
+            OpCode::Halt => break,
+            OpCode::Push => {
+                if pc + 8 > code.len() {
+                    return Err("truncated push");
+                }
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&code[pc..pc + 8]);
+                pc += 8;
+                meter.charge(1)?; // charge for immediate read
+                stack.push(u64::from_le_bytes(buf));
+            }
+            OpCode::Add => {
+                let b = stack.pop().ok_or("stack underflow")?;
+                let a = stack.pop().ok_or("stack underflow")?;
+                stack.push(a.wrapping_add(b));
+            }
+            OpCode::Sub => {
+                let b = stack.pop().ok_or("stack underflow")?;
+                let a = stack.pop().ok_or("stack underflow")?;
+                stack.push(a.wrapping_sub(b));
+            }
+        }
+    }
+    Ok(stack)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_add() {
+        let code: Vec<u8> = vec![
+            OpCode::Push as u8,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            OpCode::Push as u8,
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            OpCode::Add as u8,
+            OpCode::Halt as u8,
+        ];
+        let mut meter = GasMeter::new(10);
+        let stack = execute(&code, &mut meter).unwrap();
+        assert_eq!(stack, vec![5]);
+        assert_eq!(meter.used(), 6); // push(1+1)*2 + add + halt
+    }
+}

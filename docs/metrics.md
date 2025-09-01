@@ -27,12 +27,14 @@ The exporter currently tracks:
 - `mempool_size{lane}` – gauge of current mempool size per fee lane
 - `consumer_fee_p50` / `consumer_fee_p90` – sampled consumer fees
 - `industrial_rejected_total{reason}` – industrial transactions dropped or deferred
+- `industrial_rejected_total{reason="SLA"}` – provider slashed for missing deadlines
 - `admission_mode{mode}` – comfort guard state
 - `gossip_duplicate_total` – hashes ignored due to TTL deduplication
 - `gossip_fanout_gauge` – number of peers each gossip message relays to
 - `credit_issued_total{source}` – credits awarded by source
 - `credit_issue_rejected_total{reason}` – issuance rejected by reason
 - `credit_burn_total{sink}` – credits burned per sink
+- `read_denied_total{reason}` – reads rejected due to rate limits
 - `storage_repair_bytes_total` / `storage_repair_failures_total` – bytes reconstructed and failed repairs
 - `storage_chunk_size_bytes` – distribution of chunk sizes written during uploads
 - `storage_put_chunk_seconds` – time taken to store individual chunks
@@ -47,6 +49,7 @@ The exporter currently tracks:
 - `settle_applied_total` – receipts successfully debited and credited
 - `settle_failed_total{reason}` – settlement failures by reason
 - `settle_mode_change_total{to}` – settlement mode transitions
+- `settle_audit_mismatch_total` – settlement audit discrepancies detected
 - `ttl_drop_total` / `startup_ttl_drop_total` – messages dropped due to TTL expiry during runtime and startup
 - `orphan_sweep_total` – orphan blocks removed during periodic sweeps
 - `snapshot_duration_seconds` / `snapshot_fail_total` – snapshot round-trip time and failure counts
@@ -56,5 +59,6 @@ The exporter currently tracks:
 - `synthetic_convergence_seconds` – end-to-end probe duration emitted by scripts/synthetic.sh
 - `synthetic_success_total` – successful synthetic runs
 - `synthetic_fail_total{step}` – probe failures by step
+- `peer_handshake_failure_total{reason}` – failed peer handshakes during bootstrap
 
 For a full list of counters, see `src/telemetry.rs`.

@@ -16,6 +16,12 @@ fn init_env() -> tempfile::TempDir {
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
+    std::env::set_var("TB_NET_KEY_SEED", "chaos");
+    std::env::set_var("TB_PEER_SEED", "1");
+    std::env::set_var("TB_NET_PACKET_LOSS", "0.15");
+    std::env::set_var("TB_NET_JITTER_MS", "200");
+    std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
+    std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
     dir
 }
 
@@ -52,6 +58,7 @@ impl TestNode {
     fn new(addr: SocketAddr, peers: Vec<SocketAddr>) -> Self {
         let dir = tempdir().unwrap();
         let bc = Blockchain::open(dir.path().to_str().unwrap()).expect("open bc");
+        std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
         let node = Node::new(addr, peers, bc);
         let flag = ShutdownFlag::new();
         let handle = node.start_with_flag(&flag);
@@ -71,6 +78,36 @@ impl TestNode {
             let _ = h.join();
         }
     }
+}
+
+#[tokio::test]
+#[serial]
+async fn converges_under_loss() {
+    let _env = init_env();
+    let addr1 = free_addr();
+    let addr2 = free_addr();
+    let addr3 = free_addr();
+    let mut node1 = TestNode::new(addr1, vec![addr2, addr3]);
+    let mut node2 = TestNode::new(addr2, vec![addr1, addr3]);
+    let mut node3 = TestNode::new(addr3, vec![addr1, addr2]);
+    let start = Instant::now();
+    let ok = wait_until_converged(
+        &[&node1.node, &node2.node, &node3.node],
+        Duration::from_secs(10 * timeout_factor()),
+    )
+    .await;
+    assert!(ok, "convergence timed out");
+    let elapsed = start.elapsed();
+    assert!(elapsed <= Duration::from_secs(10 * timeout_factor()));
+    node1.shutdown();
+    node2.shutdown();
+    node3.shutdown();
+    std::env::remove_var("TB_NET_PACKET_LOSS");
+    std::env::remove_var("TB_NET_JITTER_MS");
+    std::env::remove_var("TB_NET_KEY_PATH");
+    std::env::remove_var("TB_NET_KEY_SEED");
+    std::env::remove_var("TB_PEER_DB_PATH");
+    std::env::remove_var("TB_PEER_SEED");
 }
 
 #[tokio::test]
@@ -101,7 +138,9 @@ async fn kill_node_recovers() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     let max = Duration::from_secs(5 * timeout_factor());
+    let start = Instant::now();
     assert!(wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await);
+    println!("initial convergence {:?}", start.elapsed());
 
     nodes[2].flag.trigger();
     if let Some(handle) = nodes[2].handle.take() {
@@ -127,7 +166,9 @@ async fn kill_node_recovers() {
         .filter(|(i, _)| *i != 2)
         .map(|(_, n)| &n.node)
         .collect();
+    let start = Instant::now();
     assert!(wait_until_converged(&active, max).await);
+    println!("convergence after removal {:?}", start.elapsed());
 
     let restart_bc = Blockchain::open(nodes[2].dir.path().to_str().unwrap()).unwrap();
     let node3 = Node::new(
@@ -151,12 +192,16 @@ async fn kill_node_recovers() {
         flag,
         handle: Some(handle),
     };
+    let start = Instant::now();
     assert!(wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await);
+    println!("final convergence {:?}", start.elapsed());
     let h = nodes[0].node.blockchain().block_height;
     assert_eq!(h, 40);
     for n in nodes.iter_mut() {
         n.shutdown();
     }
+    std::env::remove_var("TB_NET_PACKET_LOSS");
+    std::env::remove_var("TB_NET_JITTER_MS");
 }
 
 #[tokio::test]
@@ -219,7 +264,9 @@ async fn partition_heals_to_majority() {
     nodes[iso].node.discover_peers();
     nodes[0].node.broadcast_chain();
     let max = Duration::from_secs(5 * timeout_factor());
+    let start = Instant::now();
     assert!(wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await);
+    println!("partition heal convergence {:?}", start.elapsed());
     let h = nodes[0].node.blockchain().block_height;
     assert_eq!(h, 12);
     #[cfg(feature = "telemetry")]
@@ -232,4 +279,6 @@ async fn partition_heals_to_majority() {
     for n in nodes.iter_mut() {
         n.shutdown();
     }
+    std::env::remove_var("TB_NET_PACKET_LOSS");
+    std::env::remove_var("TB_NET_JITTER_MS");
 }

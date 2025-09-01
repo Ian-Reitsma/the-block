@@ -2,6 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Credit issuance payload attached to a proposal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreditIssue {
+    pub provider: String,
+    pub amount: u64,
+}
+
 /// Basic proposal shared by both houses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proposal {
@@ -11,10 +18,11 @@ pub struct Proposal {
     pub ops_for: u32,
     pub builders_for: u32,
     pub executed: bool,
+    pub credit_issue: Option<CreditIssue>,
 }
 
 impl Proposal {
-    pub fn new(id: u64, start: u64, end: u64) -> Self {
+    pub fn new(id: u64, start: u64, end: u64, credit_issue: Option<CreditIssue>) -> Self {
         Self {
             id,
             start,
@@ -22,6 +30,7 @@ impl Proposal {
             ops_for: 0,
             builders_for: 0,
             executed: false,
+            credit_issue,
         }
     }
     pub fn vote_operator(&mut self, approve: bool) {
@@ -114,10 +123,11 @@ impl Governance {
         fs::write(path, bytes)
     }
 
-    pub fn submit(&mut self, start: u64, end: u64) -> u64 {
+    pub fn submit(&mut self, start: u64, end: u64, credit_issue: Option<CreditIssue>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        self.proposals.insert(id, Proposal::new(id, start, end));
+        self.proposals
+            .insert(id, Proposal::new(id, start, end, credit_issue));
         id
     }
 
@@ -130,12 +140,37 @@ impl Governance {
         Ok(())
     }
 
-    pub fn execute(&mut self, id: u64, now: u64) -> Result<(), &'static str> {
+    /// Execute a proposal if it satisfies quorum and timelock requirements.
+    ///
+    /// If the proposal carries a [`CreditIssue`] payload and a ledger is
+    /// supplied, credits are issued atomically upon execution. Telemetry
+    /// counters track both successful issuances and rejected attempts when
+    /// quorum or timelock checks fail.
+    pub fn execute(
+        &mut self,
+        id: u64,
+        now: u64,
+        mut ledger: Option<&mut credits::Ledger>,
+    ) -> Result<(), &'static str> {
         let p = self.proposals.get_mut(&id).ok_or("proposal not found")?;
         if self.bicameral.can_execute(p, now) {
+            if let (Some(issue), Some(led)) = (p.credit_issue.clone(), ledger.as_mut()) {
+                let event = format!("gov:{id}");
+                led.accrue(&issue.provider, &event, issue.amount);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::CREDIT_ISSUED_TOTAL
+                    .with_label_values(&["governance", "global"])
+                    .inc_by(issue.amount);
+            }
             p.executed = true;
             Ok(())
         } else {
+            #[cfg(feature = "telemetry")]
+            if p.credit_issue.is_some() {
+                crate::telemetry::CREDIT_ISSUE_REJECTED_TOTAL
+                    .with_label_values(&["quorum"])
+                    .inc();
+            }
             Err("quorum or timelock not satisfied")
         }
     }
@@ -145,5 +180,14 @@ impl Governance {
         let end = p.end + self.bicameral.timelock_secs;
         let remaining = if now >= end { 0 } else { end - now };
         Ok((p, remaining))
+    }
+
+    pub fn proposal_credit_issue(&self, id: u64) -> Option<CreditIssue> {
+        self.proposals.get(&id).and_then(|p| p.credit_issue.clone())
+    }
+
+    /// Return a snapshot of all proposals for UI display.
+    pub fn list(&self) -> Vec<Proposal> {
+        self.proposals.values().cloned().collect()
     }
 }

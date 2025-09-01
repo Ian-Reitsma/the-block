@@ -1,7 +1,10 @@
+mod util;
+
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use serial_test::serial;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -38,7 +41,9 @@ impl Provider for MockProvider {
 }
 
 #[test]
+#[serial]
 fn fast_provider_scales_up() {
+    util::rpc::randomize_client_timeout();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);
@@ -55,7 +60,9 @@ fn fast_provider_scales_up() {
 }
 
 #[test]
+#[serial]
 fn slow_provider_limits_size() {
+    util::rpc::randomize_client_timeout();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("lane", 10_000);

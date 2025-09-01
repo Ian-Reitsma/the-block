@@ -23,6 +23,7 @@ pub struct Simulation {
     pub liquidity: LiquidityModel,
     pub bridging: BridgeModel,
     pub demand: DemandModel,
+    pub backlog: f64,
 }
 
 impl Simulation {
@@ -35,6 +36,7 @@ impl Simulation {
             liquidity: LiquidityModel::default(),
             bridging: BridgeModel::default(),
             demand: DemandModel::default(),
+            backlog: 0.0,
         }
     }
 
@@ -84,6 +86,20 @@ impl Simulation {
         let liquidity = self.liquidity.update(inc);
         let bridged = self.bridging.flow(inc);
         let (consumer_demand, industrial_demand) = self.demand.project();
+        let total_demand = consumer_demand + industrial_demand;
+        if liquidity < total_demand {
+            self.backlog += total_demand - liquidity;
+        } else {
+            let diff = liquidity - total_demand;
+            self.backlog = (self.backlog - diff).max(0.0);
+        }
+        let inflation_rate = self.inflation.rate;
+        let sell_coverage = if self.backlog == 0.0 {
+            1.0
+        } else {
+            self.liquidity.token_reserve / self.backlog.max(1.0)
+        };
+        let readiness = 1.0 / (1.0 + self.backlog);
         Snapshot {
             step,
             credits: self.credits,
@@ -92,6 +108,10 @@ impl Simulation {
             bridged,
             consumer_demand,
             industrial_demand,
+            backlog: self.backlog,
+            inflation_rate,
+            sell_coverage,
+            readiness,
         }
     }
 }

@@ -27,6 +27,7 @@ fn arm_and_activate() {
     assert_eq!(Settlement::balance("buyer"), 90);
     assert_eq!(Settlement::balance("prov"), 10);
     assert!(Settlement::receipt_applied(&r2.idempotency_key));
+    Settlement::shutdown();
 }
 
 #[test]
@@ -41,6 +42,7 @@ fn insufficient_funds_flips() {
     assert_eq!(Settlement::mode(), SettleMode::DryRun);
     assert_eq!(Settlement::balance("buyer"), 5);
     assert_eq!(Settlement::balance("prov"), 0);
+    Settlement::shutdown();
 }
 
 #[test]
@@ -61,6 +63,7 @@ fn cancel_arm_before_activation() {
     Settlement::set_balance("prov", 0);
     Settlement::tick(20, &[r]);
     assert_eq!(Settlement::balance("prov"), 0);
+    Settlement::shutdown();
 }
 
 #[test]
@@ -77,4 +80,5 @@ fn idempotent_replay() {
     assert_eq!(Settlement::balance("buyer"), 30);
     assert_eq!(Settlement::balance("prov"), 20);
     assert!(Settlement::receipt_applied(&key));
+    Settlement::shutdown();
 }

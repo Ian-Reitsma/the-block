@@ -22,7 +22,7 @@
 ## Why The Block
 
 - Dual fee lanes (Consumer | Industrial) with lane-aware mempools and a comfort guard that defers industrial when consumer p90 fees exceed threshold.
-- Service credits ledger: non-transferable credits to offset writes (reads are free) and priority with CLI top-up (development only) and balance queries.
+- Service credits ledger: non-transferable credits to offset writes (reads are free and providers earn from a reward pool) with balances governed by validator-approved issuance.
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
 - TTL-based gossip relay with duplicate suppression and sqrt-N fanout.
 - LocalNet assist receipts earn credits and on-chain DNS TXT records expose gateway policy; see [docs/localnet.md](docs/localnet.md) for discovery and session details.
@@ -87,14 +87,14 @@ cargo nextest run tests/net_gossip.rs
 
 This test uses deterministic sleeps and a height→weight→tip-hash tie-break to guarantee reproducible convergence.
 
-Inspect and manage service credits (top-up is a development convenience only):
+Inspect and manage service credits:
 
 ```bash
-cargo run --bin node -- credits top-up --provider alice --amount 100
 cargo run --bin node -- credits balance alice
 ```
 
-See [`docs/credits.md`](docs/credits.md) for ledger details and additional examples under `examples/governance/CREDITS.md`.
+Issuance occurs through validator-approved governance proposals. See [`docs/credits.md`](docs/credits.md) for ledger details and
+[`examples/governance/CREDITS.md`](examples/governance/CREDITS.md) for proposal walkthroughs.
 
 ## Installation & Bootstrap
 
@@ -182,6 +182,7 @@ curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":11,"method":"gateway.policy","params":{"domain":"example.com"}}'
 ```
+`gateway.policy` responses include `reads_total` and `last_access_ts` counters.
 
 Fetch recent micro‑shard roots:
 
@@ -302,11 +303,9 @@ Mainnet readiness: ~94/100 · Vision completion: ~68/100.
   - Document the tie-break algorithm in the consensus guide.
   - Expose a test fixture for fork injection.
   - Benchmark orphan rates before and after fanout changes.
-- Replace dev-only credit top-up with governed issuance
-  - Finalize governance proposal schema for credit issuance rates.
-  - Wire minting into validator vote execution paths.
-  - Deprecate the `credits top-up` CLI with user warnings.
-  - Add a migration to purge development-only balances.
+- Govern credit issuance through validator votes
+  - Mint credits via executed governance proposals.
+  - Provide a migration to purge development-only balances.
   - Document on-chain credit policy in `docs/credits.md`.
 - Expand settlement audit coverage
   - Index settlement receipts in the explorer database.
@@ -322,10 +321,16 @@ Mainnet readiness: ~94/100 · Vision completion: ~68/100.
   - Document manual recovery procedures in the troubleshooting guide.
 - Broaden fuzz/chaos testing across gateway and storage paths
   - Integrate gateway fuzz seeds into continuous integration.
-  - Simulate disk-full conditions for the storage layer.
-  - Randomize RPC timeouts and retry logic in tests.
+  - Simulate disk-full conditions for the storage layer by bounding `SimpleDb` bytes in tests.
+  - Randomize RPC timeouts and retry logic in tests via `TB_RPC_CLIENT_TIMEOUT_SECS`.
   - Use the chaos harness for sudden network partitions.
   - Capture reproducible seeds for any failures.
+- Implement free-read architecture for web hosting
+  - Log reads without charging and store `reads_total`/`last_access_ts`.
+  - Reward serving nodes from a governance-controlled `read_reward_pool`.
+  - Add per-IP token buckets and expose `read_denied_total{reason}` metrics.
+  - Emit `ExecutionReceipt`s for dynamic pages without billing users.
+  - Update docs and tests to reflect the model.
 
 ### Near term
 
@@ -353,12 +358,13 @@ Mainnet readiness: ~94/100 · Vision completion: ~68/100.
   - Record resource consumption metrics for CBM redemption.
   - Test edge cases in credit-to-CBM conversion.
   - Expose CLI plumbing for CBM redemptions.
-- Public testnet with PoH/Turbine and parallel executor
-  - Package node configurations for external testers.
-  - Track time-to-finality and fork rates.
-  - Collect validator feedback on GPU workloads.
-  - Iterate on network parameters from telemetry.
-  - Host weekly syncs summarizing testnet findings.
+
+# Debugging and Governance UI
+
+`tb-debugger` inspects on-disk state keys, while `gov-ui` serves a
+dark-mode web interface for submitting and viewing governance proposals.
+Enable runtime profiling by launching the node with `TB_PROFILE=1` to
+emit a `flamegraph.svg` for performance analysis.
 
 ### Medium term
 

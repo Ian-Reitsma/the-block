@@ -102,7 +102,7 @@ impl StoragePipeline {
     fn save_profile(&mut self, provider: &str, profile: &ProviderProfile) {
         let key = Self::profile_key(provider);
         if let Ok(bytes) = bincode::serialize(profile) {
-            let _ = self.db.insert(&key, bytes);
+            let _ = self.db.try_insert(&key, bytes);
         }
     }
 
@@ -180,7 +180,8 @@ impl StoragePipeline {
                 h.update(&shard);
                 let id = *h.finalize().as_bytes();
                 self.db
-                    .insert(&format!("chunk/{}", hex::encode(id)), shard.clone());
+                    .try_insert(&format!("chunk/{}", hex::encode(id)), shard.clone())
+                    .map_err(|e| e.to_string())?;
                 chunks.push(ChunkRef {
                     id,
                     nodes: vec![prov.id().into()],
@@ -248,10 +249,12 @@ impl StoragePipeline {
         let man_hash = *h.finalize().as_bytes();
         manifest.blake3 = man_hash;
         let manifest_bytes = bincode::serialize(&manifest).map_err(|e| e.to_string())?;
-        self.db.insert(
-            &format!("manifest/{}", hex::encode(man_hash)),
-            manifest_bytes,
-        );
+        self.db
+            .try_insert(
+                &format!("manifest/{}", hex::encode(man_hash)),
+                manifest_bytes,
+            )
+            .map_err(|e| e.to_string())?;
         let receipt = StoreReceipt {
             manifest_hash: man_hash,
             chunk_count: manifest.chunks.len() as u32,
@@ -260,7 +263,8 @@ impl StoragePipeline {
         };
         let rec_bytes = bincode::serialize(&receipt).map_err(|e| e.to_string())?;
         self.db
-            .insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes);
+            .try_insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes)
+            .map_err(|e| e.to_string())?;
         #[cfg(feature = "telemetry")]
         {
             STORAGE_FINAL_CHUNK_SIZE.set(profile.preferred_chunk as i64);

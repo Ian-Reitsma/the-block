@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
+use super::trust_lines::TrustLedger;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Buy,
@@ -15,6 +17,7 @@ pub struct Order {
     pub side: Side,
     pub amount: u64,
     pub price: u64,
+    pub max_slippage_bps: u64,
 }
 
 #[derive(Default)]
@@ -25,7 +28,28 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
-    pub fn place(&mut self, mut order: Order) -> Vec<(Order, Order, u64)> {
+    pub fn place(&mut self, mut order: Order) -> Result<Vec<(Order, Order, u64)>, &'static str> {
+        let limit = match order.side {
+            Side::Buy => order.price * (10_000 + order.max_slippage_bps) / 10_000,
+            Side::Sell => {
+                if order.max_slippage_bps > 10_000 {
+                    return Err("slippage");
+                }
+                order.price * (10_000 - order.max_slippage_bps) / 10_000
+            }
+        };
+        let best_opt = match order.side {
+            Side::Buy => self.asks.keys().next().cloned(),
+            Side::Sell => self.bids.keys().rev().next().cloned(),
+        };
+        if let Some(best) = best_opt {
+            if (order.side == Side::Buy && best > limit)
+                || (order.side == Side::Sell && best < limit)
+            {
+                return Err("slippage");
+            }
+        }
+
         order.id = self.next_id;
         self.next_id += 1;
         let mut trades = Vec::new();
@@ -81,6 +105,22 @@ impl OrderBook {
                 }
             }
         }
-        trades
+        Ok(trades)
+    }
+
+    /// Place an order and settle resulting trades against the provided trust ledger.
+    pub fn place_and_settle(
+        &mut self,
+        order: Order,
+        ledger: &mut TrustLedger,
+    ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
+        let trades = self.place(order)?;
+        for (buy, sell, qty) in &trades {
+            let value = sell.price * *qty;
+            // Buyer owes seller the quoted value, seller owes buyer the asset amount.
+            ledger.adjust(&buy.account, &sell.account, value as i64);
+            ledger.adjust(&sell.account, &buy.account, -(value as i64));
+        }
+        Ok(trades)
     }
 }

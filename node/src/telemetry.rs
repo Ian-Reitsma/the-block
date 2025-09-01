@@ -1,7 +1,7 @@
 use blake3;
 use once_cell::sync::Lazy;
 use prometheus::{
-    Encoder, GaugeVec, Histogram, HistogramVec, HistogramOpts, IntCounter, IntCounterVec, IntGauge,
+    Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
     IntGaugeVec, Opts, Registry, TextEncoder,
 };
 use pyo3::prelude::*;
@@ -417,6 +417,18 @@ pub static SETTLE_MODE_CHANGE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static SETTLE_AUDIT_MISMATCH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "settle_audit_mismatch_total",
+        "Receipts failing settlement audit",
+    )
+    .unwrap_or_else(|e| panic!("counter settle_audit_mismatch_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry settle_audit_mismatch_total: {e}"));
+    c
+});
+
 pub static GOV_PROPOSALS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("gov_proposals_total", "Governance proposals by status"),
@@ -483,8 +495,8 @@ pub static GOV_ACTIVATION_DELAY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
 /// Send governance events to an external webhook if `GOV_WEBHOOK_URL` is set.
 pub fn governance_webhook(event: &str, proposal_id: u64) {
     if let Ok(url) = std::env::var("GOV_WEBHOOK_URL") {
-        let _ = ureq::post(&url)
-            .send_json(ureq::json!({"event": event, "proposal_id": proposal_id}));
+        let _ =
+            ureq::post(&url).send_json(ureq::json!({"event": event, "proposal_id": proposal_id}));
     }
 }
 
@@ -785,6 +797,21 @@ pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new("peer_rejected_total", "Peers rejected grouped by reason"),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_HANDSHAKE_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_handshake_failure_total",
+            "Handshake failures grouped by reason",
+        ),
         &["reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));

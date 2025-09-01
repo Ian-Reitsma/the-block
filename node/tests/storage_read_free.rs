@@ -1,3 +1,6 @@
+mod util;
+
+use serial_test::serial;
 use std::sync::Arc;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -14,7 +17,9 @@ impl Provider for NoopProvider {
 }
 
 #[test]
+#[serial]
 fn reads_do_not_burn() {
+    util::rpc::randomize_client_timeout();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
     Settlement::set_balance("alice", 10);
@@ -25,6 +30,7 @@ fn reads_do_not_burn() {
     let data = vec![0u8; 512];
     let receipt = pipe.put_object(&data, "alice", &catalog).unwrap();
     let bal_after_write = Settlement::balance("alice");
+    pipe.db_mut().flush();
     drop(pipe);
     let pipe = StoragePipeline::open(dir.path().to_str().unwrap());
     let _ = pipe.get_object(&receipt.manifest_hash).unwrap();

@@ -1,0 +1,27 @@
+# DEX and Trust Lines
+
+The in-tree DEX exposes a simple order book with slippage checks and trust-line settlement.
+
+- **Trust lines** carry a `limit`, `balance`, and `authorized` flag.
+  Counterparties must explicitly authorize lines before any balance updates.
+- **Order book** matches limit orders and rejects placements when the best
+  available price exceeds the caller's `max_slippage_bps`.
+- **Settlement** adjusts trust-line balances between buyer and seller for each
+  trade. Path finding over authorized lines allows multi-hop payments.
+
+Example:
+
+```rust
+use the_block::dex::{OrderBook, Order, Side, TrustLedger};
+# fn main() {
+let mut book = OrderBook::default();
+let mut ledger = TrustLedger::default();
+ledger.establish("alice".into(), "bob".into(), 100);
+ledger.authorize("alice", "bob");
+let buy = Order { id:0, account:"alice".into(), side:Side::Buy, amount:10, price:5, max_slippage_bps:0 };
+let sell = Order { id:0, account:"bob".into(), side:Side::Sell, amount:10, price:5, max_slippage_bps:0 };
+book.place(buy).unwrap();
+book.place_and_settle(sell, &mut ledger).unwrap();
+assert_eq!(ledger.balance("alice", "bob"), 50);
+# }
+```

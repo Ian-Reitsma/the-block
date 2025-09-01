@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
+use tempfile::tempdir;
 use the_block::{
     net::{
         Handshake, Message, Payload, PeerSet, COMPUTE_MARKET_V1, PROTOCOL_VERSION,
@@ -14,6 +15,8 @@ use the_block::{
 
 #[test]
 fn handshake_requires_compute_market_bit() {
+    let dir = tempdir().unwrap();
+    std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
     let peers = PeerSet::new(vec![]);
     let bc = Arc::new(Mutex::new(Blockchain::default()));
     let addr: SocketAddr = "127.0.0.1:9001".parse().unwrap();

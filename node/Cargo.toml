@@ -47,6 +47,7 @@ reed-solomon-erasure = "6"
 rayon = "1"
 # webhook alerts
 ureq = { version = "2", features = ["json"], optional = true }
+pprof = { version = "0.13", features = ["flamegraph"] }
 
 [features]
 fuzzy = ["proptest"]
