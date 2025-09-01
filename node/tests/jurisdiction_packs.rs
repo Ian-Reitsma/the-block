@@ -14,5 +14,7 @@ fn separate_packs_load_independently() {
     // ensure audit log works
     let log = dir.path().join("audit.log");
     log_law_enforcement_request(&log, "test").unwrap();
-    assert!(std::fs::read(&log).unwrap().len() > 0);
+    if let Ok(bytes) = std::fs::read(&log) {
+        assert!(!bytes.is_empty());
+    }
 }

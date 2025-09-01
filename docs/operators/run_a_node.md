@@ -41,3 +41,5 @@ systemctl enable --now the-block
 
 ### Firewall
 Allow P2P and metrics if required; restrict RPC to localhost.
+Run the node with `--metrics-addr` and `--features telemetry` to surface
+`read_denied_total` and `credit_issued_total` counters for monitoring.

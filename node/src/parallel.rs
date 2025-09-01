@@ -46,7 +46,9 @@ impl ParallelExecutor {
             for group in groups.iter_mut() {
                 if let Some(ref t) = task_opt {
                     if !conflicts(t, group) {
-                        group.push(task_opt.take().unwrap());
+                        if let Some(task_inner) = task_opt.take() {
+                            group.push(task_inner);
+                        }
                         break;
                     }
                 }

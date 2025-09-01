@@ -23,3 +23,4 @@ ln -sfn ~/bin/node-next ~/.block/node
 systemctl start the-block
 ```
 Datadirs remain backward compatible; take a backup of `~/.block/datadir` before upgrading.
+After restart, verify governance parameters and that `read_reward_pool` is seeded by running `blockctl gov params` and `blockctl credits balance` for a provider account.

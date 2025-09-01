@@ -1,4 +1,5 @@
 use crate::simple_db::SimpleDb;
+use super::read_receipt;
 use crate::ERR_DNS_SIG_INVALID;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
 use hex;
@@ -47,7 +48,7 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
     msg.extend(domain.as_bytes());
     msg.extend(txt.as_bytes());
     vk.verify(&msg, &sig).map_err(|_| DnsError::SigInvalid)?;
-    let mut db = DNS_DB.lock().unwrap();
+    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
     db.insert(&format!("dns_records/{}", domain), txt.as_bytes().to_vec());
     db.insert(
         &format!("dns_reads/{}", domain),
@@ -60,7 +61,7 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
 pub fn gateway_policy(params: &Value) -> serde_json::Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let key = format!("dns_records/{}", domain);
-    let mut db = DNS_DB.lock().unwrap();
+    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(bytes) = db.get(&key) {
         if let Ok(txt) = String::from_utf8(bytes) {
             let reads_key = format!("dns_reads/{}", domain);
@@ -76,6 +77,7 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
                 .unwrap_or_default()
                 .as_secs();
             db.insert(&last_key, ts.to_le_bytes().to_vec());
+            let _ = read_receipt::append(domain, "gateway", txt.len() as u64, false, true);
             return serde_json::json!({
                 "record": txt,
                 "reads_total": reads,
@@ -88,4 +90,14 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
         "reads_total": 0,
         "last_access_ts": 0,
     })
+}
+
+pub fn reads_since(params: &Value) -> serde_json::Value {
+    let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
+    let epoch = params
+        .get("epoch")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let (total, last) = read_receipt::reads_since(epoch, domain);
+    serde_json::json!({"reads_total": total, "last_access_ts": last})
 }

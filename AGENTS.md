@@ -227,7 +227,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~94/100 · Vision completion: ~68/100.
+Mainnet readiness: ~94/100 · Vision completion: ~63/100.
 
 **Recent**
 
@@ -236,54 +236,54 @@ Mainnet readiness: ~94/100 · Vision completion: ~68/100.
 - Parallel execution engine with optional GPU hash workloads.
 - Modular wallet framework with hardware signer support and CLI utilities.
 - Cross-chain exchange adapters, light-client crate, indexer with explorer, and benchmark/simulation tools.
+- Free-read architecture with receipt batching, execution receipts, governance-seeded read reward pool, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
 
 ### Immediate
 
 All previously listed directives have been implemented:
 
 - Gossip chaos tests now converge deterministically under 15 % packet loss and
-  200 ms jitter with documented tie-break rules and fork-injection fixtures.
-- Credit issuance is governed by validator votes and rewards from read receipts
-  removed and migration tooling provided.
-- Settlement audits index receipts, run periodic verification jobs, raise
-  `settle_audit_mismatch_total` alerts, and include rollback coverage.
-- DHT bootstrapping persists peer databases, randomizes bootstrap peers, fuzzes
-  identifier exchange, and exposes handshake failure metrics.
+  200 ms jitter with documented tie-break rules (`docs/gossip_chaos.md`) and
+  fork-injection fixtures in `tests/net_gossip.rs`.
+- Credit issuance is governed by validator votes and rewards from read
+  receipts; the `read_pool_seed` migration tooling lives in
+  `node/src/credits/issuance.rs`.
+- Settlement audits index receipts, run periodic verification jobs via
+  `tools/settlement_audit`, raise `settle_audit_mismatch_total` alerts, and
+  include rollback coverage.
+- DHT bootstrapping persists peer databases (`net/discovery.rs`), randomizes
+  bootstrap peers, fuzzes identifier exchange, and exposes handshake failure
+  metrics.
 - Fuzz and chaos tests store reproducible seeds, randomize RPC timeouts, and
-  simulate disk-full conditions across storage paths.
+  simulate disk-full conditions across storage paths using
+  `node/tests/gateway_rate_limit.rs` and `node/tests/storage_repair.rs`.
 
 ### Near term
 
 - Launch industrial lane SLA enforcement and dashboard surfacing
-  - Enforce deadline slashing for tardy providers.
-  - Visualize payout caps and missed jobs in the dashboard.
-  - Track ETAs and on-time percentages per provider.
-  - Ship alerting hooks for SLA violations.
-  - Document remediation steps for operators.
+  - Enforce deadline slashing for tardy providers via `compute_market::penalize_sla` and persist bonds under `state/market/`.
+  - Visualize payout caps and missed jobs in the Grafana network dashboard (`monitoring/grafana/network_dashboard.json`).
+  - Track ETAs and on-time percentages per provider with `industrial_rejected_total{reason="SLA"}` and `industrial_eta_seconds` gauges.
+  - Ship alerting hooks for SLA violations through Prometheus rules and optional webhooks.
+  - Document remediation steps for operators in `docs/operators/incident_playbook.md`.
 - Range-boost mesh trials and mobile energy heuristics
-  - Prototype BLE/Wi-Fi Direct hop relays.
-  - Tune lighthouse multipliers based on measured energy usage.
-  - Log mobile battery and CPU metrics during trials.
-  - Compare mesh performance against baseline deployments.
-  - Publish heuristics guidance for application developers.
+  - Prototype BLE/Wi-Fi Direct hop relays in `examples/localnet/` and measure hop counts.
+  - Tune lighthouse multipliers based on measured energy usage captured via `mobile_light_client` traces.
+  - Log mobile battery and CPU metrics during trials and export `mobile_energy_mwh_total` metrics.
+  - Compare mesh performance against baseline deployments, tracking throughput and failure rates.
+  - Publish heuristics guidance for application developers in `docs/mobile_light_client.md`.
 - Economic simulator runs for emission/fee policy tuning
-  - Parameterize inflation and demand scenarios.
-  - Run Monte Carlo batches via the bench-harness.
-  - Report top results to the governance dashboard.
-  - Adjust fee curves based on simulation findings.
-  - Version-control scenarios for reproducibility.
+  - Parameterize inflation and demand scenarios under `sim/src/config/*.toml`.
+  - Run Monte Carlo batches via the bench-harness and persist results to `sim/out/`.
+  - Report top results to the governance dashboard and archive CSV outputs.
+  - Adjust fee curves based on simulation findings with proposals touching `governance/params.rs`.
+  - Version-control scenarios for reproducibility under `sim/scenarios/`.
 - Compute-backed money and instant-app groundwork
-  - Define redeem curves for compute-backed money (CBM).
-  - Prototype local instant-app execution hooks.
-  - Record resource consumption metrics for CBM redemption.
-  - Test edge cases in credit-to-CBM conversion.
-  - Expose CLI plumbing for CBM redemptions.
-- Public testnet with PoH/Turbine and parallel executor
-  - Package node configurations for external testers.
-  - Track time-to-finality and fork rates.
-  - Collect validator feedback on GPU workloads.
-  - Iterate on network parameters from telemetry.
-  - Host weekly syncs summarizing testnet findings.
+  - Define redeem curves for compute-backed money (CBM) in `docs/economics.md`.
+  - Prototype local instant-app execution hooks under `examples/instant_app/`.
+  - Record resource consumption metrics for CBM redemption (`cbm_redeem_cpu_seconds`, `cbm_redeem_bytes`).
+  - Test edge cases in credit-to-CBM conversion via `tests/compute_cbt.rs`.
+  - Expose CLI plumbing for CBM redemptions through `blockctl cbm redeem` commands.
 
 ### Medium term
 
@@ -359,10 +359,48 @@ All previously listed directives have been implemented:
 
 ## 15 · Outstanding Blockers & Directives
 
+The following items block mainnet readiness and should be prioritized. Each task references canonical file paths for ease of navigation:
 
-- Implement free-read accounting: replace gateway budget deductions with
-  `ReadReceipt`s, mint credits from a `read_reward_pool`, and add rate-limit
-  safeguards before enabling production traffic.
+1. **Add rollback tests for PoS finality gadget**
+   - `node/tests/finality_rollback.rs` should craft adversarial forks and assert state consistency after reorgs.
+2. **Implement contract deployment and persistent state**
+   - Extend `vm/src/tx.rs` for deployment transactions and persist state under `state/contracts/`.
+3. **Ship ABI tooling and contract CLI**
+   - Derive ABI from `vm/src/opcodes.rs` and expose `contract deploy/call` commands in `cli/`.
+4. **Introduce dynamic gas fee market**
+   - Track base fees in `node/src/fees.rs` and adjust per EIP‑1559; update mempool validation.
+5. **Bridge UTXO and account models**
+   - Provide a translation layer in `ledger/src/utxo_account.rs` with atomic balance updates.
+6. **Merge PoW blocks into PoS finality path**
+   - Allow PoW headers to reference PoS checkpoints in `consensus/src/pow.rs` and update fork-choice.
+7. **Build fee-aware mempool**
+   - Sort pending transactions by effective fee and evict low-fee entries in `node/src/mempool.rs`.
+8. **Implement lock/unlock bridge primitives**
+   - Define bridge contracts under `bridges/` and add CLI deposit/withdraw flows.
+9. **Persist DEX order books and trades**
+   - Store books in `dex/src/storage.rs` backed by `SimpleDb` and recover on restart.
+10. **Enhance multi-hop trust-line routing**
+    - Incorporate cost-based path scoring in `trust_lines/src/path.rs` with fallback routes.
+11. **Expose credit issuance proposals in gov-ui**
+    - List `read_pool_seed` proposals and allow voting in `gov-ui` with sync to `governance/params.rs`.
+12. **Index settlement receipts in explorer storage**
+    - Parse finalized receipt batches in `explorer/indexer.rs` and expose REST queries.
+13. **Schedule settlement verification in CI**
+    - Add a `ci/settlement.yml` job invoking `settlement.audit` and failing on mismatches.
+14. **Fuzz peer identifier parsing**
+    - Create a `cargo-fuzz` target for `net/discovery.rs` identifier handling.
+15. **Document manual DHT recovery procedures**
+    - Author `docs/dht_recovery.md` detailing stale-peer cleanup and bootstrap commands.
+16. **Integrate gateway fuzzing**
+    - Build a fuzz harness for `gateway/http.rs` request parsing and run in nightly CI.
+17. **Simulate disk exhaustion in storage tests**
+    - Modify `node/tests/storage_repair.rs` to bound tmpfs size and assert graceful recovery.
+18. **Randomize RPC client timeouts**
+    - Introduce jitter in `node/src/rpc/client.rs` with a `rpc.timeout_jitter_ms` knob.
+19. **Add push notification hooks for credit events**
+    - Emit webhooks/FCM triggers in `wallet/src/credits.rs` and document opt‑in flow.
+20. **Set up formal verification for consensus rules**
+    - Translate the state machine into F* modules under `formal/consensus` and verify in CI.
 
 ---
 This document supersedes earlier “vision” notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.

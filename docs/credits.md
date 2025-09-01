@@ -2,7 +2,10 @@
 
 Service credits track non-transferable balances used to pay for compute and network workloads. Each provider maintains a ledger entry persisted on disk so balances survive restarts.
 
-Reads are free; providers earn from a global `read_reward_pool` when they serve data, and credits are only burned on write operations such as storing new objects.
+Reads are free; providers earn from a global `read_reward_pool` when they serve
+data, and credits are only burned on write operations such as storing new
+objects. Governance proposals can replenish this pool via the `read_pool_seed`
+parameter, seeding credits at activation and on node startup.
 
 ## Ledger Operations
 
@@ -51,7 +54,8 @@ Credits accrue from distinct sources so rewards can be tuned independently:
 - `ProvenStorage` – credited for storage proofs.
 - `Civic` – community chores and governance duties.
 - `Read` – minted from the `read_reward_pool` when providers serve finalized
-  `ReadReceipt`s.
+  `ReadReceipt`s. `issue_read` enforces per-region caps and increments
+  `credit_issued_total{source="read",region}` to surface issuance.
 
 Weights and per-identity or per-region caps are controlled by `credits.issuance.*`
 governance parameters. Prometheus counters

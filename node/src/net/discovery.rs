@@ -58,8 +58,9 @@ impl Discovery {
             .iter()
             .map(|(p, a)| (p.to_bytes(), a.to_vec()))
             .collect();
-        let bytes = bincode::serialize(&Persisted { peers: list }).unwrap();
-        let _ = fs::write(&self.db_path, bytes);
+        if let Ok(bytes) = bincode::serialize(&Persisted { peers: list }) {
+            let _ = fs::write(&self.db_path, bytes);
+        }
     }
 
     pub fn has_peer(&self, peer: &PeerId) -> bool {

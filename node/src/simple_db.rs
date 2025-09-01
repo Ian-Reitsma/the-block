@@ -57,7 +57,10 @@ impl SimpleDb {
             } else {
                 let mut applied = last_id;
                 for entry in entries {
-                    let op_bytes = bincode::serialize(&entry.op).unwrap_or_default();
+                    let op_bytes = match bincode::serialize(&entry.op) {
+                        Ok(b) => b,
+                        Err(_) => continue,
+                    };
                     let mut h = Hasher::new();
                     h.update(&op_bytes);
                     if entry.checksum != *h.finalize().as_bytes() {
@@ -80,7 +83,9 @@ impl SimpleDb {
                     }
                 }
                 let _ = fs::remove_file(&wal_path);
-                map.insert("__wal_id".into(), bincode::serialize(&applied).unwrap());
+                if let Ok(bytes) = bincode::serialize(&applied) {
+                    map.insert("__wal_id".into(), bytes);
+                }
                 if let Ok(bytes) = bincode::serialize(&map) {
                     let _ = fs::write(&db_path, bytes);
                 }
@@ -109,15 +114,16 @@ impl SimpleDb {
                 id,
             }),
         )?;
-        self.map
-            .insert("__wal_id".into(), bincode::serialize(&id).unwrap());
+        if let Ok(bytes) = bincode::serialize(&id) {
+            self.map.insert("__wal_id".into(), bytes);
+        }
         let prev = self.map.insert(key.to_string(), value);
         self.try_flush()?;
         Ok(prev)
     }
 
     pub fn insert(&mut self, key: &str, value: Vec<u8>) -> Option<Vec<u8>> {
-        self.try_insert(key, value).expect("db insert")
+        self.try_insert(key, value).ok().flatten()
     }
 
     pub fn try_remove(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
@@ -131,15 +137,16 @@ impl SimpleDb {
                 id,
             }),
         )?;
-        self.map
-            .insert("__wal_id".into(), bincode::serialize(&id).unwrap());
+        if let Ok(bytes) = bincode::serialize(&id) {
+            self.map.insert("__wal_id".into(), bytes);
+        }
         let prev = self.map.remove(key);
         self.try_flush()?;
         Ok(prev)
     }
 
     pub fn remove(&mut self, key: &str) -> Option<Vec<u8>> {
-        self.try_remove(key).expect("db remove")
+        self.try_remove(key).ok().flatten()
     }
 
     pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
@@ -155,7 +162,8 @@ impl SimpleDb {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let bytes = bincode::serialize(&self.map).unwrap();
+        let bytes = bincode::serialize(&self.map)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize map"))?;
         if let Some(limit) = self.byte_limit {
             if bytes.len() > limit {
                 return Err(credit_err_to_io(CreditError::Insufficient));
@@ -173,14 +181,16 @@ impl SimpleDb {
             .and_then(|b| bincode::deserialize(b).ok())
             .unwrap_or(0);
         let op = WalOp::End { last_id: last };
-        let op_bytes = bincode::serialize(&op).unwrap();
+        let op_bytes = bincode::serialize(&op)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize op"))?;
         let mut h = Hasher::new();
         h.update(&op_bytes);
         let entry = WalEntry {
             op,
             checksum: *h.finalize().as_bytes(),
         };
-        let entry_bytes = bincode::serialize(&entry).unwrap();
+        let entry_bytes = bincode::serialize(&entry)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize entry"))?;
         f.write_all(&entry_bytes)?;
         let _ = fs::remove_file(&wal_path);
         Ok(())
@@ -200,14 +210,16 @@ fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
     if let Some(parent) = wal_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let op_bytes = bincode::serialize(&op).unwrap();
+    let op_bytes = bincode::serialize(&op)
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize op"))?;
     let mut h = Hasher::new();
     h.update(&op_bytes);
     let entry = WalEntry {
         op,
         checksum: *h.finalize().as_bytes(),
     };
-    let bytes = bincode::serialize(&entry).unwrap();
+    let bytes = bincode::serialize(&entry)
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize entry"))?;
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)

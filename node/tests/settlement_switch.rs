@@ -19,11 +19,11 @@ fn arm_and_activate() {
     let r1 = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 10, false);
     Settlement::arm(5, 10);
     for h in 11..15 {
-        Settlement::tick(h, &[r1.clone()]);
+        Settlement::tick(h, std::slice::from_ref(&r1));
     }
     assert_eq!(Settlement::balance("buyer"), 100);
     let r2 = Receipt::new("j2".into(), "buyer".into(), "prov".into(), 10, false);
-    Settlement::tick(15, &[r2.clone()]);
+    Settlement::tick(15, std::slice::from_ref(&r2));
     assert_eq!(Settlement::balance("buyer"), 90);
     assert_eq!(Settlement::balance("prov"), 10);
     assert!(Settlement::receipt_applied(&r2.idempotency_key));
@@ -75,8 +75,8 @@ fn idempotent_replay() {
     Settlement::set_balance("prov", 0);
     let r = Receipt::new("j1".into(), "buyer".into(), "prov".into(), 20, false);
     let key = r.idempotency_key;
-    Settlement::tick(1, &[r.clone()]);
-    Settlement::tick(2, &[r]);
+    Settlement::tick(1, std::slice::from_ref(&r));
+    Settlement::tick(2, std::slice::from_ref(&r));
     assert_eq!(Settlement::balance("buyer"), 30);
     assert_eq!(Settlement::balance("prov"), 20);
     assert!(Settlement::receipt_applied(&key));

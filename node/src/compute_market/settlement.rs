@@ -1,4 +1,5 @@
 use crate::compute_market::receipt::Receipt;
+use crate::gateway::read_receipt::ReadReceipt;
 use blake3;
 use credits::{CreditError, Ledger, Source};
 use once_cell::sync::Lazy;
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::CREDIT_BURN_TOTAL;
@@ -127,7 +128,7 @@ impl Settlement {
                     thread::sleep(interval);
                 }
             });
-            *AUDITOR.lock().unwrap() = Some(handle);
+            *AUDITOR.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle);
         }
     }
 
@@ -178,7 +179,7 @@ impl Settlement {
 
     pub fn shutdown() {
         AUDIT_RUN.store(false, Ordering::Relaxed);
-        if let Some(handle) = AUDITOR.lock().unwrap().take() {
+        if let Some(handle) = AUDITOR.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = handle.join();
         }
         let mut guard = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -190,6 +191,15 @@ impl Settlement {
     pub fn set_balance(acct: &str, amt: u64) {
         Self::with(|s| {
             s.ledger.set_balance(acct, amt);
+            s.ledger
+                .save(&s.ledger_path)
+                .unwrap_or_else(|e| panic!("save ledger: {e}"));
+        });
+    }
+
+    pub fn seed_read_pool(amount: u64) {
+        Self::with(|s| {
+            s.ledger.seed_read_pool(amount);
             s.ledger
                 .save(&s.ledger_path)
                 .unwrap_or_else(|e| panic!("save ledger: {e}"));
@@ -242,14 +252,15 @@ impl Settlement {
 
     pub fn accrue(provider: &str, event: &str, source: Source, amount: u64, expiry_days: u64) {
         Self::with(|s| {
-            s.ledger.accrue_with(
-                provider,
-                event,
-                source,
-                amount,
-                SystemTime::now(),
-                expiry_days,
-            );
+            let now = SystemTime::now();
+            if source == Source::Read {
+                let _ = s
+                    .ledger
+                    .issue_read(provider, event, amount, now, expiry_days);
+            } else {
+                s.ledger
+                    .accrue_with(provider, event, source, amount, now, expiry_days);
+            }
             s.ledger
                 .save(&s.ledger_path)
                 .unwrap_or_else(|e| panic!("save ledger: {e}"));
@@ -495,4 +506,81 @@ pub struct AuditSummary {
     pub epoch: u64,
     pub receipts: u64,
     pub invalid: u64,
+}
+
+pub fn submit_anchor(root: &[u8]) {
+    Settlement::with(|s| {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .to_be_bytes();
+        let _ = s.roots.insert(ts, root);
+    });
+}
+
+pub fn confirm_anchor(root: &[u8]) {
+    let base = std::env::var("TB_GATEWAY_RECEIPTS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("receipts"))
+        .join("read");
+    if let Ok(entries) = std::fs::read_dir(&base) {
+        for ent in entries.flatten() {
+            let name = ent.file_name().to_string_lossy().to_string();
+            if name.ends_with(".root") {
+                let epoch = name.trim_end_matches(".root");
+                let read_root = base.join(&name);
+                if let Ok(read_hex) = std::fs::read_to_string(&read_root) {
+                    if let Ok(read_bytes) = hex::decode(read_hex.trim()) {
+                        let exec_root = base
+                            .parent()
+                            .unwrap_or_else(|| Path::new("."))
+                            .join("exec")
+                            .join(format!("{}.root", epoch));
+                        if let Ok(exec_hex) = std::fs::read_to_string(&exec_root) {
+                            if let Ok(exec_bytes) = hex::decode(exec_hex.trim()) {
+                                let mut h = blake3::Hasher::new();
+                                h.update(&read_bytes);
+                                h.update(&exec_bytes);
+                                if h.finalize().as_bytes() == root {
+                                    let final_root = base.join(format!("{}.root.final", epoch));
+                                    let _ = std::fs::rename(&read_root, &final_root);
+                                    let dir = base.join(epoch);
+                                    let final_dir = base.join(format!("{}.final", epoch));
+                                    let _ = std::fs::rename(&dir, &final_dir);
+                                    if let Ok(files) = std::fs::read_dir(&final_dir) {
+                                        for f in files.flatten() {
+                                            if f.path().extension().and_then(|s| s.to_str())
+                                                == Some("cbor")
+                                            {
+                                                if let Ok(bytes) = std::fs::read(f.path()) {
+                                                    if let Ok(rr) =
+                                                        serde_cbor::from_slice::<ReadReceipt>(
+                                                            &bytes,
+                                                        )
+                                                    {
+                                                        let ev = format!(
+                                                            "read:{}:{}",
+                                                            epoch,
+                                                            f.file_name().to_string_lossy()
+                                                        );
+                                                        crate::credits::issuance::issue_read(
+                                                            &rr.provider_id,
+                                                            "global",
+                                                            &ev,
+                                                            rr.bytes_served,
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

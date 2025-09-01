@@ -22,6 +22,7 @@ pub enum ParamKey {
     BurstRefillRatePerS,
     CreditsDecayLambdaPerHourPpm,
     DailyPayoutCap,
+    ReadPoolSeed,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

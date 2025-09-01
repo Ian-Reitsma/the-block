@@ -68,6 +68,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "localnet.submit_receipt",
     "dns.publish_record",
     "gateway.policy",
+    "gateway.reads_since",
     "microshard.roots.last",
     "mempool.stats",
     "kyc.verify",
@@ -583,7 +584,7 @@ fn dispatch(
             }
             let hash = receipt.hash();
             let key = format!("localnet_receipts/{}", hash);
-            let mut db = LOCALNET_RECEIPTS.lock().unwrap();
+            let mut db = LOCALNET_RECEIPTS.lock().unwrap_or_else(|e| e.into_inner());
             if db.get(&key).is_some() {
                 serde_json::json!({"status":"ignored"})
             } else {
@@ -608,6 +609,7 @@ fn dispatch(
             }
         },
         "gateway.policy" => gateway::dns::gateway_policy(&req.params),
+        "gateway.reads_since" => gateway::dns::reads_since(&req.params),
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
             let roots = Settlement::recent_roots(n);
@@ -702,7 +704,7 @@ fn dispatch(
                 timestamp,
             };
             let hash = hdr.hash();
-            let val = u64::from_le_bytes(hash[..8].try_into().unwrap());
+            let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
             if val <= u64::MAX / difficulty.max(1) {
                 serde_json::json!({"status":"accepted"})
             } else {

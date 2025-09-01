@@ -67,9 +67,14 @@ keeps redundancy intact even if a chunk is lost. For a demonstration, consult
 
 Gateway fetches are free for clients and domain owners. After serving bytes the
 gateway appends a `ReadReceipt` `{domain, provider_id, bytes_served, ts}` under
-`receipts/read/<epoch>/<seq>.cbor`. Hourly jobs Merklize these receipts and the
-ledger mints credits to providers from a global `read_reward_pool` when roots
-finalize. Abuse is mitigated via in-memory token buckets and logged with
-`read_denied_total{reason}` metrics. Dynamic pages emit a companion
-`ExecutionReceipt` capturing CPU and disk I/O for the reward pool while keeping
-reads free for users.
+`receipts/read/<epoch>/<seq>.cbor`. Hourly jobs Merklize these receipts and
+write `receipts/read/<epoch>.root`; a settlement watcher moves the root to
+`<epoch>.final` once the L1 anchor confirms and triggers `issue_read` to mint
+credits from the global `read_reward_pool`. Abuse is mitigated via in-memory
+token buckets; exhausted buckets increment `read_denied_total{reason}` and still
+append a `ReadReceipt` with `allowed=false` for audit trails. Dynamic pages emit
+a companion `ExecutionReceipt` capturing CPU and disk I/O for the reward pool
+while keeping reads free for users.
+
+Rate limits throttle abusive bandwidth patterns without ever introducing
+per-read fees, preserving the free-read guarantee for both owners and visitors.

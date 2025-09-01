@@ -17,3 +17,8 @@
 ## Data corruption
 - Watch `price_board_load_total{result="corrupt"}`; node auto-recovers.
 - If repeated, replace disk after taking a support bundle.
+
+## Read-denial spikes
+- Monitor `read_denied_total{reason}` for sudden increases.
+- Verify token-bucket settings in `gateway/http.rs` and domain DNS policy.
+- Ensure clients are not exceeding documented traffic limits.
