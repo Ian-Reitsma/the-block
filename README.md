@@ -23,6 +23,16 @@
 
 - Dual fee lanes (Consumer | Industrial) with lane-aware mempools and a comfort guard that defers industrial when consumer p90 fees exceed threshold.
 - Inflation-funded storage/read/compute subsidies paid directly in CT with governance-adjustable multipliers.
+  Every block carries three explicit subsidy fields—`STORAGE_SUB_CT`,
+  `READ_SUB_CT`, and `COMPUTE_SUB_CT`—that top up the miner coinbase based on
+  measured work. Usage metrics (bytes stored, bytes served, CPU milliseconds,
+  and bytes returned) are multiplied by the epoch-retuned parameters
+  `beta/gamma/kappa/lambda`. The retuning formula clamps adjustments to ±15 %
+  per epoch, applies a doubling safeguard for near-zero utilization, and honors
+  a global kill switch (`kill_switch_subsidy_reduction`) that governance can
+  trigger to downscale rewards during emergencies. This mechanism replaces the
+  legacy credit ledger and ensures operators always receive liquid CT for their
+  contribution without per-request billing or manual token swaps.
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
 - TTL-based gossip relay with duplicate suppression and sqrt-N fanout.
 - LocalNet assist receipts record proximity attestations and on-chain DNS TXT records expose gateway policy; see [docs/localnet.md](docs/localnet.md) for discovery and session details.
@@ -44,7 +54,17 @@
 - Distributed benchmark harness and economic simulation modules; harness spawns multi-node topologies while simulators model inflation, fees, and demand curves.
 - Installer CLI for signed packages and auto-update stubs; release artifacts include reproducible build metadata and updater hooks.
 - Jurisdiction policy packs, governance metrics, and webhook alerts; nodes can load region-specific policies and push governance events to external services.
-- Free-read architecture: receipt-only read logging, execution receipts for dynamic pages, token-bucket rate limits, governance-seeded reward pools, and `gateway.reads_since` analytics.
+- Free-read architecture: receipt-only read logging, execution receipts for
+  dynamic pages, token-bucket rate limits, governance-seeded reward pools, and
+  `gateway.reads_since` analytics. When a client downloads a blob or visits a
+  hosted page, the gateway only logs a compact `ReadAck` signed by the client;
+  no fee is deducted. Gateways batch these acknowledgements, anchor a Merkle
+  root on-chain, and claim the corresponding `READ_SUB_CT` in the next block.
+  Dynamic endpoints emit `ExecReceipt` records that capture CPU time and bytes
+  out, tying `COMPUTE_SUB_CT` subsidies to verifiable execution. Operators
+  should monitor `subsidy_bytes_total{type}` and `subsidy_cpu_ms_total` metrics
+  alongside `read_denied_total{reason}` to catch rate-limit abuse or abnormal
+  reward patterns.
 - Fee-aware mempool with deterministic priority and EIP-1559 style base fee tracking; low-fee transactions are evicted when capacity is exceeded and each block adjusts the base fee toward a fullness target.
 - Bridge primitives with relayer proofs and a lock/unlock state machine; `blockctl bridge deposit` and `withdraw` commands move funds across chains while verifying relayer attestations.
 - Durable smart-contracts backed by a bincode `ContractStore`; `contract deploy` and `contract call` CLI flows persist code and key/value state under `~/.the_block/state/contracts/` and survive node restarts.
@@ -101,11 +121,11 @@ This test uses deterministic sleeps and a height→weight→tip-hash tie-break t
 Stake CT for service roles using the wallet helper:
 
 ```bash
-cargo run --example wallet stake-role gateway 100 --seed <hex>
+cargo run --bin wallet stake-role gateway 100 --seed <hex>
 # withdraw bonded CT
-cargo run --example wallet stake-role gateway 50 --withdraw --seed <hex>
+cargo run --bin wallet stake-role gateway 50 --withdraw --seed <hex>
 # query rent-escrow balance
-cargo run --example wallet escrow-balance <account>
+cargo run --bin wallet escrow-balance <account>
 ```
 
 Subsidy multipliers are governed on-chain via `inflation.params` proposals.
@@ -206,6 +226,17 @@ Fetch recent micro‑shard roots:
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":12,"method":"microshard.roots.last","params":{"n":5}}'
 ```
+
+Query subsidy multipliers and bonded stake:
+
+```bash
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":13,"method":"inflation.params"}'
+
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":14,"method":"stake.role","params":{"id":"<addr>","role":"gateway"}}'
+```
+
 
 Compute courier:
 
@@ -308,7 +339,7 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
 - Expand settlement audit coverage: index receipts in the explorer, schedule CI verification jobs, surface mismatches via Prometheus alerts, and ship sample audit reports.
 - Harden DHT bootstrapping by persisting peer databases, fuzzing identifier exchange, randomizing bootstrap peer selection, and documenting recovery procedures.
 - Broaden fuzz and chaos testing across gateway and storage paths, bound SimpleDb bytes to simulate disk-full scenarios, and randomize RPC timeouts for resilience.
-- Implement the free-read architecture across gateway and storage: log receipts without charging, replenish from `read_reward_pool`, enforce token buckets, emit `ExecutionReceipt`s, and update docs/tests to reflect the model.
+- Implement the free-read architecture across gateway and storage: log receipts without charging end users, replenish gateway balances via CT inflation subsidies rather than the retired `read_reward_pool`, enforce token buckets, emit `ExecutionReceipt`s, and update docs/tests to reflect the model. See [system_changes.md](docs/system_changes.md#2024-credit-ledger-removal-and-ct-subsidy-transition) for historical context.
 
 ### Near Term
 
@@ -478,23 +509,3 @@ make monitor   # Prom+Grafana; scrape :9100, open :3000
 - Status & Roadmap states ~94/100 and ~63/100 vision completion and maps to concrete next tasks.
 
 ## Disclaimer
-
-This software is a production-grade blockchain kernel under active development. It is not investment advice and comes with no warranty. Use at your own risk.
-
-## License
-
-Copyright 2025 IJR Enterprises, Inc.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this project except in compliance with the License.
-You may obtain a copy of the License at
-
-```
-http://www.apache.org/licenses/LICENSE-2.0
-```
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-implied. See the [LICENSE](LICENSE) for the specific language
-governing permissions and limitations under the License.

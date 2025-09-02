@@ -113,6 +113,16 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
     }))
 }
 
+pub fn inflation_params(params: &Params) -> serde_json::Value {
+    json!({
+        "beta_storage_sub_ct": params.beta_storage_sub_ct,
+        "gamma_read_sub_ct": params.gamma_read_sub_ct,
+        "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
+        "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
+        "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
+    })
+}
+
 pub fn gov_rollback_last(
     store: &GovStore,
     params: &mut Params,

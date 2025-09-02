@@ -10,6 +10,7 @@ use crate::telemetry::{
     STORAGE_PROVIDER_LOSS_RATE, STORAGE_PROVIDER_RTT_MS, STORAGE_PUT_CHUNK_SECONDS,
     STORAGE_PUT_ETA_SECONDS, SUBSIDY_BYTES_TOTAL,
 };
+use crate::transaction::BlobTx;
 use blake3::Hasher;
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
@@ -17,8 +18,8 @@ use chacha20poly1305::{
 };
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 const VERSION: u16 = 1;
 const DEFAULT_CHUNK: u32 = 1024 * 1024; // 1 MiB
@@ -86,6 +87,25 @@ impl StoragePipeline {
         }
     }
 
+    /// Build a [`BlobTx`] for raw data, hashing with BLAKE3 and assigning a
+    /// unique `blob_id`. The transaction targets fractal layer 1 (L2) by
+    /// default.
+    pub fn build_blob_tx(owner: &str, data: &[u8], expiry: Option<u64>) -> BlobTx {
+        let mut hasher = Hasher::new();
+        hasher.update(data);
+        let root: [u8; 32] = hasher.finalize().into();
+        let mut blob_id = [0u8; 32];
+        OsRng.fill_bytes(&mut blob_id);
+        BlobTx {
+            owner: owner.to_string(),
+            blob_id,
+            blob_root: root,
+            blob_size: data.len() as u64,
+            fractal_lvl: 1,
+            expiry,
+        }
+    }
+
     pub fn set_rent_rate(&mut self, rate: i64) {
         self.rent_rate = rate;
     }
@@ -145,11 +165,16 @@ impl StoragePipeline {
         data: &[u8],
         lane: &str,
         catalog: &NodeCatalog,
-    ) -> Result<StoreReceipt, String> {
+    ) -> Result<(StoreReceipt, BlobTx), String> {
         let rent = (self.rent_rate as u64).saturating_mul(data.len() as u64);
         if Settlement::spend(lane, "rent", rent).is_err() {
             return Err("ERR_RENT_ESCROW_INSUFFICIENT".into());
         }
+        let mut data_hasher = Hasher::new();
+        data_hasher.update(data);
+        let blob_root: [u8; 32] = data_hasher.finalize().into();
+        let mut blob_id = [0u8; 32];
+        OsRng.fill_bytes(&mut blob_id);
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
         let key = Key::from_slice(&key_bytes);
@@ -271,8 +296,15 @@ impl StoragePipeline {
         self.db
             .try_insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes)
             .map_err(|e| e.to_string())?;
-        self.rent
-            .lock(&hex::encode(man_hash), lane, rent, 0);
+        self.rent.lock(&hex::encode(man_hash), lane, rent, 0);
+        let blob_tx = BlobTx {
+            owner: lane.to_string(),
+            blob_id,
+            blob_root,
+            blob_size: data.len() as u64,
+            fractal_lvl: 1,
+            expiry: None,
+        };
         #[cfg(feature = "telemetry")]
         SUBSIDY_BYTES_TOTAL
             .with_label_values(&["storage"])
@@ -285,7 +317,7 @@ impl StoragePipeline {
                 STORAGE_PUT_ETA_SECONDS.set(eta as i64);
             }
         }
-        Ok(receipt)
+        Ok((receipt, blob_tx))
     }
 
     pub fn get_object(&self, manifest_hash: &[u8; 32]) -> Result<Vec<u8>, String> {
@@ -336,6 +368,10 @@ impl StoragePipeline {
             }
         }
         out.truncate(manifest.total_len as usize);
+        #[cfg(feature = "telemetry")]
+        SUBSIDY_BYTES_TOTAL
+            .with_label_values(&["read"])
+            .inc_by(out.len() as u64);
         Ok(out)
     }
 

@@ -84,9 +84,12 @@ proptest! {
                 storage_sub_ct: TokenAmount::new(0),
                 read_sub_ct: TokenAmount::new(0),
                 compute_sub_ct: TokenAmount::new(0),
+                read_root: [0u8;32],
                 fee_checksum: String::new(),
                 state_root: String::new(),
                 base_fee: 1,
+                l2_roots: Vec::new(),
+                l2_sizes: Vec::new(),
             };
             chain.push(block);
         }

@@ -67,7 +67,8 @@ and redeem against a `RedeemCurve` while debiting a shared `Backstop` reserve.
 See `node/tests/compute_cbt.rs` for an instant-app style settlement example.
 ## Epoch Retuning Formula
 
-The chain mints storage, read, and compute subsidies in CT. At each epoch the multipliers
+The chain mints storage, read, and compute subsidies in CT via block fields `storage_sub_ct`, `read_sub_ct`, and `compute_sub_ct`.
+At each epoch the multipliers
 are recalibrated to keep annual inflation under 2 %:
 
 \[
@@ -84,6 +85,20 @@ Where:
 Results are clamped to ±15 % of the prior multiplier to avoid oscillation. If
 `U_x` is near zero, the previous multiplier doubles to keep incentives from
 stalling.
+
+For example, assume the chain stored 12 GB of new blobs and served 80 GB of
+reads during the last epoch while circulating supply sat at 900 million CT. With
+\(\phi_{storage}=0.004\) and an epoch length of 6 000 seconds, the storage
+multiplier computes as:
+
+\[
+\beta = \frac{0.004 \times 0.02 \times 900_000_000 / 365}{12\,000\,000 / 6_000} \approx 0.009 \text{ µCT/byte}.
+\]
+
+If the previous \(\beta\) was 0.008 µCT/B, the clamp allows at most 0.0092
+µCT/B, so the multiplier settles at 0.0092. The same procedure applies to the
+read and compute multipliers, providing predictable, gradual reward scaling
+even under sudden utilization swings.
 
 ```rust
 fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
@@ -109,7 +124,7 @@ fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
 
 For an operator providing role \(x\):
 
-\[
+\[ 
 \text{ROI}_x = \frac{\text{subsidy}_x \times \text{blocks\_per\_year}}{\text{stake}_x + \text{opex}_x}
 \]
 
@@ -118,5 +133,18 @@ with yearly subsidy
 \[
 \text{subsidy}_x = \phi_x \cdot I_{\text{target}} \cdot S \cdot \frac{\text{stake\_share}_x}{\text{total\_effective\_stake}_x}.
 \]
+
+As an example, a gateway that bonds 10 000 CT when the total bonded gateway
+stake is 200 000 CT controls a 5 % stake share. If governance allocates
+\(\phi_{read} = 0.0025\) of the annual inflation budget to read delivery and
+the circulating supply is 900 million CT, the gateway's expected yearly subsidy
+is:
+
+\[
+\text{subsidy}_{read} = 0.0025 \times 0.02 \times 900_000_000 \times 0.05 \approx 2_250 \text{ CT/year}.
+\]
+
+Dividing this by the bonded stake and the operator's annual operating expenses
+produces an estimated ROI, enabling hardware planning and break-even analyses.
 
 See [README](../README.md) for a high-level overview.

@@ -14,6 +14,7 @@ members = [
   "tools/bench-harness",
   "tools/installer",
   "tools/debugger",
+  "tools/analytics_audit",
   "explorer",
   "bridges",
   "cli",

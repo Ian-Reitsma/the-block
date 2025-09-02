@@ -468,7 +468,16 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `fee_selector` with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-  - Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees.
+- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. The legacy credit ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-credit-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history.
+  Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the
+  formula in `docs/economics.md`; changes are logged under `governance/history`
+  and surfaced in telemetry. An emergency parameter
+  `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
+  a voted percentage, granting governance a rapid-response lever during economic
+  shocks.
+  Operators can inspect current multipliers via the `inflation.params` RPC and
+  reconcile stake-weighted payouts by querying `stake.role` for each bonded
+  account.
 - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.

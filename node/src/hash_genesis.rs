@@ -13,9 +13,12 @@ pub const fn calculate_genesis_hash() -> &'static str {
         storage_sub: 0,
         read_sub: 0,
         compute_sub: 0,
+        read_root: [0;32],
         fee_checksum: ZERO_HASH,
         state_root: ZERO_HASH,
         tx_ids: &[],
+        l2_roots: &[],
+        l2_sizes: &[],
     }
     .const_hash()
 }
@@ -34,9 +37,12 @@ pub fn calculate_genesis_hash_runtime() -> String {
         storage_sub: 0,
         read_sub: 0,
         compute_sub: 0,
+        read_root: [0;32],
         fee_checksum: ZERO_HASH,
         state_root: ZERO_HASH,
         tx_ids: &[],
+        l2_roots: &[],
+        l2_sizes: &[],
     }
     .hash()
 }

@@ -1,10 +1,10 @@
-use the_block::rpc::pos;
 use serde_json::json;
+use the_block::rpc::pos;
 use wallet::Wallet;
 
 #[test]
 fn bond_and_unbond_via_rpc() {
-    let seed = [9u8;32];
+    let seed = [9u8; 32];
     let w = Wallet::from_seed(&seed);
     let role = "gateway";
     let amount = 7u64;
@@ -26,4 +26,8 @@ fn bond_and_unbond_via_rpc() {
     });
     let res_u = pos::unbond(&params_u).expect("unbond");
     assert_eq!(res_u["stake"].as_u64().unwrap(), 0);
+
+    let params_role = json!({"id": w.public_key_hex(), "role": role});
+    let res_role = pos::role(&params_role).expect("role");
+    assert_eq!(res_role["stake"].as_u64().unwrap(), 0);
 }

@@ -1,5 +1,5 @@
 use tempfile::tempdir;
-use the_block::compute_market::settlement::{Settlement, SettleMode};
+use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 use the_block::storage::placement::NodeCatalog;
 
@@ -14,7 +14,7 @@ impl Provider for DummyProvider {
 
 #[test]
 fn rent_escrow_deposit_refund() {
-    Settlement::init("", SettleMode::Real, 0, 0.0, 0);
+    Settlement::init("", SettleMode::Real);
     Settlement::accrue("alice", "init", 100);
 
     let dir = tempdir().unwrap();
@@ -24,7 +24,7 @@ fn rent_escrow_deposit_refund() {
     let mut catalog = NodeCatalog::new();
     catalog.register(DummyProvider { id: "p1".into() });
 
-    let receipt = pipeline
+    let (receipt, _blob_tx) = pipeline
         .put_object(b"hello", "alice", &catalog)
         .expect("store blob");
 

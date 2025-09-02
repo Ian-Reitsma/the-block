@@ -40,29 +40,38 @@ fn get_role(params: &Value) -> String {
 }
 
 fn get_sig(params: &Value) -> Result<Vec<u8>, RpcError> {
-    let sig_hex = params
-        .get("sig")
-        .and_then(|v| v.as_str())
-        .ok_or(RpcError { code: -32602, message: "missing sig" })?;
-    hex::decode(sig_hex).map_err(|_| RpcError { code: -32602, message: "invalid sig" })
+    let sig_hex = params.get("sig").and_then(|v| v.as_str()).ok_or(RpcError {
+        code: -32602,
+        message: "missing sig",
+    })?;
+    hex::decode(sig_hex).map_err(|_| RpcError {
+        code: -32602,
+        message: "invalid sig",
+    })
 }
 
 fn verify(action: &str, id: &str, role: &str, amount: u64, sig: &[u8]) -> Result<(), RpcError> {
-    let pk_bytes = hex::decode(id).map_err(|_| RpcError { code: -32602, message: "invalid id" })?;
-    let pk = VerifyingKey::from_bytes(
-        &pk_bytes
-            .try_into()
-            .map_err(|_| RpcError { code: -32602, message: "invalid id" })?,
-    )
-    .map_err(|_| RpcError { code: -32602, message: "invalid id" })?;
+    let pk_bytes = hex::decode(id).map_err(|_| RpcError {
+        code: -32602,
+        message: "invalid id",
+    })?;
+    let pk = VerifyingKey::from_bytes(&pk_bytes.try_into().map_err(|_| RpcError {
+        code: -32602,
+        message: "invalid id",
+    })?)
+    .map_err(|_| RpcError {
+        code: -32602,
+        message: "invalid id",
+    })?;
     let msg = format!("{action}:{role}:{amount}");
-    let sig = Signature::from_bytes(
-        &sig
-            .try_into()
-            .map_err(|_| RpcError { code: -32602, message: "invalid sig" })?,
-    );
-    pk.verify(msg.as_bytes(), &sig)
-        .map_err(|_| RpcError { code: -32602, message: "bad signature" })
+    let sig = Signature::from_bytes(&sig.try_into().map_err(|_| RpcError {
+        code: -32602,
+        message: "invalid sig",
+    })?);
+    pk.verify(msg.as_bytes(), &sig).map_err(|_| RpcError {
+        code: -32602,
+        message: "bad signature",
+    })
 }
 
 pub fn register(params: &Value) -> Result<Value, RpcError> {
@@ -106,4 +115,11 @@ pub fn slash(params: &Value) -> Result<Value, RpcError> {
 /// Expose for tests.
 pub fn state() -> &'static Mutex<PosState> {
     &POS_STATE
+}
+
+pub fn role(params: &Value) -> Result<Value, RpcError> {
+    let id = get_id(params)?;
+    let role = get_role(params);
+    let pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(serde_json::json!({"id": id, "role": role, "stake": pos.stake_of(&id, &role)}))
 }

@@ -39,6 +39,18 @@ omits screenshot assets to keep the tree lightweight; after running a monitor
 command, open Grafana and import `monitoring/grafana/dashboard.json` to explore
 the dashboard.
 
+Operators can clone the dashboard JSON and add environment-specific panels—for
+example, graphing `subsidy_bytes_total{type="storage"}` per account or plotting
+`rent_escrow_burned_ct_total` over time to spot churn. Exported JSONs should be
+checked into a separate ops repository so upgrades can diff metric coverage.
+
+These subsidy gauges directly reflect the CT-only economic model: `subsidy_bytes_total{type="read"}` increments when gateways serve acknowledged bytes, `subsidy_bytes_total{type="storage"}` tracks newly admitted blob data, and `subsidy_cpu_ms_total` covers deterministic edge compute. Rent escrow health is captured by `rent_escrow_locked_ct_total` (currently held deposits), `rent_escrow_refunded_ct_total`, and `rent_escrow_burned_ct_total`. The `subsidy_auto_reduced_total` counter records automatic multiplier down‑tuning when realised inflation drifts above the target, while `kill_switch_trigger_total` increments whenever governance activates the emergency kill switch. Monitoring these counters alongside `inflation.params` outputs allows operators to verify that multipliers match governance expectations and that no residual credit‑era fields remain. For the full rationale behind these metrics and the retirement of the credit ledger, see [system_changes.md](system_changes.md#2024-credit-ledger-removal-and-ct-subsidy-transition).
+
+During incident response, correlate subsidy spikes with `gov_*` metrics and
+`read_denied_total{reason}` to determine whether rewards reflect legitimate
+traffic or a potential abuse vector. Historical Grafana snapshots are valuable
+for auditors reconstructing economic conditions around an event.
+
 ## Docker setup
 
 `monitoring/docker-compose.yml` provisions both services. Configuration files
@@ -103,3 +115,11 @@ Prometheus rules under `monitoring/alert.rules.yml` watch for:
 - Sudden `rent_escrow_locked_ct_total` growth (warns).
 
 `scripts/telemetry_sweep.sh` runs the synthetic check, queries Prometheus for headline numbers, and writes a timestamped `status/index.html` colored green/orange/red.
+
+### RPC aids
+
+Some subsidy figures are not metrics but can be sampled over JSON-RPC.
+Operators typically add a cron job that logs the output of `inflation.params`
+and `stake.role` for their bond address. Persisting these snapshots alongside
+Prometheus data provides a full accounting trail when reconciling payouts or
+investigating anomalous subsidy shifts.

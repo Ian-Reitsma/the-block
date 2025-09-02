@@ -11,7 +11,7 @@ fn rollback_conflicting_proposals() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path().join("gov.db"));
     let mut bc = Blockchain::default();
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mut params = Params::default();
     let mut rt = Runtime { bc: &mut bc };
 

@@ -4,7 +4,7 @@ mod message;
 mod peer;
 pub mod turbine;
 
-use crate::{gossip::relay::Relay, Blockchain, ShutdownFlag, SignedTransaction};
+use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;
 use rand::Rng;
 use rand_core::{OsRng, RngCore};
@@ -16,7 +16,7 @@ use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-pub use message::{Handshake, Message, Payload, SUPPORTED_VERSION};
+pub use message::{BlobChunk, Handshake, Message, Payload, SUPPORTED_VERSION};
 pub use peer::PeerSet;
 
 /// Current gossip protocol version.
@@ -97,6 +97,16 @@ impl Node {
     /// Broadcast a transaction to all known peers.
     pub fn broadcast_tx(&self, tx: SignedTransaction) {
         self.broadcast_payload(Payload::Tx(tx));
+    }
+
+    /// Broadcast a blob transaction to all known peers.
+    pub fn broadcast_blob_tx(&self, tx: BlobTx) {
+        self.broadcast_payload(Payload::BlobTx(tx));
+    }
+
+    /// Broadcast a blob shard to all known peers.
+    pub fn broadcast_blob_chunk(&self, chunk: BlobChunk) {
+        self.broadcast_payload(Payload::BlobChunk(chunk));
     }
 
     /// Broadcast the current chain to all known peers.

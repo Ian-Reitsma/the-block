@@ -209,6 +209,51 @@
         }
       },
       "id": 23
+    },
+    {
+      "type": "stat",
+      "title": "Rent Escrow Refunded CT",
+      "targets": [
+        {
+          "expr": "rent_escrow_refunded_ct_total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "CT"
+        }
+      },
+      "id": 24
+    },
+    {
+      "type": "stat",
+      "title": "Rent Escrow Burned CT",
+      "targets": [
+        {
+          "expr": "rent_escrow_burned_ct_total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "CT"
+        }
+      },
+      "id": 25
+    },
+    {
+      "type": "graph",
+      "title": "Rent Escrow Flow CT/s",
+      "targets": [
+        {
+          "expr": "rate(rent_escrow_refunded_ct_total[5m])",
+          "legendFormat": "refunded"
+        },
+        {
+          "expr": "rate(rent_escrow_burned_ct_total[5m])",
+          "legendFormat": "burned"
+        }
+      ],
+      "id": 26
     }
   ]
 }

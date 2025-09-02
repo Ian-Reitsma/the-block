@@ -15,9 +15,12 @@ pub struct BlockEncoder<'a> {
     pub storage_sub: u64,
     pub read_sub: u64,
     pub compute_sub: u64,
+    pub read_root: [u8;32],
     pub fee_checksum: &'a str,
     pub state_root: &'a str,
     pub tx_ids: &'a [&'a [u8]],
+    pub l2_roots: &'a [[u8; 32]],
+    pub l2_sizes: &'a [u32],
 }
 
 impl<'a> HashEncoder for BlockEncoder<'a> {
@@ -32,8 +35,15 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.storage_sub.to_le_bytes());
         h.update(&self.read_sub.to_le_bytes());
         h.update(&self.compute_sub.to_le_bytes());
+        h.update(&self.read_root);
         h.update(self.fee_checksum.as_bytes());
         h.update(self.state_root.as_bytes());
+        for r in self.l2_roots {
+            h.update(r);
+        }
+        for s in self.l2_sizes {
+            h.update(&s.to_le_bytes());
+        }
         for id in self.tx_ids {
             h.update(id);
         }

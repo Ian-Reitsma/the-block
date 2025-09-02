@@ -3,7 +3,7 @@ use std::io::Result as IoResult;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::exec;
+use crate::exec;
 use crate::compute_market::settlement;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::SUBSIDY_BYTES_TOTAL;

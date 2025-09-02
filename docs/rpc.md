@@ -21,8 +21,37 @@
   gateway store.
 - `gateway.policy` – fetches the JSON policy document for a domain and
   returns `reads_total` and `last_access_ts` counters.
+- `gateway.reads_since?epoch=` – totals reads for the domain since the given
+  epoch.
+- `analytics` – returns `{reads, bytes}` served for a domain based on finalized
+  `ReadAck` batches.
 - `microshard.roots.last?n=` – lists the most recent micro‑shard root headers.
 - `inflation.params` – returns current subsidy multipliers and rent rate.
+
+  ```bash
+  curl -s localhost:26658/inflation.params | jq
+  # {"beta_storage_sub_ct":50,"gamma_read_sub_ct":20,
+  #  "kappa_cpu_sub_ct":10,"lambda_bytes_out_sub_ct":5,
+  #  "rent_rate_ct_per_byte":1}
+  ```
+
 - `stake.role` – queries bonded CT for a service role.
+
+  ```bash
+  curl -s localhost:26658/stake.role?address=$ADDR | jq
+  # {"gateway":1000000,"storage":5000000,"exec":0}
+  ```
 - `rent.escrow.balance` – returns locked CT per blob or account.
 - `settlement.audit` – replays recent receipts and verifies explorer anchors; used in CI to halt mismatched settlements.
+
+## Deprecated / removed endpoints
+
+The 2024 credit-ledger removal eliminated a number of legacy RPC calls.
+The following methods no longer exist and clients should migrate to the
+subsidy-centric replacements listed above:
+
+- `credits.meter`
+- `gov_credit_*` family of governance helpers
+- `credits.*` balance transfer or issuance calls
+
+Any request against these paths now returns `-32601` (method not found).
