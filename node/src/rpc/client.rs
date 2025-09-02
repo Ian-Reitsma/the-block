@@ -57,12 +57,7 @@ impl RpcClient {
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
-            let res = self
-                .http
-                .post(url)
-                .json(payload)
-                .timeout(timeout)
-                .send();
+            let res = self.http.post(url).json(payload).timeout(timeout).send();
             match res {
                 Ok(r) => return Ok(r),
                 Err(e) if attempt < self.max_retries && e.is_timeout() => {
@@ -98,4 +93,3 @@ mod tests {
         }
     }
 }
-

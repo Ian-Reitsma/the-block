@@ -22,10 +22,10 @@
 ## Why The Block
 
 - Dual fee lanes (Consumer | Industrial) with lane-aware mempools and a comfort guard that defers industrial when consumer p90 fees exceed threshold.
-- Service credits ledger: non-transferable credits to offset writes (reads are free and providers earn from a reward pool) with balances governed by validator-approved issuance.
+- Inflation-funded storage/read/compute subsidies paid directly in CT with governance-adjustable multipliers.
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
 - TTL-based gossip relay with duplicate suppression and sqrt-N fanout.
-- LocalNet assist receipts earn credits and on-chain DNS TXT records expose gateway policy; see [docs/localnet.md](docs/localnet.md) for discovery and session details.
+- LocalNet assist receipts record proximity attestations and on-chain DNS TXT records expose gateway policy; see [docs/localnet.md](docs/localnet.md) for discovery and session details.
 - Rust: `#![forbid(unsafe_code)]`, Ed25519 + BLAKE3, schema-versioned state, reproducible builds.
 - PyO3 bindings for rapid prototyping.
 
@@ -37,7 +37,7 @@
 - Proof-of-History tick generator and Turbine-style gossip for deterministic block propagation; packets follow a sqrt-N fanout tree with deterministic seeding for reproducible tests.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently.
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
-- Modular wallet framework with hardware signer support and CLI utilities; command-line tools wrap the wallet crate and expose key management, signing, and credit queries.
+- Modular wallet framework with hardware signer support and CLI utilities; command-line tools wrap the wallet crate and expose key management and staking helpers.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Light-client crate with mobile example and FFI helpers; mobile demos showcase header sync, background polling, and optional KYC flows.
 - SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST.
@@ -50,7 +50,7 @@
 - Durable smart-contracts backed by a bincode `ContractStore`; `contract deploy` and `contract call` CLI flows persist code and key/value state under `~/.the_block/state/contracts/` and survive node restarts.
 - Persistent DEX order books and trade logs via `DexStore`; order matching updates trust lines atomically and reloads from disk after crashes or upgrades.
 - Multi-hop trust-line routing uses cost-based path scoring with fallback routes so payments continue even if a preferred hop disappears mid-flight.
-- Credit balance and rate-limit push notifications: wallet hooks expose web push/Firebase endpoints and trigger alerts whenever balances change or throttles engage.
+- CT balance and rate-limit push notifications: wallet hooks expose web push/Firebase endpoints and trigger alerts whenever balances change or throttles engage.
 - Jittered JSON-RPC client with exponential backoff to avoid thundering herds; timeouts and retry windows are configurable via environment variables.
 - Settlement audit task in CI replays recent receipts and fails the build on mismatched anchors to guarantee explorer and ledger consistency.
 - Fuzz coverage harness auto-installs `llvm-profdata`/`llvm-cov`, discovers fuzz binaries under the workspace `target` tree, and warns when instrumentation artifacts are missing.
@@ -98,14 +98,17 @@ cargo nextest run tests/net_gossip.rs
 
 This test uses deterministic sleeps and a height→weight→tip-hash tie-break to guarantee reproducible convergence.
 
-Inspect and manage service credits:
+Stake CT for service roles using the wallet helper:
 
 ```bash
-cargo run --bin node -- credits balance alice
+cargo run --example wallet stake-role gateway 100 --seed <hex>
+# withdraw bonded CT
+cargo run --example wallet stake-role gateway 50 --withdraw --seed <hex>
+# query rent-escrow balance
+cargo run --example wallet escrow-balance <account>
 ```
 
-Issuance occurs through validator-approved governance proposals. See [`docs/credits.md`](docs/credits.md) for ledger details and
-[`examples/governance/CREDITS.md`](examples/governance/CREDITS.md) for proposal walkthroughs.
+Subsidy multipliers are governed on-chain via `inflation.params` proposals.
 
 ## Installation & Bootstrap
 
@@ -229,7 +232,7 @@ Set `PYO3_PYTHON` or `PYTHONHOME` on macOS if the linker cannot find Python.
 - Industrial admission: a moving-window capacity estimator and fair-share / burst budgets gate high-volume clients; rejected transactions surface explicit reasons for operator tuning.
 - Storage pipeline: 1 MiB chunks with Reed–Solomon parity and ChaCha20‑Poly1305 encryption; manifest receipts record chunk hashes and placements, and reads verify integrity against the manifest.
 - Free-read architecture: gateways log per-read receipts, batch hourly Merkle roots, anchor them on L1, and replenish providers from governance-seeded reward pools while token-bucket rate limits absorb abuse.
-- Compute market: workloads settle via the credits ledger; idempotent receipts guarantee each compute slice is accounted once even across retries.
+- Compute market: workloads settle via CT balances; idempotent receipts guarantee each compute slice is accounted once even across retries.
 - Governance MVP: a parameter registry with delayed activation and single-shot rollback (keys: `SnapshotIntervalSecs`, `ConsumerFeeComfortP90Microunits`, `IndustrialAdmissionMinCapacity`) lets validators tune the network without hard forks.
 - P2P: peers handshake with feature bits, enforce token-bucket RPC limits, and run a purge loop to evict stale connections.
 - Hashing/signature: Ed25519 keys and BLAKE3 hashes under `#![forbid(unsafe_code)]` deliver a memory-safe, modern cryptographic base.
@@ -262,7 +265,6 @@ scripts/
 demo.py
 docs/
   compute_market.md
-  credits.md
   service_badge.md
   governance_rollback.md
   wal.md
@@ -287,7 +289,7 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
 
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
-| **Governance & Credit Economy** | **75 %** | Credits ledger supports decay/expiry, governance can seed the `read_reward_pool`, and `issue_read` mints credits for finalized receipts. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
+| **Governance & Subsidy Economy** | **75 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; governance can seed reward pools for service roles. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
 | **Consensus & Core Execution** | 66 % | Stake-weighted leader rotation, deterministic tie-breaks, and parallel executor guard against replay collisions. | Finality gadget lacks rollback stress tests and formal proofs. |
 | **Smart-Contract VM & UTXO/PoW** | 42 % | Minimal bytecode engine with gas metering and BLAKE3 PoW headers. | No persistent storage, deployment flow, or opcode library parity. |
 | **Storage & Free-Read Hosting** | **76 %** | Receipt-only logging, hourly batching, L1 anchoring, and `gateway.reads_since` analytics keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
@@ -295,14 +297,14 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
 | **Trust Lines & DEX** | 45 % | Authorization-aware trust lines and slippage-checked order books support multi-hop payments. | Cost-based path scoring and on-ledger escrow absent. |
 | **Cross-Chain Bridges** | 5 % | Design stubs note lock/unlock and relayer incentives. | No contract implementation or safety proofs. |
 | **Wallets, Light Clients & KYC** | 69 % | CLI and hardware wallet support, mobile light-client SDKs, and pluggable KYC hooks. | Remote signer, multisig, and production-grade mobile apps outstanding. |
-| **Monitoring, Debugging & Profiling** | 66 % | Prometheus/Grafana dashboards expose read-denial and credit issuance metrics; CLI debugger and profiling utilities ship with nodes. | Bridge/VM metrics and automated anomaly detection missing. |
+| **Monitoring, Debugging & Profiling** | 66 % | Prometheus/Grafana dashboards expose read-denial and subsidy counters; CLI debugger and profiling utilities ship with nodes. | Bridge/VM metrics and automated anomaly detection missing. |
 | **Economic Simulation & Formal Verification** | 33 % | Bench harness simulates inflation/demand; chaos tests capture seeds. | Sparse scenario library and no integrated proof pipeline. |
 | **Mobile UX & Contribution Metrics** | 50 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
 
 ### Immediate
 
 - Finalize gossip longest-chain convergence, run chaos harness with 15 % packet loss/200 ms jitter, and document tie-break algorithms and fork-injection fixtures.
-- Govern credit issuance through validator votes, migrate and purge dev balances, and expand `docs/credits.md` with on-chain policy.
+- Retune subsidy multipliers through validator votes and expand documentation on inflation parameters.
 - Expand settlement audit coverage: index receipts in the explorer, schedule CI verification jobs, surface mismatches via Prometheus alerts, and ship sample audit reports.
 - Harden DHT bootstrapping by persisting peer databases, fuzzing identifier exchange, randomizing bootstrap peer selection, and documenting recovery procedures.
 - Broaden fuzz and chaos testing across gateway and storage paths, bound SimpleDb bytes to simulate disk-full scenarios, and randomize RPC timeouts for resilience.
@@ -321,7 +323,7 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
 - **Distributed benchmark network at scale** – deploy harness across 100+ nodes/regions, automate workload permutations, gather latency/throughput heatmaps, generate regression dashboards, and publish tuning guides.
 - **Wallet ecosystem expansion** – add remote signer and multisig modules, ship Swift/Kotlin SDKs, enable hardware wallet firmware updates, provide backup/restore tooling, and host interoperability tests.
 - **Governance feature extensions** – roll out staged upgrade pipelines, support proposal dependencies and queue management, add on-chain treasury accounting, offer community alerts, and finalize rollback simulation playbooks.
-- **Mobile light client productionization** – optimize header sync/storage, add push notification hooks for credit events, integrate background energy-saving tasks, support mobile signing, and run a cross-hardware beta program.
+  - **Mobile light client productionization** – optimize header sync/storage, add push notification hooks for subsidy events, integrate background energy-saving tasks, support mobile signing, and run a cross-hardware beta program.
 
 ### Long Term
 
@@ -373,17 +375,17 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
    - Implement cost-based path scoring in `trust_lines/src/path.rs`.  
    - Add fallback routes when optimal paths fail mid-transfer.  
    - Update documentation with routing algorithm details.
-11. **Expose credit issuance proposals in gov-ui**  
-   - List `read_pool_seed` proposals in the UI.  
-   - Allow voting and activation through web interface.  
-   - Sync results via `governance/params.rs`.
+11. **Expose subsidy parameter proposals in gov-ui**
+    - List multiplier and rent-rate proposals in the UI.
+    - Allow voting and activation through web interface.
+    - Sync results via `governance/params.rs`.
 12. **Index settlement receipts in explorer storage**  
    - Parse receipt files in `explorer/indexer.rs`.  
    - Persist anchors and issuance events into explorer DB.  
    - Add REST endpoints to query finalized batches.
 13. **Schedule settlement verification in CI**  
    - Add a CI job invoking `settlement.audit`.  
-   - Fail builds on mismatched anchors or credit totals.  
+    - Fail builds on mismatched anchors or subsidy totals.
    - Provide sample configs in `ci/settlement.yml`.
 14. **Fuzz peer identifier parsing**  
    - Create fuzz target for `net/discovery.rs` identifier parser.  
@@ -405,10 +407,10 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
    - Introduce jitter in `node/src/rpc/client.rs` timeout settings.  
    - Expose config knob `rpc.timeout_jitter_ms`.  
    - Test under high latency to confirm resilience.
-19. **Add push notification hooks for credit events**  
-   - Emit webhook or FCM triggers in `wallet/src/credits.rs`.  
-   - Allow mobile clients to register tokens via RPC.  
-   - Document opt-in flow in `docs/mobile.md`.
+19. **Add push notification hooks for subsidy events**
+    - Emit webhook or FCM triggers in wallet tooling.
+    - Allow mobile clients to register tokens via RPC.
+    - Document opt-in flow in `docs/mobile.md`.
 20. **Set up formal verification for consensus rules**  
    - Translate the state machine into F* modules under `formal/consensus`.  
    - Create CI jobs running `fstar` to ensure proofs compile.  
@@ -439,10 +441,13 @@ Key counters and gauges:
 - `mempool_size{lane}`, `consumer_fee_p50`, `consumer_fee_p90`.
 - `admission_mode{mode}`, `industrial_admitted_total`, `industrial_deferred_total`, `industrial_rejected_total{reason}`.
 - `gossip_duplicate_total`, `gossip_fanout_gauge`, `gossip_convergence_seconds`, `fork_reorg_total`.
-- `credit_issued_total{source}`, `credit_issue_rejected_total{reason}`, `credit_burn_total{sink}`.
+  - `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`.
+
 - `snapshot_interval_changed`, `badge_active`, `badge_last_change_seconds`.
 - `courier_flush_attempt_total`, `courier_flush_failure_total`.
 - `storage_put_bytes_total`, `storage_chunk_put_seconds`, `storage_repair_bytes_total`.
+
+See [docs/economics.md](docs/economics.md#epoch-retuning-formula) for the subsidy retuning formula and ROI guidance.
 - `price_band_p25{lane}`, `price_band_median{lane}`, `price_band_p75{lane}`.
 
 ```bash

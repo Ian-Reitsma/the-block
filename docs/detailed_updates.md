@@ -7,7 +7,7 @@
 - Stake-weighted PoS finality with `PosState` ledger and validator staking RPCs ([node/src/consensus/pos/mod.rs](../node/src/consensus/pos/mod.rs), [node/src/rpc/pos.rs](../node/src/rpc/pos.rs)).
 - Parallel execution engine partitions read/write sets for safe concurrency with benchmarks ([node/src/parallel.rs](../node/src/parallel.rs), [node/benches/parallel_runtime.rs](../node/benches/parallel_runtime.rs)).
 - GPU compute workloads with deterministic CPU/GPU hash checks ([node/src/compute_market/workloads/gpu.rs](../node/src/compute_market/workloads/gpu.rs), [node/tests/gpu_determinism.rs](../node/tests/gpu_determinism.rs)).
-- Read and execution receipt pipeline: per-read CBOR logs, hourly Merkle roots anchored on L1, governance-seeded `read_reward_pool` issuance, token-bucket rate limiting, and `gateway.reads_since` analytics ([crates/gateway/src/read_receipt.rs](../crates/gateway/src/read_receipt.rs), [node/src/credits/issuance.rs](../node/src/credits/issuance.rs)).
+- Read and execution receipt pipeline: per-read CBOR logs, hourly Merkle roots anchored on L1, governance-seeded `read_reward_pool` issuance, token-bucket rate limiting, and `gateway.reads_since` analytics ([crates/gateway/src/read_receipt.rs](../crates/gateway/src/read_receipt.rs), [node/src/storage/pipeline.rs](../node/src/storage/pipeline.rs)).
 - Modular wallet crate, hardware signer support, and CLI tooling ([crates/wallet](../crates/wallet), [node/src/bin/wallet.rs](../node/src/bin/wallet.rs)).
 - Cross-chain exchange adapters for Uniswap and Osmosis with slippage tests ([node/src/dex/exchange_hooks.rs](../node/src/dex/exchange_hooks.rs), [node/tests/dex_hooks.rs](../node/tests/dex_hooks.rs)).
 - Light-client library with FFI helpers and mobile example ([crates/light-client](../crates/light-client), [examples/mobile](../examples/mobile)).
@@ -228,7 +228,7 @@
 
 - `rpc/client.rs` randomizes timeouts via `TB_RPC_TIMEOUT_JITTER_MS` and uses
   exponential backoff to stagger retries.
-- Wallets register web push endpoints so credit balance changes and rate-limit
+- Wallets register web push endpoints so balance changes and rate-limit
   hits trigger notifications.
 - Manual DHT recovery guide lives in `docs/networking.md`.
 

@@ -31,9 +31,8 @@ The exporter currently tracks:
 - `admission_mode{mode}` – comfort guard state
 - `gossip_duplicate_total` – hashes ignored due to TTL deduplication
 - `gossip_fanout_gauge` – number of peers each gossip message relays to
-- `credit_issued_total{source}` – credits awarded by source
-- `credit_issue_rejected_total{reason}` – issuance rejected by reason
-- `credit_burn_total{sink}` – credits burned per sink
+- `subsidy_bytes_total{type}` – bytes eligible for CT subsidy per class
+- `subsidy_cpu_ms_total` – compute time eligible for CT subsidy
 - `read_denied_total{reason}` – reads rejected due to rate limits
 - `storage_repair_bytes_total` / `storage_repair_failures_total` – bytes reconstructed and failed repairs
 - `storage_chunk_size_bytes` – distribution of chunk sizes written during uploads
@@ -46,7 +45,7 @@ The exporter currently tracks:
 - `gov_open_proposals` / `gov_quorum_required` – gauges for governance state
 - `storage_initial_chunk_size` / `storage_final_chunk_size` – first and last chunk sizes per object
 - `storage_put_eta_seconds` – estimated total upload time for the current object
-- `settle_applied_total` – receipts successfully debited and credited
+- `settle_applied_total` – receipts successfully debited and paid
 - `settle_failed_total{reason}` – settlement failures by reason
 - `settle_mode_change_total{to}` – settlement mode transitions
 - `settle_audit_mismatch_total` – settlement audit discrepancies detected

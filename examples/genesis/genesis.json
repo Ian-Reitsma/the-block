@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "accounts": {
+    "faucet": {"consumer": 1000000000, "industrial": 0},
+    "miner1": {"consumer": 1000000, "industrial": 0}
+  }
+}

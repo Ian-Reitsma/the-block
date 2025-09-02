@@ -3,7 +3,7 @@ use ledger::utxo_account::{OutPoint, Utxo, UtxoAccountBridge};
 #[test]
 fn spent_utxo_updates_accounts() {
     let mut bridge = UtxoAccountBridge::new();
-    bridge.accounts.credit("alice", 50);
+    bridge.accounts.deposit("alice", 50);
     let op = OutPoint {
         txid: [1u8; 32],
         index: 0,
@@ -29,7 +29,7 @@ fn spent_utxo_updates_accounts() {
 #[test]
 fn missing_utxo_is_atomic() {
     let mut bridge = UtxoAccountBridge::new();
-    bridge.accounts.credit("alice", 10);
+    bridge.accounts.deposit("alice", 10);
     let op = OutPoint {
         txid: [9u8; 32],
         index: 0,

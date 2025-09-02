@@ -4,7 +4,7 @@ This directory contains Grafana dashboards for core subsystems.
 
 - `compute_market_dashboard.json` visualizes backlog factors and courier metrics.
 - `governance_dashboard.json` graphs proposal votes, rollbacks, and activation delays.
-- `network_dashboard.json` tracks PoH ticks, turbine fanout, gossip convergence, `read_denied_total{reason}` counters, and `credit_issued_total{source}` metrics.
+- `network_dashboard.json` tracks PoH ticks, turbine fanout, gossip convergence, `read_denied_total{reason}` counters, and `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`, and `rent_escrow_locked_ct_total` metrics.
 - `settlement_dashboard.json` surfaces receipt indexing lag and `settle_audit_mismatch_total` from the CI audit job.
 - `storage_dashboard.json` records disk-full events via `storage_disk_full_total` and recovery durations.
 

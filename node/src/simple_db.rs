@@ -1,8 +1,6 @@
-use crate::storage::fs::credit_err_to_io;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{STORAGE_DISK_FULL_TOTAL, WAL_CORRUPT_RECOVERY_TOTAL};
 use blake3::Hasher;
-use credits::CreditError;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fs, io, io::Write, path::Path};
 
@@ -166,7 +164,7 @@ impl SimpleDb {
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize map"))?;
         if let Some(limit) = self.byte_limit {
             if bytes.len() > limit {
-                return Err(credit_err_to_io(CreditError::Insufficient));
+                return Err(io::Error::new(io::ErrorKind::Other, "byte limit exceeded"));
             }
         }
         if let Err(e) = fs::write(&db_path, &bytes) {

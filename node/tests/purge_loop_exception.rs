@@ -25,7 +25,7 @@ fn purge_loop_shutdowns_on_exception() {
     std::env::set_var("TB_PURGE_LOOP_SECS", "1");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.min_fee_per_byte_consumer = 0;
-   bc.min_fee_per_byte_industrial = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.base_fee = 0;
     bc.add_account("a".into(), 10, 10).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();

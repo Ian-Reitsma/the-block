@@ -18,13 +18,20 @@ curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":1,"method":"localnet.submit_receipt","params":{"receipt":"<hex>"}}'
 ```
 
-The node verifies the receipt signature, enforces the proximity envelope, accrues credits for the assisting provider, and records the receipt hash to prevent replays.
+The node verifies the receipt signature, enforces the proximity envelope, and records the receipt hash to prevent replays.
 
 Telemetry surfaces `localnet_receipt_total` and `localnet_receipt_rejected_total{reason}` so operators can monitor LocalNet activity.
+
+### CT-only genesis template
+
+For devnets, bootstrap accounts using the provided CT-only genesis fixture at
+`examples/genesis/genesis.json`.  The file allocates liquid CT and IT without
+any credit balances.  Start a node with this genesis file to mirror main-net
+economic parameters.
 
 ## Mobile light-client hooks
 
 The `light-client` crate exposes an FFI for verifying block headers and tracking
-credit accrual on resource-constrained devices. Mobile apps can link this library
+telemetry on resource-constrained devices. Mobile apps can link this library
 and use LocalNet assists in the background; see `examples/mobile` for a file-based
 header sync and basic wallet operations.

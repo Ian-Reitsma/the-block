@@ -7,7 +7,7 @@
 //!
 //! This crate is the civic-grade kernel for a one-second Layer 1 that
 //! notarizes sub-second micro-shards and enforces service-based governance
-//! through dual Consumer/Industrial tokens and a service-credit meter. See
+//! through dual Consumer/Industrial tokens and inflation-funded subsidies. See
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
 #[cfg(feature = "telemetry")]
@@ -44,6 +44,9 @@ use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
 
+const EPOCH_BLOCKS: u64 = 120;
+const EPOCHS_PER_YEAR: u64 = 365 * 24 * 60 * 60 / EPOCH_BLOCKS;
+
 pub mod gateway;
 pub mod gossip;
 pub mod identity;
@@ -72,13 +75,13 @@ pub use service_badge::ServiceBadgeTracker;
 
 pub mod governance;
 pub use governance::{
-    Bicameral, BicameralGovernance as Governance, BicameralProposal as LegacyProposal, GovStore,
-    House, ParamKey, Params, Proposal, ProposalStatus, Vote, VoteChoice, ACTIVATION_DELAY, QUORUM,
+    retune_multipliers, Bicameral, BicameralGovernance as Governance,
+    BicameralProposal as LegacyProposal, GovStore, House, ParamKey, Params, Proposal,
+    ProposalStatus, Utilization, Vote, VoteChoice, ACTIVATION_DELAY, QUORUM,
     ROLLBACK_WINDOW_EPOCHS,
 };
 
 pub mod compute_market;
-pub mod credits;
 pub mod le_portal;
 
 pub mod transaction;
@@ -485,6 +488,18 @@ pub struct Block {
     pub coinbase_industrial: TokenAmount,
     #[pyo3(get)]
     #[serde(default)]
+    /// CT subsidy minted for storage operations in this block
+    pub storage_sub_ct: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// CT subsidy minted for read delivery in this block
+    pub read_sub_ct: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// CT subsidy minted for compute in this block
+    pub compute_sub_ct: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
     /// blake3(total_fee_ct || total_fee_it) in hex
     pub fee_checksum: String,
     #[pyo3(get)]
@@ -579,6 +594,10 @@ pub struct Blockchain {
     pub emission_consumer: u64,
     #[pyo3(get, set)]
     pub emission_industrial: u64,
+    /// Total consumer emissions from one year ago used for rolling inflation.
+    pub emission_consumer_year_ago: u64,
+    /// Block height when the rolling inflation window started.
+    pub inflation_epoch_marker: u64,
     #[pyo3(get, set)]
     pub block_reward_consumer: TokenAmount,
     #[pyo3(get, set)]
@@ -595,6 +614,20 @@ pub struct Blockchain {
     /// Current base fee used for transaction admission and recorded in mined blocks.
     #[pyo3(get, set)]
     pub base_fee: u64,
+    /// Governance-controlled economic parameters
+    pub params: Params,
+    #[pyo3(get, set)]
+    /// Bytes stored during the current epoch
+    pub epoch_storage_bytes: u64,
+    #[pyo3(get, set)]
+    /// Bytes served during the current epoch
+    pub epoch_read_bytes: u64,
+    #[pyo3(get, set)]
+    /// CPU milliseconds consumed during the current epoch
+    pub epoch_cpu_ms: u64,
+    #[pyo3(get, set)]
+    /// Bytes of dynamic compute output during the current epoch
+    pub epoch_bytes_out: u64,
 }
 
 #[pyclass]
@@ -611,6 +644,10 @@ pub struct ChainDisk {
     #[serde(default)]
     pub emission_industrial: u64,
     #[serde(default)]
+    pub emission_consumer_year_ago: u64,
+    #[serde(default)]
+    pub inflation_epoch_marker: u64,
+    #[serde(default)]
     pub block_reward_consumer: TokenAmount,
     #[serde(default)]
     pub block_reward_industrial: TokenAmount,
@@ -620,6 +657,16 @@ pub struct ChainDisk {
     pub mempool: Vec<MempoolEntryDisk>,
     #[serde(default)]
     pub base_fee: u64,
+    #[serde(default)]
+    pub params: Params,
+    #[serde(default)]
+    pub epoch_storage_bytes: u64,
+    #[serde(default)]
+    pub epoch_read_bytes: u64,
+    #[serde(default)]
+    pub epoch_cpu_ms: u64,
+    #[serde(default)]
+    pub epoch_bytes_out: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -659,6 +706,8 @@ impl Default for Blockchain {
             path: String::new(),
             emission_consumer: 0,
             emission_industrial: 0,
+            emission_consumer_year_ago: 0,
+            inflation_epoch_marker: 0,
             block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
             block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
             block_height: 0,
@@ -668,6 +717,11 @@ impl Default for Blockchain {
             badge_tracker: ServiceBadgeTracker::new(),
             config: NodeConfig::default(),
             base_fee: 1,
+            params: Params::default(),
+            epoch_storage_bytes: 0,
+            epoch_read_bytes: 0,
+            epoch_cpu_ms: 0,
+            epoch_bytes_out: 0,
         }
     }
 }
@@ -906,6 +960,9 @@ impl Blockchain {
                                     b.difficulty,
                                     b.coinbase_consumer,
                                     b.coinbase_industrial,
+                                    b.storage_sub_ct,
+                                    b.read_sub_ct,
+                                    b.compute_sub_ct,
                                     &b.fee_checksum,
                                     &b.transactions,
                                     &b.state_root,
@@ -938,6 +995,13 @@ impl Blockchain {
                                 block_height: bh,
                                 mempool: Vec::new(),
                                 base_fee: disk.base_fee,
+                                params: Params::default(),
+                                epoch_storage_bytes: 0,
+                                epoch_read_bytes: 0,
+                                epoch_cpu_ms: 0,
+                                epoch_bytes_out: 0,
+                                emission_consumer_year_ago: disk.emission_consumer_year_ago,
+                                inflation_epoch_marker: disk.inflation_epoch_marker,
                             };
                             db.insert(
                                 DB_CHAIN,
@@ -1012,6 +1076,9 @@ impl Blockchain {
                                         b.difficulty,
                                         b.coinbase_consumer,
                                         b.coinbase_industrial,
+                                        b.storage_sub_ct,
+                                        b.read_sub_ct,
+                                        b.compute_sub_ct,
                                         &b.fee_checksum,
                                         &b.transactions,
                                         &b.state_root,
@@ -1103,6 +1170,9 @@ impl Blockchain {
                                 b.difficulty,
                                 b.coinbase_consumer,
                                 b.coinbase_industrial,
+                                b.storage_sub_ct,
+                                b.read_sub_ct,
+                                b.compute_sub_ct,
                                 &b.fee_checksum,
                                 &b.transactions,
                                 &b.state_root,
@@ -1121,11 +1191,18 @@ impl Blockchain {
                             accounts: accounts.clone(),
                             emission_consumer: em_c,
                             emission_industrial: em_i,
+                            emission_consumer_year_ago: 0,
+                            inflation_epoch_marker: 0,
                             block_reward_consumer: TokenAmount::new(br_c),
                             block_reward_industrial: TokenAmount::new(br_i),
                             block_height: bh,
                             mempool: Vec::new(),
                             base_fee: 1,
+                            params: Params::default(),
+                            epoch_storage_bytes: 0,
+                            epoch_read_bytes: 0,
+                            epoch_cpu_ms: 0,
+                            epoch_bytes_out: 0,
                         };
                         db.insert(
                             DB_CHAIN,
@@ -1260,6 +1337,14 @@ impl Blockchain {
         bc.snapshot.set_base(path.to_string());
         let cfg = NodeConfig::load(path);
         bc.snapshot.set_interval(cfg.snapshot_interval);
+        let infl = crate::config::load_inflation(path);
+        bc.params.beta_storage_sub_ct = (infl.beta_storage_sub_ct * 1000.0) as i64;
+        bc.params.gamma_read_sub_ct = (infl.gamma_read_sub_ct * 1000.0) as i64;
+        bc.params.kappa_cpu_sub_ct = (infl.kappa_cpu_sub_ct * 1000.0) as i64;
+        bc.params.lambda_bytes_out_sub_ct = (infl.lambda_bytes_out_sub_ct * 1000.0) as i64;
+        let caps = crate::config::load_caps(path);
+        crate::storage::pipeline::set_l2_cap_bytes_per_epoch(caps.storage.l2_cap_bytes_per_epoch);
+        crate::storage::pipeline::set_bytes_per_sender_epoch_cap(caps.storage.bytes_per_sender_epoch_cap);
         let pb = std::path::Path::new(path).join(&cfg.price_board_path);
         crate::compute_market::price_board::init(
             pb.to_string_lossy().into_owned(),
@@ -1274,10 +1359,6 @@ impl Blockchain {
             0.0,
             cfg.rpc.dispute_window_epochs,
         );
-        credits::issuance::set_params(credits::issuance::IssuanceParams {
-            lighthouse_low_density_multiplier_max: cfg.lighthouse.low_density_multiplier_max,
-            ..Default::default()
-        });
         #[cfg(feature = "telemetry")]
         telemetry::summary::spawn(cfg.telemetry_summary_interval);
         bc.config = cfg.clone();
@@ -1455,11 +1536,18 @@ impl Blockchain {
             accounts: self.accounts.clone(),
             emission_consumer: self.emission_consumer,
             emission_industrial: self.emission_industrial,
+            emission_consumer_year_ago: self.emission_consumer_year_ago,
+            inflation_epoch_marker: self.inflation_epoch_marker,
             block_reward_consumer: self.block_reward_consumer,
             block_reward_industrial: self.block_reward_industrial,
             block_height: self.block_height,
             mempool,
             base_fee: self.base_fee,
+            params: self.params.clone(),
+            epoch_storage_bytes: self.epoch_storage_bytes,
+            epoch_read_bytes: self.epoch_read_bytes,
+            epoch_cpu_ms: self.epoch_cpu_ms,
+            epoch_bytes_out: self.epoch_bytes_out,
         };
         let bytes = bincode::serialize(&disk)
             .map_err(|e| PyValueError::new_err(format!("Serialization error: {e}")))?;
@@ -1490,6 +1578,9 @@ impl Blockchain {
             // genesis carries zero reward; fields included for stable hashing
             coinbase_consumer: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
+            storage_sub_ct: TokenAmount::new(0),
+            read_sub_ct: TokenAmount::new(0),
+            compute_sub_ct: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
             state_root: String::new(),
@@ -2399,7 +2490,7 @@ impl Blockchain {
         self.mine_block_with_ts(miner_addr, timestamp_millis)
     }
 
-    /// Mine a new block and credit rewards to `miner_addr`.
+    /// Mine a new block and award rewards to `miner_addr`.
     ///
     /// # Errors
     /// Returns a [`PyValueError`] if fee or nonce calculations overflow or if
@@ -2493,9 +2584,21 @@ impl Blockchain {
             u64::try_from(fee_sum_consumer).map_err(|_| PyValueError::new_err("Fee overflow"))?;
         let fee_industrial_u64 =
             u64::try_from(fee_sum_industrial).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+        let storage_sub_ct =
+            (self.params.beta_storage_sub_ct as u64).saturating_mul(self.epoch_storage_bytes);
+        let read_sub_ct =
+            (self.params.gamma_read_sub_ct as u64).saturating_mul(self.epoch_read_bytes);
+        let compute_sub_ct = (self.params.kappa_cpu_sub_ct as u64)
+            .saturating_mul(self.epoch_cpu_ms)
+            .saturating_add(
+                (self.params.lambda_bytes_out_sub_ct as u64).saturating_mul(self.epoch_bytes_out),
+            );
         let coinbase_consumer = reward_consumer
             .0
-            .checked_add(fee_consumer_u64)
+            .checked_add(storage_sub_ct)
+            .and_then(|v| v.checked_add(read_sub_ct))
+            .and_then(|v| v.checked_add(compute_sub_ct))
+            .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
         let coinbase_industrial = reward_industrial
             .0
@@ -2507,6 +2610,9 @@ impl Blockchain {
         fee_hasher.update(&fee_industrial_u64.to_le_bytes());
         let fee_checksum = fee_hasher.finalize().to_hex().to_string();
 
+        let storage_sub_token = TokenAmount::new(storage_sub_ct);
+        let read_sub_token = TokenAmount::new(read_sub_ct);
+        let compute_sub_token = TokenAmount::new(compute_sub_ct);
         let coinbase = SignedTransaction {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
@@ -2600,6 +2706,9 @@ impl Blockchain {
             hash: String::new(),
             coinbase_consumer: TokenAmount::new(coinbase_consumer),
             coinbase_industrial: TokenAmount::new(coinbase_industrial),
+            storage_sub_ct: storage_sub_token,
+            read_sub_ct: read_sub_token,
+            compute_sub_ct: compute_sub_token,
             fee_checksum: fee_checksum.clone(),
             state_root: root.clone(),
             base_fee: block_base_fee,
@@ -2615,6 +2724,9 @@ impl Blockchain {
                 diff,
                 TokenAmount::new(coinbase_consumer),
                 TokenAmount::new(coinbase_industrial),
+                storage_sub_token,
+                read_sub_token,
+                compute_sub_token,
                 &fee_checksum,
                 &txs,
                 &root,
@@ -2624,6 +2736,33 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                if index % EPOCH_BLOCKS == 0 {
+                    let stats = Utilization {
+                        bytes_stored: self.epoch_storage_bytes as f64,
+                        bytes_read: self.epoch_read_bytes as f64,
+                        cpu_ms: self.epoch_cpu_ms as f64,
+                        bytes_out: self.epoch_bytes_out as f64,
+                        epoch_secs: EPOCH_BLOCKS as f64,
+                    };
+                    if index - self.inflation_epoch_marker >= EPOCHS_PER_YEAR {
+                    self.emission_consumer_year_ago = self.emission_consumer;
+                    self.inflation_epoch_marker = index;
+                }
+                let prev = if self.emission_consumer_year_ago == 0 { self.emission_consumer } else { self.emission_consumer_year_ago };
+                let rolling = if prev == 0 { 0.0 } else { (self.emission_consumer.saturating_sub(prev)) as f64 / prev as f64 };
+                retune_multipliers(
+                    &mut self.params,
+                    self.emission_consumer as f64,
+                    &stats,
+                    index / EPOCH_BLOCKS,
+                    std::path::Path::new(&self.path),
+                    rolling,
+                );
+                    self.epoch_storage_bytes = 0;
+                    self.epoch_read_bytes = 0;
+                    self.epoch_cpu_ms = 0;
+                    self.epoch_bytes_out = 0;
+                }
                 self.difficulty = if self.difficulty == 0 {
                     0
                 } else {
@@ -2854,6 +2993,9 @@ impl Blockchain {
             block.difficulty,
             block.coinbase_consumer,
             block.coinbase_industrial,
+            block.storage_sub_ct,
+            block.read_sub_ct,
+            block.compute_sub_ct,
             &block.fee_checksum,
             &block.transactions,
             &block.state_root,
@@ -2922,6 +3064,19 @@ impl Blockchain {
         {
             return Ok(false);
         }
+        let expected_consumer =
+            self.block_reward_consumer.0 as u128
+                + block.storage_sub_ct.0 as u128
+                + block.read_sub_ct.0 as u128
+                + block.compute_sub_ct.0 as u128
+                + fee_tot_consumer;
+        let expected_industrial =
+            self.block_reward_industrial.0 as u128 + fee_tot_industrial;
+        if coinbase_consumer_total != expected_consumer
+            || coinbase_industrial_total != expected_industrial
+        {
+            return Ok(false);
+        }
 
         Ok(true)
     }
@@ -2929,14 +3084,14 @@ impl Blockchain {
     /// Validate the entire chain from genesis to tip.
     #[inline]
     pub fn is_valid_chain(&self) -> PyResult<bool> {
-        Ok(Self::is_valid_chain_rust(&self.chain))
+        Ok(self.is_valid_chain_rust(&self.chain))
     }
 
     pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
         if new_chain.len() <= self.chain.len() {
             return Err(PyValueError::new_err("Incoming chain not longer"));
         }
-        if !Self::is_valid_chain_rust(&new_chain) {
+        if !self.is_valid_chain_rust(&new_chain) {
             return Err(PyValueError::new_err("Invalid incoming chain"));
         }
 
@@ -3033,6 +3188,19 @@ impl Blockchain {
             {
                 return Err(PyValueError::new_err("Fee mismatch"));
             }
+            let expected_consumer =
+                self.block_reward_consumer.0 as u128
+                    + block.storage_sub_ct.0 as u128
+                    + block.read_sub_ct.0 as u128
+                    + block.compute_sub_ct.0 as u128
+                    + fee_tot_consumer;
+            let expected_industrial =
+                self.block_reward_industrial.0 as u128 + fee_tot_industrial;
+            if coinbase_consumer_total != expected_consumer
+                || coinbase_industrial_total != expected_industrial
+            {
+                return Err(PyValueError::new_err("Coinbase mismatch"));
+            }
             let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
                 address: miner_addr.clone(),
                 balance: TokenBalance {
@@ -3115,7 +3283,7 @@ impl Blockchain {
     }
 
     #[allow(dead_code)]
-    fn is_valid_chain_rust(chain: &[Block]) -> bool {
+    fn is_valid_chain_rust(&self, chain: &[Block]) -> bool {
         for i in 0..chain.len() {
             let b = &chain[i];
             let expected_prev = if i == 0 {
@@ -3148,6 +3316,9 @@ impl Blockchain {
                 b.difficulty,
                 b.coinbase_consumer,
                 b.coinbase_industrial,
+                b.storage_sub_ct,
+                b.read_sub_ct,
+                b.compute_sub_ct,
                 &b.fee_checksum,
                 &b.transactions,
                 &b.state_root,
@@ -3222,6 +3393,19 @@ impl Blockchain {
             let coinbase_industrial_total = b.coinbase_industrial.0 as u128;
             if coinbase_consumer_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
+            {
+                return false;
+            }
+            let expected_consumer =
+                self.block_reward_consumer.0 as u128
+                    + b.storage_sub_ct.0 as u128
+                    + b.read_sub_ct.0 as u128
+                    + b.compute_sub_ct.0 as u128
+                    + fee_tot_consumer;
+            let expected_industrial =
+                self.block_reward_industrial.0 as u128 + fee_tot_industrial;
+            if coinbase_consumer_total != expected_consumer
+                || coinbase_industrial_total != expected_industrial
             {
                 return false;
             }
@@ -3705,6 +3889,9 @@ fn calculate_hash(
     difficulty: u64,
     coin_c: TokenAmount,
     coin_i: TokenAmount,
+    storage_sub: TokenAmount,
+    read_sub: TokenAmount,
+    compute_sub: TokenAmount,
     fee_checksum: &str,
     txs: &[SignedTransaction],
     state_root: &str,
@@ -3719,6 +3906,9 @@ fn calculate_hash(
         difficulty,
         coin_c: coin_c.0,
         coin_i: coin_i.0,
+        storage_sub: storage_sub.0,
+        read_sub: read_sub.0,
+        compute_sub: compute_sub.0,
         fee_checksum,
         state_root,
         tx_ids: &id_refs,
@@ -3807,7 +3997,7 @@ pub const ERR_MEMPOOL_FULL: u16 = 11;
 pub const ERR_LOCK_POISONED: u16 = 12;
 pub const ERR_PENDING_LIMIT: u16 = 13;
 pub const ERR_FEE_TOO_LARGE: u16 = 14;
-pub const ERR_STORAGE_QUOTA_CREDITS: u16 = 15;
+pub const ERR_RENT_ESCROW_INSUFFICIENT: u16 = 15;
 pub const ERR_DNS_SIG_INVALID: u16 = 16;
 
 /// Return the integer network identifier used in domain separation.
@@ -3882,7 +4072,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ERR_MEMPOOL_FULL", ERR_MEMPOOL_FULL)?;
     m.add("ERR_LOCK_POISONED", ERR_LOCK_POISONED)?;
     m.add("ERR_PENDING_LIMIT", ERR_PENDING_LIMIT)?;
-    m.add("ERR_STORAGE_QUOTA_CREDITS", ERR_STORAGE_QUOTA_CREDITS)?;
+    m.add("ERR_RENT_ESCROW_INSUFFICIENT", ERR_RENT_ESCROW_INSUFFICIENT)?;
     m.add("ERR_DNS_SIG_INVALID", ERR_DNS_SIG_INVALID)?;
     #[cfg(feature = "telemetry")]
     {

@@ -41,11 +41,12 @@ libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio
 futures = "0.3"
 unicode-normalization = "0.1"
 tokio-util = "0.7"
-credits = { path = "../crates/credits" }
 state = { path = "../state" }
 reed-solomon-erasure = "6"
 # minimal HTTP parsing
 httparse = "1"
+# account ledger for CT burns
+ledger = { path = "../ledger" }
 # jittered RPC client
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime

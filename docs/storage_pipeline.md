@@ -4,6 +4,8 @@ The storage client splits objects into encrypted chunks before handing them to
 providers. To keep uploads responsive across varied links, the pipeline adjusts
 its chunk size on a per-provider basis:
 
+For attack surfaces and mitigations see [threat_model/storage.md](threat_model/storage.md).
+
 - Allowed sizes: 256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB
 - Target chunk time: ~3 s
 - Per-chunk throughput, RTT, and loss are folded into an EWMA profile stored in
@@ -70,7 +72,7 @@ gateway appends a `ReadReceipt` `{domain, provider_id, bytes_served, ts}` under
 `receipts/read/<epoch>/<seq>.cbor`. Hourly jobs Merklize these receipts and
 write `receipts/read/<epoch>.root`; a settlement watcher moves the root to
 `<epoch>.final` once the L1 anchor confirms and triggers `issue_read` to mint
-credits from the global `read_reward_pool`. Abuse is mitigated via in-memory
+subsidies from the global reward pool. Abuse is mitigated via in-memory
 token buckets; exhausted buckets increment `read_denied_total{reason}` and still
 append a `ReadReceipt` with `allowed=false` for audit trails. Dynamic pages emit
 a companion `ExecutionReceipt` capturing CPU and disk I/O for the reward pool

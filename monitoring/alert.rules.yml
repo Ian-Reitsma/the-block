@@ -22,3 +22,17 @@ groups:
           severity: warn
         annotations:
           summary: "Industrial deferral ratio above 30%"
+      - alert: SubsidyGrowthSpike
+        expr: increase(subsidy_cpu_ms_total[10m]) > 1e9 or increase(subsidy_bytes_total[10m]) > 1e12
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Subsidy counters growing unusually fast"
+      - alert: RentEscrowLockedSpike
+        expr: increase(rent_escrow_locked_ct_total[10m]) > 1e6
+        for: 10m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Rent escrow locked CT spiking"

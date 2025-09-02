@@ -37,6 +37,25 @@ impl Wallet {
         let keypair = Keypair::generate(&mut rng);
         Self { keypair }
     }
+
+    /// Sign a staking message for a given role and amount.
+    /// The message format is `{action}:{role}:{amount}` where `action` is
+    /// `bond` or `unbond`. Returns the signature on success.
+    pub fn sign_stake(
+        &self,
+        role: &str,
+        amount: u64,
+        withdraw: bool,
+    ) -> Result<Signature, WalletError> {
+        let action = if withdraw { "unbond" } else { "bond" };
+        let msg = format!("{action}:{role}:{amount}");
+        self.sign(msg.as_bytes())
+    }
+
+    /// Return the public key encoded as lowercase hex.
+    pub fn public_key_hex(&self) -> String {
+        hex::encode(self.public_key().to_bytes())
+    }
 }
 
 impl WalletSigner for Wallet {
@@ -113,9 +132,6 @@ pub mod hardware {
         }
     }
 }
-
-pub mod credits;
-pub use credits::CreditNotifier;
 
 #[cfg(test)]
 mod tests {

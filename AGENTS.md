@@ -107,8 +107,8 @@ Proceed only if you understand that errors here translate directly into on-chain
 ### Vision Snapshot
 
 *The-Block* ultimately targets a civic-grade chain: a one-second base layer
-that anchors notarized micro-shards, dual Consumer/Industrial tokens, and a
-service-credit meter that rewards honest node work. Governance follows the
+that anchors notarized micro-shards, dual Consumer/Industrial tokens, and an
+inflation-subsidy meter that rewards honest node work. Governance follows the
 "service guarantees citizenship" maxim—badges earned by uptime grant one
 vote per node, with shard-based districts to check capture. This repository is
 the kernel of that architecture.
@@ -207,7 +207,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 ## 9. Launch Plan
 - Consumer‑first TGE: seed $500 USDC : 1,000,000 BLOCKc (single USDC pool), time‑lock LP, 48h slow‑start; publish pool math and addresses.
 - Marketplace preview: stake‑backed intents show bands without orders.
-- Readiness trips Industrial (nodes, capacity, liquidity, vote sustained N days): arm 72h countdown; list USDC/BLOCKi; auto‑convert escrows; start canary lanes; coupons act as rebates.
+- Readiness trips Industrial (nodes, capacity, liquidity, vote sustained N days): arm 72h countdown; list USDC/BLOCKi; auto‑convert escrows; start canary lanes; subsidies act as rebates.
 - Vesting & caps: any pre‑TGE accrual vests by uptime/validated work; cap total pre‑launch claims.
 
 ## 10. SDKs
@@ -242,7 +242,7 @@ Mainnet readiness: ~94/100 · Vision completion: ~63/100.
 - Bridge primitives with relayer proofs and lock/unlock flows exposed via `blockctl bridge deposit`/`withdraw`.
 - Persistent contracts and on-disk key/value state with opcode ABI generation and `contract` CLI for deploy/call.
 - DexStore-backed order books and trade logs with multi-hop trust-line routing that scores paths by cost and surfaces fallback routes.
-- Credit balance and rate-limit webhooks; mobile light client registers push endpoints and triggers notifications on changes.
+- CT balance and rate-limit webhooks; mobile light client registers push endpoints and triggers notifications on changes.
 - Jittered RPC client with exponential backoff and env-configured timeout windows to prevent request stampedes.
 - CI settlement audit job verifying explorer receipt indexes against ledger anchors.
 - Fuzz coverage harness that installs LLVM tools on demand and reports missing `.profraw` artifacts.
@@ -255,9 +255,6 @@ All previously listed directives have been implemented:
 - Gossip chaos tests now converge deterministically under 15 % packet loss and
   200 ms jitter with documented tie-break rules (`docs/gossip_chaos.md`) and
   fork-injection fixtures in `tests/net_gossip.rs`.
-- Credit issuance is governed by validator votes and rewards from read
-  receipts; the `read_pool_seed` migration tooling lives in
-  `node/src/credits/issuance.rs`.
 - Settlement audits index receipts, run periodic verification jobs via
   `tools/settlement_audit`, raise `settle_audit_mismatch_total` alerts, and
   include rollback coverage.
@@ -292,7 +289,7 @@ All previously listed directives have been implemented:
   - Define redeem curves for compute-backed money (CBM) in `docs/economics.md`.
   - Prototype local instant-app execution hooks under `examples/instant_app/`.
   - Record resource consumption metrics for CBM redemption (`cbm_redeem_cpu_seconds`, `cbm_redeem_bytes`).
-  - Test edge cases in credit-to-CBM conversion via `tests/compute_cbt.rs`.
+  - Test edge cases in token-to-CBM conversion via `tests/compute_cbt.rs`.
   - Expose CLI plumbing for CBM redemptions through `blockctl cbm redeem` commands.
 
 ### Medium term
@@ -323,7 +320,7 @@ All previously listed directives have been implemented:
   - Finalize rollback simulation playbooks.
 - Mobile light client productionization
   - Optimize header sync and storage footprints.
-  - Add push-notification hooks for credit events.
+  - Add push-notification hooks for balance events.
   - Integrate background energy-saving tasks.
   - Support signing and submitting transactions from mobile.
   - Run a beta program across varied hardware.
@@ -391,8 +388,8 @@ The following items block mainnet readiness and should be prioritized. Each task
    - Store books in `dex/src/storage.rs` backed by `SimpleDb` and recover on restart.
 10. **Enhance multi-hop trust-line routing**
     - Incorporate cost-based path scoring in `trust_lines/src/path.rs` with fallback routes.
-11. **Expose credit issuance proposals in gov-ui**
-    - List `read_pool_seed` proposals and allow voting in `gov-ui` with sync to `governance/params.rs`.
+11. **Expose subsidy parameter proposals in gov-ui**
+    - List `inflation.params` proposals and allow voting in `gov-ui` with sync to `governance/params.rs`.
 12. **Index settlement receipts in explorer storage**
     - Parse finalized receipt batches in `explorer/indexer.rs` and expose REST queries.
 13. **Schedule settlement verification in CI**
@@ -407,8 +404,8 @@ The following items block mainnet readiness and should be prioritized. Each task
     - Modify `node/tests/storage_repair.rs` to bound tmpfs size and assert graceful recovery.
 18. **Randomize RPC client timeouts**
     - Introduce jitter in `node/src/rpc/client.rs` with a `rpc.timeout_jitter_ms` knob.
-19. **Add push notification hooks for credit events**
-    - Emit webhooks/FCM triggers in `wallet/src/credits.rs` and document opt‑in flow.
+19. **Add push notification hooks for balance events**
+    - Emit webhooks/FCM triggers in the wallet and document opt‑in flow.
 20. **Set up formal verification for consensus rules**
     - Translate the state machine into F* modules under `formal/consensus` and verify in CI.
 
@@ -431,7 +428,7 @@ This section consolidates actionable playbooks from §§18–19. It is included 
   - Offline money/messaging (canary): escrowed receipts, delayed settlement on reconnect; small group “split later”; SOS broadcast.
 - Phase B (2–6 weeks): People‑Built Internet primitives
   - Range Boost delay‑tolerant store‑and‑forward; optional lighthouse recognition; coverage/delivery earnings.
-  - Hotspot Exchange: host/guest modes, wrapped traffic; credit meters backed by BLOCKc.
+  - Hotspot Exchange: host/guest modes, wrapped traffic; subsidy meters backed by CT.
   - Carry‑to‑Earn sealed bundle courier for commuter routes; privacy explainer; Neighborhood Update Accelerator for instant large downloads.
 - Phase C (6–10 weeks): Industrial canary lanes + SDKs v1
   - Transcode and authenticity‑check lanes; sealed‑bid batches; small deposits; per‑slice pricing; daily payout caps; operator diagnostics.
@@ -471,7 +468,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `fee_selector` with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Credits: ledger with governance-controlled issuance, decay, and per-source expiry; reads remain free while providers earn from a read reward pool and writes burn credits.
+  - Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees.
 - Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.

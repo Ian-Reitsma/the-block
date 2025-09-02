@@ -1,5 +1,5 @@
-use crate::simple_db::SimpleDb;
 use super::read_receipt;
+use crate::simple_db::SimpleDb;
 use crate::ERR_DNS_SIG_INVALID;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
 use hex;
@@ -94,10 +94,7 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
 
 pub fn reads_since(params: &Value) -> serde_json::Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
-    let epoch = params
-        .get("epoch")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let epoch = params.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0);
     let (total, last) = read_receipt::reads_since(epoch, domain);
     serde_json::json!({"reads_total": total, "last_access_ts": last})
 }

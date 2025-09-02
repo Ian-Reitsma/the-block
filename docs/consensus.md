@@ -67,7 +67,7 @@ For each valid transaction `tx` with amounts `(amount_ct, amount_it)` and fee co
 Δrecipient_IT = amount_it
 ```
 
-All debits apply to the sender's unreserved balances and credit the recipient and miner atomically.
+All debits apply to the sender's unreserved balances and increase the recipient and miner balances atomically.
 
 ## INV-FEE-01 — Supply Neutrality
 
@@ -75,7 +75,7 @@ For every block `B` and token `T ∈ {CT, IT}`:
 
 ```
 Σ balances_T(before B) - Σ balances_T(after B)
-  = Σ fees_T(deducted_by_senders in B) - Σ fees_T(credited_to_miners in B) = 0.
+  = Σ fees_T(deducted_by_senders in B) - Σ fees_T(awarded_to_miners in B) = 0.
 ```
 
 When `ν = 2` and `f` is odd, the `ceil`/`floor` split above ensures `fee_ct + fee_it = f`, preserving the equality.

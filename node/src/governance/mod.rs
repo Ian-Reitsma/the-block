@@ -3,9 +3,9 @@ mod params;
 mod store;
 
 pub use bicameral::{
-    Bicameral, CreditIssue, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
+    Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
-pub use params::{registry, ParamSpec, Params, Runtime};
+pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
 pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS};
 
 use serde::{Deserialize, Serialize};
@@ -20,9 +20,12 @@ pub enum ParamKey {
     IndustrialAdmissionMinCapacity,
     FairshareGlobalMax,
     BurstRefillRatePerS,
-    CreditsDecayLambdaPerHourPpm,
-    DailyPayoutCap,
-    ReadPoolSeed,
+    BetaStorageSubCt,
+    GammaReadSubCt,
+    KappaCpuSubCt,
+    LambdaBytesOutSubCt,
+    RentRateCtPerByte,
+    KillSwitchSubsidyReduction,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

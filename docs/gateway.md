@@ -4,6 +4,8 @@ Gateway nodes log every served read without charging end users or domain owners.
 This section captures the full free-read pipeline from request handling to
 reward issuance.
 
+Security considerations are catalogued under [threat_model/hosting.md](threat_model/hosting.md).
+
 ## 1. ReadReceipt Lifecycle
 
 1. **Request arrival** – `gateway/http.rs` accepts an HTTP GET, validates
@@ -19,21 +21,17 @@ reward issuance.
    receipts, writes the root to `receipts/read/<epoch>.root`, and queues an L1
    anchor via `settlement::submit_anchor`.
 5. **Finalization** – once the on-chain anchor confirms, a settlement watcher
-   moves all files into `receipts/read/<epoch>.final` and invokes
-   `issue_read` to mint provider credits.
+   moves all files into `receipts/read/<epoch>.final` and records served
+   bytes for subsidy payout.
 6. **Dynamic pages** – if server-side code runs, `gateway/exec.rs` also emits an
    `ExecutionReceipt` (CPU-seconds, disk IO). Its hash is batched alongside the
    `ReadReceipt` root so compute and storage receipts anchor together.
 
-## 2. Credit Issuance for Reads
+## 2. Subsidy Issuance for Reads
 
-- `credits/ledger.rs::read_reward_pool` holds the reward balance seeded via the
-  `read_pool_seed` governance parameter.
-- `credits/issuance.rs::issue_read` validates finalized receipts, enforces
-  per-region caps, mints credits, and increments
-  `credit_issued_total{source="read",region}`.
-- Decay and expiry apply exactly like other sources; balances live per
-  provider.
+- Governance parameters β/γ dictate CT payout per byte.
+- Finalized receipt batches trigger CT subsidies and update
+  `subsidy_bytes_total{type="read"}`.
 
 ## 3. Abuse Prevention
 
@@ -50,6 +48,5 @@ reward issuance.
   domain owners.
 - `gateway.reads_since(epoch)` scans finalized batches to aggregate reads per
   domain.
-- Operators can reconstruct traffic analytics without ever seeing credit
-  deductions or user fees.
+- Operators can reconstruct traffic analytics without ever seeing user fees.
 

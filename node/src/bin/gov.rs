@@ -53,7 +53,7 @@ fn main() {
             let v: serde_json::Value = serde_json::from_str(&text).expect("json");
             let start = v["start"].as_u64().unwrap_or(0);
             let end = v["end"].as_u64().unwrap_or(0);
-            let id = gov.submit(start, end, None);
+            let id = gov.submit(start, end);
             println!("submitted {id}");
             gov.persist(db_path).expect("persist");
         }
@@ -63,16 +63,11 @@ fn main() {
             gov.persist(db_path).expect("persist");
         }
         Command::Exec { id } => {
-            use credits::Ledger;
-            use std::path::PathBuf;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            let path = PathBuf::from("node-data").join("credits.bin");
-            let mut ledger = Ledger::load(&path).expect("load ledger");
-            gov.execute(id, now, Some(&mut ledger)).expect("exec");
-            ledger.save(&path).expect("save ledger");
+            gov.execute(id, now).expect("exec");
             println!("executed {id}");
             gov.persist(db_path).expect("persist");
         }

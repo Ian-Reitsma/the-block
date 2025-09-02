@@ -6,7 +6,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub step: u64,
-    pub credits: f64,
+    pub subsidy: f64,
     pub supply: f64,
     pub liquidity: f64,
     pub bridged: f64,

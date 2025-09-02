@@ -1,0 +1,9 @@
+[storage]
+l2_cap_bytes_per_epoch = 33554432
+bytes_per_sender_epoch_cap = 16777216
+
+[gateway]
+req_rate_per_ip = 20
+
+[func]
+gas_limit_default = 100000

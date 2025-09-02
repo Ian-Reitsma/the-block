@@ -56,7 +56,7 @@ impl TrustLedger {
     }
 
     /// Breadth-first search for a payment path from `src` to `dst` with at least `amount`
-    /// of available credit on each hop. Returns the account sequence if found.
+    /// of available balance on each hop. Returns the account sequence if found.
     pub fn find_path(&self, src: &str, dst: &str, amount: u64) -> Option<Vec<String>> {
         let mut q = VecDeque::new();
         let mut visited: HashSet<String> = HashSet::new();

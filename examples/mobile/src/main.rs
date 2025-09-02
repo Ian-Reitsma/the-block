@@ -1,5 +1,5 @@
 use light_client::{Header, LightClient};
-use wallet::{CreditNotifier, Wallet};
+use wallet::Wallet;
 use std::fs::File;
 use std::io::Read;
 
@@ -15,7 +15,7 @@ fn main() {
     for h in iter {
         client.verify_and_append(h).expect("header");
     }
-    println!("synced {} headers; credits={}", client.chain.len(), client.credits);
+    println!("synced {} headers", client.chain.len());
 
     // basic wallet operation
     let wallet = Wallet::generate();
@@ -23,8 +23,5 @@ fn main() {
     let sig = wallet.sign(message).expect("sign");
     println!("signature: {}", hex::encode(sig.to_bytes()));
 
-    // register push endpoint and trigger a balance notification
-    let mut notifier = CreditNotifier::default();
-    notifier.register_webhook("https://example.com/push");
-    let _ = notifier.notify_balance_change("demo", client.credits as u64);
+    // additional wallet logic (e.g., staking) would go here
 }

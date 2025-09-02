@@ -106,3 +106,74 @@ impl NodeConfig {
         fs::write(path, data)
     }
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct InflationConfig {
+    pub beta_storage_sub_ct: f64,
+    pub gamma_read_sub_ct: f64,
+    pub kappa_cpu_sub_ct: f64,
+    pub lambda_bytes_out_sub_ct: f64,
+}
+
+impl Default for InflationConfig {
+    fn default() -> Self {
+        Self {
+            beta_storage_sub_ct: 0.05,
+            gamma_read_sub_ct: 0.02,
+            kappa_cpu_sub_ct: 0.01,
+            lambda_bytes_out_sub_ct: 0.005,
+        }
+    }
+}
+
+pub fn load_inflation(dir: &str) -> InflationConfig {
+    let path = format!("{}/inflation.toml", dir);
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct StorageCaps {
+    pub l2_cap_bytes_per_epoch: u64,
+    pub bytes_per_sender_epoch_cap: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GatewayCaps {
+    pub req_rate_per_ip: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct FuncCaps {
+    pub gas_limit_default: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CapsConfig {
+    pub storage: StorageCaps,
+    pub gateway: GatewayCaps,
+    pub func: FuncCaps,
+}
+
+impl Default for CapsConfig {
+    fn default() -> Self {
+        Self {
+            storage: StorageCaps {
+                l2_cap_bytes_per_epoch: 33_554_432,
+                bytes_per_sender_epoch_cap: 16_777_216,
+            },
+            gateway: GatewayCaps { req_rate_per_ip: 20 },
+            func: FuncCaps { gas_limit_default: 100_000 },
+        }
+    }
+}
+
+pub fn load_caps(dir: &str) -> CapsConfig {
+    let path = format!("{}/caps.toml", dir);
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or_default()
+}

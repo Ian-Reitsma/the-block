@@ -65,6 +65,99 @@ pub static SNAPSHOT_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static SUBSIDY_MULTIPLIER: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("subsidy_multiplier", "Current subsidy multipliers"),
+        &["type"],
+    )
+    .unwrap_or_else(|e| panic!("gauge subsidy multiplier: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry subsidy multiplier: {e}"));
+    g
+});
+
+pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("subsidy_bytes_total", "Total subsidized bytes by type"),
+        &["type"],
+    )
+    .unwrap_or_else(|e| panic!("counter subsidy bytes: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry subsidy bytes: {e}"));
+    c
+});
+
+pub static SUBSIDY_CPU_MS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "subsidy_cpu_ms_total",
+        "Total subsidized compute time in ms",
+    )
+    .unwrap_or_else(|e| panic!("counter subsidy cpu: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry subsidy cpu: {e}"));
+    c
+});
+
+pub static SUBSIDY_AUTO_REDUCED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "subsidy_auto_reduced_total",
+        "Multiplier auto-reduction events due to inflation guard",
+    )
+    .unwrap_or_else(|e| panic!("counter subsidy auto reduced: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry subsidy auto reduced: {e}"));
+    c
+});
+
+pub static KILL_SWITCH_TRIGGER_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "kill_switch_trigger_total",
+        "Times the subsidy kill switch was activated",
+    )
+    .unwrap_or_else(|e| panic!("counter kill switch trigger: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry kill switch trigger: {e}"));
+    c
+});
+
+pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("rent_escrow_locked_ct_total", "Total CT locked in rent escrow")
+        .unwrap_or_else(|e| panic!("gauge rent escrow: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry rent escrow: {e}"));
+    g
+});
+
+pub static RENT_ESCROW_REFUNDED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "rent_escrow_refunded_ct_total",
+        "Total CT refunded from rent escrow",
+    )
+    .unwrap_or_else(|e| panic!("counter rent escrow refunded: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry rent escrow refunded: {e}"));
+    c
+});
+
+pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "rent_escrow_burned_ct_total",
+        "Total CT burned from rent escrow",
+    )
+    .unwrap_or_else(|e| panic!("counter rent escrow burned: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry rent escrow burned: {e}"));
+    c
+});
+
 pub static EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("evictions_total", "Total mempool evictions")
         .unwrap_or_else(|e| panic!("counter: {e}"));
@@ -210,45 +303,6 @@ pub static CONSUMER_FEE_P90: Lazy<IntGauge> = Lazy::new(|| {
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     g
-});
-
-pub static CREDIT_BURN_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
-    let c = IntCounterVec::new(
-        Opts::new("credit_burn_total", "Credits burned by sink"),
-        &["sink"],
-    )
-    .unwrap_or_else(|e| panic!("counter credit burn: {e}"));
-    REGISTRY
-        .register(Box::new(c.clone()))
-        .unwrap_or_else(|e| panic!("registry credit burn: {e}"));
-    c
-});
-
-pub static CREDIT_ISSUED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
-    let c = IntCounterVec::new(
-        Opts::new("credit_issued_total", "Credits issued by source and region"),
-        &["source", "region"],
-    )
-    .unwrap_or_else(|e| panic!("counter credit issued: {e}"));
-    REGISTRY
-        .register(Box::new(c.clone()))
-        .unwrap_or_else(|e| panic!("registry credit issued: {e}"));
-    c
-});
-
-pub static CREDIT_ISSUE_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
-    let c = IntCounterVec::new(
-        Opts::new(
-            "credit_issue_rejected_total",
-            "Rejected credit issuance attempts",
-        ),
-        &["reason"],
-    )
-    .unwrap_or_else(|e| panic!("counter credit issue rejected: {e}"));
-    REGISTRY
-        .register(Box::new(c.clone()))
-        .unwrap_or_else(|e| panic!("registry credit issue rejected: {e}"));
-    c
 });
 
 pub static READ_DENIED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {

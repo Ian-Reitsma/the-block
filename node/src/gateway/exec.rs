@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use blake3;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "telemetry")]
+use crate::telemetry::SUBSIDY_CPU_MS_TOTAL;
 
 use super::read_receipt;
 
@@ -71,6 +73,8 @@ pub fn record(
         disk_io_bytes,
         ts,
     };
+    #[cfg(feature = "telemetry")]
+    SUBSIDY_CPU_MS_TOTAL.inc_by(cpu_seconds * 1000);
     append_exec(&receipt, epoch, seq)
 }
 

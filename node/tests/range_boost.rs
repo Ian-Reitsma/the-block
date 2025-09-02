@@ -8,7 +8,6 @@ fn bundle_queue_works() {
         0,
         HopProof {
             relay: "loopback".into(),
-            credits: 1,
         },
     );
     let b = rb.dequeue().unwrap();

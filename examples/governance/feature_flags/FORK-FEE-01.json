@@ -1,6 +1,0 @@
-{
-  "id": "FORK-FEE-01",
-  "description": "Adjust fee split ratio",
-  "activate_at": 100000,
-  "version": 2
-}

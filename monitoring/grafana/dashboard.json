@@ -164,6 +164,51 @@
         }
       ],
       "id": 8
+    },
+    {
+      "type": "graph",
+      "title": "Storage Subsidy Bytes/s",
+      "targets": [
+        {
+          "expr": "rate(subsidy_bytes_total{type=\"storage\"}[5m])"
+        }
+      ],
+      "id": 20
+    },
+    {
+      "type": "graph",
+      "title": "Read Subsidy Bytes/s",
+      "targets": [
+        {
+          "expr": "rate(subsidy_bytes_total{type=\"read\"}[5m])"
+        }
+      ],
+      "id": 21
+    },
+    {
+      "type": "graph",
+      "title": "Compute Subsidy ms/s",
+      "targets": [
+        {
+          "expr": "rate(subsidy_cpu_ms_total[5m])"
+        }
+      ],
+      "id": 22
+    },
+    {
+      "type": "stat",
+      "title": "Rent Escrow Locked CT",
+      "targets": [
+        {
+          "expr": "rent_escrow_locked_ct_total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "CT"
+        }
+      },
+      "id": 23
     }
   ]
 }

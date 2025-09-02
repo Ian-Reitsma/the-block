@@ -18,7 +18,7 @@ use liquidity::LiquidityModel;
 /// Economic and network simulation harness.
 pub struct Simulation {
     pub nodes: u64,
-    pub credits: f64,
+    pub subsidy: f64,
     pub inflation: InflationModel,
     pub liquidity: LiquidityModel,
     pub bridging: BridgeModel,
@@ -31,7 +31,7 @@ impl Simulation {
     pub fn new(nodes: u64) -> Self {
         Self {
             nodes,
-            credits: 0.0,
+            subsidy: 0.0,
             inflation: InflationModel::default(),
             liquidity: LiquidityModel::default(),
             bridging: BridgeModel::default(),
@@ -54,7 +54,7 @@ impl Simulation {
     pub fn export_governance<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
         #[derive(Serialize)]
         struct Governance<'a> {
-            total_credits: f64,
+            total_subsidy: f64,
             total_supply: f64,
             liquidity: f64,
             bridged: f64,
@@ -64,7 +64,7 @@ impl Simulation {
             _p: std::marker::PhantomData<&'a ()>,
         }
         let g = Governance {
-            total_credits: self.credits,
+            total_subsidy: self.subsidy,
             total_supply: self.inflation.supply,
             liquidity: self.liquidity.token_reserve,
             bridged: self.bridging.bridged,
@@ -81,7 +81,7 @@ impl Simulation {
     pub fn step(&mut self, step: u64) -> Snapshot {
         let mut rng = rand::thread_rng();
         let inc: f64 = rng.gen_range(0.0..1.0);
-        self.credits += inc;
+        self.subsidy += inc;
         let supply = self.inflation.apply(inc);
         let liquidity = self.liquidity.update(inc);
         let bridged = self.bridging.flow(inc);
@@ -102,7 +102,7 @@ impl Simulation {
         let readiness = 1.0 / (1.0 + self.backlog);
         Snapshot {
             step,
-            credits: self.credits,
+            subsidy: self.subsidy,
             supply,
             liquidity,
             bridged,

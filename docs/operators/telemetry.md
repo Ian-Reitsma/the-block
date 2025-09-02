@@ -1,5 +1,7 @@
 # Telemetry overview
 
+See [docs/economics.md](../economics.md#epoch-retuning-formula) for subsidy formulas and ROI guidance.
+
 Headline panels show:
 - **Probe success rate 10m** – expect ~100%.
 - **Convergence p95 (s)** – normal < 3s.
@@ -8,7 +10,7 @@ Headline panels show:
 - **SLA misses** – monitor `industrial_rejected_total{reason="SLA"}` for deadline violations.
 - **Settlement applied** – watch `settle_applied_total` for receipt activity.
 - **Storage provider RTT/loss** – track `storage_provider_rtt_ms` and `storage_provider_loss_rate`.
-- **Read denials & issuance** – watch `read_denied_total{reason}` and `credit_issued_total{source}`.
+- **Read denials & issuance** – watch `read_denied_total{reason}` and `subsidy_bytes_total{type="read"}`; rent escrow via `rent_escrow_locked_ct_total`.
 
 To scrape metrics remotely with Prometheus:
 ```yaml

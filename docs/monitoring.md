@@ -33,8 +33,8 @@ blocking the calling shell.
 Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves a preloaded dashboard on <http://localhost:3000>.
 
 Panels include per-lane mempool size, banned peers, gossip duplicate counts,
-`read_denied_total{reason}` counters, `credit_issued_total{source,region}`
-metrics, and average log size derived from the `log_size_bytes` histogram. The repository
+`read_denied_total{reason}` counters, subsidy gauges (`subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`, `rent_escrow_locked_ct_total`),
+and average log size derived from the `log_size_bytes` histogram. The repository
 omits screenshot assets to keep the tree lightweight; after running a monitor
 command, open Grafana and import `monitoring/grafana/dashboard.json` to explore
 the dashboard.
@@ -99,5 +99,7 @@ Prometheus rules under `monitoring/alert.rules.yml` watch for:
 - Consumer fee p90 exceeding `ConsumerFeeComfortP90Microunits` (warns).
 - Industrial deferral ratio above 30% over 10m (warns).
 - `read_denied_total{reason="limit"}` rising faster than baseline (warns).
+- Subsidy counter spikes via `subsidy_bytes_total`/`subsidy_cpu_ms_total` (warns).
+- Sudden `rent_escrow_locked_ct_total` growth (warns).
 
 `scripts/telemetry_sweep.sh` runs the synthetic check, queries Prometheus for headline numbers, and writes a timestamped `status/index.html` colored green/orange/red.
