@@ -2,6 +2,8 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use ledger::utxo_account::AccountLedger;
+#[cfg(feature = "telemetry")]
+use crate::telemetry::SLASHING_BURN_CT_TOTAL;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettleMode {
@@ -16,28 +18,22 @@ static ACCOUNTS: Lazy<Mutex<AccountLedger>> = Lazy::new(|| Mutex::new(AccountLed
 pub struct Settlement;
 
 impl Settlement {
-    pub fn init(
-        _path: &str,
-        mode: SettleMode,
-        _min_fee_micros: u64,
-        _decay_lambda_per_hour: f64,
-        _dispute_window_epochs: u64,
-    ) {
+    pub fn init(_path: &str, mode: SettleMode) {
         *MODE.lock().unwrap_or_else(|e| e.into_inner()) = mode;
     }
 
     pub fn shutdown() {}
 
-    pub fn set_decay_lambda(_lambda: f64) {}
-
-    pub fn set_daily_payout_cap(_cap: u64) {}
-
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
-        ACCOUNTS
+        let res = ACCOUNTS
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .debit(provider, amount)
-            .map_err(|_| ())
+            .debit(provider, amount);
+        if res.is_ok() {
+            #[cfg(feature = "telemetry")]
+            SLASHING_BURN_CT_TOTAL.inc_by(amount);
+        }
+        res.map_err(|_| ())
     }
 
     pub fn accrue(provider: &str, _event: &str, amount: u64) {

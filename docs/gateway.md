@@ -1,52 +1,60 @@
-# Gateway Read Accounting
+# HTTP Gateway – Zero‑Fee Web Hosting
 
-Gateway nodes log every served read without charging end users or domain owners.
-This section captures the full free-read pipeline from request handling to
-reward issuance.
+The HTTP gateway is the public entry point for on‑chain web sites. It maps a
+`SiteManifestTx` domain to its blob assets, executes optional `FuncTx` WASM
+handlers, logs every read via `ReadAck`, and exports analytics without charging
+visitors or publishers.
 
-Security considerations are catalogued under [threat_model/hosting.md](threat_model/hosting.md).
+Security considerations are catalogued under
+[threat_model/hosting.md](threat_model/hosting.md).
 
-## 1. ReadReceipt Lifecycle
+## 1. Request Lifecycle
 
-1. **Request arrival** – `gateway/http.rs` accepts an HTTP GET, validates
-   headers, and resolves the domain through `gateway/dns.rs`.
-2. **Chunk streaming** – encrypted chunks are fetched from storage peers via
-   `storage/client.rs` and streamed to the requester; the gateway never sees
-   plaintext because decryption happens client-side.
-3. **Receipt creation** – after the response completes, the gateway calls
-   `read_receipt::append` with `{domain, provider_id, bytes_served, ts,
-   dynamic=false}`. Receipts are stored as CBOR files under
-   `receipts/read/<epoch>/<seq>.cbor`.
-4. **Batching** – an hourly job `read_receipt::batch` Merklizes the pending
-   receipts, writes the root to `receipts/read/<epoch>.root`, and queues an L1
-   anchor via `settlement::submit_anchor`.
-5. **Finalization** – once the on-chain anchor confirms, a settlement watcher
-   moves all files into `receipts/read/<epoch>.final` and records served
-   bytes for subsidy payout.
-6. **Dynamic pages** – if server-side code runs, `gateway/exec.rs` also emits an
-   `ExecutionReceipt` (CPU-seconds, disk IO). Its hash is batched alongside the
-   `ReadReceipt` root so compute and storage receipts anchor together.
+1. **Accept & Throttle** – `web/gateway.rs` accepts the TCP connection and runs a
+   per‑IP token bucket. Exceeding the bucket returns HTTP 429 and logs
+   `read_denied_total{reason="rate_limit"}`.
+2. **Domain Stake Check** – the `Host` header is verified against the on‑chain
+   stake table. Domains without an escrowed deposit receive HTTP 403.
+3. **Manifest Resolve** – the published `SiteManifestTx` is fetched by domain
+   name. The manifest maps paths to blob IDs and optional WASM function hashes.
+4. **Static Blob Stream** – for ordinary paths the gateway pulls erasure‑coded
+   shards via `storage/pipeline.rs`, reassembles the blob, and streams bytes to
+   the client. No fees are charged and the client decrypts locally if needed.
+5. **Dynamic Execution** – `"/api/"` paths invoke the referenced `FuncTx`. The
+   WASM bytecode is loaded from the blob store, executed with deterministic fuel
+   limits, and its output streamed back to the client.
+6. **ReadAck Append** – once the response body is sent, the gateway pushes a
+   `ReadAck {manifest_id, path_hash, bytes, client_ip_hash, ts}` into an in‑memory
+   queue for later batching.
 
-## 2. Subsidy Issuance for Reads
+## 2. Receipt Batching & Analytics
 
-- Governance parameters β/γ dictate CT payout per byte.
-- Finalized receipt batches trigger CT subsidies and update
-  `subsidy_bytes_total{type="read"}`.
+- A background task drains queued `ReadAck`s, writes them to CBOR batches, and
+  Merklizes each batch root. Roots anchor on‑chain so auditors can reconstruct
+  traffic.
+- The `analytics` RPC exposes per‑domain totals computed from finalized batches
+  allowing site operators to verify pageviews or ad impressions.
 
-## 3. Abuse Prevention
+## 3. Subsidy Issuance for Reads
 
-- `gateway/http.rs` enforces per-IP and per-identity token buckets configured by
-  `tokens_per_minute` and `burst_tokens`.
-- Bucket exhaustion returns HTTP `429 Too Many Requests` and increments
-  `read_denied_total{reason}`.
-- Denied reads still append a `ReadReceipt` with `allowed=false` so misuse is
-  auditable without billing users.
+- Finalized read batches credit `READ_SUB_CT` via the block coinbase. The
+  formula `γ × bytes` is governed by `inflation.params`.
+- Prometheus counter `subsidy_bytes_total{type="read"}` increments with every
+  anchored batch so operators can reconcile payouts.
 
-## 4. Visibility & Analytics
+## 4. Abuse Prevention Summary
 
-- `gateway.policy` RPC exposes `{reads_total, last_access_ts}` counters for
-  domain owners.
-- `gateway.reads_since(epoch)` scans finalized batches to aggregate reads per
-  domain.
-- Operators can reconstruct traffic analytics without ever seeing user fees.
+- **Rate limits** – per‑IP token buckets; governance knob `gateway.req_rate_per_ip`.
+- **Stake deposits** – domains bond CT before serving content; slashable on
+  abuse.
+- **WASM fuel** – deterministic execution with `func.gas_limit_default`.
+- **Auditability** – all reads recorded via `ReadAck`; batches with <10 % signed
+  acks are discarded and can trigger slashing.
+
+## 5. Operator Visibility
+
+- `gateway.policy` reports current rate‑limit counters and last access time.
+- `gateway.reads_since(epoch)` scans finalized batches for historical traffic.
+- `analytics` RPC provides aggregated read counts and bytes, suitable for
+  dashboarding or advertising audits.
 

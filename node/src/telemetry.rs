@@ -158,6 +158,18 @@ pub static RENT_ESCROW_BURNED_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static SLASHING_BURN_CT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "slashing_burn_ct_total",
+        "Total CT burned from slashing penalties",
+    )
+    .unwrap_or_else(|e| panic!("counter slashing burn: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry slashing burn: {e}"));
+    c
+});
+
 pub static EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("evictions_total", "Total mempool evictions")
         .unwrap_or_else(|e| panic!("counter: {e}"));

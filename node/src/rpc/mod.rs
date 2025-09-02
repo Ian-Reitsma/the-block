@@ -37,6 +37,8 @@ pub mod client;
 pub mod governance;
 pub mod identity;
 pub mod pos;
+#[cfg(feature = "telemetry")]
+pub mod analytics;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -69,6 +71,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "dns.publish_record",
     "gateway.policy",
     "gateway.reads_since",
+    #[cfg(feature = "telemetry")]
+    "analytics",
     "microshard.roots.last",
     "mempool.stats",
     "kyc.verify",
@@ -126,8 +130,7 @@ enum RpcResponse {
     },
 }
 
-#[derive(Serialize)]
-#[derive(Debug)]
+#[derive(Serialize, Debug)]
 pub struct RpcError {
     code: i32,
     message: &'static str,
@@ -597,6 +600,12 @@ fn dispatch(
         },
         "gateway.policy" => gateway::dns::gateway_policy(&req.params),
         "gateway.reads_since" => gateway::dns::reads_since(&req.params),
+        #[cfg(feature = "telemetry")]
+        "analytics" => {
+            let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone()).unwrap_or(analytics::AnalyticsQuery { domain: String::new() });
+            let stats = analytics::analytics(&crate::telemetry::READ_STATS, q);
+            serde_json::to_value(stats).unwrap()
+        },
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
             let roots = Settlement::recent_roots(n);
@@ -692,6 +701,8 @@ fn dispatch(
                 nonce,
                 difficulty,
                 timestamp,
+                l2_roots: Vec::new(),
+                l2_sizes: Vec::new(),
             };
             let hash = hdr.hash();
             let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
@@ -720,27 +731,9 @@ fn dispatch(
         }
         "inflation.params" => {
             let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
-            serde_json::json!({
-                "beta_storage_sub_ct": params.beta_storage_sub_ct,
-                "gamma_read_sub_ct": params.gamma_read_sub_ct,
-                "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
-                "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
-                "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
-            })
+            governance::inflation_params(&params)
         }
-        "stake.role" => {
-            let id = req.params.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let role = req
-                .params
-                .get("role")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let stake = pos::state()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .stake_of(id, role);
-            serde_json::json!({"id": id, "role": role, "stake": stake})
-        }
+        "stake.role" => pos::role(&req.params)?,
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
             match handles.lock() {

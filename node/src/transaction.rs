@@ -6,6 +6,7 @@
 use crate::{constants::bincode_config, constants::domain_tag, to_array_32, to_array_64};
 use bincode::Options;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use hex;
 use serde::{Deserialize, Serialize};
 
 use pyo3::exceptions::PyValueError;
@@ -147,6 +148,64 @@ impl SignedTransaction {
             self.public_key.len(),
             self.signature.len(),
             self.lane,
+        )
+    }
+}
+
+/// Blob transaction committing an opaque data blob by root hash.
+#[pyclass]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct BlobTx {
+    /// Owner account identifier.
+    #[pyo3(get, set)]
+    pub owner: String,
+    /// Globally unique blob identifier derived from parent hash and nonce.
+    #[pyo3(get, set)]
+    pub blob_id: [u8; 32],
+    /// BLAKE3 commitment to the blob contents or erasure-coded shards.
+    #[pyo3(get, set)]
+    pub blob_root: [u8; 32],
+    /// Total uncompressed size of the blob in bytes.
+    #[pyo3(get, set)]
+    pub blob_size: u64,
+    /// Fractal layer the blob targets (0=L1,1=L2,2=L3).
+    #[pyo3(get, set)]
+    pub fractal_lvl: u8,
+    /// Optional expiry epoch after which the blob can be pruned.
+    #[pyo3(get, set)]
+    pub expiry: Option<u64>,
+}
+
+#[pymethods]
+impl BlobTx {
+    #[new]
+    pub fn new(
+        owner: String,
+        blob_id: [u8; 32],
+        blob_root: [u8; 32],
+        blob_size: u64,
+        fractal_lvl: u8,
+        expiry: Option<u64>,
+    ) -> Self {
+        BlobTx {
+            owner,
+            blob_id,
+            blob_root,
+            blob_size,
+            fractal_lvl,
+            expiry,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BlobTx(owner='{}', blob_id={}, blob_root={}, blob_size={}, fractal_lvl={}, expiry={:?})",
+            self.owner,
+            hex::encode(self.blob_id),
+            hex::encode(self.blob_root),
+            self.blob_size,
+            self.fractal_lvl,
+            self.expiry
         )
     }
 }

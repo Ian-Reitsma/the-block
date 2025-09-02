@@ -11,6 +11,11 @@ Before accepting a receipt, the node checks a **proximity envelope** signed by t
 
 Proximity thresholds also depend on the submitting device class. `config/localnet_devices.toml` defines RSSI/RTT corridors for phones, laptops, and routers so operators can tune acceptance windows per hardware profile.
 
+Devices that fail to meet the corridor requirements still complete the handshake
+but their receipts are tagged `reason="distance"` and excluded from subsidy
+claims. Operators can lower thresholds during disaster scenarios to widen
+participation, but doing so may admit opportunistic long-range relays.
+
 Once the session is established, clients submit assists through the `localnet.submit_receipt` RPC method:
 
 ```bash
@@ -22,12 +27,15 @@ The node verifies the receipt signature, enforces the proximity envelope, and re
 
 Telemetry surfaces `localnet_receipt_total` and `localnet_receipt_rejected_total{reason}` so operators can monitor LocalNet activity.
 
+Example Grafana panels chart acceptance ratios by device class and map receipt
+locations on an anonymized heat map, helping operators identify dead zones or
+malicious nodes spamming out-of-range assists.
+
 ### CT-only genesis template
 
 For devnets, bootstrap accounts using the provided CT-only genesis fixture at
-`examples/genesis/genesis.json`.  The file allocates liquid CT and IT without
-any credit balances.  Start a node with this genesis file to mirror main-net
-economic parameters.
+`examples/genesis/genesis.json`.  The file allocates liquid CT and IT only.
+Start a node with this genesis file to mirror main-net economic parameters.
 
 ## Mobile light-client hooks
 

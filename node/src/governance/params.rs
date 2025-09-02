@@ -2,6 +2,7 @@ use super::ParamKey;
 use crate::Blockchain;
 use serde::{Deserialize, Serialize};
 use serde_json;
+#[cfg(feature = "telemetry")]
 use tracing::info;
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
@@ -309,12 +310,14 @@ pub fn retune_multipliers(
     let _ = fs::create_dir_all(&hist_dir);
     let events_path = hist_dir.join("events.log");
     if rolling_inflation > 0.02 {
-        info!(
-            "inflation_guard triggered (rolling_inflation={})",
-            rolling_inflation
-        );
         #[cfg(feature = "telemetry")]
-        crate::telemetry::SUBSIDY_AUTO_REDUCED_TOTAL.inc();
+        {
+            info!(
+                "inflation_guard triggered (rolling_inflation={})",
+                rolling_inflation
+            );
+            crate::telemetry::SUBSIDY_AUTO_REDUCED_TOTAL.inc();
+        }
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&events_path) {
             let _ = writeln!(f, "{} inflation_guard {:.6}", current_epoch, rolling_inflation);
         }
@@ -324,12 +327,14 @@ pub fn retune_multipliers(
         params.lambda_bytes_out_sub_ct = (params.lambda_bytes_out_sub_ct as f64 * 0.95).round() as i64;
     }
     if params.kill_switch_subsidy_reduction > 0 {
-        info!(
-            "kill_switch_active reduction={}",
-            params.kill_switch_subsidy_reduction
-        );
         #[cfg(feature = "telemetry")]
-        crate::telemetry::KILL_SWITCH_TRIGGER_TOTAL.inc();
+        {
+            info!(
+                "kill_switch_active reduction={}",
+                params.kill_switch_subsidy_reduction
+            );
+            crate::telemetry::KILL_SWITCH_TRIGGER_TOTAL.inc();
+        }
         if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&events_path) {
             let _ = writeln!(f, "{} kill_switch {}", current_epoch, params.kill_switch_subsidy_reduction);
         }
@@ -338,6 +343,17 @@ pub fn retune_multipliers(
         params.gamma_read_sub_ct = (params.gamma_read_sub_ct as f64 * factor).round() as i64;
         params.kappa_cpu_sub_ct = (params.kappa_cpu_sub_ct as f64 * factor).round() as i64;
         params.lambda_bytes_out_sub_ct = (params.lambda_bytes_out_sub_ct as f64 * factor).round() as i64;
+    }
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&events_path) {
+        let _ = writeln!(
+            f,
+            "{} retune {} {} {} {}",
+            current_epoch,
+            params.beta_storage_sub_ct,
+            params.gamma_read_sub_ct,
+            params.kappa_cpu_sub_ct,
+            params.lambda_bytes_out_sub_ct,
+        );
     }
     let snap_path = hist_dir.join(format!("inflation_{}.json", current_epoch));
     if let Ok(bytes) = serde_json::to_vec(params) {

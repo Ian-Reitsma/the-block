@@ -34,7 +34,6 @@ impl Default for NodeConfig {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComputeMarketConfig {
     pub settle_mode: crate::compute_market::settlement::SettleMode,
-    pub min_fee_micros: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -54,7 +53,6 @@ impl Default for ComputeMarketConfig {
     fn default() -> Self {
         Self {
             settle_mode: crate::compute_market::settlement::SettleMode::DryRun,
-            min_fee_micros: 100,
         }
     }
 }
@@ -67,8 +65,6 @@ pub struct RpcConfig {
     pub request_timeout_ms: u64,
     pub enable_debug: bool,
     pub admin_token_file: Option<String>,
-    #[serde(default)]
-    pub dispute_window_epochs: u64,
 }
 
 impl Default for RpcConfig {
@@ -80,7 +76,6 @@ impl Default for RpcConfig {
             request_timeout_ms: 5_000,
             enable_debug: false,
             admin_token_file: Some("secrets/admin.token".into()),
-            dispute_window_epochs: 0,
         }
     }
 }

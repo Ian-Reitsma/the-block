@@ -10,6 +10,10 @@ pub struct BlockHeader {
     pub nonce: u64,
     pub difficulty: u64,
     pub timestamp: u64,
+    /// Merkle/KZG roots for L2 blob commitments anchored in this block.
+    pub l2_roots: Vec<[u8; 32]>,
+    /// Total byte sizes per L2 root for accounting.
+    pub l2_sizes: Vec<u32>,
 }
 
 impl BlockHeader {
@@ -20,6 +24,14 @@ impl BlockHeader {
         h.update(&self.checkpoint_hash);
         h.update(&self.nonce.to_le_bytes());
         h.update(&self.timestamp.to_le_bytes());
+        h.update(&(self.l2_roots.len() as u32).to_le_bytes());
+        for r in &self.l2_roots {
+            h.update(r);
+        }
+        h.update(&(self.l2_sizes.len() as u32).to_le_bytes());
+        for s in &self.l2_sizes {
+            h.update(&s.to_le_bytes());
+        }
         h.finalize().into()
     }
 }
@@ -71,6 +83,8 @@ pub fn template(
         nonce: 0,
         difficulty,
         timestamp: ts,
+        l2_roots: Vec::new(),
+        l2_sizes: Vec::new(),
     }
 }
 
