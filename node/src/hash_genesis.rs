@@ -19,6 +19,9 @@ pub const fn calculate_genesis_hash() -> &'static str {
         tx_ids: &[],
         l2_roots: &[],
         l2_sizes: &[],
+        vdf_commit: [0;32],
+        vdf_output: [0;32],
+        vdf_proof: &[],
     }
     .const_hash()
 }
@@ -43,6 +46,9 @@ pub fn calculate_genesis_hash_runtime() -> String {
         tx_ids: &[],
         l2_roots: &[],
         l2_sizes: &[],
+        vdf_commit: [0;32],
+        vdf_output: [0;32],
+        vdf_proof: &[],
     }
     .hash()
 }

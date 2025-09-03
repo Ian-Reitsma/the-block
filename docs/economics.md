@@ -55,6 +55,41 @@ The `sim/` crate models inflation, demand, liquidity, and backlog dynamics. Runn
 
 These scenarios help governance evaluate issuance and demand tuning.
 
+## Logistic Miner Reward Calibration
+
+Base block rewards shrink as the effective miner count exceeds the target
+`miner_reward_logistic_target`. The curve slope is governed by
+`logistic_slope_milli` (×1000). Each epoch the node evaluates
+
+\[
+f(N) = \frac{1}{1 + e^{\xi (N - N^*)}},\qquad \xi = \text{logistic\_slope\_milli}/1000
+\]
+
+with $N$ the Rényi-effective miner count and $N^*$ the target. Telemetry
+exports `active_miners`, `base_reward_ct`, and the counter
+`miner_reward_recalc_total` to expose hysteresis transitions.
+
+## del‑Pino Logarithmic AMM Invariant
+
+To keep DEX pricing path‑independent under volatility clustering we adopt the
+del‑Pino curve:
+
+\[
+x \ln x + y \ln y = k
+\]
+
+Swaps solve for the post‑trade reserve `y'` given input `Δx` such that the
+invariant holds; the output is `Δy = y - y'`. See `sim/src/dex.rs` for the
+Newton solver and property tests.
+
+## Inflation Cap Proof‑of‑Bound
+
+Each week validators publish a Merkle root of tuples
+\((week, S_{start}, S_{end}, \rho_{calc}, \sigma_S)\), signed by ≥⅔ stake.
+Light clients verify the published root to ensure
+\(\rho_{calc} ≤ 0.02\) without replaying the chain. `node/src/governance/
+inflation_cap.rs` implements the root computation.
+
 ## Compute-Backed Money
 
 Compute-backed tokens (CBTs) redeem for compute units at a protocol-defined
@@ -86,6 +121,13 @@ Results are clamped to ±15 % of the prior multiplier to avoid oscillation. If
 `U_x` is near zero, the previous multiplier doubles to keep incentives from
 stalling.
 
+To damp bursty utilization, the input `U_x` is smoothed with an adaptive
+Golden‑Section window. Starting from a single epoch (`d_0 = 1`), the window
+grows by the golden ratio (`d_{k+1} = ⌈ϕ·d_k⌉`) until the variance over the
+window satisfies `Var(U_{t-d_k:t}) ≤ (0.1·U_t)^2`. The mean over the minimal
+window is then used in the formula above, providing just enough memory to
+stabilise the controller without unnecessary lag.
+
 For example, assume the chain stored 12 GB of new blobs and served 80 GB of
 reads during the last epoch while circulating supply sat at 900 million CT. With
 \(\phi_{storage}=0.004\) and an epoch length of 6 000 seconds, the storage
@@ -106,19 +148,73 @@ fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
     let epoch_secs = stats.epoch_secs as f64;
     let target = 0.02;
     let yr_secs = 31_536_000.0;
-    let calc = |util: f64, phi: f64, prev: f64| {
-        let mut next = if util < 1.0 {
-            prev * 2.0
-        } else {
-            let yearly = util * (yr_secs / epoch_secs);
-            (phi * target * s) / yearly
-        };
-        next = next.clamp(prev * 0.85, prev * 1.15);
-        next
+    // Fibonacci-tempered smoothing with Hampel outlier rejection
+    let eta = state.params.util_var_threshold as f64 / 1000.0;
+    let base =
+        (state.params.fib_window_base_secs as f64 / epoch_secs).ceil() as usize;
+    let smooth = |hist: &[f64], current: f64| {
+        const PHI: f64 = 1.618_033_988_749_894_8; // golden ratio
+        if hist.is_empty() {
+            return current;
+        }
+        let mut d = base.max(1);
+        loop {
+            let start = hist.len().saturating_sub(d);
+            let slice = &hist[start..];
+            let mut sorted = slice.to_vec();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = sorted[sorted.len() / 2];
+            let mut devs: Vec<f64> = slice.iter().map(|v| (v - median).abs()).collect();
+            devs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mad = devs[devs.len() / 2].max(1e-9);
+            let thresh = 3.0 * mad;
+            let filtered: Vec<f64> = slice
+                .iter()
+                .cloned()
+                .filter(|v| (v - median).abs() <= thresh)
+                .collect();
+            let mean = filtered.iter().sum::<f64>() / filtered.len() as f64;
+            let var = if filtered.len() > 1 {
+                filtered
+                    .iter()
+                    .map(|v| (v - mean).powi(2))
+                    .sum::<f64>()
+                    / filtered.len() as f64
+            } else {
+                0.0
+            };
+            if var <= eta * eta * current * current || d >= hist.len() {
+                return mean;
+            }
+            d = (PHI * d as f64).ceil() as usize;
+        }
     };
-    state.beta = calc(stats.bytes_stored, 0.004, state.beta);
+    let u = smooth(&hist.bytes_stored, stats.bytes_stored);
+    let mut next = if u < 1.0 {
+        state.beta * 2.0
+    } else {
+        let yearly = u * (yr_secs / epoch_secs);
+        (0.004 * target * s) / yearly
+    };
+    next = next.clamp(state.beta * 0.85, state.beta * 1.15);
+    state.beta = next;
 }
 ```
+
+Encrypted utilisation submissions are supported. Validators can broadcast an
+`EncryptedUtilization` blob—bincode statistics XOR-ed with a shared key—and
+the chain will decrypt and pass the result into
+`retune_multipliers_encrypted`, preserving the entropy bound on raw
+utilisation while still retuning multipliers.
+
+## Base Reward & Miner Entropy
+
+The decaying base reward adapts to miner concentration using φ‑entropy.
+Let `h_i` be the share rate (blocks per second) for miner `i` over the last
+120 blocks and `p_i = h_i / Σ_j h_j`. Define `H_φ = -ln Σ p_i^2` (φ = 2)
+and the effective miner count `N_eff = e^{H_φ}`. The base reward is scaled by
+`1/(1 + exp[ξ (N_eff - N*)])` where `N*` is the governance target and
+`ξ = ln 99 / (0.1 N*)`.
 
 ### Operator ROI
 

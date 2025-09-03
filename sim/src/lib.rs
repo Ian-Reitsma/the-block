@@ -8,6 +8,7 @@ pub mod dashboard;
 pub mod demand;
 pub mod inflation;
 pub mod liquidity;
+pub mod dex;
 
 use bridging::BridgeModel;
 use dashboard::Snapshot;

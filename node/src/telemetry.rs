@@ -1,4 +1,6 @@
 use blake3;
+#[cfg(feature = "telemetry")]
+use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
@@ -13,6 +15,108 @@ use ureq;
 pub mod summary;
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+/// In-memory read metrics aggregated per domain.
+#[cfg(feature = "telemetry")]
+#[derive(Default)]
+pub struct ReadStats {
+    inner: DashMap<String, ReadStat>,
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Default)]
+struct ReadStat {
+    reads: AtomicU64,
+    bytes: AtomicU64,
+}
+
+#[cfg(feature = "telemetry")]
+impl ReadStats {
+    pub fn new() -> Self {
+        Self {
+            inner: DashMap::new(),
+        }
+    }
+
+    pub fn record(&self, domain: &str, bytes: u64) {
+        let stat = self
+            .inner
+            .entry(domain.to_owned())
+            .or_insert_with(ReadStat::default);
+        stat.reads.fetch_add(1, Ordering::Relaxed);
+        stat.bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn snapshot(&self, domain: &str) -> (u64, u64) {
+        self.inner
+            .get(domain)
+            .map(|s| {
+                (
+                    s.reads.load(Ordering::Relaxed),
+                    s.bytes.load(Ordering::Relaxed),
+                )
+            })
+            .unwrap_or((0, 0))
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+#[derive(Default)]
+pub struct ReadStats;
+
+#[cfg(not(feature = "telemetry"))]
+impl ReadStats {
+    pub fn new() -> Self { Self }
+    pub fn record(&self, _domain: &str, _bytes: u64) {}
+    pub fn snapshot(&self, _domain: &str) -> (u64, u64) { (0, 0) }
+}
+
+#[cfg(feature = "telemetry")]
+pub static READ_STATS: Lazy<ReadStats> = Lazy::new(ReadStats::new);
+#[cfg(not(feature = "telemetry"))]
+pub static READ_STATS: ReadStats = ReadStats;
+
+pub static HAAR_ETA_MILLI: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("haar_eta_milli", "eta parameter for burst veto x1000").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static UTIL_VAR_THRESHOLD_MILLI: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "util_var_threshold_milli",
+        "utilisation variance threshold x1000",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static FIB_WINDOW_BASE_SECS: Lazy<IntGauge> = Lazy::new(|| {
+    let g =
+        IntGauge::new("fib_window_base_secs", "base seconds for Fibonacci smoothing").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static HEURISTIC_MU_MILLI: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("heuristic_mu_milli", "A* heuristic mu x1000").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static ACTIVE_MINERS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("active_miners", "effective active miners").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static BASE_REWARD_CT: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("base_reward_ct", "base reward after logistic factor")
+        .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
 
 pub static MEMPOOL_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(Opts::new("mempool_size", "Current mempool size"), &["lane"])
@@ -77,6 +181,18 @@ pub static SUBSIDY_MULTIPLIER: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static SUBSIDY_MULTIPLIER_RAW: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new("subsidy_multiplier_raw", "True subsidy multipliers"),
+        &["type"],
+    )
+    .unwrap_or_else(|e| panic!("gauge subsidy multiplier raw: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry subsidy multiplier raw: {e}"));
+    g
+});
+
 pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("subsidy_bytes_total", "Total subsidized bytes by type"),
@@ -125,9 +241,24 @@ pub static KILL_SWITCH_TRIGGER_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static MINER_REWARD_RECALC_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "miner_reward_recalc_total",
+        "Times the miner reward logistic factor was recalculated",
+    )
+    .unwrap_or_else(|e| panic!("counter miner reward recalc: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry miner reward recalc: {e}"));
+    c
+});
+
 pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("rent_escrow_locked_ct_total", "Total CT locked in rent escrow")
-        .unwrap_or_else(|e| panic!("gauge rent escrow: {e}"));
+    let g = IntGauge::new(
+        "rent_escrow_locked_ct_total",
+        "Total CT locked in rent escrow",
+    )
+    .unwrap_or_else(|e| panic!("gauge rent escrow: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry rent escrow: {e}"));

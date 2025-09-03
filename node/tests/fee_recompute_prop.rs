@@ -90,6 +90,9 @@ proptest! {
                 base_fee: 1,
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),
+                vdf_commit: [0u8;32],
+                vdf_output: [0u8;32],
+                vdf_proof: Vec::new(),
             };
             chain.push(block);
         }

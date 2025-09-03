@@ -3,7 +3,12 @@ use super::types::{ObjectManifest, Redundancy};
 use crate::simple_db::SimpleDb;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL};
+use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use std::time::Duration;
+
+/// RaptorQ overlay constants tuned for BLE repair
+const SYMBOL_SIZE: u16 = 1024; // 1 KiB symbols
+const RATE: f32 = 1.2; // 20% overhead
 
 pub fn spawn(path: String, period: Duration) {
     tokio::spawn(async move {
@@ -47,4 +52,24 @@ pub fn run_once(db: &mut SimpleDb) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Encodes `data` into RaptorQ packets with the BLE-tuned parameters and decodes
+/// them after dropping a single packet, returning the recovered bytes.
+pub fn raptorq_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
+    let oti = ObjectTransmissionInformation::with_defaults(data.len() as u64, SYMBOL_SIZE);
+    let encoder = Encoder::new(data, oti.clone());
+    let symbols = (data.len() as f32 / SYMBOL_SIZE as f32).ceil();
+    let repair = ((symbols * (RATE - 1.0)).ceil()) as u32;
+    let total = symbols as u32;
+    let mut packets: Vec<EncodingPacket> = encoder.get_encoded_packets(total + repair);
+    if !packets.is_empty() {
+        packets.remove(0);
+    }
+    let mut decoder = Decoder::new(oti);
+    for p in packets {
+        // feed all packets; decoder yields `None` until enough symbols arrive
+        decoder.decode(p);
+    }
+    decoder.get_result().ok_or_else(|| "decode".to_string())
 }

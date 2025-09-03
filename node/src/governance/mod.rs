@@ -1,6 +1,9 @@
 pub mod bicameral;
 mod params;
 mod store;
+mod kalman;
+mod variance;
+pub mod inflation_cap;
 
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
@@ -26,6 +29,10 @@ pub enum ParamKey {
     LambdaBytesOutSubCt,
     RentRateCtPerByte,
     KillSwitchSubsidyReduction,
+    MinerRewardLogisticTarget,
+    LogisticSlope,
+    MinerHysteresis,
+    HeuristicMuMilli,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

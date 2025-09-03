@@ -21,6 +21,9 @@ pub struct BlockEncoder<'a> {
     pub tx_ids: &'a [&'a [u8]],
     pub l2_roots: &'a [[u8; 32]],
     pub l2_sizes: &'a [u32],
+    pub vdf_commit: [u8;32],
+    pub vdf_output: [u8;32],
+    pub vdf_proof: &'a [u8],
 }
 
 impl<'a> HashEncoder for BlockEncoder<'a> {
@@ -44,6 +47,10 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         for s in self.l2_sizes {
             h.update(&s.to_le_bytes());
         }
+        h.update(&self.vdf_commit);
+        h.update(&self.vdf_output);
+        h.update(&(self.vdf_proof.len() as u32).to_le_bytes());
+        h.update(self.vdf_proof);
         for id in self.tx_ids {
             h.update(id);
         }

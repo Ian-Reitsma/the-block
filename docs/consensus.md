@@ -12,6 +12,16 @@ Block production is ordered by a Proof-of-History tick generator, and blocks
 propagate through a Turbine-style tree gossip, reducing orphan rates and
 latency relative to flood gossip.
 
+### A* Routing Heuristic
+
+Relay selection minimises
+\(w_{i \to j} = \tau_{ij}^{avg} + \sigma_{ij}^{95}(1-\kappa_j)\).
+The heuristic
+\(h(n) = \tau_{floor}(asn(n), asn(dst)) + \mu(1-\kappa_n)\)
+is recomputed periodically from live RTT probes. `\mu` is a governance
+parameter (`heuristic_mu_milli`) and surfaced via telemetry to bound path
+expansion.
+
 ### Leader Scheduling
 
 Validators take turns producing blocks according to a stake-weighted rotation.
@@ -213,3 +223,25 @@ See `API_CHANGELOG.md` for Python error and telemetry endpoint history.
 | Purge interval (s)  | 0       | `--mempool-purge-interval` | `TB_PURGE_LOOP_SECS` |
 | Fee floor (fpb)     | 1       | `--min-fee-per-byte`   | `TB_MIN_FEE_PER_BYTE`      |
 
+## VRF Randomness Delay
+
+Any transaction depending on a block's VRF output must wait at least
+
+\[
+\Delta s_{\min} = \left\lceil\frac{\hbar}{2 E_b \tau_b}\right\rceil + \left\lceil\frac{\kappa}{f_{\text{HW}} \tau_b}\right\rceil
+\]
+
+slots after that block. The first term mirrors the Heisenberg energy bound and
+the second term is the runtime of a 512‑bit Pietrzak VDF with recursive proof bytes (~170 B) and
+\(\kappa = 2^{28}\). Using a 3 GHz reference frequency yields
+\(\Delta s_{\min} = 2\) slots.
+
+### Committee Sampling
+Validator committees are derived from a Hadamard transform of VRF bits with an Unruh extractor:
+
+```
+r' = H(VRF || block_{t-1})
+v  = H_n · bin(r')
+```
+
+Choosing the indices of the `k` largest `|v_i|` yields a distribution ε‑close to uniform with ε ≤ 2⁻¹²⁸.

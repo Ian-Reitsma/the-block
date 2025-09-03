@@ -1,10 +1,12 @@
 use super::{load_net_key, send_msg, PROTOCOL_VERSION};
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
-use crate::net::message::{Message, Payload};
+use crate::net::message::{BlobChunk, Message, Payload};
+use crate::simple_db::SimpleDb;
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use once_cell::sync::Lazy;
+use hex;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -116,6 +118,8 @@ impl PeerSet {
             count: 0,
             last: Instant::now(),
             banned_until: None,
+            shard_tokens: *P2P_SHARD_BURST as f64,
+            shard_last: Instant::now(),
         });
         if let Some(until) = entry.banned_until {
             if until > Instant::now() {
@@ -145,6 +149,38 @@ impl PeerSet {
             return Err(PeerErrorCode::RateLimit);
         }
         Ok(())
+    }
+
+    fn check_shard_rate(&self, pk: &[u8; 32], size: usize) -> Result<(), PeerErrorCode> {
+        let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(*pk).or_insert(PeerState {
+            count: 0,
+            last: Instant::now(),
+            banned_until: None,
+            shard_tokens: *P2P_SHARD_BURST as f64,
+            shard_last: Instant::now(),
+        });
+        let now = Instant::now();
+        let elapsed = now.duration_since(entry.shard_last).as_secs_f64();
+        entry.shard_tokens =
+            (entry.shard_tokens + elapsed * *P2P_SHARD_RATE).min(*P2P_SHARD_BURST as f64);
+        entry.shard_last = now;
+        if entry.shard_tokens >= size as f64 {
+            entry.shard_tokens -= size as f64;
+            return Ok(());
+        }
+        let until = Instant::now() + Duration::from_secs(*P2P_BAN_SECS);
+        entry.banned_until = Some(until);
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|e| panic!("time error: {e}"))
+            .as_secs()
+            + *P2P_BAN_SECS as u64;
+        ban_store::store()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .ban(pk, ts);
+        Err(PeerErrorCode::RateLimit)
     }
 
     /// Verify and handle an incoming message. Unknown peers or bad signatures are dropped.
@@ -272,8 +308,33 @@ impl PeerSet {
                     }
                 }
             }
-            Payload::BlobChunk(_chunk) => {
-                // TODO: shard handling and rate limits
+            Payload::BlobChunk(chunk) => {
+                if !self.is_authorized(&msg.pubkey) {
+                    return;
+                }
+                if let Err(code) = self.check_shard_rate(&msg.pubkey, chunk.data.len()) {
+                    telemetry_peer_error(code);
+                    if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
+                        if let Some(peer_addr) = addr {
+                            if let Ok(mut a) = self.addrs.lock() {
+                                a.remove(&peer_addr);
+                            }
+                        }
+                        if let Ok(mut auth) = self.authorized.lock() {
+                            auth.remove(&msg.pubkey);
+                        }
+                    }
+                    return;
+                }
+                let key = format!(
+                    "chunk/{}/{}",
+                    hex::encode(chunk.root),
+                    chunk.index
+                );
+                let _ = CHUNK_DB
+                    .lock()
+                    .unwrap()
+                    .try_insert(&key, chunk.data);
             }
         }
     }
@@ -283,6 +344,8 @@ struct PeerState {
     count: u32,
     last: Instant,
     banned_until: Option<Instant>,
+    shard_tokens: f64,
+    shard_last: Instant,
 }
 
 #[derive(Copy, Clone)]
@@ -327,6 +390,25 @@ fn peer_db_path() -> PathBuf {
         })
 }
 
+fn chunk_db_path() -> PathBuf {
+    std::env::var("TB_CHUNK_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".the_block")
+                .join("chunks")
+        })
+}
+
+static CHUNK_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
+    let path = chunk_db_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    Mutex::new(SimpleDb::open(path.to_str().unwrap()))
+});
+
 fn persist_peers(set: &HashSet<SocketAddr>) {
     let path = peer_db_path();
     if let Some(parent) = path.parent() {
@@ -349,4 +431,18 @@ static P2P_BAN_SECS: Lazy<u64> = Lazy::new(|| {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60)
+});
+
+static P2P_SHARD_RATE: Lazy<f64> = Lazy::new(|| {
+    std::env::var("TB_P2P_SHARD_RATE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(256_000.0)
+});
+
+static P2P_SHARD_BURST: Lazy<u64> = Lazy::new(|| {
+    std::env::var("TB_P2P_SHARD_BURST")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1_000_000)
 });

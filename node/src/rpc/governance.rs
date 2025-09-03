@@ -14,6 +14,7 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "KappaCpuSubCt" => Some(ParamKey::KappaCpuSubCt),
         "LambdaBytesOutSubCt" => Some(ParamKey::LambdaBytesOutSubCt),
         "RentRateCtPerByte" => Some(ParamKey::RentRateCtPerByte),
+        "MinerRewardLogisticTarget" => Some(ParamKey::MinerRewardLogisticTarget),
         _ => None,
     }
 }
@@ -110,6 +111,7 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
         "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
         "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
         "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
+        "miner_hysteresis": params.miner_hysteresis,
     }))
 }
 

@@ -46,12 +46,7 @@
 
 ## Deprecated / removed endpoints
 
-The 2024 credit-ledger removal eliminated a number of legacy RPC calls.
-The following methods no longer exist and clients should migrate to the
-subsidy-centric replacements listed above:
-
-- `credits.meter`
-- `gov_credit_*` family of governance helpers
-- `credits.*` balance transfer or issuance calls
-
-Any request against these paths now returns `-32601` (method not found).
+The 2024 third-token ledger removal eliminated a number of legacy RPC calls.
+All methods under the former third-token namespace were removed, and clients
+should migrate to the subsidy-centric replacements listed above. Any request
+against those paths now returns `-32601` (method not found).

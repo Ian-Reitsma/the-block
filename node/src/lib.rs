@@ -31,14 +31,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "telemetry-json")]
 use serde_json::json;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub mod config;
-mod simple_db;
-mod read_receipt;
 pub mod exec;
+mod read_receipt;
+mod simple_db;
 use config::NodeConfig;
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use simple_db::SimpleDb;
@@ -49,6 +49,24 @@ use thiserror::Error;
 
 const EPOCH_BLOCKS: u64 = 120;
 const EPOCHS_PER_YEAR: u64 = 365 * 24 * 60 * 60 / EPOCH_BLOCKS;
+const RECENT_MINER_WINDOW: usize = 120;
+
+const HBAR: f64 = 1.054_571_817e-34; // J·s
+const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
+const TAU_B: f64 = 1.0; // block interval in seconds
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+static VDF_KAPPA: AtomicU64 = AtomicU64::new(1u64 << 28);
+const F_HW_BASE: f64 = 3.0e9; // reference 3 GHz hardware
+
+pub fn set_vdf_kappa(k: u64) {
+    VDF_KAPPA.store(k, AtomicOrdering::Relaxed);
+}
+
+pub fn vrf_min_delay_slots() -> u64 {
+    let heis = (HBAR / (2.0 * BLOCK_ENERGY_J * TAU_B)).ceil();
+    let vdf = (VDF_KAPPA.load(AtomicOrdering::Relaxed) as f64 / F_HW_BASE).ceil();
+    (heis + vdf) as u64
+}
 
 pub mod gateway;
 pub mod gossip;
@@ -105,6 +123,7 @@ use transaction::{canonical_payload_py, decode_payload_py, sign_tx_py, verify_si
 pub mod consensus;
 pub use consensus::pow;
 pub mod constants;
+pub mod commit_reveal;
 pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
 pub mod fee;
 pub mod fees;
@@ -510,7 +529,7 @@ pub struct Block {
     #[pyo3(get)]
     #[serde(default)]
     /// Merkle root of all `ReadAck`s batched for this block
-    pub read_root: [u8;32],
+    pub read_root: [u8; 32],
     #[pyo3(get)]
     #[serde(default)]
     /// blake3(total_fee_ct || total_fee_it) in hex
@@ -531,6 +550,18 @@ pub struct Block {
     #[serde(default)]
     /// Corresponding total byte sizes per root
     pub l2_sizes: Vec<u32>,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Commitment to VDF preimage for randomness fuse
+    pub vdf_commit: [u8;32],
+    #[pyo3(get)]
+    #[serde(default)]
+    /// VDF output revealed for commitment two blocks prior
+    pub vdf_output: [u8;32],
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Pietrzak proof bytes for the VDF evaluation
+    pub vdf_proof: Vec<u8>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -637,6 +668,10 @@ pub struct Blockchain {
     pub base_fee: u64,
     /// Governance-controlled economic parameters
     pub params: Params,
+    pub beta_storage_sub_ct_raw: i64,
+    pub gamma_read_sub_ct_raw: i64,
+    pub kappa_cpu_sub_ct_raw: i64,
+    pub lambda_bytes_out_sub_ct_raw: i64,
     #[pyo3(get, set)]
     /// Bytes stored during the current epoch
     pub epoch_storage_bytes: u64,
@@ -657,6 +692,11 @@ pub struct Blockchain {
     pub blob_scheduler: blob_chain::BlobScheduler,
     /// Pending read acknowledgements awaiting batching
     pub read_batcher: crate::read_receipt::ReadBatcher,
+    /// Recent miners for base-reward logistic feedback
+    recent_miners: VecDeque<String>,
+    logistic_last_n: f64,
+    logistic_lock_end: u64,
+    logistic_factor: f64,
 }
 
 #[pyclass]
@@ -747,6 +787,10 @@ impl Default for Blockchain {
             config: NodeConfig::default(),
             base_fee: 1,
             params: Params::default(),
+            beta_storage_sub_ct_raw: 50,
+            gamma_read_sub_ct_raw: 20,
+            kappa_cpu_sub_ct_raw: 10,
+            lambda_bytes_out_sub_ct_raw: 5,
             epoch_storage_bytes: 0,
             epoch_read_bytes: 0,
             epoch_cpu_ms: 0,
@@ -755,6 +799,10 @@ impl Default for Blockchain {
             pending_blob_bytes: 0,
             blob_scheduler: blob_chain::BlobScheduler::default(),
             read_batcher: crate::read_receipt::ReadBatcher::new(),
+            recent_miners: VecDeque::new(),
+            logistic_last_n: 0.0,
+            logistic_lock_end: 0,
+            logistic_factor: 1.0,
         }
     }
 }
@@ -1010,6 +1058,9 @@ impl Blockchain {
                                     &b.state_root,
                                     &b.l2_roots,
                                     &b.l2_sizes,
+                                    b.vdf_commit,
+                                    b.vdf_output,
+                                    &b.vdf_proof,
                                 );
                             }
                             let mut em_c = 0u64;
@@ -1129,6 +1180,9 @@ impl Blockchain {
                                         &b.state_root,
                                         &b.l2_roots,
                                         &b.l2_sizes,
+                                        b.vdf_commit,
+                                        b.vdf_output,
+                                        &b.vdf_proof,
                                     );
                                     em_c = em_c.saturating_add(b.coinbase_consumer.get());
                                     em_i = em_i.saturating_add(b.coinbase_industrial.get());
@@ -1226,6 +1280,9 @@ impl Blockchain {
                                 &b.state_root,
                                 &b.l2_roots,
                                 &b.l2_sizes,
+                                b.vdf_commit,
+                                b.vdf_output,
+                                &b.vdf_proof,
                             );
                         }
                         let mut em_c = 0u64;
@@ -1320,6 +1377,12 @@ impl Blockchain {
         bc.block_height = bh;
         bc.difficulty = difficulty::expected_difficulty(&bc.chain);
         bc.base_fee = base_fee;
+        bc.recent_miners = VecDeque::new();
+        for blk in bc.chain.iter().rev().take(RECENT_MINER_WINDOW) {
+            if let Some(tx0) = blk.transactions.first() {
+                bc.recent_miners.push_front(tx0.payload.to.clone());
+            }
+        }
 
         if let Ok(Some((snap_height, snap_accounts, root))) =
             crate::blockchain::snapshot::load_latest(path)
@@ -1392,6 +1455,20 @@ impl Blockchain {
         bc.params.gamma_read_sub_ct = (infl.gamma_read_sub_ct * 1000.0) as i64;
         bc.params.kappa_cpu_sub_ct = (infl.kappa_cpu_sub_ct * 1000.0) as i64;
         bc.params.lambda_bytes_out_sub_ct = (infl.lambda_bytes_out_sub_ct * 1000.0) as i64;
+        bc.params.risk_lambda = (infl.risk_lambda * 1000.0) as i64;
+        bc.params.entropy_phi = (infl.entropy_phi * 1000.0) as i64;
+        bc.params.haar_eta = (infl.haar_eta * 1000.0) as i64;
+        bc.params.util_var_threshold = (infl.util_var_threshold * 1000.0) as i64;
+        bc.params.fib_window_base_secs = infl.fib_window_base_secs as i64;
+        bc.params.heuristic_mu_milli = (infl.heuristic_mu * 1000.0) as i64;
+        #[cfg(feature = "telemetry")]
+        {
+            crate::telemetry::HAAR_ETA_MILLI.set(bc.params.haar_eta);
+            crate::telemetry::UTIL_VAR_THRESHOLD_MILLI.set(bc.params.util_var_threshold);
+            crate::telemetry::FIB_WINDOW_BASE_SECS.set(bc.params.fib_window_base_secs);
+            crate::telemetry::HEURISTIC_MU_MILLI.set(bc.params.heuristic_mu_milli);
+        }
+        set_vdf_kappa(infl.vdf_kappa);
         let caps = crate::config::load_caps(path);
         crate::storage::pipeline::set_l2_cap_bytes_per_epoch(caps.storage.l2_cap_bytes_per_epoch);
         crate::storage::pipeline::set_bytes_per_sender_epoch_cap(
@@ -1634,9 +1711,12 @@ impl Blockchain {
             hash: GENESIS_HASH.to_string(),
             state_root: String::new(),
             base_fee: self.base_fee,
-            read_root: [0u8;32],
+            read_root: [0u8; 32],
             l2_roots: Vec::new(),
             l2_sizes: Vec::new(),
+            vdf_commit: [0u8;32],
+            vdf_output: [0u8;32],
+            vdf_proof: Vec::new(),
         };
         self.chain.push(g);
         self.block_height = 1;
@@ -2544,9 +2624,7 @@ impl Blockchain {
 
     /// Submit a blob transaction to the pending blob queue.
     pub fn submit_blob_tx(&mut self, tx: BlobTx) -> PyResult<()> {
-        if self.pending_blob_bytes + tx.blob_size
-            > crate::constants::MAX_UNFINALIZED_BLOB_BYTES
-        {
+        if self.pending_blob_bytes + tx.blob_size > crate::constants::MAX_UNFINALIZED_BLOB_BYTES {
             return Err(PyValueError::new_err("blob mempool full"));
         }
         self.pending_blob_bytes += tx.blob_size;
@@ -2587,8 +2665,71 @@ impl Blockchain {
             )
             .map_err(|_| PyValueError::new_err("reward overflow"))?,
         );
-        let mut reward_consumer = self.block_reward_consumer;
-        let mut reward_industrial = self.block_reward_industrial;
+        let active_eff = {
+            let mut counts: HashMap<String, u64> = HashMap::new();
+            for m in self
+                .recent_miners
+                .iter()
+                .chain(std::iter::once(&miner_addr.to_owned()))
+            {
+                *counts.entry(m.clone()).or_default() += 1;
+            }
+            let keys: Vec<String> = counts.keys().cloned().collect();
+            let mut weighted: Vec<f64> = Vec::new();
+            for k in &keys {
+                let count = counts.get(k).copied().unwrap_or(0) as f64;
+                let max_prefix = keys
+                    .iter()
+                    .filter(|o| *o != k)
+                    .map(|o| k.chars().zip(o.chars()).take_while(|(a, b)| a == b).count())
+                    .max()
+                    .unwrap_or(0) as f64;
+                let w = 1.0 + max_prefix / 24.0;
+                weighted.push(count * w);
+            }
+            let total: f64 = weighted.iter().sum();
+            if total == 0.0 {
+                1.0
+            } else {
+                let alphas = [1.5_f64, 2.0, 3.0];
+                let norm: f64 = alphas.iter().map(|a| (-a).exp()).sum();
+                let mut h = 0.0;
+                for alpha in alphas.iter() {
+                    let sum_p: f64 = weighted
+                        .iter()
+                        .map(|w| (w / total).powf(*alpha))
+                        .sum();
+                    let h_alpha = sum_p.ln() / (1.0 - alpha);
+                    let w_alpha = (-alpha).exp() / norm;
+                    h += w_alpha * h_alpha;
+                }
+                h.exp().max(1.0)
+            }
+        };
+        let n_star = self.params.miner_reward_logistic_target.max(1) as f64;
+        if self.block_height >= self.logistic_lock_end
+            && (active_eff - self.logistic_last_n).abs() >= self.params.miner_hysteresis as f64
+        {
+            let xi = self.params.logistic_slope_milli as f64 / 1000.0;
+            self.logistic_factor = 1f64 / (1f64 + f64::exp(xi * (active_eff - n_star)));
+            self.logistic_last_n = active_eff;
+            self.logistic_lock_end = self.block_height + 5 * EPOCH_BLOCKS as u64;
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::MINER_REWARD_RECALC_TOTAL.inc();
+                tracing::info!(active = active_eff, factor = self.logistic_factor, "miner_reward_recalc");
+            }
+        }
+        let logistic = self.logistic_factor;
+        let mut reward_consumer =
+            TokenAmount::new((self.block_reward_consumer.0 as f64 * logistic).round() as u64);
+        let mut reward_industrial =
+            TokenAmount::new((self.block_reward_industrial.0 as f64 * logistic).round() as u64);
+        #[cfg(feature = "telemetry")]
+        {
+            crate::telemetry::ACTIVE_MINERS.set(active_eff.round() as i64);
+            crate::telemetry::BASE_REWARD_CT.set(reward_consumer.0 as i64);
+        }
         if self.emission_consumer + reward_consumer.0 > MAX_SUPPLY_CONSUMER {
             reward_consumer = TokenAmount::new(MAX_SUPPLY_CONSUMER - self.emission_consumer);
         }
@@ -2653,13 +2794,14 @@ impl Blockchain {
         self.epoch_cpu_ms = self.epoch_cpu_ms.saturating_add(cpu_ms);
         self.epoch_bytes_out = self.epoch_bytes_out.saturating_add(bytes_out);
         let storage_sub_ct =
-            (self.params.beta_storage_sub_ct as u64).saturating_mul(self.epoch_storage_bytes);
+            (self.beta_storage_sub_ct_raw as u64).saturating_mul(self.epoch_storage_bytes);
         let read_sub_ct =
-            (self.params.gamma_read_sub_ct as u64).saturating_mul(self.epoch_read_bytes);
-        let compute_sub_ct = (self.params.kappa_cpu_sub_ct as u64)
+            (self.gamma_read_sub_ct_raw as u64).saturating_mul(self.epoch_read_bytes);
+        let compute_sub_ct = (self.kappa_cpu_sub_ct_raw as u64)
             .saturating_mul(self.epoch_cpu_ms)
             .saturating_add(
-                (self.params.lambda_bytes_out_sub_ct as u64).saturating_mul(self.epoch_bytes_out),
+                (self.lambda_bytes_out_sub_ct_raw as u64)
+                    .saturating_mul(self.epoch_bytes_out),
             );
         let coinbase_consumer = reward_consumer
             .0
@@ -2803,6 +2945,9 @@ impl Blockchain {
             base_fee: block_base_fee,
             l2_roots: included_roots,
             l2_sizes: included_sizes,
+            vdf_commit: [0u8;32],
+            vdf_output: [0u8;32],
+            vdf_proof: Vec::new(),
         };
 
         let mut nonce = 0u64;
@@ -2824,12 +2969,19 @@ impl Blockchain {
                 &root,
                 &block.l2_roots,
                 &block.l2_sizes,
+                block.vdf_commit,
+                block.vdf_output,
+                &block.vdf_proof,
             );
             let bytes = hex_to_bytes(&hash);
             if leading_zero_bits(&bytes) >= diff as u32 {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                self.recent_miners.push_back(miner_addr.to_owned());
+                if self.recent_miners.len() > RECENT_MINER_WINDOW {
+                    self.recent_miners.pop_front();
+                }
                 if index % EPOCH_BLOCKS == 0 {
                     let stats = Utilization {
                         bytes_stored: self.epoch_storage_bytes as f64,
@@ -2853,7 +3005,7 @@ impl Blockchain {
                     } else {
                         (self.emission_consumer.saturating_sub(prev)) as f64 / prev as f64
                     };
-                    retune_multipliers(
+                    let raw = retune_multipliers(
                         &mut self.params,
                         self.emission_consumer as f64,
                         &stats,
@@ -2861,6 +3013,10 @@ impl Blockchain {
                         std::path::Path::new(&self.path),
                         rolling,
                     );
+                    self.beta_storage_sub_ct_raw = raw[0];
+                    self.gamma_read_sub_ct_raw = raw[1];
+                    self.kappa_cpu_sub_ct_raw = raw[2];
+                    self.lambda_bytes_out_sub_ct_raw = raw[3];
                     self.epoch_storage_bytes = 0;
                     self.epoch_read_bytes = 0;
                     self.epoch_cpu_ms = 0;
@@ -3104,6 +3260,9 @@ impl Blockchain {
             &block.state_root,
             &block.l2_roots,
             &block.l2_sizes,
+            block.vdf_commit,
+            block.vdf_output,
+            &block.vdf_proof,
         );
         if calc != block.hash {
             return Ok(false);
@@ -3426,6 +3585,9 @@ impl Blockchain {
                 &b.state_root,
                 &b.l2_roots,
                 &b.l2_sizes,
+                b.vdf_commit,
+                b.vdf_output,
+                &b.vdf_proof,
             );
             if calc != b.hash {
                 return false;
@@ -3994,12 +4156,15 @@ fn calculate_hash(
     storage_sub: TokenAmount,
     read_sub: TokenAmount,
     compute_sub: TokenAmount,
-    read_root: [u8;32],
+    read_root: [u8; 32],
     fee_checksum: &str,
     txs: &[SignedTransaction],
     state_root: &str,
     l2_roots: &[[u8; 32]],
     l2_sizes: &[u32],
+    vdf_commit: [u8;32],
+    vdf_output: [u8;32],
+    vdf_proof: &[u8],
 ) -> String {
     let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();
     let id_refs: Vec<&[u8]> = ids.iter().map(<[u8; 32]>::as_ref).collect();
@@ -4020,6 +4185,9 @@ fn calculate_hash(
         tx_ids: &id_refs,
         l2_roots,
         l2_sizes,
+        vdf_commit,
+        vdf_output,
+        vdf_proof,
     };
     enc.hash()
 }

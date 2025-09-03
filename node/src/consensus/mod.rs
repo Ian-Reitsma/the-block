@@ -15,6 +15,11 @@ pub mod observer;
 pub mod pos;
 pub mod pow;
 pub mod unl;
+pub mod hadamard;
+pub mod vdf;
+pub mod committee {
+    pub mod topk;
+}
 
 use crate::hash_genesis;
 

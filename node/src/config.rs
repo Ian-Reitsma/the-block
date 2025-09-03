@@ -108,6 +108,13 @@ pub struct InflationConfig {
     pub gamma_read_sub_ct: f64,
     pub kappa_cpu_sub_ct: f64,
     pub lambda_bytes_out_sub_ct: f64,
+    pub risk_lambda: f64,
+    pub entropy_phi: f64,
+    pub vdf_kappa: u64,
+    pub haar_eta: f64,
+    pub util_var_threshold: f64,
+    pub fib_window_base_secs: f64,
+    pub heuristic_mu: f64,
 }
 
 impl Default for InflationConfig {
@@ -117,6 +124,13 @@ impl Default for InflationConfig {
             gamma_read_sub_ct: 0.02,
             kappa_cpu_sub_ct: 0.01,
             lambda_bytes_out_sub_ct: 0.005,
+            risk_lambda: 4.0 * std::f64::consts::LN_2,
+            entropy_phi: 2.0,
+            vdf_kappa: 1u64 << 28,
+            haar_eta: 1.5,
+            util_var_threshold: 0.1,
+            fib_window_base_secs: 4.0,
+            heuristic_mu: 0.5,
         }
     }
 }
