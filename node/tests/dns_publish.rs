@@ -43,7 +43,7 @@ async fn dns_publish_invalid_sig_rejected() {
         dir.path().join("dns_db").to_str().unwrap(),
     );
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
     let rpc_cfg = RpcConfig::default();

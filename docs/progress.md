@@ -24,11 +24,11 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 - QUIC transport and large‑scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Credits & Governance — ~76 %
+## 3. Subsidies & Governance — ~76 %
 
 **Evidence**
-- Credit issuance proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
-- Push notifications on credit balance changes (`crates/wallet/src/credits.rs`).
+- Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
+- Push notifications on subsidy balance changes (`wallet` tooling).
 - Explorer indexes settlement receipts with query endpoints (`explorer/src/lib.rs`).
 
 **Gaps**
@@ -128,7 +128,7 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 **Evidence**
 - Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).
 - Contribution metrics and optional KYC in mobile example (`examples/mobile`).
-- Push notifications for credit events (`crates/wallet/src/credits.rs`).
+- Push notifications for subsidy events (wallet tooling).
 
 **Gaps**
 - Broad hardware testing and production app distribution outstanding.

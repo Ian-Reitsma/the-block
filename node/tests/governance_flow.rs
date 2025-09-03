@@ -4,10 +4,10 @@ use the_block::governance::{BicameralGovernance as Governance, House};
 #[test]
 fn submit_vote_exec_cycle() {
     let mut gov = Governance::new(1, 1, 0);
-    let id = gov.submit(0, 0, None);
+    let id = gov.submit(0, 0);
     gov.vote(id, House::Operators, true).unwrap();
     gov.vote(id, House::Builders, true).unwrap();
-    assert!(gov.execute(id, 0, None).is_ok());
+    assert!(gov.execute(id, 0).is_ok());
     let (p, remaining) = gov.status(id, 0).unwrap();
     assert!(p.executed);
     assert_eq!(remaining, 0);
@@ -16,7 +16,7 @@ fn submit_vote_exec_cycle() {
 #[test]
 fn status_reports_timelock() {
     let mut gov = Governance::new(1, 1, 5);
-    let id = gov.submit(0, 1, None);
+    let id = gov.submit(0, 1);
     gov.vote(id, House::Operators, true).unwrap();
     gov.vote(id, House::Builders, true).unwrap();
     let (_, remaining) = gov.status(id, 3).unwrap();
@@ -92,23 +92,4 @@ fn rollback_resets_metrics() {
             .get(),
         30
     );
-}
-
-#[test]
-fn credit_issue_mints() {
-    use credits::Ledger;
-    let mut gov = Governance::new(1, 1, 0);
-    let id = gov.submit(
-        0,
-        0,
-        Some(the_block::governance::CreditIssue {
-            provider: "alice".into(),
-            amount: 50,
-        }),
-    );
-    gov.vote(id, House::Operators, true).unwrap();
-    gov.vote(id, House::Builders, true).unwrap();
-    let mut ledger = Ledger::new();
-    gov.execute(id, 0, Some(&mut ledger)).unwrap();
-    assert_eq!(ledger.balance("alice"), 50);
 }

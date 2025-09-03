@@ -43,16 +43,17 @@ Governance can adjust several runtime knobs without code changes:
 |---------------|--------|---------|
 | `fairshare.global_max` | caps aggregate industrial usage as parts-per-million of capacity | `industrial_rejected_total{reason="fairshare"}` |
 | `burst.refill_rate_per_s` | rate at which burst buckets replenish | `industrial_rejected_total{reason="burst"}` |
-| `credits.decay.lambda_per_hour` | exponential credit decay per hour | `credit_burn_total{sink="decay"}` |
+| `inflation.beta_storage_sub_ct` | µCT per byte of storage subsidy | `subsidy_bytes_total{type="storage"}` |
+| `kill_switch_subsidy_reduction` | emergency % cut across all subsidies (12 h timelock) | `subsidy_multiplier{type}` |
 
 The `gov` helper CLI provides shortcuts for crafting proposals:
 
 ```bash
 cargo run --bin gov -- SetFairshare 50000 1000
-cargo run --bin gov -- SetCreditDecay 7200
+cargo run --bin gov -- SetKillSwitchSubsidyReduction 50
 ```
 
-See [`examples/governance/src/bin/gov.rs`](../examples/governance/src/bin/gov.rs)
+See [`node/src/bin/gov.rs`](../node/src/bin/gov.rs)
 for additional subcommands that submit, vote, and execute proposals.
 
 ## Handshake Signaling

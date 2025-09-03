@@ -82,8 +82,9 @@ impl PeerSet {
             .and_then(|v| v.parse().ok());
         let mut rng: StdRng = match seed {
             Some(s) => StdRng::seed_from_u64(s),
-            None => StdRng::from_rng(rand::thread_rng())
-                .unwrap_or_else(|_| StdRng::seed_from_u64(0)),
+            None => {
+                StdRng::from_rng(rand::thread_rng()).unwrap_or_else(|_| StdRng::seed_from_u64(0))
+            }
         };
         peers.shuffle(&mut rng);
         peers
@@ -227,6 +228,14 @@ impl PeerSet {
                     let _ = bc.submit_transaction(tx);
                 }
             }
+            Payload::BlobTx(tx) => {
+                if !self.is_authorized(&msg.pubkey) {
+                    return;
+                }
+                if let Ok(mut bc) = chain.lock() {
+                    let _ = bc.submit_blob_tx(tx);
+                }
+            }
             Payload::Block(block) => {
                 if !self.is_authorized(&msg.pubkey) {
                     return;
@@ -262,6 +271,9 @@ impl PeerSet {
                         observer::observe_convergence(start);
                     }
                 }
+            }
+            Payload::BlobChunk(_chunk) => {
+                // TODO: shard handling and rate limits
             }
         }
     }

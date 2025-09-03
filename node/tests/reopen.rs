@@ -8,8 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::{
-    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, RawTxPayload,
-    TokenAmount, TokenBalance, TxAdmissionError,
+    generate_keypair, sign_tx, Account, Blockchain, ChainDisk, MempoolEntryDisk, Params,
+    RawTxPayload, TokenAmount, TokenBalance, TxAdmissionError,
 };
 
 mod util;
@@ -280,11 +280,18 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
             accounts: HashMap::new(),
             emission_consumer: 0,
             emission_industrial: 0,
+            emission_consumer_year_ago: 0,
+            inflation_epoch_marker: 0,
             block_reward_consumer: TokenAmount::new(0),
             block_reward_industrial: TokenAmount::new(0),
             block_height: 0,
             mempool: vec![entry],
             base_fee: 1,
+            params: Params::default(),
+            epoch_storage_bytes: 0,
+            epoch_read_bytes: 0,
+            epoch_cpu_ms: 0,
+            epoch_bytes_out: 0,
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
         map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
@@ -296,7 +303,7 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     #[cfg(feature = "telemetry")]
     {
         // Missing-account drops come from orphaned bundles that never earned
-        // service credits. They count toward orphan sweeps, not TTL expiry,
+        // subsidy payouts. They count toward orphan sweeps, not TTL expiry,
         // preserving the civic-grade accounting model that underpins
         // service-based governance.
         assert_eq!(0, telemetry::STARTUP_TTL_DROP_TOTAL.get());
@@ -406,11 +413,18 @@ fn schema_upgrade_compatibility() {
         accounts,
         emission_consumer: 0,
         emission_industrial: 0,
+        emission_consumer_year_ago: 0,
+        inflation_epoch_marker: 0,
         block_reward_consumer: TokenAmount::new(0),
         block_reward_industrial: TokenAmount::new(0),
         block_height: 0,
         mempool: vec![entry],
         base_fee: 1,
+        params: Params::default(),
+        epoch_storage_bytes: 0,
+        epoch_read_bytes: 0,
+        epoch_cpu_ms: 0,
+        epoch_bytes_out: 0,
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

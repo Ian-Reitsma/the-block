@@ -12,7 +12,7 @@ impl AccountLedger {
             balances: HashMap::new(),
         }
     }
-    pub fn credit(&mut self, addr: &str, amount: u64) {
+    pub fn deposit(&mut self, addr: &str, amount: u64) {
         *self.balances.entry(addr.to_string()).or_insert(0) += amount;
     }
     pub fn debit(&mut self, addr: &str, amount: u64) -> Result<(), String> {
@@ -85,7 +85,7 @@ impl UtxoAccountBridge {
                     owner: addr.clone(),
                 },
             );
-            self.accounts.credit(addr, *val);
+            self.accounts.deposit(addr, *val);
         }
         Ok(())
     }

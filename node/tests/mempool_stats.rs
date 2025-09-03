@@ -35,7 +35,7 @@ async fn rpc(addr: &str, body: &str) -> serde_json::Value {
 async fn mempool_stats_rpc() {
     let dir = tempdir().unwrap();
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun, 0, 0.0, 0);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     {
         let mut guard = bc.lock().unwrap();
         guard.add_account("alice".into(), 1000, 0).unwrap();

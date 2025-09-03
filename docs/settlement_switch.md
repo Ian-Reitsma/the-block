@@ -2,14 +2,14 @@
 
 The compute marketplace supports a two-phase switch from dry-run to real
 settlement on devnet. Operators can arm the system to start applying real
-debits and credits after a delay, cancel before activation, or revert to
+debits and CT payouts after a delay, cancel before activation, or revert to
 dry-run on demand.
 
 ## Modes
 
 - `DryRun` – receipts are emitted but no funds move.
 - `Armed` – scheduled to flip to `Real` at a specific block height.
-- `Real` – debits buyers and credits providers for each receipt.
+- `Real` – debits buyers and pays providers in CT for each receipt.
 
 ## RPC Controls
 

@@ -17,6 +17,12 @@ tests:
         values: '0+4x31'
       - series: 'INDUSTRIAL_ADMITTED_TOTAL'
         values: '0+6x31'
+      - series: 'subsidy_cpu_ms_total'
+        values: '0+1x31'
+      - series: 'subsidy_bytes_total'
+        values: '0+1x31'
+      - series: 'rent_escrow_locked_ct_total'
+        values: '0+2x31'
     alert_rule_test:
       - eval_time: 20m
         alertname: ConvergenceLag
@@ -39,3 +45,17 @@ tests:
               severity: warn
             exp_annotations:
               summary: "Industrial deferral ratio above 30%"
+      - eval_time: 30m
+        alertname: SubsidyGrowthSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+            exp_annotations:
+              summary: "Subsidy counters growing unusually fast"
+      - eval_time: 30m
+        alertname: RentEscrowLockedSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+            exp_annotations:
+              summary: "Rent escrow locked CT spiking"

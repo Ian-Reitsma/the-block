@@ -14,8 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::Path};
 use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 use the_block::{
-    fee, generate_keypair, sign_tx, Blockchain, ChainDisk, MempoolEntryDisk, RawTxPayload,
-    SignedTransaction, TokenAmount, TxAdmissionError,
+    fee, generate_keypair, sign_tx, Blockchain, ChainDisk, MempoolEntryDisk, Params,
+    RawTxPayload, SignedTransaction, TokenAmount, TxAdmissionError,
 };
 
 mod util;
@@ -55,11 +55,18 @@ fn hash_state(bc: &Blockchain) -> String {
         accounts: bc.accounts.clone(),
         emission_consumer: bc.emission_consumer,
         emission_industrial: bc.emission_industrial,
+        emission_consumer_year_ago: bc.emission_consumer_year_ago,
+        inflation_epoch_marker: bc.inflation_epoch_marker,
         block_reward_consumer: bc.block_reward_consumer,
         block_reward_industrial: bc.block_reward_industrial,
         block_height: bc.block_height,
         mempool: Vec::new(),
         base_fee: bc.base_fee,
+        params: bc.params.clone(),
+        epoch_storage_bytes: bc.epoch_storage_bytes,
+        epoch_read_bytes: bc.epoch_read_bytes,
+        epoch_cpu_ms: bc.epoch_cpu_ms,
+        epoch_bytes_out: bc.epoch_bytes_out,
     };
     let bytes = bincode::serialize(&disk).unwrap();
     blake3::hash(&bytes).to_hex().to_string()
@@ -276,7 +283,7 @@ fn test_coinbase_reward_recorded() {
 
 // 5. Fee handling: miner receives all fees
 #[test]
-fn test_fee_credit_to_miner() {
+fn test_fee_to_miner() {
     init();
     let (_dir, mut bc) = temp_blockchain("temp_chain");
     bc.add_account("alice".into(), 0, 0).unwrap();
@@ -615,6 +622,9 @@ fn test_import_difficulty_mismatch() {
         difficulty: fork[idx].difficulty,
         coin_c: fork[idx].coinbase_consumer.0,
         coin_i: fork[idx].coinbase_industrial.0,
+        storage_sub: fork[idx].storage_sub_ct.0,
+        read_sub: fork[idx].read_sub_ct.0,
+        compute_sub: fork[idx].compute_sub_ct.0,
         fee_checksum: &fork[idx].fee_checksum,
         state_root: ZERO_HASH,
         tx_ids: &id_refs,
@@ -748,11 +758,18 @@ fn test_schema_upgrade_compatibility() {
         accounts: bc_tmp.accounts.clone(),
         emission_consumer: 0,
         emission_industrial: 0,
+        emission_consumer_year_ago: 0,
+        inflation_epoch_marker: 0,
         block_reward_consumer: bc_tmp.block_reward_consumer,
         block_reward_industrial: bc_tmp.block_reward_industrial,
         block_height: bc_tmp.block_height,
         mempool: vec![entry],
         base_fee: bc_tmp.base_fee,
+        params: bc_tmp.params.clone(),
+        epoch_storage_bytes: bc_tmp.epoch_storage_bytes,
+        epoch_read_bytes: bc_tmp.epoch_read_bytes,
+        epoch_cpu_ms: bc_tmp.epoch_cpu_ms,
+        epoch_bytes_out: bc_tmp.epoch_bytes_out,
     };
     let dir = temp_dir("schema_v3");
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();

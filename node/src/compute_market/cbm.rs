@@ -8,26 +8,26 @@ pub struct ComputeToken {
 }
 
 impl ComputeToken {
-    /// Redeem tokens for compute credits using the provided redeem curve and
-    /// backstop. Returns the number of credits granted.
+    /// Redeem tokens for compute units using the provided redeem curve and
+    /// backstop. Returns the number of units granted.
     pub fn redeem(
         &self,
         curve: &RedeemCurve,
         backstop: &mut Backstop,
     ) -> Result<u64, &'static str> {
-        let credits = curve.redeem(self.units);
-        if backstop.reserve < credits {
+        let units = curve.redeem(self.units);
+        if backstop.reserve < units {
             return Err("backstop depleted");
         }
-        backstop.reserve -= credits;
-        Ok(credits)
+        backstop.reserve -= units;
+        Ok(units)
     }
 }
 
 /// Linear redeem curve priced off the current marketplace median.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct RedeemCurve {
-    /// Base price per compute unit in credits.
+    /// Base price per compute unit.
     pub base: u64,
     /// Slope adjustment in ppm to dampen large burns.
     pub slope_ppm: u64,
@@ -41,7 +41,7 @@ impl RedeemCurve {
     }
 }
 
-/// Fee-funded backstop that guarantees redemption up to `reserve` credits.
+/// Fee-funded backstop that guarantees redemption up to `reserve` units.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Backstop {
     pub reserve: u64,

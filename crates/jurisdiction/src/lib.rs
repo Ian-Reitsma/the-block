@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
-use std::path::Path;
 #[cfg(feature = "pq")]
 use base64::Engine as _;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// Region specific policy pack controlling default consent and feature toggles.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -56,7 +56,11 @@ mod tests {
     fn loads_pack() {
         let dir = tempdir().unwrap();
         let file = dir.path().join("pack.json");
-        std::fs::write(&file, b"{\"region\":\"US\",\"consent_required\":true,\"features\":[\"wallet\"]}").unwrap();
+        std::fs::write(
+            &file,
+            b"{\"region\":\"US\",\"consent_required\":true,\"features\":[\"wallet\"]}",
+        )
+        .unwrap();
         let pack = PolicyPack::load(&file).unwrap();
         assert_eq!(pack.region, "US");
         assert!(pack.consent_required);

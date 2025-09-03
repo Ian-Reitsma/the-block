@@ -1,7 +1,6 @@
 use super::RpcError;
 use crate::governance::{
-    BicameralGovernance, GovStore, House, ParamKey, Params, Proposal, ProposalStatus, Runtime,
-    Vote, VoteChoice,
+    GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
 use serde_json::json;
 
@@ -10,8 +9,11 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "SnapshotIntervalSecs" => Some(ParamKey::SnapshotIntervalSecs),
         "ConsumerFeeComfortP90Microunits" => Some(ParamKey::ConsumerFeeComfortP90Microunits),
         "IndustrialAdmissionMinCapacity" => Some(ParamKey::IndustrialAdmissionMinCapacity),
-        "CreditsDecayLambdaPerHourPpm" => Some(ParamKey::CreditsDecayLambdaPerHourPpm),
-        "ReadPoolSeed" => Some(ParamKey::ReadPoolSeed),
+        "BetaStorageSubCt" => Some(ParamKey::BetaStorageSubCt),
+        "GammaReadSubCt" => Some(ParamKey::GammaReadSubCt),
+        "KappaCpuSubCt" => Some(ParamKey::KappaCpuSubCt),
+        "LambdaBytesOutSubCt" => Some(ParamKey::LambdaBytesOutSubCt),
+        "RentRateCtPerByte" => Some(ParamKey::RentRateCtPerByte),
         _ => None,
     }
 }
@@ -103,9 +105,22 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
         "snapshot_interval_secs": params.snapshot_interval_secs,
         "consumer_fee_comfort_p90_microunits": params.consumer_fee_comfort_p90_microunits,
         "industrial_admission_min_capacity": params.industrial_admission_min_capacity,
-        "credits_decay_lambda_per_hour_ppm": params.credits_decay_lambda_per_hour_ppm,
-        "read_pool_seed": params.read_pool_seed,
+        "beta_storage_sub_ct": params.beta_storage_sub_ct,
+        "gamma_read_sub_ct": params.gamma_read_sub_ct,
+        "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
+        "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
+        "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
     }))
+}
+
+pub fn inflation_params(params: &Params) -> serde_json::Value {
+    json!({
+        "beta_storage_sub_ct": params.beta_storage_sub_ct,
+        "gamma_read_sub_ct": params.gamma_read_sub_ct,
+        "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
+        "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
+        "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
+    })
 }
 
 pub fn gov_rollback_last(
@@ -136,36 +151,5 @@ pub fn gov_rollback(
             code: -32067,
             message: "rollback failed",
         })?;
-    Ok(json!({"ok":true}))
-}
-
-pub fn gov_credit_list(gov: &BicameralGovernance) -> Result<serde_json::Value, RpcError> {
-    Ok(serde_json::to_value(gov.list()).map_err(|_| RpcError {
-        code: -32066,
-        message: "json",
-    })?)
-}
-
-pub fn gov_credit_vote(
-    gov: &std::sync::Mutex<BicameralGovernance>,
-    id: u64,
-    house: &str,
-) -> Result<serde_json::Value, RpcError> {
-    let house = match house {
-        "ops" => House::Operators,
-        _ => House::Builders,
-    };
-    let mut g = gov.lock().map_err(|_| RpcError {
-        code: -32062,
-        message: "vote failed",
-    })?;
-    g.vote(id, house, true).map_err(|_| RpcError {
-        code: -32062,
-        message: "vote failed",
-    })?;
-    g.persist("examples/governance/proposals.db").map_err(|_| RpcError {
-        code: -32061,
-        message: "persist failed",
-    })?;
     Ok(json!({"ok":true}))
 }

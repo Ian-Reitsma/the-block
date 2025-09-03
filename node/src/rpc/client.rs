@@ -1,6 +1,6 @@
 use rand::Rng;
 use reqwest::blocking::{Client, Response};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -57,12 +57,7 @@ impl RpcClient {
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
-            let res = self
-                .http
-                .post(url)
-                .json(payload)
-                .timeout(timeout)
-                .send();
+            let res = self.http.post(url).json(payload).timeout(timeout).send();
             match res {
                 Ok(r) => return Ok(r),
                 Err(e) if attempt < self.max_retries && e.is_timeout() => {
@@ -76,6 +71,65 @@ impl RpcClient {
                 Err(e) => return Err(e),
             }
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InflationParams {
+    pub beta_storage_sub_ct: i64,
+    pub gamma_read_sub_ct: i64,
+    pub kappa_cpu_sub_ct: i64,
+    pub lambda_bytes_out_sub_ct: i64,
+    pub rent_rate_ct_per_byte: i64,
+}
+
+impl RpcClient {
+    pub fn inflation_params(&self, url: &str) -> Result<InflationParams, reqwest::Error> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            jsonrpc: &'static str,
+            id: u32,
+            method: &'static str,
+            params: &'a serde_json::Value,
+        }
+        #[derive(Deserialize)]
+        struct Envelope<T> {
+            result: T,
+        }
+        let params = serde_json::Value::Null;
+        let payload = Payload {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "inflation.params",
+            params: &params,
+        };
+        let res = self
+            .call(url, &payload)?
+            .json::<Envelope<InflationParams>>()?;
+        Ok(res.result)
+    }
+
+    pub fn stake_role(&self, url: &str, id: &str, role: &str) -> Result<u64, reqwest::Error> {
+        #[derive(Serialize)]
+        struct Payload {
+            jsonrpc: &'static str,
+            id: u32,
+            method: &'static str,
+            params: serde_json::Value,
+        }
+        #[derive(Deserialize)]
+        struct Envelope {
+            result: serde_json::Value,
+        }
+        let params = serde_json::json!({"id": id, "role": role});
+        let payload = Payload {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "stake.role",
+            params,
+        };
+        let res = self.call(url, &payload)?.json::<Envelope>()?;
+        Ok(res.result["stake"].as_u64().unwrap_or(0))
     }
 }
 
@@ -98,4 +152,3 @@ mod tests {
         }
     }
 }
-

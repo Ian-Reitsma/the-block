@@ -4,6 +4,8 @@ Pointer: For the project-wide glossary and cross-references, see `AGENTS.md` §1
 
 ## Glossary
 
+
+
 - **Consumer Token (CT)** — unit for high‑velocity transactions.
 - **Industrial Token (IT)** — unit for resource‑provision incentives.
 - **Fee Selector (ν)** — 2‑bit field mapping `{0 → CT-only, 1 → IT-only, 2 → Split CT∶IT, 3 → Reserved}`.
@@ -16,7 +18,7 @@ For every block `B` and token `T ∈ {CT, IT}`:
 
 \[
 \sum balances_T(\text{before }B) - \sum balances_T(\text{after }B)
-  = \sum f_{T,\text{deducted by senders in }B} - \sum f_{T,\text{credited to miners in }B} = 0.
+  = \sum f_{T,\text{deducted by senders in }B} - \sum f_{T,\text{awarded to miners in }B} = 0.
 \]
 
 When `ν = 2`, let `f = 2k + r` with `r ∈ {0,1}`. The decomposition yields `fee_ct = k + r` and `fee_it = k`. Thus `fee_ct + fee_it = 2k + r = f`, preserving total supply even when `f` is odd.
@@ -55,7 +57,7 @@ These scenarios help governance evaluate issuance and demand tuning.
 
 ## Compute-Backed Money
 
-Compute-backed tokens (CBTs) redeem for compute credits at a protocol-defined
+Compute-backed tokens (CBTs) redeem for compute units at a protocol-defined
 curve. A linear redeem curve priced off the marketplace median ensures large
 burns incur a premium, slowing depletion of the fee-funded backstop. Fees from
 compute jobs replenish the backstop reserve.
@@ -63,3 +65,86 @@ compute jobs replenish the backstop reserve.
 The `ComputeToken` prototype models this flow. Tokens represent compute units
 and redeem against a `RedeemCurve` while debiting a shared `Backstop` reserve.
 See `node/tests/compute_cbt.rs` for an instant-app style settlement example.
+## Epoch Retuning Formula
+
+The chain mints storage, read, and compute subsidies in CT via block fields `storage_sub_ct`, `read_sub_ct`, and `compute_sub_ct`.
+At each epoch the multipliers
+are recalibrated to keep annual inflation under 2 %:
+
+\[
+\text{multiplier}_x = \frac{\phi_x \cdot I_{\text{target}} \cdot S / 365}{U_x / \text{epoch\_secs}}
+\]
+
+Where:
+
+- \(S\) – current CT supply
+- \(I_{\text{target}} = 0.02\) (2 % yearly)
+- \(\phi_x\) – fraction of the inflation budget for class \(x\)
+- \(U_x\) – observed utilization last epoch (bytes or ms)
+
+Results are clamped to ±15 % of the prior multiplier to avoid oscillation. If
+`U_x` is near zero, the previous multiplier doubles to keep incentives from
+stalling.
+
+For example, assume the chain stored 12 GB of new blobs and served 80 GB of
+reads during the last epoch while circulating supply sat at 900 million CT. With
+\(\phi_{storage}=0.004\) and an epoch length of 6 000 seconds, the storage
+multiplier computes as:
+
+\[
+\beta = \frac{0.004 \times 0.02 \times 900_000_000 / 365}{12\,000\,000 / 6_000} \approx 0.009 \text{ µCT/byte}.
+\]
+
+If the previous \(\beta\) was 0.008 µCT/B, the clamp allows at most 0.0092
+µCT/B, so the multiplier settles at 0.0092. The same procedure applies to the
+read and compute multipliers, providing predictable, gradual reward scaling
+even under sudden utilization swings.
+
+```rust
+fn retune_multipliers(state: &ChainState, stats: &UtilStats) {
+    let s = state.ct_supply();
+    let epoch_secs = stats.epoch_secs as f64;
+    let target = 0.02;
+    let yr_secs = 31_536_000.0;
+    let calc = |util: f64, phi: f64, prev: f64| {
+        let mut next = if util < 1.0 {
+            prev * 2.0
+        } else {
+            let yearly = util * (yr_secs / epoch_secs);
+            (phi * target * s) / yearly
+        };
+        next = next.clamp(prev * 0.85, prev * 1.15);
+        next
+    };
+    state.beta = calc(stats.bytes_stored, 0.004, state.beta);
+}
+```
+
+### Operator ROI
+
+For an operator providing role \(x\):
+
+\[ 
+\text{ROI}_x = \frac{\text{subsidy}_x \times \text{blocks\_per\_year}}{\text{stake}_x + \text{opex}_x}
+\]
+
+with yearly subsidy
+
+\[
+\text{subsidy}_x = \phi_x \cdot I_{\text{target}} \cdot S \cdot \frac{\text{stake\_share}_x}{\text{total\_effective\_stake}_x}.
+\]
+
+As an example, a gateway that bonds 10 000 CT when the total bonded gateway
+stake is 200 000 CT controls a 5 % stake share. If governance allocates
+\(\phi_{read} = 0.0025\) of the annual inflation budget to read delivery and
+the circulating supply is 900 million CT, the gateway's expected yearly subsidy
+is:
+
+\[
+\text{subsidy}_{read} = 0.0025 \times 0.02 \times 900_000_000 \times 0.05 \approx 2_250 \text{ CT/year}.
+\]
+
+Dividing this by the bonded stake and the operator's annual operating expenses
+produces an estimated ROI, enabling hardware planning and break-even analyses.
+
+See [README](../README.md) for a high-level overview.

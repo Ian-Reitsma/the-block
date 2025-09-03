@@ -1,4 +1,4 @@
-use crate::{Block, SignedTransaction};
+use crate::{BlobTx, Block, SignedTransaction};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -50,10 +50,27 @@ pub enum Payload {
     Hello(Vec<SocketAddr>),
     /// Broadcast a transaction to be relayed and mined.
     Tx(SignedTransaction),
+    /// Broadcast a blob transaction for inclusion in L2 blobspace.
+    BlobTx(BlobTx),
     /// Broadcast a newly mined block.
     Block(Block),
     /// Share an entire chain snapshot for fork resolution.
     Chain(Vec<Block>),
+    /// Disseminate a single erasure-coded shard of a blob.
+    BlobChunk(BlobChunk),
+}
+
+/// Individual erasure-coded shard associated with a blob root.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BlobChunk {
+    /// Commitment root this shard belongs to.
+    pub root: [u8; 32],
+    /// Index of this shard in the erasure-coded set.
+    pub index: u32,
+    /// Total number of shards.
+    pub total: u32,
+    /// Raw shard bytes.
+    pub data: Vec<u8>,
 }
 
 /// Attempt to decode a [`Message`] from raw bytes.

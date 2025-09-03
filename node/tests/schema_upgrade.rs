@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs};
 use the_block::{
-    Block, Blockchain, ChainDisk, FeeLane, RawTxPayload, SignedTransaction, TokenAmount,
+    Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction, TokenAmount,
 };
 
 mod util;
@@ -59,9 +59,15 @@ fn migrate_v3_recomputes_supply() {
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),
         coinbase_industrial: TokenAmount::new(0),
+        storage_sub_ct: TokenAmount::new(0),
+        read_sub_ct: TokenAmount::new(0),
+        compute_sub_ct: TokenAmount::new(0),
+        read_root: [0u8;32],
         fee_checksum: String::new(),
         state_root: String::new(),
         base_fee: 1,
+        l2_roots: Vec::new(),
+        l2_sizes: Vec::new(),
     };
     let disk = ChainDisk {
         schema_version: 3,
@@ -69,11 +75,18 @@ fn migrate_v3_recomputes_supply() {
         accounts: HashMap::new(),
         emission_consumer: 0,
         emission_industrial: 0,
+        emission_consumer_year_ago: 0,
+        inflation_epoch_marker: 0,
         block_reward_consumer: TokenAmount::new(0),
         block_reward_industrial: TokenAmount::new(0),
         block_height: 1,
         mempool: Vec::new(),
         base_fee: 1,
+        params: Params::default(),
+        epoch_storage_bytes: 0,
+        epoch_read_bytes: 0,
+        epoch_cpu_ms: 0,
+        epoch_bytes_out: 0,
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

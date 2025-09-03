@@ -1,4 +1,5 @@
 use super::erasure;
+use super::fs::RentEscrow;
 use super::placement::NodeCatalog;
 use super::types::{ChunkRef, ObjectManifest, Redundancy, StoreReceipt};
 use crate::compute_market::settlement::Settlement;
@@ -7,16 +8,17 @@ use crate::simple_db::SimpleDb;
 use crate::telemetry::{
     STORAGE_CHUNK_SIZE_BYTES, STORAGE_FINAL_CHUNK_SIZE, STORAGE_INITIAL_CHUNK_SIZE,
     STORAGE_PROVIDER_LOSS_RATE, STORAGE_PROVIDER_RTT_MS, STORAGE_PUT_CHUNK_SECONDS,
-    STORAGE_PUT_ETA_SECONDS,
+    STORAGE_PUT_ETA_SECONDS, SUBSIDY_BYTES_TOTAL,
 };
+use crate::transaction::BlobTx;
 use blake3::Hasher;
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Key, Nonce,
 };
-use credits::CreditError;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 const VERSION: u16 = 1;
@@ -69,6 +71,8 @@ impl ProviderProfile {
 
 pub struct StoragePipeline {
     db: SimpleDb,
+    rent: RentEscrow,
+    rent_rate: i64,
 }
 
 impl StoragePipeline {
@@ -78,13 +82,38 @@ impl StoragePipeline {
         }
         Self {
             db: SimpleDb::open(path),
+            rent: RentEscrow::open(&format!("{path}/rent_escrow.db")),
+            rent_rate: 0,
         }
     }
 
-    /// Logical quota in bytes derived from the provider's credit balance.
-    /// Each credit grants one kilobyte of storage.
-    pub fn logical_quota_bytes(provider: &str) -> u64 {
-        Settlement::balance(provider) * 1024
+    /// Build a [`BlobTx`] for raw data, hashing with BLAKE3 and assigning a
+    /// unique `blob_id`. The transaction targets fractal layer 1 (L2) by
+    /// default.
+    pub fn build_blob_tx(owner: &str, data: &[u8], expiry: Option<u64>) -> BlobTx {
+        let mut hasher = Hasher::new();
+        hasher.update(data);
+        let root: [u8; 32] = hasher.finalize().into();
+        let mut blob_id = [0u8; 32];
+        OsRng.fill_bytes(&mut blob_id);
+        BlobTx {
+            owner: owner.to_string(),
+            blob_id,
+            blob_root: root,
+            blob_size: data.len() as u64,
+            fractal_lvl: 1,
+            expiry,
+        }
+    }
+
+    pub fn set_rent_rate(&mut self, rate: i64) {
+        self.rent_rate = rate;
+    }
+
+    /// Logical quota in bytes derived from the provider's stake balance.
+    /// Placeholder implementation until stake-backed quotas are implemented.
+    pub fn logical_quota_bytes(_provider: &str) -> u64 {
+        u64::MAX
     }
 
     fn profile_key(provider: &str) -> String {
@@ -136,14 +165,16 @@ impl StoragePipeline {
         data: &[u8],
         lane: &str,
         catalog: &NodeCatalog,
-    ) -> Result<StoreReceipt, String> {
-        let kb = ((data.len() as u64) + 1023) / 1024;
-        if let Err(e) = Settlement::spend(lane, "write_kb", kb) {
-            return Err(match e {
-                CreditError::Insufficient => "ERR_STORAGE_QUOTA_CREDITS".into(),
-                _ => e.to_string(),
-            });
+    ) -> Result<(StoreReceipt, BlobTx), String> {
+        let rent = (self.rent_rate as u64).saturating_mul(data.len() as u64);
+        if Settlement::spend(lane, "rent", rent).is_err() {
+            return Err("ERR_RENT_ESCROW_INSUFFICIENT".into());
         }
+        let mut data_hasher = Hasher::new();
+        data_hasher.update(data);
+        let blob_root: [u8; 32] = data_hasher.finalize().into();
+        let mut blob_id = [0u8; 32];
+        OsRng.fill_bytes(&mut blob_id);
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
         let key = Key::from_slice(&key_bytes);
@@ -265,6 +296,19 @@ impl StoragePipeline {
         self.db
             .try_insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes)
             .map_err(|e| e.to_string())?;
+        self.rent.lock(&hex::encode(man_hash), lane, rent, 0);
+        let blob_tx = BlobTx {
+            owner: lane.to_string(),
+            blob_id,
+            blob_root,
+            blob_size: data.len() as u64,
+            fractal_lvl: 1,
+            expiry: None,
+        };
+        #[cfg(feature = "telemetry")]
+        SUBSIDY_BYTES_TOTAL
+            .with_label_values(&["storage"])
+            .inc_by(data.len() as u64);
         #[cfg(feature = "telemetry")]
         {
             STORAGE_FINAL_CHUNK_SIZE.set(profile.preferred_chunk as i64);
@@ -273,7 +317,7 @@ impl StoragePipeline {
                 STORAGE_PUT_ETA_SECONDS.set(eta as i64);
             }
         }
-        Ok(receipt)
+        Ok((receipt, blob_tx))
     }
 
     pub fn get_object(&self, manifest_hash: &[u8; 32]) -> Result<Vec<u8>, String> {
@@ -324,7 +368,29 @@ impl StoragePipeline {
             }
         }
         out.truncate(manifest.total_len as usize);
+        #[cfg(feature = "telemetry")]
+        SUBSIDY_BYTES_TOTAL
+            .with_label_values(&["read"])
+            .inc_by(out.len() as u64);
         Ok(out)
+    }
+
+    pub fn delete_object(&mut self, manifest_hash: &[u8; 32]) -> Result<u64, String> {
+        let key = format!("manifest/{}", hex::encode(manifest_hash));
+        let _ = self.db.remove(&key);
+        let id = hex::encode(manifest_hash);
+        if let Some((depositor, refund, _burn)) = self.rent.release(&id) {
+            Settlement::accrue(&depositor, "rent_refund", refund);
+            Ok(refund)
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub fn process_expired(&mut self, now: u64) {
+        for (depositor, refund, _burn) in self.rent.purge_expired(now) {
+            Settlement::accrue(&depositor, "rent_refund", refund);
+        }
     }
 
     pub fn get_manifest(&self, manifest_hash: &[u8; 32]) -> Option<ObjectManifest> {
@@ -337,4 +403,15 @@ impl StoragePipeline {
     pub fn db_mut(&mut self) -> &mut SimpleDb {
         &mut self.db
     }
+}
+
+static L2_CAP_BYTES_PER_EPOCH: AtomicU64 = AtomicU64::new(33_554_432);
+static BYTES_PER_SENDER_EPOCH_CAP: AtomicU64 = AtomicU64::new(16_777_216);
+
+pub fn set_l2_cap_bytes_per_epoch(v: u64) {
+    L2_CAP_BYTES_PER_EPOCH.store(v, Ordering::Relaxed);
+}
+
+pub fn set_bytes_per_sender_epoch_cap(v: u64) {
+    BYTES_PER_SENDER_EPOCH_CAP.store(v, Ordering::Relaxed);
 }

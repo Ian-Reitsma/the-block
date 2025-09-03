@@ -19,6 +19,12 @@ mkdir -p ~/.block
 ~/.block/node --datadir ~/.block/datadir --config ~/.block/config.toml
 ```
 
+Bond CT for a service role once the node is running:
+
+```sh
+cargo run --example wallet stake-role storage 100 --seed <hex>
+```
+
 ### systemd
 Create `/etc/systemd/system/the-block.service`:
 ```ini
@@ -42,4 +48,4 @@ systemctl enable --now the-block
 ### Firewall
 Allow P2P and metrics if required; restrict RPC to localhost.
 Run the node with `--metrics-addr` and `--features telemetry` to surface
-`read_denied_total` and `credit_issued_total` counters for monitoring.
+`read_denied_total` and `subsidy_bytes_total{type="storage"}` counters for monitoring.

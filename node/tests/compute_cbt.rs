@@ -8,9 +8,9 @@ fn redeem_tracks_backstop() {
         slope_ppm: 50_000,
     }; // 5% premium
     let mut backstop = Backstop::new(1_000);
-    let credits = token.redeem(&curve, &mut backstop).expect("redeem");
-    assert_eq!(credits, 20);
-    assert_eq!(backstop.reserve, 1_000 - credits);
+    let granted = token.redeem(&curve, &mut backstop).expect("redeem");
+    assert_eq!(granted, 20);
+    assert_eq!(backstop.reserve, 1_000 - granted);
     // deplete reserve
     let big = ComputeToken { units: 1_000_000 };
     assert!(big.redeem(&curve, &mut backstop).is_err());

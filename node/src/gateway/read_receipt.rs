@@ -3,8 +3,10 @@ use std::io::Result as IoResult;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::exec;
+use crate::exec;
 use crate::compute_market::settlement;
+#[cfg(feature = "telemetry")]
+use crate::telemetry::SUBSIDY_BYTES_TOTAL;
 use blake3;
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +66,12 @@ pub fn append(
         dynamic,
         allowed,
     };
+    if allowed {
+        #[cfg(feature = "telemetry")]
+        SUBSIDY_BYTES_TOTAL
+            .with_label_values(&["read"])
+            .inc_by(bytes_served);
+    }
     let data = serde_cbor::to_vec(&receipt)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     fs::write(path, data)

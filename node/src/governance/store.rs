@@ -44,9 +44,12 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::IndustrialAdmissionMinCapacity => "industrial_admission_min_capacity",
         ParamKey::FairshareGlobalMax => "fairshare_global_max_ppm",
         ParamKey::BurstRefillRatePerS => "burst_refill_rate_per_s_ppm",
-        ParamKey::CreditsDecayLambdaPerHourPpm => "credits_decay_lambda_per_hour_ppm",
-        ParamKey::DailyPayoutCap => "daily_payout_cap",
-        ParamKey::ReadPoolSeed => "read_pool_seed",
+        ParamKey::BetaStorageSubCt => "beta_storage_sub_ct",
+        ParamKey::GammaReadSubCt => "gamma_read_sub_ct",
+        ParamKey::KappaCpuSubCt => "kappa_cpu_sub_ct",
+        ParamKey::LambdaBytesOutSubCt => "lambda_bytes_out_sub_ct",
+        ParamKey::RentRateCtPerByte => "rent_rate_ct_per_byte",
+        ParamKey::KillSwitchSubsidyReduction => "kill_switch_subsidy_reduction",
     }
 }
 
@@ -169,7 +172,16 @@ impl GovStore {
         }
         if yes >= QUORUM && yes > no {
             prop.status = ProposalStatus::Passed;
-            let act_epoch = current_epoch + ACTIVATION_DELAY;
+            let spec = registry()
+                .iter()
+                .find(|s| s.key == prop.key)
+                .expect("param spec");
+            let delay = if spec.timelock_epochs > 0 {
+                spec.timelock_epochs
+            } else {
+                ACTIVATION_DELAY
+            };
+            let act_epoch = current_epoch + delay;
             prop.activation_epoch = Some(act_epoch);
             let key_epoch = ser(&act_epoch)?;
             let mut list: Vec<u64> = self
@@ -235,11 +247,12 @@ impl GovStore {
                                 }
                                 ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
                                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
-                                ParamKey::CreditsDecayLambdaPerHourPpm => {
-                                    params.credits_decay_lambda_per_hour_ppm
-                                }
-                                ParamKey::DailyPayoutCap => params.daily_payout_cap as i64,
-                                ParamKey::ReadPoolSeed => params.read_pool_seed as i64,
+                                ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
+                                ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
+                                ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
+                                ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                                ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
+                ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -369,9 +382,14 @@ impl GovStore {
                 }
                 ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
-                ParamKey::CreditsDecayLambdaPerHourPpm => params.credits_decay_lambda_per_hour_ppm,
-                ParamKey::DailyPayoutCap => params.daily_payout_cap as i64,
-                ParamKey::ReadPoolSeed => params.read_pool_seed as i64,
+                ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
+                ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
+                ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
+                ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
+                ParamKey::KillSwitchSubsidyReduction => {
+                    params.kill_switch_subsidy_reduction as i64
+                }
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;

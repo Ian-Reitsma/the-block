@@ -112,11 +112,6 @@ enum Commands {
         #[command(subcommand)]
         cmd: BadgeCmd,
     },
-    /// Manage service credits
-    Credits {
-        #[command(subcommand)]
-        cmd: CreditsCmd,
-    },
 }
 
 #[derive(Subcommand)]
@@ -132,24 +127,6 @@ enum ComputeCmd {
 enum BadgeCmd {
     /// Show current badge status
     Status {
-        #[arg(long, default_value = "node-data")]
-        data_dir: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum CreditsCmd {
-    /// Show credit balance for a provider
-    Balance {
-        provider: String,
-        #[arg(long, default_value = "node-data")]
-        data_dir: String,
-    },
-    /// Transfer credits between providers
-    Transfer {
-        from: String,
-        to: String,
-        amount: u64,
         #[arg(long, default_value = "node-data")]
         data_dir: String,
     },
@@ -318,35 +295,6 @@ async fn main() -> std::process::ExitCode {
                 std::process::ExitCode::SUCCESS
             }
         },
-        Commands::Credits { cmd } => {
-            use credits::Ledger;
-            use std::path::PathBuf;
-            match cmd {
-                CreditsCmd::Balance { provider, data_dir } => {
-                    let path = PathBuf::from(data_dir).join("credits.bin");
-                    let ledger = Ledger::load(&path).expect("load ledger");
-                    println!("{}", ledger.balance(&provider));
-                    std::process::ExitCode::SUCCESS
-                }
-                CreditsCmd::Transfer {
-                    from,
-                    to,
-                    amount,
-                    data_dir,
-                } => {
-                    let path = PathBuf::from(&data_dir).join("credits.bin");
-                    let mut ledger = Ledger::load(&path).expect("load ledger");
-                    if ledger.spend(&from, amount).is_err() {
-                        eprintln!("insufficient credits");
-                        return std::process::ExitCode::FAILURE;
-                    }
-                    let event = format!("transfer:{}:{}:{}", from, to, amount);
-                    ledger.accrue(&to, &event, amount);
-                    ledger.save(&path).expect("save ledger");
-                    std::process::ExitCode::SUCCESS
-                }
-            }
-        }
     };
     code
 }

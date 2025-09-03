@@ -50,7 +50,7 @@ node compute courier send bundle.bin alice
 node compute courier flush
 ```
 
-Receipts are persisted in `sled` until acknowledged and rewards are credited
+Receipts are persisted in `sled` until acknowledged and rewards are paid
 when forwarding succeeds. Each receipt carries a unique ID and an
 `acknowledged` flag set only after successful forwarding. The `compute courier
 flush` command retries failed sends with exponential backoff and records
@@ -95,11 +95,11 @@ Logs emit `loaded price board` and `saved price board` messages, while metrics
 track quantile bands. Suggested bids are adjusted by a backlog factor of
 `1 + backlog/window` computed per lane, excluding deferred industrial jobs.
 
-## Receipt Settlement and Credits Ledger
+## Receipt Settlement
 
-Matches between bids and asks produce `Receipt` objects that debit the buyer and
-credit the provider. Settlement uses the [`credits` ledger](credits.md) crate and
-tracks applied receipts in a sled tree to guarantee idempotency across restarts.
+Matches between bids and asks produce `Receipt` objects that debit CT from the
+buyer and pay the provider. Settlement tracks applied receipts in a sled tree to
+guarantee idempotency across restarts.
 
 ```text
 { version: 1, job_id, buyer, provider, quote_price, issued_at, idempotency_key }
@@ -115,7 +115,7 @@ damaged records.
 
 - **DryRun** – records receipts without moving balances (default).
 - **Armed** – after a configured delay, transitions to `Real`.
-- **Real** – debits buyers and accrues credits to providers.
+- **Real** – debits buyers and pays providers in CT.
 
 Operators can toggle modes via CLI and inspect the current state with the
 `settlement_status` RPC, which reports balances and mode.
@@ -125,7 +125,7 @@ accrues the same amount for the provider with an event tag.  Failures (e.g.,
 insufficient funds) are archived and cause the system to revert to `DryRun`.
 Metrics track behaviour:
 
-- `settle_applied_total` – receipts successfully debited and credited.
+- `settle_applied_total` – receipts successfully debited and paid.
 - `settle_failed_total{reason}` – settlement failures.
 - `settle_mode_change_total{to}` – mode transitions.
 - `matches_total{dry_run}` – receipts processed by the match loop.

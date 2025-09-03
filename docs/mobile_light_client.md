@@ -22,23 +22,6 @@ Swift and Kotlin bindings are provided under `examples/mobile/` and wrap the
 above API. They allow wallets to integrate light-client features without
 resorting to JNI or bridging layers.
 
-## Push Notifications
-
-Mobile clients can opt in to credit balance and rate-limit notifications by
-registering a webhook endpoint:
-
-```rust
-use wallet::CreditNotifier;
-
-let mut notifier = CreditNotifier::default();
-notifier.register_webhook("https://example.com/push");
-notifier.notify_balance_change("provider-id", 42)?;
-```
-
-The notifier posts JSON payloads to each endpoint when balances change or when
-the client hits RPC rate limits.  Applications can forward these events to the
-platform's native push service (FCM/APNS) to alert users.
-
 ## Sample Apps
 
 Example iOS and Android projects demonstrate invoking the KYC flow and

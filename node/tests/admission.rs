@@ -136,9 +136,15 @@ fn validate_block_rejects_nonce_gap() {
             difficulty: diff,
             coin_c: reward_c,
             coin_i: reward_i,
+            storage_sub: 0,
+            read_sub: 0,
+            compute_sub: 0,
+            read_root: [0;32],
             fee_checksum: &fee_checksum,
             state_root: ZERO_HASH,
             tx_ids: &id_refs,
+            l2_roots: &[],
+            l2_sizes: &[],
         };
         let h = enc.hash();
         let bytes: Vec<u8> = (0..h.len())
@@ -169,9 +175,15 @@ fn validate_block_rejects_nonce_gap() {
         hash,
         coinbase_consumer: TokenAmount::new(reward_c),
         coinbase_industrial: TokenAmount::new(reward_i),
+        storage_sub_ct: TokenAmount::new(0),
+        read_sub_ct: TokenAmount::new(0),
+        compute_sub_ct: TokenAmount::new(0),
+        read_root: [0u8;32],
         fee_checksum,
         state_root: String::new(),
         base_fee: 1,
+        l2_roots: Vec::new(),
+        l2_sizes: Vec::new(),
     };
     assert!(!bc.validate_block(&block).unwrap());
 }
@@ -389,9 +401,15 @@ fn validate_block_rejects_wrong_difficulty() {
         difficulty: block.difficulty,
         coin_c: block.coinbase_consumer.0,
         coin_i: block.coinbase_industrial.0,
+        storage_sub: block.storage_sub_ct.0,
+        read_sub: block.read_sub_ct.0,
+        compute_sub: block.compute_sub_ct.0,
+        read_root: [0;32],
         fee_checksum: &block.fee_checksum,
         state_root: ZERO_HASH,
         tx_ids: &id_refs,
+        l2_roots: &[],
+        l2_sizes: &[],
     };
     block.hash = enc.hash();
     assert!(!bc.validate_block(&block).unwrap());

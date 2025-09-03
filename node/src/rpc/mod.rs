@@ -2,18 +2,17 @@ use crate::{
     compute_market::settlement::{SettleMode, Settlement},
     config::RpcConfig,
     consensus::pow::{self, BlockHeader},
-    credits::issuance,
     gateway,
-    governance::{BicameralGovernance, GovStore, Params},
+    governance::{GovStore, Params},
     identity::handle_registry::HandleRegistry,
     kyc,
     localnet::{validate_proximity, AssistReceipt},
     simple_db::SimpleDb,
+    storage::fs::RentEscrow,
     transaction::FeeLane,
     Blockchain, SignedTransaction,
 };
 use bincode;
-use credits::Source;
 use hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -34,21 +33,15 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
+pub mod client;
 pub mod governance;
 pub mod identity;
 pub mod pos;
-pub mod client;
+#[cfg(feature = "telemetry")]
+pub mod analytics;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
-static CREDIT_GOV: Lazy<Mutex<BicameralGovernance>> = Lazy::new(|| {
-    Mutex::new(BicameralGovernance::load(
-        "examples/governance/proposals.db",
-        1,
-        1,
-        0,
-    ))
-});
 static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
     Mutex::new(SimpleDb::open(&path))
@@ -78,16 +71,20 @@ const PUBLIC_METHODS: &[&str] = &[
     "dns.publish_record",
     "gateway.policy",
     "gateway.reads_since",
+    #[cfg(feature = "telemetry")]
+    "analytics",
     "microshard.roots.last",
     "mempool.stats",
     "kyc.verify",
     "pow.get_template",
     "pow.submit",
-    "credits.meter",
+    "inflation.params",
+    "stake.role",
     "consensus.pos.register",
     "consensus.pos.bond",
     "consensus.pos.unbond",
     "consensus.pos.slash",
+    "rent.escrow.balance",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -99,8 +96,6 @@ const ADMIN_METHODS: &[&str] = &[
     "gov_vote",
     "gov_list",
     "gov_params",
-    "gov_credit_list",
-    "gov_credit_vote",
     "gov_rollback_last",
     "gov_rollback",
     "record_le_request",
@@ -135,7 +130,7 @@ enum RpcResponse {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct RpcError {
     code: i32,
     message: &'static str,
@@ -552,15 +547,6 @@ fn dispatch(
             let res = Settlement::audit();
             serde_json::to_value(res).unwrap_or_else(|_| serde_json::json!([]))
         }
-        "credits.meter" => {
-            let provider = req
-                .params
-                .get("provider")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let map = Settlement::meter(provider);
-            serde_json::to_value(&map).unwrap_or_else(|_| serde_json::json!({}))
-        }
         "localnet.submit_receipt" => {
             let hex = req
                 .params
@@ -600,13 +586,6 @@ fn dispatch(
                 serde_json::json!({"status":"ignored"})
             } else {
                 db.insert(&key, Vec::new());
-                issuance::issue(
-                    &receipt.provider,
-                    &receipt.region,
-                    Source::LocalNetAssist,
-                    &hash,
-                    1,
-                );
                 serde_json::json!({"status":"ok"})
             }
         }
@@ -621,6 +600,12 @@ fn dispatch(
         },
         "gateway.policy" => gateway::dns::gateway_policy(&req.params),
         "gateway.reads_since" => gateway::dns::reads_since(&req.params),
+        #[cfg(feature = "telemetry")]
+        "analytics" => {
+            let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone()).unwrap_or(analytics::AnalyticsQuery { domain: String::new() });
+            let stats = analytics::analytics(&crate::telemetry::READ_STATS, q);
+            serde_json::to_value(stats).unwrap()
+        },
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
             let roots = Settlement::recent_roots(n);
@@ -716,6 +701,8 @@ fn dispatch(
                 nonce,
                 difficulty,
                 timestamp,
+                l2_roots: Vec::new(),
+                l2_sizes: Vec::new(),
             };
             let hash = hdr.hash();
             let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
@@ -732,6 +719,21 @@ fn dispatch(
         "consensus.pos.bond" => pos::bond(&req.params)?,
         "consensus.pos.unbond" => pos::unbond(&req.params)?,
         "consensus.pos.slash" => pos::slash(&req.params)?,
+        "rent.escrow.balance" => {
+            let esc = RentEscrow::open("rent_escrow.db");
+            if let Some(id) = req.params.get("id").and_then(|v| v.as_str()) {
+                serde_json::json!({"balance": esc.balance(id)})
+            } else if let Some(acct) = req.params.get("account").and_then(|v| v.as_str()) {
+                serde_json::json!({"balance": esc.balance_account(acct)})
+            } else {
+                serde_json::json!({"balance": 0})
+            }
+        }
+        "inflation.params" => {
+            let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
+            governance::inflation_params(&params)
+        }
+        "stake.role" => pos::role(&req.params)?,
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
             match handles.lock() {
@@ -986,19 +988,6 @@ fn dispatch(
                 .unwrap_or(0);
             let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
             governance::gov_params(&params, epoch)?
-        }
-        "gov_credit_list" => {
-            let g = CREDIT_GOV.lock().unwrap_or_else(|e| e.into_inner());
-            governance::gov_credit_list(&g)?
-        }
-        "gov_credit_vote" => {
-            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let house = req
-                .params
-                .get("house")
-                .and_then(|v| v.as_str())
-                .unwrap_or("ops");
-            governance::gov_credit_vote(&CREDIT_GOV, id, house)?
         }
         "gov_rollback_last" => {
             let epoch = req
