@@ -315,6 +315,9 @@ fn invalid_gossip_block_rejected() {
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
+        vdf_commit: [0u8;32],
+        vdf_output: [0u8;32],
+        vdf_proof: Vec::new(),
     };
     send(addr, &kp, Payload::Block(block));
 
@@ -357,6 +360,9 @@ fn forged_identity_rejected() {
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
+        vdf_commit: [0u8;32],
+        vdf_output: [0u8;32],
+        vdf_proof: Vec::new(),
     };
     send(addr, &kp, Payload::Block(block));
 

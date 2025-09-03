@@ -8,6 +8,10 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
 - EIP‑1559 base fee tracker: `node/src/fees.rs` adjusts per block and `node/tests/base_fee.rs` verifies target fullness tracking.
 - Adversarial rollback tests in `node/tests/finality_rollback.rs` assert ledger state after competing forks.
+- Pietrzak VDF with timed commitment and delayed preimage reveal (`node/src/consensus/vdf.rs`, `node/tests/vdf.rs`) shrinks proofs and blocks speculative computation.
+- Hadamard–Unruh committee sampler with Count-Sketch top‑k (`node/src/consensus/hadamard.rs`, `node/src/consensus/committee/topk.rs`).
+- Dilithium-based commit–reveal path with nonce replay protection (`node/src/commit_reveal.rs`, `node/tests/commit_reveal.rs`) compresses blind signatures and thwarts mempool DoS.
+- Heisenberg + VDF fuse (`node/src/consensus/vdf.rs`) enforces a ≥2-block delay before randomness-dependent transactions execute.
 
 **Gaps**
 - Formal safety/liveness proofs under `formal/` still stubbed.
@@ -19,6 +23,9 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
 - Peer identifier fuzzing prevents malformed IDs from crashing DHT routing (`net/fuzz/peer_id.rs`).
 - Manual DHT recovery runbook (`docs/networking.md#dht-recovery`).
+- ASN-aware A* routing oracle (`node/src/net/a_star.rs`) chooses k cheapest paths per shard and feeds compute-placement SLAs.
+- SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
+- Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
 
 **Gaps**
 - QUIC transport and large‑scale WAN chaos experiments remain open.
@@ -30,6 +37,10 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
 - Push notifications on subsidy balance changes (`wallet` tooling).
 - Explorer indexes settlement receipts with query endpoints (`explorer/src/lib.rs`).
+- Risk-sensitive Kalman–LQG governor with variance-aware smoothing (`node/src/governance/kalman.rs`, `node/src/governance/variance.rs`).
+- Laplace-noised multiplier releases and miner-count logistic hysteresis (`node/src/governance/params.rs`, `pow/src/reward.rs`).
+- Emergency kill switch `kill_switch_subsidy_reduction` with telemetry counters (`node/src/governance/params.rs`, `docs/monitoring.md`).
+- Legacy third-token ledger fully removed; CT-only subsidies minted each block with migration documented in `docs/system_changes.md`.
 
 **Gaps**
 - No on‑chain treasury or proposal dependency system.
@@ -41,6 +52,9 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 - Read receipts and reward pool wiring documented in `docs/storage_pipeline.md`.
 - Disk‑full metrics and recovery tests (`node/tests/storage_disk_full.rs`).
 - Gateway HTTP parsing fuzz harness (`gateway/fuzz`).
+- RaptorQ progressive fountain overlay for BLE repair (`node/src/storage/repair.rs`, `docs/storage/repair.md`, `node/tests/raptorq_repair.rs`).
+- Thread-safe `ReadStats` telemetry and analytics RPC (`node/src/telemetry.rs`, `node/tests/analytics.rs`).
+- Rent escrow metrics (`rent_escrow_locked_ct_total`, etc.) exposed in `docs/monitoring.md` with alert thresholds.
 
 **Gaps**
 - Incentive‑backed DHT storage marketplace still conceptual.
@@ -52,6 +66,7 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
 - ABI generation from opcode enum (`node/src/vm/opcodes.rs`).
 - State survives restarts (`node/tests/vm.rs::state_persists_across_restarts`).
+- Planned dynamic gas fee market (`node/src/fees.rs` roadmap) anchors eventual EIP-1559 adaptation.
 
 **Gaps**
 - Instruction set remains minimal; no formal VM spec or audits.
@@ -136,4 +151,4 @@ This document tracks high‑fidelity progress across The‑Block's major work st
 
 ---
 
-*Last updated: 2025‑05‑15*
+*Last updated: 2025‑05‑19*

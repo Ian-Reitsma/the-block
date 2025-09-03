@@ -53,6 +53,33 @@ The repository owns exactly four responsibility domains:
 | Memory- & Thread-Safety       | `#![forbid(unsafe_code)]`; FFI boundary capped at 2 % LOC; Miri & AddressSanitizer in nightly CI. | 0 undefined-behaviour findings in continuous fuzz. |
 | Portability                   | Cross-compile matrix: Linux glibc & musl, macOS, Windows‑WSL; reproducible Docker images. | Successful `cargo test --release` on all targets per PR. |
 
+### Economic Model — CT/IT Subsidy Engine
+
+- The retired third token ledger has been **permanently removed**. All
+  operator rewards flow in liquid CT and are minted directly in the
+  coinbase.
+- Every block carries three subsidy fields: `STORAGE_SUB_CT`,
+  `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
+- Per‑epoch utilisation `U_x` (bytes stored, bytes served, CPU ms, bytes
+  out) feeds the "one‑dial" multiplier formula:
+
+  \[
+  \text{multiplier}_x =
+    \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
+  \]
+
+  Adjustments are clamped to ±15 % of the prior value; near‑zero
+  utilisation doubles the multiplier to keep incentives alive. Governance
+  may hot‑patch all multipliers via `kill_switch_subsidy_reduction`.
+- Base miner reward follows a logistic curve
+
+  \[
+  R_0(N) = \frac{R_{\max}}{1+e^{\xi (N-N^\star)}}
+  \]
+
+  with hysteresis `ΔN ≈ √N*` to damp flash joins/leaves.
+- See `docs/economics.md` for full derivations and worked examples.
+
 ## 2 · Repository Layout
 
 ```
@@ -468,7 +495,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `fee_selector` with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. The legacy credit ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-credit-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history.
+- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. The legacy third-token ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history.
   Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the
   formula in `docs/economics.md`; changes are logged under `governance/history`
   and surfaced in telemetry. An emergency parameter

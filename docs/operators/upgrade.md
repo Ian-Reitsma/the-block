@@ -27,23 +27,23 @@ After restart, verify that governance parameters reflect the CT-only subsidy mod
 
 For additional assurance, query `subsidy_bytes_total{type}` and `rent_escrow_locked_ct_total`
 from the Prometheus endpoint and compare them against pre-upgrade snapshots. Any
-unexpected jumps suggest lingering credit-era files or misapplied configs.
+unexpected jumps suggest lingering legacy-ledger files or misapplied configs.
 
 ## Migrating from subsidy-ledger devnets
 
-Legacy devnets stored a `credits.db` ledger beside the chain state. Remove it before
+Legacy devnets stored a separate ledger beside the chain state. Remove it before
 starting a CT-only node. The helper below validates the datadir path, prints the
 target it is inspecting, and reports whether a ledger was removed:
 
 ```bash
-scripts/zero_credits_db.sh ~/.block/datadir
+scripts/purge_legacy_ledger.sh ~/.block/datadir
 # example output:
-# checking /home/user/.block/credits.db
+# checking /home/user/.block/legacy-ledger.db
 # removed legacy ledger
 ```
 
-Genesis files no longer include `initial_credit_balances`; faucets dispense liquid
-CT instead of the old credits. Use the helper script to top up accounts on test networks:
+Genesis files no longer include the legacy balance field; faucets dispense liquid
+CT instead of the old third token. Use the helper script to top up accounts on test networks:
 
 ```bash
 scripts/devnet_faucet.sh <address> [amount_nct]

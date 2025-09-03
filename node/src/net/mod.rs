@@ -3,6 +3,7 @@ pub mod discovery;
 mod message;
 mod peer;
 pub mod turbine;
+pub mod a_star;
 
 use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;

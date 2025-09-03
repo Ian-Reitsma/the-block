@@ -21,6 +21,8 @@ pub struct Wallet {
     keypair: Keypair,
 }
 
+pub mod stake;
+
 impl Wallet {
     /// Create a wallet from a 32-byte seed.
     pub fn from_seed(seed: &[u8; 32]) -> Self {

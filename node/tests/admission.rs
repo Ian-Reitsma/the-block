@@ -145,6 +145,9 @@ fn validate_block_rejects_nonce_gap() {
             tx_ids: &id_refs,
             l2_roots: &[],
             l2_sizes: &[],
+            vdf_commit: [0;32],
+            vdf_output: [0;32],
+            vdf_proof: &[],
         };
         let h = enc.hash();
         let bytes: Vec<u8> = (0..h.len())
@@ -184,6 +187,9 @@ fn validate_block_rejects_nonce_gap() {
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
+        vdf_commit: [0u8;32],
+        vdf_output: [0u8;32],
+        vdf_proof: Vec::new(),
     };
     assert!(!bc.validate_block(&block).unwrap());
 }
@@ -410,6 +416,9 @@ fn validate_block_rejects_wrong_difficulty() {
         tx_ids: &id_refs,
         l2_roots: &[],
         l2_sizes: &[],
+        vdf_commit: [0;32],
+        vdf_output: [0;32],
+        vdf_proof: &[],
     };
     block.hash = enc.hash();
     assert!(!bc.validate_block(&block).unwrap());

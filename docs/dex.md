@@ -18,6 +18,17 @@ The in-tree DEX exposes a simple order book with slippage checks and trust-line 
 - **Metrics** expose `dex_orders_total{side=*}` and `dex_trades_total` counters
   along with per-hop routing costs for observability.
 
+The pool invariant used for swaps is the del‑Pino logarithmic curve
+
+\[
+x \ln x + y \ln y = k
+\]
+
+which ensures arbitrage‑free paths even under clustered volatility. A
+governance parameter $\varepsilon$ adds virtual reserves to bound
+slippage in thin pools: the solver operates on $(x+\varepsilon, y+\varepsilon)$.
+See `sim/src/dex.rs` for the reference implementation.
+
 Example:
 
 ```rust

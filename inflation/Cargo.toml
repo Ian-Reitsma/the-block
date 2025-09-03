@@ -1,0 +1,8 @@
+[package]
+name = "inflation"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bellman_ce = "0.8"
+rand = "0.4"

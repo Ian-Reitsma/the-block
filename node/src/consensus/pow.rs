@@ -14,6 +14,12 @@ pub struct BlockHeader {
     pub l2_roots: Vec<[u8; 32]>,
     /// Total byte sizes per L2 root for accounting.
     pub l2_sizes: Vec<u32>,
+    /// Commitment to VDF preimage for randomness fuse.
+    pub vdf_commit: [u8; 32],
+    /// VDF output revealed for the commitment from two blocks prior.
+    pub vdf_output: [u8; 32],
+    /// Optional proof bytes (Pietrzak recursive proof).
+    pub vdf_proof: Vec<u8>,
 }
 
 impl BlockHeader {
@@ -32,6 +38,10 @@ impl BlockHeader {
         for s in &self.l2_sizes {
             h.update(&s.to_le_bytes());
         }
+        h.update(&self.vdf_commit);
+        h.update(&self.vdf_output);
+        h.update(&(self.vdf_proof.len() as u32).to_le_bytes());
+        h.update(&self.vdf_proof);
         h.finalize().into()
     }
 }
@@ -85,6 +95,9 @@ pub fn template(
         timestamp: ts,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
+        vdf_commit: [0u8;32],
+        vdf_output: [0u8;32],
+        vdf_proof: Vec::new(),
     }
 }
 

@@ -10,7 +10,7 @@ struct ReadAck {
     ts: u64,
     client_hash: [u8;32],
     pk: [u8;32],
-    sig: [u8;64],
+    sig: Vec<u8>,
 }
 
 fn hash_ack(a: &ReadAck) -> [u8;32] {

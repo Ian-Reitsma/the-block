@@ -26,13 +26,28 @@
   Every block carries three explicit subsidy fields—`STORAGE_SUB_CT`,
   `READ_SUB_CT`, and `COMPUTE_SUB_CT`—that top up the miner coinbase based on
   measured work. Usage metrics (bytes stored, bytes served, CPU milliseconds,
-  and bytes returned) are multiplied by the epoch-retuned parameters
-  `beta/gamma/kappa/lambda`. The retuning formula clamps adjustments to ±15 %
-  per epoch, applies a doubling safeguard for near-zero utilization, and honors
-  a global kill switch (`kill_switch_subsidy_reduction`) that governance can
-  trigger to downscale rewards during emergencies. This mechanism replaces the
-  legacy credit ledger and ensures operators always receive liquid CT for their
-  contribution without per-request billing or manual token swaps.
+  and bytes returned) feed the one‑dial multiplier formula:
+
+  \[
+  \text{multiplier}_x =
+    \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
+  \]
+
+  Adjustments are clamped to ±15 % per epoch; if utilisation `U_x` nearly
+  vanishes, the previous multiplier doubles to preserve incentive. A global
+  kill switch (`kill_switch_subsidy_reduction`) lets governance scale all
+  multipliers down during emergencies. This subsidy scheme replaces the
+  retired third-token ledger and guarantees operators always receive liquid CT
+  for their work without per-request billing or manual swaps.
+  The base miner reward follows
+
+  \[
+  R_0(N) = \frac{R_{\max}}{1+e^{\xi (N-N^\star)}}
+  \]
+
+  with hysteresis `ΔN ≈ √N*` to damp reward oscillation from flash joins and
+  leaves.
+- Historical context for the transition away from the third token is in [docs/system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
 - Idempotent receipts: compute and storage actions produce stable BLAKE3-keyed receipts for exactly-once semantics across restarts.
 - TTL-based gossip relay with duplicate suppression and sqrt-N fanout.
 - LocalNet assist receipts record proximity attestations and on-chain DNS TXT records expose gateway policy; see [docs/localnet.md](docs/localnet.md) for discovery and session details.
@@ -314,7 +329,14 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 Mainnet readiness: ~94/100 · Vision completion: ~63/100.
 
-For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [docs/progress.md](docs/progress.md).
+The third-token ledger has been fully retired. Every block now mints
+`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase,
+with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing
+inflation to ≤ 2 %/year. Historical context and migration notes are in
+[`docs/system_changes.md`](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
+
+For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
+[docs/progress.md](docs/progress.md).
 
 ### Strategic Pillars
 
@@ -334,12 +356,12 @@ For a subsystem-by-subsystem breakdown with evidence and outstanding gaps, see [
 
 ### Immediate
 
-- Finalize gossip longest-chain convergence, run chaos harness with 15 % packet loss/200 ms jitter, and document tie-break algorithms and fork-injection fixtures.
-- Retune subsidy multipliers through validator votes and expand documentation on inflation parameters.
-- Expand settlement audit coverage: index receipts in the explorer, schedule CI verification jobs, surface mismatches via Prometheus alerts, and ship sample audit reports.
+- Finalize gossip longest-chain convergence, run the chaos harness with 15 % packet loss/200 ms jitter, and document tie-break algorithms and fork-injection fixtures in `docs/networking.md`.
+- Retune subsidy multipliers through validator votes (`node/src/rpc/governance.rs`) and expand documentation on inflation parameters.
+- Expand settlement audit coverage: index receipts in the explorer (`explorer/indexer.rs`), schedule CI verification jobs, surface mismatches via Prometheus alerts, and ship sample audit reports.
 - Harden DHT bootstrapping by persisting peer databases, fuzzing identifier exchange, randomizing bootstrap peer selection, and documenting recovery procedures.
-- Broaden fuzz and chaos testing across gateway and storage paths, bound SimpleDb bytes to simulate disk-full scenarios, and randomize RPC timeouts for resilience.
-- Implement the free-read architecture across gateway and storage: log receipts without charging end users, replenish gateway balances via CT inflation subsidies rather than the retired `read_reward_pool`, enforce token buckets, emit `ExecutionReceipt`s, and update docs/tests to reflect the model. See [system_changes.md](docs/system_changes.md#2024-credit-ledger-removal-and-ct-subsidy-transition) for historical context.
+- Broaden fuzz and chaos testing across gateway and storage paths, bound `SimpleDb` bytes to simulate disk-full scenarios, and randomize RPC timeouts for resilience.
+- Implement the free-read architecture across gateway and storage: log receipts without charging end users, replenish gateway balances via CT inflation subsidies rather than the retired `read_reward_pool`, enforce token buckets, emit `ExecutionReceipt`s, and update docs/tests to reflect the model. See [system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition) for historical context.
 
 ### Near Term
 

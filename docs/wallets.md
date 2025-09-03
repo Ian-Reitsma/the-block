@@ -32,6 +32,15 @@ cargo run --bin wallet escrow-balance <account>
 This prints total CT locked for active blobs so operators can gauge exposure
 before pruning storage.
 
+## Staking Advice
+
+`crates/wallet::stake` exposes `stake_advice` which computes a Kelly-optimal stake
+fraction and CVaR$_{0.999}$ using a Cornish–Fisher corrected $
+\sigma$.
+Inputs include block win probability, reward, slash loss, return volatility,
+skew and kurtosis. The function returns `(f^*, \text{CVaR}_{0.999})` where
+`f^*` is the recommended fraction of liquid CT to bond.
+
 ## Hardware Wallet Support
 
 Mock Ledger/Trezor devices implement the `WalletSigner` trait. Tests under `node/tests` verify ed25519 and post-quantum flows with deterministic transcripts and error handling.

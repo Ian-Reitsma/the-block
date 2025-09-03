@@ -5,14 +5,26 @@
 //! records a `ReadAck` that gateways later batch and anchor on-chain to claim
 //! CT subsidies.
 
-use std::{collections::HashMap, net::SocketAddr, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+mod rate_limit;
+use rate_limit::RateLimitFilter;
 
-use hyper::{Body, Request, Response, Server, Method, StatusCode};
 use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
 use tokio::sync::mpsc;
-use wasmtime::{Engine, Store, Module, Linker, Func};
+use wasmtime::{Engine, Func, Linker, Module, Store};
 
-use crate::{storage::pipeline, tx::web::{SiteManifestTx, FuncTx}, ReadAck, StakeTable, exec};
+use crate::{
+    exec,
+    storage::pipeline,
+    tx::web::{FuncTx, SiteManifestTx},
+    ReadAck, StakeTable,
+};
 
 /// Simple token bucket for per-IP throttling.
 struct Bucket {
@@ -36,8 +48,13 @@ impl Bucket {
 }
 
 /// Runs the gateway server on the given address.
-pub async fn run(addr: SocketAddr, stake: Arc<dyn StakeTable + Send + Sync>, read_tx: mpsc::Sender<ReadAck>) -> anyhow::Result<()> {
+pub async fn run(
+    addr: SocketAddr,
+    stake: Arc<dyn StakeTable + Send + Sync>,
+    read_tx: mpsc::Sender<ReadAck>,
+) -> anyhow::Result<()> {
     let buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>> = Arc::new(Mutex::new(HashMap::new()));
+    let filter: Arc<Mutex<RateLimitFilter>> = Arc::new(Mutex::new(RateLimitFilter::new()));
     let make = make_service_fn(move |conn: &hyper::server::conn::AddrStream| {
         let ip = conn.remote_addr();
         let buckets = Arc::clone(&buckets);
@@ -45,7 +62,14 @@ pub async fn run(addr: SocketAddr, stake: Arc<dyn StakeTable + Send + Sync>, rea
         let read_tx = read_tx.clone();
         async move {
             Ok::<_, hyper::Error>(service_fn(move |req| {
-                handle(req, ip, Arc::clone(&buckets), Arc::clone(&stake), read_tx.clone())
+                handle(
+                    req,
+                    ip,
+                    Arc::clone(&buckets),
+                    Arc::clone(&filter),
+                    Arc::clone(&stake),
+                    read_tx.clone(),
+                )
             }))
         }
     });
@@ -57,15 +81,27 @@ async fn handle(
     req: Request<Body>,
     ip: SocketAddr,
     buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>>,
+    filter: Arc<Mutex<RateLimitFilter>>,
     stake: Arc<dyn StakeTable + Send + Sync>,
     read_tx: mpsc::Sender<ReadAck>,
 ) -> Result<Response<Body>, hyper::Error> {
-    if !check_bucket(&ip, &buckets) {
-        return Ok(Response::builder().status(StatusCode::TOO_MANY_REQUESTS).body(Body::empty()).unwrap());
+    if !check_bucket(&ip, &buckets, &filter) {
+        return Ok(Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .body(Body::empty())
+            .unwrap());
     }
-    let host = req.headers().get("host").and_then(|h| h.to_str().ok()).unwrap_or("").to_string();
+    let host = req
+        .headers()
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     if !stake.has_stake(&host) {
-        return Ok(Response::builder().status(StatusCode::FORBIDDEN).body(Body::from("domain stake required")) .unwrap());
+        return Ok(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::from("domain stake required"))
+            .unwrap());
     }
     let path = req.uri().path().to_string();
     if path.starts_with("/api/") {
@@ -74,67 +110,140 @@ async fn handle(
     handle_static(host, &path, read_tx).await
 }
 
-fn check_bucket(ip: &SocketAddr, buckets: &Arc<Mutex<HashMap<SocketAddr, Bucket>>>) -> bool {
+fn check_bucket(
+    ip: &SocketAddr,
+    buckets: &Arc<Mutex<HashMap<SocketAddr, Bucket>>>,
+    filter: &Arc<Mutex<RateLimitFilter>>,
+) -> bool {
+    let key = ip_key(ip);
+    if filter.lock().unwrap().contains(key) {
+        return false;
+    }
     let mut map = buckets.lock().unwrap();
-    let b = map.entry(*ip).or_insert(Bucket{tokens: 1.0, last: Instant::now()});
-    b.take(20.0, 20.0)
+    let b = map.entry(*ip).or_insert(Bucket {
+        tokens: 1.0,
+        last: Instant::now(),
+    });
+    if b.take(20.0, 20.0) {
+        true
+    } else {
+        filter.lock().unwrap().insert(key);
+        false
+    }
 }
 
-async fn handle_static(domain: String, path: &str, read_tx: mpsc::Sender<ReadAck>) -> Result<Response<Body>, hyper::Error> {
+pub fn ip_key(ip: &SocketAddr) -> u64 {
+    match ip.ip() {
+        IpAddr::V4(v4) => u32::from(v4) as u64,
+        IpAddr::V6(v6) => {
+            let o = v6.octets();
+            let mut b = [0u8; 8];
+            b.copy_from_slice(&o[0..8]);
+            u64::from_le_bytes(b)
+        }
+    }
+}
+
+// SIMD-aware rate limit filter lives in rate_limit.rs
+
+async fn handle_static(
+    domain: String,
+    path: &str,
+    read_tx: mpsc::Sender<ReadAck>,
+) -> Result<Response<Body>, hyper::Error> {
     // look up manifest and blob bytes
     let blob = pipeline::fetch_blob(&domain, path).unwrap_or_default();
     let bytes = blob.len() as u64;
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::READ_STATS.record(&domain, bytes);
     let ack = ReadAck {
-        manifest: [0;32],
+        manifest: [0; 32],
         path_hash: blake3::hash(path.as_bytes()).into(),
         bytes,
         ts: now_ts(),
         client_hash: blake3::hash(domain.as_bytes()).into(),
-        pk: [0u8;32],
-        sig: [0u8;64],
+        pk: [0u8; 32],
+        sig: [0u8; 64],
     };
     let _ = read_tx.send(ack).await;
-    Ok(Response::builder().status(StatusCode::OK).body(Body::from(blob)).unwrap())
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::from(blob))
+        .unwrap())
 }
 
-async fn handle_func(domain: String, api: &str, req: Request<Body>, read_tx: mpsc::Sender<ReadAck>) -> Result<Response<Body>, hyper::Error> {
+async fn handle_func(
+    domain: String,
+    api: &str,
+    req: Request<Body>,
+    read_tx: mpsc::Sender<ReadAck>,
+) -> Result<Response<Body>, hyper::Error> {
     let wasm = pipeline::fetch_wasm(&domain).unwrap_or_default();
     let engine = Engine::default();
-    let module = Module::new(&engine, wasm).map_err(|_| hyper::Error::new_std(std::io::Error::new(std::io::ErrorKind::Other, "wasm")))?;
+    let module = Module::new(&engine, wasm).map_err(|_| {
+        hyper::Error::new_std(std::io::Error::new(std::io::ErrorKind::Other, "wasm"))
+    })?;
     let mut store = Store::new(&engine, ());
     let linker = Linker::new(&engine);
-    let func = linker.instantiate(&mut store, &module).and_then(|i| i.get_func(&mut store, "handler")).ok();
+    let func = linker
+        .instantiate(&mut store, &module)
+        .and_then(|i| i.get_func(&mut store, "handler"))
+        .ok();
     if let Some(f) = func {
-        let body_bytes = hyper::body::to_bytes(req.into_body()).await.unwrap_or_default();
+        let body_bytes = hyper::body::to_bytes(req.into_body())
+            .await
+            .unwrap_or_default();
         let start = Instant::now();
         let res = f.call(&mut store, &[], &mut []).map(|_| body_bytes);
         match res {
             Ok(out) => {
                 let cpu_ms = start.elapsed().as_millis() as u64;
                 let bytes_out = out.len() as u64;
-                let func_id: [u8;32] = blake3::hash(&wasm).into();
-                let _ = exec::record(&domain, func_id, bytes_out, cpu_ms, [0u8;32], Vec::new(), Vec::new());
+                let func_id: [u8; 32] = blake3::hash(&wasm).into();
+                let _ = exec::record(
+                    &domain,
+                    func_id,
+                    bytes_out,
+                    cpu_ms,
+                    [0u8; 32],
+                    Vec::new(),
+                    Vec::new(),
+                );
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::READ_STATS.record(&domain, bytes_out);
                 let ack = ReadAck {
-                    manifest: [0;32],
+                    manifest: [0; 32],
                     path_hash: blake3::hash(api.as_bytes()).into(),
                     bytes: bytes_out,
                     ts: now_ts(),
                     client_hash: blake3::hash(domain.as_bytes()).into(),
-                    pk: [0u8;32],
-                    sig: [0u8;64],
+                    pk: [0u8; 32],
+                    sig: [0u8; 64],
                 };
                 let _ = read_tx.send(ack).await;
-                Ok(Response::builder().status(StatusCode::OK).body(Body::from(out)).unwrap())
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(out))
+                    .unwrap())
             }
-            Err(_) => Ok(Response::builder().status(StatusCode::INTERNAL_SERVER_ERROR).body(Body::from("exec failed")).unwrap()),
+            Err(_) => Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("exec failed"))
+                .unwrap()),
         }
     } else {
-        Ok(Response::builder().status(StatusCode::NOT_FOUND).body(Body::from("no func" )).unwrap())
+        Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("no func"))
+            .unwrap())
     }
 }
 
 fn now_ts() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 /// Trait for looking up domain stake deposits.

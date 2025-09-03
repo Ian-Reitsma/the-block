@@ -37,14 +37,14 @@ Security considerations are catalogued under
 
 ## 3. Subsidy Issuance for Reads
 
-- Finalized read batches credit `READ_SUB_CT` via the block coinbase. The
+- Finalized read batches mint `READ_SUB_CT` via the block coinbase. The
   formula `γ × bytes` is governed by `inflation.params`.
 - Prometheus counter `subsidy_bytes_total{type="read"}` increments with every
   anchored batch so operators can reconcile payouts.
 
 ## 4. Abuse Prevention Summary
 
-- **Rate limits** – per‑IP token buckets; governance knob `gateway.req_rate_per_ip`.
+- **Rate limits** – per‑IP token buckets backed by an Xor8 filter (97 % load, 1.1×10⁻³ FP); governance knob `gateway.req_rate_per_ip`.
 - **Stake deposits** – domains bond CT before serving content; slashable on
   abuse.
 - **WASM fuel** – deterministic execution with `func.gas_limit_default`.

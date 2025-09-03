@@ -703,6 +703,9 @@ fn dispatch(
                 timestamp,
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),
+                vdf_commit: [0u8;32],
+                vdf_output: [0u8;32],
+                vdf_proof: Vec::new(),
             };
             let hash = hdr.hash();
             let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());

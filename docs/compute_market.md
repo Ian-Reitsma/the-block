@@ -22,6 +22,15 @@ slices to execute in parallel. Results are cached per slice ID so repeated
 invocations avoid recomputation. Parallel execution is deterministic—the same
 inputs always yield the same hashes regardless of concurrency.
 
+## Bid Commit–Reveal
+Industrial bids use a post-quantum blind signature to hide parameters until reveal:
+
+```
+h = blind_sign_cat(salt, state)
+```
+
+`h` is broadcast in `BidTx`; after at least two blocks the bidder reveals `(salt,state)` and the signature is verified before execution.
+
 Jobs may set `gpu_required = true` to schedule only on GPU-capable nodes; other
 jobs run on any provider with deterministic CPU and GPU results checked by
 tests.

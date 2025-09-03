@@ -11,7 +11,9 @@ referencing external context.
 2. The wallet opens a local `StoragePipeline` (default `./blobstore`) and
    registers a dummy provider for demonstration purposes.
 3. The file is chunked into ~1 MiB pieces; each chunk is encrypted with
-   ChaCha20‑Poly1305 and erasure‑coded into two shards (data+parity).
+   ChaCha20‑Poly1305 and encoded using a Local Reconstruction Code with
+   \((k,r,h)=(16,5,3)\), then overlaid with a Progressive Fountain layer
+   \((k'=2,n'=5)\) so single‑shard losses repair over BLE.
 4. Every shard is stored locally and referenced in an `ObjectManifest`. The
    manifest itself is hashed with BLAKE3 to produce a deterministic
    `manifest_hash`.

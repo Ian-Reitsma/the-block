@@ -19,7 +19,9 @@ members = [
   "bridges",
   "cli",
   "net/fuzz",
-  "gateway/fuzz"
+  "gateway/fuzz",
+  "dex",
+  "inflation"
 ]
 default-members = [
   "node",

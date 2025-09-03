@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Wipe the legacy credits database from a node datadir.
-# Usage: zero_credits_db.sh [path_to_datadir]
+# Wipe the legacy ledger database from a node datadir.
+# Usage: purge_legacy_ledger.sh [path_to_datadir]
 set -euo pipefail
 
 DIR="${1:-$HOME/.the_block}"
@@ -17,5 +17,5 @@ if [ -f "$DB" ]; then
   rm -v "$DB" >&2
   echo "removed legacy ledger" >&2
 else
-  echo "no credits.db at $DB" >&2
+  echo "no legacy ledger at $DB" >&2
 fi
