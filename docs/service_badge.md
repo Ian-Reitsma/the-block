@@ -1,53 +1,50 @@
 # Service Badge Tracker
 
-Nodes earn a *service badge* for sustained uptime. Each badge represents
-approximately 90 days of near-perfect availability and is intended for future
-governance voting.
+The service badge incentivizes long‑lived, responsive nodes. Operators earn a
+badge after demonstrating 90 consecutive epochs of high availability; losing
+availability revokes the badge until uptime is re‑established.
 
-The tracker records a heartbeat proof for each 600-block epoch along with a
-latency sample. When 90 epochs have been recorded and uptime exceeds 99%, a
-badge is minted. If uptime later falls below 95% the badge is revoked.
+## Epoch Accounting
+
+- **Epoch length** – 600 blocks.
+- **Heartbeat** – each epoch records a boolean `up` flag and a latency sample.
+- **Minting** – after 90 epochs (≈90 days) with `up` ≥99 %, the tracker mints a
+  badge and records `last_mint` timestamp.
+- **Revocation** – if the rolling window falls below 95 % uptime, the badge is
+  burned and `last_burn` is updated.
 
 ```rust
 use the_block::ServiceBadgeTracker;
-let mut tracker = ServiceBadgeTracker::new();
-for _ in 0..90 {
-    tracker.record_epoch(true, std::time::Duration::from_millis(0));
-}
-assert!(tracker.has_badge());
-for _ in 0..90 {
-    tracker.record_epoch(false, std::time::Duration::from_millis(0));
-}
-assert!(!tracker.has_badge());
+let mut t = ServiceBadgeTracker::new();
+for _ in 0..90 { t.record_epoch(true, std::time::Duration::from_millis(50)); }
+assert!(t.has_badge());
 ```
 
-`Blockchain::mine_block` automatically records epochs every 600 blocks and
-updates the badge tracker. The current node's badge status can be queried with
-`Blockchain::has_badge()`.
+Epochs are recorded automatically from `Blockchain::mine_block`, but external
+systems may call `record_epoch` for test harnesses.
 
-## HTTP Status Endpoint
+## Telemetry & RPC
 
-Nodes expose `/badge/status` on the RPC port for external monitoring. The
-endpoint returns a JSON object:
+- Metrics: `badge_active`, `badge_last_change_seconds`, and
+  `badge_latency_ms{quantile}` are exported for Prometheus.
+- RPC: `/badge/status` returns `{ "active": bool, "last_mint": u64,
+  "last_burn": Option<u64> }`.
+- CLI: `tb-cli badge status` queries the RPC endpoint and prints a human‑readable
+  report.
 
-```json
-{"active": true, "last_mint": 1700000000, "last_burn": null}
-```
+## Governance & Persistence
 
-`active` indicates whether a badge is currently minted. `last_mint` and
-`last_burn` expose UNIX timestamps of the most recent transitions, allowing
-external monitors to track heartbeat cadence. Prometheus gauges
-`badge_active` and `badge_last_change_seconds` surface the same information for
-scrapes.
+Badges are stored in node state and are expected to feed future governance
+weighting. Persistence ensures restarts do not reset progress; checkpoints are
+included in snapshots.
 
-Query the status from the CLI:
+## Troubleshooting
 
-```bash
-curl -s localhost:9898/badge/status | jq
-```
+| Symptom | Resolution |
+| --- | --- |
+| `badge_active` absent from metrics | Ensure telemetry is enabled and Prometheus scrapes the correct port. |
+| Progress stalls | Verify blocks are mined; badge tracking only advances every 600 blocks. |
+| Unexpected revocation | Check for gaps in heartbeat logs or latency spikes above SLA. |
 
-### Troubleshooting
-
-- If `badge_active` or `badge_last_change_seconds` are missing from `/metrics`,
-  ensure the node started with telemetry enabled and that `monitoring/prometheus.yml`
-  scrapes the correct address.
+See `node/src/service_badge.rs` and `node/tests/service_badge.rs` for
+implementation details and unit tests.

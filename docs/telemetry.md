@@ -45,3 +45,50 @@ should do the same to avoid hanging suites.
 Histogram `log_size_bytes` records the serialized size of each emitted log.
 Panels on the default Grafana dashboard derive average log size from this
 histogram, helping operators tune retention and export costs.
+
+## Summary Aggregation and Histograms
+
+Nodes spawn a background task via `telemetry::summary::spawn(interval_secs)` that
+periodically calls `emit()` and appends a JSON line to
+`telemetry-summary.log`. Each line contains counters and percentile summaries
+for selected histograms along with a monotonically increasing sequence number:
+
+```json
+{"seq":42,"mempool_size":128,"tx_validation_ms":{"p50":1.2,"p95":3.4}}
+```
+
+Available histograms include:
+
+- `tx_validation_ms` – per-transaction validation latency.
+- `block_verify_ms` – end-to-end block verification time.
+- `match_loop_latency_seconds` – compute-market match cycle.
+- `log_size_bytes` – serialized log length.
+
+Buckets follow a base‑2 exponential scheme (`1,2,4,...,65536`) so p50/p99 can be
+derived cheaply.  Histograms reset at start-up; summaries report cumulative
+statistics since boot.
+
+### CLI Summaries
+
+Operators can inspect the latest snapshot using the CLI:
+
+```bash
+blockctl telemetry summarize telemetry-summary.log
+```
+
+Sample output:
+
+```text
+seq: 42
+mempool_size: 128
+tx_validation_ms: p50=1.2 p95=3.4
+block_verify_ms: p50=45.0 p95=80.0
+```
+
+### OTLP Export and Dashboards
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TIMEOUT` to stream
+traces to an external collector.  The default Grafana bundle ships with a
+`telemetry-histograms.json` dashboard visualizing the above buckets.
+Import it via the Grafana UI or with `make monitor`.
+

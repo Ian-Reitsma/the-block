@@ -1,0 +1,77 @@
+# State Pruning and Compaction Guide
+
+State grows monotonically as blocks commit new key/value pairs. To keep disk usage
+bounded the node exposes a pruning subsystem that periodically drops historical
+snapshots while retaining enough checkpoints for fast recovery.
+
+## Retention Window Configuration
+
+The pruning manager tracks snapshots under `state/` and preserves a sliding
+window of the most recent checkpoints. The window length is controlled by the
+`state.prune.keep` value in `config/node.toml`:
+
+```toml
+[state.prune]
+keep = 4            # number of recent snapshots to retain
+```
+
+Setting `keep = 0` disables automatic pruning. Archival operators should either
+set a large window or pass the `--no-prune` CLI flag to opt out entirely.
+
+## Snapshot Creation and Prune Cycle
+
+`state/src/snapshot.rs` defines `SnapshotManager`, which serializes the Merkle
+trie to disk after each block or on a configured interval. During `snapshot()`
+execution the manager invokes `prune()` to remove snapshots older than the
+retention window. Pruned files are deleted from disk and removed from the
+checkpoint index.
+
+Every snapshot filename is the BLAKE3 hash of its root state. Restoring a node
+is as simple as reading the snapshot and replaying blocks higher than the
+checkpoint height.
+
+## Block Retrieval After Pruning
+
+Older blocks are not deleted; pruning only removes intermediate state. When a
+pruned block is requested the node reconstructs the state by loading the closest
+snapshot and replaying subsequent blocks from the ledger. This keeps RPCs like
+`state.get` functional even when historic snapshots are gone.
+
+## CLI Usage
+
+Manual pruning and status inspection are available through the node CLI:
+
+```bash
+# remove snapshots beyond the configured window
+$ the-block state prune
+
+# show current snapshot directory, window size, and disk usage
+$ the-block state status
+```
+
+These commands are idempotent and can be run while the node is offline. `state
+status` exits with code 1 if snapshots are missing or corrupted.
+
+## Metrics
+
+Telemetry counters surface pruning behavior for monitoring:
+
+| Metric Name           | Type      | Description                                |
+|-----------------------|-----------|--------------------------------------------|
+| `prune_duration_ms`   | histogram | time spent removing expired snapshots       |
+| `pruned_bytes_total`  | counter   | cumulative bytes reclaimed from disk        |
+| `snapshot_kept_total` | counter   | number of snapshots retained after pruning |
+
+Grafana dashboards should alert if `prune_duration_ms` spikes or if
+`pruned_bytes_total` remains zero despite high snapshot counts.
+
+## Recovery and Over‑Pruning
+
+If pruning removed a snapshot needed for audit or replay, rebuild the node by
+copying a snapshot from another peer or by replaying the entire chain from
+block 0. After restoring a replacement snapshot, restart the node with
+`--no-prune` until the desired historical window is rebuilt.
+
+Running `state prune --dry-run` first is recommended in critical environments to
+list files that would be deleted without modifying disk state.
+

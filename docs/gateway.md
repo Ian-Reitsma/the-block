@@ -3,7 +3,10 @@
 The HTTP gateway is the public entry point for on‑chain web sites. It maps a
 `SiteManifestTx` domain to its blob assets, executes optional `FuncTx` WASM
 handlers, logs every read via `ReadAck`, and exports analytics without charging
-visitors or publishers.
+visitors or publishers. The read acknowledgement format and audit workflow are
+detailed in [docs/read_receipts.md](read_receipts.md).
+
+Signed DNS TXT records advertise gateway policy and track read counters; see [docs/gateway_dns.md](gateway_dns.md) for publishing and retrieval semantics.
 
 Security considerations are catalogued under
 [threat_model/hosting.md](threat_model/hosting.md).

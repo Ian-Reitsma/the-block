@@ -76,6 +76,8 @@ cargo nextest run --features telemetry compute_market::courier_retry_updates_met
 
 to verify the retry behaviour and metrics.
 
+For a deep dive into receipt fields, storage paths, and retry semantics see [docs/compute_market_courier.md](compute_market_courier.md).
+
 ## Price Board Persistence
 
 Recent offer prices feed a sliding window that derives quantile bands. The board
@@ -172,6 +174,64 @@ the comfort threshold governable.
 Admission decisions are logged with job identifiers, requested shards, and current mode to aid post-mortems.
 
 Providers that miss declared job deadlines have their bonds slashed via `penalize_sla`, incrementing `industrial_rejected_total{reason="SLA"}` for dashboard alerts. Operators should set Prometheus rules to page when this counter rises.
+
+## Fair-Share Caps and Burst Quotas
+
+Admission uses a dual budget model to prevent any single buyer or provider from
+monopolizing industrial capacity.  Each call to
+`check_and_record(buyer, provider, demand)` in
+[`admission.rs`](../node/src/compute_market/admission.rs) evaluates two limits:
+
+1. **Fair-share cap** – The moving window of demand for each party is compared
+   against total observed capacity. The cap defaults to
+   `FAIR_SHARE_CAP_MICRO = 250_000`, i.e. 25% of the window.
+2. **Burst quota** – When the fair-share cap is exceeded, a short-term bucket
+   allows extra throughput. `BURST_QUOTA` defaults to 30 micro-shard-seconds and
+   refills at `BURST_REFILL_RATE_MICRO` (0.5 µshard·s per second) until the cap
+   is replenished.
+
+Usage decays linearly over a 60 s window.  For each buyer and provider a
+`Usage` record stores `shards_seconds`; the value is multiplied by
+`(WINDOW_SECS - elapsed)/WINDOW_SECS` whenever checked. Quotas are tracked in
+`Quota` structs and refilled by the same decay timer.  Both limits are evaluated
+before jobs enter the market, returning `RejectReason::{Capacity,FairShare,BurstExhausted}`
+on failure.
+
+### Querying Admission Parameters
+
+Governance proposals of type `Admission` can retune the budgets at runtime.
+Parameter keys map to fields in `governance::params::Params` and apply via
+`Runtime::set_min_capacity`, `set_fair_share_cap`, and `set_burst_refill_rate`.
+Operators can inspect current values through the CLI:
+
+```bash
+blockctl compute-market params
+```
+
+Example JSON output:
+
+```json
+{
+  "min_capacity": 10,
+  "fair_share_cap": 0.25,
+  "burst_quota": 30.0,
+  "burst_refill_rate": 0.5
+}
+```
+
+### Troubleshooting
+
+- `INDUSTRIAL_REJECTED_TOTAL{reason="fair_share"}` – buyer or provider exceeded
+  the global cap. Verify quotas with `compute-market params` and check the
+  `fair_share_cap` value.
+- `INDUSTRIAL_REJECTED_TOTAL{reason="burst_exhausted"}` – burst bucket is empty.
+  Wait for refill or raise `burst_refill_rate` via governance.
+- `INDUSTRIAL_REJECTED_TOTAL{reason="capacity"}` –
+  `record_available_shards` reports insufficient headroom. Ensure providers are
+  advertising realistic capacity.
+
+Simulation scenarios exercising admission behaviour live under
+[`sim/compute_market`](../sim/compute_market/).
 
 ## Developer notes
 

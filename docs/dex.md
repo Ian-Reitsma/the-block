@@ -1,47 +1,72 @@
 # DEX and Trust Lines
 
-The in-tree DEX exposes a simple order book with slippage checks and trust-line settlement.
+The in-tree DEX exposes a simple order book with slippage checks and trust-line settlement. Routing logic supports multi-hop transfers over a graph of authorised trust lines and returns a fallback path when the cheapest route fails mid-flight.
 
-- **Trust lines** carry a `limit`, `balance`, and `authorized` flag.
-  Counterparties must explicitly authorize lines before any balance updates.
-- **Order book** matches limit orders and rejects placements when the best
-  available price exceeds the caller's `max_slippage_bps`.
-- **Settlement** adjusts trust-line balances between buyer and seller for each
-  trade. Path finding over authorized lines allows multi-hop payments.
-- **Routing** uses cost-based path scoring and returns a fallback route when the
-  cheapest path later fails. The primary path minimizes hop count and a secondary
-  path is returned if one exists.
-- **Persistence** stores books and executed trades under `~/.the_block/state/dex/`
-  via a bincode-backed `DexStore`. Order books are rebuilt on startup so restarts
-  or crashes do not lose market depth, and trade logs allow explorers to replay
-  historical fills.
-- **Metrics** expose `dex_orders_total{side=*}` and `dex_trades_total` counters
-  along with per-hop routing costs for observability.
+## 1. Trust Lines
 
-The pool invariant used for swaps is the del‑Pino logarithmic curve
+Trust lines track bilateral credit with three fields:
 
-\[
-x \ln x + y \ln y = k
-\]
+- `limit` – maximum absolute IOU value permitted between parties.
+- `balance` – signed current exposure. Positive means the first party owes the second.
+- `authorized` – both sides must call `authorize(a, b)` before any balance adjustments occur.
 
-which ensures arbitrage‑free paths even under clustered volatility. A
-governance parameter $\varepsilon$ adds virtual reserves to bound
-slippage in thin pools: the solver operates on $(x+\varepsilon, y+\varepsilon)$.
-See `sim/src/dex.rs` for the reference implementation.
+`TrustLedger` stores all lines in a hash map keyed by `(a, b)`. Establishing a line inserts a zero balance with the chosen limit.
 
-Example:
+## 2. Order Book and Settlement
+
+`node/src/dex/order_book.rs` maintains price-sorted `buy` and `sell` heaps. Orders specify `amount`, `price`, and `max_slippage_bps`.
+
+- When matching, the engine checks that the counter-order price does not exceed the caller's slippage tolerance.
+- Each fill calls `TrustLedger::adjust` to move balances along the settlement path.
+- Trades and order placements persist to `~/.the_block/state/dex/` via a bincode-backed `DexStore`, surviving crashes and restarts.
+
+## 3. Multi-Hop Routing Algorithms
+
+`node/src/dex/trust_lines.rs` implements two path finders:
+
+### 3.1 Breadth-First Search (`find_path`)
+
+Used for quick reachability checks when no costs are attached. It performs a BFS over authorised edges requiring each hop to have at least `amount` headroom (`limit >= |balance| + amount`). Returns the first path discovered.
+
+### 3.2 Dijkstra with Fallback (`find_best_path`)
+
+For optimal routing, `dijkstra` assigns each hop a cost of `1` (one trust-line traversal). The algorithm:
+
+1. Initialises a min-heap ordered by cumulative hop count.
+2. Pops the lowest-cost node, exploring authorised neighbours that still have credit for `amount`.
+3. Records predecessor pointers to reconstruct the cheapest path to `dst`.
+4. After the primary path is found, edges along that path are excluded and a second `dijkstra` run searches for a fallback route.
+
+`find_best_path` returns `(primary, fallback)` where `fallback` is `None` if no disjoint route exists.
+
+## 4. Monitoring
+
+- Metrics `dex_orders_total{side=*}` and `dex_trades_total` track activity.
+- Per-hop routing costs and fallback usage are exported when telemetry is enabled, helping operators spot imbalances or saturated lines.
+
+## 5. Example
 
 ```rust
 use the_block::dex::{OrderBook, Order, Side, TrustLedger};
-# fn main() {
+
 let mut book = OrderBook::default();
 let mut ledger = TrustLedger::default();
 ledger.establish("alice".into(), "bob".into(), 100);
+ledger.establish("bob".into(), "carol".into(), 100);
 ledger.authorize("alice", "bob");
+ledger.authorize("bob", "carol");
 let buy = Order { id:0, account:"alice".into(), side:Side::Buy, amount:10, price:5, max_slippage_bps:0 };
-let sell = Order { id:0, account:"bob".into(), side:Side::Sell, amount:10, price:5, max_slippage_bps:0 };
+let sell = Order { id:0, account:"carol".into(), side:Side::Sell, amount:10, price:5, max_slippage_bps:0 };
 book.place(buy).unwrap();
 book.place_and_settle(sell, &mut ledger).unwrap();
 assert_eq!(ledger.balance("alice", "bob"), 50);
-# }
+assert_eq!(ledger.balance("bob", "carol"), 50);
 ```
+
+## 6. Further Reading
+
+- Routing implementation: `node/src/dex/trust_lines.rs`.
+- Economic rationale and governance for fees: `docs/fees.md`.
+- Progress and remaining gaps for the DEX: `docs/progress.md` §7.
+
+Keep this doc updated as routing metrics, cost functions, or persistence formats evolve.

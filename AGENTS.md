@@ -5,9 +5,44 @@ Quick Index
 - Agent Playbooks: see §17
 - Strategic Pillars: see §18
 - Monitoring Stack: see `docs/monitoring.md` and `make monitor`
+- Status & Roadmap: see `docs/roadmap.md`
 - Progress Snapshot: see `docs/progress.md` for subsystem status and gaps
+- Networking & DHT recovery: see `docs/networking.md`
+- Economic formulas: see `docs/economics.md`
+- Blob root scheduling: see `docs/blob_chain.md`
+- Law-enforcement portal & canary runbook: see `docs/le_portal.md`
+- Range-boost queue semantics: see `docs/range_boost.md`
+- Read acknowledgement batching and audit workflow: see `docs/read_receipts.md`
+- SimpleDb WAL and byte-limit mechanics: see `docs/simple_db.md`
+- Parallel execution and transaction scheduling: see `docs/scheduler.md`
+- PoH tick generator: see `docs/poh.md`
+- Commit–reveal scheme: see `docs/commit_reveal.md`
+- Service badge tracker: see `docs/service_badge.md`
+- Fee market reference: see `docs/fees.md`
+- Transaction lifecycle and fee lanes: see `docs/transaction_lifecycle.md`
+- Compute-market courier retry logic: see `docs/compute_market_courier.md`
+- Compute-market admission quotas: see `docs/compute_market.md`
+- Multi-hop trust-line routing: see `docs/dex.md`
+- Gateway DNS publishing and policy records: see `docs/gateway_dns.md`
+- Gossip relay dedup and adaptive fanout: see `docs/gossip.md`
+- P2P handshake and capability negotiation: see `docs/p2p_protocol.md`
+- Light-client synchronization and security model: see `docs/light_client.md`
+- Jurisdiction policy packs and LE logging: see `docs/jurisdiction.md`
+- Probe CLI and metrics: see `docs/probe.md`
+- Telemetry summaries and histograms: see `docs/telemetry.md`
+- Simulation framework and replay semantics: see `docs/simulation_framework.md`
+- Wallet staking lifecycle: see `docs/wallets.md`
+- Storage erasure coding and reconstruction: see `docs/storage_erasure.md`
+- KYC provider workflow: see `docs/kyc.md`
+- A* latency routing: see `docs/net_a_star.md`
+- Mempool architecture and tuning: see `docs/mempool.md`
+- Hash layout & genesis seeding: see `docs/hashlayout.md`
+- State pruning and RocksDB compaction: see `docs/state_pruning.md`
+- Cross-platform deployment methods: see `docs/deployment_guide.md`
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
+
+Mainnet readiness sits at **~95/100** with vision completion **~64/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -255,7 +290,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~94/100 · Vision completion: ~63/100.
+Mainnet readiness: ~95/100 · Vision completion: ~64/100.
 
 **Recent**
 
