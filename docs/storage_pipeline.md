@@ -1,8 +1,11 @@
 # Storage Pipeline
 
 The storage client splits objects into encrypted chunks before handing them to
-providers. To keep uploads responsive across varied links, the pipeline adjusts
-its chunk size on a per-provider basis:
+providers. Completed blob roots are queued for on-chain anchoring by the
+[BlobScheduler](blob_chain.md), which separates light L2 roots from heavy L3
+roots and releases them on 4 s and 16 s cadences respectively. To keep uploads
+responsive across varied links, the pipeline adjusts its chunk size on a
+per-provider basis:
 
 For attack surfaces and mitigations see [threat_model/storage.md](threat_model/storage.md).
 
@@ -68,15 +71,18 @@ keeps redundancy intact even if a chunk is lost. For a demonstration, consult
 ## Free Reads and Receipts
 
 Gateway fetches are free for clients and domain owners. After serving bytes the
-gateway appends a `ReadReceipt` `{domain, provider_id, bytes_served, ts}` under
-`receipts/read/<epoch>/<seq>.cbor`. Hourly jobs Merklize these receipts and
-write `receipts/read/<epoch>.root`; a settlement watcher moves the root to
-`<epoch>.final` once the L1 anchor confirms and triggers `issue_read` to mint
-subsidies from the global reward pool. Abuse is mitigated via in-memory
-token buckets; exhausted buckets increment `read_denied_total{reason}` and still
-append a `ReadReceipt` with `allowed=false` for audit trails. Dynamic pages emit
-a companion `ExecutionReceipt` capturing CPU and disk I/O for the reward pool
-while keeping reads free for users.
+gateway appends a `ReadAck` `{manifest, path_hash, bytes, ts, client_hash, pk,
+sig}` under `receipts/read/<epoch>/<seq>.cbor`. Hourly jobs Merklize these
+acknowledgements and write `receipts/read/<epoch>.root`; a settlement watcher
+moves the root to `<epoch>.final` once the L1 anchor confirms and triggers
+`issue_read` to mint subsidies from the global reward pool. Abuse is mitigated
+via in-memory token buckets; exhausted buckets increment
+`read_denied_total{reason}` and still append a `ReadAck` with `allowed=false`
+for audit trails. Dynamic pages emit a companion `ExecutionReceipt` capturing
+CPU and disk I/O for the reward pool while keeping reads free for users.
+
+See [docs/read_receipts.md](read_receipts.md) for the full acknowledgement
+format, batching algorithm, and audit tooling.
 
 Rate limits throttle abusive bandwidth patterns without ever introducing
 per-read fees, preserving the free-read guarantee for both owners and visitors.

@@ -390,6 +390,7 @@ pub fn retune_multipliers(
     current_epoch: u64,
     base_path: &Path,
     rolling_inflation: f64,
+    rng_seed: Option<u64>,
 ) -> [i64; 4] {
     #[derive(Serialize, Deserialize)]
     struct KalmanState {
@@ -560,9 +561,12 @@ pub fn retune_multipliers(
         theta[2].round() as i64,
         theta[3].round() as i64,
     ];
-    use rand::Rng;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     let b = supply * (1.0 / (1u64 << 20) as f64);
-    let mut rng = rand::thread_rng();
+    let mut rng: StdRng = match rng_seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => StdRng::from_rng(rand::thread_rng()).expect("rng seed"),
+    };
     let noisy: [i64; 4] = raw.map(|v| {
         let u: f64 = rng.gen::<f64>() - 0.5;
         let noise = if u >= 0.0 {
@@ -693,6 +697,7 @@ pub fn retune_multipliers_encrypted(
     current_epoch: u64,
     base_path: &Path,
     rolling_inflation: f64,
+    rng_seed: Option<u64>,
 ) -> [i64; 4] {
     let stats = enc.decrypt(key);
     retune_multipliers(
@@ -702,5 +707,6 @@ pub fn retune_multipliers_encrypted(
         current_epoch,
         base_path,
         rolling_inflation,
+        rng_seed,
     )
 }

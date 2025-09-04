@@ -3012,6 +3012,7 @@ impl Blockchain {
                         epoch,
                         std::path::Path::new(&self.path),
                         rolling,
+                        None,
                     );
                     self.beta_storage_sub_ct_raw = raw[0];
                     self.gamma_read_sub_ct_raw = raw[1];

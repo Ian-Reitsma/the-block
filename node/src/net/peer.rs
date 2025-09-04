@@ -1,7 +1,7 @@
 use super::{load_net_key, send_msg, PROTOCOL_VERSION};
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
-use crate::net::message::{BlobChunk, Message, Payload};
+use crate::net::message::{Message, Payload};
 use crate::simple_db::SimpleDb;
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};

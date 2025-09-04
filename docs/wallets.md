@@ -32,6 +32,61 @@ cargo run --bin wallet escrow-balance <account>
 This prints total CT locked for active blobs so operators can gauge exposure
 before pruning storage.
 
+## Delegation and Reward Withdrawal
+
+Delegation transactions transfer voting power to a validator while keeping
+tokens in the delegator's account. The payload contains:
+
+```text
+{ delegator: <addr>, validator: <addr>, amount: u64, nonce: u64 }
+```
+
+The delegator signs the above message with Ed25519; the validator's signature is
+optional but recommended for mutual authorization. Nonces must be sequential and
+match the on-chain account state or the transaction is rejected.
+
+Withdrawals reclaim accumulated rewards and unbonded stake. A withdrawal message
+is structurally similar:
+
+```text
+{ delegator: <addr>, validator: <addr>, withdraw: true, nonce: u64 }
+```
+
+The wallet increments the nonce and signs with the same key used for delegation.
+Funds are unlocked once the unbonding period elapses.
+
+### CLI Examples
+
+```bash
+# delegate 250 CT to validator bob
+wallet delegate --to bob --amount 250 --seed <hex>
+
+# withdraw all mature rewards
+wallet withdraw --from alice --seed <hex>
+```
+
+Both commands print the transaction hash and update a local JSON log for audit
+purposes. Failed submissions include a reason field pointing to nonce mismatches
+or insufficient balance.
+
+### Hardware Wallet Flow
+
+When a Ledger/Trezor device is connected, the CLI prompts on the hardware
+screen before broadcasting. Approve the transaction by matching the displayed
+hash and pressing the confirm button. A screenshot of the approval screen is
+shown below for reference:
+
+![HID approval prompt](assets/hid_approval.png)
+
+### Monitoring
+
+Telemetry counters track staking operations:
+
+- `delegation_total{validator}` – successful delegation transactions.
+- `withdraw_total{validator}` – reward withdrawals.
+
+Expose these via `--metrics-addr` and set alerts when unexpected spikes occur.
+
 ## Staking Advice
 
 `crates/wallet::stake` exposes `stake_advice` which computes a Kelly-optimal stake
@@ -58,4 +113,4 @@ APIs without specialized equipment.
 and `wallet submit` on an online machine. The CLI prints transaction hashes so
 operators can confirm inclusion via the explorer.
 
-Progress: 60%
+Progress: 70%
