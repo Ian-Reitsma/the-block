@@ -20,6 +20,19 @@ Trust lines track bilateral credit with three fields:
 - Each fill calls `TrustLedger::adjust` to move balances along the settlement path.
 - Trades and order placements persist to `~/.the_block/state/dex/` via a bincode-backed `DexStore`, surviving crashes and restarts.
 
+## 2.1 Escrow and Partial Payments
+
+Before settlement, matched orders lock funds in an on-ledger escrow. The escrow entry tracks `from`, `to`, the locked total, and a
+Merkle root over released partial payments. Each release appends a payment amount and recomputes the root, yielding a proof that
+can be verified off-chain. When the cumulative released amount equals the original total the escrow entry is removed and the
+trade is final.
+
+### Failure Modes and Recovery
+
+- **Timeout releases:** if one side disappears, the remaining balance can be cancelled and returned after a timeout.
+- **Invalid proofs:** releases providing hashes that do not match the stored root are rejected and the escrow remains pending for
+  manual recovery.
+
 ## 3. Multi-Hop Routing Algorithms
 
 `node/src/dex/trust_lines.rs` implements two path finders:

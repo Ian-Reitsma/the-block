@@ -36,7 +36,7 @@ fn purge_loop_shutdowns_on_exception() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -87,7 +87,7 @@ def boom(bc):
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };

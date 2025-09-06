@@ -305,7 +305,7 @@ def decode_payload_demo() -> None:
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        fee_selector=2,
+        pct_ct=50,
         nonce=0,
         memo=b"demo",
     )
@@ -330,9 +330,9 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
     explain("Nonce is like a check number: use each once and in order")
     next_nonce = 1
     routes = {
-        0: "all fee to consumer token",
-        1: "all fee to industrial token",
-        2: "fee split between tokens",
+        100: "all fee to consumer token",
+        0: "all fee to industrial token",
+        50: "fee split between tokens",
     }
     for sel, note in routes.items():
         payload = the_block.RawTxPayload(
@@ -341,7 +341,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
             amount_consumer=1,
             amount_industrial=0,
             fee=BASE_FEE,
-            fee_selector=sel,
+            pct_ct=sel,
             nonce=next_nonce,
             memo=b"selector demo",
         )
@@ -355,7 +355,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        fee_selector=0,
+        pct_ct=100,
         nonce=2,
         memo=b"reused nonce",
     )
@@ -379,7 +379,7 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str], priv: bytes) -> N
             amount_consumer=1,
             amount_industrial=0,
             fee=BASE_FEE,
-            fee_selector=2,
+            pct_ct=50,
             nonce=i + 4,
             memo=b"block transfer",
         )
@@ -447,7 +447,7 @@ def restart_purge_demo(priv: bytes) -> None:
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        fee_selector=2,
+        pct_ct=50,
         nonce=1,
         memo=b"expire",
     )

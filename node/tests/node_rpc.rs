@@ -190,7 +190,7 @@ async fn rpc_concurrent_controls() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };

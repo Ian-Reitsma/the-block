@@ -199,6 +199,68 @@ pub static SUBSIDY_MULTIPLIER_RAW: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static INDUSTRIAL_BACKLOG: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "industrial_backlog",
+        "Pending industrial compute slices",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static INDUSTRIAL_UTILIZATION: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "industrial_utilization",
+        "Industrial compute utilisation percentage",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static INDUSTRIAL_MULTIPLIER: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "industrial_multiplier",
+        "Current industrial subsidy multiplier",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static INDUSTRIAL_UNITS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "industrial_units_total",
+        "Total normalized compute units processed",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(c.clone())).unwrap();
+    c
+});
+
+pub static INDUSTRIAL_PRICE_PER_UNIT: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "industrial_price_per_unit",
+        "Latest price per compute unit",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static DEX_ESCROW_LOCKED: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("dex_escrow_locked", "Total funds locked in DEX escrow").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
+pub static DEX_ESCROW_PENDING: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("dex_escrow_pending", "Number of pending DEX escrows").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
 pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("subsidy_bytes_total", "Total subsidized bytes by type"),
@@ -1432,10 +1494,12 @@ fn gather() -> String {
         LOG_EMIT_TOTAL.with_label_values(&["storage"]),
         LOG_EMIT_TOTAL.with_label_values(&["p2p"]),
         LOG_EMIT_TOTAL.with_label_values(&["compute"]),
+        LOG_EMIT_TOTAL.with_label_values(&["consensus"]),
         LOG_DROP_TOTAL.with_label_values(&["mempool"]),
         LOG_DROP_TOTAL.with_label_values(&["storage"]),
         LOG_DROP_TOTAL.with_label_values(&["p2p"]),
         LOG_DROP_TOTAL.with_label_values(&["compute"]),
+        LOG_DROP_TOTAL.with_label_values(&["consensus"]),
     );
 
     let mut buffer = Vec::new();

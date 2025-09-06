@@ -18,9 +18,9 @@ use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-use log::info;
+use tracing::info;
 #[cfg(feature = "telemetry")]
-use log::warn;
+use tracing::warn;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -36,6 +36,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
 pub mod config;
 pub mod exec;
 mod read_receipt;
@@ -86,6 +87,7 @@ pub mod tx;
 #[cfg(feature = "gateway")]
 pub mod web;
 
+pub mod logging;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
 #[cfg(feature = "telemetry")]
@@ -260,6 +262,7 @@ fn log_event(
     reason: &str,
     code: u16,
     fpb: Option<u64>,
+    cid: Option<&str>,
 ) {
     if !telemetry::should_log(subsystem) {
         return;
@@ -273,6 +276,9 @@ fn log_event(
     obj.insert("code".into(), json!(code));
     if let Some(v) = fpb {
         obj.insert("fpb".into(), json!(v));
+    }
+    if let Some(c) = cid {
+        obj.insert("cid".into(), json!(c));
     }
     let msg = serde_json::Value::Object(obj).to_string();
     telemetry::observe_log_size(msg.len());
@@ -529,6 +535,18 @@ pub struct Block {
     pub compute_sub_ct: TokenAmount,
     #[pyo3(get)]
     #[serde(default)]
+    /// IT subsidy minted for storage operations in this block
+    pub storage_sub_it: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// IT subsidy minted for read delivery in this block
+    pub read_sub_it: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// IT subsidy minted for compute in this block
+    pub compute_sub_it: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
     /// Merkle root of all `ReadAck`s batched for this block
     pub read_root: [u8; 32],
     #[pyo3(get)]
@@ -563,6 +581,12 @@ pub struct Block {
     #[serde(default)]
     /// Pietrzak proof bytes for the VDF evaluation
     pub vdf_proof: Vec<u8>,
+}
+
+impl Block {
+    pub fn industrial_subsidies(&self) -> (TokenAmount, TokenAmount, TokenAmount) {
+        (self.storage_sub_it, self.read_sub_it, self.compute_sub_it)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -959,6 +983,7 @@ impl Blockchain {
                 if after { "minted" } else { "revoked" },
                 ERR_OK,
                 None,
+                None,
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("service") {
@@ -1043,7 +1068,7 @@ impl Blockchain {
                             let mut fee_industrial: u128 = 0;
                             for tx in b.transactions.iter().skip(1) {
                                 if let Ok((c, i)) =
-                                    crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                                 {
                                     fee_consumer += c as u128;
                                     fee_industrial += i as u128;
@@ -1066,6 +1091,9 @@ impl Blockchain {
                                 b.storage_sub_ct,
                                 b.read_sub_ct,
                                 b.compute_sub_ct,
+                                b.storage_sub_it,
+                                b.read_sub_it,
+                                b.compute_sub_it,
                                 b.read_root,
                                 &b.fee_checksum,
                                 &b.transactions,
@@ -1165,7 +1193,7 @@ impl Blockchain {
                                 let mut fee_i: u128 = 0;
                                 for tx in b.transactions.iter().skip(1) {
                                     if let Ok((c, i)) = crate::fee::decompose(
-                                        tx.payload.fee_selector,
+                                        tx.payload.pct_ct,
                                         tx.payload.fee,
                                     ) {
                                         fee_c += c as u128;
@@ -1189,6 +1217,9 @@ impl Blockchain {
                                     b.storage_sub_ct,
                                     b.read_sub_ct,
                                     b.compute_sub_ct,
+                                    b.storage_sub_it,
+                                    b.read_sub_it,
+                                    b.compute_sub_it,
                                     b.read_root,
                                     &b.fee_checksum,
                                     &b.transactions,
@@ -1245,6 +1276,30 @@ impl Blockchain {
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
+                        if disk.schema_version < 8 {
+                            disk.schema_version = 8;
+                            db.insert(
+                                DB_CHAIN,
+                                bincode::serialize(&disk)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
+                        }
+                        if disk.schema_version < 9 {
+                            disk.schema_version = 9;
+                            db.insert(
+                                DB_CHAIN,
+                                bincode::serialize(&disk)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
+                        }
+                        if disk.schema_version < 10 {
+                            disk.schema_version = 10;
+                            db.insert(
+                                DB_CHAIN,
+                                bincode::serialize(&disk)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
+                        }
                         (
                             disk.chain,
                             disk.accounts,
@@ -1283,7 +1338,7 @@ impl Blockchain {
                         let mut fee_industrial: u128 = 0;
                         for tx in b.transactions.iter().skip(1) {
                             if let Ok((c, i)) =
-                                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                             {
                                 fee_consumer += c as u128;
                                 fee_industrial += i as u128;
@@ -1306,6 +1361,9 @@ impl Blockchain {
                             b.storage_sub_ct,
                             b.read_sub_ct,
                             b.compute_sub_ct,
+                            b.storage_sub_it,
+                            b.read_sub_it,
+                            b.compute_sub_it,
                             b.read_root,
                             &b.fee_checksum,
                             &b.transactions,
@@ -1382,7 +1440,7 @@ impl Blockchain {
             let mut fee_consumer: u128 = 0;
             let mut fee_industrial: u128 = 0;
             for tx in b.transactions.iter().skip(1) {
-                if let Ok((c, i)) = crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                if let Ok((c, i)) = crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                     fee_consumer += c as u128;
                     fee_industrial += i as u128;
                 }
@@ -1433,7 +1491,7 @@ impl Blockchain {
                                 if tx.payload.from_ != "0".repeat(34) {
                                     if let Some(s) = bc.accounts.get_mut(&tx.payload.from_) {
                                         if let Ok((fee_c, fee_i)) = crate::fee::decompose(
-                                            tx.payload.fee_selector,
+                                            tx.payload.pct_ct,
                                             tx.payload.fee,
                                         ) {
                                             let total_c = tx.payload.amount_consumer + fee_c;
@@ -1625,7 +1683,7 @@ impl Blockchain {
                     bc.inc_mempool_size(e.tx.lane);
                     if let Some(acc) = bc.accounts.get_mut(&e.sender) {
                         if let Ok((fee_consumer, fee_industrial)) =
-                            crate::fee::decompose(e.tx.payload.fee_selector, e.tx.payload.fee)
+                            crate::fee::decompose(e.tx.payload.pct_ct, e.tx.payload.fee)
                         {
                             acc.pending_consumer += e.tx.payload.amount_consumer + fee_consumer;
                             acc.pending_industrial +=
@@ -1655,6 +1713,7 @@ impl Blockchain {
             "expired_drop_total",
             ERR_OK,
             Some(expired_drop_total as u64),
+            None,
         );
         #[cfg(feature = "telemetry")]
         {
@@ -1745,6 +1804,9 @@ impl Blockchain {
             storage_sub_ct: TokenAmount::new(0),
             read_sub_ct: TokenAmount::new(0),
             compute_sub_ct: TokenAmount::new(0),
+            storage_sub_it: TokenAmount::new(0),
+            read_sub_it: TokenAmount::new(0),
+            compute_sub_it: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
             state_root: String::new(),
@@ -1908,20 +1970,27 @@ impl Blockchain {
             panic!("admission panic");
         }
 
-        if tx.payload.fee_selector > 2 {
+        if tx.payload.pct_ct > 100 {
             #[cfg(feature = "telemetry-json")]
-            log_event(
-                "mempool",
-                log::Level::Warn,
-                "reject",
-                &sender_addr,
-                nonce,
-                "invalid_selector",
-                TxAdmissionError::InvalidSelector.code(),
-                None,
-            );
+            {
+                let tx_hash = tx.id();
+                log_event(
+                    "mempool",
+                    log::Level::Warn,
+                    "reject",
+                    &sender_addr,
+                    nonce,
+                    "invalid_selector",
+                    TxAdmissionError::InvalidSelector.code(),
+                    None,
+                    Some(&hex::encode(tx_hash)),
+                );
+            }
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-            warn!("tx rejected sender={sender_addr} nonce={nonce} reason=invalid_selector");
+            if telemetry::should_log("mempool") {
+                let span = crate::log_context!(tx = tx.id());
+                tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=invalid_selector");
+            }
             #[cfg(feature = "telemetry")]
             {
                 telemetry::INVALID_SELECTOR_REJECT_TOTAL.inc();
@@ -1935,7 +2004,7 @@ impl Blockchain {
             return Err(TxAdmissionError::FeeTooLarge);
         }
         let (fee_consumer, fee_industrial) =
-            match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+            match crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                 Ok(v) => v,
                 Err(FeeError::InvalidSelector) => {
                     #[cfg(feature = "telemetry")]
@@ -2038,7 +2107,7 @@ impl Blockchain {
                 self.dec_mempool_size(lane);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
                     if let Ok((c, i)) = crate::fee::decompose(
-                        ev_entry.tx.payload.fee_selector,
+                        ev_entry.tx.payload.pct_ct,
                         ev_entry.tx.payload.fee,
                     ) {
                         let total_c = ev_entry.tx.payload.amount_consumer + c;
@@ -2052,6 +2121,26 @@ impl Blockchain {
                     self.orphan_counter
                         .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
+                #[cfg(feature = "telemetry-json")]
+                {
+                    let ev_hash = ev_entry.tx.id();
+                    log_event(
+                        "mempool",
+                        log::Level::Info,
+                        "evict",
+                        &ev_sender,
+                        ev_nonce,
+                        "priority",
+                        ERR_OK,
+                        None,
+                        Some(&hex::encode(ev_hash)),
+                    );
+                }
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                if telemetry::should_log("mempool") {
+                    let span = crate::log_context!(tx = ev_entry.tx.id());
+                    tracing::info!(parent: &span, "tx evicted sender={} nonce={} reason=priority", scrub(&ev_sender), ev_nonce);
+                }
                 if self
                     .panic_on_evict
                     .swap(false, std::sync::atomic::Ordering::SeqCst)
@@ -2062,18 +2151,25 @@ impl Blockchain {
                 #[cfg(feature = "telemetry")]
                 self.record_reject("mempool_full");
                 #[cfg(feature = "telemetry-json")]
-                log_event(
-                    "mempool",
-                    log::Level::Warn,
-                    "reject",
-                    &sender_addr,
-                    nonce,
-                    "mempool_full",
-                    TxAdmissionError::MempoolFull.code(),
-                    None,
-                );
+                {
+                    let tx_hash = tx.id();
+                    log_event(
+                        "mempool",
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "mempool_full",
+                        TxAdmissionError::MempoolFull.code(),
+                        None,
+                        Some(&hex::encode(tx_hash)),
+                    );
+                }
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                warn!("tx rejected sender={sender_addr} nonce={nonce} reason=mempool_full");
+                if telemetry::should_log("mempool") {
+                    let span = crate::log_context!(tx = tx.id());
+                    tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=mempool_full");
+                }
                 return Err(TxAdmissionError::MempoolFull);
             }
         }
@@ -2081,19 +2177,26 @@ impl Blockchain {
         match mempool.entry((sender_addr.clone(), nonce)) {
             dashmap::mapref::entry::Entry::Occupied(_) => {
                 #[cfg(feature = "telemetry")]
-                #[cfg(feature = "telemetry-json")]
-                log_event(
-                    "mempool",
-                    log::Level::Warn,
-                    "reject",
-                    &sender_addr,
-                    nonce,
-                    "duplicate",
-                    TxAdmissionError::Duplicate.code(),
-                    None,
-                );
-                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                {
+                    let tx_hash = tx.id();
+                    #[cfg(feature = "telemetry-json")]
+                    log_event(
+                        "mempool",
+                        log::Level::Warn,
+                        "reject",
+                        &sender_addr,
+                        nonce,
+                        "duplicate",
+                        TxAdmissionError::Duplicate.code(),
+                        None,
+                        Some(&hex::encode(tx_hash)),
+                    );
+                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                    if telemetry::should_log("mempool") {
+                        let span = crate::log_context!(tx = tx_hash);
+                        tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                    }
+                }
                 #[cfg(feature = "telemetry")]
                 {
                     telemetry::DUP_TX_REJECT_TOTAL.inc();
@@ -2107,20 +2210,25 @@ impl Blockchain {
                     None => {
                         #[cfg(feature = "telemetry")]
                         #[cfg(feature = "telemetry-json")]
-                        log_event(
-                            "mempool",
-                            log::Level::Warn,
-                            "reject",
-                            &sender_addr,
-                            nonce,
-                            "unknown_sender",
-                            TxAdmissionError::UnknownSender.code(),
-                            None,
-                        );
+                        {
+                            let tx_hash = tx.id();
+                            log_event(
+                                "mempool",
+                                log::Level::Warn,
+                                "reject",
+                                &sender_addr,
+                                nonce,
+                                "unknown_sender",
+                                TxAdmissionError::UnknownSender.code(),
+                                None,
+                                Some(&hex::encode(tx_hash)),
+                            );
+                        }
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                        warn!(
-                            "tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender"
-                        );
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx.id());
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
+                        }
                         #[cfg(feature = "telemetry")]
                         self.record_reject("unknown_sender");
                         return Err(TxAdmissionError::UnknownSender);
@@ -2153,40 +2261,51 @@ impl Blockchain {
                     || sender.balance.industrial < required_industrial
                 {
                     #[cfg(feature = "telemetry")]
-                    #[cfg(feature = "telemetry-json")]
-                    log_event(
-                        "mempool",
-                        log::Level::Warn,
-                        "reject",
-                        &sender_addr,
-                        nonce,
-                        "insufficient_balance",
-                        TxAdmissionError::InsufficientBalance.code(),
-                        None,
-                    );
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
+                    {
+                        let tx_hash = tx.id();
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            "mempool",
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "insufficient_balance",
+                            TxAdmissionError::InsufficientBalance.code(),
+                            None,
+                            Some(&hex::encode(tx_hash)),
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx_hash);
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
+                        }
+                    }
                     #[cfg(feature = "telemetry")]
                     self.record_reject("insufficient_balance");
                     return Err(TxAdmissionError::InsufficientBalance);
                 }
                 if sender.pending_nonces.contains(&nonce) {
                     #[cfg(feature = "telemetry")]
-                    #[cfg(feature = "telemetry-json")]
-                    log_event(
-                        "mempool",
-                        log::Level::Warn,
-                        "reject",
-                        &sender_addr,
-                        nonce,
-                        "duplicate",
-                        TxAdmissionError::Duplicate.code(),
-                        None,
-                    );
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
-                    #[cfg(feature = "telemetry")]
                     {
+                        let tx_hash = tx.id();
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            "mempool",
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "duplicate",
+                            TxAdmissionError::Duplicate.code(),
+                            None,
+                            Some(&hex::encode(tx_hash)),
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx_hash);
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                        }
                         telemetry::DUP_TX_REJECT_TOTAL.inc();
                         self.record_reject("duplicate");
                     }
@@ -2194,21 +2313,27 @@ impl Blockchain {
                 }
                 if nonce != sender.nonce + sender.pending_nonce + 1 {
                     #[cfg(feature = "telemetry")]
-                    #[cfg(feature = "telemetry-json")]
-                    log_event(
-                        "mempool",
-                        log::Level::Warn,
-                        "reject",
-                        &sender_addr,
-                        nonce,
-                        "nonce_gap",
-                        TxAdmissionError::NonceGap.code(),
-                        None,
-                    );
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=nonce_gap");
-                    #[cfg(feature = "telemetry")]
-                    self.record_reject("nonce_gap");
+                    {
+                        let tx_hash = tx.id();
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            "mempool",
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "nonce_gap",
+                            TxAdmissionError::NonceGap.code(),
+                            None,
+                            Some(&hex::encode(tx_hash)),
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx_hash);
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=nonce_gap");
+                        }
+                        self.record_reject("nonce_gap");
+                    }
                     return Err(TxAdmissionError::NonceGap);
                 }
                 #[cfg(feature = "telemetry")]
@@ -2249,21 +2374,25 @@ impl Blockchain {
                 let floor = lane_min.max(self.base_fee);
                 if fee_per_byte < floor {
                     #[cfg(feature = "telemetry")]
-                    #[cfg(feature = "telemetry-json")]
-                    log_event(
-                        "mempool",
-                        log::Level::Warn,
-                        "reject",
-                        &sender_addr,
-                        nonce,
-                        "fee_too_low",
-                        TxAdmissionError::FeeTooLow.code(),
-                        Some(fee_per_byte),
-                    );
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low");
-                    #[cfg(feature = "telemetry")]
                     {
+                        let tx_hash = tx.id();
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            "mempool",
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "fee_too_low",
+                            TxAdmissionError::FeeTooLow.code(),
+                            Some(fee_per_byte),
+                            Some(&hex::encode(tx_hash)),
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx_hash);
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low");
+                        }
                         telemetry::FEE_FLOOR_REJECT_TOTAL.inc();
                         self.record_reject("fee_too_low");
                     }
@@ -2271,40 +2400,52 @@ impl Blockchain {
                 }
                 if !verify_signed_tx(tx.clone()) {
                     #[cfg(feature = "telemetry")]
-                    #[cfg(feature = "telemetry-json")]
-                    log_event(
-                        "mempool",
-                        log::Level::Warn,
-                        "reject",
-                        &sender_addr,
-                        nonce,
-                        "bad_signature",
-                        TxAdmissionError::BadSignature.code(),
-                        None,
-                    );
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
-                    #[cfg(feature = "telemetry")]
-                    self.record_reject("bad_signature");
+                    {
+                        let tx_hash = tx.id();
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            "mempool",
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "bad_signature",
+                            TxAdmissionError::BadSignature.code(),
+                            None,
+                            Some(&hex::encode(tx_hash)),
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx_hash);
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
+                        }
+                        self.record_reject("bad_signature");
+                    }
                     return Err(TxAdmissionError::BadSignature);
                 }
                 if sender.pending_nonce as usize >= self.max_pending_per_account {
                     #[cfg(feature = "telemetry")]
-                    #[cfg(feature = "telemetry-json")]
-                    log_event(
-                        "mempool",
-                        log::Level::Warn,
-                        "reject",
-                        &sender_addr,
-                        nonce,
-                        "pending_limit",
-                        TxAdmissionError::PendingLimitReached.code(),
-                        None,
-                    );
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    warn!("tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit");
-                    #[cfg(feature = "telemetry")]
-                    self.record_reject("pending_limit");
+                    {
+                        let tx_hash = tx.id();
+                        #[cfg(feature = "telemetry-json")]
+                        log_event(
+                            "mempool",
+                            log::Level::Warn,
+                            "reject",
+                            &sender_addr,
+                            nonce,
+                            "pending_limit",
+                            TxAdmissionError::PendingLimitReached.code(),
+                            None,
+                            Some(&hex::encode(tx_hash)),
+                        );
+                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                        if telemetry::should_log("mempool") {
+                            let span = crate::log_context!(tx = tx_hash);
+                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit");
+                        }
+                        self.record_reject("pending_limit");
+                    }
                     return Err(TxAdmissionError::PendingLimitReached);
                 }
                 {
@@ -2318,8 +2459,8 @@ impl Blockchain {
                     if panic_step == 1 {
                         panic!("admission panic");
                     }
-                    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                    let tx_id = tx.id();
+                    #[cfg(feature = "telemetry")]
+                    let tx_hash = tx.id();
                     #[cfg(feature = "telemetry")]
                     let fee_val = tx.payload.fee;
                     let now = SystemTime::now()
@@ -2350,14 +2491,17 @@ impl Blockchain {
                         "ok",
                         ERR_OK,
                         Some(fee_per_byte),
+                        Some(&hex::encode(tx_hash)),
                     );
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     if telemetry::should_log("mempool") {
+                        let span = crate::log_context!(tx = tx_hash);
                         info!(
+                            parent: &span,
                             "tx accepted sender={} nonce={} reason=accepted id={}",
                             scrub(&sender_addr),
                             nonce,
-                            scrub(&hex::encode(tx_id))
+                            scrub(&hex::encode(tx_hash))
                         );
                     }
                 }
@@ -2431,7 +2575,7 @@ impl Blockchain {
             let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -2452,6 +2596,7 @@ impl Blockchain {
                         .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }
+            let tx_hash = tx.id();
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
@@ -2462,10 +2607,13 @@ impl Blockchain {
                 "dropped",
                 ERR_OK,
                 None,
+                Some(&hex::encode(tx_hash)),
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("mempool") {
+                let span = crate::log_context!(tx = tx_hash);
                 info!(
+                    parent: &span,
                     "tx dropped sender={} nonce={} reason=dropped",
                     scrub(sender),
                     nonce
@@ -2477,9 +2625,10 @@ impl Blockchain {
         {
             self.dec_mempool_size(entry.tx.lane);
             let tx = entry.tx;
+            let tx_hash = tx.id();
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -2510,10 +2659,13 @@ impl Blockchain {
                 "dropped",
                 ERR_OK,
                 None,
+                Some(&hex::encode(tx_hash)),
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("mempool") {
+                let span = crate::log_context!(tx = tx_hash);
                 info!(
+                    parent: &span,
                     "tx dropped sender={} nonce={} reason=dropped",
                     scrub(sender),
                     nonce
@@ -2530,6 +2682,7 @@ impl Blockchain {
                 nonce,
                 "not_found",
                 TxAdmissionError::NotFound.code(),
+                None,
                 None,
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -2862,7 +3015,7 @@ impl Blockchain {
         let mut fee_sum_industrial: u128 = 0;
         for tx in &included {
             if let Ok((fee_consumer, fee_industrial)) =
-                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
             {
                 fee_sum_consumer += fee_consumer as u128;
                 fee_sum_industrial += fee_industrial as u128;
@@ -2910,7 +3063,7 @@ impl Blockchain {
                 amount_consumer: coinbase_consumer,
                 amount_industrial: coinbase_industrial,
                 fee: 0,
-                fee_selector: 0,
+                pct_ct: 100,
                 nonce: 0,
                 memo: Vec::new(),
             },
@@ -2927,7 +3080,7 @@ impl Blockchain {
             if tx.payload.from_ != "0".repeat(34) {
                 if let Some(s) = shadow_accounts.get_mut(&tx.payload.from_) {
                     let (fee_c, fee_i) =
-                        crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                             .unwrap_or((0, 0));
                     let total_c = tx.payload.amount_consumer + fee_c;
                     let total_i = tx.payload.amount_industrial + fee_i;
@@ -3015,6 +3168,9 @@ impl Blockchain {
             storage_sub_ct: storage_sub_token,
             read_sub_ct: read_sub_token,
             compute_sub_ct: compute_sub_token,
+            storage_sub_it: TokenAmount::new(0),
+            read_sub_it: TokenAmount::new(0),
+            compute_sub_it: TokenAmount::new(0),
             read_root: batch.root,
             fee_checksum: fee_checksum.clone(),
             state_root: root.clone(),
@@ -3039,6 +3195,9 @@ impl Blockchain {
                 storage_sub_token,
                 read_sub_token,
                 compute_sub_token,
+                TokenAmount::new(0),
+                TokenAmount::new(0),
+                TokenAmount::new(0),
                 block.read_root,
                 &fee_checksum,
                 &txs,
@@ -3101,6 +3260,17 @@ impl Blockchain {
                     self.gamma_read_sub_ct_raw = raw[1];
                     self.kappa_cpu_sub_ct_raw = raw[2];
                     self.lambda_bytes_out_sub_ct_raw = raw[3];
+                    let (backlog, util) =
+                        crate::compute_market::price_board::backlog_utilization();
+                    let ind = inflation::retuning::retune_industrial_multiplier(
+                        std::path::Path::new(&self.path),
+                        self.params.industrial_multiplier,
+                        backlog as f64,
+                        util as f64,
+                    );
+                    self.params.industrial_multiplier = ind;
+                    #[cfg(feature = "telemetry")]
+                    crate::telemetry::INDUSTRIAL_MULTIPLIER.set(ind);
                     self.epoch_storage_bytes = 0;
                     self.epoch_read_bytes = 0;
                     self.epoch_cpu_ms = 0;
@@ -3177,7 +3347,7 @@ impl Blockchain {
                         changed.insert(tx.payload.from_.clone());
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             let (fee_consumer, fee_industrial) =
-                                crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                                     .unwrap_or((0, 0));
                             let total_consumer = tx.payload.amount_consumer + fee_consumer;
                             let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -3343,6 +3513,9 @@ impl Blockchain {
             block.storage_sub_ct,
             block.read_sub_ct,
             block.compute_sub_ct,
+            block.storage_sub_it,
+            block.read_sub_it,
+            block.compute_sub_it,
             block.read_root,
             &block.fee_checksum,
             &block.transactions,
@@ -3392,7 +3565,7 @@ impl Blockchain {
                 return Ok(false);
             }
             *exp += 1;
-            match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+            match crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                 Ok((fee_consumer, fee_industrial)) => {
                     fee_tot_consumer += fee_consumer as u128;
                     fee_tot_industrial += fee_industrial as u128;
@@ -3489,7 +3662,7 @@ impl Blockchain {
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                         let (fee_consumer, fee_industrial) =
-                            crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee)
+                            crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                                 .unwrap_or((0, 0));
                         s.balance.consumer = s
                             .balance
@@ -3648,9 +3821,7 @@ impl Blockchain {
             if b.previous_hash != expected_prev {
                 return false;
             }
-            if b.difficulty
-                != difficulty::expected_difficulty_from_chain(&chain[..i])
-            {
+            if b.difficulty != difficulty::expected_difficulty_from_chain(&chain[..i]) {
                 return false;
             }
             if b.transactions.is_empty() {
@@ -3675,6 +3846,9 @@ impl Blockchain {
                 b.storage_sub_ct,
                 b.read_sub_ct,
                 b.compute_sub_ct,
+                b.storage_sub_it,
+                b.read_sub_it,
+                b.compute_sub_it,
                 b.read_root,
                 &b.fee_checksum,
                 &b.transactions,
@@ -3731,7 +3905,7 @@ impl Blockchain {
                 if !seen.insert(tx.id()) {
                     return false;
                 }
-                match crate::fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                match crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                     Ok((fee_consumer, fee_industrial)) => {
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
@@ -3821,6 +3995,7 @@ pub fn spawn_purge_loop_thread(
                                 "ttl_drop_total",
                                 ERR_OK,
                                 Some(ttl_after),
+                                None,
                             );
                         }
                         if orphan_delta > 0 {
@@ -3833,6 +4008,7 @@ pub fn spawn_purge_loop_thread(
                                 "orphan_sweep_total",
                                 ERR_OK,
                                 Some(orphan_after),
+                                None,
                             );
                         }
                     }
@@ -3901,6 +4077,7 @@ pub fn spawn_purge_loop(
                                 "ttl_drop_total",
                                 ERR_OK,
                                 Some(ttl_after),
+                                None,
                             );
                         }
                         if orphan_delta > 0 {
@@ -3913,6 +4090,7 @@ pub fn spawn_purge_loop(
                                 "orphan_sweep_total",
                                 ERR_OK,
                                 Some(orphan_after),
+                                None,
                             );
                         }
                     }
@@ -4254,6 +4432,9 @@ fn calculate_hash(
     storage_sub: TokenAmount,
     read_sub: TokenAmount,
     compute_sub: TokenAmount,
+    storage_sub_it: TokenAmount,
+    read_sub_it: TokenAmount,
+    compute_sub_it: TokenAmount,
     read_root: [u8; 32],
     fee_checksum: &str,
     txs: &[SignedTransaction],
@@ -4277,6 +4458,9 @@ fn calculate_hash(
         storage_sub: storage_sub.0,
         read_sub: read_sub.0,
         compute_sub: compute_sub.0,
+        storage_sub_it: storage_sub_it.0,
+        read_sub_it: read_sub_it.0,
+        compute_sub_it: compute_sub_it.0,
         read_root,
         fee_checksum,
         state_root,
@@ -4374,6 +4558,32 @@ pub const ERR_FEE_TOO_LARGE: u16 = 14;
 pub const ERR_RENT_ESCROW_INSUFFICIENT: u16 = 15;
 pub const ERR_DNS_SIG_INVALID: u16 = 16;
 
+#[pyclass]
+pub struct PyRemoteSigner {
+    inner: WalletRemoteSigner,
+}
+
+#[pymethods]
+impl PyRemoteSigner {
+    #[new]
+    pub fn new(url: String) -> PyResult<Self> {
+        let inner = WalletRemoteSigner::connect(&url)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    pub fn public_key(&self) -> String {
+        hex::encode(self.inner.public_key().to_bytes())
+    }
+
+    pub fn sign(&self, msg: &[u8]) -> PyResult<Vec<u8>> {
+        self.inner
+            .sign(msg)
+            .map(|s| s.to_bytes().to_vec())
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+}
+
 /// Return the integer network identifier used in domain separation.
 #[must_use]
 #[pyfunction]
@@ -4394,6 +4604,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<FeeLane>()?;
     m.add_class::<RawTxPayload>()?;
     m.add_class::<TokenBalance>()?;
+    m.add_class::<PyRemoteSigner>()?;
     m.add_class::<ShutdownFlag>()?;
     m.add_class::<PurgeLoopHandle>()?;
     m.add_class::<PurgeLoop>()?;

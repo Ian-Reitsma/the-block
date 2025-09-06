@@ -81,6 +81,9 @@ pub struct InflationParams {
     pub kappa_cpu_sub_ct: i64,
     pub lambda_bytes_out_sub_ct: i64,
     pub rent_rate_ct_per_byte: i64,
+    pub industrial_multiplier: i64,
+    pub industrial_backlog: u64,
+    pub industrial_utilization: u64,
 }
 
 impl RpcClient {

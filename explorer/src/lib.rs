@@ -118,7 +118,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let receipts = dir.path().join("receipts");
         std::fs::create_dir_all(&receipts).unwrap();
-        let r = Receipt::new("job".into(), "buyer".into(), "prov".into(), 10, false);
+        let r = Receipt::new("job".into(), "buyer".into(), "prov".into(), 10, 1, false);
         let bytes = bincode::serialize(&vec![r]).unwrap();
         std::fs::write(receipts.join("1"), bytes).unwrap();
         let db = dir.path().join("explorer.db");

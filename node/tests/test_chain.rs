@@ -91,7 +91,7 @@ mod testutil {
             amount_consumer: consumer,
             amount_industrial: industrial,
             fee,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce,
             memo: Vec::new(),
         };
@@ -218,7 +218,7 @@ fn test_rejects_invalid_signature() {
         amount_consumer: 1,
         amount_industrial: 2,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -482,7 +482,7 @@ fn test_fee_checksum_enforced() {
     let mut fee_tot_consumer = 0u64;
     let mut fee_tot_industrial = 0u64;
     for tx in block.transactions.iter().skip(1) {
-        let (c, i) = the_block::fee::decompose(tx.payload.fee_selector, tx.payload.fee).unwrap();
+        let (c, i) = the_block::fee::decompose(tx.payload.pct_ct, tx.payload.fee).unwrap();
         fee_tot_consumer += c;
         fee_tot_industrial += i;
     }
@@ -655,6 +655,9 @@ fn test_import_difficulty_mismatch() {
         storage_sub: fork[idx].storage_sub_ct.0,
         read_sub: fork[idx].read_sub_ct.0,
         compute_sub: fork[idx].compute_sub_ct.0,
+        storage_sub_it: fork[idx].storage_sub_it.0,
+        read_sub_it: fork[idx].read_sub_it.0,
+        compute_sub_it: fork[idx].compute_sub_it.0,
         read_root: [0; 32],
         fee_checksum: &fork[idx].fee_checksum,
         state_root: ZERO_HASH,
@@ -706,6 +709,16 @@ fn test_chain_determinism() {
 }
 
 #[test]
+fn industrial_subsidies_zero_by_default() {
+    init();
+    let (_dir, bc) = temp_blockchain("subsidy_zero");
+    for b in bc.chain {
+        let (s, r, c) = b.industrial_subsidies();
+        assert_eq!(s.0 + r.0 + c.0, 0);
+    }
+}
+
+#[test]
 fn test_schema_upgrade_compatibility() {
     init();
     for fixture in ["v1", "v2"] {
@@ -719,7 +732,7 @@ fn test_schema_upgrade_compatibility() {
             let mut fee_c: u128 = 0;
             let mut fee_i: u128 = 0;
             for tx in blk.transactions.iter().skip(1) {
-                if let Ok((c, i)) = fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                if let Ok((c, i)) = fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                     fee_c += c as u128;
                     fee_i += i as u128;
                 }
@@ -752,7 +765,7 @@ fn test_schema_upgrade_compatibility() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -776,7 +789,7 @@ fn test_schema_upgrade_compatibility() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 2,
         memo: Vec::new(),
     };
@@ -824,7 +837,7 @@ fn test_schema_upgrade_compatibility() {
         let mut fee_c: u128 = 0;
         let mut fee_i: u128 = 0;
         for tx in blk.transactions.iter().skip(1) {
-            if let Ok((c, i)) = fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+            if let Ok((c, i)) = fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                 fee_c += c as u128;
                 fee_i += i as u128;
             }

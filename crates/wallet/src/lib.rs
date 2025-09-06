@@ -12,6 +12,8 @@ pub trait WalletSigner {
 pub enum WalletError {
     #[error("device not connected")]
     NotConnected,
+    #[error("remote signer timed out")]
+    Timeout,
     #[error("signing failed: {0}")]
     Failure(String),
 }
@@ -22,6 +24,7 @@ pub struct Wallet {
 }
 
 pub mod stake;
+pub mod remote_signer;
 
 impl Wallet {
     /// Create a wallet from a 32-byte seed.

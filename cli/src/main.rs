@@ -1,7 +1,10 @@
-use bridges::{Bridge, RelayerProof};
 use clap::{Parser, Subcommand};
-use std::fs;
 use std::path::PathBuf;
+
+mod bridge;
+mod dex;
+use bridge::BridgeCmd;
+use dex::DexCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 
 #[derive(Parser)]
@@ -41,23 +44,10 @@ enum Commands {
         #[command(subcommand)]
         action: BridgeCmd,
     },
-}
-
-#[derive(Subcommand)]
-enum BridgeCmd {
-    Deposit {
-        user: String,
-        amount: u64,
-        relayer: String,
-        #[arg(long, default_value = "bridge.bin")]
-        state: String,
-    },
-    Withdraw {
-        user: String,
-        amount: u64,
-        relayer: String,
-        #[arg(long, default_value = "bridge.bin")]
-        state: String,
+    /// DEX escrow utilities
+    Dex {
+        #[command(subcommand)]
+        action: DexCmd,
     },
 }
 
@@ -97,51 +87,7 @@ fn main() {
             let path = PathBuf::from(out);
             opcodes::write_abi(&path).expect("write abi");
         }
-        Commands::Bridge { action } => match action {
-            BridgeCmd::Deposit {
-                user,
-                amount,
-                relayer,
-                state,
-            } => {
-                let path = PathBuf::from(state);
-                let mut bridge = if path.exists() {
-                    let bytes = fs::read(&path).expect("read bridge state");
-                    bincode::deserialize(&bytes).unwrap_or_default()
-                } else {
-                    Bridge::default()
-                };
-                let proof = RelayerProof::new(&relayer, &user, amount);
-                if bridge.lock(&user, amount, &proof) {
-                    let bytes = bincode::serialize(&bridge).expect("serialize");
-                    fs::write(&path, bytes).expect("write bridge state");
-                    println!("locked");
-                } else {
-                    eprintln!("invalid proof");
-                }
-            }
-            BridgeCmd::Withdraw {
-                user,
-                amount,
-                relayer,
-                state,
-            } => {
-                let path = PathBuf::from(state);
-                let mut bridge = if path.exists() {
-                    let bytes = fs::read(&path).expect("read bridge state");
-                    bincode::deserialize(&bytes).unwrap_or_default()
-                } else {
-                    Bridge::default()
-                };
-                let proof = RelayerProof::new(&relayer, &user, amount);
-                if bridge.unlock(&user, amount, &proof) {
-                    let bytes = bincode::serialize(&bridge).expect("serialize");
-                    fs::write(&path, bytes).expect("write bridge state");
-                    println!("unlocked");
-                } else {
-                    eprintln!("invalid proof or balance");
-                }
-            }
-        },
+        Commands::Bridge { action } => bridge::handle(action),
+        Commands::Dex { action } => dex::handle(action),
     }
 }

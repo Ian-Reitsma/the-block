@@ -21,8 +21,18 @@ pub struct TipMeta {
 /// 3. If both match, lexicographically greater tip hash wins, ensuring
 ///    a total order and deterministic tie-break.
 pub fn choose_tip(a: &TipMeta, b: &TipMeta) -> Ordering {
+    #[cfg(feature = "telemetry")]
+    let span = if crate::telemetry::should_log("consensus") {
+        Some(crate::log_context!(block = a.height.max(b.height)))
+    } else {
+        None
+    };
+    #[cfg(feature = "telemetry")]
+    if let Some(ref s) = span {
+        tracing::info!(parent: s, a_height = a.height, b_height = b.height, "fork_choice_start");
+    }
     use Ordering::*;
-    match a.checkpoint_height.cmp(&b.checkpoint_height) {
+    let res = match a.checkpoint_height.cmp(&b.checkpoint_height) {
         Greater => Greater,
         Less => Less,
         Equal => match a.height.cmp(&b.height) {
@@ -34,5 +44,10 @@ pub fn choose_tip(a: &TipMeta, b: &TipMeta) -> Ordering {
                 Equal => a.tip_hash.cmp(&b.tip_hash),
             },
         },
+    };
+    #[cfg(feature = "telemetry")]
+    if let Some(s) = span {
+        tracing::info!(parent: &s, ?res, "fork_choice_end");
     }
+    res
 }

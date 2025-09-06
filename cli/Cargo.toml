@@ -9,3 +9,6 @@ hex = "0.4"
 the_block = { path = "../node" }
 bridges = { path = "../bridges" }
 bincode = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dex = { path = "../dex" }

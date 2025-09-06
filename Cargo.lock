@@ -200,6 +200,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
+name = "ascii"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
+
+[[package]]
 name = "ascii-canvas"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -782,6 +788,9 @@ name = "bridges"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "hex",
+ "once_cell",
+ "prometheus",
  "serde",
 ]
 
@@ -913,6 +922,12 @@ dependencies = [
  "poly1305",
  "zeroize",
 ]
+
+[[package]]
+name = "chunked_transfer"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
 
 [[package]]
 name = "ciborium"
@@ -1055,7 +1070,10 @@ dependencies = [
  "bincode",
  "bridges",
  "clap",
+ "dex",
  "hex",
+ "serde",
+ "serde_json",
  "the_block",
 ]
 
@@ -1436,6 +1454,10 @@ dependencies = [
 [[package]]
 name = "dex"
 version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+]
 
 [[package]]
 name = "difflib"
@@ -2724,6 +2746,8 @@ version = "0.1.0"
 dependencies = [
  "bellman_ce",
  "rand 0.4.6",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6163,6 +6187,7 @@ dependencies = [
  "criterion",
  "csv",
  "dashmap",
+ "dex",
  "dirs",
  "ed25519-dalek 2.2.0",
  "env_logger",
@@ -6313,6 +6338,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
 dependencies = [
  "crunchy",
+]
+
+[[package]]
+name = "tiny_http"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "389915df6413a2e74fb181895f933386023c71110878cd0825588928e64cdc82"
+dependencies = [
+ "ascii",
+ "chunked_transfer",
+ "httpdate",
+ "log",
 ]
 
 [[package]]
@@ -6545,6 +6582,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6554,12 +6601,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]
@@ -6825,6 +6875,7 @@ version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f33196643e165781c20a5ead5582283a7dacbb87855d867fbc2df3f81eddc1be"
 dependencies = [
+ "getrandom 0.3.3",
  "js-sys",
  "wasm-bindgen",
 ]
@@ -6886,11 +6937,15 @@ dependencies = [
  "hex",
  "hidapi",
  "httpmock",
+ "ledger",
  "rand 0.7.3",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tiny_http",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

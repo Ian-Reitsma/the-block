@@ -1,11 +1,12 @@
 #![forbid(unsafe_code)]
 
 use super::order_book::{Order, OrderBook};
+use dex::escrow::{Escrow, PaymentProof};
 use crate::simple_db::SimpleDb;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct TradeLog(Order, Order, u64);
+struct TradeLog(Order, Order, u64, PaymentProof);
 
 #[derive(Default)]
 pub struct DexStore {
@@ -33,9 +34,13 @@ impl DexStore {
             .unwrap_or_default()
     }
 
-    pub fn log_trade(&mut self, trade: &(Order, Order, u64)) {
-        if let Ok(bytes) = bincode::serialize(&TradeLog(trade.0.clone(), trade.1.clone(), trade.2))
-        {
+    pub fn log_trade(&mut self, trade: &(Order, Order, u64), proof: &PaymentProof) {
+        if let Ok(bytes) = bincode::serialize(&TradeLog(
+            trade.0.clone(),
+            trade.1.clone(),
+            trade.2,
+            proof.clone(),
+        )) {
             let key = format!("trade:{}", self.db.keys_with_prefix("trade:").len());
             let _ = self.db.insert(&key, bytes);
             self.db.flush();
@@ -46,11 +51,25 @@ impl DexStore {
         let mut res = Vec::new();
         for k in self.db.keys_with_prefix("trade:") {
             if let Some(bytes) = self.db.get(&k) {
-                if let Ok(TradeLog(a, b, c)) = bincode::deserialize(&bytes) {
+                if let Ok(TradeLog(a, b, c, _)) = bincode::deserialize(&bytes) {
                     res.push((a, b, c));
                 }
             }
         }
         res
+    }
+
+    pub fn save_escrow(&mut self, esc: &Escrow) {
+        if let Ok(bytes) = bincode::serialize(esc) {
+            let _ = self.db.insert("escrow", bytes);
+            self.db.flush();
+        }
+    }
+
+    pub fn load_escrow(&self) -> Escrow {
+        self.db
+            .get("escrow")
+            .and_then(|b| bincode::deserialize(&b).ok())
+            .unwrap_or_default()
     }
 }

@@ -26,7 +26,7 @@ fn migrate_v3_recomputes_supply() {
             amount_consumer: 50,
             amount_industrial: 25,
             fee: 0,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 0,
             memo: Vec::new(),
         },
@@ -41,7 +41,7 @@ fn migrate_v3_recomputes_supply() {
             amount_consumer: 1,
             amount_industrial: 0,
             fee: 100,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         },
@@ -62,6 +62,9 @@ fn migrate_v3_recomputes_supply() {
         storage_sub_ct: TokenAmount::new(0),
         read_sub_ct: TokenAmount::new(0),
         compute_sub_ct: TokenAmount::new(0),
+        storage_sub_it: TokenAmount::new(0),
+        read_sub_it: TokenAmount::new(0),
+        compute_sub_it: TokenAmount::new(0),
         read_root: [0u8; 32],
         fee_checksum: String::new(),
         state_root: String::new(),
@@ -101,7 +104,7 @@ fn migrate_v3_recomputes_supply() {
     let blk = &bc.chain[0];
     assert_eq!(blk.coinbase_consumer.get(), 50);
     assert_eq!(blk.coinbase_industrial.get(), 25);
-    let (fc, fi) = the_block::fee_decompose(0, 100).unwrap();
+    let (fc, fi) = the_block::fee_decompose(100, 100).unwrap();
     let mut h = blake3::Hasher::new();
     h.update(&fc.to_le_bytes());
     h.update(&fi.to_le_bytes());
@@ -141,6 +144,6 @@ fn migrate_v6_adds_recent_timestamps() {
     fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    assert_eq!(bc.schema_version(), 7);
+    assert_eq!(bc.schema_version(), 10);
     assert!(bc.recent_timestamps.is_empty());
 }

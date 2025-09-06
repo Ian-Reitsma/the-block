@@ -1,0 +1,8 @@
+{
+  "format": "json",
+  "default": "info",
+  "modules": {
+    "mempool": "debug",
+    "storage": "warn"
+  }
+}

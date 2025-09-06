@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
 use super::{trust_lines::TrustLedger, DexStore};
+use dex::escrow::Escrow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -114,8 +115,9 @@ impl OrderBook {
         &mut self,
         order: Order,
         ledger: &mut TrustLedger,
+        escrow: &mut Escrow,
     ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
-        self.place_settle_persist(order, ledger, None)
+        self.place_settle_persist(order, ledger, None, escrow)
     }
 
     pub fn place_settle_persist(
@@ -123,14 +125,25 @@ impl OrderBook {
         order: Order,
         ledger: &mut TrustLedger,
         mut store: Option<&mut DexStore>,
+        escrow: &mut Escrow,
     ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
         let trades = self.place(order)?;
         for (buy, sell, qty) in &trades {
             let value = sell.price * *qty;
+            let eid = escrow.lock(buy.account.clone(), sell.account.clone(), value);
+            let proof = escrow
+                .release(eid, value)
+                .expect("release full trade amount");
             ledger.adjust(&buy.account, &sell.account, value as i64);
             ledger.adjust(&sell.account, &buy.account, -(value as i64));
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::DEX_ESCROW_LOCKED.set(escrow.total_locked() as i64);
+                crate::telemetry::DEX_ESCROW_PENDING.set(escrow.count() as i64);
+            }
             if let Some(st) = store.as_deref_mut() {
-                st.log_trade(&(buy.clone(), sell.clone(), *qty));
+                st.log_trade(&(buy.clone(), sell.clone(), *qty), &proof);
+                st.save_escrow(escrow);
             }
         }
         if let Some(st) = store.as_deref_mut() {

@@ -9,6 +9,10 @@ Structured telemetry logs include the following fields. All identifiers are priv
 - `reason`: human-readable reason for the event.
 - `code`: stable numeric code for the event.
 - `fpb`: optional fee-per-byte value when applicable.
+- `cid`: short correlation identifier derived from a transaction hash or block height.
+- `tx`: transaction hash included on all mempool admission and rejection logs for traceability.
+
+Use the `log_context!` macro to attach these correlation IDs when emitting spans. The node binary exposes `--log-format` (plain or json) and `--log-level` flags for per-module filtering; see `config/logging.json` for an example configuration.
 
 Logs are sampled and rate limited; emitted and dropped counts are exported via `log_emit_total{subsystem}` and `log_drop_total{subsystem}` on the `/metrics` endpoint. A `redact_at_rest` helper can hash or delete log files older than a configured number of hours.
 The logger permits up to 100 events per second before sampling kicks in. Once the limit is exceeded, only one out of every 100 events is emitted while the rest are dropped, preventing log bursts from overwhelming block propagation.

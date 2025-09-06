@@ -31,7 +31,7 @@ fn build_signed_tx(
         amount_consumer: consumer,
         amount_industrial: industrial,
         fee,
-        fee_selector: selector,
+        pct_ct: selector,
         nonce,
         memo: Vec::new(),
     };
@@ -47,7 +47,7 @@ fn invalid_selector_rejects_and_counts() {
     bc.add_account("alice".into(), 10_000, 0).unwrap();
     bc.add_account("bob".into(), 0, 0).unwrap();
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1, 3);
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1, 255);
     #[cfg(feature = "telemetry")]
     {
         telemetry::TX_REJECTED_TOTAL.reset();
@@ -83,7 +83,7 @@ fn balance_overflow_rejects_and_counts() {
         acc.pending_consumer = u64::MAX - 1;
     }
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1, 1, 0);
+    let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1, 1, 100);
     #[cfg(feature = "telemetry")]
     {
         telemetry::TX_REJECTED_TOTAL.reset();

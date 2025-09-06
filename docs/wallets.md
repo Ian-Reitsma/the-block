@@ -104,6 +104,26 @@ Physical hardware wallet support is planned but follows the same trait
 interfaces. Until then, the mock implementations help developers exercise the
 APIs without specialized equipment.
 
+## Remote Signer
+
+Remote signer daemons let hardware devices or offline machines approve
+transactions without exposing private keys. The service exposes two HTTP
+endpoints:
+
+- `GET /pubkey` returning `{ "pubkey": "<hex>" }`
+- `POST /sign` accepting `{ "trace": "<uuid>", "msg": "<hex>" }`
+
+Both the `sign` and `stake-role` CLI commands accept a `--remote-signer <url>`
+flag that overrides `--seed`. Each request prefixes the `REMOTE_SIGN|` domain
+tag, logs the unique trace ID, and retries on timeout. Example usage:
+
+```bash
+cargo run --bin wallet sign --message "hello" --remote-signer http://127.0.0.1:8000
+```
+
+Deploy remote signers on trusted networks and transport over TLS or USB to
+avoid MITM attacks.
+
 ## Key Management Guides
 
 - Seeds are stored in `$TB_WALLET_DIR` (defaults to `~/.the-block/wallets`).

@@ -1,6 +1,6 @@
-# Bridge Primitives and Relayer Workflow
+# Bridge Primitives and Light-Client Workflow
 
-The bridge subsystem moves value between The‑Block and external chains without introducing custodial risk. This document describes the current lock/unlock implementation, relayer proof format, CLI flows, and outstanding work.
+The bridge subsystem moves value between The‑Block and external chains without introducing custodial risk. This document describes the lock/unlock implementation, light‑client header verification, relayer proof format, CLI flows, and outstanding work.
 
 ## Architecture Overview
 
@@ -15,6 +15,33 @@ The bridge subsystem moves value between The‑Block and external chains without
    - The contract validates that the deposit is unspent and releases the locked balance to the caller.
 
 All bridge state lives under `state/bridges/` and survives restarts via bincode snapshots.
+
+## Light-Client Header Verification
+
+`verify_header` validates external chain headers and Merkle proofs before minting mirrored tokens.
+
+```rust
+struct Header {
+    chain_id: String,
+    height: u64,
+    merkle_root: [u8;32],
+    signature: [u8;32], // blake3(chain_id || height || merkle_root)
+}
+
+struct Proof {
+    leaf: [u8;32],
+    path: Vec<[u8;32]>,
+}
+```
+
+Sequence:
+
+1. Relayers fetch an external `Header` and Merkle `Proof` for the deposit event.
+2. `blockctl bridge deposit --header header.json --proof proof.json` calls `Bridge::deposit_verified`.
+3. `deposit_verified` invokes `verify_header`, credits the user on success, and persists the header hash under `state/bridge_headers/<hash>` to prevent replay.
+4. Telemetry counters `bridge_proof_verify_success_total` and `bridge_proof_verify_failure_total` track verification results.
+
+Sample `header.json` and `proof.json` files reside in `examples/bridges/` for development testing.
 
 ## Relayer Proof Format
 
@@ -36,30 +63,30 @@ Relayers must sign the serialized `LockProof` with their Ed25519 key. The contra
 
 ## CLI Examples
 
-Lock funds on The‑Block destined for Ethereum:
+Lock funds on The‑Block using a light-client proof:
 
 ```bash
 blockctl bridge deposit \
-  --from alice \
+  --user alice \
   --amount 50 \
-  --dest-chain 1            # Ethereum chain ID
+  --header header.json \
+  --proof proof.json
 ```
 
-After the lock is observed and proven on Ethereum, unlock back on The‑Block:
+After the lock is observed and proven on Ethereum, unlock back on The‑Block using a relayer proof:
 
 ```bash
 blockctl bridge withdraw \
-  --id 42 \
-  --proof proof.json \
-  --relayer-signature <hex>
+  --user alice \
+  --amount 50 \
+  --relayer bob
 ```
 
-`proof.json` is the canonical JSON form of `LockProof` above. The CLI converts the JSON into bincode before submitting the transaction.
+`header.json` and `proof.json` follow the formats above and are consumed directly by the CLI.
 
 ## Outstanding Work
 
-- **Light-Client Verification** – embed an Ethereum light client so The‑Block verifies destination headers directly.
 - **Relayer Incentives** – fee market and slashing for misbehavior.
 - **Multi-Asset Support** – extend the lock contract to wrap arbitrary tokens with minted representations on the destination chain.
 
-Progress: 20%
+Progress: 30%

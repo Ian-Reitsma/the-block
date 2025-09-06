@@ -38,7 +38,7 @@ fn scenario_accept_and_reject(logger: &mut Logger) {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -76,6 +76,9 @@ fn scenario_accept_and_reject(logger: &mut Logger) {
         for rec in logs {
             let v: Value = serde_json::from_str(rec.args()).unwrap();
             let code = v.get("code").and_then(Value::as_u64).expect("numeric code");
+            if v.get("cid").is_none() {
+                panic!("missing cid");
+            }
             match (v.get("op"), v.get("reason")) {
                 (Some(op), Some(reason)) if op == "admit" && reason == "ok" => {
                     assert_eq!(code, ERR_OK as u64);
@@ -113,6 +116,48 @@ fn scenario_accept_and_reject(logger: &mut Logger) {
     }
 }
 
+fn scenario_eviction(logger: &mut Logger) {
+    let (priv_a, _) = generate_keypair();
+    let payload = RawTxPayload {
+        from_: "a".into(),
+        to: "b".into(),
+        amount_consumer: 1,
+        amount_industrial: 0,
+        fee: 1000,
+        pct_ct: 100,
+        nonce: 1,
+        memo: Vec::new(),
+    };
+    let tx1 = sign_tx(priv_a.to_vec(), payload.clone()).unwrap();
+    let payload2 = RawTxPayload {
+        nonce: 2,
+        fee: 2000,
+        ..payload
+    };
+    let tx2 = sign_tx(priv_a.to_vec(), payload2).unwrap();
+    let dir = temp_dir("temp_eviction");
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    bc.max_mempool_size_consumer = 1;
+    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.submit_transaction(tx1).unwrap();
+    bc.submit_transaction(tx2).unwrap();
+    let logs: Vec<_> = logger.collect();
+    #[cfg(feature = "telemetry-json")]
+    {
+        assert!(logs.iter().any(|r| {
+            let v: Value = serde_json::from_str(r.args()).unwrap();
+            v.get("op") == Some(&Value::String("evict".into()))
+                && v.get("reason") == Some(&Value::String("priority".into()))
+                && v.get("cid").is_some()
+        }));
+    }
+    #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+    {
+        assert!(logs.iter().any(|r| r.args().contains("tx evicted")));
+    }
+}
+
 fn scenario_purge_loop_counters(logger: &mut Logger) {
     let dir = temp_dir("temp_purge_logs");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
@@ -135,7 +180,7 @@ fn scenario_purge_loop_counters(logger: &mut Logger) {
                 amount_consumer: 1,
                 amount_industrial: 0,
                 fee: 1000,
-                fee_selector: 0,
+                pct_ct: 100,
                 nonce: 1,
                 memo: Vec::new(),
             },
@@ -162,7 +207,7 @@ fn scenario_purge_loop_counters(logger: &mut Logger) {
                 amount_consumer: 1,
                 amount_industrial: 0,
                 fee: 1000,
-                fee_selector: 0,
+                pct_ct: 100,
                 nonce: 1,
                 memo: Vec::new(),
             },
@@ -233,5 +278,6 @@ fn logs_accept_and_reject_and_purge_loop_counters() {
     init();
     let mut logger = Logger::start();
     scenario_accept_and_reject(&mut logger);
+    scenario_eviction(&mut logger);
     scenario_purge_loop_counters(&mut logger);
 }

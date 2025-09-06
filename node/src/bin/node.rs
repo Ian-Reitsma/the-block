@@ -8,7 +8,8 @@ use tokio_util::sync::CancellationToken;
 use clap::{Parser, Subcommand};
 use ed25519_dalek::SigningKey;
 #[cfg(feature = "telemetry")]
-use log::info;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
@@ -89,6 +90,14 @@ enum Commands {
         /// Directory for chain data
         #[arg(long, default_value = "node-data")]
         data_dir: String,
+
+        /// Log output format: `plain` or `json`
+        #[arg(long, default_value = "plain")]
+        log_format: String,
+
+        /// Log level directives (e.g. `info`, `mempool=debug`)
+        #[arg(long = "log-level", value_name = "LEVEL", num_args = 0.., default_values_t = vec!["info".to_string()])]
+        log_level: Vec<String>,
 
         /// Dry-run compute-market matches (default true)
         #[arg(long, default_value_t = true)]
@@ -182,6 +191,8 @@ async fn main() -> std::process::ExitCode {
             snapshot_interval,
             metrics_addr,
             data_dir,
+            log_format,
+            log_level,
             dry_run,
             quic,
             quic_port: _quic_port,
@@ -189,6 +200,13 @@ async fn main() -> std::process::ExitCode {
             quic_key: _quic_key,
             quic_cert_ttl_days: _quic_cert_ttl_days,
         } => {
+            let filter = EnvFilter::new(log_level.join(","));
+            let fmt = tracing_subscriber::fmt().with_env_filter(filter);
+            if log_format == "json" {
+                fmt.json().init();
+            } else {
+                fmt.init();
+            }
             let mut inner = Blockchain::open(&data_dir).expect("open blockchain");
             if snapshot_interval != inner.config.snapshot_interval {
                 inner.snapshot.set_interval(snapshot_interval);
@@ -240,11 +258,11 @@ async fn main() -> std::process::ExitCode {
             if quic {
                 #[cfg(feature = "quic")]
                 {
+                    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
                     use std::path::Path;
+                    use std::time::Duration;
                     use the_block::config::QuicConfig;
                     use the_block::net::quic;
-                    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-                    use std::time::Duration;
                     let port = _quic_port
                         .or_else(|| bc.lock().unwrap().config.quic.as_ref().map(|c| c.port))
                         .unwrap_or(0);
@@ -267,7 +285,14 @@ async fn main() -> std::process::ExitCode {
                             .unwrap_or_else(|| format!("{data_dir}/quic.key"))
                     });
                     let ttl_days = _quic_cert_ttl_days
-                        .or_else(|| bc.lock().unwrap().config.quic.as_ref().map(|c| c.cert_ttl_days))
+                        .or_else(|| {
+                            bc.lock()
+                                .unwrap()
+                                .config
+                                .quic
+                                .as_ref()
+                                .map(|c| c.cert_ttl_days)
+                        })
                         .unwrap_or(30);
                     let regen = {
                         let cert_meta = std::fs::metadata(&cert_path).ok();
@@ -275,8 +300,10 @@ async fn main() -> std::process::ExitCode {
                         match (cert_meta, key_meta) {
                             (Some(cm), Some(km)) => {
                                 let uid = nix::unistd::Uid::effective().as_raw();
-                                if cm.mode() & 0o777 != 0o600 || km.mode() & 0o777 != 0o600
-                                    || cm.uid() != uid || km.uid() != uid
+                                if cm.mode() & 0o777 != 0o600
+                                    || km.mode() & 0o777 != 0o600
+                                    || cm.uid() != uid
+                                    || km.uid() != uid
                                 {
                                     panic!("insecure quic cert permissions");
                                 }

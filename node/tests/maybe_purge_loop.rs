@@ -45,7 +45,7 @@ fn env_driven_purge_loop_drops_entries() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };

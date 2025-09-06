@@ -47,7 +47,7 @@
 - Python: `RawTxPayload` now exposes both `from_` and `from` properties, restoring examples that accessed either name after decode ([node/src/transaction.rs](../node/src/transaction.rs)).
 
 ### Breaking
-- Renamed `fee_token` to `fee_selector` and bumped the crypto domain tag to `THE_BLOCKv2|` ([node/src/lib.rs](../node/src/lib.rs)).
+- Renamed `fee_token` to `pct_ct` and bumped the crypto domain tag to `THE_BLOCKv2|` ([node/src/lib.rs](../node/src/lib.rs)).
 
 - Fix: make `demo.py` build the `the_block` extension with `maturin` when
   missing and default `TB_PURGE_LOOP_SECS` to `1`, preventing module and
@@ -56,7 +56,7 @@
   telemetry, extend logging tests for nonce-gap and balance rejections, and
   document sample JSON log output.
 - Breaking: Fee routing overhaul, overflow clamp, invariants **INV-FEE-01** and **INV-FEE-02**.
-- Breaking: rename `fee_token` to `fee_selector` and bump crypto domain tag to `THE_BLOCKv2|`.
+- Breaking: rename `fee_token` to `pct_ct` and bump crypto domain tag to `THE_BLOCKv2|`.
 - Breaking: database schema **v4** adds per-account mempool caps and TTL
   indexes; `Blockchain::open` rebuilds the mempool on startup dropping
   expired or orphaned entries.

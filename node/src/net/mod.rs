@@ -5,9 +5,21 @@ mod message;
 mod peer;
 #[cfg(feature = "quic")]
 pub mod quic;
+#[cfg(not(feature = "quic"))]
+pub mod quic {
+    use anyhow::Error;
+
+    #[derive(Debug)]
+    pub enum ConnectError {
+        Handshake,
+        Other(Error),
+    }
+}
 pub mod turbine;
 
 use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
+use anyhow::anyhow;
+use blake3;
 use ed25519_dalek::SigningKey;
 use rand::Rng;
 use rand_core::{OsRng, RngCore};
@@ -18,7 +30,6 @@ use std::path::PathBuf;
 use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use anyhow::anyhow;
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
 pub use message::{BlobChunk, Message, Payload};
@@ -99,6 +110,11 @@ impl Node {
                     let addr = Some(addr);
                     let mut buf = Vec::new();
                     if stream.read_to_end(&mut buf).is_ok() {
+                        #[cfg(feature = "telemetry")]
+                        if crate::telemetry::should_log("p2p") {
+                            let span = crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
+                            tracing::info!(parent: &span, peer = ?addr, len = buf.len(), "recv_msg");
+                        }
                         if let Ok(msg) = bincode::deserialize::<Message>(&buf) {
                             peers.handle_message(msg, addr, &chain);
                         }
@@ -238,6 +254,11 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     }
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
+    #[cfg(feature = "telemetry")]
+    if crate::telemetry::should_log("p2p") {
+        let span = crate::log_context!(tx = *blake3::hash(&bytes).as_bytes());
+        tracing::info!(parent: &span, peer = %addr, len = bytes.len(), "send_msg");
+    }
     stream.write_all(&bytes)?;
     Ok(())
 }
@@ -270,7 +291,9 @@ pub(crate) fn send_quic_msg(
     _cert: &[u8],
     _msg: &Message,
 ) -> Result<(), quic::ConnectError> {
-    Err(quic::ConnectError::Other(anyhow!("quic feature not enabled")))
+    Err(quic::ConnectError::Other(anyhow!(
+        "quic feature not enabled"
+    )))
 }
 
 pub(crate) fn load_net_key() -> SigningKey {

@@ -21,7 +21,7 @@ def trigger_unknown_sender(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -39,7 +39,7 @@ def trigger_insufficient_balance(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -57,7 +57,7 @@ def trigger_nonce_gap(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=2,
         memo=b"",
     )
@@ -75,7 +75,7 @@ def trigger_invalid_selector(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=9,
+        pct_ct=255,
         nonce=1,
         memo=b"",
     )
@@ -93,7 +93,7 @@ def trigger_bad_signature(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -112,7 +112,7 @@ def trigger_duplicate(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -136,7 +136,7 @@ def trigger_balance_overflow(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -148,7 +148,7 @@ def trigger_balance_overflow(tmp_path):
         amount_consumer=2**64 - 1,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=2,
         memo=b"",
     )
@@ -166,7 +166,7 @@ def trigger_fee_too_large(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=1 << 63,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -185,7 +185,7 @@ def trigger_fee_overflow(tmp_path):
         amount_consumer=max_u64,
         amount_industrial=0,
         fee=1,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -205,7 +205,7 @@ def trigger_fee_too_low(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -224,7 +224,7 @@ def trigger_mempool_full(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -242,7 +242,7 @@ def trigger_lock_poisoned(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -262,7 +262,7 @@ def trigger_pending_limit(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=1,
         memo=b"",
     )
@@ -274,7 +274,7 @@ def trigger_pending_limit(tmp_path):
         amount_consumer=0,
         amount_industrial=0,
         fee=0,
-        fee_selector=0,
+        pct_ct=100,
         nonce=2,
         memo=b"",
     )

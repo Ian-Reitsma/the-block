@@ -26,13 +26,24 @@
 - `analytics` – returns `{reads, bytes}` served for a domain based on finalized
   `ReadAck` batches.
 - `microshard.roots.last?n=` – lists the most recent micro‑shard root headers.
-- `inflation.params` – returns current subsidy multipliers and rent rate.
+- `inflation.params` – returns current subsidy multipliers, industrial backlog
+  and utilisation, and rent rate.
 
   ```bash
   curl -s localhost:26658/inflation.params | jq
   # {"beta_storage_sub_ct":50,"gamma_read_sub_ct":20,
   #  "kappa_cpu_sub_ct":10,"lambda_bytes_out_sub_ct":5,
+  #  "industrial_multiplier":100,
+  #  "industrial_backlog":0,"industrial_utilization":0,
   #  "rent_rate_ct_per_byte":1}
+  ```
+
+- `compute_market.stats` – exposes current compute backlog and utilisation
+  metrics.
+
+  ```bash
+  curl -s localhost:26658/compute_market.stats | jq
+  # {"industrial_backlog":0,"industrial_utilization":0}
   ```
 
   - `consensus.difficulty` – returns the current proof-of-work difficulty target and timestamp.

@@ -87,8 +87,24 @@ impl Miner {
 
     /// Mine a block header and update the internal difficulty based on elapsed time.
     pub fn mine(&mut self, mut header: BlockHeader) -> BlockHeader {
+        #[cfg(feature = "telemetry")]
+        let span = if crate::telemetry::should_log("consensus") {
+            Some(crate::log_context!(
+                block = self.timestamps.len() as u64 + 1
+            ))
+        } else {
+            None
+        };
+        #[cfg(feature = "telemetry")]
+        if let Some(ref s) = span {
+            tracing::info!(parent: s, "pow_start");
+        }
         header.difficulty = self.difficulty;
         let mined = solve(header);
+        #[cfg(feature = "telemetry")]
+        if let Some(s) = span {
+            tracing::info!(parent: &s, nonce = mined.nonce, "pow_end");
+        }
         self.timestamps.push(mined.timestamp_millis);
         if self.timestamps.len() > DIFFICULTY_WINDOW {
             let excess = self.timestamps.len() - DIFFICULTY_WINDOW;
