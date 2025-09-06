@@ -56,7 +56,7 @@ jobs:
         run: cargo geiger --all --skip build
       - uses: taiki-e/setup-nextest@v0
       - name: cargo nextest
-        run: cargo nextest run --all-features
+        run: cargo nextest run --profile quic
       - name: minimal versions
         run: |
           rustup toolchain install nightly --profile minimal

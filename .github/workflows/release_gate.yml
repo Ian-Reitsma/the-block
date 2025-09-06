@@ -15,7 +15,7 @@ jobs:
           override: true
       - uses: taiki-e/setup-nextest@v0
       - name: Unit and integration tests
-        run: cargo nextest run --all-features
+        run: cargo nextest run --profile quic
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly

@@ -109,12 +109,12 @@ The `GENESIS_HASH` constant is asserted at compile time against the hash derived
 
 Each block header carries a `difficulty` field representing the proof‑of‑work
 target. After every block the next difficulty is computed from a sliding window
-of the most recent 120 blocks:
+of the most recent 120 blocks (`DIFFICULTY_WINDOW`):
 
 - **Target spacing:** 1 000 ms per block
 - **Adjustment factor:** `(expected_spacing / actual_spacing)` over the window
 - **Clamp:** the factor is restricted to the range [¼, ×4] relative to the
-  previous difficulty
+  previous difficulty (`DIFFICULTY_CLAMP_FACTOR`)
 
 The 120-block window (~2 minutes) dampens timestamp jitter yet reacts to real
 hash‑rate swings. Clamping the factor to one-quarter and four-times of the

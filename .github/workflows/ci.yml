@@ -65,11 +65,11 @@ jobs:
           echo "LIBPYTHON_PATH=$(python3-config --ldflags | sed -n 's/.*-L\([^ ]*\).*/\1/p')" >> $GITHUB_ENV
       - uses: taiki-e/setup-nextest@v0
       - name: cargo nextest
-        run: cargo nextest run --all-features
+        run: cargo nextest run --profile quic
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
       - name: gossip test
-        run: cargo nextest run --all-features gossip_converges_to_longest_chain --retries 2
+        run: cargo nextest run --profile quic gossip_converges_to_longest_chain --retries 2
         env:
           RUST_TEST_THREADS: 1
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}

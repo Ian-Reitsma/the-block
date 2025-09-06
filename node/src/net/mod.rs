@@ -1,9 +1,11 @@
+pub mod a_star;
 pub mod ban_store;
 pub mod discovery;
 mod message;
 mod peer;
+#[cfg(feature = "quic")]
+pub mod quic;
 pub mod turbine;
-pub mod a_star;
 
 use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
 use ed25519_dalek::SigningKey;
@@ -16,12 +18,14 @@ use std::path::PathBuf;
 use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use anyhow::anyhow;
 
-pub use message::{BlobChunk, Handshake, Message, Payload, SUPPORTED_VERSION};
+pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
+pub use message::{BlobChunk, Message, Payload};
 pub use peer::PeerSet;
 
 /// Current gossip protocol version.
-pub const PROTOCOL_VERSION: u32 = SUPPORTED_VERSION;
+pub const PROTOCOL_VERSION: u16 = SUPPORTED_VERSION;
 
 /// Feature bits required for peer connections.
 pub const COMPUTE_MARKET_V1: u32 = crate::p2p::FeatureBit::ComputeMarketV1 as u32;
@@ -38,11 +42,22 @@ pub struct Node {
     relay: std::sync::Arc<Relay>,
     chain: Arc<Mutex<Blockchain>>,
     key: SigningKey,
+    quic_addr: Option<SocketAddr>,
+    quic_cert: Option<Vec<u8>>,
 }
 
 impl Node {
     /// Create a new node bound to `addr` and seeded with `peers`.
     pub fn new(addr: SocketAddr, peers: Vec<SocketAddr>, bc: Blockchain) -> Self {
+        Self::new_with_quic(addr, peers, bc, None)
+    }
+
+    pub fn new_with_quic(
+        addr: SocketAddr,
+        peers: Vec<SocketAddr>,
+        bc: Blockchain,
+        quic: Option<(SocketAddr, Vec<u8>)>,
+    ) -> Self {
         let key = load_net_key();
         ban_store::store()
             .lock()
@@ -55,6 +70,8 @@ impl Node {
             chain: Arc::new(Mutex::new(bc)),
             key,
             relay,
+            quic_addr: quic.as_ref().map(|(a, _)| *a),
+            quic_cert: quic.map(|(_, c)| c),
         }
     }
 
@@ -121,12 +138,19 @@ impl Node {
     pub fn discover_peers(&self) {
         let peers = self.peers.bootstrap();
         // send handshake to each peer
-        let hs = Handshake {
-            node_id: self.key.verifying_key().to_bytes(),
-            protocol_version: PROTOCOL_VERSION,
-            features: LOCAL_FEATURES,
+        let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
+        let nonce = OsRng.next_u64();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: LOCAL_FEATURES,
+            agent,
+            nonce,
+            transport: Transport::Tcp,
+            quic_addr: self.quic_addr,
+            quic_cert: self.quic_cert.clone(),
         };
-        let hs_msg = Message::new(Payload::Handshake(hs), &self.key);
+        let hs_msg = Message::new(Payload::Handshake(hello), &self.key);
         for p in &peers {
             let _ = send_msg(*p, &hs_msg);
         }
@@ -187,9 +211,10 @@ impl Node {
     }
 
     fn broadcast(&self, msg: &Message) {
-        let peers = self.peers.list();
+        let peers = self.peers.list_with_info();
         if std::env::var("TB_GOSSIP_ALGO").ok().as_deref() == Some("turbine") {
-            turbine::broadcast(msg, &peers);
+            let addrs: Vec<SocketAddr> = peers.iter().map(|(a, _, _)| *a).collect();
+            turbine::broadcast(msg, &addrs);
         } else {
             self.relay.broadcast(msg, &peers);
         }
@@ -215,6 +240,37 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     stream.write_all(&bytes)?;
     Ok(())
+}
+
+#[cfg(feature = "quic")]
+pub(crate) fn send_quic_msg(
+    addr: SocketAddr,
+    cert: &[u8],
+    msg: &Message,
+) -> Result<(), quic::ConnectError> {
+    use crate::net::quic;
+    use quinn::Certificate;
+    use tokio::runtime::Runtime;
+    let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
+    let cert = Certificate::from_der(cert).map_err(|e| quic::ConnectError::Other(anyhow!(e)))?;
+    let rt = Runtime::new().unwrap();
+    rt.block_on(async move {
+        let conn = quic::connect(addr, cert).await?;
+        quic::send(&conn, &bytes)
+            .await
+            .map_err(|e| quic::ConnectError::Other(anyhow!(e)))?;
+        conn.close(0u32.into(), b"done");
+        Ok(())
+    })
+}
+
+#[cfg(not(feature = "quic"))]
+pub(crate) fn send_quic_msg(
+    _addr: SocketAddr,
+    _cert: &[u8],
+    _msg: &Message,
+) -> Result<(), quic::ConnectError> {
+    Err(quic::ConnectError::Other(anyhow!("quic feature not enabled")))
 }
 
 pub(crate) fn load_net_key() -> SigningKey {

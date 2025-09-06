@@ -32,6 +32,13 @@ peers to forward it to.  The fanout size is `ceil(sqrt(N))` capped at 16, where
 without broadcasting to everyone at once.  The chosen fanout is exposed via the
 `gossip_fanout_gauge` metric.
 
+For each selected peer the relay consults the peer registry to determine the
+preferred transport. If the peer advertises QUIC support the relay uses
+`net::quic::send`; otherwise it falls back to the TCP `send_msg` helper. If a
+QUIC send fails, the relay retries over TCP to maintain delivery. Session-level
+metrics `quic_bytes_sent_total` and `quic_bytes_recv_total` record per-transport
+traffic alongside the `gossip_fanout_gauge` gauge.
+
 Setting the environment variable `TB_GOSSIP_FANOUT=all` disables the random
 selection and forces broadcast to every peer.  This override is useful for
 small testnets where full fanout is desired.

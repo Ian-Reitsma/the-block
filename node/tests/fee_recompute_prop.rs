@@ -3,7 +3,8 @@ use std::{collections::HashMap, fs};
 use proptest::prelude::*;
 use rand::{Rng, SeedableRng};
 use the_block::{
-    fee, Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction, TokenAmount,
+    fee, Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction,
+    TokenAmount,
 };
 
 mod util;
@@ -115,6 +116,7 @@ proptest! {
             epoch_read_bytes: 0,
             epoch_cpu_ms: 0,
             epoch_bytes_out: 0,
+            recent_timestamps: Vec::new(),
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
         map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~95/100** with vision completion **~64/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~96/100** with vision completion **~66/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,10 +16,11 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~72 %
+## 1. Consensus & Core Execution — ~74 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
+- Sliding-window difficulty retarget over 120 blocks with clamp [1/4, 4x] and metrics in `node/src/consensus/difficulty.rs` and `docs/difficulty.md`.
 - EIP‑1559 base fee tracker: `node/src/fees.rs` adjusts per block and `node/tests/base_fee.rs` verifies target fullness tracking.
 - Adversarial rollback tests in `node/tests/finality_rollback.rs` assert ledger state after competing forks.
 - Pietrzak VDF with timed commitment and delayed preimage reveal (`node/src/consensus/vdf.rs`, `node/tests/vdf.rs`) shrinks proofs and blocks speculative computation.
@@ -34,10 +35,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~72 %
+## 2. Networking & Gossip — ~75 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
+- QUIC transport with certificate reuse, TCP fallback, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs` and `docs/networking.md`.
 - TTL-based duplicate suppression and sqrt-N fanout documented in `docs/gossip.md` and implemented in `node/src/gossip/relay.rs`.
 - Peer identifier fuzzing prevents malformed IDs from crashing DHT routing (`net/fuzz/peer_id.rs`).
 - Manual DHT recovery runbook (`docs/networking.md#dht-recovery`).
@@ -48,7 +50,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
 
 **Gaps**
-- QUIC transport and large‑scale WAN chaos experiments remain open.
+- Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
 ## 3. Governance & Subsidy Economy — ~78 %
@@ -177,4 +179,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑03*
+*Last updated: 2025‑09‐06*

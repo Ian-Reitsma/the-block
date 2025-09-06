@@ -29,6 +29,8 @@ Quick Index
 - Light-client synchronization and security model: see `docs/light_client.md`
 - Jurisdiction policy packs and LE logging: see `docs/jurisdiction.md`
 - Probe CLI and metrics: see `docs/probe.md`
+- Operator QUIC configuration and difficulty monitoring: see `docs/operators/run_a_node.md`
+- Python demo walkthrough: see `docs/demo.md`
 - Telemetry summaries and histograms: see `docs/telemetry.md`
 - Simulation framework and replay semantics: see `docs/simulation_framework.md`
 - Wallet staking lifecycle: see `docs/wallets.md`
@@ -42,7 +44,7 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~95/100** with vision completion **~64/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~96/100** with vision completion **~66/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -290,7 +292,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~95/100 · Vision completion: ~64/100.
+Mainnet readiness: ~96/100 · Vision completion: ~66/100.
 
 **Recent**
 
@@ -523,6 +525,8 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   Use `scripts/extract_wal_seeds.sh` to list seeds and see [docs/wal.md](docs/wal.md) for failure triage.
 
 - Compute market changes: run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` to cover courier retries and price board persistence. Install `cargo-nextest` (v0.9.97-b.2 works with Rust 1.82) if the command is unavailable.
+- QUIC networking changes: run `cargo nextest run --profile quic` to exercise QUIC handshake, fanout, and fallback paths. The
+  profile enables the `quic` feature flag.
 
 ### 17.5 Architecture & Telemetry Highlights (from Agents‑Sup)
 
@@ -540,7 +544,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   Operators can inspect current multipliers via the `inflation.params` RPC and
   reconcile stake-weighted payouts by querying `stake.role` for each bonded
   account.
-- Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
+- Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`, `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.
 - Quick start: `just demo` runs the Python walkthrough after `./scripts/bootstrap.sh` and fails fast if the virtualenv is missing.

@@ -1,3 +1,5 @@
+use super::constants::DIFFICULTY_WINDOW;
+use super::difficulty;
 use blake3::Hasher;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,7 +11,7 @@ pub struct BlockHeader {
     pub checkpoint_hash: [u8; 32],
     pub nonce: u64,
     pub difficulty: u64,
-    pub timestamp: u64,
+    pub timestamp_millis: u64,
     /// Merkle/KZG roots for L2 blob commitments anchored in this block.
     pub l2_roots: Vec<[u8; 32]>,
     /// Total byte sizes per L2 root for accounting.
@@ -29,7 +31,7 @@ impl BlockHeader {
         h.update(&self.merkle_root);
         h.update(&self.checkpoint_hash);
         h.update(&self.nonce.to_le_bytes());
-        h.update(&self.timestamp.to_le_bytes());
+        h.update(&self.timestamp_millis.to_le_bytes());
         h.update(&(self.l2_roots.len() as u32).to_le_bytes());
         for r in &self.l2_roots {
             h.update(r);
@@ -50,7 +52,7 @@ fn target(difficulty: u64) -> u64 {
     u64::MAX / difficulty.max(1)
 }
 
-pub fn mine(mut header: BlockHeader) -> BlockHeader {
+fn solve(mut header: BlockHeader) -> BlockHeader {
     loop {
         let hash = header.hash();
         let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
@@ -61,19 +63,44 @@ pub fn mine(mut header: BlockHeader) -> BlockHeader {
     }
 }
 
-/// Adjust difficulty based on elapsed time.
-pub fn adjust_difficulty(prev: u64, actual_secs: u64, target_secs: u64) -> u64 {
-    let mut next = prev.saturating_mul(target_secs.max(1)) / actual_secs.max(1);
-    let min = prev / 4;
-    let max = prev * 4;
-    if next < min {
-        next = min;
-    }
-    if next > max {
-        next = max;
-    }
-    next.max(1)
+/// Stateful PoW miner that tracks difficulty and recent timestamps.
+pub struct Miner {
+    difficulty: u64,
+    target_millis: u64,
+    timestamps: Vec<u64>,
 }
+
+impl Miner {
+    /// Create a new miner with an initial difficulty and target spacing in milliseconds.
+    pub fn new(initial_difficulty: u64, target_millis: u64) -> Self {
+        Self {
+            difficulty: initial_difficulty.max(1),
+            target_millis,
+            timestamps: Vec::new(),
+        }
+    }
+
+    /// Access the difficulty that will be used for the next mined block.
+    pub fn difficulty(&self) -> u64 {
+        self.difficulty
+    }
+
+    /// Mine a block header and update the internal difficulty based on elapsed time.
+    pub fn mine(&mut self, mut header: BlockHeader) -> BlockHeader {
+        header.difficulty = self.difficulty;
+        let mined = solve(header);
+        self.timestamps.push(mined.timestamp_millis);
+        if self.timestamps.len() > DIFFICULTY_WINDOW {
+            let excess = self.timestamps.len() - DIFFICULTY_WINDOW;
+            self.timestamps.drain(0..excess);
+        }
+        self.difficulty =
+            difficulty::retarget(self.difficulty, &self.timestamps, self.target_millis);
+        mined
+    }
+}
+
+/// Adjust difficulty based on elapsed time.
 
 /// Helper to build a header template with current time.
 pub fn template(
@@ -85,18 +112,18 @@ pub fn template(
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-        .as_secs();
+        .as_millis() as u64;
     BlockHeader {
         prev_hash,
         merkle_root,
         checkpoint_hash,
         nonce: 0,
         difficulty,
-        timestamp: ts,
+        timestamp_millis: ts,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
-        vdf_commit: [0u8;32],
-        vdf_output: [0u8;32],
+        vdf_commit: [0u8; 32],
+        vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     }
 }
@@ -108,16 +135,41 @@ mod tests {
     #[test]
     fn mines_block() {
         let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000);
-        let mined = mine(header.clone());
+        let mut miner = Miner::new(1_000_000, 1_000);
+        let mined = miner.mine(header.clone());
         let hash = mined.hash();
         let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
         assert!(value <= target(header.difficulty));
     }
 
     #[test]
-    fn difficulty_adjusts() {
-        let prev = 1000;
-        let next = adjust_difficulty(prev, 240, 120); // twice the target time -> easier
-        assert!(next < prev);
+    fn difficulty_decreases_when_blocks_slow() {
+        let mut miner = Miner::new(1_000, 1_000);
+        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        h1.timestamp_millis = 0;
+        let _b1 = miner.mine(h1);
+        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        h2.timestamp_millis = 3_000;
+        let _b2 = miner.mine(h2);
+        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        h3.timestamp_millis = 4_000;
+        let b3 = miner.mine(h3);
+        assert!(b3.difficulty < 1_000);
+        assert!(miner.difficulty() <= b3.difficulty);
+    }
+
+    #[test]
+    fn difficulty_increases_when_blocks_fast() {
+        let mut miner = Miner::new(1_000, 1_000);
+        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        h1.timestamp_millis = 0;
+        let _b1 = miner.mine(h1);
+        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        h2.timestamp_millis = 500;
+        let _b2 = miner.mine(h2);
+        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        h3.timestamp_millis = 1_000;
+        let b3 = miner.mine(h3);
+        assert!(b3.difficulty > 1_000);
     }
 }

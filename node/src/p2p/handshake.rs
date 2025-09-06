@@ -12,7 +12,16 @@ pub enum FeatureBit {
     ComputeMarketV1 = 1 << 1,
     GovV1 = 1 << 2,
     FeeRoutingV2 = 1 << 3,
+    QuicTransport = 1 << 4,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum Transport {
+    Tcp,
+    Quic,
+}
+
+pub const SUPPORTED_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Hello {
@@ -21,6 +30,11 @@ pub struct Hello {
     pub feature_bits: u32,
     pub agent: String,
     pub nonce: u64,
+    pub transport: Transport,
+    #[serde(default)]
+    pub quic_addr: Option<std::net::SocketAddr>,
+    #[serde(default)]
+    pub quic_cert: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,6 +56,9 @@ pub struct HandshakeCfg {
 pub struct PeerInfo {
     pub agent: String,
     pub features: u32,
+    pub transport: Transport,
+    pub quic_addr: Option<std::net::SocketAddr>,
+    pub quic_cert: Option<Vec<u8>>,
 }
 
 static PEERS: Lazy<Mutex<HashMap<String, PeerInfo>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -94,6 +111,9 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
         PeerInfo {
             agent: hello.agent.clone(),
             features: accepted,
+            transport: hello.transport,
+            quic_addr: hello.quic_addr,
+            quic_cert: hello.quic_cert.clone(),
         },
     );
     HelloAck {

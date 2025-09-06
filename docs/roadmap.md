@@ -1,6 +1,6 @@
 # Status & Roadmap
 
-Mainnet readiness: ~95/100 · Vision completion: ~64/100.
+Mainnet readiness: ~96/100 · Vision completion: ~66/100.
 
 The third-token ledger has been fully retired. Every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase, with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing inflation to ≤ 2 %/year. Historical context and migration notes are in [`docs/system_changes.md`](system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
 
@@ -32,7 +32,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
 | **Governance & Subsidy Economy** | **78 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; governance can seed reward pools for service roles. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
-| **Consensus & Core Execution** | 72 % | Stake-weighted leader rotation, deterministic tie-breaks, rollback tests, and parallel executor guard against replay collisions. | Formal proofs still absent. |
+| **Consensus & Core Execution** | 74 % | Stake-weighted leader rotation, deterministic tie-breaks, sliding-window difficulty retarget, and parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 50 % | Persistent contract store, deployment CLI, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **76 %** | Receipt-only logging, hourly batching, L1 anchoring, and `gateway.reads_since` analytics keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
 | **Compute Marketplace & CBM** | 60 % | GPU/CPU workloads emit deterministic `ExecutionReceipt`s and redeem via compute-backed money curves. | No heterogeneous scheduling or reputation system; SLA arbitration limited. |

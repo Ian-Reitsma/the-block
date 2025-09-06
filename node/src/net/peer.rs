@@ -2,12 +2,14 @@ use super::{load_net_key, send_msg, PROTOCOL_VERSION};
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use crate::net::message::{Message, Payload};
+use crate::p2p::handshake::Transport;
 use crate::simple_db::SimpleDb;
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-use once_cell::sync::Lazy;
 use hex;
+use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::SocketAddr;
@@ -24,6 +26,8 @@ pub struct PeerSet {
     addrs: Arc<Mutex<HashSet<SocketAddr>>>,
     authorized: Arc<Mutex<HashSet<[u8; 32]>>>,
     states: Arc<Mutex<HashMap<[u8; 32], PeerState>>>,
+    transports: Arc<Mutex<HashMap<SocketAddr, Transport>>>,
+    quic: Arc<Mutex<HashMap<SocketAddr, QuicEndpoint>>>,
 }
 
 impl PeerSet {
@@ -37,10 +41,14 @@ impl PeerSet {
                 }
             }
         }
+        persist_peers(&set);
+        let quic_map = load_quic_peers();
         Self {
             addrs: Arc::new(Mutex::new(set)),
             authorized: Arc::new(Mutex::new(HashSet::new())),
             states: Arc::new(Mutex::new(HashMap::new())),
+            transports: Arc::new(Mutex::new(HashMap::new())),
+            quic: Arc::new(Mutex::new(quic_map)),
         }
     }
 
@@ -50,6 +58,14 @@ impl PeerSet {
             guard.insert(addr);
             persist_peers(&guard);
         }
+        if let Ok(mut map) = self.transports.lock() {
+            map.entry(addr).or_insert(Transport::Tcp);
+        }
+        if let Ok(q) = self.quic.lock() {
+            if !q.contains_key(&addr) {
+                persist_quic_peers(&q);
+            }
+        }
     }
 
     /// Remove a peer from the set.
@@ -57,6 +73,9 @@ impl PeerSet {
         if let Ok(mut guard) = self.addrs.lock() {
             guard.remove(&addr);
             persist_peers(&guard);
+        }
+        if let Ok(mut map) = self.transports.lock() {
+            map.remove(&addr);
         }
     }
 
@@ -66,6 +85,9 @@ impl PeerSet {
             guard.clear();
             persist_peers(&guard);
         }
+        if let Ok(mut map) = self.transports.lock() {
+            map.clear();
+        }
     }
 
     /// Return a snapshot of known peers.
@@ -74,6 +96,52 @@ impl PeerSet {
             .lock()
             .map(|g| g.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    /// Snapshot peers with their advertised transport.
+    pub fn list_with_transport(&self) -> Vec<(SocketAddr, Transport)> {
+        self.list_with_info()
+            .into_iter()
+            .map(|(a, t, _)| (a, t))
+            .collect()
+    }
+
+    /// Snapshot peers with transport and optional QUIC certificate.
+    pub fn list_with_info(&self) -> Vec<(SocketAddr, Transport, Option<Vec<u8>>)> {
+        let addrs = self.addrs.lock().unwrap_or_else(|e| e.into_inner());
+        let transports = self.transports.lock().unwrap_or_else(|e| e.into_inner());
+        let quic = self.quic.lock().unwrap_or_else(|e| e.into_inner());
+        addrs
+            .iter()
+            .map(|a| {
+                if let Some(info) = quic.get(a) {
+                    (info.addr, Transport::Quic, Some(info.cert.clone()))
+                } else {
+                    (*a, *transports.get(a).unwrap_or(&Transport::Tcp), None)
+                }
+            })
+            .collect()
+    }
+
+    /// Record the preferred transport for `addr`.
+    pub fn set_transport(&self, addr: SocketAddr, transport: Transport) {
+        if let Ok(mut map) = self.transports.lock() {
+            map.insert(addr, transport);
+        }
+    }
+
+    /// Record QUIC endpoint info for `addr`.
+    pub fn set_quic(&self, addr: SocketAddr, quic_addr: SocketAddr, cert: Vec<u8>) {
+        if let Ok(mut map) = self.quic.lock() {
+            map.insert(
+                addr,
+                QuicEndpoint {
+                    addr: quic_addr,
+                    cert,
+                },
+            );
+            persist_quic_peers(&map);
+        }
     }
 
     /// Return a randomized list of peers for bootstrapping.
@@ -223,7 +291,7 @@ impl PeerSet {
 
         match msg.body {
             Payload::Handshake(hs) => {
-                if hs.protocol_version != PROTOCOL_VERSION {
+                if hs.proto_version != PROTOCOL_VERSION {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
                     #[cfg(feature = "telemetry")]
                     {
@@ -236,7 +304,9 @@ impl PeerSet {
                     }
                     return;
                 }
-                if (hs.features & crate::net::REQUIRED_FEATURES) != crate::net::REQUIRED_FEATURES {
+                if (hs.feature_bits & crate::net::REQUIRED_FEATURES)
+                    != crate::net::REQUIRED_FEATURES
+                {
                     telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                     #[cfg(feature = "telemetry")]
                     {
@@ -246,9 +316,17 @@ impl PeerSet {
                     }
                     return;
                 }
+                if hs.transport != Transport::Tcp && hs.transport != Transport::Quic {
+                    telemetry_peer_error(PeerErrorCode::HandshakeFeature);
+                    return;
+                }
                 self.authorize(msg.pubkey);
                 if let Some(peer_addr) = addr {
                     self.add(peer_addr);
+                    self.set_transport(peer_addr, hs.transport);
+                    if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
+                        self.set_quic(peer_addr, qaddr, cert);
+                    }
                 }
             }
             Payload::Hello(addrs) => {
@@ -326,15 +404,8 @@ impl PeerSet {
                     }
                     return;
                 }
-                let key = format!(
-                    "chunk/{}/{}",
-                    hex::encode(chunk.root),
-                    chunk.index
-                );
-                let _ = CHUNK_DB
-                    .lock()
-                    .unwrap()
-                    .try_insert(&key, chunk.data);
+                let key = format!("chunk/{}/{}", hex::encode(chunk.root), chunk.index);
+                let _ = CHUNK_DB.lock().unwrap().try_insert(&key, chunk.data);
             }
         }
     }
@@ -388,6 +459,56 @@ fn peer_db_path() -> PathBuf {
                 .join(".the_block")
                 .join("peers.txt")
         })
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct QuicEndpoint {
+    addr: SocketAddr,
+    cert: Vec<u8>,
+}
+
+fn quic_peer_db_path() -> PathBuf {
+    std::env::var("TB_QUIC_PEER_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".the_block")
+                .join("quic_peers.txt")
+        })
+}
+
+fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
+    use base64::Engine;
+    let mut map = HashMap::new();
+    if let Ok(data) = fs::read_to_string(quic_peer_db_path()) {
+        for line in data.lines() {
+            let parts: Vec<&str> = line.split(',').collect();
+            if parts.len() == 3 {
+                if let (Ok(tcp), Ok(quic)) = (parts[0].parse(), parts[1].parse()) {
+                    if let Ok(cert) = base64::engine::general_purpose::STANDARD.decode(parts[2]) {
+                        map.insert(tcp, QuicEndpoint { addr: quic, cert });
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+fn persist_quic_peers(map: &HashMap<SocketAddr, QuicEndpoint>) {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+    let path = quic_peer_db_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let mut lines: Vec<String> = map
+        .iter()
+        .map(|(tcp, info)| format!("{tcp},{},{}", info.addr, B64.encode(&info.cert)))
+        .collect();
+    lines.sort();
+    let _ = fs::write(path, lines.join("\n"));
 }
 
 fn chunk_db_path() -> PathBuf {

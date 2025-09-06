@@ -3,7 +3,8 @@ use proptest::prelude::*;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 use the_block::{
-    net::{Handshake, Message, Payload, PeerSet},
+    net::{Message, Payload, PeerSet},
+    p2p::handshake::{Hello, Transport},
     Blockchain,
 };
 
@@ -13,13 +14,22 @@ fn sample_sk() -> SigningKey {
 
 proptest! {
     #[test]
-    fn fuzz_identifier_exchange(node_id in any::<[u8;32]>(), protocol_version in any::<u32>(), features in any::<u32>()) {
+    fn fuzz_identifier_exchange(proto_version in any::<u16>(), feature_bits in any::<u32>()) {
         let dir = tempdir().unwrap();
         std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let peers = PeerSet::new(vec![]);
-        let hs = Handshake { node_id, protocol_version, features };
-        let msg = Message::new(Payload::Handshake(hs), &sample_sk());
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version,
+            feature_bits,
+            agent: String::new(),
+            nonce: 0,
+            transport: Transport::Tcp,
+            quic_addr: None,
+            quic_cert: None,
+        };
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
         // Should never panic regardless of contents
         peers.handle_message(msg, None, &bc);
     }

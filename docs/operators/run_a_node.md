@@ -10,6 +10,16 @@
 - RPC: `3030`
 - Metrics: `9898`
 
+## QUIC mode
+
+Start the node with `--quic` to enable QUIC gossip alongside TCP. The listener
+binds to a UDP port specified by `--quic-port` (default `3033`). On first run a
+self-signed certificate and key are written to `<data_dir>/quic.cert` and
+`<data_dir>/quic.key` with `0600` permissions; subsequent restarts reuse these
+files.  Certificates rotate automatically after the number of days specified by
+`--quic-cert-ttl-days` (default 30). Ensure the key files remain owner-readable
+only to avoid peers rejecting the endpoint.
+
 ## Quickstart
 ```sh
 curl -LO <release-tar>
@@ -49,3 +59,21 @@ systemctl enable --now the-block
 Allow P2P and metrics if required; restrict RPC to localhost.
 Run the node with `--metrics-addr` and `--features telemetry` to surface
 `read_denied_total` and `subsidy_bytes_total{type="storage"}` counters for monitoring.
+
+## Difficulty monitoring
+
+Query the current proof-of-work difficulty via JSON-RPC:
+
+```bash
+curl -s localhost:26658/consensus.difficulty
+# {"difficulty":12345,"timestamp_millis":1700000000000}
+```
+
+Prometheus metrics expose retarget activity and clamp events:
+
+```bash
+curl -s localhost:9898/metrics | rg '^difficulty_'
+```
+
+The `difficulty_retarget_total` and `difficulty_clamp_total` counters should
+advance roughly once per block under normal operation.

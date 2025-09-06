@@ -67,6 +67,7 @@ fn hash_state(bc: &Blockchain) -> String {
         epoch_read_bytes: bc.epoch_read_bytes,
         epoch_cpu_ms: bc.epoch_cpu_ms,
         epoch_bytes_out: bc.epoch_bytes_out,
+        recent_timestamps: bc.recent_timestamps.iter().copied().collect(),
     };
     let bytes = bincode::serialize(&disk).unwrap();
     blake3::hash(&bytes).to_hex().to_string()
@@ -303,7 +304,6 @@ fn test_logistic_base_reward() {
     let r3 = b3.coinbase_consumer.0;
     assert!((r2 as i64 - r3 as i64).abs() < (r2 / 10) as i64);
 }
-
 
 #[test]
 fn test_vrf_delay_constant() {
@@ -661,8 +661,8 @@ fn test_import_difficulty_mismatch() {
         tx_ids: &id_refs,
         l2_roots: &[],
         l2_sizes: &[],
-        vdf_commit: [0;32],
-        vdf_output: [0;32],
+        vdf_commit: [0; 32],
+        vdf_output: [0; 32],
         vdf_proof: &[],
     };
     fork[idx].hash = enc.hash();
@@ -806,6 +806,7 @@ fn test_schema_upgrade_compatibility() {
         epoch_read_bytes: bc_tmp.epoch_read_bytes,
         epoch_cpu_ms: bc_tmp.epoch_cpu_ms,
         epoch_bytes_out: bc_tmp.epoch_bytes_out,
+        recent_timestamps: bc_tmp.recent_timestamps.iter().copied().collect(),
     };
     let dir = temp_dir("schema_v3");
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();

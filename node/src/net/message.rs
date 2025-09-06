@@ -1,4 +1,4 @@
-use crate::{BlobTx, Block, SignedTransaction};
+use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -28,24 +28,11 @@ impl Message {
     }
 }
 
-/// Initial handshake information exchanged on connection.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Handshake {
-    /// Opaque node identifier (usually the verifying key bytes).
-    pub node_id: [u8; 32],
-    /// Protocol version this node speaks.
-    pub protocol_version: u32,
-    /// Advertised optional feature bits.
-    pub features: u32,
-}
-
-pub const SUPPORTED_VERSION: u32 = 1;
-
 /// Network message payloads exchanged between peers.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {
     /// Version/feature negotiation and identity exchange.
-    Handshake(Handshake),
+    Handshake(Hello),
     /// Advertise known peers.
     Hello(Vec<SocketAddr>),
     /// Broadcast a transaction to be relayed and mined.

@@ -66,9 +66,13 @@ pub struct ReadStats;
 
 #[cfg(not(feature = "telemetry"))]
 impl ReadStats {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
     pub fn record(&self, _domain: &str, _bytes: u64) {}
-    pub fn snapshot(&self, _domain: &str) -> (u64, u64) { (0, 0) }
+    pub fn snapshot(&self, _domain: &str) -> (u64, u64) {
+        (0, 0)
+    }
 }
 
 #[cfg(feature = "telemetry")]
@@ -93,8 +97,11 @@ pub static UTIL_VAR_THRESHOLD_MILLI: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 pub static FIB_WINDOW_BASE_SECS: Lazy<IntGauge> = Lazy::new(|| {
-    let g =
-        IntGauge::new("fib_window_base_secs", "base seconds for Fibonacci smoothing").unwrap();
+    let g = IntGauge::new(
+        "fib_window_base_secs",
+        "base seconds for Fibonacci smoothing",
+    )
+    .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
 });
@@ -112,8 +119,7 @@ pub static ACTIVE_MINERS: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 pub static BASE_REWARD_CT: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("base_reward_ct", "base reward after logistic factor")
-        .unwrap();
+    let g = IntGauge::new("base_reward_ct", "base reward after logistic factor").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
 });
@@ -250,6 +256,30 @@ pub static MINER_REWARD_RECALC_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry miner reward recalc: {e}"));
+    c
+});
+
+pub static DIFFICULTY_RETARGET_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "difficulty_retarget_total",
+        "Number of difficulty retarget calculations",
+    )
+    .unwrap_or_else(|e| panic!("counter difficulty retarget: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry difficulty retarget: {e}"));
+    c
+});
+
+pub static DIFFICULTY_CLAMP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "difficulty_clamp_total",
+        "Retarget calculations clamped to bounds",
+    )
+    .unwrap_or_else(|e| panic!("counter difficulty clamp: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry difficulty clamp: {e}"));
     c
 });
 
@@ -1153,6 +1183,69 @@ pub static P2P_HANDSHAKE_ACCEPT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static QUIC_CONN_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "quic_conn_latency_seconds",
+        "QUIC connection handshake latency",
+    );
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram quic latency: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry quic latency: {e}"));
+    h
+});
+
+pub static QUIC_BYTES_SENT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("quic_bytes_sent_total", "Total bytes sent over QUIC")
+        .unwrap_or_else(|e| panic!("counter quic bytes sent: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic bytes sent: {e}"));
+    c
+});
+
+pub static QUIC_BYTES_RECV_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("quic_bytes_recv_total", "Total bytes received over QUIC")
+        .unwrap_or_else(|e| panic!("counter quic bytes recv: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic bytes recv: {e}"));
+    c
+});
+
+pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("quic_handshake_fail_total", "Total QUIC handshake failures")
+        .unwrap_or_else(|e| panic!("counter quic handshake fail: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic handshake fail: {e}"));
+    c
+});
+
+pub static QUIC_DISCONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("quic_disconnect_total", "QUIC disconnects by error code"),
+        &["code"],
+    )
+    .unwrap_or_else(|e| panic!("counter vec quic disconnect: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic disconnect: {e}"));
+    c
+});
+
+pub static QUIC_ENDPOINT_REUSE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "quic_endpoint_reuse_total",
+        "Total QUIC endpoint reuse count",
+    )
+    .unwrap_or_else(|e| panic!("counter quic endpoint reuse: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic endpoint reuse: {e}"));
     c
 });
 

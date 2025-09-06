@@ -62,14 +62,14 @@ fn migrate_v3_recomputes_supply() {
         storage_sub_ct: TokenAmount::new(0),
         read_sub_ct: TokenAmount::new(0),
         compute_sub_ct: TokenAmount::new(0),
-        read_root: [0u8;32],
+        read_root: [0u8; 32],
         fee_checksum: String::new(),
         state_root: String::new(),
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
-        vdf_commit: [0u8;32],
-        vdf_output: [0u8;32],
+        vdf_commit: [0u8; 32],
+        vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     };
     let disk = ChainDisk {
@@ -90,6 +90,7 @@ fn migrate_v3_recomputes_supply() {
         epoch_read_bytes: 0,
         epoch_cpu_ms: 0,
         epoch_bytes_out: 0,
+        recent_timestamps: Vec::new(),
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
@@ -106,4 +107,40 @@ fn migrate_v3_recomputes_supply() {
     h.update(&fi.to_le_bytes());
     assert_eq!(blk.fee_checksum, h.finalize().to_hex().to_string());
     assert_eq!(bc.circulating_supply(), (50, 25));
+}
+
+#[test]
+fn migrate_v6_adds_recent_timestamps() {
+    init();
+    let dir = temp_dir("schema_v6_recent_ts");
+    fs::create_dir_all(dir.path()).unwrap();
+
+    let disk = ChainDisk {
+        schema_version: 6,
+        chain: Vec::new(),
+        accounts: HashMap::new(),
+        emission_consumer: 0,
+        emission_industrial: 0,
+        emission_consumer_year_ago: 0,
+        inflation_epoch_marker: 0,
+        block_reward_consumer: TokenAmount::new(0),
+        block_reward_industrial: TokenAmount::new(0),
+        block_height: 0,
+        mempool: Vec::new(),
+        base_fee: 1,
+        params: Params::default(),
+        epoch_storage_bytes: 0,
+        epoch_read_bytes: 0,
+        epoch_cpu_ms: 0,
+        epoch_bytes_out: 0,
+        recent_timestamps: Vec::new(),
+    };
+    let mut map: HashMap<String, Vec<u8>> = HashMap::new();
+    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+    let db_path = dir.path().join("db");
+    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+
+    let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    assert_eq!(bc.schema_version(), 7);
+    assert!(bc.recent_timestamps.is_empty());
 }

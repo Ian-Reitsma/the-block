@@ -32,6 +32,34 @@ This guide describes how to restore the distributed hash table (DHT) state when 
    ```
    A steadily increasing peer count after bootstrap indicates healthy gossip.
 
+## QUIC Configuration
+
+Nodes may optionally accept gossip over QUIC for reduced handshake latency.
+Enable the transport with the `--quic` flag and expose a UDP port. On first
+startup a self-signed certificate and private key are generated and written to
+`<data_dir>/quic.cert` and `<data_dir>/quic.key`. Subsequent restarts reuse these
+files and advertise the QUIC address and certificate during the TCP handshake so
+peers can cache and validate the endpoint without manual distribution. Metrics
+`quic_conn_latency_seconds`, `quic_bytes_sent_total`, and
+`quic_bytes_recv_total` track session performance. Additional counters
+`quic_handshake_fail_total` and `quic_disconnect_total{code}` record failed
+handshakes and disconnect error codes for troubleshooting. `quic_endpoint_reuse_total`
+counts how often the client connection pool reused an existing endpoint.
+
+Certificates are stored with `0600` permissions and checked for ownership at
+startup. The node will regenerate the pair if the files are missing, have
+incorrect permissions, or exceed the age specified by
+`--quic-cert-ttl-days` (default 30). This allows periodic rotation without
+manual intervention.
+
+### QUIC Handshake Failures and TCP Fallback
+
+If a QUIC handshake fails, the node automatically retries the connection over
+TCP. Each failure increments `quic_handshake_fail_total`. A spike in this
+counter usually indicates certificate mismatches or blocked UDP traffic. When
+fallback occurs the gossip message proceeds over the established TCP channel,
+so functionality is preserved while operators investigate the root cause.
+
 ## Recovery After Corruption
 If the peer file was truncated or contained invalid IDs, the discovery layer may misbehave.  After deleting the file and supplying fresh peers as above, restart the node.  The DHT will rebuild automatically and persist the updated peer list on clean shutdown.
 

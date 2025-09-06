@@ -1,4 +1,4 @@
-use the_block::net::message::{self, SUPPORTED_VERSION};
+use the_block::net::{message, SUPPORTED_VERSION};
 
 pub fn run(data: &[u8]) {
     let _ = SUPPORTED_VERSION;

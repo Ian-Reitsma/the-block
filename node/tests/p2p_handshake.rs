@@ -1,5 +1,5 @@
 #![cfg(feature = "telemetry")]
-use the_block::p2p::handshake::{handle_handshake, FeatureBit, HandshakeCfg, Hello};
+use the_block::p2p::handshake::{handle_handshake, FeatureBit, HandshakeCfg, Hello, Transport};
 use the_block::telemetry;
 
 fn cfg() -> HandshakeCfg {
@@ -22,6 +22,9 @@ fn reject_mismatched_network() {
         feature_bits: FeatureBit::StorageV1 as u32,
         agent: "a".into(),
         nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
     let ack = handle_handshake("peer1", hello, &cfg());
     assert!(!ack.ok);
@@ -45,6 +48,9 @@ fn reject_old_proto() {
         feature_bits: FeatureBit::StorageV1 as u32,
         agent: "a".into(),
         nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
     let ack = handle_handshake("peer2", hello, &cfg());
     assert!(!ack.ok);
@@ -68,6 +74,9 @@ fn accept_and_record() {
         feature_bits: (FeatureBit::StorageV1 as u32) | (FeatureBit::ComputeMarketV1 as u32),
         agent: "blockd/0.1".into(),
         nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
     let ack = handle_handshake("peer3", hello, &cfg());
     assert!(ack.ok);
@@ -80,5 +89,7 @@ fn accept_and_record() {
     );
     assert!(the_block::p2p::handshake::list_peers()
         .iter()
-        .any(|(id, info)| id == "peer3" && info.agent.contains("blockd")));
+        .any(|(id, info)| id == "peer3"
+            && info.agent.contains("blockd")
+            && info.transport == Transport::Tcp));
 }
