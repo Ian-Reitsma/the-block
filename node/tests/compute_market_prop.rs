@@ -7,7 +7,7 @@ proptest! {
     fn match_and_finalize_payout(slices in 1usize..5, price in 1u64..10) {
         let mut market = Market::new();
         let job_id = "job_prop".to_string();
-        let offer = Offer { job_id: job_id.clone(), provider: "prov".into(), provider_bond: 1, consumer_bond: 1, capacity: slices as u64, price };
+        let offer = Offer { job_id: job_id.clone(), provider: "prov".into(), provider_bond: 1, consumer_bond: 1, units: slices as u64, price_per_unit: price, fee_pct_ct: 100 };
         market.post_offer(offer).unwrap();
         let mut refs = Vec::new();
         let mut wls = Vec::new();
@@ -18,7 +18,7 @@ proptest! {
             refs.push(*h.finalize().as_bytes());
             wls.push(Workload::Transcode(data));
         }
-        let job = Job { job_id: job_id.clone(), buyer: "buyer".into(), slices: refs, price_per_slice: price, consumer_bond: 1, workloads: wls, gpu_required: false, deadline: u64::MAX };
+        let job = Job { job_id: job_id.clone(), buyer: "buyer".into(), slices: refs, price_per_unit: price, consumer_bond: 1, workloads: wls, gpu_required: false, deadline: u64::MAX };
         market.submit_job(job).unwrap();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let total = rt.block_on(market.execute_job(&job_id)).unwrap();

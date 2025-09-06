@@ -2,7 +2,40 @@
 
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+pub mod light_client;
+use light_client::{header_hash, Header, Proof};
+
+#[cfg(feature = "telemetry")]
+use once_cell::sync::Lazy;
+#[cfg(feature = "telemetry")]
+use prometheus::{IntCounter, Opts, Registry};
+
+#[cfg(feature = "telemetry")]
+static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+#[cfg(feature = "telemetry")]
+pub static PROOF_VERIFY_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::with_opts(Opts::new(
+        "bridge_proof_verify_success_total",
+        "Bridge proofs successfully verified",
+    ))
+    .expect("counter");
+    REGISTRY.register(Box::new(c.clone())).expect("register");
+    c
+});
+
+#[cfg(feature = "telemetry")]
+pub static PROOF_VERIFY_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::with_opts(Opts::new(
+        "bridge_proof_verify_failure_total",
+        "Bridge proofs rejected",
+    ))
+    .expect("counter");
+    REGISTRY.register(Box::new(c.clone())).expect("register");
+    c
+});
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RelayerProof {
@@ -30,6 +63,8 @@ impl RelayerProof {
 #[derive(Default, Serialize, Deserialize, Clone)]
 pub struct Bridge {
     locked: HashMap<String, u64>,
+    #[serde(default)]
+    verified_headers: HashSet<[u8; 32]>,
 }
 
 impl Bridge {
@@ -51,9 +86,36 @@ impl Bridge {
         *entry -= amount;
         true
     }
+    pub fn deposit_verified(
+        &mut self,
+        user: &str,
+        amount: u64,
+        header: &Header,
+        proof: &Proof,
+    ) -> bool {
+        if !verify_header(header, proof) {
+            #[cfg(feature = "telemetry")]
+            PROOF_VERIFY_FAILURE_TOTAL.inc();
+            return false;
+        }
+        let h = header_hash(header);
+        if !self.verified_headers.insert(h) {
+            #[cfg(feature = "telemetry")]
+            PROOF_VERIFY_FAILURE_TOTAL.inc();
+            return false;
+        }
+        *self.locked.entry(user.to_string()).or_insert(0) += amount;
+        #[cfg(feature = "telemetry")]
+        PROOF_VERIFY_SUCCESS_TOTAL.inc();
+        true
+    }
     pub fn locked(&self, user: &str) -> u64 {
         self.locked.get(user).copied().unwrap_or(0)
     }
+}
+
+pub fn verify_header(header: &Header, proof: &Proof) -> bool {
+    light_client::verify(header, proof)
 }
 
 #[cfg(test)]

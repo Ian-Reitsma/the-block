@@ -4,8 +4,6 @@ use crate::telemetry::{
     governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_ROLLBACK_TOTAL, GOV_VOTES_TOTAL,
     PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
 };
-#[cfg(feature = "telemetry")]
-use log::info;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
 use std::path::Path;
@@ -294,10 +292,17 @@ impl GovStore {
                                     .with_label_values(&[key_name(prop.key)])
                                     .observe(delay as f64);
                                 governance_webhook("activate", prop.id);
-                                info!(
-                                    "gov_param_activated key={:?} new={} old={} epoch={}",
-                                    prop.key, prop.new_value, old, current_epoch
-                                );
+                                if crate::telemetry::should_log("governance") {
+                                    let span = crate::log_context!(block = current_epoch);
+                                    tracing::info!(
+                                        parent: &span,
+                                        "gov_param_activated key={:?} new={} old={} epoch={}",
+                                        prop.key,
+                                        prop.new_value,
+                                        old,
+                                        current_epoch
+                                    );
+                                }
                             }
                         }
                     }

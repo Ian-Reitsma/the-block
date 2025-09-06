@@ -51,7 +51,7 @@ pub struct RawTxPayload {
     #[pyo3(get, set)]
     pub fee: u64,
     #[pyo3(get, set)]
-    pub fee_selector: u8,
+    pub pct_ct: u8,
     #[pyo3(get, set)]
     pub nonce: u64,
     #[pyo3(get, set)]
@@ -68,7 +68,7 @@ impl RawTxPayload {
         amount_consumer: u64,
         amount_industrial: u64,
         fee: u64,
-        fee_selector: u8,
+        pct_ct: u8,
         nonce: u64,
         memo: Vec<u8>,
     ) -> Self {
@@ -78,20 +78,20 @@ impl RawTxPayload {
             amount_consumer,
             amount_industrial,
             fee,
-            fee_selector,
+            pct_ct,
             nonce,
             memo,
         }
     }
     fn __repr__(&self) -> String {
         format!(
-            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, fee_selector={}, nonce={}, memo_len={})",
+            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, pct_ct={}, nonce={}, memo_len={})",
             self.from_,
             self.to,
             self.amount_consumer,
             self.amount_industrial,
             self.fee,
-            self.fee_selector,
+            self.pct_ct,
             self.nonce,
             self.memo.len(),
         )

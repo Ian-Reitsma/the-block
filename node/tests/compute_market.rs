@@ -11,8 +11,9 @@ fn offer_validation() {
         provider: "prov".into(),
         provider_bond: 1,
         consumer_bond: 1,
-        capacity: 5,
-        price: 2,
+        units: 5,
+        price_per_unit: 2,
+        fee_pct_ct: 100,
     };
     assert!(offer.validate().is_ok());
 }
@@ -46,8 +47,9 @@ fn market_job_flow_and_finalize() {
         provider: "prov".into(),
         provider_bond: 1,
         consumer_bond: 1,
-        capacity: 1,
-        price: 5,
+        units: 1,
+        price_per_unit: 5,
+        fee_pct_ct: 100,
     };
     market.post_offer(offer).unwrap();
 
@@ -58,7 +60,7 @@ fn market_job_flow_and_finalize() {
         job_id: "job1".into(),
         buyer: "buyer".into(),
         slices: vec![ref_hash],
-        price_per_slice: 5,
+        price_per_unit: 5,
         consumer_bond: 1,
         workloads: vec![Workload::Transcode(b"input".to_vec())],
         gpu_required: false,
@@ -77,7 +79,7 @@ fn market_job_flow_and_finalize() {
 
 #[test]
 fn price_board_tracks_bands() {
-    let mut board = PriceBoard::default();
+    let mut board = PriceBoard::new(5);
     for p in [1, 2, 3, 4, 5] {
         board.record(p);
     }

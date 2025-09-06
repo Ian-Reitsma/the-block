@@ -62,7 +62,7 @@ fn open_mine_reopen() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -106,7 +106,7 @@ fn replay_after_crash_is_duplicate() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -122,7 +122,7 @@ fn replay_after_crash_is_duplicate() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -148,7 +148,7 @@ fn ttl_expired_purged_on_restart() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -198,7 +198,7 @@ fn startup_ttl_purge_increments_metrics() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -257,7 +257,7 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -330,7 +330,7 @@ fn timestamp_ticks_persist_across_restart() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -376,7 +376,7 @@ fn schema_upgrade_compatibility() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1000,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };

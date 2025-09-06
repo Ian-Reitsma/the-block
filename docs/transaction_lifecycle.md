@@ -10,7 +10,7 @@ The transaction subsystem coordinates account debits, signatures, and fee calcul
 - `amount_consumer` – CT to transfer on the consumer lane.
 - `amount_industrial` – CT routed through the industrial lane.
 - `fee` – absolute fee paid in CT regardless of lane.
-- `fee_selector` – `0` uses `fee` directly, `1` applies the EIP‑1559 style base‑fee adjustment.
+- `pct_ct` – percentage of the fee paid in consumer tokens. `0` routes the entire fee to industrial tokens, `100` routes it entirely to consumer tokens.
 - `nonce` – sequential per-sender nonce preventing replay; gaps are rejected by the mempool.
 - `memo` – arbitrary byte vector stored verbatim; the mempool enforces a size cap to deter spam.
 
@@ -22,7 +22,7 @@ pub struct RawTxPayload {
     pub amount_consumer: u64,
     pub amount_industrial: u64,
     pub fee: u64,
-    pub fee_selector: u8,
+    pub pct_ct: u8,
     pub nonce: u64,
     pub memo: Vec<u8>,
 }
@@ -59,7 +59,7 @@ from the_block import RawTxPayload, SignedTransaction, FeeLane
 payload = RawTxPayload(
     from_="alice", to="bob",
     amount_consumer=5, amount_industrial=0,
-    fee=1, fee_selector=0, nonce=42, memo=b"hello"
+    fee=1, pct_ct=100, nonce=42, memo=b"hello"
 )
 
 signed = SignedTransaction(payload, pubkey_bytes, sig_bytes, FeeLane.Consumer)
@@ -73,7 +73,7 @@ Helpers in `node/src/transaction.rs` expose `__repr__` and alias properties so P
 2. **Validation** – The node checks signature, fee sufficiency, nonce continuity, and memo length. Invalid transactions are rejected before hashing.
 3. **Lane Mempools** – `node/src/mempool.rs` maintains separate heaps per lane sorted by effective fee. When capacity is exceeded low-fee entries are evicted.
 4. **Comfort Guard** – A moving window monitors consumer p90 fees; if they exceed `comfort_threshold` industrial transactions pause until fees stabilise.
-5. **Base Fee Accounting** – `node/src/fees.rs` updates the global base fee each block toward a fullness target. `fee_selector=1` transactions must include `fee >= base_fee` to remain valid.
+5. **Base Fee Accounting** – `node/src/fees.rs` updates the global base fee each block toward a fullness target. `pct_ct=100` transactions must include `fee >= base_fee` to remain valid.
 6. **Parallel Execution** – On inclusion, the scheduler groups conflict‑free transactions so independent transfers across lanes execute concurrently; see `docs/scheduler.md`.
 
 ## 5. On‑Chain Effects and Receipts

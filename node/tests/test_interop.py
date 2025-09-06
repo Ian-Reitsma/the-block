@@ -14,7 +14,7 @@ def encode_py(payload):
             struct.pack("<Q", payload.amount_consumer),
             struct.pack("<Q", payload.amount_industrial),
             struct.pack("<Q", payload.fee),
-            struct.pack("<B", payload.fee_selector),
+            struct.pack("<B", payload.pct_ct),
             struct.pack("<Q", payload.nonce),
             struct.pack("<Q", len(payload.memo)) + bytes(payload.memo),
         ]
@@ -28,7 +28,7 @@ def test_deterministic_bytes():
         amount_consumer=1,
         amount_industrial=2,
         fee=3,
-        fee_selector=0,
+        pct_ct=100,
         nonce=42,
         memo=b"hi",
     )

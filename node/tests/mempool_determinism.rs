@@ -26,7 +26,7 @@ fn mempool_order_invariant() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -39,7 +39,7 @@ fn mempool_order_invariant() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee: 1000,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: 1,
             memo: Vec::new(),
         };

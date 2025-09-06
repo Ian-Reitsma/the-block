@@ -36,7 +36,7 @@ fn prepare_purge_inputs(prefix: &str) -> (TempDir, Blockchain, Vec<u8>) {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -60,7 +60,7 @@ fn submit_orphan_tx(bc: &mut Blockchain) {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -105,7 +105,7 @@ fn counters_saturate_at_u64_max() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce: 2,
         memo: Vec::new(),
     };

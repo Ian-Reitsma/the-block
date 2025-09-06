@@ -75,6 +75,7 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
                 bid.buyer.clone(),
                 ask.provider.clone(),
                 ask.price,
+                1,
                 dry_run,
             );
             match store.try_insert(&receipt) {

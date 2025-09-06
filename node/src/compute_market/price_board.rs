@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex, RwLock,
 };
 use std::thread;
@@ -21,6 +21,13 @@ use crate::util::versioned_blob::{decode_blob, encode_blob, DecodeErr, MAGIC_PRI
 use prometheus::{IntCounterVec, IntGauge, IntGaugeVec, Opts};
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use tracing::{info, warn};
+
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{
+    INDUSTRIAL_BACKLOG,
+    INDUSTRIAL_PRICE_PER_UNIT,
+    INDUSTRIAL_UTILIZATION,
+};
 
 const MAGIC: [u8; 4] = MAGIC_PRICE_BOARD;
 const VERSION: u16 = 1;
@@ -51,6 +58,10 @@ impl PriceBoard {
             prices.pop_front();
         }
         prices.push_back(price);
+        #[cfg(feature = "telemetry")]
+        if let FeeLane::Industrial = lane {
+            INDUSTRIAL_PRICE_PER_UNIT.set(price as i64);
+        }
         self.update_metrics(lane);
     }
 
@@ -153,6 +164,33 @@ fn save_with_metrics(path: &Path) {
             let _ = err;
         }
     }
+}
+
+static BACKLOG: AtomicU64 = AtomicU64::new(0);
+static UTILIZATION: AtomicU64 = AtomicU64::new(0);
+
+/// Record current backlog and utilisation metrics.
+pub fn report_backlog(backlog: u64, capacity: u64) {
+    BACKLOG.store(backlog, Ordering::Relaxed);
+    let util = if capacity == 0 {
+        0
+    } else {
+        ((backlog as f64 / capacity as f64) * 100.0).round() as u64
+    };
+    UTILIZATION.store(util, Ordering::Relaxed);
+    #[cfg(feature = "telemetry")]
+    {
+        INDUSTRIAL_BACKLOG.set(backlog as i64);
+        INDUSTRIAL_UTILIZATION.set(util as i64);
+    }
+}
+
+/// Snapshot the backlog and utilisation metrics.
+pub fn backlog_utilization() -> (u64, u64) {
+    (
+        BACKLOG.load(Ordering::Relaxed),
+        UTILIZATION.load(Ordering::Relaxed),
+    )
 }
 
 fn spawn_saver<C: Clock>(path: PathBuf, interval: Duration, clock: C) {

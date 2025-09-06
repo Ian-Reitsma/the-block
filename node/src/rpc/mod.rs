@@ -40,6 +40,9 @@ pub mod consensus;
 pub mod governance;
 pub mod identity;
 pub mod pos;
+pub mod dex;
+pub mod inflation;
+pub mod compute_market;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -78,8 +81,12 @@ const PUBLIC_METHODS: &[&str] = &[
     "mempool.stats",
     "kyc.verify",
     "pow.get_template",
+    "dex_escrow_status",
+    "dex_escrow_release",
+    "dex_escrow_proof",
     "pow.submit",
     "inflation.params",
+    "compute_market.stats",
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
@@ -739,9 +746,9 @@ fn dispatch(
             }
         }
         "inflation.params" => {
-            let params = GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
-            governance::inflation_params(&params)
+            inflation::params(&bc)
         }
+        "compute_market.stats" => compute_market::stats(),
         "stake.role" => pos::role(&req.params)?,
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
@@ -934,6 +941,35 @@ fn dispatch(
                 .unwrap_or("");
             crate::compute_market::settlement::Settlement::back_to_dry_run(reason);
             serde_json::json!({"status": "ok"})
+        }
+        "dex_escrow_status" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            dex::escrow_status(id)
+        }
+        "dex_escrow_release" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let amt = req.params.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+            match dex::escrow_release(id, amt) {
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32002,
+                        message: "release failed",
+                    })
+                }
+            }
+        }
+        "dex_escrow_proof" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let idx = req.params.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            if let Some(proof) = dex::escrow_proof(id, idx) {
+                serde_json::to_value(proof).map_err(|_| RpcError {
+                    code: -32603,
+                    message: "internal error",
+                })?
+            } else {
+                return Err(RpcError { code: -32003, message: "not found" });
+            }
         }
         "gov_propose" => {
             let proposer = req

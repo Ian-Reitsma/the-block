@@ -12,7 +12,13 @@ fn fee_vectors_match() {
     for line in lines.take(1000) {
         let l = line.unwrap();
         let parts: Vec<&str> = l.split(',').collect();
-        let selector: u8 = parts[0].parse().unwrap();
+        let raw_selector: u8 = parts[0].parse().unwrap();
+        let selector = match raw_selector {
+            0 => 100,
+            1 => 0,
+            2 => 50,
+            v => v,
+        };
         let fee: u64 = parts[1].parse().unwrap();
         let fee_ct: u64 = parts[2].parse().unwrap();
         let fee_it: u64 = parts[3].parse().unwrap();

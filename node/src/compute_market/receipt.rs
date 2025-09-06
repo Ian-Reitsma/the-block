@@ -9,7 +9,10 @@ pub struct Receipt {
     pub job_id: String,
     pub buyer: String,
     pub provider: String,
+    /// Quoted price per compute unit.
     pub quote_price: u64,
+    /// Total compute units covered by this receipt.
+    pub units: u64,
     pub dry_run: bool,
     pub issued_at: u64,
     pub idempotency_key: [u8; 32],
@@ -22,6 +25,7 @@ impl Receipt {
         buyer: String,
         provider: String,
         quote_price: u64,
+        units: u64,
         dry_run: bool,
     ) -> Self {
         let version = 1u16;
@@ -30,6 +34,7 @@ impl Receipt {
         h.update(buyer.as_bytes());
         h.update(provider.as_bytes());
         h.update(&quote_price.to_be_bytes());
+        h.update(&units.to_be_bytes());
         h.update(&version.to_be_bytes());
         let idempotency_key = *h.finalize().as_bytes();
         let issued_at = SystemTime::now()
@@ -42,6 +47,7 @@ impl Receipt {
             buyer,
             provider,
             quote_price,
+            units,
             dry_run,
             issued_at,
             idempotency_key,

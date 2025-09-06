@@ -14,6 +14,7 @@ pub mod price_board;
 pub mod receipt;
 pub mod settlement;
 pub mod workloads;
+pub mod workload;
 
 pub use errors::MarketError;
 
@@ -27,8 +28,13 @@ pub struct Offer {
     pub provider: String,
     pub provider_bond: u64,
     pub consumer_bond: u64,
-    pub capacity: u64,
-    pub price: u64,
+    /// Total compute units the provider is willing to execute.
+    pub units: u64,
+    /// Price quoted per compute unit.
+    pub price_per_unit: u64,
+    /// Percentage of `price` paid in consumer tokens. `0` routes the entire
+    /// amount to industrial tokens, `100` routes it all to consumer tokens.
+    pub fee_pct_ct: u8,
 }
 
 impl Offer {
@@ -39,6 +45,12 @@ impl Offer {
         }
         if self.consumer_bond < MIN_BOND {
             return Err("consumer bond too low");
+        }
+        if self.units == 0 {
+            return Err("no units offered");
+        }
+        if self.fee_pct_ct > 100 {
+            return Err("invalid fee_pct_ct");
         }
         Ok(())
     }
@@ -85,6 +97,18 @@ pub enum Workload {
     GpuHash(Vec<u8>),
 }
 
+impl Workload {
+    /// Estimate normalized compute units for this workload using the generic
+    /// `compute_units` helper.
+    pub fn units(&self) -> u64 {
+        match self {
+            Workload::Transcode(data)
+            | Workload::Inference(data)
+            | Workload::GpuHash(data) => workload::compute_units(data),
+        }
+    }
+}
+
 /// Execute workloads and produce proof hashes with per-slice caching.
 pub struct WorkloadRunner {
     cache: std::sync::Arc<std::sync::Mutex<HashMap<usize, [u8; 32]>>>,
@@ -129,7 +153,8 @@ pub struct Job {
     pub job_id: String,
     pub buyer: String,
     pub slices: Vec<[u8; 32]>,
-    pub price_per_slice: u64,
+    /// Maximum price per compute unit the buyer is willing to pay.
+    pub price_per_unit: u64,
     pub consumer_bond: u64,
     pub workloads: Vec<Workload>,
     /// Whether this job requires GPU execution.
@@ -144,6 +169,7 @@ struct JobState {
     job: Job,
     provider: String,
     provider_bond: u64,
+    price_per_unit: u64,
     paid_slices: usize,
     completed: bool,
 }
@@ -166,9 +192,11 @@ impl Market {
     pub fn post_offer(&mut self, offer: Offer) -> Result<(), &'static str> {
         let mut offer = offer;
         offer.validate()?;
-        if offer.price == 0 {
-            if let Some(p) = price_board::backlog_adjusted_bid(FeeLane::Consumer, self.jobs.len()) {
-                offer.price = p;
+        if offer.price_per_unit == 0 {
+            if let Some(p) =
+                price_board::backlog_adjusted_bid(FeeLane::Industrial, self.jobs.len())
+            {
+                offer.price_per_unit = p;
             }
         }
         if self.offers.contains_key(&offer.job_id) {
@@ -191,7 +219,7 @@ impl Market {
             .get(&job.job_id)
             .cloned()
             .ok_or(MarketError::JobNotFound)?;
-        let demand = job.slices.len() as u64;
+        let demand: u64 = job.workloads.iter().map(|w| w.units()).sum();
         if let Err(reason) = admission::check_and_record(&job.buyer, &offer.provider, demand) {
             #[cfg(feature = "telemetry")]
             {
@@ -232,11 +260,12 @@ impl Market {
             .offers
             .remove(&job.job_id)
             .ok_or(MarketError::JobNotFound)?;
-        price_board::record_price(FeeLane::Consumer, offer.price);
+        price_board::record_price(FeeLane::Industrial, offer.price_per_unit);
         let state = JobState {
             job,
             provider: offer.provider.clone(),
             provider_bond: offer.provider_bond,
+            price_per_unit: offer.price_per_unit,
             paid_slices: 0,
             completed: false,
         };
@@ -273,20 +302,23 @@ impl Market {
         if state.completed {
             return Err("job already completed");
         }
-        let expected = state
+        let expected_ref = state
             .job
             .slices
             .get(state.paid_slices)
             .ok_or("no such slice")?;
-        if &proof.reference != expected {
+        if &proof.reference != expected_ref {
             return Err("reference mismatch");
         }
         if !proof.verify() {
             return Err("invalid proof");
         }
-        if proof.payout != state.job.price_per_slice {
+        let slice_units = state.job.workloads[state.paid_slices].units();
+        if proof.payout != slice_units * state.price_per_unit {
             return Err("payout mismatch");
         }
+        #[cfg(feature = "telemetry")]
+        telemetry::INDUSTRIAL_UNITS_TOTAL.inc_by(slice_units as u64);
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
@@ -308,26 +340,30 @@ impl Market {
 
     /// Execute a job by submitting slice outputs and returning total payout.
     pub async fn execute_job(&mut self, job_id: &str) -> Result<u64, &'static str> {
-        let (slices, workloads, price) = {
+        let (slices, workloads, price_per_unit) = {
             let state = self.jobs.get(job_id).ok_or("unknown job")?;
             (
                 state.job.slices.clone(),
                 state.job.workloads.clone(),
-                state.job.price_per_slice,
+                state.price_per_unit,
             )
         };
         let runner = WorkloadRunner::new();
         let mut handles = Vec::new();
-        for (i, w) in workloads.into_iter().enumerate() {
+        for (i, w) in workloads.iter().cloned().enumerate() {
             handles.push(runner.run(i, w));
         }
         let results = futures::future::join_all(handles).await;
         let mut total = 0;
-        for (expected, output) in slices.into_iter().zip(results.into_iter()) {
+        for (expected, (output, w)) in slices
+            .into_iter()
+            .zip(results.into_iter().zip(workloads.into_iter()))
+        {
+            let units = w.units();
             let proof = SliceProof {
                 reference: expected,
                 output,
-                payout: price,
+                payout: units * price_per_unit,
             };
             total += self.submit_slice(job_id, proof)?;
         }
@@ -339,9 +375,17 @@ impl Market {
         let pending: u64 = self
             .jobs
             .values()
-            .map(|s| (s.job.slices.len() - s.paid_slices) as u64)
+            .map(|s| {
+                s.job
+                    .workloads
+                    .iter()
+                    .skip(s.paid_slices)
+                    .map(|w| w.units())
+                    .sum::<u64>()
+            })
             .sum();
-        let capacity: u64 = self.offers.values().map(|o| o.capacity).sum();
+        let capacity: u64 = self.offers.values().map(|o| o.units).sum();
+        crate::compute_market::price_board::report_backlog(pending, capacity);
         if capacity == 0 {
             1.0 + pending as f64
         } else {
@@ -404,8 +448,9 @@ mod tests {
             provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
-            capacity: 10,
-            price: 5,
+            units: 10,
+            price_per_unit: 5,
+            fee_pct_ct: 100,
         };
         assert!(offer.validate().is_ok());
     }
@@ -460,8 +505,9 @@ mod tests {
             provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
-            capacity: 1,
-            price: 5,
+            units: 1,
+            price_per_unit: 5,
+            fee_pct_ct: 100,
         };
         market
             .post_offer(offer)
@@ -473,7 +519,7 @@ mod tests {
             job_id: job_id.clone(),
             buyer: "buyer".into(),
             slices: vec![hash],
-            price_per_slice: 5,
+            price_per_unit: 5,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
             gpu_required: false,
@@ -510,8 +556,9 @@ mod tests {
             provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
-            capacity: 1,
-            price: 5,
+            units: 1,
+            price_per_unit: 5,
+            fee_pct_ct: 100,
         };
         market
             .post_offer(offer)
@@ -520,7 +567,7 @@ mod tests {
             job_id: "j1".into(),
             buyer: "buyer".into(),
             slices: vec![hash, hash],
-            price_per_slice: 5,
+            price_per_unit: 5,
             consumer_bond: 1,
             workloads: vec![
                 Workload::Transcode(b"a".to_vec()),
@@ -534,7 +581,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("submit job: {e}"));
         assert!(market.backlog_factor() > 1.0);
         let mut board = PriceBoard::new(10);
-        board.record(5);
+        board.record(FeeLane::Industrial, 5);
         let adj = board
             .adjusted_median(market.backlog_factor())
             .unwrap_or_else(|| panic!("adjusted median"));
@@ -549,8 +596,9 @@ mod tests {
             provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
-            capacity: 1,
-            price: 5,
+            units: 1,
+            price_per_unit: 5,
+            fee_pct_ct: 100,
         };
         market
             .post_offer(offer.clone())
@@ -566,7 +614,7 @@ mod tests {
             job_id: "j2".into(),
             buyer: "buyer".into(),
             slices: vec![hash],
-            price_per_slice: 5,
+            price_per_unit: 5,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
             gpu_required: false,
@@ -590,8 +638,9 @@ mod tests {
             provider: "prov".into(),
             provider_bond: 1,
             consumer_bond: 1,
-            capacity: 1,
-            price: 2,
+            units: 1,
+            price_per_unit: 2,
+            fee_pct_ct: 100,
         };
         market
             .post_offer(offer)
@@ -603,7 +652,7 @@ mod tests {
             job_id: job_id.clone(),
             buyer: "buyer".into(),
             slices: vec![hash],
-            price_per_slice: 2,
+            price_per_unit: 2,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"a".to_vec())],
             gpu_required: false,

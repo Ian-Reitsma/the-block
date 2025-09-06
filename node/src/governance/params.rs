@@ -69,6 +69,7 @@ pub struct Params {
     pub util_var_threshold: i64,
     pub fib_window_base_secs: i64,
     pub heuristic_mu_milli: i64,
+    pub industrial_multiplier: i64,
 }
 
 impl Default for Params {
@@ -94,6 +95,7 @@ impl Default for Params {
             util_var_threshold: 100,
             fib_window_base_secs: 4,
             heuristic_mu_milli: 500,
+            industrial_multiplier: 100,
         }
     }
 }

@@ -4,6 +4,32 @@ The compute market supports running real workloads on job slices. Each slice
 contains input data that is executed by a workload runner and produces a proof
 hash.
 
+## Mixed CT/IT Escrow
+
+Offers specify `fee_pct_ct`, the consumer-token percentage of the quoted price.
+`0` routes the full amount to industrial tokens while `100` pays entirely in
+consumer tokens. During admission, buyers escrow the split amounts and
+settlement credits providers with the same proportions. Example splits:
+
+| `fee_pct_ct` | CT share | IT share |
+|--------------|---------|---------|
+| `0`          | `0%`    | `100%`  |
+| `25`         | `25%`   | `75%`   |
+| `100`        | `100%`  | `0%`    |
+
+Residual escrows are refunded using the original percentages.
+
+## Normalized Compute Units
+
+Workloads are expressed in **compute units** representing GPU-seconds scaled by
+device throughput. The reference implementation estimates units as one per MiB
+of workload input. Providers post offers with a `units` capacity and
+`price_per_unit`, and receipts include the units consumed. Prometheus gauges
+`industrial_units_total` and `industrial_price_per_unit` track aggregate demand
+and the latest quoted price. Hardware can be calibrated via
+`compute_market::workload::calibrate_gpu`, which maps a GPU's GFLOPS rating to
+units per second.
+
 ## Workload Formats
 
 - **Transcode** – Accepts raw bytes representing media to be transcoded. For the
@@ -113,10 +139,10 @@ buyer and pay the provider. Settlement tracks applied receipts in a sled tree to
 guarantee idempotency across restarts.
 
 ```text
-{ version: 1, job_id, buyer, provider, quote_price, issued_at, idempotency_key }
+{ version: 1, job_id, buyer, provider, quote_price, units, issued_at, idempotency_key }
 ```
 
-The `idempotency_key` is `BLAKE3(job_id || buyer || provider || quote_price ||
+The `idempotency_key` is `BLAKE3(job_id || buyer || provider || quote_price || units ||
 version)` and is used as the primary index in the `ReceiptStore`.  Receipts are
 persisted via `compare_and_swap` so duplicates are ignored.  On startup the
 store reloads existing entries and increments `receipt_corrupt_total` for any
@@ -131,7 +157,7 @@ damaged records.
 Operators can toggle modes via CLI and inspect the current state with the
 `settlement_status` RPC, which reports balances and mode.
 
-When `Real`, each finalized receipt subtracts `quote_price` from the buyer and
+When `Real`, each finalized receipt subtracts `quote_price * units` from the buyer and
 accrues the same amount for the provider with an event tag.  Failures (e.g.,
 insufficient funds) are archived and cause the system to revert to `DryRun`.
 Metrics track behaviour:

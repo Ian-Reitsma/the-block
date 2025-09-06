@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use the_block::dex::{Order, OrderBook, Side, TrustLedger};
+use the_block::dex::{escrow::Escrow, Order, OrderBook, Side, TrustLedger};
 
 #[test]
 fn trust_line_transfer() {
@@ -35,7 +35,10 @@ fn order_matching() {
         max_slippage_bps: 0,
     };
     book.place(buy).unwrap();
-    let trades = book.place_and_settle(sell, &mut ledger).unwrap();
+    let mut escrow = Escrow::default();
+    let trades = book
+        .place_and_settle(sell, &mut ledger, &mut escrow)
+        .unwrap();
     assert_eq!(trades.len(), 1);
     assert_eq!(trades[0].2, 10);
     // Buyer owes seller 50 units

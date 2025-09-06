@@ -42,7 +42,7 @@ proptest! {
                     amount_consumer: cb_c,
                     amount_industrial: cb_i,
                     fee: 0,
-                    fee_selector: 0,
+                    pct_ct: 100,
                     nonce: 0,
                     memo: Vec::new(),
                 },
@@ -53,7 +53,7 @@ proptest! {
             let tx_count = rng.gen_range(0..5);
             let mut txs = vec![coinbase.clone()];
             for n in 0..tx_count {
-                let selector = rng.gen_range(0..=2);
+                let selector = rng.gen_range(0..=100);
                 let fee_amt = rng.gen_range(0..1000);
                 let tx = SignedTransaction {
                     payload: RawTxPayload {
@@ -62,7 +62,7 @@ proptest! {
                         amount_consumer: 0,
                         amount_industrial: 0,
                         fee: fee_amt,
-                        fee_selector: selector,
+                        pct_ct: selector,
                         nonce: n as u64 + 1,
                         memo: Vec::new(),
                     },
@@ -85,6 +85,9 @@ proptest! {
                 storage_sub_ct: TokenAmount::new(0),
                 read_sub_ct: TokenAmount::new(0),
                 compute_sub_ct: TokenAmount::new(0),
+                storage_sub_it: TokenAmount::new(0),
+                read_sub_it: TokenAmount::new(0),
+                compute_sub_it: TokenAmount::new(0),
                 read_root: [0u8;32],
                 fee_checksum: String::new(),
                 state_root: String::new(),
@@ -133,7 +136,7 @@ proptest! {
             let mut fee_c: u128 = 0;
             let mut fee_i: u128 = 0;
             for tx in blk.transactions.iter().skip(1) {
-                if let Ok((c, i)) = fee::decompose(tx.payload.fee_selector, tx.payload.fee) {
+                if let Ok((c, i)) = fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
                     fee_c += c as u128;
                     fee_i += i as u128;
                 }

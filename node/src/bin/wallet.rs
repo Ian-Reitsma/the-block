@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use hex::{decode, encode};
 use reqwest::blocking::Client;
-use wallet::{hardware::MockHardwareWallet, Wallet, WalletSigner};
+use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 use the_block::storage::placement::NodeCatalog;
@@ -19,7 +19,13 @@ enum Commands {
     /// Generate a new wallet and print the public key as hex.
     Generate,
     /// Sign a message given a hex-encoded seed and print the signature as hex.
-    Sign { seed: String, message: String },
+    Sign {
+        #[arg(long, help = "32-byte seed in hex", conflicts_with = "remote_signer")]
+        seed: Option<String>,
+        message: String,
+        #[arg(long, help = "remote signer endpoint", conflicts_with = "seed")]
+        remote_signer: Option<String>,
+    },
     /// Sign a message using a mock hardware wallet.
     SignHw { message: String },
     /// Stake CT for a service role
@@ -27,8 +33,10 @@ enum Commands {
         #[arg(value_enum)]
         role: Role,
         amount: u64,
-        #[arg(long, help = "32-byte seed in hex")]
-        seed: String,
+        #[arg(long, help = "32-byte seed in hex", required_unless_present = "remote_signer")]
+        seed: Option<String>,
+        #[arg(long, help = "remote signer endpoint", required_unless_present = "seed")]
+        remote_signer: Option<String>,
         #[arg(long, help = "withdraw instead of bond")]
         withdraw: bool,
         #[arg(long, default_value = "http://127.0.0.1:8545")]
@@ -70,13 +78,23 @@ fn main() {
             let wallet = Wallet::generate();
             println!("{}", encode(wallet.public_key()));
         }
-        Commands::Sign { seed, message } => {
-            let seed_bytes = decode(&seed).expect("hex seed");
-            assert_eq!(seed_bytes.len(), 32, "seed must be 32 bytes");
-            let mut seed_arr = [0u8; 32];
-            seed_arr.copy_from_slice(&seed_bytes);
-            let wallet = Wallet::from_seed(&seed_arr);
-            let sig = wallet.sign(message.as_bytes()).expect("sign");
+        Commands::Sign {
+            seed,
+            message,
+            remote_signer,
+        } => {
+            let sig = if let Some(url) = remote_signer {
+                let signer = RemoteSigner::connect(&url).expect("connect signer");
+                signer.sign(message.as_bytes()).expect("sign")
+            } else {
+                let seed = seed.expect("seed required");
+                let seed_bytes = decode(&seed).expect("hex seed");
+                assert_eq!(seed_bytes.len(), 32, "seed must be 32 bytes");
+                let mut seed_arr = [0u8; 32];
+                seed_arr.copy_from_slice(&seed_bytes);
+                let wallet = Wallet::from_seed(&seed_arr);
+                wallet.sign(message.as_bytes()).expect("sign")
+            };
             println!("{}", encode(sig.to_bytes()));
         }
         Commands::SignHw { message } => {
@@ -89,24 +107,37 @@ fn main() {
             role,
             amount,
             seed,
+            remote_signer,
             withdraw,
             url,
         } => {
-            let bytes = decode(&seed).expect("seed hex");
-            assert!(bytes.len() >= 32, "seed too short");
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes[..32]);
-            let wallet = Wallet::from_seed(&arr);
             let role_str = format!("{:?}", role).to_lowercase();
-            let sig = wallet
-                .sign_stake(&role_str, amount, withdraw)
-                .expect("sign");
+            let sig;
+            let id;
+            if let Some(url_signer) = remote_signer {
+                let signer = RemoteSigner::connect(&url_signer).expect("connect signer");
+                let action = if withdraw { "unbond" } else { "bond" };
+                let msg = format!("{action}:{role_str}:{amount}");
+                sig = signer.sign(msg.as_bytes()).expect("sign");
+                id = encode(signer.public_key().to_bytes());
+            } else {
+                let seed = seed.expect("seed required");
+                let bytes = decode(&seed).expect("seed hex");
+                assert!(bytes.len() >= 32, "seed too short");
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes[..32]);
+                let wallet = Wallet::from_seed(&arr);
+                sig = wallet
+                    .sign_stake(&role_str, amount, withdraw)
+                    .expect("sign");
+                id = wallet.public_key_hex();
+            }
             let body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
                 "params": {
-                    "id": wallet.public_key_hex(),
+                    "id": id,
                     "role": role_str,
                     "amount": amount,
                     "sig": encode(sig.to_bytes()),

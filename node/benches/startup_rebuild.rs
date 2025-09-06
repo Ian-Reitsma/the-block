@@ -16,7 +16,7 @@ fn sample_entries(count: usize) -> (Vec<MempoolEntryDisk>, Account) {
             amount_consumer: 1,
             amount_industrial: 0,
             fee: 1,
-            fee_selector: 0,
+            pct_ct: 100,
             nonce: i as u64,
             memo: Vec::new(),
         };

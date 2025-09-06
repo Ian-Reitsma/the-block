@@ -31,7 +31,7 @@ proptest! {
                 amount_consumer: c % 5,
                 amount_industrial: i % 5,
                 fee: 1000,
-                fee_selector: 0,
+                pct_ct: 100,
                 nonce: expected_nonce + 1,
                 memo: Vec::new(),
             };

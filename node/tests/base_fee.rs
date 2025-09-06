@@ -10,7 +10,7 @@ fn build_tx(sk: &[u8], from: &str, to: &str, fee: u64, nonce: u64) -> SignedTran
         amount_consumer: 0,
         amount_industrial: 0,
         fee,
-        fee_selector: 0,
+        pct_ct: 100,
         nonce,
         memo: vec![],
     };

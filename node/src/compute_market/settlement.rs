@@ -14,6 +14,9 @@ pub enum SettleMode {
 
 static MODE: Lazy<Mutex<SettleMode>> = Lazy::new(|| Mutex::new(SettleMode::DryRun));
 static ACCOUNTS: Lazy<Mutex<AccountLedger>> = Lazy::new(|| Mutex::new(AccountLedger::new()));
+// Separate ledger for industrial-token balances accrued via split payments.
+static ACCOUNTS_IT: Lazy<Mutex<AccountLedger>> =
+    Lazy::new(|| Mutex::new(AccountLedger::new()));
 
 pub struct Settlement;
 
@@ -43,6 +46,18 @@ impl Settlement {
             .deposit(provider, amount);
     }
 
+    /// Credit a provider with a split CT/IT payout.
+    pub fn accrue_split(provider: &str, ct: u64, it: u64) {
+        ACCOUNTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .deposit(provider, ct);
+        ACCOUNTS_IT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .deposit(provider, it);
+    }
+
     pub fn submit_anchor(_anchor: &[u8]) {}
 
     pub fn balance(provider: &str) -> u64 {
@@ -55,12 +70,43 @@ impl Settlement {
             .unwrap_or(0)
     }
 
+    /// Return the CT/IT balances for a provider.
+    pub fn balance_split(provider: &str) -> (u64, u64) {
+        let ct = ACCOUNTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .balances
+            .get(provider)
+            .copied()
+            .unwrap_or(0);
+        let it = ACCOUNTS_IT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .balances
+            .get(provider)
+            .copied()
+            .unwrap_or(0);
+        (ct, it)
+    }
+
     pub fn spend(provider: &str, _event: &str, amount: u64) -> Result<(), ()> {
         ACCOUNTS
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .debit(provider, amount)
             .map_err(|_| ())
+    }
+
+    /// Refund a buyer's escrowed CT/IT amounts.
+    pub fn refund_split(buyer: &str, ct: u64, it: u64) {
+        ACCOUNTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .deposit(buyer, ct);
+        ACCOUNTS_IT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .deposit(buyer, it);
     }
 
     pub fn mode() -> SettleMode {

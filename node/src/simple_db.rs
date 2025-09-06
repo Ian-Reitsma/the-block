@@ -84,6 +84,11 @@ impl SimpleDb {
                 if let Ok(bytes) = bincode::serialize(&applied) {
                     map.insert("__wal_id".into(), bytes);
                 }
+                #[cfg(feature = "telemetry")]
+                if crate::telemetry::should_log("storage") {
+                    let span = crate::log_context!(block = applied);
+                    tracing::info!(parent: &span, "wal_replay");
+                }
                 if let Ok(bytes) = bincode::serialize(&map) {
                     let _ = fs::write(&db_path, bytes);
                 }
@@ -196,6 +201,11 @@ impl SimpleDb {
         let entry_bytes = bincode::serialize(&entry)
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize entry"))?;
         f.write_all(&entry_bytes)?;
+        #[cfg(feature = "telemetry")]
+        if crate::telemetry::should_log("storage") {
+            let span = crate::log_context!(block = last);
+            tracing::info!(parent: &span, "wal_compact");
+        }
         let _ = fs::remove_file(&wal_path);
         Ok(())
     }
@@ -218,6 +228,10 @@ fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize op"))?;
     let mut h = Hasher::new();
     h.update(&op_bytes);
+    let id = match &op {
+        WalOp::Record(r) => r.id,
+        WalOp::End { last_id } => *last_id,
+    };
     let entry = WalEntry {
         op,
         checksum: *h.finalize().as_bytes(),
@@ -228,6 +242,11 @@ fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
         .create(true)
         .append(true)
         .open(wal_path)?;
+    #[cfg(feature = "telemetry")]
+    if crate::telemetry::should_log("storage") {
+        let span = crate::log_context!(block = id);
+        tracing::info!(parent: &span, "wal_append");
+    }
     f.write_all(&bytes)?;
     Ok(())
 }
