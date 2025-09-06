@@ -12,6 +12,8 @@ pub mod fork_choice;
 pub mod leader;
 #[cfg(feature = "telemetry")]
 pub mod observer;
+pub mod constants;
+pub mod difficulty;
 pub mod pos;
 pub mod pow;
 pub mod unl;

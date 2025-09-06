@@ -292,6 +292,7 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
             epoch_read_bytes: 0,
             epoch_cpu_ms: 0,
             epoch_bytes_out: 0,
+            recent_timestamps: Vec::new(),
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
         map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
@@ -425,6 +426,7 @@ fn schema_upgrade_compatibility() {
         epoch_read_bytes: 0,
         epoch_cpu_ms: 0,
         epoch_bytes_out: 0,
+        recent_timestamps: Vec::new(),
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
     map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());

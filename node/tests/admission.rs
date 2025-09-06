@@ -99,7 +99,8 @@ fn validate_block_rejects_nonce_gap() {
     let tx3 = build_signed_tx(&sk, "miner", "alice", 0, 0, 1000, 3);
     let index = 0u64;
     let prev = "0".repeat(64);
-    let diff = the_block::blockchain::difficulty::expected_difficulty(&bc.chain);
+    let diff =
+        the_block::consensus::difficulty::expected_difficulty_from_chain(&bc.chain);
     let reward_c = bc.block_reward_consumer.0;
     let reward_i = bc.block_reward_industrial.0;
     let fee_checksum = {
@@ -139,14 +140,14 @@ fn validate_block_rejects_nonce_gap() {
             storage_sub: 0,
             read_sub: 0,
             compute_sub: 0,
-            read_root: [0;32],
+            read_root: [0; 32],
             fee_checksum: &fee_checksum,
             state_root: ZERO_HASH,
             tx_ids: &id_refs,
             l2_roots: &[],
             l2_sizes: &[],
-            vdf_commit: [0;32],
-            vdf_output: [0;32],
+            vdf_commit: [0; 32],
+            vdf_output: [0; 32],
             vdf_proof: &[],
         };
         let h = enc.hash();
@@ -181,14 +182,14 @@ fn validate_block_rejects_nonce_gap() {
         storage_sub_ct: TokenAmount::new(0),
         read_sub_ct: TokenAmount::new(0),
         compute_sub_ct: TokenAmount::new(0),
-        read_root: [0u8;32],
+        read_root: [0u8; 32],
         fee_checksum,
         state_root: String::new(),
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
-        vdf_commit: [0u8;32],
-        vdf_output: [0u8;32],
+        vdf_commit: [0u8; 32],
+        vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     };
     assert!(!bc.validate_block(&block).unwrap());
@@ -410,14 +411,14 @@ fn validate_block_rejects_wrong_difficulty() {
         storage_sub: block.storage_sub_ct.0,
         read_sub: block.read_sub_ct.0,
         compute_sub: block.compute_sub_ct.0,
-        read_root: [0;32],
+        read_root: [0; 32],
         fee_checksum: &block.fee_checksum,
         state_root: ZERO_HASH,
         tx_ids: &id_refs,
         l2_roots: &[],
         l2_sizes: &[],
-        vdf_commit: [0;32],
-        vdf_output: [0;32],
+        vdf_commit: [0; 32],
+        vdf_output: [0; 32],
         vdf_proof: &[],
     };
     block.hash = enc.hash();

@@ -2,6 +2,18 @@
 
 Thank you for helping improve The‑Block. Read `AGENTS.md` for the full developer handbook.
 
+## Testing
+
+Run the standard suite with `cargo nextest run`. QUIC changes require the
+dedicated profile:
+
+```bash
+cargo nextest run --profile quic
+```
+
+The `quic` profile enables the `quic` feature flag to exercise QUIC transport
+paths. Run it in addition to `cargo test` before submitting a PR.
+
 ## Balance & Nonce Changes
 
 Any pull request that touches account balance logic or nonce handling **must**:

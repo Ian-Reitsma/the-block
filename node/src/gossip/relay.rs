@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use blake3::hash;
 use rand::seq::SliceRandom;
 
-use crate::net::send_msg;
-use crate::net::Message;
+use crate::net::{send_msg, send_quic_msg, Message};
+use crate::p2p::handshake::Transport;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE};
 
@@ -50,16 +50,31 @@ impl Relay {
     }
 
     /// Broadcast a message to a random subset of peers using default sender.
-    pub fn broadcast(&self, msg: &Message, peers: &[SocketAddr]) {
-        self.broadcast_with(msg, peers, |addr, m| {
-            let _ = send_msg(addr, m);
+    pub fn broadcast(&self, msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {
+        self.broadcast_with(msg, peers, |(addr, transport, cert), m| match transport {
+            Transport::Tcp => {
+                let _ = send_msg(addr, m);
+            }
+            Transport::Quic => {
+                if let Some(c) = cert {
+                    if let Err(crate::net::quic::ConnectError::Handshake) =
+                        send_quic_msg(addr, &c, m)
+                    {
+                        let _ = send_msg(addr, m);
+                    }
+                }
+            }
         });
     }
 
     /// Broadcast using a custom send function (primarily for testing).
-    pub fn broadcast_with<F>(&self, msg: &Message, peers: &[SocketAddr], mut send: F)
-    where
-        F: FnMut(SocketAddr, &Message),
+    pub fn broadcast_with<F>(
+        &self,
+        msg: &Message,
+        peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+        mut send: F,
+    ) where
+        F: FnMut((SocketAddr, Transport, Option<&[u8]>), &Message),
     {
         if !self.should_process(msg) {
             return;
@@ -79,8 +94,9 @@ impl Relay {
             let mut rng = rand::thread_rng();
             list.shuffle(&mut rng);
         }
-        for addr in list.into_iter().take(fanout) {
-            send(addr, msg);
+        for peer in list.into_iter().take(fanout) {
+            let cert = peer.2.as_deref();
+            send((peer.0, peer.1, cert), msg);
         }
     }
 }

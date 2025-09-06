@@ -14,6 +14,8 @@ import subprocess
 import sys
 import time
 import argparse
+import json
+import urllib.request
 
 
 if os.getenv("TB_SAVE_LOGS") == "1":
@@ -134,6 +136,79 @@ def metric_val(metrics: str, name: str) -> int:
             except ValueError:
                 return 0
     return 0
+
+
+def _rpc_call(url: str, payload: dict) -> dict:
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read().decode())
+
+
+def difficulty_quic_demo(enable_quic: bool) -> None:
+    """Spawn a node, mine a few blocks, and report difficulty via RPC."""
+    explain(
+        "Starting node subprocess" + (" with QUIC enabled" if enable_quic else "")
+    )
+    cmd = [
+        "cargo",
+        "run",
+        "-p",
+        "the_block",
+        "--bin",
+        "node",
+        "--",
+        "run",
+        "--rpc-addr",
+        "127.0.0.1:3030",
+        "--mempool-purge-interval",
+        "0",
+    ]
+    if enable_quic:
+        cmd.append("--quic")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        time.sleep(2)
+        _rpc_call(
+            "http://127.0.0.1:3030",
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "start_mining",
+                "params": {"miner": "demo", "nonce": 1},
+            },
+        )
+        last = None
+        for i in range(5):
+            res = _rpc_call(
+                "http://127.0.0.1:3030",
+                {
+                    "jsonrpc": "2.0",
+                    "id": i + 2,
+                    "method": "consensus.difficulty",
+                    "params": {},
+                },
+            )
+            diff = res.get("result", {}).get("difficulty")
+            if diff is not None and diff != last:
+                explain(f"current difficulty: {diff}")
+                last = diff
+            time.sleep(1)
+        _rpc_call(
+            "http://127.0.0.1:3030",
+            {
+                "jsonrpc": "2.0",
+                "id": 99,
+                "method": "stop_mining",
+                "params": {"miner": "demo", "nonce": 2},
+            },
+        )
+    finally:
+        proc.terminate()
+        proc.wait()
 
 
 def show_pending(bc: the_block.Blockchain, sender: str, recipient: str) -> None:
@@ -465,7 +540,12 @@ def demo_steps(bc: the_block.Blockchain) -> None:
 def main() -> None:
     """Run the full demo sequentially."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-runtime", type=int, default=15)
+    parser.add_argument("--max-runtime", type=int, default=20)
+    parser.add_argument(
+        "--quic",
+        action="store_true",
+        help="start the node with QUIC enabled for the RPC demo",
+    )
     args = parser.parse_args()
     start = time.time()
     init_environment()
@@ -478,6 +558,7 @@ def main() -> None:
         explain("Handle returned; join waits for the loop to finish")
         try:
             demo_steps(bc)
+            difficulty_quic_demo(args.quic)
         finally:
             explain("Triggering shutdown flag and joining purge loop")
             flag.trigger()
@@ -486,6 +567,7 @@ def main() -> None:
         # TB_PURGE_LOOP_SECS controls purge interval for the context manager.
         with the_block.PurgeLoop(bc):
             demo_steps(bc)
+            difficulty_quic_demo(args.quic)
     cleanup()
     explain("Demo complete")
     if time.time() - start > args.max_runtime:

@@ -1,4 +1,4 @@
-use the_block::blockchain::difficulty::expected_difficulty;
+use the_block::consensus::difficulty::expected_difficulty_from_chain as expected_difficulty;
 use the_block::{Block, TokenAmount};
 
 fn blank_block(index: u64, ts: u64, diff: u64) -> Block {
@@ -15,14 +15,14 @@ fn blank_block(index: u64, ts: u64, diff: u64) -> Block {
         storage_sub_ct: TokenAmount::new(0),
         read_sub_ct: TokenAmount::new(0),
         compute_sub_ct: TokenAmount::new(0),
-        read_root: [0u8;32],
+        read_root: [0u8; 32],
         fee_checksum: String::new(),
         state_root: String::new(),
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
-        vdf_commit: [0u8;32],
-        vdf_output: [0u8;32],
+        vdf_commit: [0u8; 32],
+        vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     }
 }

@@ -35,13 +35,24 @@
   #  "rent_rate_ct_per_byte":1}
   ```
 
-- `stake.role` – queries bonded CT for a service role.
+  - `consensus.difficulty` – returns the current proof-of-work difficulty target and timestamp.
 
-  ```bash
-  curl -s localhost:26658/stake.role?address=$ADDR | jq
-  # {"gateway":1000000,"storage":5000000,"exec":0}
-  ```
-- `rent.escrow.balance` – returns locked CT per blob or account.
+    ```bash
+    curl -s localhost:26658/consensus.difficulty | jq
+    # {"difficulty":12345,"timestamp_millis":1700000000000}
+    ```
+
+    The timestamp is in milliseconds; polling once per block (≈1 s) is
+    sufficient for monitoring. See [docs/difficulty.md](difficulty.md) for the
+    retarget algorithm.
+
+  - `stake.role` – queries bonded CT for a service role.
+
+    ```bash
+    curl -s localhost:26658/stake.role?address=$ADDR | jq
+    # {"gateway":1000000,"storage":5000000,"exec":0}
+    ```
+  - `rent.escrow.balance` – returns locked CT per blob or account.
 - `settlement.audit` – replays recent receipts and verifies explorer anchors; used in CI to halt mismatched settlements.
 
 ## Deprecated / removed endpoints

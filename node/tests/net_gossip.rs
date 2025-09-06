@@ -9,7 +9,8 @@ use std::time::Duration;
 use tempfile::tempdir;
 use the_block::{
     generate_keypair,
-    net::{self, Handshake, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
+    net::{self, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
+    p2p::handshake::{Hello, Transport},
     sign_tx, Block, Blockchain, RawTxPayload, ShutdownFlag, TokenAmount,
 };
 use tokio::time::Instant;
@@ -251,12 +252,17 @@ fn invalid_gossip_tx_rejected() {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
-    let hs = Handshake {
-        node_id: kp.verifying_key().to_bytes(),
-        protocol_version: PROTOCOL_VERSION,
-        features: LOCAL_FEATURES,
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: LOCAL_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
-    send(addr, &kp, Payload::Handshake(hs));
+    send(addr, &kp, Payload::Handshake(hello));
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "unknown".into(),
@@ -289,12 +295,17 @@ fn invalid_gossip_block_rejected() {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
-    let hs = Handshake {
-        node_id: kp.verifying_key().to_bytes(),
-        protocol_version: PROTOCOL_VERSION,
-        features: LOCAL_FEATURES,
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: LOCAL_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
-    send(addr, &kp, Payload::Handshake(hs));
+    send(addr, &kp, Payload::Handshake(hello));
 
     let block = Block {
         index: 99,
@@ -309,14 +320,14 @@ fn invalid_gossip_block_rejected() {
         storage_sub_ct: TokenAmount::new(0),
         read_sub_ct: TokenAmount::new(0),
         compute_sub_ct: TokenAmount::new(0),
-        read_root: [0u8;32],
+        read_root: [0u8; 32],
         fee_checksum: String::new(),
         state_root: String::new(),
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
-        vdf_commit: [0u8;32],
-        vdf_output: [0u8;32],
+        vdf_commit: [0u8; 32],
+        vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     };
     send(addr, &kp, Payload::Block(block));
@@ -354,14 +365,14 @@ fn forged_identity_rejected() {
         storage_sub_ct: TokenAmount::new(0),
         read_sub_ct: TokenAmount::new(0),
         compute_sub_ct: TokenAmount::new(0),
-        read_root: [0u8;32],
+        read_root: [0u8; 32],
         fee_checksum: String::new(),
         state_root: String::new(),
         base_fee: 1,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
-        vdf_commit: [0u8;32],
-        vdf_output: [0u8;32],
+        vdf_commit: [0u8; 32],
+        vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     };
     send(addr, &kp, Payload::Block(block));
@@ -385,10 +396,15 @@ fn handshake_version_mismatch_rejected() {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
-    let bad = Handshake {
-        node_id: kp.verifying_key().to_bytes(),
-        protocol_version: PROTOCOL_VERSION + 1,
-        features: LOCAL_FEATURES,
+    let bad = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION + 1,
+        feature_bits: LOCAL_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
     send(addr, &kp, Payload::Handshake(bad));
 
@@ -424,10 +440,15 @@ fn handshake_feature_mismatch_rejected() {
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
-    let bad = Handshake {
-        node_id: kp.verifying_key().to_bytes(),
-        protocol_version: PROTOCOL_VERSION,
-        features: 0,
+    let bad = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: 0,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
     send(addr, &kp, Payload::Handshake(bad));
 
@@ -487,10 +508,15 @@ fn peer_rate_limit_and_ban() {
     send(
         addr,
         &sk,
-        Payload::Handshake(Handshake {
-            node_id: sk.verifying_key().to_bytes(),
-            protocol_version: PROTOCOL_VERSION,
-            features: LOCAL_FEATURES,
+        Payload::Handshake(Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: LOCAL_FEATURES,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Tcp,
+            quic_addr: None,
+            quic_cert: None,
         }),
     );
     for _ in 0..4 {

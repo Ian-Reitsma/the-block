@@ -6,10 +6,8 @@ use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use tempfile::tempdir;
 use the_block::{
-    net::{
-        Handshake, Message, Payload, PeerSet, COMPUTE_MARKET_V1, PROTOCOL_VERSION,
-        REQUIRED_FEATURES,
-    },
+    net::{Message, Payload, PeerSet, COMPUTE_MARKET_V1, PROTOCOL_VERSION, REQUIRED_FEATURES},
+    p2p::handshake::{Hello, Transport},
     Blockchain,
 };
 
@@ -26,22 +24,32 @@ fn handshake_requires_compute_market_bit() {
     let sk = SigningKey::from_bytes(&seed);
 
     // Missing compute-market bit should be rejected.
-    let hs = Handshake {
-        node_id: sk.verifying_key().to_bytes(),
-        protocol_version: PROTOCOL_VERSION,
-        features: REQUIRED_FEATURES & !COMPUTE_MARKET_V1,
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: REQUIRED_FEATURES & !COMPUTE_MARKET_V1,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
-    let msg = Message::new(Payload::Handshake(hs), &sk);
+    let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, Some(addr), &bc);
     assert!(!peers.list().contains(&addr));
 
     // Including the bit allows the peer to be added.
-    let hs_ok = Handshake {
-        node_id: sk.verifying_key().to_bytes(),
-        protocol_version: PROTOCOL_VERSION,
-        features: REQUIRED_FEATURES,
+    let hello_ok = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 1,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
-    let msg_ok = Message::new(Payload::Handshake(hs_ok), &sk);
+    let msg_ok = Message::new(Payload::Handshake(hello_ok), &sk);
     peers.handle_message(msg_ok, Some(addr), &bc);
     assert!(peers.list().contains(&addr));
 }

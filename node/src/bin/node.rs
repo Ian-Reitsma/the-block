@@ -93,6 +93,26 @@ enum Commands {
         /// Dry-run compute-market matches (default true)
         #[arg(long, default_value_t = true)]
         dry_run: bool,
+
+        /// Enable QUIC transport for gossip
+        #[arg(long, default_value_t = false)]
+        quic: bool,
+
+        /// Port for QUIC listener
+        #[arg(long)]
+        quic_port: Option<u16>,
+
+        /// Path to QUIC certificate (DER)
+        #[arg(long)]
+        quic_cert: Option<String>,
+
+        /// Path to QUIC private key (DER)
+        #[arg(long)]
+        quic_key: Option<String>,
+
+        /// Rotate QUIC certificates after this many days
+        #[arg(long)]
+        quic_cert_ttl_days: Option<u64>,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -163,6 +183,11 @@ async fn main() -> std::process::ExitCode {
             metrics_addr,
             data_dir,
             dry_run,
+            quic,
+            quic_port: _quic_port,
+            quic_cert: _quic_cert,
+            quic_key: _quic_key,
+            quic_cert_ttl_days: _quic_cert_ttl_days,
         } => {
             let mut inner = Blockchain::open(&data_dir).expect("open blockchain");
             if snapshot_interval != inner.config.snapshot_interval {
@@ -212,6 +237,100 @@ async fn main() -> std::process::ExitCode {
             ));
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
+            if quic {
+                #[cfg(feature = "quic")]
+                {
+                    use std::path::Path;
+                    use the_block::config::QuicConfig;
+                    use the_block::net::quic;
+                    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+                    use std::time::Duration;
+                    let port = _quic_port
+                        .or_else(|| bc.lock().unwrap().config.quic.as_ref().map(|c| c.port))
+                        .unwrap_or(0);
+                    let cert_path = _quic_cert.unwrap_or_else(|| {
+                        bc.lock()
+                            .unwrap()
+                            .config
+                            .quic
+                            .as_ref()
+                            .map(|c| c.cert_path.clone())
+                            .unwrap_or_else(|| format!("{data_dir}/quic.cert"))
+                    });
+                    let key_path = _quic_key.unwrap_or_else(|| {
+                        bc.lock()
+                            .unwrap()
+                            .config
+                            .quic
+                            .as_ref()
+                            .map(|c| c.key_path.clone())
+                            .unwrap_or_else(|| format!("{data_dir}/quic.key"))
+                    });
+                    let ttl_days = _quic_cert_ttl_days
+                        .or_else(|| bc.lock().unwrap().config.quic.as_ref().map(|c| c.cert_ttl_days))
+                        .unwrap_or(30);
+                    let regen = {
+                        let cert_meta = std::fs::metadata(&cert_path).ok();
+                        let key_meta = std::fs::metadata(&key_path).ok();
+                        match (cert_meta, key_meta) {
+                            (Some(cm), Some(km)) => {
+                                let uid = nix::unistd::Uid::effective().as_raw();
+                                if cm.mode() & 0o777 != 0o600 || km.mode() & 0o777 != 0o600
+                                    || cm.uid() != uid || km.uid() != uid
+                                {
+                                    panic!("insecure quic cert permissions");
+                                }
+                                cm.modified()
+                                    .ok()
+                                    .and_then(|m| m.elapsed().ok())
+                                    .map(|d| d > Duration::from_secs(ttl_days * 86_400))
+                                    .unwrap_or(true)
+                            }
+                            _ => true,
+                        }
+                    };
+                    if regen {
+                        let cert = rcgen::generate_simple_self_signed(["the-block".to_string()])
+                            .expect("generate cert");
+                        let cert_der = cert.serialize_der().expect("cert der");
+                        let key_der = cert.serialize_private_key_der();
+                        let _ = std::fs::create_dir_all(Path::new(&cert_path).parent().unwrap());
+                        let mut cf = std::fs::OpenOptions::new()
+                            .create(true)
+                            .truncate(true)
+                            .write(true)
+                            .mode(0o600)
+                            .open(&cert_path)
+                            .expect("write cert");
+                        use std::io::Write;
+                        cf.write_all(&cert_der).expect("write cert");
+                        let mut kf = std::fs::OpenOptions::new()
+                            .create(true)
+                            .truncate(true)
+                            .write(true)
+                            .mode(0o600)
+                            .open(&key_path)
+                            .expect("write key");
+                        kf.write_all(&key_der).expect("write key");
+                    }
+                    let cert_der = std::fs::read(&cert_path).expect("read cert");
+                    let key_der = std::fs::read(&key_path).expect("read key");
+                    let addr: std::net::SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
+                    let _ = quic::listen_with_cert(addr, &cert_der, &key_der).await;
+                    {
+                        let mut guard = bc.lock().unwrap();
+                        guard.config.quic = Some(QuicConfig {
+                            port: if port == 0 { addr.port() } else { port },
+                            cert_path: cert_path.clone(),
+                            key_path: key_path.clone(),
+                            cert_ttl_days: ttl_days,
+                        });
+                        guard.save_config();
+                    }
+                }
+                #[cfg(not(feature = "quic"))]
+                eprintln!("quic feature not enabled");
+            }
             let _ = handle.await;
             match_stop.cancel();
             the_block::compute_market::price_board::persist();

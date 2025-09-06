@@ -1,7 +1,8 @@
 use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use tempfile::tempdir;
-use the_block::net::{Handshake, Message, Payload, PeerSet, SUPPORTED_VERSION};
+use the_block::net::{Message, Payload, PeerSet, SUPPORTED_VERSION};
+use the_block::p2p::handshake::{Hello, Transport};
 use the_block::Blockchain;
 
 #[test]
@@ -12,12 +13,17 @@ fn rejects_wrong_version() {
     let mut bytes = [0u8; 32];
     OsRng.fill_bytes(&mut bytes);
     let kp = SigningKey::from_bytes(&bytes);
-    let hs = Handshake {
-        node_id: [0u8; 32],
-        protocol_version: SUPPORTED_VERSION + 1,
-        features: 0,
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: SUPPORTED_VERSION + 1,
+        feature_bits: 0,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
     };
-    let msg = Message::new(Payload::Handshake(hs), &kp);
+    let msg = Message::new(Payload::Handshake(hello), &kp);
     let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
     peers.handle_message(msg, None, &chain);
     assert!(peers.list().is_empty());

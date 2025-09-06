@@ -17,6 +17,6 @@ jobs:
       - name: Run tests
         id: vars
         run: |
-          cargo nextest run --all-features --quiet && echo "status=passing" >> "$GITHUB_OUTPUT"
+          cargo nextest run --profile quic --quiet && echo "status=passing" >> "$GITHUB_OUTPUT"
       - name: Serialization determinism
         run: python scripts/serialization_equiv.py

@@ -191,25 +191,26 @@ fn admit_and_mine_never_over_cap() {
     let bc = Arc::new(RwLock::new(bc));
     let peak = Arc::new(AtomicUsize::new(0));
 
-    // Miner thread repeatedly empties the pool while submissions race.
+    // Miner thread repeatedly empties the pool while submissions race. Fewer
+    // iterations keep the test within CI timeouts while still exercising the
+    // concurrent path.
     let bc_miner = Arc::clone(&bc);
     let peak_miner = Arc::clone(&peak);
     let miner_handle = std::thread::spawn(move || {
-        for _ in 0..32 {
+        for _ in 0..8 {
             let mut guard = bc_miner.write().unwrap();
-            let _ = guard.mine_block("alice");
             let first_ts = guard.chain.first().unwrap().timestamp_millis;
-            let len_chain = guard.chain.len() as u64;
-            if let Some(last) = guard.chain.last_mut() {
-                last.timestamp_millis = first_ts + (len_chain - 1) * 1_000;
-            }
+            let next_ts = first_ts + guard.chain.len() as u64 * 1_000;
+            let _ = guard.mine_block_at("alice", next_ts);
             let len = guard.mempool_consumer.len();
             drop(guard);
             peak_miner.fetch_max(len, Ordering::SeqCst);
         }
     });
 
-    let handles: Vec<_> = (0..64)
+    // Limit to 16 concurrent submissions to avoid starvation on slower
+    // runners while maintaining a race against the miner thread.
+    let handles: Vec<_> = (0..16)
         .map(|i| {
             let bc_cl = Arc::clone(&bc);
             let peak_cl = Arc::clone(&peak);

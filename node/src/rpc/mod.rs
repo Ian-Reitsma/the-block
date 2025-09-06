@@ -33,12 +33,13 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
+#[cfg(feature = "telemetry")]
+pub mod analytics;
 pub mod client;
+pub mod consensus;
 pub mod governance;
 pub mod identity;
 pub mod pos;
-#[cfg(feature = "telemetry")]
-pub mod analytics;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -80,6 +81,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "pow.submit",
     "inflation.params",
     "stake.role",
+    "consensus.difficulty",
     "consensus.pos.register",
     "consensus.pos.bond",
     "consensus.pos.unbond",
@@ -602,10 +604,13 @@ fn dispatch(
         "gateway.reads_since" => gateway::dns::reads_since(&req.params),
         #[cfg(feature = "telemetry")]
         "analytics" => {
-            let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone()).unwrap_or(analytics::AnalyticsQuery { domain: String::new() });
+            let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone())
+                .unwrap_or(analytics::AnalyticsQuery {
+                    domain: String::new(),
+                });
             let stats = analytics::analytics(&crate::telemetry::READ_STATS, q);
             serde_json::to_value(stats).unwrap()
-        },
+        }
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
             let roots = Settlement::recent_roots(n);
@@ -656,7 +661,7 @@ fn dispatch(
                 "merkle_root": hex::encode(tmpl.merkle_root),
                 "checkpoint_hash": hex::encode(tmpl.checkpoint_hash),
                 "difficulty": tmpl.difficulty,
-                "timestamp": tmpl.timestamp
+                "timestamp_millis": tmpl.timestamp_millis
             })
         }
         "pow.submit" => {
@@ -690,9 +695,9 @@ fn dispatch(
                 code: -32602,
                 message: "bad difficulty",
             })?;
-            let timestamp = header_obj["timestamp"].as_u64().ok_or(RpcError {
+            let timestamp = header_obj["timestamp_millis"].as_u64().ok_or(RpcError {
                 code: -32602,
-                message: "bad timestamp",
+                message: "bad timestamp_millis",
             })?;
             let hdr = BlockHeader {
                 prev_hash,
@@ -700,11 +705,11 @@ fn dispatch(
                 checkpoint_hash,
                 nonce,
                 difficulty,
-                timestamp,
+                timestamp_millis: timestamp,
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),
-                vdf_commit: [0u8;32],
-                vdf_output: [0u8;32],
+                vdf_commit: [0u8; 32],
+                vdf_output: [0u8; 32],
                 vdf_proof: Vec::new(),
             };
             let hash = hdr.hash();
@@ -718,6 +723,7 @@ fn dispatch(
                 });
             }
         }
+        "consensus.difficulty" => consensus::difficulty(&bc),
         "consensus.pos.register" => pos::register(&req.params)?,
         "consensus.pos.bond" => pos::bond(&req.params)?,
         "consensus.pos.unbond" => pos::unbond(&req.params)?,

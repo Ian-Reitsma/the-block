@@ -15,6 +15,9 @@ struct Hello {
     feature_bits: u32,
     agent: String,
     nonce: u64,
+    transport: Transport,
+    quic_addr: Option<SocketAddr>,
+    quic_cert: Option<Vec<u8>>,
 }
 ```
 
@@ -22,7 +25,11 @@ struct Hello {
 represents the highest protocol version supported by the sender. `feature_bits`
 is a bitmask of optional capabilities described below. The `agent` string is free
 form and surfaced in metrics and RPC for debugging. `nonce` seeds connection-level
-randomness and helps detect echo attacks.
+randomness and helps detect echo attacks. `transport` specifies the protocol in use
+for this connection, currently either TCP or QUIC.  When a node supports QUIC it may
+also populate `quic_addr` and `quic_cert` with the UDP socket address and
+DER-encoded certificate so peers can establish secure QUIC sessions later without
+additional out-of-band exchange.
 
 The receiver responds with a `HelloAck`:
 
@@ -80,23 +87,36 @@ pub enum FeatureBit {
     ComputeMarketV1= 1 << 1,
     GovV1          = 1 << 2,
     FeeRoutingV2   = 1 << 3,
+    QuicTransport  = 1 << 4,
 }
 ```
 
 Future features append additional bits.  When proposing a new capability, update
 this enum and bump `proto_version` if the change is not backward compatible.
 
+## QUIC Transport
+
+Nodes may advertise the optional `QuicTransport` feature bit to indicate support
+for establishing gossip connections over QUIC.  During the initial TCP
+bootstrap, peers include a `transport` field in the handshake specifying the
+protocol in use.  When both sides support QUIC, they may subsequently establish
+a QUIC channel using the `quic` module.  QUIC sessions use the `the-block`
+ALPN string and rely on self-signed certificates exchanged out-of-band.
+
 ## Peer Registry
 
 Accepted peers are stored in an in-memory registry keyed by connection ID. Each
-entry retains the peer's reported `agent` string and the accepted feature mask.
-This registry powers diagnostic RPCs and can be queried programmatically via
-`p2p::handshake::list_peers()`:
+entry retains the peer's reported `agent` string, the accepted feature mask, and
+the negotiated `transport`. This registry powers diagnostic RPCs and can be
+queried programmatically via `p2p::handshake::list_peers()`:
 
 ```rust
 let peers = list_peers();
 for (id, info) in peers {
-    println!("{} => {} features {:#x}", id, info.agent, info.features);
+    println!(
+        "{} => {} features {:#x} via {:?}",
+        id, info.agent, info.features, info.transport
+    );
 }
 ```
 

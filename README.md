@@ -100,11 +100,13 @@ test real services today.
 
 - Stake-weighted PoS finality with validator registration, bonding/unbonding, and slashing RPCs; stake dictates leader schedule and exits honor delayed unbonding to protect liveness.
 - Proof-of-History tick generator and Turbine-style gossip for deterministic block propagation; packets follow a sqrt-N fanout tree with deterministic seeding for reproducible tests. Duplicate suppression and adaptive fanout are detailed in [docs/gossip.md](docs/gossip.md).
+- Sliding-window difficulty retargeting keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC and `difficulty_*` metrics.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently. See [docs/scheduler.md](docs/scheduler.md).
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
 - Modular wallet framework with hardware signer support and CLI utilities; command-line tools wrap the wallet crate and expose key management and staking helpers.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Versioned P2P handshake negotiates feature bits, records peer metadata, and enforces minimum protocol versions. See [docs/p2p_protocol.md](docs/p2p_protocol.md).
+- QUIC gossip transport with certificate reuse, connection pooling, and TCP fallback; fanout selects per-peer transport.
 - Light-client crate with mobile example and FFI helpers; mobile demos showcase header sync, background polling, and optional KYC flows. The synchronization model and security trade-offs are described in [docs/light_client.md](docs/light_client.md).
 - SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST.
 - Distributed benchmark harness and economic simulation modules; harness spawns multi-node topologies while simulators model inflation, fees, and demand curves.
@@ -150,6 +152,19 @@ See the [Status & Roadmap](#status--roadmap) section below for recent progress a
 # Unix/macOS
 bash ./scripts/bootstrap.sh          # installs toolchains, pins cargo-nextest, builds wheel; installs patchelf on Linux
 python demo.py               # demo with background purge loop
+# optional QUIC + difficulty demo
+python demo.py --quic        # spawns a node with QUIC and prints live difficulty
+
+The optional mode launches a node subprocess, begins mining, and polls
+`consensus.difficulty` over JSON‑RPC. Any retarget adjustments are
+printed to stdout. Supplying `--quic` enables the QUIC listener so peer
+connections can upgrade from TCP.
+
+See [docs/demo.md](docs/demo.md) for a detailed walkthrough of the demo and its
+output.
+
+For production deployment, QUIC configuration, and difficulty monitoring, see
+[docs/operators/run_a_node.md](docs/operators/run_a_node.md).
 
 # Windows (PowerShell)
 ./scripts/bootstrap.ps1              # run as admin for VS Build Tools
@@ -257,6 +272,16 @@ Price board:
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":4,"method":"price_board_get"}'
 ```
+
+Current PoW difficulty:
+
+```bash
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":8,"method":"consensus.difficulty"}'
+```
+
+Run `cargo run -p the_block --example difficulty` to poll the endpoint and
+observe difficulty adjustments as blocks are mined.
 
 Mempool stats per lane:
 
@@ -390,7 +415,7 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 ## Status & Roadmap
 
-Mainnet readiness: ~95/100 · Vision completion: ~64/100.
+Mainnet readiness: ~96/100 · Vision completion: ~66/100.
 
 This section mirrors the canonical [docs/roadmap.md](docs/roadmap.md), which tracks ongoing priorities and is updated with every release.
 
@@ -539,6 +564,7 @@ see [docs/progress.md](docs/progress.md).
 ## Contribution Guidelines
 
 - Run both `cargo test` and `cargo nextest run` before opening a PR.
+- QUIC changes require `cargo nextest run --profile quic` which enables the `quic` feature flag.
 - `cargo fmt`, `cargo clippy`, and fuzz/monitoring checks must be clean.
 - See `AGENTS.md` for the Definition of Done and path-gated monitoring lint.
 
@@ -559,6 +585,7 @@ Key counters and gauges:
 - `mempool_size{lane}`, `consumer_fee_p50`, `consumer_fee_p90`.
 - `admission_mode{mode}`, `industrial_admitted_total`, `industrial_deferred_total`, `industrial_rejected_total{reason}`.
 - `gossip_duplicate_total`, `gossip_fanout_gauge`, `gossip_convergence_seconds`, `fork_reorg_total`.
+- `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`.
   - `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`.
 
 - `snapshot_interval_changed`, `badge_active`, `badge_last_change_seconds`.
@@ -609,6 +636,6 @@ make monitor   # Prom+Grafana; scrape :9100, open :3000
 - Links to `docs/*` and `examples/*` validate via `python scripts/check_anchors.py --md-anchors`.
 - Nightly toolchain is required only for `cargo fuzz`.
 - macOS rpath guidance for PyO3 (`PYO3_PYTHON`/`PYTHONHOME`) is documented.
-- Status & Roadmap states ~95/100 and ~64/100 vision completion and maps to concrete next tasks.
+- Status & Roadmap states ~96/100 and ~66/100 vision completion and maps to concrete next tasks.
 
 ## Disclaimer

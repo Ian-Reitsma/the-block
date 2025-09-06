@@ -14,6 +14,8 @@ pub struct NodeConfig {
     pub telemetry_summary_interval: u64,
     #[serde(default)]
     pub lighthouse: LighthouseConfig,
+    #[serde(default)]
+    pub quic: Option<QuicConfig>,
 }
 
 impl Default for NodeConfig {
@@ -27,6 +29,7 @@ impl Default for NodeConfig {
             compute_market: ComputeMarketConfig::default(),
             telemetry_summary_interval: 0,
             lighthouse: LighthouseConfig::default(),
+            quic: None,
         }
     }
 }
@@ -65,6 +68,19 @@ pub struct RpcConfig {
     pub request_timeout_ms: u64,
     pub enable_debug: bool,
     pub admin_token_file: Option<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct QuicConfig {
+    pub port: u16,
+    pub cert_path: String,
+    pub key_path: String,
+    #[serde(default = "default_cert_ttl_days")]
+    pub cert_ttl_days: u64,
+}
+
+fn default_cert_ttl_days() -> u64 {
+    30
 }
 
 impl Default for RpcConfig {
