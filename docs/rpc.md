@@ -38,12 +38,12 @@
   #  "rent_rate_ct_per_byte":1}
   ```
 
-- `compute_market.stats` – exposes current compute backlog and utilisation
-  metrics.
+- `compute_market.stats` – exposes current compute backlog, utilisation,
+  provisioned units, and spot price metrics.
 
   ```bash
   curl -s localhost:26658/compute_market.stats | jq
-  # {"industrial_backlog":0,"industrial_utilization":0}
+  # {"industrial_backlog":0,"industrial_utilization":0,"industrial_units_total":0,"industrial_price_per_unit":0}
   ```
 
   - `consensus.difficulty` – returns the current proof-of-work difficulty target and timestamp.
@@ -65,6 +65,29 @@
     ```
   - `rent.escrow.balance` – returns locked CT per blob or account.
 - `settlement.audit` – replays recent receipts and verifies explorer anchors; used in CI to halt mismatched settlements.
+- `dex.escrow_status?id=` – prints `{from,to,locked,released}` for a pending
+  escrow.
+
+  ```bash
+  curl -s localhost:26658/dex.escrow_status?id=7 | jq
+  # {"from":"alice","to":"bob","locked":100,"released":20}
+  ```
+
+- `dex.escrow_release?id=&amount=` – releases a partial payment and updates the
+  escrow root.
+
+  ```bash
+  curl -s localhost:26658/dex.escrow_release?id=7\&amount=40 | jq
+  # {"released":60,"root":"ab34…"}
+  ```
+
+- `dex.escrow_proof?id=&index=` – retrieves a Merkle proof for a prior
+  release.
+
+  ```bash
+  curl -s localhost:26658/dex.escrow_proof?id=7\&index=1 | jq
+  # {"amount":40,"proof":["aa..","bb.."]}
+  ```
 
 ## Deprecated / removed endpoints
 
@@ -72,3 +95,7 @@ The 2024 third-token ledger removal eliminated a number of legacy RPC calls.
 All methods under the former third-token namespace were removed, and clients
 should migrate to the subsidy-centric replacements listed above. Any request
 against those paths now returns `-32601` (method not found).
+
+Endpoints returning fees expose mixed CT/IT accounting. Fee reports such as
+`mempool.stats` and settlement receipts include `pct_ct` or separate `fee_ct`
+and `fee_it` fields to track splits between consumer and industrial lanes.

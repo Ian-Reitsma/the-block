@@ -22,11 +22,14 @@ Quick Index
 - Transaction lifecycle and fee lanes: see `docs/transaction_lifecycle.md`
 - Compute-market courier retry logic: see `docs/compute_market_courier.md`
 - Compute-market admission quotas: see `docs/compute_market.md`
+- Compute-unit calibration: see `docs/compute_market.md`
 - Multi-hop trust-line routing: see `docs/dex.md`
+- DEX escrow and partial-payment proofs: see `docs/dex.md`
 - Gateway DNS publishing and policy records: see `docs/gateway_dns.md`
 - Gossip relay dedup and adaptive fanout: see `docs/gossip.md`
 - P2P handshake and capability negotiation: see `docs/p2p_protocol.md`
 - Light-client synchronization and security model: see `docs/light_client.md`
+- Bridge light-client verification: see `docs/bridges.md`
 - Jurisdiction policy packs and LE logging: see `docs/jurisdiction.md`
 - Probe CLI and metrics: see `docs/probe.md`
 - Operator QUIC configuration and difficulty monitoring: see `docs/operators/run_a_node.md`
@@ -34,6 +37,7 @@ Quick Index
 - Telemetry summaries and histograms: see `docs/telemetry.md`
 - Simulation framework and replay semantics: see `docs/simulation_framework.md`
 - Wallet staking lifecycle: see `docs/wallets.md`
+- Remote signer workflows: see `docs/wallets.md`
 - Storage erasure coding and reconstruction: see `docs/storage_erasure.md`
 - KYC provider workflow: see `docs/kyc.md`
 - A* latency routing: see `docs/net_a_star.md`
@@ -44,7 +48,7 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~96/100** with vision completion **~66/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~97/100** with vision completion **~68/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -97,6 +101,10 @@ The repository owns exactly four responsibility domains:
   coinbase.
 - Every block carries three subsidy fields: `STORAGE_SUB_CT`,
   `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
+- `industrial_backlog` and `industrial_utilization` gauges feed
+  `Block::industrial_subsidies()`; these metrics surface the queued work and
+  realised throughput that the subsidy governor uses when retuning
+  multipliers.
 - Per‑epoch utilisation `U_x` (bytes stored, bytes served, CPU ms, bytes
   out) feeds the "one‑dial" multiplier formula:
 
@@ -158,7 +166,7 @@ Tests and benches live under `node/`. If your tree differs, run the repo re‑la
 
 ## 3 · System Requirements
 
-- Rust 1.82+, `cargo-nextest`, `cargo-fuzz` (nightly), and `maturin` for Python bindings.
+- Rust 1.86+, `cargo-nextest`, `cargo-fuzz` (nightly), and `maturin` for Python bindings.
 - Python 3.12.3 in a virtualenv; bootstrap creates `bin/python` shim and prepends `.venv/bin` to `PATH`.
 - Node 18+ for the monitoring stack; `npm ci --prefix monitoring` must succeed when `monitoring/**` changes.
 - On Linux, `patchelf` is required for wheel installs (bootstrap installs it automatically).
@@ -292,7 +300,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~96/100 · Vision completion: ~66/100.
+Mainnet readiness: ~97/100 · Vision completion: ~68/100.
 
 **Recent**
 
@@ -371,7 +379,7 @@ All previously listed directives have been implemented:
   - Generate regression dashboards from collected metrics.
   - Publish performance tuning guides.
 - Wallet ecosystem expansion
-  - Add remote signer and multisig modules.
+  - Add multisig modules.
   - Ship Swift and Kotlin SDKs for mobile clients.
   - Enable hardware wallet firmware update flows.
   - Provide secure backup and restore tooling.
@@ -524,20 +532,17 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - WAL fuzzing (nightly toolchain required): `make fuzz-wal` stores artifacts and RNG seeds under `fuzz/wal/`; reproduce with `cargo fuzz run wal_fuzz -- -seed=<seed> fuzz/wal/<file>`.
   Use `scripts/extract_wal_seeds.sh` to list seeds and see [docs/wal.md](docs/wal.md) for failure triage.
 
-- Compute market changes: run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` to cover courier retries and price board persistence. Install `cargo-nextest` (v0.9.97-b.2 works with Rust 1.82) if the command is unavailable.
+- Compute market changes: run `cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board` to cover courier retries and price board persistence. Install `cargo-nextest` (compatible with Rust 1.86) if the command is unavailable.
 - QUIC networking changes: run `cargo nextest run --profile quic` to exercise QUIC handshake, fanout, and fallback paths. The
   profile enables the `quic` feature flag.
 
 ### 17.5 Architecture & Telemetry Highlights (from Agents‑Sup)
 
 - Consensus & Mining: PoW with BLAKE3; dynamic retarget over ~120 blocks with clamp [¼, ×4]; headers carry difficulty; coinbase fields must match tx[0]; decay rewards.
-- Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct_ct` with sequential nonce validation.
+- Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct_ct` carries an arbitrary 0–100 split with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. The legacy third-token ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history.
-  Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the
-  formula in `docs/economics.md`; changes are logged under `governance/history`
-  and surfaced in telemetry. An emergency parameter
+- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. The legacy third-token ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the formula in `docs/economics.md`; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
   `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
   a voted percentage, granting governance a rapid-response lever during economic
   shocks.
@@ -558,24 +563,25 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
-  - Progress: 80%
+  - Progress: 74%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
-  - Progress: 40%
+  - Progress: 50%
 - **Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
-  - [ ] Light client verification
+  - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 20%
+  - Progress: 45%
 - **Wallets** ([docs/wallets.md](docs/wallets.md))
   - [x] CLI enhancements
   - [x] Hardware wallet integration
   - [x] Key management guides
+  - [x] Remote signer workflows
   - Progress: 80%
 - **Performance** ([docs/performance.md](docs/performance.md))
   - [x] Consensus benchmarks
   - [ ] VM throughput measurements
   - [x] Profiling harness
-  - Progress: 60%
+  - Progress: 67%

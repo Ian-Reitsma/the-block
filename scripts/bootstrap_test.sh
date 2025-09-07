@@ -24,7 +24,7 @@ if ! cargo make --version 2>/dev/null | grep -q "$CARGO_MAKE_VERSION"; then
   echo "cargo-make $CARGO_MAKE_VERSION missing" >&2
   exit 1
 fi
-# Pin to the last cargo-nextest release supporting rustc 1.82
+# Pin to the cargo-nextest release supporting rustc 1.86
 NEXTEST_VERSION="0.9.97-b.2"
 if ! cargo nextest --version 2>/dev/null | grep -q "$NEXTEST_VERSION"; then
   echo "cargo-nextest $NEXTEST_VERSION missing" >&2

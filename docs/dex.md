@@ -27,6 +27,42 @@ Merkle root over released partial payments. Each release appends a payment amoun
 can be verified off-chain. When the cumulative released amount equals the original total the escrow entry is removed and the
 trade is final.
 
+### CLI Escrow Lifecycle
+
+```bash
+# check pending escrow 7
+blockctl dex escrow status 7
+# from: alice, to: bob, locked: 100, released: 20
+
+# release 40 units from escrow 7
+blockctl dex escrow release 7 40
+# released: 60, root: ab34…
+```
+
+`blockctl` wraps the `dex.escrow_status` and `dex.escrow_release` RPC calls. Each
+release updates the Merkle root stored with the escrow so both sides can audit
+partial payments.
+
+### Proof Verification via RPC
+
+Obtain a Merkle proof for a prior release and verify it off-chain:
+
+```bash
+curl -s localhost:26658/dex.escrow_proof?id=7\&index=1 | jq
+# {"amount":40,"proof":["aa..","bb.."]}
+```
+
+Clients recompute the root from the provided `amount` and `proof` to confirm the
+release was recorded.
+
+### Telemetry
+
+`dex_escrow_locked` gauges total funds locked in escrow, while
+`dex_escrow_pending` counts outstanding escrows. `dex_escrow_total` tracks the
+aggregate value of all escrowed funds. Operators can alert on any metric to
+detect stuck settlements. See [`docs/telemetry.md`](telemetry.md) for the full
+metric list.
+
 ### Failure Modes and Recovery
 
 - **Timeout releases:** if one side disappears, the remaining balance can be cancelled and returned after a timeout.

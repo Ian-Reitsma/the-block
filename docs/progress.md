@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~96/100** with vision completion **~66/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~97/100** with vision completion **~68/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -64,6 +64,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Emergency kill switch `kill_switch_subsidy_reduction` with telemetry counters (`node/src/governance/params.rs`, `docs/monitoring.md`).
 - Legacy third-token ledger fully removed; CT-only subsidies minted each block with migration documented in `docs/system_changes.md`.
 - One‑dial multiplier formula retunes β/γ/κ/λ per epoch using realised utilisation `U_x`, clamped to ±15 % and doubled when `U_x` → 0; see `docs/economics.md`.
+- Demand gauges `industrial_backlog` and `industrial_utilization` feed
+  `Block::industrial_subsidies()` and surface via `inflation.params` and
+  `compute_market.stats`.
+- Arbitrary CT/IT fee splits tracked by `pct_ct`; `reserve_pending` debits
+  balances before coinbase accumulation, documented in `docs/fees.md`.
 - Logistic base reward `R_0(N) = R_max / (1 + e^{ξ (N - N^*)})` with hysteresis `ΔN ≈ √N*` dampens miner churn and is implemented in `pow/src/reward.rs`.
 
 **Gaps**
@@ -97,7 +102,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~60 %
+## 6. Compute Marketplace & CBM — ~65 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -109,38 +114,44 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Heterogeneous hardware scheduling and escrowed payments unsolved.
 - SLA enforcement rudimentary.
 
-## 7. Trust Lines & DEX — ~55 %
+## 7. Trust Lines & DEX — ~72 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
 - Cost‑based multi‑hop routing with fallback paths (`node/src/dex/trust_lines.rs`).
+- On-ledger escrow with partial-payment proofs (`dex/src/escrow.rs`, `node/tests/dex.rs`, `dex/tests/escrow.rs`).
 - Trade logging and routing semantics documented in `docs/dex.md`.
+- CLI escrow flows and Merkle proof verification exposed via `dex escrow status`/
+  `dex escrow release` commands and `dex.escrow_proof` RPC. Telemetry gauges
+  `dex_escrow_locked`, `dex_escrow_pending`, and `dex_escrow_total` monitor
+  utilisation; `dex_escrow_total` aggregates locked funds across all escrows.
 
 **Gaps**
-- On‑ledger settlement proofs and partial payments not implemented.
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~70 %
+## 8. Wallets, Light Clients & KYC — ~80 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
+- Remote signer workflows (`crates/wallet/src/remote_signer.rs`, `docs/wallets.md`).
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
 - Optional KYC provider wiring (`docs/kyc.md`).
 
 **Gaps**
-- Remote signer and multisig flows missing.
+- Multisig flows missing.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — ~20 %
+## 9. Bridges & Cross‑Chain Routing — ~45 %
 
 **Evidence**
 - Lock/unlock bridge contract with relayer proofs (`bridges/src/lib.rs`).
+- Light-client verification checks foreign headers (`docs/bridges.md`).
 - CLI deposit/withdraw flows (`cli/src/main.rs` subcommands).
 - Bridge walkthrough in `docs/bridges.md`.
 
 **Gaps**
-- Light‑client verification and relayer incentive mechanisms undeveloped.
+- Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
 ## 10. Monitoring, Debugging & Profiling — ~67 %
@@ -179,4 +190,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‐06*
+*Last updated: 2025‑09‑07*

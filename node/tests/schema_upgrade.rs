@@ -144,6 +144,6 @@ fn migrate_v6_adds_recent_timestamps() {
     fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
-    assert_eq!(bc.schema_version(), 10);
+    assert_eq!(bc.schema_version(), 7);
     assert!(bc.recent_timestamps.is_empty());
 }

@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: '1.86.0'
           override: true
       - uses: Swatinem/rust-cache@v2
       - id: changes
@@ -63,7 +63,10 @@ jobs:
       - name: discover libpython
         run: |
           echo "LIBPYTHON_PATH=$(python3-config --ldflags | sed -n 's/.*-L\([^ ]*\).*/\1/p')" >> $GITHUB_ENV
-      - uses: taiki-e/setup-nextest@v0
+      - name: install cargo-nextest
+        run: cargo install cargo-nextest --locked
+      - name: verify cargo-nextest
+        run: cargo nextest --version
       - name: cargo nextest
         run: cargo nextest run --profile quic
         env:
@@ -72,6 +75,10 @@ jobs:
         run: cargo nextest run --profile quic gossip_converges_to_longest_chain --retries 2
         env:
           RUST_TEST_THREADS: 1
+          LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: compute-market nextest
+        run: cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board
+        env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
       - name: doc tests
         run: cargo test --doc --all-features
@@ -207,7 +214,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: '1.86.0'
           override: true
       - uses: Swatinem/rust-cache@v2
       - name: settlement audit

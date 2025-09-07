@@ -40,7 +40,7 @@
 - README and docs refreshed for wallet framework, performance benchmarks, and monitoring updates.
 - Moving-average difficulty retargeting validates block headers against expected difficulty ([node/src/lib.rs](../node/src/lib.rs)).
 - README and agent handbooks document JSON-RPC sessions, networking demos, and purge-loop defaults ([README.md](README.md), [AGENTS.md](AGENTS.md), [Agents-Sup.md](Agents-Sup.md)).
-- Bootstraps pin `cargo-nextest` v0.9.97-b.2 to match the Rust 1.82 toolchain ([../scripts/bootstrap.sh](../scripts/bootstrap.sh), [../scripts/bootstrap.ps1](../scripts/bootstrap.ps1), [../scripts/bootstrap_test.sh](../scripts/bootstrap_test.sh)).
+- Bootstraps pin `cargo-nextest` v0.9.97-b.2 to match the Rust 1.86 toolchain ([../scripts/bootstrap.sh](../scripts/bootstrap.sh), [../scripts/bootstrap.ps1](../scripts/bootstrap.ps1), [../scripts/bootstrap_test.sh](../scripts/bootstrap_test.sh)).
 
 ### Fixed
 - Telemetry exporter always emits keys such as `orphan_sweep_total` even before they increment ([node/src/telemetry.rs](../node/src/telemetry.rs)).

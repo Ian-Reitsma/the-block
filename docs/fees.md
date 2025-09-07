@@ -53,3 +53,22 @@ The node rejects the transaction if `max-fee < base_fee`.
 Keeping block fullness near 50 % provides headroom for bursts and simplifies
 capacity planning. Validators can adjust `TARGET_GAS_PER_BLOCK` through
 `governance.params` proposals if demand patterns change.
+
+## CT/IT Fee Splits
+
+The `pct_ct` selector routes an arbitrary percentage of each transaction's fee
+to consumer tokens (`CT`), with the remainder paid in industrial tokens (`IT`).
+Examples:
+
+| `pct_ct` | CT share | IT share |
+|----------|---------|---------|
+| `0`      | `0%`    | `100%`  |
+| `37`     | `37%`   | `63%`   |
+| `100`    | `100%`  | `0%`    |
+
+During admission, `reserve_pending` debits the caller's balances according to
+this split; `reserve_pending` in `node/src/transaction.rs` subtracts the CT and
+IT portions separately. When the block is mined, the coinbase accumulates the
+same proportions, so fee accounting matches the original split. See
+[docs/transaction_lifecycle.md](transaction_lifecycle.md) for a full payload
+example using `pct_ct`.

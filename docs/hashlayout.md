@@ -20,15 +20,18 @@ hash at compile time.
 8. `storage_sub`
 9. `read_sub`
 10. `compute_sub`
-11. `read_root`
-12. `fee_checksum`
-13. `state_root`
-14. Each `l2_root`
-15. Each `l2_size`
-16. `vdf_commit`
-17. `vdf_output`
-18. `vdf_proof` length and bytes
-19. Each transaction ID
+11. `storage_sub_it`
+12. `read_sub_it`
+13. `compute_sub_it`
+14. `read_root`
+15. `fee_checksum`
+16. `state_root`
+17. Each `l2_root`
+18. Each `l2_size`
+19. `vdf_commit`
+20. `vdf_output`
+21. `vdf_proof` length and bytes
+22. Each transaction ID
 
 The deterministic ordering ensures identical hashes across platforms and
 language bindings.
@@ -50,6 +53,9 @@ encoder = BlockEncoder{
   storage_sub: 0,
   read_sub: 0,
   compute_sub: 0,
+  storage_sub_it: 0,
+  read_sub_it: 0,
+  compute_sub_it: 0,
   read_root: [0;32],
   fee_checksum: ZERO_HASH,
   state_root: ZERO_HASH,

@@ -712,7 +712,7 @@ fn test_chain_determinism() {
 fn industrial_subsidies_zero_by_default() {
     init();
     let (_dir, bc) = temp_blockchain("subsidy_zero");
-    for b in bc.chain {
+    for b in &bc.chain {
         let (s, r, c) = b.industrial_subsidies();
         assert_eq!(s.0 + r.0 + c.0, 0);
     }
