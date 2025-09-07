@@ -98,11 +98,15 @@ skew and kurtosis. The function returns `(f^*, \text{CVaR}_{0.999})` where
 
 ## Hardware Wallet Support
 
-Mock Ledger/Trezor devices implement the `WalletSigner` trait. Tests under `node/tests` verify ed25519 and post-quantum flows with deterministic transcripts and error handling.
+Ledger Nano S/X and Trezor T devices implement the `WalletSigner` trait via the
+`wallet-hw` feature. Integration tests under `node/tests` verify Ed25519 and
+post‑quantum flows with deterministic transcripts and error handling, allowing
+developers to exercise the same APIs against real hardware.
 
-Physical hardware wallet support is planned but follows the same trait
-interfaces. Until then, the mock implementations help developers exercise the
-APIs without specialized equipment.
+### Gaps
+
+- Automated firmware update workflows
+- Broader vendor coverage beyond Ledger and Trezor
 
 ## Remote Signer
 

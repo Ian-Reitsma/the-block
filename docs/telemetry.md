@@ -12,12 +12,19 @@ Structured telemetry logs include the following fields. All identifiers are priv
 - `cid`: short correlation identifier derived from a transaction hash or block height.
 - `tx`: transaction hash included on all mempool admission and rejection logs for traceability.
 
-Use the `log_context!` macro to attach these correlation IDs when emitting spans. The node binary exposes `--log-format` (plain or json) and `--log-level` flags for per-module filtering; see `config/logging.json` for an example configuration.
+Use the `log_context!` macro to attach these correlation IDs when emitting network, consensus, or storage spans. The node binary exposes `--log-format` (plain or json) and `--log-level` flags for per-module filtering; see `config/logging.json` for an example configuration.
 
 Logs are sampled and rate limited; emitted and dropped counts are exported via `log_emit_total{subsystem}` and `log_drop_total{subsystem}` on the `/metrics` endpoint. A `redact_at_rest` helper can hash or delete log files older than a configured number of hours.
 The logger permits up to 100 events per second before sampling kicks in. Once the limit is exceeded, only one out of every 100 events is emitted while the rest are dropped, preventing log bursts from overwhelming block propagation.
 
 Counters `peer_error_total{code}` and `rpc_client_error_total{code}` track rate‑limited and banned peers and RPC clients for observability.
+- `industrial_backlog`, `industrial_utilization`, `industrial_units_total`, and
+  `industrial_price_per_unit` surface demand for industrial workloads and feed
+  `Block::industrial_subsidies()`; see [docs/compute_market.md](compute_market.md)
+  for gauge definitions.
+- `dex_escrow_locked`, `dex_escrow_pending`, and `dex_escrow_total` expose funds
+  locked, the count of outstanding DEX escrows, and the aggregate value of all
+  escrowed funds.
 - `difficulty_retarget_total`, `difficulty_clamp_total` track retarget executions and clamp events.
 - `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total` capture QUIC session metrics.
 
@@ -97,4 +104,8 @@ Set `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_TIMEOUT` to stream
 traces to an external collector.  The default Grafana bundle ships with a
 `telemetry-histograms.json` dashboard visualizing the above buckets.
 Import it via the Grafana UI or with `make monitor`.
+
+Remote signer requests emit per-call trace IDs and increment
+`remote_signer_failure_total` on errors so operators can alert on signer
+availability.
 

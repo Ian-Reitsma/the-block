@@ -18,3 +18,28 @@ Example response:
 }
 ```
 
+## Industrial Subsidy Retuning
+
+The governor maintains a separate Kalman state vector
+`(industrial_beta, industrial_gamma, industrial_kappa, industrial_lambda)`
+covering storage, read, compute, and bytes‑out multipliers. Each epoch the
+filter ingests `industrial_backlog` and `industrial_utilization` metrics and
+emits smoothed multipliers for the next period.
+
+`Block::industrial_subsidies()` exposes per‑block IT payouts:
+
+```rust
+let (s, r, c) = block.industrial_subsidies();
+```
+
+These fields (`storage_sub_it`, `read_sub_it`, `compute_sub_it`) appear in block
+RPC responses:
+
+```bash
+curl -s localhost:26658/chain.block?height=1 | \
+  jq '.block | {storage_sub_it,read_sub_it,compute_sub_it}'
+# {"storage_sub_it":0,"read_sub_it":0,"compute_sub_it":0}
+```
+
+Ledger changes introducing the industrial subsidy fields are described in
+[`docs/schema_migrations/v10_industrial_subsidies.md`](schema_migrations/v10_industrial_subsidies.md).

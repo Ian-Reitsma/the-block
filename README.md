@@ -64,12 +64,13 @@ test real services today.
   anchor activity on-chain and mint the corresponding `READ_SUB_CT` reward.
   See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
   flow. (76.0% Complete)
-- The compute marketplace pays nodes for deterministic CPU and GPU work, with
-  receipts hashed into blocks and convertible to CT through multipliers, laying
-  the foundation for compute-backed money. (60.0% Complete)
+- The compute marketplace pays nodes for deterministic CPU and GPU work
+  metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
+  `pct_ct`, and receipts hash into blocks before conversion to CT through
+  multipliers, laying the foundation for compute-backed money. (65.0% Complete)
 - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
   resolves forks deterministically, and validates blocks with BLAKE3 hashes and
-  VDF-anchored randomness. (72.0% Complete)
+  VDF-anchored randomness. (74.0% Complete)
 - Governance and subsidy economics use on-chain proposals to retune `beta`,
   `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
   two percent while funding service roles. (78.0% Complete)
@@ -78,13 +79,16 @@ test real services today.
   PoW headers. (50.0% Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
-  liquidity. (55.0% Complete)
+  liquidity. On-ledger escrow and partial-payment proofs now lock funds until
+  settlements complete, and telemetry gauges `dex_escrow_locked`,
+  `dex_escrow_pending`, and `dex_escrow_total` track utilisation. (72.0%
+  Complete)
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
-  (20.0% Complete)
+  Light-client verification guards all transfers. (45.0% Complete)
 - Wallets, light clients, and optional KYC hooks provide desktop and mobile
-  users with secure key management, staking tools, and compliance options as
-  needed. (70.0% Complete)
+  users with secure key management, staking tools, remote signer support, and
+  compliance options as needed. (80.0% Complete)
 - Monitoring, debugging, and profiling tools export Prometheus metrics,
   structured traces, and readiness endpoints to keep operators informed in
   production. (67.0% Complete)
@@ -103,7 +107,8 @@ test real services today.
 - Sliding-window difficulty retargeting keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC and `difficulty_*` metrics.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently. See [docs/scheduler.md](docs/scheduler.md).
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
-- Modular wallet framework with hardware signer support and CLI utilities; command-line tools wrap the wallet crate and expose key management and staking helpers.
+- Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages.
+- Modular wallet framework with hardware and remote signer support; command-line tools wrap the wallet crate and expose key management and staking helpers.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Versioned P2P handshake negotiates feature bits, records peer metadata, and enforces minimum protocol versions. See [docs/p2p_protocol.md](docs/p2p_protocol.md).
 - QUIC gossip transport with certificate reuse, connection pooling, and TCP fallback; fanout selects per-peer transport.
@@ -128,9 +133,9 @@ test real services today.
 - Range-boost store-and-forward queue tracks bundles with hop proofs so offline relays can ferry data until connectivity returns. See [docs/range_boost.md](docs/range_boost.md).
 - Fee-aware mempool with deterministic priority and EIP-1559 style base fee tracking; low-fee transactions are evicted when capacity is exceeded and each block adjusts the base fee toward a fullness target.
 - Transaction lifecycle document covers payload fields, memo handling, Python bindings, and lane-tagged admission; see [docs/transaction_lifecycle.md](docs/transaction_lifecycle.md).
-- Bridge primitives with relayer proofs and a lock/unlock state machine; `blockctl bridge deposit` and `withdraw` commands move funds across chains while verifying relayer attestations.
+- Bridge primitives with light-client verification, relayer proofs, and a lock/unlock state machine; `blockctl bridge deposit` and `withdraw` commands move funds across chains while verifying relayer attestations.
 - Durable smart-contracts backed by a bincode `ContractStore`; `contract deploy` and `contract call` CLI flows persist code and key/value state under `~/.the_block/state/contracts/` and survive node restarts.
-- Persistent DEX order books and trade logs via `DexStore`; multi-hop trust-line routing uses cost-based path scoring with fallback routes so payments continue even if a preferred hop disappears mid-flight. See [docs/dex.md](docs/dex.md).
+- Persistent DEX order books and trade logs via `DexStore`; on-ledger escrow and partial-payment proofs lock funds until settlement, and gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track funds and counts. Multi-hop trust-line routing uses cost-based path scoring with fallback routes so payments continue even if a preferred hop disappears mid-flight. See [docs/dex.md](docs/dex.md).
 - WAL-backed `SimpleDb` provides a lightweight key-value store with crash-safe
   replay and optional byte quotas. DNS caches, chunk gossip, and DEX storage
   all build on this primitive; see [docs/simple_db.md](docs/simple_db.md).
@@ -415,7 +420,7 @@ If your tree differs, run the repo re-layout task in `AGENTS.md`.
 
 ## Status & Roadmap
 
-Mainnet readiness: ~96/100 · Vision completion: ~66/100.
+Mainnet readiness: ~97/100 · Vision completion: ~68/100.
 
 This section mirrors the canonical [docs/roadmap.md](docs/roadmap.md), which tracks ongoing priorities and is updated with every release.
 
@@ -433,13 +438,13 @@ see [docs/progress.md](docs/progress.md).
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
 | **Governance & Subsidy Economy** | **78 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; governance can seed reward pools for service roles. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
-| **Consensus & Core Execution** | 72 % | Stake-weighted leader rotation, deterministic tie-breaks, rollback tests, and parallel executor guard against replay collisions. | Formal proofs still absent. |
+| **Consensus & Core Execution** | 74 % | Stake-weighted leader rotation, deterministic tie-breaks, sliding-window difficulty retarget, and parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 50 % | Persistent contract store, deployment CLI, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **76 %** | Receipt-only logging, hourly batching, L1 anchoring, and `gateway.reads_since` analytics keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
-| **Compute Marketplace & CBM** | 60 % | GPU/CPU workloads emit deterministic `ExecutionReceipt`s and redeem via compute-backed money curves. | No heterogeneous scheduling or reputation system; SLA arbitration limited. |
-| **Trust Lines & DEX** | 55 % | Authorization-aware trust lines, cost-based multi-hop routing, and slippage-checked order books. | On-ledger escrow and partial payment proofs absent. |
-| **Cross-Chain Bridges** | 20 % | Lock/unlock primitives with relayer proofs and CLI deposit/withdraw flows. | Light-client verification and incentive safety proofs missing. |
-| **Wallets, Light Clients & KYC** | 70 % | CLI and hardware wallet support, mobile light-client SDKs, and pluggable KYC hooks. | Remote signer, multisig, and production-grade mobile apps outstanding. |
+| **Compute Marketplace & CBM** | 65 % | GPU/CPU workloads emit deterministic `ExecutionReceipt`s, compute-unit pricing surfaces in `compute_market.stats`, and redeem curves back CBM. | No heterogeneous scheduling or reputation system; SLA arbitration limited. |
+| **Trust Lines & DEX** | 72 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation. | Cross-chain settlement proofs and advanced routing features outstanding. |
+| **Cross-Chain Bridges** | 45 % | Lock/unlock primitives with light-client verification, persisted headers under `state/bridge_headers/`, and CLI deposit/withdraw flows. | Relayer incentives and incentive safety proofs missing. |
+| **Wallets, Light Clients & KYC** | 80 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, and pluggable KYC hooks. | Multisig and production-grade mobile apps outstanding. |
 | **Monitoring, Debugging & Profiling** | 67 % | Prometheus/Grafana dashboards expose read-denial and subsidy counters; CLI debugger and profiling utilities ship with nodes. | Bridge/VM metrics and automated anomaly detection missing. |
 | **Economic Simulation & Formal Verification** | 35 % | Bench harness simulates inflation/demand; chaos tests capture seeds. | Sparse scenario library and no integrated proof pipeline. |
 | **Mobile UX & Contribution Metrics** | 52 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
@@ -464,7 +469,7 @@ see [docs/progress.md](docs/progress.md).
 
 - **Full cross-chain exchange routing** – implement adapters for SushiSwap and Balancer, integrate bridge fee estimators and route selectors, simulate multi-hop slippage, watchdog stuck swaps, and document guarantees.
 - **Distributed benchmark network at scale** – deploy harness across 100+ nodes/regions, automate workload permutations, gather latency/throughput heatmaps, generate regression dashboards, and publish tuning guides.
-- **Wallet ecosystem expansion** – add remote signer and multisig modules, ship Swift/Kotlin SDKs, enable hardware wallet firmware updates, provide backup/restore tooling, and host interoperability tests.
+- **Wallet ecosystem expansion** – add multisig modules, ship Swift/Kotlin SDKs, enable hardware wallet firmware updates, provide backup/restore tooling, and host interoperability tests.
 - **Governance feature extensions** – roll out staged upgrade pipelines, support proposal dependencies and queue management, add on-chain treasury accounting, offer community alerts, and finalize rollback simulation playbooks.
   - **Mobile light client productionization** – optimize header sync/storage, add push notification hooks for subsidy events, integrate background energy-saving tasks, support mobile signing, and run a cross-hardware beta program.
 
@@ -580,18 +585,20 @@ see [docs/progress.md](docs/progress.md).
 
 ## Telemetry & Metrics
 
-Key counters and gauges:
+ Key counters and gauges:
 
-- `mempool_size{lane}`, `consumer_fee_p50`, `consumer_fee_p90`.
-- `admission_mode{mode}`, `industrial_admitted_total`, `industrial_deferred_total`, `industrial_rejected_total{reason}`.
-- `gossip_duplicate_total`, `gossip_fanout_gauge`, `gossip_convergence_seconds`, `fork_reorg_total`.
-- `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`.
-  - `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`.
+ - `mempool_size{lane}`, `consumer_fee_p50`, `consumer_fee_p90`.
+ - `admission_mode{mode}`, `industrial_admitted_total`, `industrial_deferred_total`, `industrial_rejected_total{reason}`.
+ - `industrial_backlog`, `industrial_utilization`, `industrial_units_total`, `industrial_price_per_unit`.
+- - `dex_escrow_locked` and `dex_escrow_pending` track escrowed funds and open contracts.
+ - `gossip_duplicate_total`, `gossip_fanout_gauge`, `gossip_convergence_seconds`, `fork_reorg_total`.
+ - `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`.
+   - `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`.
 
-- `snapshot_interval_changed`, `badge_active`, `badge_last_change_seconds`.
-- `courier_flush_attempt_total`, `courier_flush_failure_total`.
-- `storage_put_bytes_total`, `storage_chunk_put_seconds`, `storage_repair_bytes_total`.
-- Synthetic probes: the `probe` CLI emits `probe_success` and `probe_duration_seconds` for external health checks; see [docs/probe.md](docs/probe.md).
+ - `snapshot_interval_changed`, `badge_active`, `badge_last_change_seconds`.
+ - `courier_flush_attempt_total`, `courier_flush_failure_total`.
+ - `storage_put_bytes_total`, `storage_chunk_put_seconds`, `storage_repair_bytes_total`.
+ - Synthetic probes: the `probe` CLI emits `probe_success` and `probe_duration_seconds` for external health checks; see [docs/probe.md](docs/probe.md).
 
 Histograms provide latency distributions for core operations:
 
@@ -607,6 +614,14 @@ blockctl telemetry summarize telemetry-summary.log
 ```
 
 OTLP traces can be exported by setting `OTEL_EXPORTER_OTLP_ENDPOINT`.
+
+Structured logging supports JSON output and per-module directives:
+
+```bash
+blockctl node start --log-format json --log-level info --log-level mempool=debug
+```
+
+See [`config/logging.json`](config/logging.json) for an example configuration file.
 
 See [docs/economics.md](docs/economics.md#epoch-retuning-formula) for the subsidy retuning formula and ROI guidance.
 - `price_band_p25{lane}`, `price_band_median{lane}`, `price_band_p75{lane}`.
@@ -636,6 +651,6 @@ make monitor   # Prom+Grafana; scrape :9100, open :3000
 - Links to `docs/*` and `examples/*` validate via `python scripts/check_anchors.py --md-anchors`.
 - Nightly toolchain is required only for `cargo fuzz`.
 - macOS rpath guidance for PyO3 (`PYO3_PYTHON`/`PYTHONHOME`) is documented.
-- Status & Roadmap states ~96/100 and ~66/100 vision completion and maps to concrete next tasks.
+- Status & Roadmap states ~97/100 and ~68/100 vision completion and maps to concrete next tasks.
 
 ## Disclaimer

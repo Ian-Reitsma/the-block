@@ -273,7 +273,7 @@ else
   chmod +x "$bindir/cargo-make"
 fi
 
-# Last version compatible with rustc 1.82 bundled in this repo
+# Bundled cargo-nextest release compatible with rustc 1.86
 NEXTEST_VERSION=0.9.97-b.2
 if cargo nextest --version 2>/dev/null | grep -q "$NEXTEST_VERSION"; then
   cecho green "   ✓ cargo-nextest already installed"

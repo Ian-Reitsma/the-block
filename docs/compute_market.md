@@ -30,6 +30,35 @@ and the latest quoted price. Hardware can be calibrated via
 `compute_market::workload::calibrate_gpu`, which maps a GPU's GFLOPS rating to
 units per second.
 
+### Demand Metrics and Subsidy Interaction
+
+The marketplace exposes `industrial_backlog` and `industrial_utilization`
+gauges. `industrial_backlog` counts queued compute units awaiting execution,
+while `industrial_utilization` reports realised throughput over the current
+window. The subsidy governor samples these metrics through
+`Block::industrial_subsidies()` when retuning multipliers, tying pricing to
+actual demand.
+
+Sample stats output:
+
+```bash
+curl localhost:26658/compute_market.stats
+```
+
+```json
+{
+  "industrial_backlog": 12,
+  "industrial_utilization": 0.83,
+  "industrial_units_total": 240,
+  "industrial_price_per_unit": 5
+}
+```
+
+High backlog with low utilisation suggests providers are scarce; governance may
+raise multipliers or admission targets. Cross-reference
+[docs/inflation.md](inflation.md) for how these gauges feed the retuning
+mechanics.
+
 ## Workload Formats
 
 - **Transcode** – Accepts raw bytes representing media to be transcoded. For the

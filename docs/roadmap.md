@@ -1,6 +1,6 @@
 # Status & Roadmap
 
-Mainnet readiness: ~96/100 · Vision completion: ~66/100.
+Mainnet readiness: ~97/100 · Vision completion: ~68/100.
 
 The third-token ledger has been fully retired. Every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase, with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing inflation to ≤ 2 %/year. Historical context and migration notes are in [`docs/system_changes.md`](system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
 
@@ -35,10 +35,10 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 | **Consensus & Core Execution** | 74 % | Stake-weighted leader rotation, deterministic tie-breaks, sliding-window difficulty retarget, and parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 50 % | Persistent contract store, deployment CLI, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **76 %** | Receipt-only logging, hourly batching, L1 anchoring, and `gateway.reads_since` analytics keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
-| **Compute Marketplace & CBM** | 60 % | GPU/CPU workloads emit deterministic `ExecutionReceipt`s and redeem via compute-backed money curves. | No heterogeneous scheduling or reputation system; SLA arbitration limited. |
-| **Trust Lines & DEX** | 55 % | Authorization-aware trust lines, cost-based multi-hop routing, and slippage-checked order books. | On-ledger escrow and partial payment proofs absent. |
-| **Cross-Chain Bridges** | 20 % | Lock/unlock primitives with relayer proofs and CLI deposit/withdraw flows. | Light-client verification and incentive safety proofs missing. |
-| **Wallets, Light Clients & KYC** | 70 % | CLI and hardware wallet support, mobile light-client SDKs, and pluggable KYC hooks. | Remote signer, multisig, and production-grade mobile apps outstanding. |
+| **Compute Marketplace & CBM** | 65 % | GPU/CPU workloads emit deterministic `ExecutionReceipt`s, compute-unit pricing surfaces in `compute_market.stats`, and redeem curves back CBM. | No heterogeneous scheduling or reputation system; SLA arbitration limited. |
+| **Trust Lines & DEX** | 72 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). | Cross-chain settlement proofs and advanced routing features outstanding. |
+| **Cross-Chain Bridges** | 45 % | Lock/unlock primitives with light-client verification, persisted headers under `state/bridge_headers/`, and CLI deposit/withdraw flows. | Relayer incentives and incentive safety proofs missing. |
+| **Wallets, Light Clients & KYC** | 80 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, and pluggable KYC hooks. | Multisig and production-grade mobile apps outstanding. |
 | **Monitoring, Debugging & Profiling** | 67 % | Prometheus/Grafana dashboards expose read-denial and subsidy counters; CLI debugger and profiling utilities ship with nodes. | Bridge/VM metrics and automated anomaly detection missing. |
 | **Economic Simulation & Formal Verification** | 35 % | Bench harness simulates inflation/demand; chaos tests capture seeds. | Sparse scenario library and no integrated proof pipeline. |
 | **Mobile UX & Contribution Metrics** | 52 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
@@ -63,7 +63,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 - **Full cross-chain exchange routing** – implement adapters for SushiSwap and Balancer, integrate bridge fee estimators and route selectors, simulate multi-hop slippage, watchdog stuck swaps, and document guarantees.
 - **Distributed benchmark network at scale** – deploy harness across 100+ nodes/regions, automate workload permutations, gather latency/throughput heatmaps, generate regression dashboards, and publish tuning guides.
-- **Wallet ecosystem expansion** – add remote signer and multisig modules, ship Swift/Kotlin SDKs, enable hardware wallet firmware updates, provide backup/restore tooling, and host interoperability tests.
+- **Wallet ecosystem expansion** – add multisig modules, ship Swift/Kotlin SDKs, enable hardware wallet firmware updates, provide backup/restore tooling, and host interoperability tests.
 - **Governance feature extensions** – roll out staged upgrade pipelines, support proposal dependencies and queue management, add on-chain treasury accounting, offer community alerts, and finalize rollback simulation playbooks.
 - **Mobile light client productionization** – optimize header sync/storage, add push notification hooks for subsidy events, integrate background energy-saving tasks, support mobile signing, and run a cross-hardware beta program.
 
@@ -105,55 +105,47 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
    - Sort pending transactions by effective fee in `node/src/mempool.rs`.
    - Evict low-fee transactions when capacity exceeds threshold.
    - Ensure higher-fee transactions are processed first in tests.
-8. **Implement lock/unlock bridge primitives**
-   - Define bridge contracts in `bridges/` for asset locking.
-   - Add relayer proofs verifying remote chain events.
-   - Provide CLI commands for deposit and withdraw.
-9. **Persist DEX order books and trades**
-   - Store order books in `dex/src/storage.rs` backed by `SimpleDb`.
-   - Log executed trades in `dex/trades/` for audits.
-   - Recover books after node restart in tests.
-10. **Enhance multi-hop trust-line routing**
-    - Implement cost-based path scoring in `trust_lines/src/path.rs`.
-    - Add fallback routes when optimal paths fail mid-transfer.
-    - Update documentation with routing algorithm details.
-11. **Expose subsidy parameter proposals in gov-ui**
+8. **Enhance multi-hop trust-line routing**
+   - Implement cost-based path scoring in `trust_lines/src/path.rs`.
+   - Add fallback routes when optimal paths fail mid-transfer.
+   - Update documentation with routing algorithm details.
+9. **Expose subsidy parameter proposals in gov-ui**
     - List multiplier and rent-rate proposals in the UI.
     - Allow voting and activation through web interface.
     - Sync results via `governance/params.rs`.
-12. **Index settlement receipts in explorer storage**
+10. **Index settlement receipts in explorer storage**
     - Parse receipt files in `explorer/indexer.rs`.
     - Persist anchors and issuance events into explorer DB.
     - Add REST endpoints to query finalized batches.
-13. **Schedule settlement verification in CI**
+11. **Schedule settlement verification in CI**
     - Add a CI job invoking `settlement.audit`.
     - Fail builds on mismatched anchors or subsidy totals.
     - Provide sample configs in `ci/settlement.yml`.
-14. **Fuzz peer identifier parsing**
+12. **Fuzz peer identifier parsing**
     - Create fuzz target for `net/discovery.rs` identifier parser.
     - Integrate with `cargo-fuzz` under `fuzz/`.
     - Run in CI with crash-on-error.
-15. **Document manual DHT recovery procedures**
+13. **Document manual DHT recovery procedures**
     - Write `docs/dht_recovery.md` with step-by-step commands.
        - Include troubleshooting for stale peer lists.
     - Cross-reference `net/discovery.rs` comments.
-16. **Integrate gateway fuzzing**
+14. **Integrate gateway fuzzing**
     - Build fuzz harness for `gateway/http.rs` request handling.
     - Seed with realistic HTTP traffic patterns.
     - Wire into nightly CI runs.
-17. **Simulate disk exhaustion in storage tests**
+15. **Simulate disk exhaustion in storage tests**
     - Modify `node/tests/storage_repair.rs` to limit tmpfs size.
     - Validate graceful error and recovery paths.
     - Ensure receipts and ledger updates remain consistent.
-18. **Randomize RPC client timeouts**
+16. **Randomize RPC client timeouts**
     - Introduce jitter in `node/src/rpc/client.rs` timeout settings.
     - Expose config knob `rpc.timeout_jitter_ms`.
     - Test under high latency to confirm resilience.
-19. **Add push notification hooks for subsidy events**
+17. **Add push notification hooks for subsidy events**
     - Emit webhook or FCM triggers in wallet tooling.
     - Allow mobile clients to register tokens via RPC.
     - Document opt-in flow in `docs/mobile.md`.
-20. **Set up formal verification for consensus rules**
+18. **Set up formal verification for consensus rules**
     - Translate the state machine into F* modules under `formal/consensus`.
     - Create CI jobs running `fstar` to ensure proofs compile.
     - Provide developer guide in `formal/README.md`.

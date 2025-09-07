@@ -1,4 +1,4 @@
-FROM rust:1.82-bullseye AS build
+FROM rust:1.86-bullseye AS build
 WORKDIR /app
 COPY . .
 RUN cargo build --release --locked

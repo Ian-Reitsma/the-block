@@ -3,7 +3,7 @@
 To rebuild official releases byte-for-byte, follow these guidelines.
 
 ## Environment
-- **Rust toolchain:** pinned via `rust-toolchain.toml` (1.82.0 with `clippy` and `rustfmt`).
+- **Rust toolchain:** pinned via `rust-toolchain.toml` (1.86.0 with `clippy` and `rustfmt`).
 - **Base image:** Ubuntu 22.04 or macOS 14 runner.
 - **Linker:** `lld` preferred (`apt install lld` on Linux, `brew install llvm` on macOS).
 - **Environment variables:**

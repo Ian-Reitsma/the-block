@@ -43,6 +43,11 @@ Sequence:
 
 Sample `header.json` and `proof.json` files reside in `examples/bridges/` for development testing.
 
+The `state/bridge_headers/` directory stores one file per verified header. Each
+entry contains the serialised `Header` plus the block height that introduced it.
+Schema migration details live in
+[`docs/schema_migrations/v8_bridge_headers.md`](schema_migrations/v8_bridge_headers.md).
+
 ## Relayer Proof Format
 
 ```text
@@ -60,6 +65,14 @@ Relayers must sign the serialized `LockProof` with their Ed25519 key. The contra
 - signature matches a whitelisted relayer,
 - `deposit_id` exists and is still locked,
 - Merkle path recomputes the event root.
+
+| Field       | Type        | Example file |
+|-------------|-------------|--------------|
+| `deposit_id`| `u64`       | `examples/bridges/proof.json` |
+| `amount`    | `u64`       | `examples/bridges/proof.json` |
+| `source`    | `[u8;32]`   | `examples/bridges/header.json` |
+| `dest_chain`| `u16`       | `examples/bridges/proof.json` |
+| `merkle_path`| `Vec<[u8;32]>` | `examples/bridges/proof.json` |
 
 ## CLI Examples
 
@@ -89,4 +102,4 @@ blockctl bridge withdraw \
 - **Relayer Incentives** – fee market and slashing for misbehavior.
 - **Multi-Asset Support** – extend the lock contract to wrap arbitrary tokens with minted representations on the destination chain.
 
-Progress: 30%
+Progress: 45%

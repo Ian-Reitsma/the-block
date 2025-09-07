@@ -581,7 +581,7 @@ mod tests {
             .unwrap_or_else(|e| panic!("submit job: {e}"));
         assert!(market.backlog_factor() > 1.0);
         let mut board = PriceBoard::new(10);
-        board.record(FeeLane::Industrial, 5);
+        board.record(5);
         let adj = board
             .adjusted_median(market.backlog_factor())
             .unwrap_or_else(|| panic!("adjusted median"));
