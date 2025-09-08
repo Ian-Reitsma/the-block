@@ -54,4 +54,3 @@ async fn rpc_inflation_reports_industrial() {
     let val2 = rpc(&addr, r#"{"method":"compute_market.stats"}"#).await;
     assert!(val2["result"]["industrial_backlog"].is_number());
 }
-

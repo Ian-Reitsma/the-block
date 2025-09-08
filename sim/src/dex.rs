@@ -11,13 +11,15 @@ pub fn swap_del_pino(x: f64, y: f64, dx: f64) -> f64 {
     let k = x * x.ln() + y * y.ln();
     let x_new = x + dx;
     let mut y_new = y; // initial guess
-    // Newton–Raphson iterations
+                       // Newton–Raphson iterations
     for _ in 0..20 {
         let f = x_new * x_new.ln() + y_new * y_new.ln() - k;
         let df = y_new.ln() + 1.0;
         let step = f / df;
         y_new -= step;
-        if step.abs() < 1e-12 { break; }
+        if step.abs() < 1e-12 {
+            break;
+        }
     }
     let dy = y - y_new;
     assert!(dy >= 0.0);
@@ -39,4 +41,3 @@ mod tests {
         assert!((k1 - k2).abs() < 1e-6);
     }
 }
-

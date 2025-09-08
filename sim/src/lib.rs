@@ -6,9 +6,9 @@ use serde::Serialize;
 pub mod bridging;
 pub mod dashboard;
 pub mod demand;
+pub mod dex;
 pub mod inflation;
 pub mod liquidity;
-pub mod dex;
 
 use bridging::BridgeModel;
 use dashboard::Snapshot;

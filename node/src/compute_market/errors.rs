@@ -10,6 +10,7 @@ pub enum MarketError {
     Capacity,
     FairShare,
     BurstExhausted,
+    Capability,
 }
 
 impl MarketError {
@@ -22,6 +23,7 @@ impl MarketError {
             MarketError::Capacity => -33100,
             MarketError::FairShare => -33101,
             MarketError::BurstExhausted => -33102,
+            MarketError::Capability => -33103,
         }
     }
     pub fn message(&self) -> &'static str {
@@ -33,6 +35,7 @@ impl MarketError {
             MarketError::Capacity => "insufficient capacity",
             MarketError::FairShare => "fair share cap exceeded",
             MarketError::BurstExhausted => "burst quota exhausted",
+            MarketError::Capability => "capability mismatch",
         }
     }
 }

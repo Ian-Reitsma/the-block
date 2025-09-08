@@ -41,6 +41,6 @@ mod tests {
     fn selects_topk() {
         let v = vec![1.0, -5.0, 3.0, 10.0, -2.0];
         let top = topk(&v, 2);
-        assert_eq!(top, vec![1,3]);
+        assert_eq!(top, vec![1, 3]);
     }
 }

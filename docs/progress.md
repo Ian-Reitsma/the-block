@@ -35,7 +35,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~75 %
+## 2. Networking & Gossip — ~77 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -48,6 +48,8 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
 - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
 - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
+- Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC
+  and `net stats` CLI, capped by `max_peer_metrics`.
 
 **Gaps**
 - Large-scale WAN chaos experiments remain open.
@@ -102,17 +104,18 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~65 %
+## 6. Compute Marketplace & CBM — ~68 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
 - Price board persistence with metrics (`docs/compute_market.md`).
 - Economic simulator outputs KPIs to CSV (`sim/src`).
 - Durable courier receipts with exponential backoff documented in `docs/compute_market_courier.md` and implemented in `node/src/compute_market/courier.rs`.
+- Capability-aware scheduler matches CPU/GPU workloads and weights offers by
+  provider reputation (`node/src/compute_market/scheduler.rs`).
 
 **Gaps**
-- Heterogeneous hardware scheduling and escrowed payments unsolved.
-- SLA enforcement rudimentary.
+- Escrowed payments and SLA enforcement remain rudimentary.
 
 ## 7. Trust Lines & DEX — ~72 %
 

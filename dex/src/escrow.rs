@@ -123,7 +123,11 @@ fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
         let mut next = Vec::with_capacity((level.len() + 1) / 2);
         for i in (0..level.len()).step_by(2) {
             let a = level[i];
-            let b = if i + 1 < level.len() { level[i + 1] } else { level[i] };
+            let b = if i + 1 < level.len() {
+                level[i + 1]
+            } else {
+                level[i]
+            };
             let mut buf = [0u8; 64];
             buf[..32].copy_from_slice(&a);
             buf[32..].copy_from_slice(&b);
@@ -155,7 +159,11 @@ fn build_proof(leaves: &[[u8; 32]], idx: usize) -> Option<PaymentProof> {
         let mut next = Vec::with_capacity((level.len() + 1) / 2);
         for i in (0..level.len()).step_by(2) {
             let a = level[i];
-            let b = if i + 1 < level.len() { level[i + 1] } else { level[i] };
+            let b = if i + 1 < level.len() {
+                level[i + 1]
+            } else {
+                level[i]
+            };
             let mut buf = [0u8; 64];
             buf[..32].copy_from_slice(&a);
             buf[32..].copy_from_slice(&b);
@@ -201,4 +209,3 @@ mod tests {
         assert!(verify_proof(proof.leaf, 0, &proof.path, entry.root));
     }
 }
-

@@ -23,9 +23,7 @@ pub fn retune_industrial_multiplier(
     let mut state: KalmanState = fs::read(&state_path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or(KalmanState {
-            x: current as f64,
-        });
+        .unwrap_or(KalmanState { x: current as f64 });
     let mut m = if utilisation <= 0.0 {
         state.x * 2.0
     } else {
@@ -38,4 +36,3 @@ pub fn retune_industrial_multiplier(
     let _ = fs::write(&state_path, serde_json::to_vec(&state).unwrap());
     m.round() as i64
 }
-

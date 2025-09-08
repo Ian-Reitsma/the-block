@@ -1,6 +1,4 @@
-use super::constants::{
-    DIFFICULTY_CLAMP_FACTOR, DIFFICULTY_WINDOW, TARGET_SPACING_MS,
-};
+use super::constants::{DIFFICULTY_CLAMP_FACTOR, DIFFICULTY_WINDOW, TARGET_SPACING_MS};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{DIFFICULTY_CLAMP_TOTAL, DIFFICULTY_RETARGET_TOTAL};
 use crate::Block;

@@ -23,11 +23,7 @@ use prometheus::{IntCounterVec, IntGauge, IntGaugeVec, Opts};
 use tracing::{info, warn};
 
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{
-    INDUSTRIAL_BACKLOG,
-    INDUSTRIAL_PRICE_PER_UNIT,
-    INDUSTRIAL_UTILIZATION,
-};
+use crate::telemetry::{INDUSTRIAL_BACKLOG, INDUSTRIAL_PRICE_PER_UNIT, INDUSTRIAL_UTILIZATION};
 
 const MAGIC: [u8; 4] = MAGIC_PRICE_BOARD;
 const VERSION: u16 = 1;

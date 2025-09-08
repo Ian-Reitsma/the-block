@@ -1,8 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::util::temp::temp_dir;
 use the_block::fee::{decompose, FeeError, MAX_FEE};
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
-use crate::util::temp::temp_dir;
 
 mod util;
 

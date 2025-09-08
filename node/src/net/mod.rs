@@ -33,7 +33,15 @@ use std::time::Duration;
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
 pub use message::{BlobChunk, Message, Payload};
-pub use peer::PeerSet;
+pub use peer::{
+    export_peer_stats, peer_stats, peer_stats_all, reset_peer_metrics, set_max_peer_metrics,
+    set_peer_metrics_export, set_track_drop_reasons, set_peer_reputation_decay, DropReason,
+    PeerMetrics, PeerReputation, PeerSet, PeerStat,
+};
+
+pub fn record_ip_drop(ip: &std::net::SocketAddr) {
+    peer::record_ip_drop(ip);
+}
 
 /// Current gossip protocol version.
 pub const PROTOCOL_VERSION: u16 = SUPPORTED_VERSION;
@@ -260,6 +268,7 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
         tracing::info!(parent: &span, peer = %addr, len = bytes.len(), "send_msg");
     }
     stream.write_all(&bytes)?;
+    crate::net::peer::record_send(addr, bytes.len());
     Ok(())
 }
 

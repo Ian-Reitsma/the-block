@@ -33,9 +33,17 @@ enum Commands {
         #[arg(value_enum)]
         role: Role,
         amount: u64,
-        #[arg(long, help = "32-byte seed in hex", required_unless_present = "remote_signer")]
+        #[arg(
+            long,
+            help = "32-byte seed in hex",
+            required_unless_present = "remote_signer"
+        )]
         seed: Option<String>,
-        #[arg(long, help = "remote signer endpoint", required_unless_present = "seed")]
+        #[arg(
+            long,
+            help = "remote signer endpoint",
+            required_unless_present = "seed"
+        )]
         remote_signer: Option<String>,
         #[arg(long, help = "withdraw instead of bond")]
         withdraw: bool,

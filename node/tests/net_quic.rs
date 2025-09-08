@@ -90,12 +90,16 @@ async fn quic_gossip_roundtrip() {
         quic_cert: None,
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&msg).unwrap()).await.unwrap();
+    quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        .await
+        .unwrap();
     let recv = hs_rx.await.unwrap();
     let parsed: Message = bincode::deserialize(&recv).unwrap();
     assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
     let gossip = Message::new(Payload::Hello(Vec::new()), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&gossip).unwrap()).await.unwrap();
+    quic::send(&conn, &bincode::serialize(&gossip).unwrap())
+        .await
+        .unwrap();
     let recv = msg_rx.await.unwrap();
     let parsed: Message = bincode::deserialize(&recv).unwrap();
     assert!(matches!(parsed.body, Payload::Hello(peers) if peers.is_empty()));
@@ -134,7 +138,9 @@ async fn quic_disconnect() {
         quic_cert: None,
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&msg).unwrap()).await.unwrap();
+    quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        .await
+        .unwrap();
     conn.close(0u32.into(), b"client");
     conn.closed().await;
     close_rx.await.unwrap();
@@ -193,4 +199,19 @@ async fn quic_endpoint_reuse() {
     server_ep.wait_idle().await;
     #[cfg(feature = "telemetry")]
     assert!(QUIC_ENDPOINT_REUSE_TOTAL.get() >= 1);
+}
+
+#[tokio::test]
+async fn quic_handshake_failure_metric() {
+    use rcgen::generate_simple_self_signed;
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let (server_ep, _incoming, _cert) = quic::listen(addr).await.unwrap();
+    let listen_addr = server_ep.local_addr().unwrap();
+    let bad = generate_simple_self_signed(["bad".into()]).unwrap();
+    let bad_cert = quinn::Certificate::from_der(&bad.serialize_der().unwrap()).unwrap();
+    let res = quic::connect(listen_addr, bad_cert).await;
+    assert!(res.is_err());
+    server_ep.wait_idle().await;
+    #[cfg(feature = "telemetry")]
+    assert!(the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL.get() >= 1);
 }

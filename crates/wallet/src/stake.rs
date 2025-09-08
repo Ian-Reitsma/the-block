@@ -26,9 +26,7 @@ pub fn stake_advice(
         - (1.0 / 36.0) * (2.0 * z * z * z - 5.0 * z) * skew * skew;
 
     let sigma_star = sigma
-        * (1.0
-            + (skew * z_cf) / 6.0
-            + (kurt - 3.0) * (z_cf * z_cf - 1.0) / 24.0
+        * (1.0 + (skew * z_cf) / 6.0 + (kurt - 3.0) * (z_cf * z_cf - 1.0) / 24.0
             - skew * skew * (2.0 * z_cf * z_cf - 1.0) / 36.0);
 
     // CVaR for normal approx: mu=loss, tail beyond VaR
@@ -52,4 +50,3 @@ mod tests {
         assert!(cvar > 5.0);
     }
 }
-

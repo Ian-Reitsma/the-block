@@ -1,9 +1,9 @@
 pub mod bicameral;
+pub mod inflation_cap;
+mod kalman;
 mod params;
 mod store;
-mod kalman;
 mod variance;
-pub mod inflation_cap;
 
 pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,

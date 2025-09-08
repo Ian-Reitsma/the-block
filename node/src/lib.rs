@@ -17,10 +17,6 @@ use blake3;
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
-#[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-use tracing::info;
-#[cfg(feature = "telemetry")]
-use tracing::warn;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -36,6 +32,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+use tracing::info;
+#[cfg(feature = "telemetry")]
+use tracing::warn;
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
 pub mod config;
 pub mod exec;
@@ -1192,10 +1192,9 @@ impl Blockchain {
                                 let mut fee_c: u128 = 0;
                                 let mut fee_i: u128 = 0;
                                 for tx in b.transactions.iter().skip(1) {
-                                    if let Ok((c, i)) = crate::fee::decompose(
-                                        tx.payload.pct_ct,
-                                        tx.payload.fee,
-                                    ) {
+                                    if let Ok((c, i)) =
+                                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                    {
                                         fee_c += c as u128;
                                         fee_i += i as u128;
                                     }
@@ -1490,10 +1489,9 @@ impl Blockchain {
                             for tx in &blk.transactions {
                                 if tx.payload.from_ != "0".repeat(34) {
                                     if let Some(s) = bc.accounts.get_mut(&tx.payload.from_) {
-                                        if let Ok((fee_c, fee_i)) = crate::fee::decompose(
-                                            tx.payload.pct_ct,
-                                            tx.payload.fee,
-                                        ) {
+                                        if let Ok((fee_c, fee_i)) =
+                                            crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                        {
                                             let total_c = tx.payload.amount_consumer + fee_c;
                                             let total_i = tx.payload.amount_industrial + fee_i;
                                             s.balance.consumer =
@@ -1545,6 +1543,17 @@ impl Blockchain {
         bc.snapshot.set_base(path.to_string());
         let cfg = NodeConfig::load(path);
         bc.snapshot.set_interval(cfg.snapshot_interval);
+        crate::net::set_max_peer_metrics(cfg.max_peer_metrics);
+        crate::net::set_peer_metrics_export(cfg.peer_metrics_export);
+        crate::net::set_track_drop_reasons(cfg.track_peer_drop_reasons);
+        crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
+        crate::compute_market::scheduler::set_provider_reputation_decay(
+            cfg.provider_reputation_decay,
+        );
+        crate::compute_market::scheduler::set_provider_reputation_retention(
+            cfg.provider_reputation_retention,
+        );
+        crate::compute_market::scheduler::set_scheduler_metrics_enabled(cfg.scheduler_metrics);
         let infl = crate::config::load_inflation(path);
         bc.params.beta_storage_sub_ct = (infl.beta_storage_sub_ct * 1000.0) as i64;
         bc.params.gamma_read_sub_ct = (infl.gamma_read_sub_ct * 1000.0) as i64;
@@ -2106,10 +2115,9 @@ impl Blockchain {
                 mempool.remove(&(ev_sender.clone(), ev_nonce));
                 self.dec_mempool_size(lane);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
-                    if let Ok((c, i)) = crate::fee::decompose(
-                        ev_entry.tx.payload.pct_ct,
-                        ev_entry.tx.payload.fee,
-                    ) {
+                    if let Ok((c, i)) =
+                        crate::fee::decompose(ev_entry.tx.payload.pct_ct, ev_entry.tx.payload.fee)
+                    {
                         let total_c = ev_entry.tx.payload.amount_consumer + c;
                         let total_i = ev_entry.tx.payload.amount_industrial + i;
                         acc.pending_consumer = acc.pending_consumer.saturating_sub(total_c);
@@ -3080,8 +3088,7 @@ impl Blockchain {
             if tx.payload.from_ != "0".repeat(34) {
                 if let Some(s) = shadow_accounts.get_mut(&tx.payload.from_) {
                     let (fee_c, fee_i) =
-                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
-                            .unwrap_or((0, 0));
+                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee).unwrap_or((0, 0));
                     let total_c = tx.payload.amount_consumer + fee_c;
                     let total_i = tx.payload.amount_industrial + fee_i;
                     s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
@@ -3260,8 +3267,7 @@ impl Blockchain {
                     self.gamma_read_sub_ct_raw = raw[1];
                     self.kappa_cpu_sub_ct_raw = raw[2];
                     self.lambda_bytes_out_sub_ct_raw = raw[3];
-                    let (backlog, util) =
-                        crate::compute_market::price_board::backlog_utilization();
+                    let (backlog, util) = crate::compute_market::price_board::backlog_utilization();
                     let ind = inflation::retuning::retune_industrial_multiplier(
                         std::path::Path::new(&self.path),
                         self.params.industrial_multiplier,

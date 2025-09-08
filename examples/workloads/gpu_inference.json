@@ -1,0 +1,9 @@
+{
+  "job_id": "demo-gpu",
+  "capability": {
+    "cpu_cores": 4,
+    "gpu": "RTX4090",
+    "gpu_memory_mb": 16384
+  },
+  "workload": "inference"
+}

@@ -1,5 +1,5 @@
-use dex::escrow::{verify_proof, Escrow};
 use blake3;
+use dex::escrow::{verify_proof, Escrow};
 
 #[test]
 fn full_and_partial_and_proofs() {

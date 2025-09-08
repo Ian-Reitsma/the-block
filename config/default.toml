@@ -1,0 +1,8 @@
+# Default configuration for The-Block networking
+max_peer_metrics = 1024
+peer_metrics_export = true
+track_peer_drop_reasons = true
+peer_reputation_decay = 0.01
+provider_reputation_decay = 0.05
+provider_reputation_retention = 604800
+scheduler_metrics = true

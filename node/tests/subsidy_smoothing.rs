@@ -1,5 +1,5 @@
-use the_block::governance::{retune_multipliers, Utilization, Params};
 use tempfile::tempdir;
+use the_block::governance::{retune_multipliers, Params, Utilization};
 
 #[test]
 fn smoothing_limits_burst_effect() {
@@ -9,7 +9,13 @@ fn smoothing_limits_burst_effect() {
     params.util_var_threshold = 100; // 0.1
     params.fib_window_base_secs = 4; // 1 epoch
     let supply = 1_000_000.0;
-    let mut util = Utilization { bytes_stored: 1000.0, bytes_read: 0.0, cpu_ms: 0.0, bytes_out: 0.0, epoch_secs: 4.0 };
+    let mut util = Utilization {
+        bytes_stored: 1000.0,
+        bytes_read: 0.0,
+        cpu_ms: 0.0,
+        bytes_out: 0.0,
+        epoch_secs: 4.0,
+    };
     // build history with steady usage
     for epoch in 0..5 {
         retune_multipliers(&mut params, supply, &util, epoch, base, 0.0, Some(0));
@@ -29,7 +35,13 @@ fn steady_usage_stable_multiplier() {
     params.util_var_threshold = 100;
     params.fib_window_base_secs = 4;
     let supply = 1_000_000.0;
-    let util = Utilization { bytes_stored: 2000.0, bytes_read: 0.0, cpu_ms: 0.0, bytes_out: 0.0, epoch_secs: 4.0 };
+    let util = Utilization {
+        bytes_stored: 2000.0,
+        bytes_read: 0.0,
+        cpu_ms: 0.0,
+        bytes_out: 0.0,
+        epoch_secs: 4.0,
+    };
     for epoch in 0..5 {
         retune_multipliers(&mut params, supply, &util, epoch, base, 0.0, Some(0));
     }

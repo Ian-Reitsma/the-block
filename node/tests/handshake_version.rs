@@ -1,13 +1,14 @@
 use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use tempfile::tempdir;
-use the_block::net::{Message, Payload, PeerSet, SUPPORTED_VERSION};
+use the_block::net::{self, Message, Payload, PeerSet, SUPPORTED_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 use the_block::Blockchain;
 
 #[test]
 fn rejects_wrong_version() {
     let dir = tempdir().unwrap();
+    net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
     let peers = PeerSet::new(vec![]);
     let mut bytes = [0u8; 32];

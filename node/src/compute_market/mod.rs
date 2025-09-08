@@ -12,9 +12,10 @@ pub mod errors;
 pub mod matcher;
 pub mod price_board;
 pub mod receipt;
+pub mod scheduler;
 pub mod settlement;
-pub mod workloads;
 pub mod workload;
+pub mod workloads;
 
 pub use errors::MarketError;
 
@@ -35,6 +36,12 @@ pub struct Offer {
     /// Percentage of `price` paid in consumer tokens. `0` routes the entire
     /// amount to industrial tokens, `100` routes it all to consumer tokens.
     pub fee_pct_ct: u8,
+    /// Hardware capability advertised by the provider.
+    #[serde(default)]
+    pub capability: scheduler::Capability,
+    /// Initial reputation score for the provider.
+    #[serde(default)]
+    pub reputation: i64,
 }
 
 impl Offer {
@@ -102,9 +109,9 @@ impl Workload {
     /// `compute_units` helper.
     pub fn units(&self) -> u64 {
         match self {
-            Workload::Transcode(data)
-            | Workload::Inference(data)
-            | Workload::GpuHash(data) => workload::compute_units(data),
+            Workload::Transcode(data) | Workload::Inference(data) | Workload::GpuHash(data) => {
+                workload::compute_units(data)
+            }
         }
     }
 }
@@ -157,8 +164,9 @@ pub struct Job {
     pub price_per_unit: u64,
     pub consumer_bond: u64,
     pub workloads: Vec<Workload>,
-    /// Whether this job requires GPU execution.
-    pub gpu_required: bool,
+    /// Required hardware capability for the job.
+    #[serde(default)]
+    pub capability: scheduler::Capability,
     /// Unix timestamp by which the provider must deliver.
     pub deadline: u64,
 }
@@ -193,8 +201,7 @@ impl Market {
         let mut offer = offer;
         offer.validate()?;
         if offer.price_per_unit == 0 {
-            if let Some(p) =
-                price_board::backlog_adjusted_bid(FeeLane::Industrial, self.jobs.len())
+            if let Some(p) = price_board::backlog_adjusted_bid(FeeLane::Industrial, self.jobs.len())
             {
                 offer.price_per_unit = p;
             }
@@ -202,6 +209,7 @@ impl Market {
         if self.offers.contains_key(&offer.job_id) {
             return Err("offer already exists");
         }
+        scheduler::register_offer(&offer.provider, offer.capability.clone(), offer.reputation);
         self.offers.insert(offer.job_id.clone(), offer);
         Ok(())
     }
@@ -219,6 +227,9 @@ impl Market {
             .get(&job.job_id)
             .cloned()
             .ok_or(MarketError::JobNotFound)?;
+        if !offer.capability.matches(&job.capability) {
+            return Err(MarketError::Capability);
+        }
         let demand: u64 = job.workloads.iter().map(|w| w.units()).sum();
         if let Err(reason) = admission::check_and_record(&job.buyer, &offer.provider, demand) {
             #[cfg(feature = "telemetry")]
@@ -295,6 +306,7 @@ impl Market {
             .unwrap_or_else(|e| panic!("time: {e}"))
             .as_secs();
         if now > state.job.deadline {
+            scheduler::record_failure(&state.provider);
             let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
             self.jobs.remove(job_id);
             return Err("deadline exceeded");
@@ -308,13 +320,16 @@ impl Market {
             .get(state.paid_slices)
             .ok_or("no such slice")?;
         if &proof.reference != expected_ref {
+            scheduler::record_failure(&state.provider);
             return Err("reference mismatch");
         }
         if !proof.verify() {
+            scheduler::record_failure(&state.provider);
             return Err("invalid proof");
         }
         let slice_units = state.job.workloads[state.paid_slices].units();
         if proof.payout != slice_units * state.price_per_unit {
+            scheduler::record_failure(&state.provider);
             return Err("payout mismatch");
         }
         #[cfg(feature = "telemetry")]
@@ -330,8 +345,10 @@ impl Market {
     pub fn finalize_job(&mut self, job_id: &str) -> Option<(u64, u64)> {
         let state = self.jobs.get(job_id)?;
         if !state.completed {
+            scheduler::record_failure(&state.provider);
             return None;
         }
+        scheduler::record_success(&state.provider);
         let provider_bond = state.provider_bond;
         let consumer_bond = state.job.consumer_bond;
         self.jobs.remove(job_id);
@@ -451,6 +468,8 @@ mod tests {
             units: 10,
             price_per_unit: 5,
             fee_pct_ct: 100,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
         };
         assert!(offer.validate().is_ok());
     }
@@ -508,6 +527,8 @@ mod tests {
             units: 1,
             price_per_unit: 5,
             fee_pct_ct: 100,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
         };
         market
             .post_offer(offer)
@@ -522,7 +543,7 @@ mod tests {
             price_per_unit: 5,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
-            gpu_required: false,
+            capability: scheduler::Capability::default(),
             deadline: u64::MAX,
         };
         market
@@ -559,6 +580,8 @@ mod tests {
             units: 1,
             price_per_unit: 5,
             fee_pct_ct: 100,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
         };
         market
             .post_offer(offer)
@@ -573,7 +596,7 @@ mod tests {
                 Workload::Transcode(b"a".to_vec()),
                 Workload::Transcode(b"a".to_vec()),
             ],
-            gpu_required: false,
+            capability: scheduler::Capability::default(),
             deadline: u64::MAX,
         };
         market
@@ -599,6 +622,8 @@ mod tests {
             units: 1,
             price_per_unit: 5,
             fee_pct_ct: 100,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
         };
         market
             .post_offer(offer.clone())
@@ -617,7 +642,7 @@ mod tests {
             price_per_unit: 5,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
-            gpu_required: false,
+            capability: scheduler::Capability::default(),
             deadline: u64::MAX,
         };
         market
@@ -641,6 +666,8 @@ mod tests {
             units: 1,
             price_per_unit: 2,
             fee_pct_ct: 100,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
         };
         market
             .post_offer(offer)
@@ -655,7 +682,7 @@ mod tests {
             price_per_unit: 2,
             consumer_bond: 1,
             workloads: vec![Workload::Transcode(b"a".to_vec())],
-            gpu_required: false,
+            capability: scheduler::Capability::default(),
             deadline: u64::MAX,
         };
         market

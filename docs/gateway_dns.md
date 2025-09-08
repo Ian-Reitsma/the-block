@@ -1,6 +1,6 @@
 # Gateway DNS Publishing and Policy Records
 
-Gateways publish domain policies and free-read counters via signed DNS TXT records. This document explains how records are signed, stored, and queried by clients and auditors.
+Gateways publish domain policies and free-read counters via signed DNS TXT records. The chain does not consult ICANN roots, so only `.block` domains are trusted implicitly; other TLDs must expose the same TXT record in the public DNS zone before clients honour the on-chain entry. This document explains how records are signed, stored, and queried by clients and auditors.
 
 ## 1. Storage Layout
 
@@ -16,7 +16,7 @@ All records are stored in a `SimpleDb` tree chosen by the `TB_DNS_DB_PATH` envir
 
 ```json
 {
-  "domain": "example.com",
+  "domain": "example.block",
   "txt": "policy=v1; contact=ops@example.com",
   "pubkey": "<hex ed25519 key>",
   "sig": "<hex signature over domain||txt>"
@@ -51,14 +51,14 @@ On each query the server:
 3. Updates `dns_last/<domain>` to the current timestamp.
 4. Appends a `ReadAck` via `read_receipt::append` so the access can be audited and subsidised.
 
-If the domain is unknown, `record` is `null` and counters remain `0`.
+If the domain is unknown or the public TXT record does not match, `record` is `null` and counters remain `0`.
 
 ## 4. Read Counters Since Epoch
 
 `gateway.reads_since` allows auditors to fetch total reads and the last access after a given epoch:
 
 ```json
-{"method":"gateway.reads_since","params":{"domain":"example.com","epoch":1700000000}}
+{"method":"gateway.reads_since","params":{"domain":"example.block","epoch":1700000000}}
 ```
 
 Internally it scans finalised `ReadBatch` files, returning `{ "reads_total": <u64>, "last_access_ts": <u64> }` for transparency.
@@ -69,7 +69,7 @@ Publish and query via the CLI:
 
 ```bash
 blockctl rpc "{\"method\":\"dns.publish_record\",\"params\":{...}}"
-blockctl rpc "{\"method\":\"gateway.policy\",\"params\":{\"domain\":\"example.com\"}}"
+blockctl rpc "{\"method\":\"gateway.policy\",\"params\":{\"domain\":\"example.block\"}}"
 ```
 
 ## 6. Operational Notes
@@ -77,5 +77,6 @@ blockctl rpc "{\"method\":\"gateway.policy\",\"params\":{\"domain\":\"example.co
 - Rotate TXT records periodically to advertise new policies or contact points.
 - Monitor `dns_reads` and `dns_last` to detect abuse or stale domains.
 - The free-read model means clients incur no fees; all read counts feed the `READ_SUB_CT` subsidy via `read_receipt` batching.
+- Domains outside `.block` must publish a matching TXT record in the public DNS zone or clients will ignore the on-chain assertion.
 
 Keep this guide aligned with `node/src/gateway/dns.rs` whenever the schema or RPC parameters change.

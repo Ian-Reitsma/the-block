@@ -4,16 +4,16 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 use futures::StreamExt;
+use once_cell::sync::Lazy;
 use quinn::{rustls, Connection, Endpoint, Incoming};
 use rcgen::generate_simple_self_signed;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
-use once_cell::sync::Lazy;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS,
-    QUIC_DISCONNECT_TOTAL, QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
+    QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS, QUIC_DISCONNECT_TOTAL,
+    QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
 };
 
 /// Error type for QUIC connection attempts.
@@ -78,7 +78,10 @@ pub async fn listen_with_cert(
 }
 
 /// Connect to a remote QUIC endpoint at `addr` trusting `cert`.
-pub async fn connect(addr: SocketAddr, cert: quinn::Certificate) -> std::result::Result<Connection, ConnectError> {
+pub async fn connect(
+    addr: SocketAddr,
+    cert: quinn::Certificate,
+) -> std::result::Result<Connection, ConnectError> {
     let mut roots = rustls::RootCertStore::empty();
     roots
         .add(rustls::Certificate(cert.clone().into_der()))
@@ -88,8 +91,8 @@ pub async fn connect(addr: SocketAddr, cert: quinn::Certificate) -> std::result:
         .with_root_certificates(roots)
         .with_no_client_auth();
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
-    let endpoint = get_or_create_endpoint("0.0.0.0:0".parse().unwrap())
-        .map_err(ConnectError::Other)?;
+    let endpoint =
+        get_or_create_endpoint("0.0.0.0:0".parse().unwrap()).map_err(ConnectError::Other)?;
     let start = Instant::now();
     let attempt = endpoint
         .connect_with(client_cfg, addr, "the-block")
@@ -100,9 +103,19 @@ pub async fn connect(addr: SocketAddr, cert: quinn::Certificate) -> std::result:
             QUIC_CONN_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
             Ok(conn.connection)
         }
-        Err(_e) => {
+        Err(e) => {
             #[cfg(feature = "telemetry")]
-            QUIC_HANDSHAKE_FAIL_TOTAL.inc();
+            {
+                QUIC_HANDSHAKE_FAIL_TOTAL.inc();
+                let reason = if e.to_string().to_lowercase().contains("certificate") {
+                    "bad_cert"
+                } else if e.to_string().to_lowercase().contains("timeout") {
+                    "timeout"
+                } else {
+                    "other"
+                };
+                super::peer::record_handshake_fail_addr(addr, reason);
+            }
             Err(ConnectError::Handshake)
         }
     }
@@ -156,8 +169,8 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
-    let endpoint = get_or_create_endpoint("0.0.0.0:0".parse().unwrap())
-        .map_err(ConnectError::Other)?;
+    let endpoint =
+        get_or_create_endpoint("0.0.0.0:0".parse().unwrap()).map_err(ConnectError::Other)?;
     let start = Instant::now();
     let attempt = endpoint.connect_with(client_cfg, addr, "the-block")?;
     match attempt.await {
@@ -166,9 +179,19 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
             QUIC_CONN_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
             Ok(conn.connection)
         }
-        Err(_e) => {
+        Err(e) => {
             #[cfg(feature = "telemetry")]
-            QUIC_HANDSHAKE_FAIL_TOTAL.inc();
+            {
+                QUIC_HANDSHAKE_FAIL_TOTAL.inc();
+                let reason = if e.to_string().to_lowercase().contains("certificate") {
+                    "bad_cert"
+                } else if e.to_string().to_lowercase().contains("timeout") {
+                    "timeout"
+                } else {
+                    "other"
+                };
+                super::peer::record_handshake_fail_addr(addr, reason);
+            }
             Err(ConnectError::Handshake)
         }
     }

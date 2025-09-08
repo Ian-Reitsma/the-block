@@ -22,3 +22,15 @@ the script. Generate `.profraw` files by running fuzz targets with
 `RUSTFLAGS="-C instrument-coverage"` and an `LLVM_PROFILE_FILE` path before
 invoking the script.
 
+## Documentation
+
+Building the documentation requires [`mdbook`](https://rust-lang.github.io/mdBook/).
+Install it with `cargo install mdbook` and verify the book renders cleanly via
+
+```bash
+mdbook build docs
+```
+
+Continuous integration runs this command for every pull request, so ensure it
+passes locally before submitting patches.
+

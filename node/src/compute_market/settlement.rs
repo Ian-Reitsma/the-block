@@ -1,9 +1,9 @@
+#[cfg(feature = "telemetry")]
+use crate::telemetry::SLASHING_BURN_CT_TOTAL;
+use ledger::utxo_account::AccountLedger;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use ledger::utxo_account::AccountLedger;
-#[cfg(feature = "telemetry")]
-use crate::telemetry::SLASHING_BURN_CT_TOTAL;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettleMode {
@@ -15,8 +15,7 @@ pub enum SettleMode {
 static MODE: Lazy<Mutex<SettleMode>> = Lazy::new(|| Mutex::new(SettleMode::DryRun));
 static ACCOUNTS: Lazy<Mutex<AccountLedger>> = Lazy::new(|| Mutex::new(AccountLedger::new()));
 // Separate ledger for industrial-token balances accrued via split payments.
-static ACCOUNTS_IT: Lazy<Mutex<AccountLedger>> =
-    Lazy::new(|| Mutex::new(AccountLedger::new()));
+static ACCOUNTS_IT: Lazy<Mutex<AccountLedger>> = Lazy::new(|| Mutex::new(AccountLedger::new()));
 
 pub struct Settlement;
 

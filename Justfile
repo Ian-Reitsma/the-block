@@ -1,13 +1,18 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 default:
-    @echo "Available recipes: demo"
+    @echo "Available recipes: demo docs test-peer-stats"
 
 demo:
     @if [ ! -x .venv/bin/python ]; then \
         echo "virtualenv missing; run ./scripts/bootstrap.sh" >&2; exit 1; \
     fi
     .venv/bin/python demo.py
+
+test-workloads:
+    for f in examples/workloads/*.json; do \
+        cargo run --example run_workload $$f >/dev/null; \
+    done
 
 test-gossip:
     if command -v cargo-nextest >/dev/null 2>&1; then \
@@ -21,6 +26,10 @@ swarm-up:
 
 swarm-down:
     sh scripts/swarm.sh down
+
+test-peer-stats:
+    cargo test -p the_block --test rate_limit --features telemetry --release -- -q
+    cargo test -p the_block --test net_peer_stats --features telemetry --release -- -q
 
 swarm-logs:
     sh scripts/swarm.sh logs
@@ -47,3 +56,6 @@ support:bundle:
 
 fuzz:promote:
     bash scripts/promote_wal_seeds.sh
+
+docs:
+    mdbook build docs

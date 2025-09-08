@@ -14,6 +14,17 @@ cargo nextest run --profile quic
 The `quic` profile enables the `quic` feature flag to exercise QUIC transport
 paths. Run it in addition to `cargo test` before submitting a PR.
 
+## Documentation
+
+The documentation site is generated with [`mdbook`](https://rust-lang.github.io/mdBook/).
+Install it via `cargo install mdbook` and confirm the book builds:
+
+```bash
+mdbook build docs
+```
+
+CI executes this command, so ensure it passes locally before submitting patches.
+
 ## Balance & Nonce Changes
 
 Any pull request that touches account balance logic or nonce handling **must**:

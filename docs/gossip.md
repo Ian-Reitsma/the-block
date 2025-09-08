@@ -72,5 +72,112 @@ computed `sqrt(N)`.
   for legitimate replays.  Adjust `Relay::new(ttl)` if your deployment requires
   a different window.
 
+## Rate-Limit Telemetry
+
+Each peer records request counts, bytes sent, and drop reasons. The following
+Prometheus counters expose these metrics:
+
+| Metric | Labels | Description |
+|--------|--------|-------------|
+| `peer_request_total` | `peer_id` | Total messages received from a peer |
+| `peer_bytes_sent_total` | `peer_id` | Bytes delivered to a peer |
+| `peer_drop_total` | `peer_id`, `reason` | Messages discarded by reason |
+
+Drop reasons include:
+
+- `rate_limit` – peer exceeded request or shard quotas
+- `malformed` – failed basic validation or protocol checks
+- `blacklist` – peer banned via `ban` CLI or auto-banning
+- `duplicate` – message already seen via Xor8 hash filter
+
+Operators can compare `peer_drop_total{reason="rate_limit"}` with
+`peer_request_total` to spot abusive peers. High drop ratios often indicate
+misconfigured or malicious nodes and may warrant tighter filters or manual
+intervention.
+
+Handshake failures increment `peer_handshake_fail_total{peer_id,reason}` with
+reasons like `timeout` or `bad_cert` so operators can diagnose connection
+issues.
+
+Each peer also tracks a **reputation score** that scales its allowable request
+rate and shard bandwidth. The effective per‑second quota is
+`base_limit × reputation`. Scores decay toward `1.0` at a configurable rate and
+are multiplied by `0.9` whenever a peer is rate‑limited. Operators can inspect
+the current score via `net.peer_stats` or:
+
+```bash
+net stats reputation <peer_id>
+```
+
+The score is exported as `peer_reputation_score{peer_id}` in Prometheus.
+
+Metrics for an individual peer can be queried over RPC using `net.peer_stats`
+or via the `net stats <peer_id>` CLI, returning recent request counts, bytes
+sent, and drop totals. Each successful lookup increments the
+`peer_stats_query_total{peer_id}` counter and is only available from the
+loopback interface. To retrieve metrics for multiple peers at once, use the
+`net.peer_stats_all` RPC or `net stats --all`, which accept optional `offset`
+and `limit` parameters for pagination:
+
+```bash
+net stats <peer_id>
+```
+
+```json
+{"method":"net.peer_stats","params":{"peer_id":"abcd…"}}
+```
+
+```json
+{"method":"net.peer_stats_all","params":{"offset":0,"limit":2}}
+```
+
+Example output:
+
+```json
+[
+  {
+    "peer_id": "abcd…",
+    "metrics": {"requests": 10, "bytes_sent": 512, "drops": {"rate_limit": 1}}
+  },
+  {
+    "peer_id": "dcba…",
+    "metrics": {"requests": 4, "bytes_sent": 128, "drops": 0}
+  }
+]
+```
+
+Configuration knobs:
+
+- `max_peer_metrics` – cap tracked peers to bound memory
+- `peer_metrics_export` – disable per‑peer Prometheus labels when `false`
+- `track_peer_drop_reasons` – collapse drop reasons into `other` when `false`
+- `peer_reputation_decay` – rate at which reputation decays toward `1.0`
+
 See [`docs/networking.md`](networking.md) for peer database recovery and
 [`docs/gossip_chaos.md`](gossip_chaos.md) for adversarial gossip testing.
+
+### Resetting Metrics
+
+Operators may clear metrics for a specific peer when troubleshooting or after
+blocking abusive behavior. Invoke the RPC or CLI reset command:
+
+```json
+{"method":"net.peer_stats_reset","params":{"peer_id":"abcd…"}}
+```
+
+```bash
+net stats reset abcd…
+```
+
+Counters for the peer are reset to zero and a `peer_stats_reset_total{peer_id}`
+telemetry event is emitted. Historical data is lost and subsequent requests will
+recreate counters on demand.
+
+To export metrics for offline analysis, use:
+
+```bash
+net stats export <peer_id> --path /tmp/peer.json
+```
+
+or the `net.peer_stats_export` RPC. Successful exports increment
+`peer_stats_export_total{peer_id}` and write a JSON snapshot of the metrics.

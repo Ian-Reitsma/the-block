@@ -45,10 +45,7 @@ fn remote_signer_roundtrip() {
     let signer = RemoteSigner::connect(&url).expect("connect");
     let msg = b"hello";
     let sig = signer.sign(msg).expect("sign");
-    signer
-        .public_key()
-        .verify(&remote_tag(msg), &sig)
-        .unwrap();
+    signer.public_key().verify(&remote_tag(msg), &sig).unwrap();
     handle.join().unwrap();
 }
 

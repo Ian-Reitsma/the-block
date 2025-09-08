@@ -18,4 +18,3 @@ pub fn params(bc: &Arc<Mutex<Blockchain>>) -> serde_json::Value {
         "industrial_utilization": util,
     })
 }
-

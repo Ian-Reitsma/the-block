@@ -1,6 +1,6 @@
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid};
-use the_block::compute_market::*;
+use the_block::compute_market::{scheduler, *};
 use the_block::transaction::FeeLane;
 use tokio_util::sync::CancellationToken;
 
@@ -14,6 +14,8 @@ fn offer_validation() {
         units: 5,
         price_per_unit: 2,
         fee_pct_ct: 100,
+        capability: scheduler::Capability::default(),
+        reputation: 0,
     };
     assert!(offer.validate().is_ok());
 }
@@ -50,6 +52,8 @@ fn market_job_flow_and_finalize() {
         units: 1,
         price_per_unit: 5,
         fee_pct_ct: 100,
+        capability: scheduler::Capability::default(),
+        reputation: 0,
     };
     market.post_offer(offer).unwrap();
 
@@ -63,7 +67,7 @@ fn market_job_flow_and_finalize() {
         price_per_unit: 5,
         consumer_bond: 1,
         workloads: vec![Workload::Transcode(b"input".to_vec())],
-        gpu_required: false,
+        capability: scheduler::Capability::default(),
         deadline: u64::MAX,
     };
     market.submit_job(job).unwrap();

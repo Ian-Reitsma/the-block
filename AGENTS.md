@@ -7,7 +7,7 @@ Quick Index
 - Monitoring Stack: see `docs/monitoring.md` and `make monitor`
 - Status & Roadmap: see `docs/roadmap.md`
 - Progress Snapshot: see `docs/progress.md` for subsystem status and gaps
-- Networking & DHT recovery: see `docs/networking.md`
+- Networking, per-peer telemetry, & DHT recovery: see `docs/networking.md`
 - Economic formulas: see `docs/economics.md`
 - Blob root scheduling: see `docs/blob_chain.md`
 - Law-enforcement portal & canary runbook: see `docs/le_portal.md`
@@ -25,7 +25,7 @@ Quick Index
 - Compute-unit calibration: see `docs/compute_market.md`
 - Multi-hop trust-line routing: see `docs/dex.md`
 - DEX escrow and partial-payment proofs: see `docs/dex.md`
-- Gateway DNS publishing and policy records: see `docs/gateway_dns.md`
+- Gateway DNS publishing and policy records (`.block` TLD or externally verified): see `docs/gateway_dns.md`
 - Gossip relay dedup and adaptive fanout: see `docs/gossip.md`
 - P2P handshake and capability negotiation: see `docs/p2p_protocol.md`
 - Light-client synchronization and security model: see `docs/light_client.md`
@@ -541,7 +541,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Consensus & Mining: PoW with BLAKE3; dynamic retarget over ~120 blocks with clamp [¼, ×4]; headers carry difficulty; coinbase fields must match tx[0]; decay rewards.
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct_ct` carries an arbitrary 0–100 split with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
-- Networking & Gossip: minimal TCP gossip with `PeerSet` and `Message`; JSON‑RPC server in `src/bin/node.rs`; integration tests for gossip and RPC. RPC methods cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
+- Networking & Gossip: QUIC/TCP transport with `PeerSet`; per-peer drop reasons and reputation-aware rate limits surface via `net.peer_stats` and the `net` CLI. JSON‑RPC server in `src/bin/node.rs`; integration tests cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
 - Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. The legacy third-token ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the formula in `docs/economics.md`; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
   `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
   a voted percentage, granting governance a rapid-response lever during economic
@@ -549,7 +549,21 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   Operators can inspect current multipliers via the `inflation.params` RPC and
   reconcile stake-weighted payouts by querying `stake.role` for each bonded
   account.
-- Telemetry & Spans: metrics including `ttl_drop_total`, `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`, `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`; spans for mempool and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations export `snapshot_duration_seconds`, `snapshot_fail_total`, and the `snapshot_interval`/`snapshot_interval_changed` gauges.
+- Telemetry & Spans: metrics including `peer_request_total{peer_id}`,
+  `peer_bytes_sent_total{peer_id}`, `peer_drop_total{peer_id,reason}`,
+  `peer_handshake_fail_total{peer_id,reason}`,
+  `peer_stats_query_total{peer_id}`, `peer_stats_reset_total{peer_id}`,
+  `peer_stats_export_total{peer_id}`, `peer_reputation_score{peer_id}`, and
+  the `peer_metrics_active` gauge; scheduler metrics `scheduler_match_total{result}`
+  and `scheduler_effective_price`; transport metrics `ttl_drop_total`,
+  `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`,
+  `difficulty_retarget_total`, `difficulty_clamp_total`,
+  `quic_conn_latency_seconds`, `quic_bytes_sent_total`,
+  `quic_bytes_recv_total`, `quic_handshake_fail_total`,
+  `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`; spans for mempool
+  and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations
+  export `snapshot_duration_seconds`, `snapshot_fail_total`, and the
+  `snapshot_interval`/`snapshot_interval_changed` gauges.
 - Schema Migrations: bump `schema_version` with lossless routines; preserve fee invariants; update docs under `docs/schema_migrations/`.
 - Python Demo: `PurgeLoop` context manager with env controls; demo integration test settings and troubleshooting tips.
 - Quick start: `just demo` runs the Python walkthrough after `./scripts/bootstrap.sh` and fails fast if the virtualenv is missing.
@@ -559,17 +573,38 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 
 ## 18 · Strategic Pillars
 
-- **Consensus Upgrade** ([node/src/consensus](node/src/consensus))
+- **Governance & Subsidy Economy** ([docs/governance.md](docs/governance.md))
+  - [x] Inflation governors tune β/γ/κ/λ multipliers
+  - [ ] On-chain treasury and proposal dependencies
+  - Progress: 78%
+- **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
   - Progress: 74%
+- **Networking & Gossip** ([docs/networking.md](docs/networking.md))
+  - [x] QUIC transport with TCP fallback
+  - [x] Per-peer rate-limit telemetry and CLI/RPC introspection
+  - [ ] Large-scale WAN chaos testing
+  - Progress: 77%
+- **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
+  - [x] Read acknowledgements and WAL-backed stores
+  - [ ] Incentive-backed DHT marketplace
+  - Progress: 76%
+- **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
+  - [x] Capability-aware scheduler with reputation weighting
+  - [ ] SLA arbitration and heterogeneous payments
+  - Progress: 68%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
   - Progress: 50%
-- **Bridges** ([docs/bridges.md](docs/bridges.md))
+- **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
+  - [x] Authorization-aware trust lines and order books
+  - [ ] Cross-chain settlement proofs
+  - Progress: 72%
+- **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
@@ -577,7 +612,6 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - **Wallets** ([docs/wallets.md](docs/wallets.md))
   - [x] CLI enhancements
   - [x] Hardware wallet integration
-  - [x] Key management guides
   - [x] Remote signer workflows
   - Progress: 80%
 - **Performance** ([docs/performance.md](docs/performance.md))

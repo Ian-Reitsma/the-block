@@ -23,8 +23,8 @@ pub struct Wallet {
     keypair: Keypair,
 }
 
-pub mod stake;
 pub mod remote_signer;
+pub mod stake;
 
 impl Wallet {
     /// Create a wallet from a 32-byte seed.

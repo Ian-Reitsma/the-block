@@ -254,6 +254,35 @@
         }
       ],
       "id": 26
+    },
+    {
+      "type": "graph",
+      "title": "Peer Requests/s (top5)",
+      "targets": [
+        {
+          "expr": "topk(5, rate(peer_request_total[5m]))"
+        }
+      ],
+      "id": 27
+    },
+    {
+      "type": "graph",
+      "title": "Peer Drops/s by reason (top5)",
+      "targets": [
+        {
+          "expr": "topk(5, rate(peer_drop_total[5m]))"
+        }
+      ],
+      "id": 28
+    },
+    {
+      "type": "graph",
+      "title": "Scheduler Matches by Result", 
+      "targets": [
+        {"expr": "rate(scheduler_match_total{result=\"success\"}[5m])"},
+        {"expr": "rate(scheduler_match_total{result=\"capability_mismatch\"}[5m])"}
+      ],
+      "id": 29
     }
   ]
 }

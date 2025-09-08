@@ -12,7 +12,11 @@ pub struct AsnLatencyCache {
 
 impl AsnLatencyCache {
     pub fn new(cap: usize) -> Self {
-        Self { map: HashMap::new(), order: VecDeque::new(), cap }
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+            cap,
+        }
     }
 
     pub fn get_or_insert(&mut self, a: u32, b: u32, compute: impl Fn(u32, u32) -> u64) -> u64 {
@@ -52,4 +56,3 @@ pub fn heuristic(
     let floor = cache.get_or_insert(asn_src, asn_dst, |_a, _b| 0);
     floor as f64 + mu * (1.0 - uptime)
 }
-

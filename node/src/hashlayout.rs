@@ -18,14 +18,14 @@ pub struct BlockEncoder<'a> {
     pub storage_sub_it: u64,
     pub read_sub_it: u64,
     pub compute_sub_it: u64,
-    pub read_root: [u8;32],
+    pub read_root: [u8; 32],
     pub fee_checksum: &'a str,
     pub state_root: &'a str,
     pub tx_ids: &'a [&'a [u8]],
     pub l2_roots: &'a [[u8; 32]],
     pub l2_sizes: &'a [u32],
-    pub vdf_commit: [u8;32],
-    pub vdf_output: [u8;32],
+    pub vdf_commit: [u8; 32],
+    pub vdf_output: [u8; 32],
     pub vdf_proof: &'a [u8],
 }
 
