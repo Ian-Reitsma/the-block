@@ -1,7 +1,12 @@
+use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
+use std::sync::Mutex;
 
-use crate::net::{send_msg, Message};
+use blake3::Hasher;
+use once_cell::sync::Lazy;
+
 use crate::net::message::BlobChunk;
+use crate::net::{record_ip_drop, send_msg, Message};
 use ed25519_dalek::SigningKey;
 
 /// Deterministic fanout tree inspired by Turbine gossip.
@@ -22,6 +27,32 @@ pub fn broadcast_with<F>(msg: &Message, peers: &[SocketAddr], mut send: F)
 where
     F: FnMut(SocketAddr, &Message),
 {
+    static SEEN: Lazy<Mutex<(HashSet<[u8; 32]>, VecDeque<[u8; 32]>)>> = Lazy::new(|| {
+        Mutex::new((HashSet::new(), VecDeque::new()))
+    });
+    const MAX_SEEN: usize = 1024;
+    let hash = {
+        let bytes = bincode::serialize(msg).unwrap_or_default();
+        let mut h = Hasher::new();
+        h.update(&bytes);
+        *h.finalize().as_bytes()
+    };
+    let mut guard = SEEN.lock().unwrap();
+    if guard.0.contains(&hash) {
+        for p in peers {
+            record_ip_drop(p);
+        }
+        return;
+    }
+    guard.0.insert(hash);
+    guard.1.push_back(hash);
+    if guard.0.len() > MAX_SEEN {
+        if let Some(old) = guard.1.pop_front() {
+            guard.0.remove(&old);
+        }
+    }
+    drop(guard);
+
     if peers.is_empty() {
         return;
     }

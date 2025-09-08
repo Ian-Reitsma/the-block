@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use super::order_book::{Order, OrderBook};
-use dex::escrow::{Escrow, PaymentProof};
 use crate::simple_db::SimpleDb;
+use dex::escrow::{Escrow, PaymentProof};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

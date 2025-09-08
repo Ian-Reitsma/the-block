@@ -1,6 +1,6 @@
 use clap::Subcommand;
-use the_block::dex::DexStore;
 use dex::escrow::Escrow;
+use the_block::dex::DexStore;
 
 #[derive(Subcommand)]
 pub enum DexCmd {

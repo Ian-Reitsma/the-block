@@ -15,11 +15,14 @@ pub fn swap_with_epsilon(x: f64, y: f64, dx: f64, epsilon: f64) -> f64 {
     let mut y_new = y;
     for _ in 0..50 {
         let f = (x_new + epsilon) * (x_new + epsilon).ln()
-              + (y_new + epsilon) * (y_new + epsilon).ln() - k;
+            + (y_new + epsilon) * (y_new + epsilon).ln()
+            - k;
         let df = (y_new + epsilon).ln() + 1.0;
         let step = f / df;
         y_new -= step;
-        if step.abs() < 1e-12 { break; }
+        if step.abs() < 1e-12 {
+            break;
+        }
     }
     let dy = y - y_new;
     assert!(dy >= -1e-12);

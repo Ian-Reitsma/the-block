@@ -3,7 +3,7 @@ use proptest::prelude::*;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 use the_block::{
-    net::{Message, Payload, PeerSet},
+    net::{self, Message, Payload, PeerSet},
     p2p::handshake::{Hello, Transport},
     Blockchain,
 };
@@ -16,6 +16,7 @@ proptest! {
     #[test]
     fn fuzz_identifier_exchange(proto_version in any::<u16>(), feature_bits in any::<u32>()) {
         let dir = tempdir().unwrap();
+        net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
         std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let peers = PeerSet::new(vec![]);

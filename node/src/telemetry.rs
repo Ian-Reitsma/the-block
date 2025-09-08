@@ -200,11 +200,7 @@ pub static SUBSIDY_MULTIPLIER_RAW: Lazy<IntGaugeVec> = Lazy::new(|| {
 });
 
 pub static INDUSTRIAL_BACKLOG: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new(
-        "industrial_backlog",
-        "Pending industrial compute slices",
-    )
-    .unwrap();
+    let g = IntGauge::new("industrial_backlog", "Pending industrial compute slices").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
 });
@@ -240,11 +236,7 @@ pub static INDUSTRIAL_UNITS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 pub static INDUSTRIAL_PRICE_PER_UNIT: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new(
-        "industrial_price_per_unit",
-        "Latest price per compute unit",
-    )
-    .unwrap();
+    let g = IntGauge::new("industrial_price_per_unit", "Latest price per compute unit").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
 });
@@ -678,6 +670,83 @@ pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static SCHEDULER_MATCH_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "scheduler_match_total",
+            "Scheduler match outcomes by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_match_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_match_total: {e}"));
+    c
+});
+
+pub static SCHEDULER_MATCH_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "scheduler_match_latency_seconds",
+        "Time to perform a scheduler match",
+    );
+    let h = Histogram::with_opts(opts)
+        .unwrap_or_else(|e| panic!("histogram scheduler match latency: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler match latency: {e}"));
+    h
+});
+
+pub static SCHEDULER_REPUTATION_SCORE: Lazy<Histogram> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "scheduler_provider_reputation",
+        "Distribution of provider reputation scores",
+    );
+    let h = Histogram::with_opts(opts)
+        .unwrap_or_else(|e| panic!("histogram scheduler provider reputation: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler provider reputation: {e}"));
+    h
+});
+
+pub static SCHEDULER_ACTIVE_JOBS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("scheduler_active_jobs", "Number of currently assigned jobs")
+        .unwrap_or_else(|e| panic!("gauge scheduler_active_jobs: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_active_jobs: {e}"));
+    g
+});
+
+pub static REPUTATION_ADJUST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("reputation_adjust_total", "Reputation adjustments"),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter reputation_adjust_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry reputation_adjust_total: {e}"));
+    c
+});
+
+pub static PROVIDER_REPUTATION_SCORE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "provider_reputation_score",
+            "Current reputation score per provider",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("gauge provider_reputation_score: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry provider_reputation_score: {e}"));
+    g
+});
+
 pub static RECEIPT_PERSIST_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("receipt_persist_fail_total", "Receipt persistence failures")
         .unwrap_or_else(|e| panic!("counter receipt persist fail: {e}"));
@@ -1107,10 +1176,73 @@ pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static PEER_REQUEST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("peer_request_total", "Total requests received from peer"),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_BYTES_SENT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("peer_bytes_sent_total", "Bytes sent to peer"),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("peer_drop_total", "Messages dropped grouped by reason"),
+        &["peer_id", "reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_METRICS_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "peer_metrics_active",
+        "Number of peers currently tracked for telemetry",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
 pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new("peer_rejected_total", "Peers rejected grouped by reason"),
         &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "net_peer_handshake_fail_total",
+            "QUIC handshake failures per peer grouped by reason",
+        ),
+        &["peer_id", "reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
@@ -1126,6 +1258,63 @@ pub static PEER_HANDSHAKE_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
             "Handshake failures grouped by reason",
         ),
         &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_STATS_RESET_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_stats_reset_total",
+            "Peer metric resets grouped by peer",
+        ),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_STATS_QUERY_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_stats_query_total",
+            "Peer metric queries grouped by peer",
+        ),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_REPUTATION_SCORE: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        prometheus::Opts::new("peer_reputation_score", "Peer reputation score"),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static PEER_STATS_EXPORT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_stats_export_total",
+            "Peer metric exports grouped by peer",
+        ),
+        &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY

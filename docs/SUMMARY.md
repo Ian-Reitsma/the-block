@@ -1,0 +1,15 @@
+# Summary
+
+- [Progress Snapshot](progress.md)
+- [Status & Roadmap](roadmap.md)
+- [Telemetry](telemetry.md)
+- [Networking](networking.md)
+- [Gossip](gossip.md)
+- [Compute Market](compute_market.md)
+- [Monitoring](monitoring.md)
+- [Operators](operators/README.md)
+  - [Run a Node](operators/run_a_node.md)
+  - [Telemetry](operators/telemetry.md)
+  - [Incident Playbook](operators/incident_playbook.md)
+  - [Upgrade Guide](operators/upgrade.md)
+- [Contributing](contributing.md)

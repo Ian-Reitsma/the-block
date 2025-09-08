@@ -35,6 +35,25 @@ Bond CT for a service role once the node is running:
 cargo run --example wallet stake-role storage 100 --seed <hex>
 ```
 
+## Inspecting peers
+
+Use the networking CLI to inspect and manage per-peer metrics:
+
+```sh
+net stats <peer_id>
+net stats reset <peer_id>
+net stats export <peer_id> --path /tmp/peer.json
+net stats --all
+net stats reputation <peer_id>
+```
+
+`net stats` prints request, byte, and drop counters for the given peer. `net
+stats reset` clears all counters, incrementing `peer_stats_reset_total{peer_id}`
+and removing the peer from Prometheus until traffic resumes. `net stats export`
+writes a JSON snapshot for offline analysis. `net stats --all` paginates through
+all tracked peers, while `net stats reputation` shows the current reputation
+score used for adaptive rate limits.
+
 ### systemd
 Create `/etc/systemd/system/the-block.service`:
 ```ini
@@ -77,3 +96,15 @@ curl -s localhost:9898/metrics | rg '^difficulty_'
 
 The `difficulty_retarget_total` and `difficulty_clamp_total` counters should
 advance roughly once per block under normal operation.
+
+## Example workloads
+
+Sample workload descriptors live under `examples/workloads/`. Run one with:
+
+```bash
+cargo run --example run_workload examples/workloads/cpu_only.json
+```
+
+Replace the path with `gpu_inference.json` or `multi_gpu.json` to request GPU
+providers. The example verifies the JSON schema and prints the derived
+capability requirements.

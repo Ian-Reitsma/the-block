@@ -6,18 +6,18 @@ macro_rules! consensus {
     };
 }
 
+pub mod constants;
+pub mod difficulty;
 pub mod engine;
 pub mod finality;
 pub mod fork_choice;
+pub mod hadamard;
 pub mod leader;
 #[cfg(feature = "telemetry")]
 pub mod observer;
-pub mod constants;
-pub mod difficulty;
 pub mod pos;
 pub mod pow;
 pub mod unl;
-pub mod hadamard;
 pub mod vdf;
 pub mod committee {
     pub mod topk;

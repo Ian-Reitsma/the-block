@@ -12,6 +12,20 @@ pub struct NodeConfig {
     #[serde(default)]
     pub compute_market: ComputeMarketConfig,
     pub telemetry_summary_interval: u64,
+    #[serde(default = "default_max_peer_metrics")]
+    pub max_peer_metrics: usize,
+    #[serde(default = "default_true")]
+    pub peer_metrics_export: bool,
+    #[serde(default = "default_true")]
+    pub track_peer_drop_reasons: bool,
+    #[serde(default = "default_peer_reputation_decay")]
+    pub peer_reputation_decay: f64,
+    #[serde(default = "default_provider_reputation_decay")]
+    pub provider_reputation_decay: f64,
+    #[serde(default = "default_provider_reputation_retention")]
+    pub provider_reputation_retention: u64,
+    #[serde(default = "default_true")]
+    pub scheduler_metrics: bool,
     #[serde(default)]
     pub lighthouse: LighthouseConfig,
     #[serde(default)]
@@ -28,10 +42,37 @@ impl Default for NodeConfig {
             rpc: RpcConfig::default(),
             compute_market: ComputeMarketConfig::default(),
             telemetry_summary_interval: 0,
+            max_peer_metrics: default_max_peer_metrics(),
+            peer_metrics_export: default_true(),
+            track_peer_drop_reasons: default_true(),
+            peer_reputation_decay: default_peer_reputation_decay(),
+            provider_reputation_decay: default_provider_reputation_decay(),
+            provider_reputation_retention: default_provider_reputation_retention(),
+            scheduler_metrics: default_true(),
             lighthouse: LighthouseConfig::default(),
             quic: None,
         }
     }
+}
+
+fn default_max_peer_metrics() -> usize {
+    1024
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_peer_reputation_decay() -> f64 {
+    0.01
+}
+
+fn default_provider_reputation_decay() -> f64 {
+    0.05
+}
+
+fn default_provider_reputation_retention() -> u64 {
+    7 * 24 * 60 * 60
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -189,8 +230,12 @@ impl Default for CapsConfig {
                 l2_cap_bytes_per_epoch: 33_554_432,
                 bytes_per_sender_epoch_cap: 16_777_216,
             },
-            gateway: GatewayCaps { req_rate_per_ip: 20 },
-            func: FuncCaps { gas_limit_default: 100_000 },
+            gateway: GatewayCaps {
+                req_rate_per_ip: 20,
+            },
+            func: FuncCaps {
+                gas_limit_default: 100_000,
+            },
         }
     }
 }

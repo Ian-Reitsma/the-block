@@ -18,6 +18,24 @@ Logs are sampled and rate limited; emitted and dropped counts are exported via `
 The logger permits up to 100 events per second before sampling kicks in. Once the limit is exceeded, only one out of every 100 events is emitted while the rest are dropped, preventing log bursts from overwhelming block propagation.
 
 Counters `peer_error_total{code}` and `rpc_client_error_total{code}` track rate‑limited and banned peers and RPC clients for observability.
+All per-peer metrics include a `peer_id` label and, where applicable, a
+`reason` label to classify drops or handshake failures. See the
+[gossip guide](gossip.md) for RPC and CLI examples.
+- `peer_request_total{peer_id}` and `peer_bytes_sent_total{peer_id}` expose per-peer traffic
+- `peer_drop_total{peer_id,reason}` classifies discarded messages
+- `peer_handshake_fail_total{peer_id,reason}` records QUIC handshake errors
+- `peer_metrics_active` gauges the number of peers currently tracked
+- `peer_stats_query_total{peer_id}` counts RPC and CLI lookups
+- `peer_stats_reset_total{peer_id}` counts manual metric resets
+- `peer_stats_export_total{peer_id}` counts JSON snapshot exports
+- `peer_reputation_score{peer_id}` gauges the dynamic reputation used for rate limits
+- `scheduler_match_total{result}` counts scheduler outcomes (success, capability_mismatch, reputation_failure)
+- `scheduler_match_latency_seconds` records time spent matching jobs
+- `scheduler_provider_reputation` histogram tracks reputation score distribution
+- `scheduler_active_jobs` gauges currently assigned jobs
+- Configuration knobs: `max_peer_metrics` bounds per-peer labels;
+  set `peer_metrics_export = false` to disable them and
+  `track_peer_drop_reasons = false` to collapse drop reasons.
 - `industrial_backlog`, `industrial_utilization`, `industrial_units_total`, and
   `industrial_price_per_unit` surface demand for industrial workloads and feed
   `Block::industrial_subsidies()`; see [docs/compute_market.md](compute_market.md)

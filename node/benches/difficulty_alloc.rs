@@ -1,7 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::collections::VecDeque;
-use the_block::consensus::difficulty::{expected_difficulty, expected_difficulty_from_chain};
 use the_block::consensus::constants::DIFFICULTY_WINDOW;
+use the_block::consensus::difficulty::{expected_difficulty, expected_difficulty_from_chain};
 use the_block::Block;
 use the_block::TokenAmount;
 

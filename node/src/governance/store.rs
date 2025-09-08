@@ -254,8 +254,12 @@ impl GovStore {
                                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
-                                ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction,
-                                ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
+                                ParamKey::KillSwitchSubsidyReduction => {
+                                    params.kill_switch_subsidy_reduction
+                                }
+                                ParamKey::MinerRewardLogisticTarget => {
+                                    params.miner_reward_logistic_target
+                                }
                                 ParamKey::LogisticSlope => params.logistic_slope_milli,
                                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
@@ -400,9 +404,7 @@ impl GovStore {
                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
-                ParamKey::KillSwitchSubsidyReduction => {
-                    params.kill_switch_subsidy_reduction as i64
-                }
+                ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
                 ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
                 ParamKey::LogisticSlope => params.logistic_slope_milli,
                 ParamKey::MinerHysteresis => params.miner_hysteresis,

@@ -7,6 +7,7 @@ use crate::{
     identity::handle_registry::HandleRegistry,
     kyc,
     localnet::{validate_proximity, AssistReceipt},
+    net,
     simple_db::SimpleDb,
     storage::fs::RentEscrow,
     transaction::FeeLane,
@@ -17,6 +18,7 @@ use hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::fs;
 use std::net::IpAddr;
 use std::sync::{
@@ -36,13 +38,13 @@ use tokio::sync::oneshot;
 #[cfg(feature = "telemetry")]
 pub mod analytics;
 pub mod client;
+pub mod compute_market;
 pub mod consensus;
+pub mod dex;
 pub mod governance;
 pub mod identity;
-pub mod pos;
-pub mod dex;
 pub mod inflation;
-pub mod compute_market;
+pub mod pos;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -79,6 +81,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "analytics",
     "microshard.roots.last",
     "mempool.stats",
+    "net.peer_stats",
+    "net.peer_stats_all",
+    "net.peer_stats_reset",
+    "net.peer_stats_export",
     "kyc.verify",
     "pow.get_template",
     "dex_escrow_status",
@@ -87,6 +93,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "pow.submit",
     "inflation.params",
     "compute_market.stats",
+    "compute_market.scheduler_metrics",
+    "compute_market.scheduler_stats",
+    "compute.reputation_get",
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
@@ -223,6 +232,7 @@ pub async fn handle_conn(
     cfg: Arc<RpcRuntimeConfig>,
 ) {
     let mut reader = BufReader::new(stream);
+    let peer_ip = reader.get_ref().peer_addr().ok().map(|a| a.ip());
 
     // Read request line with timeout to avoid hanging connections.
     let mut line = String::new();
@@ -439,23 +449,62 @@ pub async fn handle_conn(
                     }
                 }
             } else if PUBLIC_METHODS.contains(&method_str) {
-                match dispatch(
-                    &r,
-                    Arc::clone(&bc),
-                    Arc::clone(&mining),
-                    Arc::clone(&nonces),
-                    Arc::clone(&handles),
+                if matches!(
+                    method_str,
+                    "net.peer_stats"
+                        | "net.peer_stats_all"
+                        | "net.peer_stats_reset"
+                        | "net.peer_stats_export"
                 ) {
-                    Ok(v) => RpcResponse::Result {
-                        jsonrpc: "2.0",
-                        result: v,
-                        id,
-                    },
-                    Err(e) => RpcResponse::Error {
-                        jsonrpc: "2.0",
-                        error: e,
-                        id,
-                    },
+                    let local = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+                    if !local {
+                        RpcResponse::Error {
+                            jsonrpc: "2.0",
+                            error: RpcError {
+                                code: -32601,
+                                message: "method not found",
+                            },
+                            id,
+                        }
+                    } else {
+                        match dispatch(
+                            &r,
+                            Arc::clone(&bc),
+                            Arc::clone(&mining),
+                            Arc::clone(&nonces),
+                            Arc::clone(&handles),
+                        ) {
+                            Ok(v) => RpcResponse::Result {
+                                jsonrpc: "2.0",
+                                result: v,
+                                id,
+                            },
+                            Err(e) => RpcResponse::Error {
+                                jsonrpc: "2.0",
+                                error: e,
+                                id,
+                            },
+                        }
+                    }
+                } else {
+                    match dispatch(
+                        &r,
+                        Arc::clone(&bc),
+                        Arc::clone(&mining),
+                        Arc::clone(&nonces),
+                        Arc::clone(&handles),
+                    ) {
+                        Ok(v) => RpcResponse::Result {
+                            jsonrpc: "2.0",
+                            result: v,
+                            id,
+                        },
+                        Err(e) => RpcResponse::Error {
+                            jsonrpc: "2.0",
+                            error: e,
+                            id,
+                        },
+                    }
                 }
             } else {
                 RpcResponse::Error {
@@ -643,6 +692,128 @@ fn dispatch(
                 "fee_p90": fee_p90,
             })
         }
+        "net.peer_stats" => {
+            let id = req
+                .params
+                .get("peer_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bytes = match hex::decode(id) {
+                Ok(b) => b,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let pk: [u8; 32] = match bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let m = net::peer_stats(&pk).ok_or(RpcError {
+                code: -32602,
+                message: "unknown peer",
+            })?;
+            serde_json::json!({
+                "requests": m.requests,
+                "bytes_sent": m.bytes_sent,
+                "drops": m.drops,
+                "handshake_fail": m.handshake_fail,
+                "reputation": m.reputation.score,
+            })
+        }
+        "net.peer_stats_all" => {
+            let offset = req
+                .params
+                .get("offset")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100) as usize;
+            let stats = net::peer_stats_all(offset, limit);
+            serde_json::to_value(stats).unwrap()
+        }
+        "net.peer_stats_reset" => {
+            let id = req
+                .params
+                .get("peer_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bytes = match hex::decode(id) {
+                Ok(b) => b,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let pk: [u8; 32] = match bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            if net::reset_peer_metrics(&pk) {
+                serde_json::json!({"status": "ok"})
+            } else {
+                return Err(RpcError {
+                    code: -32602,
+                    message: "unknown peer",
+                });
+            }
+        }
+        "net.peer_stats_export" => {
+            let id = req
+                .params
+                .get("peer_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let path = req
+                .params
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bytes = match hex::decode(id) {
+                Ok(b) => b,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let pk: [u8; 32] = match bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            match net::export_peer_stats(&pk, path) {
+                Ok(()) => serde_json::json!({"status": "ok"}),
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "export failed",
+                    });
+                }
+            }
+        }
         "kyc.verify" => {
             let user = req
                 .params
@@ -745,10 +916,18 @@ fn dispatch(
                 serde_json::json!({"balance": 0})
             }
         }
-        "inflation.params" => {
-            inflation::params(&bc)
-        }
+        "inflation.params" => inflation::params(&bc),
         "compute_market.stats" => compute_market::stats(),
+        "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
+        "compute_market.scheduler_stats" => compute_market::scheduler_stats(),
+        "compute.reputation_get" => {
+            let provider = req
+                .params
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            compute_market::reputation_get(provider)
+        }
         "stake.role" => pos::role(&req.params)?,
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
@@ -948,7 +1127,11 @@ fn dispatch(
         }
         "dex_escrow_release" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let amt = req.params.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+            let amt = req
+                .params
+                .get("amount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             match dex::escrow_release(id, amt) {
                 Ok(v) => v,
                 Err(_) => {
@@ -961,14 +1144,21 @@ fn dispatch(
         }
         "dex_escrow_proof" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let idx = req.params.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let idx = req
+                .params
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
             if let Some(proof) = dex::escrow_proof(id, idx) {
                 serde_json::to_value(proof).map_err(|_| RpcError {
                     code: -32603,
                     message: "internal error",
                 })?
             } else {
-                return Err(RpcError { code: -32003, message: "not found" });
+                return Err(RpcError {
+                    code: -32003,
+                    message: "not found",
+                });
             }
         }
         "gov_propose" => {

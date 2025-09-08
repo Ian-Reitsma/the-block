@@ -67,7 +67,11 @@ test real services today.
 - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, and receipts hash into blocks before conversion to CT through
-  multipliers, laying the foundation for compute-backed money. (65.0% Complete)
+  multipliers, laying the foundation for compute-backed money. (68.0% Complete)
+- Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
+  letting operators run `net stats`, `net stats --all`, and `net stats reset`
+  to inspect or clear counters. Metrics are bounded by `max_peer_metrics` so
+  abusive peers cannot exhaust memory. (77.0% Complete)
 - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
   resolves forks deterministically, and validates blocks with BLAKE3 hashes and
   VDF-anchored randomness. (74.0% Complete)
@@ -139,7 +143,9 @@ test real services today.
 - WAL-backed `SimpleDb` provides a lightweight key-value store with crash-safe
   replay and optional byte quotas. DNS caches, chunk gossip, and DEX storage
   all build on this primitive; see [docs/simple_db.md](docs/simple_db.md).
-- Gateway DNS publishing exposes signed TXT records and per-domain read counters for free-read auditing; see [docs/gateway_dns.md](docs/gateway_dns.md).
+- Gateway DNS publishing exposes signed TXT records and per-domain read counters for free-read auditing. Domains outside the
+  chain-specific `.block` TLD require a matching TXT record in the public zone
+  before clients honor them. See [docs/gateway_dns.md](docs/gateway_dns.md).
 - Durable compute courier records bundles with exponential backoff retries; see [docs/compute_market_courier.md](docs/compute_market_courier.md).
 - CT balance and rate-limit push notifications: wallet hooks expose web push/Firebase endpoints and trigger alerts whenever balances change or throttles engage.
 - Jittered JSON-RPC client with exponential backoff to avoid thundering herds; timeouts and retry windows are configurable via environment variables.
@@ -302,18 +308,35 @@ curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":9,"method":"localnet.submit_receipt","params":{"receipt":"<hex>"}}'
 ```
 
+Inspect per-peer metrics:
+
+```bash
+blockctl net stats <peer_id>
+blockctl net stats --all
+blockctl net stats export <peer_id> --path /tmp/peer.json
+blockctl net stats reset <peer_id>
+blockctl net stats reputation <peer_id>
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":15,"method":"net.peer_stats","params":{"peer_id":"<hex>"}}'
+```
+All commands are restricted to the loopback interface. `net stats reset` zeroes
+counters, `net stats reputation` prints the adaptive rate-limit score, and all
+metrics honour `max_peer_metrics` to cap memory.
+
 Discovery, handshake, and proximity rules are detailed in [docs/localnet.md](docs/localnet.md).
 
 Publish a DNS TXT record and query gateway policy:
 
 ```bash
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
-'{"jsonrpc":"2.0","id":10,"method":"dns.publish_record","params":{"domain":"example.com","record":{"txt":"policy"},"sig":"<hex>"}}'
+'{"jsonrpc":"2.0","id":10,"method":"dns.publish_record","params":{"domain":"example.block","record":{"txt":"policy"},"sig":"<hex>"}}'
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
-'{"jsonrpc":"2.0","id":11,"method":"gateway.policy","params":{"domain":"example.com"}}'
+'{"jsonrpc":"2.0","id":11,"method":"gateway.policy","params":{"domain":"example.block"}}'
 ```
 `gateway.policy` responses include `reads_total` and `last_access_ts` counters.
-Operational details live in [docs/gateway_dns.md](docs/gateway_dns.md).
+Domains outside `.block` must host the same TXT payload in the public DNS zone
+to prevent spoofing. Operational details live in
+[docs/gateway_dns.md](docs/gateway_dns.md).
 
 Fetch recent micro‑shard roots:
 
@@ -590,14 +613,21 @@ see [docs/progress.md](docs/progress.md).
  - `mempool_size{lane}`, `consumer_fee_p50`, `consumer_fee_p90`.
  - `admission_mode{mode}`, `industrial_admitted_total`, `industrial_deferred_total`, `industrial_rejected_total{reason}`.
  - `industrial_backlog`, `industrial_utilization`, `industrial_units_total`, `industrial_price_per_unit`.
-- - `dex_escrow_locked` and `dex_escrow_pending` track escrowed funds and open contracts.
+ - `dex_escrow_locked` and `dex_escrow_pending` track escrowed funds and open contracts.
+ - `peer_request_total{peer_id}`, `peer_bytes_sent_total{peer_id}`, `peer_drop_total{peer_id,reason}`,
+   `peer_handshake_fail_total{peer_id,reason}`, `peer_stats_query_total{peer_id}`,
+   `peer_stats_reset_total{peer_id}`, `peer_stats_export_total{peer_id}`, and
+   `peer_reputation_score{peer_id}` surface per-peer activity; `peer_metrics_active`
+   gauges tracked peers.
  - `gossip_duplicate_total`, `gossip_fanout_gauge`, `gossip_convergence_seconds`, `fork_reorg_total`.
- - `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`.
-   - `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`.
+ - `difficulty_retarget_total`, `difficulty_clamp_total`, `quic_conn_latency_seconds`, `quic_bytes_sent_total`,
+   `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`.
+ - `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`.
 
  - `snapshot_interval_changed`, `badge_active`, `badge_last_change_seconds`.
  - `courier_flush_attempt_total`, `courier_flush_failure_total`.
  - `storage_put_bytes_total`, `storage_chunk_put_seconds`, `storage_repair_bytes_total`.
+ - `scheduler_match_total{result}`, `scheduler_effective_price`, `scheduler_active_jobs`.
  - Synthetic probes: the `probe` CLI emits `probe_success` and `probe_duration_seconds` for external health checks; see [docs/probe.md](docs/probe.md).
 
 Histograms provide latency distributions for core operations:

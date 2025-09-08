@@ -1,7 +1,9 @@
 #[cfg(feature = "pq-crypto")]
 use once_cell::sync::Lazy;
 #[cfg(feature = "pq-crypto")]
-use pqcrypto_dilithium::dilithium3::{detached_sign, verify_detached_signature, keypair, DetachedSignature, PublicKey, SecretKey};
+use pqcrypto_dilithium::dilithium3::{
+    detached_sign, keypair, verify_detached_signature, DetachedSignature, PublicKey, SecretKey,
+};
 
 #[cfg(feature = "pq-crypto")]
 static KEYPAIR: Lazy<(PublicKey, SecretKey)> = Lazy::new(|| keypair());

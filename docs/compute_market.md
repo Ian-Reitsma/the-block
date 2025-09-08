@@ -86,9 +86,27 @@ h = blind_sign_cat(salt, state)
 
 `h` is broadcast in `BidTx`; after at least two blocks the bidder reveals `(salt,state)` and the signature is verified before execution.
 
-Jobs may set `gpu_required = true` to schedule only on GPU-capable nodes; other
-jobs run on any provider with deterministic CPU and GPU results checked by
-tests.
+### Capability-Based Scheduling
+
+Providers attach a capability descriptor to each offer listing available CPU cores,
+GPU model, and optional accelerator. Jobs specify the minimum capability they
+require. The scheduler selects the highest-reputation provider whose capability
+satisfies the request. Reputation starts from the offer's advertised score and is
+incremented on successful completion or decremented on failure.
+
+### Scheduler Flow
+
+![Scheduler flow](assets/scheduler_flow.svg)
+
+The scheduler ingests offers, weights them by reputation, and selects the
+highest-scoring provider that satisfies the job's capability requirements.
+
+Prometheus counters `scheduler_match_total{result}` and
+`reputation_adjust_total{result}` expose scheduler outcomes and reputation
+adjustments. Snapshot recent success and failure counts with the
+`compute_market.scheduler_stats` RPC for dashboard display. Reputation scores
+persist across restarts in `~/.the_block/reputation.json` and decay toward zero
+at the rate configured by `provider_reputation_decay`.
 
 ## Slice Files and Hashing
 
@@ -96,11 +114,42 @@ Slices are raw byte blobs saved with a `.slice` extension. The reference
 implementation simply hashes the contents with BLAKE3. Sample slice files and a
 `generate_slice.py` helper live under `examples/workloads/`.
 
+`gpu_inference.json` demonstrates requesting an RTX4090-capable provider with 16 GB of VRAM. Additional examples illustrate a
+CPU-only task (`cpu_only.json`) and a multi-GPU request (`multi_gpu.json`):
+
+```bash
+cat examples/workloads/gpu_inference.json
+```
+
 To run a sample workload:
 
 ```bash
 cargo run --example run_workload examples/workloads/transcode.slice
 ```
+
+Fetch aggregated scheduler statistics with:
+
+```bash
+curl -s -d '{"method":"compute_market.scheduler_stats"}' http://localhost:3030 | jq
+```
+
+Sample output:
+
+```json
+{"success":1,"capability_mismatch":0,"reputation_failure":0,"active_jobs":0,"utilization":{"A100":1}}
+```
+
+### GPU Memory Matching
+
+Providers advertise `gpu_memory_mb` alongside the GPU model. Workloads may
+require a minimum amount of VRAM, and the scheduler will only match offers that
+meet both the model and memory requirements. If no provider has sufficient
+memory, the scheduler increments `scheduler_match_total{result="capability_mismatch"}`
+for observability.
+
+Default reputation decay and retention values are configurable in
+`config/default.toml` via `provider_reputation_decay` and
+`provider_reputation_retention`.
 
 ## Courier Mode
 

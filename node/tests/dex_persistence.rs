@@ -42,11 +42,9 @@ fn order_book_persists() {
         max_slippage_bps: 0,
     };
     let mut escrow = Escrow::default();
-    book
-        .place_settle_persist(buy, &mut ledger, Some(&mut store), &mut escrow)
+    book.place_settle_persist(buy, &mut ledger, Some(&mut store), &mut escrow)
         .unwrap();
-    book
-        .place_settle_persist(sell, &mut ledger, Some(&mut store), &mut escrow)
+    book.place_settle_persist(sell, &mut ledger, Some(&mut store), &mut escrow)
         .unwrap();
     assert_eq!(store.trades().len(), 1);
     drop(book);

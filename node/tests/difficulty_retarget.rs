@@ -1,6 +1,8 @@
 use proptest::prelude::*;
 use the_block::consensus::constants::{DIFFICULTY_CLAMP_FACTOR, DIFFICULTY_WINDOW};
-use the_block::consensus::difficulty::{expected_difficulty_from_chain as expected_difficulty, retarget};
+use the_block::consensus::difficulty::{
+    expected_difficulty_from_chain as expected_difficulty, retarget,
+};
 use the_block::{Block, TokenAmount};
 
 #[test]

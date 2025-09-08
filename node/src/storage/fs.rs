@@ -76,7 +76,7 @@ impl RentEscrow {
         }
         sum
     }
-pub fn purge_expired(&mut self, now: u64) -> Vec<(String, u64, u64)> {
+    pub fn purge_expired(&mut self, now: u64) -> Vec<(String, u64, u64)> {
         let mut out = Vec::new();
         let keys = self.db.keys_with_prefix("escrow/");
         for key in keys {

@@ -86,6 +86,7 @@ async fn handle(
     read_tx: mpsc::Sender<ReadAck>,
 ) -> Result<Response<Body>, hyper::Error> {
     if !check_bucket(&ip, &buckets, &filter) {
+        crate::net::peer::record_ip_drop(&ip);
         return Ok(Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .body(Body::empty())
@@ -117,6 +118,7 @@ fn check_bucket(
 ) -> bool {
     let key = ip_key(ip);
     if filter.lock().unwrap().contains(key) {
+        crate::net::peer::record_ip_drop(ip);
         return false;
     }
     let mut map = buckets.lock().unwrap();
@@ -128,6 +130,7 @@ fn check_bucket(
         true
     } else {
         filter.lock().unwrap().insert(key);
+        crate::net::peer::record_ip_drop(ip);
         false
     }
 }

@@ -1,12 +1,12 @@
 use crate::{WalletError, WalletSigner};
 use ed25519_dalek::{PublicKey, Signature};
+use hex;
 use ledger::crypto::remote_tag;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{info, warn};
 use uuid::Uuid;
-use hex;
 
 /// Remote signer communicating over HTTP JSON.
 pub struct RemoteSigner {
@@ -62,7 +62,8 @@ impl RemoteSigner {
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
-        let pubkey = PublicKey::from_bytes(&arr).map_err(|e| WalletError::Failure(e.to_string()))?;
+        let pubkey =
+            PublicKey::from_bytes(&arr).map_err(|e| WalletError::Failure(e.to_string()))?;
         Ok(Self {
             endpoint: endpoint.to_string(),
             client,
@@ -97,8 +98,8 @@ impl WalletSigner for RemoteSigner {
             match res {
                 Ok(resp) => match resp.json::<SignResp>() {
                     Ok(r) => {
-                        let sig_bytes = hex::decode(r.sig)
-                            .map_err(|e| WalletError::Failure(e.to_string()))?;
+                        let sig_bytes =
+                            hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
                         if sig_bytes.len() != 64 {
                             return Err(WalletError::Failure("invalid signature length".into()));
                         }

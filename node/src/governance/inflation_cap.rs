@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
-use blake3::Hasher;
-use serde::Serialize;
-use inflation::proof::{verify as verify_proof, InflationProof};
 use bellman_ce::bn256::Bn256;
 use bellman_ce::groth16::PreparedVerifyingKey;
+use blake3::Hasher;
+use inflation::proof::{verify as verify_proof, InflationProof};
+use serde::Serialize;
 
 #[derive(Clone, Serialize)]
 pub struct WeekTuple {
@@ -56,12 +56,18 @@ pub fn submit_proof(proof: &InflationProof, pvk: &PreparedVerifyingKey<Bn256>) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use inflation::proof::{prove, setup};
     use bellman_ce::groth16::prepare_verifying_key;
+    use inflation::proof::{prove, setup};
 
     #[test]
     fn root_deterministic() {
-        let weeks = vec![WeekTuple { week:1, s_start:1000, s_end:1010, rho_calc:0.01, sigma_s:0.1 }];
+        let weeks = vec![WeekTuple {
+            week: 1,
+            s_start: 1000,
+            s_end: 1010,
+            rho_calc: 0.01,
+            sigma_s: 0.1,
+        }];
         let r1 = merkle_root(&weeks);
         let r2 = merkle_root(&weeks);
         assert_eq!(r1, r2);
@@ -75,4 +81,3 @@ mod tests {
         assert!(submit_proof(&proof, &pvk));
     }
 }
-

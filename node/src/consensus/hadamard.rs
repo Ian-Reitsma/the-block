@@ -1,7 +1,7 @@
-use blake3;
 use crate::consensus::committee::topk::topk as sketch_topk;
+use blake3;
 
-pub fn unruh_extract(vrf: &[u8], prev_block: &[u8]) -> [u8;32] {
+pub fn unruh_extract(vrf: &[u8], prev_block: &[u8]) -> [u8; 32] {
     let mut h = blake3::Hasher::new();
     h.update(vrf);
     h.update(prev_block);
@@ -43,20 +43,25 @@ mod tests {
 
     #[test]
     fn committee_size() {
-        let vrf = [1u8;32];
-        let prev = [2u8;32];
+        let vrf = [1u8; 32];
+        let prev = [2u8; 32];
         let sel = sample_committee(&vrf, &prev, 8, 3);
-        assert_eq!(sel.len(),3);
+        assert_eq!(sel.len(), 3);
         // Ensure selected indices correspond to largest magnitudes as a sanity check
-        let mut vec = vec![0f64;8];
-        let seed = unruh_extract(&vrf,&prev);
-        for i in 0..8 { let bit = (seed[i/8]>>(i%8))&1; vec[i]=if bit==1{1.0}else{-1.0}; }
+        let mut vec = vec![0f64; 8];
+        let seed = unruh_extract(&vrf, &prev);
+        for i in 0..8 {
+            let bit = (seed[i / 8] >> (i % 8)) & 1;
+            vec[i] = if bit == 1 { 1.0 } else { -1.0 };
+        }
         hadamard(&mut vec);
-        let mut idx: Vec<usize>=(0..8).collect();
-        idx.sort_by(|a,b| vec[*b].abs().partial_cmp(&vec[*a].abs()).unwrap());
+        let mut idx: Vec<usize> = (0..8).collect();
+        idx.sort_by(|a, b| vec[*b].abs().partial_cmp(&vec[*a].abs()).unwrap());
         idx.truncate(3);
-        let mut sel_sorted=sel.clone(); sel_sorted.sort();
-        let mut idx_sorted=idx.clone(); idx_sorted.sort();
+        let mut sel_sorted = sel.clone();
+        sel_sorted.sort();
+        let mut idx_sorted = idx.clone();
+        idx_sorted.sort();
         assert_eq!(sel_sorted, idx_sorted);
     }
 }

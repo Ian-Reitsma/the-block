@@ -34,7 +34,14 @@ Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves 
 
 Panels include per-lane mempool size, banned peers, gossip duplicate counts,
 `read_denied_total{reason}` counters, subsidy gauges (`subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`, `rent_escrow_locked_ct_total`),
-and average log size derived from the `log_size_bytes` histogram. Additional gauges expose `subsidy_auto_reduced_total` and `kill_switch_trigger_total` so operators can correlate reward shifts with governance interventions. The repository omits screenshot assets to keep the tree lightweight; after running a monitor command, open Grafana and import `monitoring/grafana/dashboard.json` to explore the dashboard.
+per-peer request/drop panels from `peer_request_total`/`peer_drop_total{reason}`,
+scheduler match histograms (`scheduler_match_total{result}`,
+`scheduler_provider_reputation`) and average log size derived from the
+`log_size_bytes` histogram. Additional gauges expose `subsidy_auto_reduced_total`
+and `kill_switch_trigger_total` so operators can correlate reward shifts with
+governance interventions. The repository omits screenshot assets to keep the
+tree lightweight; after running a monitor command, open Grafana and import
+`monitoring/grafana/dashboard.json` to explore the dashboard.
 
 Operators can clone the dashboard JSON and add environment-specific panels—for
 example, graphing `subsidy_bytes_total{type="storage"}` per account or plotting

@@ -1,0 +1,9 @@
+{
+  "job_id": "demo-cpu",
+  "capability": {
+    "cpu_cores": 8,
+    "gpu_memory_mb": 0
+  },
+  "workload": "transcode",
+  "_comment": "CPU-only workload requiring 8 cores"
+}

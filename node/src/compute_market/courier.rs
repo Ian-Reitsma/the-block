@@ -1,3 +1,4 @@
+use super::scheduler::{self, Capability};
 use blake3::Hasher;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,17 @@ impl CourierStore {
             bincode::serialize(&receipt).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
         let _ = self.tree.insert(id.to_be_bytes(), bytes);
         receipt
+    }
+
+    /// Send a bundle only if a provider matching the required capability exists.
+    /// Returns `None` when no compatible provider is available.
+    pub fn send_for_capability(
+        &self,
+        bundle: &[u8],
+        sender: &str,
+        need: &Capability,
+    ) -> Option<CourierReceipt> {
+        scheduler::match_offer(need).map(|_| self.send(bundle, sender))
     }
 
     pub fn flush<F: Fn(&CourierReceipt) -> bool>(&self, forward: F) -> Result<u64, sled::Error> {

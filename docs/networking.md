@@ -42,8 +42,9 @@ files and advertise the QUIC address and certificate during the TCP handshake so
 peers can cache and validate the endpoint without manual distribution. Metrics
 `quic_conn_latency_seconds`, `quic_bytes_sent_total`, and
 `quic_bytes_recv_total` track session performance. Additional counters
-`quic_handshake_fail_total` and `quic_disconnect_total{code}` record failed
-handshakes and disconnect error codes for troubleshooting. `quic_endpoint_reuse_total`
+`quic_handshake_fail_total`, `net_peer_handshake_fail_total{peer_id,reason}`, and
+`quic_disconnect_total{code}` record failed handshakes and disconnect error codes
+for troubleshooting. `quic_endpoint_reuse_total`
 counts how often the client connection pool reused an existing endpoint.
 
 Certificates are stored with `0600` permissions and checked for ownership at
@@ -79,6 +80,50 @@ Chunk gossip uses a separate `SimpleDb` instance. The location defaults to
 `~/.the_block/chunks/` and may be changed with `TB_CHUNK_DB_PATH`. Both
 directories are created automatically if missing. See
 [docs/simple_db.md](simple_db.md) for WAL layout and recovery behavior.
+
+## Rate-Limit Metric Retention
+
+Per-peer telemetry retains up to `max_peer_metrics` entries in memory. The
+default cap (1024) prevents unbounded label cardinality in Prometheus. When the
+cap is exceeded, the least recently updated peer is evicted and its counters are
+removed from the exporter. An informational `evict_peer_metrics` log is emitted
+whenever eviction occurs. Each entry tracks requests, bytes, and drops and
+consumes only a few dozen bytes, but operators should size the cap according to
+expected peer churn and available memory.
+
+Set `peer_metrics_export = false` to suppress per-peer Prometheus labels and
+`track_peer_drop_reasons = false` to aggregate all drops under `other` if label
+cardinality is a concern.
+
+Rate limits adapt to each peer's reputation score. The base quota is multiplied
+by the score, which decays toward `1.0` at a rate of `peer_reputation_decay` and
+is reduced by 10% on every rate-limit violation. Inspect scores with
+`net stats reputation <peer_id>` and tune decay via `config.toml`.
+
+Per-peer counters are retrievable via the loopback-only `net.peer_stats` RPC or
+the `net stats <peer_id>` CLI:
+
+```bash
+net stats <peer_id>
+```
+
+Each query increments `peer_stats_query_total{peer_id}`. For bulk inspection,
+use `net.peer_stats_all` or `net stats --all` with optional `offset` and `limit`
+parameters.
+
+Invoking `net.peer_stats_reset` or the `net stats reset` CLI subcommand clears
+all counters for the specified peer. This operation removes the peer's metrics
+from the Prometheus exporter and permanently discards historical data. Each
+successful reset increments `peer_stats_reset_total{peer_id}` which can be
+scraped from the metrics endpoint:
+
+```sh
+curl -s http://localhost:9898/metrics | grep peer_stats_reset_total
+```
+
+Metrics can also be exported for offline inspection using
+`net stats export <peer_id> --path <file>`, which writes a JSON snapshot and
+increments the `peer_stats_export_total{peer_id}` counter.
 
 For deterministic tests, setting `TB_PEER_SEED=<u64>` fixes the shuffle order
 returned by `PeerSet::bootstrap`. This allows reproducible bootstrap sequences

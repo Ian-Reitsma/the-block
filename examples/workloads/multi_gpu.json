@@ -1,0 +1,11 @@
+{
+  "job_id": "demo-multi-gpu",
+  "capability": {
+    "cpu_cores": 16,
+    "gpu": "A100",
+    "gpu_memory_mb": 32768,
+    "gpu_count": 2
+  },
+  "workload": "inference",
+  "_comment": "Request two A100 GPUs each with 16 GB"
+}
