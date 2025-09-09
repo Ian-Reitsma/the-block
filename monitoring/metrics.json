@@ -1,0 +1,890 @@
+{
+  "metrics": [
+    {
+      "deprecated": false,
+      "description": "Remaining burst quota",
+      "labels": [
+        "identity"
+      ],
+      "name": "active_burst_quota"
+    },
+    {
+      "deprecated": false,
+      "description": "effective active miners",
+      "labels": [],
+      "name": "active_miners"
+    },
+    {
+      "deprecated": false,
+      "description": "Current industrial admission mode",
+      "labels": [
+        "mode"
+      ],
+      "name": "admission_mode"
+    },
+    {
+      "deprecated": false,
+      "description": "Whether a service badge is active (1/0)",
+      "labels": [],
+      "name": "badge_active"
+    },
+    {
+      "deprecated": false,
+      "description": "Unix timestamp of the last badge mint/burn",
+      "labels": [],
+      "name": "badge_last_change_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Transactions rejected due to balance overflow",
+      "labels": [],
+      "name": "balance_overflow_reject_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Expiration timestamp for active peer bans",
+      "labels": [],
+      "name": "banned_peer_expiration_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Total peers currently banned",
+      "labels": [],
+      "name": "banned_peers_total"
+    },
+    {
+      "deprecated": false,
+      "description": "base reward after logistic factor",
+      "labels": [],
+      "name": "base_reward_ct"
+    },
+    {
+      "deprecated": false,
+      "description": "Total mined blocks",
+      "labels": [],
+      "name": "block_mined_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Configuration reload attempts grouped by result",
+      "labels": [],
+      "name": "config_reload_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Median consumer fee",
+      "labels": [],
+      "name": "consumer_fee_p50"
+    },
+    {
+      "deprecated": false,
+      "description": "p90 consumer fee",
+      "labels": [],
+      "name": "consumer_fee_p90"
+    },
+    {
+      "deprecated": false,
+      "description": "Total courier receipt flush attempts",
+      "labels": [],
+      "name": "courier_flush_attempt_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Failed courier receipt flush attempts",
+      "labels": [],
+      "name": "courier_flush_failure_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total funds locked in DEX escrow",
+      "labels": [],
+      "name": "dex_escrow_locked"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of pending DEX escrows",
+      "labels": [],
+      "name": "dex_escrow_pending"
+    },
+    {
+      "deprecated": false,
+      "description": "Retarget calculations clamped to bounds",
+      "labels": [],
+      "name": "difficulty_clamp_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of difficulty retarget calculations",
+      "labels": [],
+      "name": "difficulty_retarget_total"
+    },
+    {
+      "deprecated": false,
+      "description": "drop_transaction failures for missing entries",
+      "labels": [],
+      "name": "drop_not_found_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Transactions rejected as duplicate",
+      "labels": [],
+      "name": "dup_tx_reject_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total mempool evictions",
+      "labels": [],
+      "name": "evictions_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Transactions rejected for low fee",
+      "labels": [],
+      "name": "fee_floor_reject_total"
+    },
+    {
+      "deprecated": false,
+      "description": "base seconds for Fibonacci smoothing",
+      "labels": [],
+      "name": "fib_window_base_secs"
+    },
+    {
+      "deprecated": false,
+      "description": "Total observed fork reorgs",
+      "labels": [
+        "depth"
+      ],
+      "name": "fork_reorg_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Gateway DNS verification attempts grouped by status",
+      "labels": [],
+      "name": "gateway_dns_lookup_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Time for all peers to agree on the network tip",
+      "labels": [],
+      "name": "gossip_convergence_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Duplicate gossip messages dropped",
+      "labels": [],
+      "name": "gossip_duplicate_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current gossip fanout",
+      "labels": [],
+      "name": "gossip_fanout_gauge"
+    },
+    {
+      "deprecated": false,
+      "description": "Delay between scheduled and actual activation",
+      "labels": [],
+      "name": "gov_activation_delay_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Governance activations",
+      "labels": [
+        "key"
+      ],
+      "name": "gov_activation_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Open governance proposals",
+      "labels": [],
+      "name": "gov_open_proposals"
+    },
+    {
+      "deprecated": false,
+      "description": "Governance proposals by status",
+      "labels": [
+        "status"
+      ],
+      "name": "gov_proposals_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Governance quorum",
+      "labels": [],
+      "name": "gov_quorum_required"
+    },
+    {
+      "deprecated": false,
+      "description": "Governance rollbacks",
+      "labels": [
+        "key"
+      ],
+      "name": "gov_rollback_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Governance votes",
+      "labels": [
+        "choice"
+      ],
+      "name": "gov_votes_total"
+    },
+    {
+      "deprecated": false,
+      "description": "eta parameter for burst veto x1000",
+      "labels": [],
+      "name": "haar_eta_milli"
+    },
+    {
+      "deprecated": false,
+      "description": "Handshake failures grouped by reason",
+      "labels": [],
+      "name": "handshake_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "A* heuristic mu x1000",
+      "labels": [],
+      "name": "heuristic_mu_milli"
+    },
+    {
+      "deprecated": false,
+      "description": "Non-contiguous nonce submissions",
+      "labels": [],
+      "name": "identity_nonce_skips_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Handle registration attempts",
+      "labels": [],
+      "name": "identity_registrations_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Rejected identity replay attempts",
+      "labels": [],
+      "name": "identity_replays_blocked_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Industrial lane transactions admitted",
+      "labels": [],
+      "name": "industrial_admitted_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Pending industrial compute slices",
+      "labels": [],
+      "name": "industrial_backlog"
+    },
+    {
+      "deprecated": false,
+      "description": "Industrial lane submissions deferred",
+      "labels": [],
+      "name": "industrial_deferred_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current industrial subsidy multiplier",
+      "labels": [],
+      "name": "industrial_multiplier"
+    },
+    {
+      "deprecated": false,
+      "description": "Latest price per compute unit",
+      "labels": [],
+      "name": "industrial_price_per_unit"
+    },
+    {
+      "deprecated": false,
+      "description": "Industrial admission rejections by reason",
+      "labels": [],
+      "name": "industrial_rejected_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total normalized compute units processed",
+      "labels": [],
+      "name": "industrial_units_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Industrial compute utilisation percentage",
+      "labels": [],
+      "name": "industrial_utilization"
+    },
+    {
+      "deprecated": false,
+      "description": "Transactions rejected for invalid fee selector",
+      "labels": [],
+      "name": "invalid_selector_reject_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Times the subsidy kill switch was activated",
+      "labels": [],
+      "name": "kill_switch_trigger_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Lock acquisition failures due to poisoning",
+      "labels": [],
+      "name": "lock_poison_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Logs dropped due to rate limiting",
+      "labels": [],
+      "name": "log_drop_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total emitted log events",
+      "labels": [],
+      "name": "log_emit_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Size of serialized log events in bytes",
+      "labels": [],
+      "name": "log_size_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Settlement loop latency",
+      "labels": [],
+      "name": "match_loop_latency_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Total matched jobs",
+      "labels": [
+        "dry_run"
+      ],
+      "name": "matches_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current mempool size",
+      "labels": [
+        "lane"
+      ],
+      "name": "mempool_size"
+    },
+    {
+      "deprecated": false,
+      "description": "Times the miner reward logistic factor was recalculated",
+      "labels": [],
+      "name": "miner_reward_recalc_total"
+    },
+    {
+      "deprecated": false,
+      "description": "QUIC handshake failures per peer grouped by reason",
+      "labels": [],
+      "name": "net_peer_handshake_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Transactions dropped because the sender account is missing",
+      "labels": [],
+      "name": "orphan_sweep_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Successful handshakes by feature mask",
+      "labels": [],
+      "name": "p2p_handshake_accept_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Handshakes rejected by reason",
+      "labels": [],
+      "name": "p2p_handshake_reject_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current active governance parameter values",
+      "labels": [],
+      "name": "param_change_active"
+    },
+    {
+      "deprecated": false,
+      "description": "Governance parameter changes pending activation",
+      "labels": [],
+      "name": "param_change_pending"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of settlement payouts capped per identity",
+      "labels": [],
+      "name": "payout_cap_hits_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bytes sent to peer",
+      "labels": [],
+      "name": "peer_bytes_sent_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Messages dropped grouped by reason",
+      "labels": [],
+      "name": "peer_drop_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total peer errors grouped by code",
+      "labels": [],
+      "name": "peer_error_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Peer key rotation attempts grouped by result",
+      "labels": [],
+      "name": "peer_key_rotate_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of peers currently tracked for telemetry",
+      "labels": [],
+      "name": "peer_metrics_active"
+    },
+    {
+      "deprecated": false,
+      "description": "Websocket peer metrics frames dropped",
+      "labels": [],
+      "name": "peer_metrics_dropped_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Approximate memory used by peer metrics map",
+      "labels": [],
+      "name": "peer_metrics_memory_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Active peer metrics websocket subscribers",
+      "labels": [],
+      "name": "peer_metrics_subscribers"
+    },
+    {
+      "deprecated": false,
+      "description": "Peers rejected grouped by reason",
+      "labels": [],
+      "name": "peer_rejected_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Peer reputation score",
+      "labels": [],
+      "name": "peer_reputation_score"
+    },
+    {
+      "deprecated": false,
+      "description": "Total requests received from peer",
+      "labels": [],
+      "name": "peer_request_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Bulk peer metric export attempts grouped by result",
+      "labels": [],
+      "name": "peer_stats_export_all_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Peer metric export attempts grouped by result",
+      "labels": [],
+      "name": "peer_stats_export_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Peer metric queries grouped by peer",
+      "labels": [],
+      "name": "peer_stats_query_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Peer metric resets grouped by peer",
+      "labels": [],
+      "name": "peer_stats_reset_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Peer throttle events grouped by reason",
+      "labels": [],
+      "name": "peer_throttle_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current reputation score per provider",
+      "labels": [],
+      "name": "provider_reputation_score"
+    },
+    {
+      "deprecated": false,
+      "description": "Total bytes received over QUIC",
+      "labels": [],
+      "name": "quic_bytes_recv_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total bytes sent over QUIC",
+      "labels": [],
+      "name": "quic_bytes_sent_total"
+    },
+    {
+      "deprecated": false,
+      "description": "QUIC connection handshake latency",
+      "labels": [],
+      "name": "quic_conn_latency_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "QUIC disconnects by error code",
+      "labels": [
+        "code"
+      ],
+      "name": "quic_disconnect_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total QUIC endpoint reuse count",
+      "labels": [],
+      "name": "quic_endpoint_reuse_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total QUIC handshake failures",
+      "labels": [],
+      "name": "quic_handshake_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Reads denied by reason",
+      "labels": [
+        "reason"
+      ],
+      "name": "read_denied_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Corrupted receipt entries on load",
+      "labels": [],
+      "name": "receipt_corrupt_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Receipt persistence failures",
+      "labels": [],
+      "name": "receipt_persist_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total CT burned from rent escrow",
+      "labels": [],
+      "name": "rent_escrow_burned_ct_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total CT locked in rent escrow",
+      "labels": [],
+      "name": "rent_escrow_locked_ct_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total CT refunded from rent escrow",
+      "labels": [],
+      "name": "rent_escrow_refunded_ct_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Reputation adjustments",
+      "labels": [
+        "result"
+      ],
+      "name": "reputation_adjust_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Reputation gossip updates processed grouped by result",
+      "labels": [],
+      "name": "reputation_gossip_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total RPC bans issued",
+      "labels": [],
+      "name": "rpc_bans_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total RPC client errors grouped by code",
+      "labels": [],
+      "name": "rpc_client_error_total"
+    },
+    {
+      "deprecated": false,
+      "description": "RPC requests checked against the rate limiter",
+      "labels": [],
+      "name": "rpc_rate_limit_attempt_total"
+    },
+    {
+      "deprecated": false,
+      "description": "RPC requests rejected by the rate limiter",
+      "labels": [],
+      "name": "rpc_rate_limit_reject_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current RPC rate limiter tokens per client",
+      "labels": [],
+      "name": "rpc_tokens_available"
+    },
+    {
+      "deprecated": false,
+      "description": "Jobs requiring accelerators that could not be matched",
+      "labels": [],
+      "name": "scheduler_accelerator_miss_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of currently assigned jobs",
+      "labels": [],
+      "name": "scheduler_active_jobs"
+    },
+    {
+      "deprecated": false,
+      "description": "Effective compute price per unit by provider",
+      "labels": [],
+      "name": "scheduler_effective_price"
+    },
+    {
+      "deprecated": false,
+      "description": "Time to perform a scheduler match",
+      "labels": [],
+      "name": "scheduler_match_latency_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Scheduler match outcomes by result",
+      "labels": [],
+      "name": "scheduler_match_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Scheduler preemption events by reason",
+      "labels": [],
+      "name": "scheduler_preempt_total"
+    },
+    {
+      "deprecated": false,
+      "description": "High-priority jobs exceeding wait threshold",
+      "labels": [],
+      "name": "scheduler_priority_miss_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Distribution of provider reputation scores",
+      "labels": [],
+      "name": "scheduler_provider_reputation"
+    },
+    {
+      "deprecated": false,
+      "description": "Receipts applied",
+      "labels": [],
+      "name": "settle_applied_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Receipts failing settlement audit",
+      "labels": [],
+      "name": "settle_audit_mismatch_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Settlement failures",
+      "labels": [
+        "reason"
+      ],
+      "name": "settle_failed_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Settlement mode changes",
+      "labels": [
+        "to"
+      ],
+      "name": "settle_mode_change_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total CT burned from slashing penalties",
+      "labels": [],
+      "name": "slashing_burn_ct_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Snapshot operation duration",
+      "labels": [],
+      "name": "snapshot_duration_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Total snapshot operation failures",
+      "labels": [],
+      "name": "snapshot_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Snapshot interval in blocks",
+      "labels": [],
+      "name": "snapshot_interval"
+    },
+    {
+      "deprecated": false,
+      "description": "Last requested snapshot interval",
+      "labels": [],
+      "name": "snapshot_interval_changed"
+    },
+    {
+      "deprecated": false,
+      "description": "Expired mempool entries dropped during startup",
+      "labels": [],
+      "name": "startup_ttl_drop_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Size of chunks put into storage",
+      "labels": [],
+      "name": "storage_chunk_size_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of storage writes that failed due to disk exhaustion",
+      "labels": [],
+      "name": "storage_disk_full_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Final preferred chunk size after upload",
+      "labels": [],
+      "name": "storage_final_chunk_size"
+    },
+    {
+      "deprecated": false,
+      "description": "Initial chunk size used for object upload",
+      "labels": [],
+      "name": "storage_initial_chunk_size"
+    },
+    {
+      "deprecated": false,
+      "description": "Observed provider loss rate",
+      "labels": [],
+      "name": "storage_provider_loss_rate"
+    },
+    {
+      "deprecated": false,
+      "description": "Observed provider RTT in milliseconds",
+      "labels": [],
+      "name": "storage_provider_rtt_ms"
+    },
+    {
+      "deprecated": false,
+      "description": "Time to put a single chunk",
+      "labels": [],
+      "name": "storage_put_chunk_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Estimated time to upload object in seconds",
+      "labels": [],
+      "name": "storage_put_eta_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Total bytes reconstructed by repair loop",
+      "labels": [],
+      "name": "storage_repair_bytes_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total storage repair failures",
+      "labels": [],
+      "name": "storage_repair_failures_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Multiplier auto-reduction events due to inflation guard",
+      "labels": [],
+      "name": "subsidy_auto_reduced_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total subsidized bytes by type",
+      "labels": [
+        "type"
+      ],
+      "name": "subsidy_bytes_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total subsidized compute time in ms",
+      "labels": [],
+      "name": "subsidy_cpu_ms_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Current subsidy multipliers",
+      "labels": [
+        "type"
+      ],
+      "name": "subsidy_multiplier"
+    },
+    {
+      "deprecated": false,
+      "description": "True subsidy multipliers",
+      "labels": [
+        "type"
+      ],
+      "name": "subsidy_multiplier_raw"
+    },
+    {
+      "deprecated": false,
+      "description": "Transactions dropped due to TTL expiration",
+      "labels": [],
+      "name": "ttl_drop_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total admitted transactions",
+      "labels": [],
+      "name": "tx_admitted_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total rejected transactions",
+      "labels": [],
+      "name": "tx_rejected_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total submitted transactions",
+      "labels": [],
+      "name": "tx_submitted_total"
+    },
+    {
+      "deprecated": false,
+      "description": "utilisation variance threshold x1000",
+      "labels": [],
+      "name": "util_var_threshold_milli"
+    },
+    {
+      "deprecated": false,
+      "description": "WAL entries skipped due to checksum mismatch",
+      "labels": [],
+      "name": "wal_corrupt_recovery_total"
+    }
+  ]
+}

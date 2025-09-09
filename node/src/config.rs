@@ -33,8 +33,12 @@ pub struct NodeConfig {
     pub peer_metrics_retention: u64,
     #[serde(default)]
     pub peer_metrics_compress: bool,
+    #[serde(default = "default_peer_metrics_sample_rate")]
+    pub peer_metrics_sample_rate: u32,
     #[serde(default = "default_metrics_export_dir")]
     pub metrics_export_dir: String,
+    #[serde(default = "default_peer_metrics_export_quota_bytes")]
+    pub peer_metrics_export_quota_bytes: u64,
     #[serde(default = "default_true")]
     pub track_peer_drop_reasons: bool,
     #[serde(default = "default_true")]
@@ -43,6 +47,8 @@ pub struct NodeConfig {
     pub peer_reputation_decay: f64,
     #[serde(default = "default_p2p_max_per_sec")]
     pub p2p_max_per_sec: u32,
+    #[serde(default = "default_p2p_max_bytes_per_sec")]
+    pub p2p_max_bytes_per_sec: u64,
     #[serde(default = "default_provider_reputation_decay")]
     pub provider_reputation_decay: f64,
     #[serde(default = "default_provider_reputation_retention")]
@@ -74,11 +80,14 @@ impl Default for NodeConfig {
             peer_metrics_path: default_peer_metrics_path(),
             peer_metrics_retention: default_peer_metrics_retention(),
             peer_metrics_compress: false,
+            peer_metrics_sample_rate: default_peer_metrics_sample_rate(),
             metrics_export_dir: default_metrics_export_dir(),
+            peer_metrics_export_quota_bytes: default_peer_metrics_export_quota_bytes(),
             track_peer_drop_reasons: default_true(),
             track_handshake_failures: default_true(),
             peer_reputation_decay: default_peer_reputation_decay(),
             p2p_max_per_sec: default_p2p_max_per_sec(),
+            p2p_max_bytes_per_sec: default_p2p_max_bytes_per_sec(),
             provider_reputation_decay: default_provider_reputation_decay(),
             provider_reputation_retention: default_provider_reputation_retention(),
             reputation_gossip: default_true(),
@@ -109,6 +118,10 @@ fn default_p2p_max_per_sec() -> u32 {
     100
 }
 
+fn default_p2p_max_bytes_per_sec() -> u64 {
+    65536
+}
+
 fn default_provider_reputation_decay() -> f64 {
     0.05
 }
@@ -129,6 +142,14 @@ fn default_metrics_export_dir() -> String {
     "state".into()
 }
 
+fn default_peer_metrics_export_quota_bytes() -> u64 {
+    10 * 1024 * 1024
+}
+
+fn default_peer_metrics_sample_rate() -> u32 {
+    1
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComputeMarketConfig {
     pub settle_mode: crate::compute_market::settlement::SettleMode,
@@ -136,6 +157,8 @@ pub struct ComputeMarketConfig {
     pub enable_preempt: bool,
     #[serde(default = "default_preempt_min_delta")]
     pub preempt_min_delta: i64,
+    #[serde(default = "default_low_priority_cap_pct")]
+    pub low_priority_cap_pct: u8,
     #[serde(default = "default_reputation_multiplier_min")]
     pub reputation_multiplier_min: f64,
     #[serde(default = "default_reputation_multiplier_max")]
@@ -161,6 +184,7 @@ impl Default for ComputeMarketConfig {
             settle_mode: crate::compute_market::settlement::SettleMode::DryRun,
             enable_preempt: default_false(),
             preempt_min_delta: default_preempt_min_delta(),
+            low_priority_cap_pct: default_low_priority_cap_pct(),
             reputation_multiplier_min: default_reputation_multiplier_min(),
             reputation_multiplier_max: default_reputation_multiplier_max(),
         }
@@ -173,6 +197,10 @@ fn default_false() -> bool {
 
 fn default_preempt_min_delta() -> i64 {
     10
+}
+
+fn default_low_priority_cap_pct() -> u8 {
+    50
 }
 
 fn default_reputation_multiplier_min() -> f64 {
@@ -250,11 +278,13 @@ fn load_file(dir: &str) -> Result<NodeConfig> {
 fn apply(cfg: &NodeConfig) {
     crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
+    crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
     crate::compute_market::scheduler::set_provider_reputation_decay(cfg.provider_reputation_decay);
     crate::compute_market::scheduler::set_provider_reputation_retention(
         cfg.provider_reputation_retention,
     );
     crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
+    crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
 }
 
 pub fn reload() -> bool {

@@ -168,6 +168,29 @@ Exports are restricted to `metrics_export_dir` (default `state`) and paths are
 validated to prevent traversal. The CLI warns on overwrite and supports
 `--all` to create a tarball containing every peer's metrics.
 
+### Peer Throttling
+
+Peers that exceed request or bandwidth quotas are temporarily throttled using
+moving averages of `peer_request_total` and `peer_bytes_sent_total`. Quotas are
+configured via `p2p_max_per_sec` and `p2p_max_bytes_per_sec` in `config.toml`.
+Throttled peers are skipped during Turbine broadcast and accrue reputation
+penalties. Inspect a peer's status with:
+
+```bash
+net stats <peer_id>
+```
+
+The output includes `throttle=<reason>` while a peer is throttled. Operators can
+manually engage or clear throttling:
+
+```bash
+net stats throttle <peer_id>
+net stats throttle <peer_id> --clear
+```
+
+Each action increments the `peer_throttle_total{reason}` counter for
+observability.
+
 For deterministic tests, setting `TB_PEER_SEED=<u64>` fixes the shuffle order
 returned by `PeerSet::bootstrap`. This allows reproducible bootstrap sequences
 when running integration tests or chaos simulations.

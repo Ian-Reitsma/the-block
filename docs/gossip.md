@@ -178,12 +178,22 @@ To export metrics for offline analysis, use:
 
 ```bash
 net stats export <peer_id> --path peer.json
+net stats export --all --path bulk [--min-reputation 0.5 --active-within 60]
 ```
 
-or the `net.peer_stats_export` RPC. Paths are relative to `metrics_export_dir`
-(`state` by default) and sanitized against traversal. Successful exports
-increment `peer_stats_export_total{result}` and write a JSON snapshot of the
-metrics. Use `--all` to bundle every peer into a tarball.
+The `net.peer_stats_export` RPC performs the on-disk write. Paths are relative
+to `metrics_export_dir` (`state` by default) and sanitized against traversal.
+Successful single‑peer exports increment `peer_stats_export_total{result}` and
+write a JSON snapshot of the metrics. Supplying `--all` creates a directory with
+one `<peer_id>.json` file per peer; enabling `peer_metrics_compress` in the
+config compresses the directory to `bulk.tar.gz`. Bulk operations increment
+`peer_stats_export_all_total{result}` and log the number of peers and bytes
+written. Filters can restrict the export to peers above a reputation threshold
+or active within a recent window.
+
+For inspection without writing to disk, the `net.peer_stats_export_all` RPC
+returns a JSON object mapping peer IDs to metrics and accepts the same filtering
+parameters.
 
 ## Live Metrics Stream
 

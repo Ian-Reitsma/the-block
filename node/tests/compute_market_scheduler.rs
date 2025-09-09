@@ -86,6 +86,7 @@ fn scheduler_stats_rpc() {
     let stats = the_block::rpc::compute_market::scheduler_stats();
     assert_eq!(stats["success"].as_u64().unwrap(), 1);
     assert_eq!(stats["preemptions"].as_u64().unwrap(), 0);
+    assert!(stats["queued_low"].is_number());
 }
 
 #[test]
@@ -229,4 +230,32 @@ fn reputation_persists_across_restarts() {
     drop(store);
     let store = ReputationStore::load(path);
     assert_eq!(store.get("prov"), 5);
+}
+
+#[test]
+fn priority_queue_favors_high_priority() {
+    use the_block::compute_market::scheduler::Priority;
+    scheduler::reset_for_test();
+    scheduler::set_low_priority_cap_pct(50);
+    let cap = Capability {
+        cpu_cores: 1,
+        gpu: None,
+        gpu_memory_mb: 0,
+        accelerator: None,
+        accelerator_memory_mb: 0,
+    };
+    scheduler::start_job_with_priority("low1", "p1", cap.clone(), Priority::Low);
+    scheduler::start_job_with_priority("low2", "p2", cap.clone(), Priority::Low);
+    let mut stats = scheduler::stats();
+    assert_eq!(stats.active_jobs, 1);
+    assert_eq!(stats.queued_low, 1);
+    scheduler::start_job_with_priority("high", "p3", cap.clone(), Priority::High);
+    stats = scheduler::stats();
+    assert_eq!(stats.active_jobs, 2);
+    assert_eq!(stats.queued_low, 1);
+    scheduler::record_success("p1");
+    scheduler::end_job("low1");
+    stats = scheduler::stats();
+    assert_eq!(stats.active_jobs, 2);
+    assert_eq!(stats.queued_low, 0);
 }

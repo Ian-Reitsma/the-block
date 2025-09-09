@@ -71,6 +71,7 @@ fn market_job_flow_and_finalize() {
         workloads: vec![Workload::Transcode(b"input".to_vec())],
         capability: scheduler::Capability::default(),
         deadline: u64::MAX,
+        priority: scheduler::Priority::Normal,
     };
     market.submit_job(job).unwrap();
     let proof = SliceProof {

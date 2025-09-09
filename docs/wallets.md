@@ -73,10 +73,7 @@ or insufficient balance.
 
 When a Ledger/Trezor device is connected, the CLI prompts on the hardware
 screen before broadcasting. Approve the transaction by matching the displayed
-hash and pressing the confirm button. A screenshot of the approval screen is
-shown below for reference:
-
-![HID approval prompt](assets/hid_approval.png)
+hash and pressing the confirm button.
 
 ### Monitoring
 

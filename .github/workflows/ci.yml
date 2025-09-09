@@ -38,6 +38,9 @@ jobs:
         run: |
           set -o pipefail
           make -C monitoring lint 2>&1 | tee monitoring/lint.log
+      - name: verify dashboard up-to-date
+        if: steps.changes.outputs.monitoring == 'true'
+        run: git diff --exit-code monitoring/metrics.json monitoring/grafana/dashboard.json
       - name: upload grafana lint log
         if: always() && steps.changes.outputs.monitoring == 'true'
         uses: actions/upload-artifact@v4

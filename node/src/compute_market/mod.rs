@@ -179,6 +179,9 @@ pub struct Job {
     pub capability: scheduler::Capability,
     /// Unix timestamp by which the provider must deliver.
     pub deadline: u64,
+    /// Priority for scheduling.
+    #[serde(default)]
+    pub priority: scheduler::Priority,
 }
 
 /// Internal state for a matched job.
@@ -315,7 +318,12 @@ impl Market {
             paid_slices: 0,
             completed: false,
         };
-        scheduler::start_job(&offer.job_id, &offer.provider, state.job.capability.clone());
+        scheduler::start_job_with_priority(
+            &offer.job_id,
+            &offer.provider,
+            state.job.capability.clone(),
+            state.job.priority,
+        );
         self.jobs.insert(state.job.job_id.clone(), state);
         #[cfg(feature = "telemetry")]
         telemetry::INDUSTRIAL_ADMITTED_TOTAL.inc();
@@ -586,6 +594,7 @@ mod tests {
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
             capability: scheduler::Capability::default(),
             deadline: u64::MAX,
+            priority: scheduler::Priority::Normal,
         };
         market
             .submit_job(job)
@@ -640,6 +649,7 @@ mod tests {
             ],
             capability: scheduler::Capability::default(),
             deadline: u64::MAX,
+            priority: scheduler::Priority::Normal,
         };
         market
             .submit_job(job)
@@ -687,6 +697,7 @@ mod tests {
             workloads: vec![Workload::Transcode(b"slice".to_vec())],
             capability: scheduler::Capability::default(),
             deadline: u64::MAX,
+            priority: scheduler::Priority::Normal,
         };
         market
             .submit_job(job)
@@ -728,6 +739,7 @@ mod tests {
             workloads: vec![Workload::Transcode(b"a".to_vec())],
             capability: scheduler::Capability::default(),
             deadline: u64::MAX,
+            priority: scheduler::Priority::Normal,
         };
         market
             .submit_job(job)

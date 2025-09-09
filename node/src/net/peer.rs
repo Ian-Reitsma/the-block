@@ -15,6 +15,7 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
+use std::mem::size_of;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{
@@ -153,7 +154,7 @@ impl PeerSet {
         }
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if metrics.len() == max {
-            if let Some((old, _)) = metrics.swap_remove_index(0) {
+            if let Some(old) = evict_lru(&mut metrics) {
                 #[cfg(feature = "telemetry")]
                 {
                     remove_peer_metrics(&old);
@@ -386,7 +387,7 @@ impl PeerSet {
                         crate::telemetry::PEER_REJECTED_TOTAL
                             .with_label_values(&["protocol"])
                             .inc();
-                    crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                        crate::telemetry::HANDSHAKE_FAIL_TOTAL
                             .with_label_values(&["protocol"])
                             .inc();
                     }
@@ -399,7 +400,7 @@ impl PeerSet {
                     telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                     #[cfg(feature = "telemetry")]
                     {
-                    crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                        crate::telemetry::HANDSHAKE_FAIL_TOTAL
                             .with_label_values(&["feature"])
                             .inc();
                     }
@@ -555,16 +556,7 @@ impl DropReason {
     }
 }
 
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Hash,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HandshakeError {
     Tls,
@@ -626,6 +618,8 @@ pub struct PeerMetrics {
     pub requests: u64,
     pub bytes_sent: u64,
     #[serde(default)]
+    pub sends: u64,
+    #[serde(default)]
     pub drops: HashMap<DropReason, u64>,
     #[serde(default)]
     pub handshake_fail: HashMap<HandshakeError, u64>,
@@ -633,6 +627,22 @@ pub struct PeerMetrics {
     pub reputation: PeerReputation,
     #[serde(default)]
     pub last_updated: u64,
+    #[serde(default)]
+    pub req_avg: f64,
+    #[serde(default)]
+    pub byte_avg: f64,
+    #[serde(default)]
+    pub throttled_until: u64,
+    #[serde(default)]
+    pub throttle_reason: Option<String>,
+    #[serde(default)]
+    pub sec_start: u64,
+    #[serde(skip)]
+    pub sec_requests: u64,
+    #[serde(skip)]
+    pub sec_bytes: u64,
+    #[serde(skip)]
+    pub breach_count: u32,
 }
 
 #[derive(Copy, Clone)]
@@ -666,19 +676,80 @@ fn telemetry_peer_error(code: PeerErrorCode) {
     let _ = code;
 }
 
+fn update_peer_rates(pk: &[u8; 32], entry: &mut PeerMetrics, bytes: u64, reqs: u64, now: u64) {
+    if entry.sec_start == 0 {
+        entry.sec_start = now;
+    }
+    if now > entry.sec_start {
+        entry.req_avg = (entry.req_avg * 4.0 + entry.sec_requests as f64) / 5.0;
+        entry.byte_avg = (entry.byte_avg * 4.0 + entry.sec_bytes as f64) / 5.0;
+        entry.sec_requests = 0;
+        entry.sec_bytes = 0;
+        entry.sec_start = now;
+    }
+    entry.sec_requests += reqs;
+    entry.sec_bytes += bytes;
+    let req_rate = (entry.req_avg * 4.0 + entry.sec_requests as f64) / 5.0;
+    let byte_rate = (entry.byte_avg * 4.0 + entry.sec_bytes as f64) / 5.0;
+    if entry.throttled_until != 0 && entry.throttled_until <= now {
+        entry.throttled_until = 0;
+        entry.throttle_reason = None;
+        entry.breach_count = 0;
+    }
+    let mut reason = None;
+    if req_rate > p2p_max_per_sec() as f64 {
+        reason = Some("requests");
+    } else if byte_rate > p2p_max_bytes_per_sec() as f64 {
+        reason = Some("bandwidth");
+    }
+    if let Some(r) = reason {
+        entry.breach_count += 1;
+        if entry.breach_count >= 3 && entry.throttled_until == 0 {
+            entry.throttled_until = now + *P2P_THROTTLE_SECS;
+            entry.throttle_reason = Some(r.to_string());
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::PEER_THROTTLE_TOTAL
+                .with_label_values(&[r])
+                .inc();
+            entry.reputation.penalize(0.9);
+            update_reputation_metric(pk, entry.reputation.score);
+        }
+    } else {
+        entry.breach_count = 0;
+    }
+}
+
 pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
     if let Some(pk) = ADDR_MAP.lock().unwrap().get(&addr).copied() {
         let mut map = PEER_METRICS.lock().unwrap();
+        maybe_consolidate(&mut map);
+        let now = now_secs();
         if let Some(mut entry) = map.swap_remove(&pk) {
             entry.bytes_sent += bytes as u64;
-            entry.last_updated = now_secs();
+            entry.sends += 1;
+            update_peer_rates(&pk, &mut entry, bytes as u64, 0, now);
+            entry.last_updated = now;
             broadcast_metrics(&pk, &entry);
+            let sends = entry.sends;
             map.insert(pk, entry);
             update_active_gauge(map.len());
+            update_memory_usage(map.len());
+            #[cfg(feature = "telemetry")]
+            {
+                if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
+                    let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
+                    if sample <= 1 || sends % sample == 0 {
+                        let id = hex::encode(pk);
+                        crate::telemetry::PEER_BYTES_SENT_TOTAL
+                            .with_label_values(&[id.as_str()])
+                            .inc_by(bytes as u64 * sample as u64);
+                    }
+                }
+            }
         } else {
             let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
             if map.len() == max {
-                if let Some((old, _)) = map.swap_remove_index(0) {
+                if let Some(old) = evict_lru(&mut map) {
                     #[cfg(feature = "telemetry")]
                     {
                         remove_peer_metrics(&old);
@@ -691,34 +762,58 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
             }
             let mut entry = PeerMetrics::default();
             entry.bytes_sent += bytes as u64;
-            entry.last_updated = now_secs();
+            entry.sends += 1;
+            update_peer_rates(&pk, &mut entry, bytes as u64, 0, now);
+            entry.last_updated = now;
+            let sends = entry.sends;
             map.insert(pk, entry);
             update_active_gauge(map.len());
-        }
-        #[cfg(feature = "telemetry")]
-        {
-            if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
-                let id = hex::encode(pk);
-                crate::telemetry::PEER_BYTES_SENT_TOTAL
-                    .with_label_values(&[id.as_str()])
-                    .inc_by(bytes as u64);
+            update_memory_usage(map.len());
+            #[cfg(feature = "telemetry")]
+            {
+                if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
+                    let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
+                    if sample <= 1 || sends % sample == 0 {
+                        let id = hex::encode(pk);
+                        crate::telemetry::PEER_BYTES_SENT_TOTAL
+                            .with_label_values(&[id.as_str()])
+                            .inc_by(bytes as u64 * sample as u64);
+                    }
+                }
             }
         }
     }
 }
 
-fn record_request(pk: &[u8; 32]) {
+pub fn record_request(pk: &[u8; 32]) {
     let mut map = PEER_METRICS.lock().unwrap();
+    maybe_consolidate(&mut map);
+    let now = now_secs();
     if let Some(mut entry) = map.swap_remove(pk) {
         entry.requests += 1;
-        entry.last_updated = now_secs();
+        update_peer_rates(pk, &mut entry, 0, 1, now);
+        entry.last_updated = now;
         broadcast_metrics(pk, &entry);
+        let reqs = entry.requests;
         map.insert(*pk, entry);
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
+        #[cfg(feature = "telemetry")]
+        {
+            if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
+                let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
+                if sample <= 1 || reqs % sample == 0 {
+                    let id = hex::encode(pk);
+                    crate::telemetry::PEER_REQUEST_TOTAL
+                        .with_label_values(&[id.as_str()])
+                        .inc_by(sample as u64);
+                }
+            }
+        }
     } else {
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if map.len() == max {
-            if let Some((old, _)) = map.swap_remove_index(0) {
+            if let Some(old) = evict_lru(&mut map) {
                 #[cfg(feature = "telemetry")]
                 {
                     remove_peer_metrics(&old);
@@ -731,17 +826,23 @@ fn record_request(pk: &[u8; 32]) {
         }
         let mut entry = PeerMetrics::default();
         entry.requests += 1;
-        entry.last_updated = now_secs();
+        update_peer_rates(pk, &mut entry, 0, 1, now);
+        entry.last_updated = now;
+        let reqs = entry.requests;
         map.insert(*pk, entry);
         update_active_gauge(map.len());
-    }
-    #[cfg(feature = "telemetry")]
-    {
-        if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
-            let id = hex::encode(pk);
-            crate::telemetry::PEER_REQUEST_TOTAL
-                .with_label_values(&[id.as_str()])
-                .inc();
+        update_memory_usage(map.len());
+        #[cfg(feature = "telemetry")]
+        {
+            if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
+                let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
+                if sample <= 1 || reqs % sample == 0 {
+                    let id = hex::encode(pk);
+                    crate::telemetry::PEER_REQUEST_TOTAL
+                        .with_label_values(&[id.as_str()])
+                        .inc_by(sample as u64);
+                }
+            }
         }
     }
 }
@@ -753,16 +854,18 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         DropReason::Other
     };
     let mut map = PEER_METRICS.lock().unwrap();
+    maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.drops.entry(reason).or_default() += 1;
         entry.last_updated = now_secs();
         broadcast_metrics(pk, &entry);
         map.insert(*pk, entry);
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
     } else {
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if map.len() == max {
-            if let Some((old, _)) = map.swap_remove_index(0) {
+            if let Some(old) = evict_lru(&mut map) {
                 #[cfg(feature = "telemetry")]
                 {
                     remove_peer_metrics(&old);
@@ -778,6 +881,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         entry.last_updated = now_secs();
         map.insert(*pk, entry);
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
     }
     #[cfg(feature = "telemetry")]
     {
@@ -795,6 +899,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         return;
     }
     let mut map = PEER_METRICS.lock().unwrap();
+    maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.handshake_fail.entry(reason).or_default() += 1;
         entry.reputation.penalize(0.95);
@@ -802,10 +907,11 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         broadcast_metrics(pk, &entry);
         map.insert(*pk, entry);
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
     } else {
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if map.len() == max {
-            if let Some((old, _)) = map.swap_remove_index(0) {
+            if let Some(old) = evict_lru(&mut map) {
                 #[cfg(feature = "telemetry")]
                 {
                     remove_peer_metrics(&old);
@@ -822,6 +928,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         entry.last_updated = now_secs();
         map.insert(*pk, entry);
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
     }
     #[cfg(feature = "telemetry")]
     {
@@ -881,6 +988,7 @@ pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
                 }
             }
         }
+        update_memory_usage(map.len());
         true
     } else {
         false
@@ -892,6 +1000,7 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
     if let Some((_, metrics)) = map.shift_remove_entry(old) {
         map.insert(new, metrics);
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
         drop(map);
         let mut addr_map = ADDR_MAP.lock().unwrap();
         for val in addr_map.values_mut() {
@@ -976,7 +1085,11 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
     res
 }
 
-pub fn export_all_peer_stats(name: &str) -> std::io::Result<bool> {
+pub fn export_all_peer_stats(
+    name: &str,
+    min_rep: Option<f64>,
+    active_within: Option<u64>,
+) -> std::io::Result<bool> {
     let res = (|| {
         let rel = Path::new(name);
         if rel.is_absolute() || rel.components().any(|c| matches!(c, Component::ParentDir)) {
@@ -985,33 +1098,147 @@ pub fn export_all_peer_stats(name: &str) -> std::io::Result<bool> {
                 "invalid path",
             ));
         }
-        let dir = METRICS_EXPORT_DIR.lock().unwrap().clone();
-        std::fs::create_dir_all(&dir)?;
-        let path = Path::new(&dir).join(rel);
-        let mut tmp = NamedTempFile::new_in(&dir)?;
-        {
-            let mut tar = Builder::new(tmp.as_file_mut());
+        let base = METRICS_EXPORT_DIR.lock().unwrap().clone();
+        std::fs::create_dir_all(&base)?;
+        let quota = PEER_METRICS_EXPORT_QUOTA.load(Ordering::Relaxed);
+        let compress = PEER_METRICS_COMPRESS.load(Ordering::Relaxed);
+
+        let keys: Vec<[u8; 32]> = {
             let map = PEER_METRICS.lock().unwrap();
-            for (pk, m) in map.iter() {
-                let id = hex::encode(pk);
-                let data = serde_json::to_vec(m)?;
-                let mut header = tar::Header::new_gnu();
-                header.set_size(data.len() as u64);
-                header.set_cksum();
-                tar.append_data(&mut header, format!("{id}.json"), data.as_slice())?;
+            map.keys().cloned().collect()
+        };
+        let initial_len = keys.len();
+        let mut total_bytes = 0u64;
+
+        if compress {
+            let path = Path::new(&base).join(format!("{name}.tar.gz"));
+            let mut tmp = NamedTempFile::new_in(&base)?;
+            {
+                let enc = flate2::write::GzEncoder::new(
+                    tmp.as_file_mut(),
+                    flate2::Compression::default(),
+                );
+                let mut tar = Builder::new(enc);
+                for pk in &keys {
+                    let m = {
+                        let map = PEER_METRICS.lock().unwrap();
+                        match map.get(pk) {
+                            Some(v) => v.clone(),
+                            None => {
+                                return Err(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    "peer list changed",
+                                ))
+                            }
+                        }
+                    };
+                    if let Some(r) = min_rep {
+                        if m.reputation.score < r {
+                            continue;
+                        }
+                    }
+                    if let Some(a) = active_within {
+                        let now = now_secs();
+                        if now.saturating_sub(m.last_updated) > a {
+                            continue;
+                        }
+                    }
+                    let id = hex::encode(pk);
+                    let data = serde_json::to_vec(&m)?;
+                    total_bytes += data.len() as u64;
+                    if total_bytes > quota {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "quota exceeded",
+                        ));
+                    }
+                    let mut header = tar::Header::new_gnu();
+                    header.set_size(data.len() as u64);
+                    header.set_cksum();
+                    tar.append_data(&mut header, format!("{id}.json"), data.as_slice())?;
+                }
+                tar.finish()?;
             }
-            tar.finish()?;
+            if PEER_METRICS.lock().unwrap().len() != initial_len {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "peer list changed",
+                ));
+            }
+            let overwritten = path.exists();
+            tmp.persist(&path)?;
+            log::info!(
+                "peer_stats_export_all count={} bytes={}",
+                initial_len,
+                total_bytes
+            );
+            Ok(overwritten)
+        } else {
+            let path = Path::new(&base).join(rel);
+            let tmp_dir = tempfile::Builder::new()
+                .prefix("export")
+                .tempdir_in(&base)?;
+            for pk in &keys {
+                let m = {
+                    let map = PEER_METRICS.lock().unwrap();
+                    match map.get(pk) {
+                        Some(v) => v.clone(),
+                        None => {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                "peer list changed",
+                            ))
+                        }
+                    }
+                };
+                if let Some(r) = min_rep {
+                    if m.reputation.score < r {
+                        continue;
+                    }
+                }
+                if let Some(a) = active_within {
+                    let now = now_secs();
+                    if now.saturating_sub(m.last_updated) > a {
+                        continue;
+                    }
+                }
+                let id = hex::encode(pk);
+                let data = serde_json::to_vec(&m)?;
+                total_bytes += data.len() as u64;
+                if total_bytes > quota {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "quota exceeded",
+                    ));
+                }
+                std::fs::write(tmp_dir.path().join(format!("{id}.json")), &data)?;
+            }
+            if PEER_METRICS.lock().unwrap().len() != initial_len {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "peer list changed",
+                ));
+            }
+            let overwritten = path.exists();
+            if overwritten {
+                std::fs::remove_dir_all(&path)?;
+            }
+            let tmp_path = tmp_dir.keep();
+            std::fs::rename(tmp_path, &path)?;
+            log::info!(
+                "peer_stats_export_all count={} bytes={} ",
+                initial_len,
+                total_bytes
+            );
+            Ok(overwritten)
         }
-        let overwritten = path.exists();
-        tmp.persist(&path)?;
-        Ok(overwritten)
     })();
 
     #[cfg(feature = "telemetry")]
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let label = if res.is_ok() { "ok" } else { "error" };
-            crate::telemetry::PEER_STATS_EXPORT_TOTAL
+            crate::telemetry::PEER_STATS_EXPORT_ALL_TOTAL
                 .with_label_values(&[label])
                 .inc();
         }
@@ -1037,6 +1264,21 @@ pub fn peer_stats_all(offset: usize, limit: usize) -> Vec<PeerStat> {
             peer_id: hex::encode(pk),
             metrics: m.clone(),
         })
+        .collect()
+}
+
+pub fn peer_stats_map(
+    min_rep: Option<f64>,
+    active_within: Option<u64>,
+) -> HashMap<String, PeerMetrics> {
+    let now = now_secs();
+    PEER_METRICS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, m)| min_rep.map_or(true, |r| m.reputation.score >= r))
+        .filter(|(_, m)| active_within.map_or(true, |s| now.saturating_sub(m.last_updated) <= s))
+        .map(|(pk, m)| (hex::encode(pk), m.clone()))
         .collect()
 }
 
@@ -1177,6 +1419,21 @@ static P2P_MAX_PER_SEC: Lazy<AtomicU32> = Lazy::new(|| {
     AtomicU32::new(val)
 });
 
+static P2P_MAX_BYTES_PER_SEC: Lazy<AtomicU64> = Lazy::new(|| {
+    let val = std::env::var("TB_P2P_MAX_BYTES_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(65536);
+    AtomicU64::new(val)
+});
+
+static P2P_THROTTLE_SECS: Lazy<u64> = Lazy::new(|| {
+    std::env::var("TB_THROTTLE_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10)
+});
+
 static P2P_BAN_SECS: Lazy<u64> = Lazy::new(|| {
     std::env::var("TB_P2P_BAN_SECS")
         .ok()
@@ -1208,9 +1465,13 @@ static EXPORT_PEER_METRICS: AtomicBool = AtomicBool::new(true);
 static TRACK_DROP_REASONS: AtomicBool = AtomicBool::new(true);
 static TRACK_HANDSHAKE_FAIL: AtomicBool = AtomicBool::new(true);
 static PEER_REPUTATION_DECAY: AtomicU64 = AtomicU64::new(f64::to_bits(0.01));
+static PEER_METRICS_SAMPLE_RATE: AtomicU64 = AtomicU64::new(1);
+static LAST_CONSOLIDATE: AtomicU64 = AtomicU64::new(0);
+const CONSOLIDATE_SECS: u64 = 60;
 static PEER_METRICS_PATH: Lazy<Mutex<String>> =
     Lazy::new(|| Mutex::new("state/peer_metrics.json".into()));
 static METRICS_EXPORT_DIR: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new("state".into()));
+static PEER_METRICS_EXPORT_QUOTA: AtomicU64 = AtomicU64::new(10 * 1024 * 1024);
 static PEER_METRICS_RETENTION: AtomicU64 = AtomicU64::new(7 * 24 * 60 * 60);
 static PEER_METRICS_COMPRESS: AtomicBool = AtomicBool::new(false);
 static KEY_HISTORY_PATH: Lazy<Mutex<String>> = Lazy::new(|| {
@@ -1317,6 +1578,11 @@ pub fn set_peer_reputation_decay(rate: f64) {
     PEER_REPUTATION_DECAY.store(rate.to_bits(), Ordering::Relaxed);
 }
 
+pub fn set_peer_metrics_sample_rate(rate: u64) {
+    let rate = rate.max(1);
+    PEER_METRICS_SAMPLE_RATE.store(rate, Ordering::Relaxed);
+}
+
 pub fn set_peer_metrics_path(path: String) {
     *PEER_METRICS_PATH.lock().unwrap() = path;
 }
@@ -1333,12 +1599,64 @@ pub fn set_peer_metrics_compress(val: bool) {
     PEER_METRICS_COMPRESS.store(val, Ordering::Relaxed);
 }
 
+pub fn set_peer_metrics_export_quota(bytes: u64) {
+    PEER_METRICS_EXPORT_QUOTA.store(bytes, Ordering::Relaxed);
+}
+
 pub fn set_p2p_max_per_sec(v: u32) {
     P2P_MAX_PER_SEC.store(v, Ordering::Relaxed);
 }
 
 pub fn p2p_max_per_sec() -> u32 {
     P2P_MAX_PER_SEC.load(Ordering::Relaxed)
+}
+
+pub fn set_p2p_max_bytes_per_sec(v: u64) {
+    P2P_MAX_BYTES_PER_SEC.store(v, Ordering::Relaxed);
+}
+
+pub fn p2p_max_bytes_per_sec() -> u64 {
+    P2P_MAX_BYTES_PER_SEC.load(Ordering::Relaxed)
+}
+
+pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
+    let mut map = PEER_METRICS.lock().unwrap();
+    let entry = map.entry(*pk).or_insert_with(PeerMetrics::default);
+    let now = now_secs();
+    entry.throttled_until = now + *P2P_THROTTLE_SECS;
+    entry.throttle_reason = Some(reason.to_string());
+    entry.breach_count = 0;
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::PEER_THROTTLE_TOTAL
+        .with_label_values(&[reason])
+        .inc();
+}
+
+pub fn clear_throttle(pk: &[u8; 32]) -> bool {
+    let mut map = PEER_METRICS.lock().unwrap();
+    if let Some(e) = map.get_mut(pk) {
+        e.throttled_until = 0;
+        e.throttle_reason = None;
+        e.breach_count = 0;
+        true
+    } else {
+        false
+    }
+}
+
+fn is_throttled(pk: &[u8; 32]) -> bool {
+    let map = PEER_METRICS.lock().unwrap();
+    map.get(pk)
+        .map(|e| e.throttled_until > now_secs())
+        .unwrap_or(false)
+}
+
+pub(crate) fn is_throttled_addr(addr: &SocketAddr) -> bool {
+    if let Some(pk) = ADDR_MAP.lock().unwrap().get(addr) {
+        is_throttled(pk)
+    } else {
+        false
+    }
 }
 
 pub fn peer_reputation_decay() -> f64 {
@@ -1354,6 +1672,57 @@ fn update_active_gauge(len: usize) {
 
 #[cfg(not(feature = "telemetry"))]
 fn update_active_gauge(_len: usize) {}
+
+#[cfg(feature = "telemetry")]
+fn update_memory_usage(len: usize) {
+    if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
+        let bytes = len * size_of::<PeerMetrics>();
+        crate::telemetry::PEER_METRICS_MEM_BYTES.set(bytes as i64);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn update_memory_usage(_len: usize) {}
+
+fn maybe_consolidate(map: &mut IndexMap<[u8; 32], PeerMetrics>) {
+    let now = now_secs();
+    let last = LAST_CONSOLIDATE.load(Ordering::Relaxed);
+    if now.saturating_sub(last) >= CONSOLIDATE_SECS
+        && LAST_CONSOLIDATE
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+    {
+        let mut removed = Vec::new();
+        map.retain(|pk, m| {
+            let keep = m.requests > 0
+                || m.bytes_sent > 0
+                || m.drops.values().any(|&v| v > 0)
+                || m.handshake_fail.values().any(|&v| v > 0);
+            if !keep {
+                removed.push(*pk);
+            }
+            keep
+        });
+        update_active_gauge(map.len());
+        update_memory_usage(map.len());
+        #[cfg(feature = "telemetry")]
+        for pk in removed {
+            remove_peer_metrics(&pk);
+        }
+    }
+}
+
+fn evict_lru(map: &mut IndexMap<[u8; 32], PeerMetrics>) -> Option<[u8; 32]> {
+    let now = now_secs();
+    if let Some(pos) = map
+        .iter()
+        .position(|(_, m)| m.throttled_until == 0 || m.throttled_until <= now)
+    {
+        map.swap_remove_index(pos).map(|(k, _)| k)
+    } else {
+        map.swap_remove_index(0).map(|(k, _)| k)
+    }
+}
 
 #[cfg(feature = "telemetry")]
 fn register_peer_metrics(pk: &[u8; 32], m: &PeerMetrics) {
@@ -1455,6 +1824,7 @@ pub fn load_peer_metrics() {
             }
         }
         update_active_gauge(map.len());
+        update_memory_usage(map.len());
     }
 }
 
@@ -1468,6 +1838,7 @@ pub fn clear_peer_metrics() {
     }
     map.clear();
     update_active_gauge(0);
+    update_memory_usage(0);
 }
 
 #[derive(Serialize, Deserialize)]

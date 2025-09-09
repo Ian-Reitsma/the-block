@@ -720,6 +720,18 @@ pub static SCHEDULER_ACTIVE_JOBS: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static SCHEDULER_PRIORITY_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "scheduler_priority_miss_total",
+        "High-priority jobs exceeding wait threshold",
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_priority_miss_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_priority_miss_total: {e}"));
+    c
+});
+
 pub static SCHEDULER_EFFECTIVE_PRICE: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
         Opts::new(
@@ -1278,6 +1290,18 @@ pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static PEER_METRICS_MEM_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "peer_metrics_memory_bytes",
+        "Approximate memory used by peer metrics map",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
 pub static REPUTATION_GOSSIP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
@@ -1396,6 +1420,36 @@ pub static PEER_STATS_EXPORT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
             "Peer metric export attempts grouped by result",
         ),
         &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_STATS_EXPORT_ALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_stats_export_all_total",
+            "Bulk peer metric export attempts grouped by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_THROTTLE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_throttle_total",
+            "Peer throttle events grouped by reason",
+        ),
+        &["reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
