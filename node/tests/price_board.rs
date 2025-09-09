@@ -24,7 +24,7 @@ use tracing_test::traced_test;
 fn computes_bands() {
     reset();
     for p in [1, 2, 3, 4, 5] {
-        record_price(FeeLane::Consumer, p);
+        record_price(FeeLane::Consumer, p, 1.0);
     }
     let b = bands(FeeLane::Consumer).unwrap();
     assert_eq!(b.0, 2);
@@ -37,7 +37,7 @@ fn computes_bands() {
 fn backlog_adjusts_bid() {
     reset();
     for p in [10, 10, 10, 10] {
-        record_price(FeeLane::Consumer, p);
+        record_price(FeeLane::Consumer, p, 1.0);
     }
     let adj = backlog_adjusted_bid(FeeLane::Consumer, 4).unwrap();
     assert!(adj > 10);
@@ -57,7 +57,7 @@ fn persists_across_restart() {
         .unwrap()
         .to_string();
     init(path.clone(), 10, 30);
-    record_price(FeeLane::Consumer, 5);
+    record_price(FeeLane::Consumer, 5, 1.0);
     persist();
     reset();
     init(path.clone(), 10, 30);
@@ -88,7 +88,7 @@ fn ignores_tmp_crash_file() {
     let path = dir.path().join("board.v1.bin");
     let path_str = path.to_str().unwrap().to_string();
     init(path_str.clone(), 10, 30);
-    record_price(FeeLane::Consumer, 7);
+    record_price(FeeLane::Consumer, 7, 1.0);
     persist();
     // Simulate crash leaving .tmp behind
     let tmp = path.with_extension("v1.bin.tmp");
@@ -124,7 +124,7 @@ fn save_occurs_after_interval() {
     let path_str = path.to_str().unwrap().to_string();
     let clock = PausedClock::new(Instant::now());
     init_with_clock(path_str.clone(), 10, 5, clock.clone());
-    record_price(FeeLane::Consumer, 9);
+    record_price(FeeLane::Consumer, 9, 1.0);
     clock.advance(Duration::from_secs(5));
     persist();
     assert!(fs::metadata(&path).is_ok());

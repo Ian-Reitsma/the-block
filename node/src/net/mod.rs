@@ -2,7 +2,7 @@ pub mod a_star;
 pub mod ban_store;
 pub mod discovery;
 mod message;
-mod peer;
+pub mod peer;
 #[cfg(feature = "quic")]
 pub mod quic;
 #[cfg(not(feature = "quic"))]
@@ -32,15 +32,37 @@ use std::thread;
 use std::time::Duration;
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
-pub use message::{BlobChunk, Message, Payload};
+pub use message::{BlobChunk, Message, Payload, ReputationGossip};
 pub use peer::{
-    export_peer_stats, peer_stats, peer_stats_all, reset_peer_metrics, set_max_peer_metrics,
-    set_peer_metrics_export, set_track_drop_reasons, set_peer_reputation_decay, DropReason,
-    PeerMetrics, PeerReputation, PeerSet, PeerStat,
+    clear_peer_metrics, export_all_peer_stats, export_peer_stats, known_peers, load_peer_metrics,
+    p2p_max_per_sec, peer_reputation_decay, peer_stats, peer_stats_all, persist_peer_metrics,
+    reset_peer_metrics, rotate_peer_key, set_max_peer_metrics, set_metrics_export_dir,
+    set_p2p_max_per_sec, set_peer_metrics_compress, set_peer_metrics_export, set_peer_metrics_path,
+    set_peer_metrics_retention, set_peer_reputation_decay, set_track_drop_reasons, set_track_handshake_fail,
+    DropReason, HandshakeError, PeerMetrics, PeerReputation, PeerSet, PeerStat,
 };
+
+pub use peer::simulate_handshake_fail;
 
 pub fn record_ip_drop(ip: &std::net::SocketAddr) {
     peer::record_ip_drop(ip);
+}
+
+/// Broadcast local reputation scores to known peers.
+pub fn reputation_sync() {
+    if !crate::compute_market::scheduler::reputation_gossip_enabled() {
+        return;
+    }
+    let peers = known_peers();
+    if peers.is_empty() {
+        return;
+    }
+    let entries = crate::compute_market::scheduler::reputation_snapshot();
+    if entries.is_empty() {
+        return;
+    }
+    let sk = load_net_key();
+    turbine::broadcast_reputation(&entries, &sk, &peers);
 }
 
 /// Current gossip protocol version.
@@ -305,7 +327,7 @@ pub(crate) fn send_quic_msg(
     )))
 }
 
-pub(crate) fn load_net_key() -> SigningKey {
+pub fn load_net_key() -> SigningKey {
     let path = std::env::var("TB_NET_KEY_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {

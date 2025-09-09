@@ -45,6 +45,8 @@ pub enum Payload {
     Chain(Vec<Block>),
     /// Disseminate a single erasure-coded shard of a blob.
     BlobChunk(BlobChunk),
+    /// Propagate provider reputation scores.
+    Reputation(Vec<ReputationGossip>),
 }
 
 /// Individual erasure-coded shard associated with a blob root.
@@ -58,6 +60,17 @@ pub struct BlobChunk {
     pub total: u32,
     /// Raw shard bytes.
     pub data: Vec<u8>,
+}
+
+/// Reputation gossip payload.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ReputationGossip {
+    /// Provider identifier being scored.
+    pub provider_id: String,
+    /// Reputation score for the provider.
+    pub reputation_score: i64,
+    /// Epoch the score was computed in.
+    pub epoch: u64,
 }
 
 /// Attempt to decode a [`Message`] from raw bytes.

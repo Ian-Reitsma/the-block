@@ -35,12 +35,14 @@
 - Prototype service-badge tracker mints placeholder badges after high-uptime epochs ([node/src/service_badge.rs](../node/src/service_badge.rs), [tests/service_badge.rs](tests/service_badge.rs)).
 - Grafana dashboard now graphs snapshot duration/failures and service badge metrics (`badge_active`, `badge_last_change_seconds`) for monitoring.
 - Network topology diagrams and an RPC walkthrough illustrate partition tests and end-to-end transaction flow ([docs/network_topologies.md](docs/network_topologies.md), [README.md](README.md), [AGENTS.md](AGENTS.md)).
+- Scheduler preemption migrates active jobs to higher-reputation providers with `scheduler_preempt_total{reason}` counters and configurable policies.
 
 ### Changed
 - README and docs refreshed for wallet framework, performance benchmarks, and monitoring updates.
 - Moving-average difficulty retargeting validates block headers against expected difficulty ([node/src/lib.rs](../node/src/lib.rs)).
 - README and agent handbooks document JSON-RPC sessions, networking demos, and purge-loop defaults ([README.md](README.md), [AGENTS.md](AGENTS.md), [Agents-Sup.md](Agents-Sup.md)).
 - Bootstraps pin `cargo-nextest` v0.9.97-b.2 to match the Rust 1.86 toolchain ([../scripts/bootstrap.sh](../scripts/bootstrap.sh), [../scripts/bootstrap.ps1](../scripts/bootstrap.ps1), [../scripts/bootstrap_test.sh](../scripts/bootstrap_test.sh)).
+- CI executes the QUIC networking test profile with telemetry and uploads logs for audit, improving suite stability.
 
 ### Fixed
 - Telemetry exporter always emits keys such as `orphan_sweep_total` even before they increment ([node/src/telemetry.rs](../node/src/telemetry.rs)).

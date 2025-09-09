@@ -1,6 +1,6 @@
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid};
-use the_block::compute_market::{scheduler, *};
+use the_block::compute_market::{price_board::PriceBoard, scheduler, *};
 use the_block::transaction::FeeLane;
 use tokio_util::sync::CancellationToken;
 
@@ -16,6 +16,7 @@ fn offer_validation() {
         fee_pct_ct: 100,
         capability: scheduler::Capability::default(),
         reputation: 0,
+        reputation_multiplier: 1.0,
     };
     assert!(offer.validate().is_ok());
 }
@@ -54,6 +55,7 @@ fn market_job_flow_and_finalize() {
         fee_pct_ct: 100,
         capability: scheduler::Capability::default(),
         reputation: 0,
+        reputation_multiplier: 1.0,
     };
     market.post_offer(offer).unwrap();
 
@@ -85,9 +87,9 @@ fn market_job_flow_and_finalize() {
 fn price_board_tracks_bands() {
     let mut board = PriceBoard::new(5);
     for p in [1, 2, 3, 4, 5] {
-        board.record(p);
+        board.record(FeeLane::Consumer, p, 1.0);
     }
-    assert_eq!(board.bands().unwrap(), (2, 3, 4));
+    assert_eq!(board.bands(FeeLane::Consumer).unwrap(), (2, 3, 4));
 }
 
 #[tokio::test]

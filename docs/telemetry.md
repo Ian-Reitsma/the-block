@@ -27,12 +27,15 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_metrics_active` gauges the number of peers currently tracked
 - `peer_stats_query_total{peer_id}` counts RPC and CLI lookups
 - `peer_stats_reset_total{peer_id}` counts manual metric resets
-- `peer_stats_export_total{peer_id}` counts JSON snapshot exports
+- `peer_stats_export_total{result}` counts JSON snapshot export attempts (ok, error)
+- `gateway_dns_lookup_total{status}` counts verified versus rejected DNS entries
 - `peer_reputation_score{peer_id}` gauges the dynamic reputation used for rate limits
 - `scheduler_match_total{result}` counts scheduler outcomes (success, capability_mismatch, reputation_failure)
 - `scheduler_match_latency_seconds` records time spent matching jobs
 - `scheduler_provider_reputation` histogram tracks reputation score distribution
 - `scheduler_active_jobs` gauges currently assigned jobs
+- `scheduler_preempt_total{reason}` counts job preemption attempts (success or handoff_failed)
+- `scheduler_effective_price{provider}` gauges the latest effective price per unit by provider
 - Configuration knobs: `max_peer_metrics` bounds per-peer labels;
   set `peer_metrics_export = false` to disable them and
   `track_peer_drop_reasons = false` to collapse drop reasons.

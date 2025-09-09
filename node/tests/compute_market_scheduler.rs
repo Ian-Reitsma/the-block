@@ -1,21 +1,21 @@
 use the_block::compute_market::scheduler::{self, Capability, ReputationStore};
 
 #[test]
-fn matches_highest_reputation() {
+fn chooses_lowest_effective_price() {
     scheduler::reset_for_test();
     let cap_gpu = Capability {
         cpu_cores: 4,
         gpu: Some("A100".into()),
         gpu_memory_mb: 16384,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
-    scheduler::register_offer("gpu1", cap_gpu.clone(), 10);
-    scheduler::register_offer("gpu2", cap_gpu.clone(), 5);
+    scheduler::register_offer("gpu1", cap_gpu.clone(), 10, 100, 1.0);
+    scheduler::register_offer("gpu2", cap_gpu.clone(), 5, 100, 0.8);
     let provider = scheduler::match_offer(&cap_gpu).expect("match");
-    assert_eq!(provider, "gpu1");
-    scheduler::record_success("gpu1");
-    let metrics = scheduler::metrics();
-    assert_eq!(metrics["reputation"]["gpu1"].as_i64().unwrap(), 1);
+    assert_eq!(provider, "gpu2");
+    let stats = scheduler::stats();
+    assert_eq!(stats.effective_price, Some(80));
 }
 
 #[test]
@@ -26,14 +26,16 @@ fn no_match_for_incompatible_capability() {
         gpu: None,
         gpu_memory_mb: 0,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
     let need = Capability {
         cpu_cores: 16,
         gpu: None,
         gpu_memory_mb: 0,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
-    scheduler::register_offer("cpu", cap_cpu, 0);
+    scheduler::register_offer("cpu", cap_cpu, 0, 100, 1.0);
     assert!(scheduler::match_offer(&need).is_none());
 }
 
@@ -45,13 +47,15 @@ fn gpu_memory_mismatch_records_failure() {
         gpu: Some("A100".into()),
         gpu_memory_mb: 8192,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
-    scheduler::register_offer("gpu8", cap_gpu.clone(), 0);
+    scheduler::register_offer("gpu8", cap_gpu.clone(), 0, 100, 1.0);
     let need = Capability {
         cpu_cores: 4,
         gpu: Some("A100".into()),
         gpu_memory_mb: 16384,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
     assert!(scheduler::match_offer(&need).is_none());
     #[cfg(feature = "telemetry")]
@@ -74,12 +78,14 @@ fn scheduler_stats_rpc() {
         gpu: None,
         gpu_memory_mb: 0,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
-    scheduler::register_offer("cpu", cap.clone(), 0);
+    scheduler::register_offer("cpu", cap.clone(), 0, 100, 1.0);
     scheduler::match_offer(&cap);
     scheduler::record_success("cpu");
     let stats = the_block::rpc::compute_market::scheduler_stats();
     assert_eq!(stats["success"].as_u64().unwrap(), 1);
+    assert_eq!(stats["preemptions"].as_u64().unwrap(), 0);
 }
 
 #[test]
@@ -90,6 +96,7 @@ fn telemetry_counters_increment() {
         gpu: None,
         gpu_memory_mb: 0,
         accelerator: None,
+        accelerator_memory_mb: 0,
     };
     #[cfg(feature = "telemetry")]
     {
@@ -109,6 +116,107 @@ fn telemetry_counters_increment() {
     {
         let _ = scheduler::match_offer(&need);
     }
+}
+
+#[test]
+fn matches_accelerator_with_memory() {
+    scheduler::reset_for_test();
+    let cap_acc = Capability {
+        cpu_cores: 2,
+        gpu: None,
+        gpu_memory_mb: 0,
+        accelerator: Some("TPU".into()),
+        accelerator_memory_mb: 8192,
+    };
+    scheduler::register_offer("tpu1", cap_acc.clone(), 0, 100, 1.0);
+    let provider = scheduler::match_offer(&cap_acc).expect("match");
+    assert_eq!(provider, "tpu1");
+}
+
+#[test]
+fn unmatched_accelerator_records_metric() {
+    scheduler::reset_for_test();
+    let need = Capability {
+        cpu_cores: 2,
+        gpu: None,
+        gpu_memory_mb: 0,
+        accelerator: Some("TPU".into()),
+        accelerator_memory_mb: 4096,
+    };
+    #[cfg(feature = "telemetry")]
+    {
+        use the_block::telemetry::SCHEDULER_ACCELERATOR_MISS_TOTAL;
+        let before = SCHEDULER_ACCELERATOR_MISS_TOTAL.get();
+        assert!(scheduler::match_offer(&need).is_none());
+        assert_eq!(SCHEDULER_ACCELERATOR_MISS_TOTAL.get(), before + 1);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        assert!(scheduler::match_offer(&need).is_none());
+    }
+}
+
+#[test]
+fn rpc_job_requirements_returns_accelerator() {
+    scheduler::reset_for_test();
+    let cap = Capability {
+        cpu_cores: 2,
+        gpu: None,
+        gpu_memory_mb: 0,
+        accelerator: Some("FPGA".into()),
+        accelerator_memory_mb: 2048,
+    };
+    scheduler::start_job("job", "prov", cap.clone());
+    let req = the_block::rpc::compute_market::job_requirements("job");
+    assert_eq!(req["accelerator"].as_str(), Some("FPGA"));
+    assert_eq!(req["accelerator_memory_mb"].as_u64(), Some(2048));
+}
+
+#[test]
+fn preempts_lower_reputation() {
+    scheduler::reset_for_test();
+    scheduler::set_preempt_enabled(true);
+    scheduler::set_preempt_min_delta(1);
+    scheduler::start_job(
+        "job",
+        "low",
+        Capability {
+            cpu_cores: 1,
+            gpu: None,
+            gpu_memory_mb: 0,
+            accelerator: None,
+            accelerator_memory_mb: 0,
+        },
+    );
+    assert_eq!(scheduler::active_provider("job"), Some("low".into()));
+    assert!(scheduler::try_preempt("job", "high", 5));
+    assert_eq!(scheduler::active_provider("job"), Some("high".into()));
+    let stats = scheduler::stats();
+    assert_eq!(stats.preemptions, 1);
+}
+
+#[test]
+fn preemption_rolls_back_on_failure() {
+    scheduler::reset_for_test();
+    scheduler::set_preempt_enabled(true);
+    scheduler::set_preempt_min_delta(1);
+    scheduler::start_job(
+        "job",
+        "low",
+        Capability {
+            cpu_cores: 1,
+            gpu: None,
+            gpu_memory_mb: 0,
+            accelerator: None,
+            accelerator_memory_mb: 0,
+        },
+    );
+    the_block::compute_market::courier::set_handoff_fail(true);
+    assert!(!scheduler::try_preempt("job", "high", 5));
+    assert_eq!(scheduler::active_provider("job"), Some("low".into()));
+    let stats = scheduler::stats();
+    assert_eq!(stats.preemptions, 0);
+    the_block::compute_market::courier::set_handoff_fail(false);
 }
 
 #[test]

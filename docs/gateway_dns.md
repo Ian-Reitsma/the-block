@@ -1,6 +1,6 @@
 # Gateway DNS Publishing and Policy Records
 
-Gateways publish domain policies and free-read counters via signed DNS TXT records. The chain does not consult ICANN roots, so only `.block` domains are trusted implicitly; other TLDs must expose the same TXT record in the public DNS zone before clients honour the on-chain entry. This document explains how records are signed, stored, and queried by clients and auditors.
+Gateways publish domain policies and free-read counters via signed DNS TXT records. The chain does not consult ICANN roots, so only `.block` domains are trusted implicitly; other TLDs must expose the same public key in the public DNS zone before clients honour the on-chain entry. This document explains how records are signed, stored, verified, and queried by clients and auditors.
 
 ## 1. Storage Layout
 
@@ -27,14 +27,14 @@ Steps:
 
 1. Decode `pubkey` and `sig` as Ed25519 arrays.
 2. Concatenate `domain` and `txt`, verify the signature.
-3. On success, write `txt` to `dns_records/<domain>` and initialise `dns_reads`/`dns_last` to `0`.
+3. On success, write `txt` to `dns_records/<domain>`, store `pubkey` under `dns_keys/<domain>`, and initialise `dns_reads`/`dns_last` to `0`.
 4. Return `{ "status": "ok" }`.
 
 Invalid signatures yield `ERR_DNS_SIG_INVALID`.
 
 ## 3. Retrieving Gateway Policy
 
-`gateway.policy` RPC returns the current TXT record and read statistics:
+`gateway.policy` RPC returns the current TXT record and read statistics when the domain passes verification:
 
 ```json
 {
@@ -51,7 +51,15 @@ On each query the server:
 3. Updates `dns_last/<domain>` to the current timestamp.
 4. Appends a `ReadAck` via `read_receipt::append` so the access can be audited and subsidised.
 
-If the domain is unknown or the public TXT record does not match, `record` is `null` and counters remain `0`.
+If the domain is unknown or verification fails, `record` is `null` and counters remain `0`.
+
+`gateway.dns_lookup` exposes the verification status without mutating counters:
+
+```json
+{"method":"gateway.dns_lookup","params":{"domain":"example.block"}}
+```
+
+The response includes `{ "record": <txt or null>, "verified": <bool> }`.
 
 ## 4. Read Counters Since Epoch
 
@@ -69,6 +77,7 @@ Publish and query via the CLI:
 
 ```bash
 blockctl rpc "{\"method\":\"dns.publish_record\",\"params\":{...}}"
+blockctl rpc "{\"method\":\"gateway.dns_lookup\",\"params\":{\"domain\":\"example.block\"}}"
 blockctl rpc "{\"method\":\"gateway.policy\",\"params\":{\"domain\":\"example.block\"}}"
 ```
 
@@ -77,6 +86,7 @@ blockctl rpc "{\"method\":\"gateway.policy\",\"params\":{\"domain\":\"example.bl
 - Rotate TXT records periodically to advertise new policies or contact points.
 - Monitor `dns_reads` and `dns_last` to detect abuse or stale domains.
 - The free-read model means clients incur no fees; all read counts feed the `READ_SUB_CT` subsidy via `read_receipt` batching.
-- Domains outside `.block` must publish a matching TXT record in the public DNS zone or clients will ignore the on-chain assertion.
+- Domains outside `.block` require a public TXT record containing the on-chain `pubkey`. Verification results are cached for one hour and tracked via the `gateway_dns_lookup_total{status}` metric.
+- Set `gateway_dns_allow_external = true` in `config.toml` to enable external domains; the default restricts lookups to `.block`.
 
 Keep this guide aligned with `node/src/gateway/dns.rs` whenever the schema or RPC parameters change.

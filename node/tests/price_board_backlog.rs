@@ -7,7 +7,7 @@ use the_block::transaction::FeeLane;
 fn backlog_adjusts_per_lane() {
     reset();
     for _ in 0..10 {
-        record_price(FeeLane::Industrial, 100);
+        record_price(FeeLane::Industrial, 100, 1.0);
     }
     let base = backlog_adjusted_bid(FeeLane::Industrial, 0).unwrap();
     assert_eq!(base, 100);

@@ -14,8 +14,11 @@ use std::{
 mod rate_limit;
 use rate_limit::RateLimitFilter;
 
+use futures::{SinkExt, StreamExt};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use hyper_tungstenite::tungstenite::Message as WsMessage;
+use hyper_tungstenite::{is_upgrade_request, upgrade};
 use tokio::sync::mpsc;
 use wasmtime::{Engine, Func, Linker, Module, Store};
 
@@ -105,6 +108,15 @@ async fn handle(
             .unwrap());
     }
     let path = req.uri().path().to_string();
+    if path.starts_with("/ws/peer_metrics") {
+        if !ip.ip().is_loopback() {
+            return Ok(Response::builder()
+                .status(StatusCode::FORBIDDEN)
+                .body(Body::empty())
+                .unwrap());
+        }
+        return ws_peer_metrics(req).await;
+    }
     if path.starts_with("/api/") {
         return handle_func(host, &path[4..], req, read_tx).await;
     }
@@ -148,6 +160,36 @@ pub fn ip_key(ip: &SocketAddr) -> u64 {
 }
 
 // SIMD-aware rate limit filter lives in rate_limit.rs
+
+async fn ws_peer_metrics(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    if !is_upgrade_request(&req) {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("websocket upgrade required"))
+            .unwrap());
+    }
+    let (resp, fut) = upgrade(req, None).unwrap();
+    tokio::spawn(async move {
+        if let Ok(ws) = fut.await {
+            let (mut ws_tx, mut ws_rx) = ws.split();
+            let mut rx = crate::net::peer::subscribe_peer_metrics();
+            loop {
+                tokio::select! {
+                    msg = rx.recv() => {
+                        match msg {
+                            Ok(snap) => {
+                                if ws_tx.send(WsMessage::Text(serde_json::to_string(&snap).unwrap())).await.is_err() { break; }
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                    _ = ws_rx.next() => { break; }
+                }
+            }
+        }
+    });
+    Ok(resp)
+}
 
 async fn handle_static(
     domain: String,

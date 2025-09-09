@@ -125,3 +125,20 @@ impl CourierStore {
             .and_then(|v| bincode::deserialize(&v).ok())
     }
 }
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static HANDOFF_FAIL: AtomicBool = AtomicBool::new(false);
+
+pub fn handoff_job(job_id: &str, new_provider: &str) -> Result<(), &'static str> {
+    if HANDOFF_FAIL.load(Ordering::Relaxed) {
+        return Err("handoff failed");
+    }
+    #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+    tracing::info!(job_id, provider = new_provider, "courier handoff");
+    Ok(())
+}
+
+pub fn set_handoff_fail(val: bool) {
+    HANDOFF_FAIL.store(val, Ordering::Relaxed);
+}

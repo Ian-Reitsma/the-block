@@ -1545,15 +1545,34 @@ impl Blockchain {
         bc.snapshot.set_interval(cfg.snapshot_interval);
         crate::net::set_max_peer_metrics(cfg.max_peer_metrics);
         crate::net::set_peer_metrics_export(cfg.peer_metrics_export);
+        crate::net::set_peer_metrics_path(cfg.peer_metrics_path.clone());
+        crate::net::set_peer_metrics_retention(cfg.peer_metrics_retention);
+        crate::net::set_peer_metrics_compress(cfg.peer_metrics_compress);
+        crate::net::set_metrics_export_dir(cfg.metrics_export_dir.clone());
         crate::net::set_track_drop_reasons(cfg.track_peer_drop_reasons);
+        crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
         crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
+        crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
         crate::compute_market::scheduler::set_provider_reputation_decay(
             cfg.provider_reputation_decay,
         );
         crate::compute_market::scheduler::set_provider_reputation_retention(
             cfg.provider_reputation_retention,
         );
+        crate::compute_market::scheduler::set_reputation_gossip_enabled(cfg.reputation_gossip);
         crate::compute_market::scheduler::set_scheduler_metrics_enabled(cfg.scheduler_metrics);
+        crate::gateway::dns::set_allow_external(cfg.gateway_dns_allow_external);
+        crate::compute_market::scheduler::set_preempt_enabled(cfg.compute_market.enable_preempt);
+        crate::compute_market::scheduler::set_preempt_min_delta(
+            cfg.compute_market.preempt_min_delta,
+        );
+        crate::config::set_current(cfg.clone());
+        crate::config::watch(path);
+        crate::compute_market::scheduler::set_reputation_multiplier_bounds(
+            cfg.compute_market.reputation_multiplier_min,
+            cfg.compute_market.reputation_multiplier_max,
+        );
+        crate::net::load_peer_metrics();
         let infl = crate::config::load_inflation(path);
         bc.params.beta_storage_sub_ct = (infl.beta_storage_sub_ct * 1000.0) as i64;
         bc.params.gamma_read_sub_ct = (infl.gamma_read_sub_ct * 1000.0) as i64;

@@ -7,7 +7,7 @@ proptest! {
     fn match_and_finalize_payout(slices in 1usize..5, price in 1u64..10) {
         let mut market = Market::new();
         let job_id = "job_prop".to_string();
-        let offer = Offer { job_id: job_id.clone(), provider: "prov".into(), provider_bond: 1, consumer_bond: 1, units: slices as u64, price_per_unit: price, fee_pct_ct: 100, capability: scheduler::Capability::default(), reputation: 0 };
+        let offer = Offer { job_id: job_id.clone(), provider: "prov".into(), provider_bond: 1, consumer_bond: 1, units: slices as u64, price_per_unit: price, fee_pct_ct: 100, capability: scheduler::Capability::default(), reputation: 0, reputation_multiplier: 1.0 };
         market.post_offer(offer).unwrap();
         let mut refs = Vec::new();
         let mut wls = Vec::new();

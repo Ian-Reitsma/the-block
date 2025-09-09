@@ -26,14 +26,20 @@ use tracing::{info, warn};
 use crate::telemetry::{INDUSTRIAL_BACKLOG, INDUSTRIAL_PRICE_PER_UNIT, INDUSTRIAL_UTILIZATION};
 
 const MAGIC: [u8; 4] = MAGIC_PRICE_BOARD;
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 /// Sliding window of recent prices with quantile bands per lane.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+struct PriceEntry {
+    price: u64,
+    multiplier: f64,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct PriceBoard {
     pub window: usize,
-    pub consumer: VecDeque<u64>,
-    pub industrial: VecDeque<u64>,
+    consumer: VecDeque<PriceEntry>,
+    industrial: VecDeque<PriceEntry>,
 }
 
 impl PriceBoard {
@@ -45,7 +51,7 @@ impl PriceBoard {
         }
     }
 
-    pub fn record(&mut self, lane: FeeLane, price: u64) {
+    pub fn record(&mut self, lane: FeeLane, price: u64, multiplier: f64) {
         let prices = match lane {
             FeeLane::Consumer => &mut self.consumer,
             FeeLane::Industrial => &mut self.industrial,
@@ -53,10 +59,11 @@ impl PriceBoard {
         if prices.len() == self.window {
             prices.pop_front();
         }
-        prices.push_back(price);
+        prices.push_back(PriceEntry { price, multiplier });
         #[cfg(feature = "telemetry")]
         if let FeeLane::Industrial = lane {
-            INDUSTRIAL_PRICE_PER_UNIT.set(price as i64);
+            let eff = (price as f64 * multiplier).round() as i64;
+            INDUSTRIAL_PRICE_PER_UNIT.set(eff);
         }
         self.update_metrics(lane);
     }
@@ -85,7 +92,10 @@ impl PriceBoard {
         if prices.is_empty() {
             return None;
         }
-        let mut v: Vec<_> = prices.iter().copied().collect();
+        let mut v: Vec<_> = prices
+            .iter()
+            .map(|e| (e.price as f64 * e.multiplier).round() as u64)
+            .collect();
         v.sort_unstable();
         let median = v[v.len() / 2];
         let p25 = v[(v.len() as f64 * 0.25).floor() as usize];
@@ -309,9 +319,9 @@ pub fn persist() {
 }
 
 /// Record a new price into the global board for a lane.
-pub fn record_price(lane: FeeLane, price: u64) {
+pub fn record_price(lane: FeeLane, price: u64, multiplier: f64) {
     if let Ok(mut b) = BOARD.write() {
-        b.record(lane, price);
+        b.record(lane, price, multiplier);
     }
 }
 
@@ -349,8 +359,37 @@ pub enum MigrateErr {
     Unsupported(u16),
 }
 
-fn migrate(from_ver: u16, _bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
-    Err(MigrateErr::Unsupported(from_ver))
+fn migrate(from_ver: u16, bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
+    if from_ver == 1 {
+        #[derive(Deserialize)]
+        struct V1 {
+            window: usize,
+            consumer: VecDeque<u64>,
+            industrial: VecDeque<u64>,
+        }
+        let v1: V1 = bincode::deserialize(bytes).map_err(|_| MigrateErr::Unsupported(from_ver))?;
+        Ok(PriceBoard {
+            window: v1.window,
+            consumer: v1
+                .consumer
+                .into_iter()
+                .map(|p| PriceEntry {
+                    price: p,
+                    multiplier: 1.0,
+                })
+                .collect(),
+            industrial: v1
+                .industrial
+                .into_iter()
+                .map(|p| PriceEntry {
+                    price: p,
+                    multiplier: 1.0,
+                })
+                .collect(),
+        })
+    } else {
+        Err(MigrateErr::Unsupported(from_ver))
+    }
 }
 
 #[cfg(feature = "telemetry")]

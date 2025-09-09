@@ -3,10 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::courier;
 use crate::telemetry;
 
 /// Hardware capability descriptor for a provider or workload.
@@ -23,6 +24,9 @@ pub struct Capability {
     /// Optional accelerator identifier (e.g. TPU model).
     #[serde(default)]
     pub accelerator: Option<String>,
+    /// Accelerator memory in megabytes.
+    #[serde(default)]
+    pub accelerator_memory_mb: u32,
 }
 
 #[derive(Serialize)]
@@ -30,8 +34,10 @@ pub struct SchedulerStats {
     pub success: u64,
     pub capability_mismatch: u64,
     pub reputation_failure: u64,
+    pub preemptions: u64,
     pub active_jobs: u64,
     pub utilization: HashMap<String, u64>,
+    pub effective_price: Option<u64>,
 }
 
 impl Capability {
@@ -53,6 +59,11 @@ impl Capability {
                 return false;
             }
         }
+        if other.accelerator_memory_mb > 0
+            && self.accelerator_memory_mb < other.accelerator_memory_mb
+        {
+            return false;
+        }
         true
     }
 }
@@ -61,9 +72,12 @@ impl Capability {
 struct OfferEntry {
     capability: Capability,
     reputation: i64,
+    price_per_unit: u64,
+    multiplier: f64,
 }
 
 const RECENT_WINDOW: usize = 100;
+const ACCELERATOR_PREMIUM: f64 = 1.2;
 
 #[derive(Clone, Copy)]
 enum MatchOutcome {
@@ -78,22 +92,42 @@ struct SchedulerState {
     reputation: HashMap<String, i64>,
     recent: VecDeque<MatchOutcome>,
     active_jobs: u64,
+    active: HashMap<String, ActiveAssignment>,
+    preempt_total: u64,
+    last_effective_price: Option<u64>,
+}
+
+#[derive(Clone)]
+struct ActiveAssignment {
+    provider: String,
+    reputation: i64,
+    capability: Capability,
 }
 
 impl SchedulerState {
-    fn register_offer(&mut self, provider: &str, capability: Capability, reputation: i64) {
+    fn register_offer(
+        &mut self,
+        provider: &str,
+        capability: Capability,
+        reputation: i64,
+        price_per_unit: u64,
+        multiplier: f64,
+    ) {
         self.offers.insert(
             provider.to_owned(),
             OfferEntry {
                 capability,
                 reputation,
+                price_per_unit,
+                multiplier,
             },
         );
     }
 
     fn match_job(&mut self, need: &Capability) -> Option<String> {
-        let mut best: Option<(String, i64)> = None;
+        let mut best: Option<(String, u64)> = None;
         let mut mem_insufficient = false;
+        let mut acc_mem_insufficient = false;
         for (prov, entry) in &self.offers {
             if let Some(req_gpu) = &need.gpu {
                 if entry.capability.gpu.as_deref() == Some(req_gpu.as_str())
@@ -102,18 +136,30 @@ impl SchedulerState {
                     mem_insufficient = true;
                 }
             }
+            if let Some(req_acc) = &need.accelerator {
+                if entry.capability.accelerator.as_deref() == Some(req_acc.as_str())
+                    && entry.capability.accelerator_memory_mb < need.accelerator_memory_mb
+                {
+                    acc_mem_insufficient = true;
+                }
+            }
             if entry.capability.matches(need) {
                 let rep = *self.reputation.get(prov).unwrap_or(&entry.reputation);
                 if rep >= 0 {
+                    let mut eff = entry.price_per_unit as f64 * entry.multiplier;
+                    if need.accelerator.is_some() {
+                        eff *= ACCELERATOR_PREMIUM;
+                    }
+                    let eff = eff.round() as u64;
                     match best {
-                        Some((_, best_rep)) if rep <= best_rep => {}
-                        _ => best = Some((prov.clone(), rep)),
+                        Some((_, best_eff)) if eff >= best_eff => {}
+                        _ => best = Some((prov.clone(), eff)),
                     }
                 }
             }
         }
         let mut outcome = MatchOutcome::CapabilityMismatch;
-        if let Some((prov, _)) = &best {
+        if let Some((prov, eff)) = &best {
             let cap_label = if let Some(g) = &self.offers[prov].capability.gpu {
                 g.clone()
             } else if let Some(a) = &self.offers[prov].capability.accelerator {
@@ -127,6 +173,7 @@ impl SchedulerState {
                 .or_insert(1);
             self.active_jobs += 1;
             outcome = MatchOutcome::Success;
+            self.last_effective_price = Some(*eff);
             if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                 #[cfg(feature = "telemetry")]
                 {
@@ -134,14 +181,21 @@ impl SchedulerState {
                         .with_label_values(&["success"])
                         .inc();
                     telemetry::SCHEDULER_ACTIVE_JOBS.set(self.active_jobs as i64);
+                    telemetry::SCHEDULER_EFFECTIVE_PRICE
+                        .with_label_values(&[prov])
+                        .set(*eff as i64);
                 }
             }
-        } else if mem_insufficient {
+        } else if mem_insufficient || acc_mem_insufficient {
             if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                 #[cfg(feature = "telemetry")]
                 telemetry::SCHEDULER_MATCH_TOTAL
                     .with_label_values(&["capability_mismatch"])
                     .inc();
+            }
+            if need.accelerator.is_some() && SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                #[cfg(feature = "telemetry")]
+                telemetry::SCHEDULER_ACCELERATOR_MISS_TOTAL.inc();
             }
         } else {
             let any_cap_match = self.offers.values().any(|e| e.capability.matches(need));
@@ -158,6 +212,10 @@ impl SchedulerState {
                 telemetry::SCHEDULER_MATCH_TOTAL
                     .with_label_values(&["capability_mismatch"])
                     .inc();
+                if need.accelerator.is_some() {
+                    #[cfg(feature = "telemetry")]
+                    telemetry::SCHEDULER_ACCELERATOR_MISS_TOTAL.inc();
+                }
             }
         }
         self.recent.push_back(outcome);
@@ -217,6 +275,81 @@ impl SchedulerState {
         }
     }
 
+    fn start_job(&mut self, job_id: &str, provider: &str, cap: Capability) {
+        let rep = *self.reputation.get(provider).unwrap_or(&0);
+        self.active.insert(
+            job_id.to_owned(),
+            ActiveAssignment {
+                provider: provider.to_owned(),
+                reputation: rep,
+                capability: cap,
+            },
+        );
+    }
+
+    fn end_job(&mut self, job_id: &str) {
+        self.active.remove(job_id);
+    }
+
+    fn preempt(&mut self, job_id: &str, new_provider: &str, new_rep: i64) -> bool {
+        if !PREEMPT_ENABLED.load(Ordering::Relaxed) {
+            return false;
+        }
+        let min_delta = PREEMPT_MIN_DELTA.load(Ordering::Relaxed);
+        if let Some(current) = self.active.get(job_id).cloned() {
+            if new_rep - current.reputation >= min_delta {
+                match courier::handoff_job(job_id, new_provider) {
+                    Ok(()) => {
+                        self.reputation
+                            .entry(new_provider.to_owned())
+                            .or_insert(new_rep);
+                        self.active.insert(
+                            job_id.to_owned(),
+                            ActiveAssignment {
+                                provider: new_provider.to_owned(),
+                                reputation: new_rep,
+                                capability: current.capability.clone(),
+                            },
+                        );
+                        self.preempt_total += 1;
+                        if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                            #[cfg(feature = "telemetry")]
+                            telemetry::SCHEDULER_PREEMPT_TOTAL
+                                .with_label_values(&["success"])
+                                .inc();
+                        }
+                        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                        tracing::info!(job_id, old = %current.provider, new = new_provider, "preempted job");
+                        true
+                    }
+                    Err(_) => {
+                        if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                            #[cfg(feature = "telemetry")]
+                            telemetry::SCHEDULER_PREEMPT_TOTAL
+                                .with_label_values(&["handoff_failed"])
+                                .inc();
+                        }
+                        #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+                        tracing::warn!(job_id, old = %current.provider, new = new_provider, "handoff failed");
+                        false
+                    }
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
+
+    fn active_provider(&self, job_id: &str) -> Option<String> {
+        self.active.get(job_id).map(|a| a.provider.clone())
+    }
+
+    fn job_requirements(&self, job_id: &str) -> Option<Capability> {
+        self.active.get(job_id).map(|a| a.capability.clone())
+    }
+
     fn metrics(&self) -> serde_json::Value {
         serde_json::json!({
             "reputation": self.reputation,
@@ -239,8 +372,10 @@ impl SchedulerState {
             success,
             capability_mismatch,
             reputation_failure,
+            preemptions: self.preempt_total,
             active_jobs: self.active_jobs,
             utilization: self.utilization.clone(),
+            effective_price: self.last_effective_price,
         }
     }
 }
@@ -261,13 +396,18 @@ static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
         reputation: rep,
         recent: VecDeque::new(),
         active_jobs: 0,
+        active: HashMap::new(),
+        preempt_total: 0,
+        last_effective_price: None,
     })
 });
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Clone)]
 struct ReputationEntry {
     score: i64,
     last_update: u64,
+    #[serde(default)]
+    epoch: u64,
 }
 
 #[derive(Default)]
@@ -306,14 +446,52 @@ impl ReputationStore {
             .or_insert(ReputationEntry {
                 score: 0,
                 last_update: now,
+                epoch: now,
             });
         entry.score += delta;
         entry.last_update = now;
+        entry.epoch = now;
         self.save();
     }
 
     pub fn get(&self, provider: &str) -> i64 {
         self.data.get(provider).map(|e| e.score).unwrap_or(0)
+    }
+
+    /// Merge a gossiped reputation entry, returning true if applied.
+    pub fn merge(&mut self, provider: &str, score: i64, epoch: u64) -> bool {
+        const MAX_SCORE: i64 = 1_000;
+        if score.abs() > MAX_SCORE {
+            return false;
+        }
+        let entry = self
+            .data
+            .entry(provider.to_string())
+            .or_insert(ReputationEntry {
+                score: 0,
+                last_update: current_ts(),
+                epoch: 0,
+            });
+        if epoch <= entry.epoch {
+            return false;
+        }
+        entry.score = score;
+        entry.epoch = epoch;
+        entry.last_update = current_ts();
+        self.save();
+        true
+    }
+
+    /// Snapshot all reputation entries for gossiping.
+    pub fn snapshot(&self) -> Vec<crate::net::ReputationGossip> {
+        self.data
+            .iter()
+            .map(|(p, e)| crate::net::ReputationGossip {
+                provider_id: p.clone(),
+                reputation_score: e.score,
+                epoch: e.epoch,
+            })
+            .collect()
     }
 
     fn decay(&mut self, rate: f64, retention: u64) {
@@ -339,6 +517,11 @@ static REPUTATION_STORE: Lazy<Mutex<ReputationStore>> = Lazy::new(|| {
 static PROVIDER_REPUTATION_DECAY: AtomicU64 = AtomicU64::new(f64::to_bits(0.05));
 static PROVIDER_REPUTATION_RETENTION: AtomicU64 = AtomicU64::new(7 * 24 * 60 * 60);
 static SCHEDULER_METRICS_ENABLED: AtomicBool = AtomicBool::new(true);
+static PREEMPT_ENABLED: AtomicBool = AtomicBool::new(false);
+static PREEMPT_MIN_DELTA: AtomicI64 = AtomicI64::new(10);
+static REPUTATION_MULT_MIN: AtomicU64 = AtomicU64::new((0.5f64).to_bits());
+static REPUTATION_MULT_MAX: AtomicU64 = AtomicU64::new((1.0f64).to_bits());
+static REPUTATION_GOSSIP_ENABLED: AtomicBool = AtomicBool::new(true);
 
 fn provider_reputation_decay() -> f64 {
     f64::from_bits(PROVIDER_REPUTATION_DECAY.load(Ordering::Relaxed))
@@ -360,6 +543,47 @@ pub fn set_scheduler_metrics_enabled(val: bool) {
     SCHEDULER_METRICS_ENABLED.store(val, Ordering::Relaxed);
 }
 
+pub fn set_preempt_enabled(val: bool) {
+    PREEMPT_ENABLED.store(val, Ordering::Relaxed);
+}
+
+pub fn set_preempt_min_delta(delta: i64) {
+    PREEMPT_MIN_DELTA.store(delta, Ordering::Relaxed);
+}
+
+pub fn set_reputation_multiplier_bounds(min: f64, max: f64) {
+    REPUTATION_MULT_MIN.store(min.to_bits(), Ordering::Relaxed);
+    REPUTATION_MULT_MAX.store(max.to_bits(), Ordering::Relaxed);
+}
+
+pub fn set_reputation_gossip_enabled(val: bool) {
+    REPUTATION_GOSSIP_ENABLED.store(val, Ordering::Relaxed);
+}
+
+pub fn reputation_gossip_enabled() -> bool {
+    REPUTATION_GOSSIP_ENABLED.load(Ordering::Relaxed)
+}
+
+pub fn reputation_snapshot() -> Vec<crate::net::ReputationGossip> {
+    REPUTATION_STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .snapshot()
+}
+
+pub fn merge_reputation(provider: &str, score: i64, epoch: u64) -> bool {
+    REPUTATION_STORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .merge(provider, score, epoch)
+}
+
+pub fn validate_multiplier(m: f64) -> bool {
+    let min = f64::from_bits(REPUTATION_MULT_MIN.load(Ordering::Relaxed));
+    let max = f64::from_bits(REPUTATION_MULT_MAX.load(Ordering::Relaxed));
+    m >= min && m <= max
+}
+
 fn reputation_db_path() -> PathBuf {
     std::env::var("TB_REPUTATION_DB_PATH")
         .map(PathBuf::from)
@@ -378,11 +602,17 @@ fn current_ts() -> u64 {
         .as_secs()
 }
 
-pub fn register_offer(provider: &str, capability: Capability, reputation: i64) {
+pub fn register_offer(
+    provider: &str,
+    capability: Capability,
+    reputation: i64,
+    price_per_unit: u64,
+    multiplier: f64,
+) {
     SCHEDULER
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .register_offer(provider, capability, reputation);
+        .register_offer(provider, capability, reputation, price_per_unit, multiplier);
 }
 
 pub fn match_offer(need: &Capability) -> Option<String> {
@@ -396,6 +626,41 @@ pub fn match_offer(need: &Capability) -> Option<String> {
         telemetry::SCHEDULER_MATCH_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
     }
     res
+}
+
+pub fn start_job(job_id: &str, provider: &str, cap: Capability) {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .start_job(job_id, provider, cap);
+}
+
+pub fn end_job(job_id: &str) {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .end_job(job_id);
+}
+
+pub fn try_preempt(job_id: &str, new_provider: &str, new_rep: i64) -> bool {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .preempt(job_id, new_provider, new_rep)
+}
+
+pub fn active_provider(job_id: &str) -> Option<String> {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .active_provider(job_id)
+}
+
+pub fn job_requirements(job_id: &str) -> Option<Capability> {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .job_requirements(job_id)
 }
 
 pub fn record_success(provider: &str) {
@@ -435,10 +700,17 @@ pub fn reset_for_test() {
         s.reputation.clear();
         s.recent.clear();
         s.active_jobs = 0;
+        s.active.clear();
+        s.preempt_total = 0;
+        s.last_effective_price = None;
         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
             #[cfg(feature = "telemetry")]
             telemetry::SCHEDULER_ACTIVE_JOBS.set(0);
         }
     }
     REPUTATION_STORE.lock().unwrap().data.clear();
+    PREEMPT_ENABLED.store(false, Ordering::Relaxed);
+    PREEMPT_MIN_DELTA.store(10, Ordering::Relaxed);
+    REPUTATION_MULT_MIN.store((0.5f64).to_bits(), Ordering::Relaxed);
+    REPUTATION_MULT_MAX.store((1.0f64).to_bits(), Ordering::Relaxed);
 }

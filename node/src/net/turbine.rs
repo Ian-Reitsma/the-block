@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use blake3::Hasher;
 use once_cell::sync::Lazy;
 
-use crate::net::message::BlobChunk;
+use crate::net::message::{BlobChunk, ReputationGossip};
 use crate::net::{record_ip_drop, send_msg, Message};
 use ed25519_dalek::SigningKey;
 
@@ -22,14 +22,22 @@ pub fn broadcast_chunk(chunk: &BlobChunk, sk: &SigningKey, peers: &[SocketAddr])
     broadcast(&msg, peers);
 }
 
+/// Broadcast reputation gossip entries.
+pub fn broadcast_reputation(entries: &[ReputationGossip], sk: &SigningKey, peers: &[SocketAddr]) {
+    let msg = Message::new(
+        crate::net::message::Payload::Reputation(entries.to_vec()),
+        sk,
+    );
+    broadcast(&msg, peers);
+}
+
 /// Broadcast with a custom send function, useful for tests.
 pub fn broadcast_with<F>(msg: &Message, peers: &[SocketAddr], mut send: F)
 where
     F: FnMut(SocketAddr, &Message),
 {
-    static SEEN: Lazy<Mutex<(HashSet<[u8; 32]>, VecDeque<[u8; 32]>)>> = Lazy::new(|| {
-        Mutex::new((HashSet::new(), VecDeque::new()))
-    });
+    static SEEN: Lazy<Mutex<(HashSet<[u8; 32]>, VecDeque<[u8; 32]>)>> =
+        Lazy::new(|| Mutex::new((HashSet::new(), VecDeque::new())));
     const MAX_SEEN: usize = 1024;
     let hash = {
         let bytes = bincode::serialize(msg).unwrap_or_default();

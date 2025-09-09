@@ -88,25 +88,56 @@ h = blind_sign_cat(salt, state)
 
 ### Capability-Based Scheduling
 
-Providers attach a capability descriptor to each offer listing available CPU cores,
-GPU model, and optional accelerator. Jobs specify the minimum capability they
-require. The scheduler selects the highest-reputation provider whose capability
-satisfies the request. Reputation starts from the offer's advertised score and is
+Providers attach a capability descriptor and a `reputation_multiplier` to each
+offer. Jobs specify the minimum capability they require. The scheduler computes
+an **effective price** as `price_per_unit * reputation_multiplier` and, when an
+accelerator is requested, multiplies by a fixed `1.2×` accelerator premium. It
+selects the matching provider with the lowest effective price among those with
+non-negative reputation. The multiplier range is bounded by
+`reputation_multiplier_min`/`reputation_multiplier_max` in `config.toml` and
+defaults to `0.5–1.0`. Reputation starts from the offer's advertised score and is
 incremented on successful completion or decremented on failure.
 
 ### Scheduler Flow
 
 ![Scheduler flow](assets/scheduler_flow.svg)
 
-The scheduler ingests offers, weights them by reputation, and selects the
-highest-scoring provider that satisfies the job's capability requirements.
+The scheduler ingests offers, applies reputation multipliers to derive effective
+prices, and selects the lowest-cost provider that satisfies the job's capability
+requirements.
 
 Prometheus counters `scheduler_match_total{result}` and
 `reputation_adjust_total{result}` expose scheduler outcomes and reputation
-adjustments. Snapshot recent success and failure counts with the
-`compute_market.scheduler_stats` RPC for dashboard display. Reputation scores
-persist across restarts in `~/.the_block/reputation.json` and decay toward zero
-at the rate configured by `provider_reputation_decay`.
+adjustments. The gauge `scheduler_effective_price{provider}` records the latest
+effective price by provider. Unmatched accelerator requests increment
+`scheduler_accelerator_miss_total`. Snapshot recent success, failure counts, and
+the last effective price with the `compute_market.scheduler_stats` RPC or `net
+compute stats --effective` CLI. Query job capability descriptors through
+`compute.job_requirements`. Reputation scores persist across restarts in
+`~/.the_block/reputation.json` and decay toward zero at the rate configured by
+`provider_reputation_decay`.
+
+### Reputation Gossip
+
+Nodes exchange provider scores using a lightweight gossip message carrying
+`(provider_id, reputation_score, epoch)` tuples. A manual round can be
+triggered with `net reputation sync`, which broadcasts the current snapshot to
+known peers. Incoming entries replace local scores only if their epoch is
+greater than the stored value and the score lies within `[-1000,1000]`. The
+`reputation_gossip_total{result="applied|ignored"}` counter tracks update
+processing. Set `reputation_gossip = false` in `config.toml` to opt out of the
+protocol.
+
+### Preemption
+
+When `enable_preempt` is set in `config.toml`, the scheduler may migrate an
+active job to a higher-reputation provider. An incoming offer whose reputation
+exceeds the running provider by at least `preempt_min_delta` triggers a handoff
+via the courier. Successful migrations increment
+`scheduler_preempt_total{reason="success"}`; handoff failures increment
+`scheduler_preempt_total{reason="handoff_failed"}` and leave the original
+assignment intact. Preemption counts are exposed through the
+`compute_market.scheduler_stats` RPC.
 
 ## Slice Files and Hashing
 
@@ -115,7 +146,8 @@ implementation simply hashes the contents with BLAKE3. Sample slice files and a
 `generate_slice.py` helper live under `examples/workloads/`.
 
 `gpu_inference.json` demonstrates requesting an RTX4090-capable provider with 16 GB of VRAM. Additional examples illustrate a
-CPU-only task (`cpu_only.json`) and a multi-GPU request (`multi_gpu.json`):
+CPU-only task (`cpu_only.json`), a multi-GPU request (`multi_gpu.json`), and an
+accelerator-driven workload (`tpu_inference.json`):
 
 ```bash
 cat examples/workloads/gpu_inference.json
@@ -146,6 +178,14 @@ require a minimum amount of VRAM, and the scheduler will only match offers that
 meet both the model and memory requirements. If no provider has sufficient
 memory, the scheduler increments `scheduler_match_total{result="capability_mismatch"}`
 for observability.
+
+### Accelerator Requests
+
+Jobs may request specialized accelerators such as TPUs or FPGAs. Providers
+advertise `accelerator` and `accelerator_memory_mb` in their capability
+descriptor. When a job's accelerator requirement cannot be met—either because no
+provider offers the requested model or available memory is insufficient—the
+`scheduler_accelerator_miss_total` counter increments to aid capacity planning.
 
 Default reputation decay and retention values are configurable in
 `config/default.toml` via `provider_reputation_decay` and
@@ -185,13 +225,13 @@ For a deep dive into receipt fields, storage paths, and retry semantics see [doc
 ## Price Board Persistence
 
 Recent offer prices feed a sliding window that derives quantile bands. The board
-persists to `node-data/state/price_board.v1.bin` on shutdown and every
+persists to `node-data/state/price_board.v2.bin` on shutdown and every
 `price_board_save_interval` seconds. If the file is missing or corrupted the
 board starts empty. The persistence path, window size, and save interval are
 configurable via `node-data/config.toml`:
 
 ```toml
-price_board_path = "state/price_board.v1.bin"
+price_board_path = "state/price_board.v2.bin"
 price_board_window = 100
 price_board_save_interval = 30
 ```
@@ -202,7 +242,7 @@ bytes (≈800 B for the default). Older prices are dropped as new ones arrive.
 Clear the board by deleting the persistence file:
 
 ```bash
-rm node-data/state/price_board.v1.bin
+rm node-data/state/price_board.v2.bin
 ```
 
 Logs emit `loaded price board` and `saved price board` messages, while metrics

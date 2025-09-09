@@ -42,6 +42,9 @@ pub struct Offer {
     /// Initial reputation score for the provider.
     #[serde(default)]
     pub reputation: i64,
+    /// Reputation-based price multiplier.
+    #[serde(default = "default_multiplier")]
+    pub reputation_multiplier: f64,
 }
 
 impl Offer {
@@ -59,8 +62,15 @@ impl Offer {
         if self.fee_pct_ct > 100 {
             return Err("invalid fee_pct_ct");
         }
+        if !scheduler::validate_multiplier(self.reputation_multiplier) {
+            return Err("invalid reputation multiplier");
+        }
         Ok(())
     }
+}
+
+fn default_multiplier() -> f64 {
+    1.0
 }
 
 /// A single slice of a job with a reference hash and output hash.
@@ -206,10 +216,26 @@ impl Market {
                 offer.price_per_unit = p;
             }
         }
+        if self.jobs.contains_key(&offer.job_id) {
+            if scheduler::try_preempt(&offer.job_id, &offer.provider, offer.reputation) {
+                if let Some(state) = self.jobs.get_mut(&offer.job_id) {
+                    state.provider = offer.provider.clone();
+                }
+                return Ok(());
+            } else {
+                return Err("preemption rejected");
+            }
+        }
         if self.offers.contains_key(&offer.job_id) {
             return Err("offer already exists");
         }
-        scheduler::register_offer(&offer.provider, offer.capability.clone(), offer.reputation);
+        scheduler::register_offer(
+            &offer.provider,
+            offer.capability.clone(),
+            offer.reputation,
+            offer.price_per_unit,
+            offer.reputation_multiplier,
+        );
         self.offers.insert(offer.job_id.clone(), offer);
         Ok(())
     }
@@ -271,7 +297,16 @@ impl Market {
             .offers
             .remove(&job.job_id)
             .ok_or(MarketError::JobNotFound)?;
-        price_board::record_price(FeeLane::Industrial, offer.price_per_unit);
+        price_board::record_price(
+            FeeLane::Industrial,
+            offer.price_per_unit,
+            offer.reputation_multiplier,
+        );
+        let effective = (offer.price_per_unit as f64 * offer.reputation_multiplier).round() as u64;
+        #[cfg(feature = "telemetry")]
+        telemetry::SCHEDULER_EFFECTIVE_PRICE
+            .with_label_values(&[&offer.provider])
+            .set(effective as i64);
         let state = JobState {
             job,
             provider: offer.provider.clone(),
@@ -280,6 +315,7 @@ impl Market {
             paid_slices: 0,
             completed: false,
         };
+        scheduler::start_job(&offer.job_id, &offer.provider, state.job.capability.clone());
         self.jobs.insert(state.job.job_id.clone(), state);
         #[cfg(feature = "telemetry")]
         telemetry::INDUSTRIAL_ADMITTED_TOTAL.inc();
@@ -294,6 +330,7 @@ impl Market {
     /// Cancel an in-flight job, returning both bonds.
     pub fn cancel_job(&mut self, job_id: &str) -> Option<(u64, u64)> {
         let state = self.jobs.remove(job_id)?;
+        scheduler::end_job(job_id);
         Some((state.provider_bond, state.job.consumer_bond))
     }
 
@@ -309,6 +346,7 @@ impl Market {
             scheduler::record_failure(&state.provider);
             let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
             self.jobs.remove(job_id);
+            scheduler::end_job(job_id);
             return Err("deadline exceeded");
         }
         if state.completed {
@@ -352,6 +390,7 @@ impl Market {
         let provider_bond = state.provider_bond;
         let consumer_bond = state.job.consumer_bond;
         self.jobs.remove(job_id);
+        scheduler::end_job(job_id);
         Some((provider_bond, consumer_bond))
     }
 
@@ -470,6 +509,7 @@ mod tests {
             fee_pct_ct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
+            reputation_multiplier: 1.0,
         };
         assert!(offer.validate().is_ok());
     }
@@ -529,6 +569,7 @@ mod tests {
             fee_pct_ct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
+            reputation_multiplier: 1.0,
         };
         market
             .post_offer(offer)
@@ -582,6 +623,7 @@ mod tests {
             fee_pct_ct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
+            reputation_multiplier: 1.0,
         };
         market
             .post_offer(offer)
@@ -624,6 +666,7 @@ mod tests {
             fee_pct_ct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
+            reputation_multiplier: 1.0,
         };
         market
             .post_offer(offer.clone())
@@ -668,6 +711,7 @@ mod tests {
             fee_pct_ct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
+            reputation_multiplier: 1.0,
         };
         market
             .post_offer(offer)

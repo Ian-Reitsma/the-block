@@ -1,5 +1,16 @@
+#[cfg(feature = "telemetry")]
+use crate::telemetry::CONFIG_RELOAD_TOTAL;
+use anyhow::Result;
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use signal_hook::consts::signal::SIGHUP;
+use signal_hook::iterator::Signals;
 use std::fs;
+use std::path::Path;
+use std::sync::mpsc::channel;
+use std::sync::RwLock;
+use std::thread;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -16,16 +27,32 @@ pub struct NodeConfig {
     pub max_peer_metrics: usize,
     #[serde(default = "default_true")]
     pub peer_metrics_export: bool,
+    #[serde(default = "default_peer_metrics_path")]
+    pub peer_metrics_path: String,
+    #[serde(default = "default_peer_metrics_retention")]
+    pub peer_metrics_retention: u64,
+    #[serde(default)]
+    pub peer_metrics_compress: bool,
+    #[serde(default = "default_metrics_export_dir")]
+    pub metrics_export_dir: String,
     #[serde(default = "default_true")]
     pub track_peer_drop_reasons: bool,
+    #[serde(default = "default_true")]
+    pub track_handshake_failures: bool,
     #[serde(default = "default_peer_reputation_decay")]
     pub peer_reputation_decay: f64,
+    #[serde(default = "default_p2p_max_per_sec")]
+    pub p2p_max_per_sec: u32,
     #[serde(default = "default_provider_reputation_decay")]
     pub provider_reputation_decay: f64,
     #[serde(default = "default_provider_reputation_retention")]
     pub provider_reputation_retention: u64,
     #[serde(default = "default_true")]
+    pub reputation_gossip: bool,
+    #[serde(default = "default_true")]
     pub scheduler_metrics: bool,
+    #[serde(default = "default_false")]
+    pub gateway_dns_allow_external: bool,
     #[serde(default)]
     pub lighthouse: LighthouseConfig,
     #[serde(default)]
@@ -36,7 +63,7 @@ impl Default for NodeConfig {
     fn default() -> Self {
         Self {
             snapshot_interval: crate::DEFAULT_SNAPSHOT_INTERVAL,
-            price_board_path: "state/price_board.v1.bin".to_string(),
+            price_board_path: "state/price_board.v2.bin".to_string(),
             price_board_window: 100,
             price_board_save_interval: 30,
             rpc: RpcConfig::default(),
@@ -44,16 +71,27 @@ impl Default for NodeConfig {
             telemetry_summary_interval: 0,
             max_peer_metrics: default_max_peer_metrics(),
             peer_metrics_export: default_true(),
+            peer_metrics_path: default_peer_metrics_path(),
+            peer_metrics_retention: default_peer_metrics_retention(),
+            peer_metrics_compress: false,
+            metrics_export_dir: default_metrics_export_dir(),
             track_peer_drop_reasons: default_true(),
+            track_handshake_failures: default_true(),
             peer_reputation_decay: default_peer_reputation_decay(),
+            p2p_max_per_sec: default_p2p_max_per_sec(),
             provider_reputation_decay: default_provider_reputation_decay(),
             provider_reputation_retention: default_provider_reputation_retention(),
+            reputation_gossip: default_true(),
             scheduler_metrics: default_true(),
+            gateway_dns_allow_external: default_false(),
             lighthouse: LighthouseConfig::default(),
             quic: None,
         }
     }
 }
+
+static CONFIG_DIR: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
+static CURRENT_CONFIG: Lazy<RwLock<NodeConfig>> = Lazy::new(|| RwLock::new(NodeConfig::default()));
 
 fn default_max_peer_metrics() -> usize {
     1024
@@ -67,6 +105,10 @@ fn default_peer_reputation_decay() -> f64 {
     0.01
 }
 
+fn default_p2p_max_per_sec() -> u32 {
+    100
+}
+
 fn default_provider_reputation_decay() -> f64 {
     0.05
 }
@@ -75,9 +117,29 @@ fn default_provider_reputation_retention() -> u64 {
     7 * 24 * 60 * 60
 }
 
+fn default_peer_metrics_path() -> String {
+    "state/peer_metrics.json".into()
+}
+
+fn default_peer_metrics_retention() -> u64 {
+    7 * 24 * 60 * 60
+}
+
+fn default_metrics_export_dir() -> String {
+    "state".into()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComputeMarketConfig {
     pub settle_mode: crate::compute_market::settlement::SettleMode,
+    #[serde(default = "default_false")]
+    pub enable_preempt: bool,
+    #[serde(default = "default_preempt_min_delta")]
+    pub preempt_min_delta: i64,
+    #[serde(default = "default_reputation_multiplier_min")]
+    pub reputation_multiplier_min: f64,
+    #[serde(default = "default_reputation_multiplier_max")]
+    pub reputation_multiplier_max: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -97,8 +159,28 @@ impl Default for ComputeMarketConfig {
     fn default() -> Self {
         Self {
             settle_mode: crate::compute_market::settlement::SettleMode::DryRun,
+            enable_preempt: default_false(),
+            preempt_min_delta: default_preempt_min_delta(),
+            reputation_multiplier_min: default_reputation_multiplier_min(),
+            reputation_multiplier_max: default_reputation_multiplier_max(),
         }
     }
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn default_preempt_min_delta() -> i64 {
+    10
+}
+
+fn default_reputation_multiplier_min() -> f64 {
+    0.5
+}
+
+fn default_reputation_multiplier_max() -> f64 {
+    1.0
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -157,6 +239,85 @@ impl NodeConfig {
             toml::to_string(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         fs::write(path, data)
     }
+}
+
+fn load_file(dir: &str) -> Result<NodeConfig> {
+    let path = format!("{}/config.toml", dir);
+    let data = fs::read_to_string(&path)?;
+    Ok(toml::from_str(&data)?)
+}
+
+fn apply(cfg: &NodeConfig) {
+    crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
+    crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
+    crate::compute_market::scheduler::set_provider_reputation_decay(cfg.provider_reputation_decay);
+    crate::compute_market::scheduler::set_provider_reputation_retention(
+        cfg.provider_reputation_retention,
+    );
+    crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
+}
+
+pub fn reload() -> bool {
+    let dir = CONFIG_DIR.read().unwrap().clone();
+    if dir.is_empty() {
+        return false;
+    }
+    match load_file(&dir) {
+        Ok(cfg) => {
+            apply(&cfg);
+            *CURRENT_CONFIG.write().unwrap() = cfg;
+            #[cfg(feature = "telemetry")]
+            CONFIG_RELOAD_TOTAL.with_label_values(&["ok"]).inc();
+            true
+        }
+        Err(e) => {
+            #[cfg(feature = "telemetry")]
+            {
+                log::warn!("config_reload_failed: {e}");
+                CONFIG_RELOAD_TOTAL.with_label_values(&["err"]).inc();
+            }
+            #[cfg(not(feature = "telemetry"))]
+            eprintln!("config_reload_failed: {e}");
+            false
+        }
+    }
+}
+
+pub fn watch(dir: &str) {
+    {
+        *CONFIG_DIR.write().unwrap() = dir.to_string();
+    }
+    let cfg_dir = dir.to_string();
+    thread::spawn(move || {
+        let (tx, rx) = channel();
+        let mut watcher: RecommendedWatcher = notify::recommended_watcher(tx).expect("watcher");
+        let path = Path::new(&cfg_dir).join("config.toml");
+        watcher
+            .watch(&path, RecursiveMode::NonRecursive)
+            .expect("watch config");
+        for res in rx {
+            if let Ok(event) = res {
+                if matches!(event.kind, EventKind::Modify(_)) {
+                    let _ = reload();
+                }
+            }
+        }
+    });
+
+    thread::spawn(|| {
+        let mut signals = Signals::new([SIGHUP]).expect("signals");
+        for _ in signals.forever() {
+            let _ = reload();
+        }
+    });
+}
+
+pub fn current() -> NodeConfig {
+    CURRENT_CONFIG.read().unwrap().clone()
+}
+
+pub fn set_current(cfg: NodeConfig) {
+    *CURRENT_CONFIG.write().unwrap() = cfg;
 }
 
 #[derive(Clone, Serialize, Deserialize)]

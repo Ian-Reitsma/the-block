@@ -553,7 +553,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   `peer_bytes_sent_total{peer_id}`, `peer_drop_total{peer_id,reason}`,
   `peer_handshake_fail_total{peer_id,reason}`,
   `peer_stats_query_total{peer_id}`, `peer_stats_reset_total{peer_id}`,
-  `peer_stats_export_total{peer_id}`, `peer_reputation_score{peer_id}`, and
+  `peer_stats_export_total{result}`, `peer_reputation_score{peer_id}`, and
   the `peer_metrics_active` gauge; scheduler metrics `scheduler_match_total{result}`
   and `scheduler_effective_price`; transport metrics `ttl_drop_total`,
   `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`,

@@ -28,3 +28,12 @@ pub fn reputation_get(provider: &str) -> serde_json::Value {
         "score": scheduler::reputation_get(provider),
     })
 }
+
+/// Return capability requirements for an active job.
+pub fn job_requirements(job_id: &str) -> serde_json::Value {
+    if let Some(cap) = scheduler::job_requirements(job_id) {
+        serde_json::to_value(cap).unwrap()
+    } else {
+        json!({})
+    }
+}

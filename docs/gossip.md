@@ -151,6 +151,7 @@ Configuration knobs:
 - `max_peer_metrics` – cap tracked peers to bound memory
 - `peer_metrics_export` – disable per‑peer Prometheus labels when `false`
 - `track_peer_drop_reasons` – collapse drop reasons into `other` when `false`
+- `track_handshake_failures` – disable detailed handshake error labels when `false`
 - `peer_reputation_decay` – rate at which reputation decays toward `1.0`
 
 See [`docs/networking.md`](networking.md) for peer database recovery and
@@ -176,8 +177,49 @@ recreate counters on demand.
 To export metrics for offline analysis, use:
 
 ```bash
-net stats export <peer_id> --path /tmp/peer.json
+net stats export <peer_id> --path peer.json
 ```
 
-or the `net.peer_stats_export` RPC. Successful exports increment
-`peer_stats_export_total{peer_id}` and write a JSON snapshot of the metrics.
+or the `net.peer_stats_export` RPC. Paths are relative to `metrics_export_dir`
+(`state` by default) and sanitized against traversal. Successful exports
+increment `peer_stats_export_total{result}` and write a JSON snapshot of the
+metrics. Use `--all` to bundle every peer into a tarball.
+
+## Live Metrics Stream
+
+Nodes expose a WebSocket at `/ws/peer_metrics` that pushes JSON snapshots
+whenever a peer's counters change. The stream is restricted to loopback clients
+for now and emits messages of the form:
+
+```json
+{"peer_id":"abcd…","metrics":{"requests":1,"bytes_sent":0,"drops":{}}}
+```
+
+Use the CLI to watch metrics for a specific peer:
+
+```bash
+net stats watch abcd…
+```
+
+or connect from a browser:
+
+```html
+<script>
+  const ws = new WebSocket('ws://127.0.0.1:3030/ws/peer_metrics');
+  ws.onmessage = (e) => console.log(e.data);
+</script>
+```
+
+## Peer Key Rotation
+
+Operators may rotate a peer's network key without losing accumulated metrics.
+The new key must be signed by the current key to prove authority. Invoke the
+CLI or RPC with the old peer id, new public key, and signature:
+
+```bash
+net key rotate <peer_id> <new_key>
+```
+
+Internally this calls `net.key_rotate` which transfers existing metrics to the
+new key and appends an audit entry to `state/peer_key_history.log`. Metrics for
+the old key are no longer accessible once the rotation succeeds.

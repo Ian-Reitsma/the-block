@@ -42,8 +42,9 @@ files and advertise the QUIC address and certificate during the TCP handshake so
 peers can cache and validate the endpoint without manual distribution. Metrics
 `quic_conn_latency_seconds`, `quic_bytes_sent_total`, and
 `quic_bytes_recv_total` track session performance. Additional counters
-`quic_handshake_fail_total`, `net_peer_handshake_fail_total{peer_id,reason}`, and
-`quic_disconnect_total{code}` record failed handshakes and disconnect error codes
+`quic_handshake_fail_total`, `net_peer_handshake_fail_total{peer_id,reason}`,
+`handshake_fail_total{reason}`, and `quic_disconnect_total{code}` record failed
+handshakes and disconnect error codes
 for troubleshooting. `quic_endpoint_reuse_total`
 counts how often the client connection pool reused an existing endpoint.
 
@@ -53,12 +54,25 @@ incorrect permissions, or exceed the age specified by
 `--quic-cert-ttl-days` (default 30). This allows periodic rotation without
 manual intervention.
 
+### QUIC Test Suite
+
+Install `cargo-nextest` and run the networking suite with telemetry enabled:
+
+```bash
+cargo nextest run --profile quic --features telemetry
+```
+
+Tests use isolated temporary directories and may set `RUST_TEST_THREADS=1`
+for reproducibility. Ensure local UDP ports are free before executing the
+suite to avoid spurious handshake failures.
+
 ### QUIC Handshake Failures and TCP Fallback
 
 If a QUIC handshake fails, the node automatically retries the connection over
 TCP. Each failure increments `quic_handshake_fail_total`. A spike in this
-counter usually indicates certificate mismatches or blocked UDP traffic. When
-fallback occurs the gossip message proceeds over the established TCP channel,
+counter usually indicates certificate mismatches or blocked UDP traffic. Use
+`net stats failures <peer>` to inspect reason-coded counts. When fallback occurs
+the gossip message proceeds over the established TCP channel,
 so functionality is preserved while operators investigate the root cause.
 
 ## Recovery After Corruption
@@ -123,7 +137,36 @@ curl -s http://localhost:9898/metrics | grep peer_stats_reset_total
 
 Metrics can also be exported for offline inspection using
 `net stats export <peer_id> --path <file>`, which writes a JSON snapshot and
-increments the `peer_stats_export_total{peer_id}` counter.
+increments the `peer_stats_export_total{result}` counter.
+
+### Dynamic Config Reload
+
+Rate-limit quotas and reputation decay can be adjusted without restarting the
+node. The watcher monitors `config.toml` and applies new `p2p_max_per_sec` and
+`peer_reputation_decay` values when the file changes. Force a reload via:
+
+```bash
+net config reload
+```
+
+The outcome is logged to telemetry as `config_reload_total{result}`. Sending a
+`SIGHUP` to the process triggers the same reload path for systemd integration.
+Malformed updates are ignored and the last good configuration is retained.
+
+Persistent snapshots of all peers can be enabled via `peer_metrics_path` in
+`config.toml`. On startup, `load_peer_metrics` reads the JSON file, prunes
+entries older than `peer_metrics_retention` seconds, and re-registers telemetry
+gauges. Operators may manually flush the in-memory map with:
+
+```bash
+net stats persist
+```
+
+Set `peer_metrics_compress = true` to gzip-compress the on-disk file.
+
+Exports are restricted to `metrics_export_dir` (default `state`) and paths are
+validated to prevent traversal. The CLI warns on overwrite and supports
+`--all` to create a tarball containing every peer's metrics.
 
 For deterministic tests, setting `TB_PEER_SEED=<u64>` fixes the shuffle order
 returned by `PeerSet::bootstrap`. This allows reproducible bootstrap sequences

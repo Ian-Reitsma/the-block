@@ -6,7 +6,7 @@ pub fn run(data: &[u8]) {
     let mut u = Unstructured::new(data);
     if let (Ok(price), Ok(backlog)) = (u.arbitrary::<u64>(), u.arbitrary::<usize>()) {
         reset();
-        record_price(FeeLane::Consumer, price);
+        record_price(FeeLane::Consumer, price, 1.0);
         let _ = backlog_adjusted_bid(FeeLane::Consumer, backlog);
     }
 }

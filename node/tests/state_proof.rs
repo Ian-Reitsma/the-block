@@ -18,6 +18,7 @@ fn account_proof_roundtrip() {
     init();
     let dir = temp_dir("proof_db");
     let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+    bc.recompute_difficulty();
     bc.add_account("alice".into(), 10, 0).unwrap();
     bc.add_account("bob".into(), 5, 0).unwrap();
     bc.mine_block("miner").unwrap();

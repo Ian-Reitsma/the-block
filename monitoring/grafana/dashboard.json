@@ -1,288 +1,1166 @@
 {
-  "title": "The-Block Dashboard",
-  "schemaVersion": 27,
+  "title": "The-Block Auto",
+  "schemaVersion": 37,
   "version": 1,
   "panels": [
     {
-      "type": "stat",
-      "title": "Probe Success Rate 10m",
-      "targets": [
-        {
-          "expr": "rate(synthetic_success_total[10m]) / (rate(synthetic_success_total[10m]) + rate(synthetic_fail_total[10m]))"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "decimals": 1
-        }
-      },
-      "id": 9
-    },
-    {
-      "type": "stat",
-      "title": "Convergence p95 (s)",
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum(rate(gossip_convergence_seconds_bucket[5m])) by (le))"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
-        }
-      },
-      "id": 10
-    },
-    {
-      "type": "stat",
-      "title": "Consumer fee p90 vs comfort",
-      "targets": [
-        {
-          "expr": "CONSUMER_FEE_P90"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none"
-        }
-      },
-      "id": 11
-    },
-    {
-      "type": "stat",
-      "title": "Industrial defer ratio 10m",
-      "targets": [
-        {
-          "expr": "(increase(INDUSTRIAL_DEFERRED_TOTAL[10m]) / clamp_min(increase(INDUSTRIAL_ADMITTED_TOTAL[10m]) + increase(INDUSTRIAL_DEFERRED_TOTAL[10m]),1))"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "decimals": 1
-        }
-      },
-      "id": 12
-    },
-    {
-      "type": "graph",
-      "title": "Mempool Size",
+      "type": "timeseries",
+      "title": "mempool_size",
+      "id": 1,
       "targets": [
         {
           "expr": "mempool_size"
         }
       ],
-      "id": 1
-    },
-    {
-      "type": "graph",
-      "title": "Banned Peers",
-      "targets": [
-        {
-          "expr": "banned_peers_total"
-        }
-      ],
-      "id": 2
-    },
-    {
-      "type": "graph",
-      "title": "Log Size Avg",
-      "targets": [
-        {
-          "expr": "sum(rate(log_size_bytes_sum[5m])) / sum(rate(log_size_bytes_count[5m]))"
-        }
-      ],
-      "id": 3
-    },
-    {
-      "type": "graph",
-      "title": "Snapshot Duration",
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.9, sum(rate(snapshot_duration_seconds_bucket[5m])) by (le))"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 4
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Snapshot Failures",
+      "type": "timeseries",
+      "title": "snapshot_duration_seconds",
+      "id": 2,
       "targets": [
         {
-          "expr": "snapshot_fail_total"
+          "expr": "snapshot_duration_seconds"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 5
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Badge Active",
+      "type": "timeseries",
+      "title": "subsidy_multiplier",
+      "id": 3,
       "targets": [
         {
-          "expr": "badge_active"
+          "expr": "subsidy_multiplier"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 6
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Badge Last Change",
+      "type": "timeseries",
+      "title": "subsidy_multiplier_raw",
+      "id": 4,
       "targets": [
         {
-          "expr": "badge_last_change_seconds"
+          "expr": "subsidy_multiplier_raw"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 7
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Matches per Minute",
+      "type": "timeseries",
+      "title": "subsidy_bytes_total",
+      "id": 5,
       "targets": [
         {
-          "expr": "rate(matches_total[1m])"
+          "expr": "subsidy_bytes_total"
         }
       ],
-      "id": 8
-    },
-    {
-      "type": "graph",
-      "title": "Storage Subsidy Bytes/s",
-      "targets": [
-        {
-          "expr": "rate(subsidy_bytes_total{type=\"storage\"}[5m])"
-        }
-      ],
-      "id": 20
-    },
-    {
-      "type": "graph",
-      "title": "Read Subsidy Bytes/s",
-      "targets": [
-        {
-          "expr": "rate(subsidy_bytes_total{type=\"read\"}[5m])"
-        }
-      ],
-      "id": 21
-    },
-    {
-      "type": "graph",
-      "title": "Compute Subsidy ms/s",
-      "targets": [
-        {
-          "expr": "rate(subsidy_cpu_ms_total[5m])"
-        }
-      ],
-      "id": 22
-    },
-    {
-      "type": "stat",
-      "title": "Rent Escrow Locked CT",
-      "targets": [
-        {
-          "expr": "rent_escrow_locked_ct_total"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "CT"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 23
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "stat",
-      "title": "Rent Escrow Refunded CT",
+      "type": "timeseries",
+      "title": "industrial_rejected_total",
+      "id": 6,
       "targets": [
         {
-          "expr": "rent_escrow_refunded_ct_total"
+          "expr": "industrial_rejected_total"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "CT"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 24
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "stat",
-      "title": "Rent Escrow Burned CT",
+      "type": "timeseries",
+      "title": "payout_cap_hits_total",
+      "id": 7,
       "targets": [
         {
-          "expr": "rent_escrow_burned_ct_total"
+          "expr": "payout_cap_hits_total"
         }
       ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "CT"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
       },
-      "id": 25
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Rent Escrow Flow CT/s",
+      "type": "timeseries",
+      "title": "active_burst_quota",
+      "id": 8,
       "targets": [
         {
-          "expr": "rate(rent_escrow_refunded_ct_total[5m])",
-          "legendFormat": "refunded"
-        },
-        {
-          "expr": "rate(rent_escrow_burned_ct_total[5m])",
-          "legendFormat": "burned"
+          "expr": "active_burst_quota"
         }
       ],
-      "id": 26
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Peer Requests/s (top5)",
+      "type": "timeseries",
+      "title": "admission_mode",
+      "id": 9,
       "targets": [
         {
-          "expr": "topk(5, rate(peer_request_total[5m]))"
+          "expr": "admission_mode"
         }
       ],
-      "id": 27
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Peer Drops/s by reason (top5)",
+      "type": "timeseries",
+      "title": "param_change_pending",
+      "id": 10,
       "targets": [
         {
-          "expr": "topk(5, rate(peer_drop_total[5m]))"
+          "expr": "param_change_pending"
         }
       ],
-      "id": 28
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     },
     {
-      "type": "graph",
-      "title": "Scheduler Matches by Result", 
+      "type": "timeseries",
+      "title": "param_change_active",
+      "id": 11,
       "targets": [
-        {"expr": "rate(scheduler_match_total{result=\"success\"}[5m])"},
-        {"expr": "rate(scheduler_match_total{result=\"capability_mismatch\"}[5m])"}
+        {
+          "expr": "param_change_active"
+        }
       ],
-      "id": 29
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "read_denied_total",
+      "id": 12,
+      "targets": [
+        {
+          "expr": "read_denied_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "storage_chunk_size_bytes",
+      "id": 13,
+      "targets": [
+        {
+          "expr": "storage_chunk_size_bytes"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "storage_put_chunk_seconds",
+      "id": 14,
+      "targets": [
+        {
+          "expr": "storage_put_chunk_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "storage_provider_rtt_ms",
+      "id": 15,
+      "targets": [
+        {
+          "expr": "storage_provider_rtt_ms"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "storage_provider_loss_rate",
+      "id": 16,
+      "targets": [
+        {
+          "expr": "storage_provider_loss_rate"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "matches_total",
+      "id": 17,
+      "targets": [
+        {
+          "expr": "matches_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "scheduler_match_total",
+      "id": 18,
+      "targets": [
+        {
+          "expr": "scheduler_match_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "scheduler_match_latency_seconds",
+      "id": 19,
+      "targets": [
+        {
+          "expr": "scheduler_match_latency_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "scheduler_provider_reputation",
+      "id": 20,
+      "targets": [
+        {
+          "expr": "scheduler_provider_reputation"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "scheduler_effective_price",
+      "id": 21,
+      "targets": [
+        {
+          "expr": "scheduler_effective_price"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "scheduler_preempt_total",
+      "id": 22,
+      "targets": [
+        {
+          "expr": "scheduler_preempt_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "reputation_adjust_total",
+      "id": 23,
+      "targets": [
+        {
+          "expr": "reputation_adjust_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "provider_reputation_score",
+      "id": 24,
+      "targets": [
+        {
+          "expr": "provider_reputation_score"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "match_loop_latency_seconds",
+      "id": 25,
+      "targets": [
+        {
+          "expr": "match_loop_latency_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "settle_failed_total",
+      "id": 26,
+      "targets": [
+        {
+          "expr": "settle_failed_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "settle_mode_change_total",
+      "id": 27,
+      "targets": [
+        {
+          "expr": "settle_mode_change_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gov_proposals_total",
+      "id": 28,
+      "targets": [
+        {
+          "expr": "gov_proposals_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gov_votes_total",
+      "id": 29,
+      "targets": [
+        {
+          "expr": "gov_votes_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gov_activation_total",
+      "id": 30,
+      "targets": [
+        {
+          "expr": "gov_activation_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gov_rollback_total",
+      "id": 31,
+      "targets": [
+        {
+          "expr": "gov_rollback_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gov_activation_delay_seconds",
+      "id": 32,
+      "targets": [
+        {
+          "expr": "gov_activation_delay_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "identity_registrations_total",
+      "id": 33,
+      "targets": [
+        {
+          "expr": "identity_registrations_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "tx_rejected_total",
+      "id": 34,
+      "targets": [
+        {
+          "expr": "tx_rejected_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gossip_convergence_seconds",
+      "id": 35,
+      "targets": [
+        {
+          "expr": "gossip_convergence_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "fork_reorg_total",
+      "id": 36,
+      "targets": [
+        {
+          "expr": "fork_reorg_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "banned_peer_expiration_seconds",
+      "id": 37,
+      "targets": [
+        {
+          "expr": "banned_peer_expiration_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_error_total",
+      "id": 38,
+      "targets": [
+        {
+          "expr": "peer_error_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_request_total",
+      "id": 39,
+      "targets": [
+        {
+          "expr": "peer_request_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_bytes_sent_total",
+      "id": 40,
+      "targets": [
+        {
+          "expr": "peer_bytes_sent_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_drop_total",
+      "id": 41,
+      "targets": [
+        {
+          "expr": "peer_drop_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "reputation_gossip_total",
+      "id": 42,
+      "targets": [
+        {
+          "expr": "reputation_gossip_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_rejected_total",
+      "id": 43,
+      "targets": [
+        {
+          "expr": "peer_rejected_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "net_peer_handshake_fail_total",
+      "id": 44,
+      "targets": [
+        {
+          "expr": "net_peer_handshake_fail_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "handshake_fail_total",
+      "id": 45,
+      "targets": [
+        {
+          "expr": "handshake_fail_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_stats_reset_total",
+      "id": 46,
+      "targets": [
+        {
+          "expr": "peer_stats_reset_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_stats_query_total",
+      "id": 47,
+      "targets": [
+        {
+          "expr": "peer_stats_query_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_reputation_score",
+      "id": 48,
+      "targets": [
+        {
+          "expr": "peer_reputation_score"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_stats_export_total",
+      "id": 49,
+      "targets": [
+        {
+          "expr": "peer_stats_export_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "peer_key_rotate_total",
+      "id": 50,
+      "targets": [
+        {
+          "expr": "peer_key_rotate_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "config_reload_total",
+      "id": 51,
+      "targets": [
+        {
+          "expr": "config_reload_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "gateway_dns_lookup_total",
+      "id": 52,
+      "targets": [
+        {
+          "expr": "gateway_dns_lookup_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "rpc_client_error_total",
+      "id": 53,
+      "targets": [
+        {
+          "expr": "rpc_client_error_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "rpc_tokens_available",
+      "id": 54,
+      "targets": [
+        {
+          "expr": "rpc_tokens_available"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "p2p_handshake_reject_total",
+      "id": 55,
+      "targets": [
+        {
+          "expr": "p2p_handshake_reject_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "p2p_handshake_accept_total",
+      "id": 56,
+      "targets": [
+        {
+          "expr": "p2p_handshake_accept_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "quic_conn_latency_seconds",
+      "id": 57,
+      "targets": [
+        {
+          "expr": "quic_conn_latency_seconds"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "quic_disconnect_total",
+      "id": 58,
+      "targets": [
+        {
+          "expr": "quic_disconnect_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "log_emit_total",
+      "id": 59,
+      "targets": [
+        {
+          "expr": "log_emit_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "log_drop_total",
+      "id": 60,
+      "targets": [
+        {
+          "expr": "log_drop_total"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "log_size_bytes",
+      "id": 61,
+      "targets": [
+        {
+          "expr": "log_size_bytes"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      }
     }
   ]
 }

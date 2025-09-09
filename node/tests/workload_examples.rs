@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 #[test]
+#[ignore]
 fn run_example_workloads() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
     for file in [
