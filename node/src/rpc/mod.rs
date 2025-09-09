@@ -86,7 +86,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.peer_stats_all",
     "net.peer_stats_reset",
     "net.peer_stats_export",
+    "net.peer_stats_export_all",
     "net.peer_stats_persist",
+    "net.peer_throttle",
     "net.reputation_sync",
     "net.key_rotate",
     "kyc.verify",
@@ -157,6 +159,18 @@ enum RpcResponse {
 pub struct RpcError {
     code: i32,
     message: &'static str,
+}
+
+fn io_err_msg(e: &std::io::Error) -> &'static str {
+    if e.to_string().contains("peer list changed") {
+        "peer list changed"
+    } else if e.to_string().contains("quota exceeded") {
+        "quota exceeded"
+    } else if e.kind() == std::io::ErrorKind::InvalidInput {
+        "invalid path"
+    } else {
+        "export failed"
+    }
 }
 
 #[derive(Debug)]
@@ -460,6 +474,8 @@ pub async fn handle_conn(
                         | "net.peer_stats_all"
                         | "net.peer_stats_reset"
                         | "net.peer_stats_export"
+                        | "net.peer_stats_export_all"
+                        | "net.peer_throttle"
                 ) {
                     let local = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
                     if !local {
@@ -482,7 +498,17 @@ pub async fn handle_conn(
                             } else {
                                 log::info!("peer_stats_export operator={:?}", peer_ip);
                             }
+                        } else if method_str == "net.peer_stats_export_all" {
+                            log::info!("peer_stats_export_all operator={:?}", peer_ip);
+                        } else if method_str == "net.peer_throttle" {
+                            let clear = r
+                                .params
+                                .get("clear")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            log::info!("peer_throttle operator={:?} clear={}", peer_ip, clear);
                         }
+
                         match dispatch(
                             &r,
                             Arc::clone(&bc),
@@ -743,6 +769,8 @@ fn dispatch(
                 "drops": m.drops,
                 "handshake_fail": m.handshake_fail,
                 "reputation": m.reputation.score,
+                "throttle_reason": m.throttle_reason,
+                "throttled_until": m.throttled_until,
             })
         }
         "net.peer_stats_all" => {
@@ -803,13 +831,15 @@ fn dispatch(
                 .get("all")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let min_rep = req.params.get("min_reputation").and_then(|v| v.as_f64());
+            let active = req.params.get("active_within").and_then(|v| v.as_u64());
             if all {
-                match net::export_all_peer_stats(path) {
+                match net::export_all_peer_stats(path, min_rep, active) {
                     Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
-                    Err(_) => {
+                    Err(e) => {
                         return Err(RpcError {
                             code: -32602,
-                            message: "export failed",
+                            message: io_err_msg(&e),
                         });
                     }
                 }
@@ -839,14 +869,20 @@ fn dispatch(
                 };
                 match net::export_peer_stats(&pk, path) {
                     Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
-                    Err(_) => {
+                    Err(e) => {
                         return Err(RpcError {
                             code: -32602,
-                            message: "export failed",
+                            message: io_err_msg(&e),
                         });
                     }
                 }
             }
+        }
+        "net.peer_stats_export_all" => {
+            let min_rep = req.params.get("min_reputation").and_then(|v| v.as_f64());
+            let active = req.params.get("active_within").and_then(|v| v.as_u64());
+            let map = net::peer_stats_map(min_rep, active);
+            serde_json::to_value(map).unwrap()
         }
         "net.peer_stats_persist" => match net::persist_peer_metrics() {
             Ok(()) => serde_json::json!({"status": "ok"}),
@@ -857,6 +893,49 @@ fn dispatch(
                 });
             }
         },
+        "net.peer_throttle" => {
+            let id = req
+                .params
+                .get("peer_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let clear = req
+                .params
+                .get("clear")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let bytes = match hex::decode(id) {
+                Ok(b) => b,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let pk: [u8; 32] = match bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            if clear {
+                if net::clear_throttle(&pk) {
+                    serde_json::json!({"status": "ok"})
+                } else {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "unknown peer",
+                    });
+                }
+            } else {
+                net::throttle_peer(&pk, "manual");
+                serde_json::json!({"status": "ok"})
+            }
+        }
         "net.reputation_sync" => {
             net::reputation_sync();
             serde_json::json!({"status": "ok"})

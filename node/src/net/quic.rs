@@ -10,12 +10,12 @@ use rcgen::generate_simple_self_signed;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Instant;
 
+use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS, QUIC_DISCONNECT_TOTAL,
     QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
 };
-use super::peer::HandshakeError;
 
 /// Error type for QUIC connection attempts.
 #[derive(Debug)]

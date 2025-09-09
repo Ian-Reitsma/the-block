@@ -13,7 +13,10 @@ fn records_handshake_failures() {
     assert_eq!(stats.handshake_fail.get(&HandshakeError::Tls), Some(&1));
     assert_eq!(stats.handshake_fail.get(&HandshakeError::Timeout), Some(&1));
     assert_eq!(stats.handshake_fail.get(&HandshakeError::Version), Some(&1));
-    assert_eq!(stats.handshake_fail.get(&HandshakeError::Certificate), Some(&1));
+    assert_eq!(
+        stats.handshake_fail.get(&HandshakeError::Certificate),
+        Some(&1)
+    );
     assert!(reset_peer_metrics(&pk));
     let stats = peer_stats(&pk).unwrap();
     assert!(stats.handshake_fail.is_empty());

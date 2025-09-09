@@ -1548,11 +1548,14 @@ impl Blockchain {
         crate::net::set_peer_metrics_path(cfg.peer_metrics_path.clone());
         crate::net::set_peer_metrics_retention(cfg.peer_metrics_retention);
         crate::net::set_peer_metrics_compress(cfg.peer_metrics_compress);
+        crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
         crate::net::set_metrics_export_dir(cfg.metrics_export_dir.clone());
+        crate::net::set_peer_metrics_export_quota(cfg.peer_metrics_export_quota_bytes);
         crate::net::set_track_drop_reasons(cfg.track_peer_drop_reasons);
         crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
         crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
         crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
+        crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
         crate::compute_market::scheduler::set_provider_reputation_decay(
             cfg.provider_reputation_decay,
         );
@@ -1565,6 +1568,9 @@ impl Blockchain {
         crate::compute_market::scheduler::set_preempt_enabled(cfg.compute_market.enable_preempt);
         crate::compute_market::scheduler::set_preempt_min_delta(
             cfg.compute_market.preempt_min_delta,
+        );
+        crate::compute_market::scheduler::set_low_priority_cap_pct(
+            cfg.compute_market.low_priority_cap_pct,
         );
         crate::config::set_current(cfg.clone());
         crate::config::watch(path);

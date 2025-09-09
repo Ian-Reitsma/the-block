@@ -99,9 +99,26 @@ enum StatsCmd {
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
+        /// Minimum reputation to include
+        #[arg(long)]
+        min_reputation: Option<f64>,
+        /// Only include peers active within this many seconds
+        #[arg(long)]
+        active_within: Option<u64>,
     },
     /// Persist metrics to disk
     Persist {
+        /// RPC server address
+        #[arg(long, default_value = "http://127.0.0.1:3030")]
+        rpc: String,
+    },
+    /// Throttle or clear throttle for a peer
+    Throttle {
+        /// Hex-encoded peer id
+        peer_id: String,
+        /// Clear existing throttle
+        #[arg(long)]
+        clear: bool,
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
@@ -264,8 +281,10 @@ fn main() {
                                         .join(",")
                                 })
                                 .unwrap_or_else(|| "".into());
+                            let thr = res["throttle_reason"].as_str().unwrap_or("");
+                            let until = res["throttled_until"].as_u64().unwrap_or(0);
                             println!(
-                                "requests={reqs} bytes_sent={bytes} drops={drops} handshake_fail={hf}"
+                                "requests={reqs} bytes_sent={bytes} drops={drops} handshake_fail={hf} throttle={thr} until={until}"
                             );
                         }
                         Err(e) => eprintln!("request error: {e}"),
@@ -308,12 +327,21 @@ fn main() {
                 all,
                 path,
                 rpc,
+                min_reputation,
+                active_within,
             } => {
                 if !all && peer_id.is_none() {
                     eprintln!("peer_id required unless --all is specified");
                 } else {
                     let params = if all {
-                        json!({"path": path, "all": true})
+                        let mut p = json!({"path": path, "all": true});
+                        if let Some(r) = min_reputation {
+                            p["min_reputation"] = json!(r);
+                        }
+                        if let Some(a) = active_within {
+                            p["active_within"] = json!(a);
+                        }
+                        p
                     } else {
                         json!({"peer_id": peer_id.unwrap(), "path": path})
                     };
@@ -323,7 +351,10 @@ fn main() {
                     });
                     match post_json(&rpc, req) {
                         Ok(val) => {
-                            if val["result"]["status"].as_str() == Some("ok") {
+                            if let Some(err) = val.get("error") {
+                                let msg = err["message"].as_str().unwrap_or("export failed");
+                                eprintln!("export failed: {msg}");
+                            } else if val["result"]["status"].as_str() == Some("ok") {
                                 if val["result"]["overwritten"].as_bool() == Some(true) {
                                     eprintln!("warning: overwrote existing file");
                                 }
@@ -349,6 +380,30 @@ fn main() {
                     Err(e) => eprintln!("request error: {e}"),
                 }
             }
+            StatsCmd::Throttle {
+                peer_id,
+                clear,
+                rpc,
+            } => {
+                let req = json!({
+                    "method": "net.peer_throttle",
+                    "params": { "peer_id": peer_id, "clear": clear },
+                });
+                match post_json(&rpc, req) {
+                    Ok(val) => {
+                        if val["result"]["status"].as_str() == Some("ok") {
+                        if clear {
+                                println!("cleared");
+                            } else {
+                                println!("throttled");
+                            }
+                        } else {
+                            eprintln!("throttle failed");
+                        }
+                    }
+                    Err(e) => eprintln!("request error: {e}"),
+                }
+            }
             StatsCmd::Failures { peer_id, rpc } => {
                 let req = json!({
                     "method": "net.peer_stats",
@@ -367,7 +422,7 @@ fn main() {
             }
             StatsCmd::Watch { peer_id, ws } => match connect(&ws) {
                 Ok((mut socket, _)) => loop {
-                    match socket.read_message() {
+                    match socket.read() {
                         Ok(WsMessage::Text(txt)) => {
                             if let Ok(snap) = serde_json::from_str::<serde_json::Value>(&txt) {
                                 if peer_id

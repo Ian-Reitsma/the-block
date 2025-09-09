@@ -6,6 +6,7 @@ use blake3::Hasher;
 use once_cell::sync::Lazy;
 
 use crate::net::message::{BlobChunk, ReputationGossip};
+use crate::net::peer::is_throttled_addr;
 use crate::net::{record_ip_drop, send_msg, Message};
 use ed25519_dalek::SigningKey;
 
@@ -72,7 +73,9 @@ where
             continue;
         }
         seen[idx] = true;
-        send(peers[idx], msg);
+        if !is_throttled_addr(&peers[idx]) {
+            send(peers[idx], msg);
+        }
         for i in 1..=fanout {
             queue.push(idx * fanout + i);
         }

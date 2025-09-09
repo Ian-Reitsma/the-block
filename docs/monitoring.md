@@ -39,9 +39,8 @@ scheduler match histograms (`scheduler_match_total{result}`,
 `scheduler_provider_reputation`) and average log size derived from the
 `log_size_bytes` histogram. Additional gauges expose `subsidy_auto_reduced_total`
 and `kill_switch_trigger_total` so operators can correlate reward shifts with
-governance interventions. The repository omits screenshot assets to keep the
-tree lightweight; after running a monitor command, open Grafana and import
-`monitoring/grafana/dashboard.json` to explore the dashboard.
+governance interventions. After running a monitor command, open Grafana and
+import `monitoring/grafana/dashboard.json` to explore the live panels.
 
 Operators can clone the dashboard JSON and add environment-specific panels—for
 example, graphing `subsidy_bytes_total{type="storage"}` per account or plotting
@@ -80,10 +79,11 @@ fail on unsupported panel types.
 
 ### Dashboard generation
 
-`make -C monitoring lint` regenerates `grafana/dashboard.json` from metric
-definitions in `node/src/telemetry.rs` via `tools/gen_dashboard.py`. Each
-Prometheus counter or gauge becomes a Grafana timeseries panel. The
-auto-generated dashboard provides a starting point
+`make -C monitoring lint` regenerates `metrics.json` and `grafana/dashboard.json`
+from metric definitions in `node/src/telemetry.rs` via the scripts in
+`monitoring/tools`. Removed metrics are kept in the schema with `"deprecated": true`
+and omitted from the dashboard. Each Prometheus counter or gauge becomes a
+Grafana timeseries panel. The auto-generated dashboard provides a starting point
 for operators to further customize panels.
 
 ## Synthetic chain health checks

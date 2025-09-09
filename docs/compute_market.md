@@ -139,6 +139,20 @@ via the courier. Successful migrations increment
 assignment intact. Preemption counts are exposed through the
 `compute_market.scheduler_stats` RPC.
 
+### Priority and Aging
+
+Workloads may supply a `priority` field (`low`, `normal`, or `high`) when
+submitting a job. The scheduler maintains a priority queue ordered first by
+priority and then by arrival time. Older high-priority jobs run before newer
+low-priority ones, ensuring fairness under load.
+
+Operators can cap the share of concurrently executing low-priority jobs via
+`low_priority_cap_pct` in `config.toml`. Jobs exceeding this cap wait in the
+queue until capacity frees. The counter `scheduler_priority_miss_total`
+increments if a non-low-priority job waits more than five seconds before
+starting. Queue depths and miss counts are available through the
+`compute_market.scheduler_stats` RPC.
+
 ## Slice Files and Hashing
 
 Slices are raw byte blobs saved with a `.slice` extension. The reference
