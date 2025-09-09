@@ -6,8 +6,8 @@ use serial_test::serial;
 use ed25519_dalek::SigningKey;
 use rand::{thread_rng, RngCore};
 use the_block::net::{
-    peer_stats, record_ip_drop, set_max_peer_metrics, DropReason, Hello, Message, Payload,
-    PeerSet, Transport, LOCAL_FEATURES, PROTOCOL_VERSION,
+    peer_stats, record_ip_drop, set_max_peer_metrics, DropReason, Hello, Message, Payload, PeerSet,
+    Transport, LOCAL_FEATURES, PROTOCOL_VERSION,
 };
 use the_block::Blockchain;
 
@@ -31,6 +31,11 @@ fn ip_drop_increments_metric() {
 #[test]
 #[serial]
 fn rate_limit_drop_records_reason() {
+    // Lower the per-second threshold so we can reliably trigger a drop without
+    // burning the full default quota. Environment variables are read once on
+    // first access, so set it before instantiating any peer structures.
+    std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
+    the_block::net::set_p2p_max_per_sec(10);
     let peers = PeerSet::new(vec![]);
     let chain = Arc::new(Mutex::new(Blockchain::default()));
 
@@ -52,19 +57,21 @@ fn rate_limit_drop_records_reason() {
     let msg = Message::new(Payload::Handshake(hello), &key);
     peers.handle_message(msg, Some(addr), &chain);
 
-    // Send enough messages to exceed default rate limit (100 per sec)
-    for _ in 0..100 {
+    // Send enough messages to exceed the lowered rate limit (10 per sec)
+    for _ in 0..20 {
         let msg = Message::new(Payload::Hello(vec![]), &key);
         peers.handle_message(msg, Some(addr), &chain);
     }
 
     let stats = peer_stats(&pk).unwrap();
-    assert!(stats
-        .drops
-        .get(&DropReason::RateLimit)
-        .copied()
-        .unwrap_or(0)
-        >= 1);
+    assert!(
+        stats
+            .drops
+            .get(&DropReason::RateLimit)
+            .copied()
+            .unwrap_or(0)
+            >= 1
+    );
     #[cfg(feature = "telemetry")]
     {
         use the_block::telemetry::{PEER_DROP_TOTAL, PEER_METRICS_ACTIVE};
@@ -77,6 +84,10 @@ fn rate_limit_drop_records_reason() {
         );
         assert!(PEER_METRICS_ACTIVE.get() >= 1);
     }
+
+    // Avoid leaking the overridden rate limit to other tests in this binary.
+    std::env::remove_var("TB_P2P_MAX_PER_SEC");
+    the_block::net::set_p2p_max_per_sec(100);
 }
 
 #[test]

@@ -44,7 +44,7 @@ updated interval.
 ```toml
 # node-data/config.toml
 snapshot_interval = 1200
-price_board_path = "state/price_board.v1.bin"
+price_board_path = "state/price_board.v2.bin"
 price_board_window = 100
 price_board_save_interval = 30
 ```

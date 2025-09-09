@@ -14,6 +14,7 @@ use crate::{
     Blockchain, SignedTransaction,
 };
 use bincode;
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -85,6 +86,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.peer_stats_all",
     "net.peer_stats_reset",
     "net.peer_stats_export",
+    "net.peer_stats_persist",
+    "net.reputation_sync",
+    "net.key_rotate",
     "kyc.verify",
     "pow.get_template",
     "dex_escrow_status",
@@ -96,6 +100,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "compute_market.scheduler_metrics",
     "compute_market.scheduler_stats",
     "compute.reputation_get",
+    "compute.job_requirements",
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
@@ -467,6 +472,17 @@ pub async fn handle_conn(
                             id,
                         }
                     } else {
+                        if method_str == "net.peer_stats_export" {
+                            if let Some(path) = r.params.get("path").and_then(|v| v.as_str()) {
+                                log::info!(
+                                    "peer_stats_export operator={:?} path={}",
+                                    peer_ip,
+                                    path
+                                );
+                            } else {
+                                log::info!("peer_stats_export operator={:?}", peer_ip);
+                            }
+                        }
                         match dispatch(
                             &r,
                             Arc::clone(&bc),
@@ -658,6 +674,7 @@ fn dispatch(
         },
         "gateway.policy" => gateway::dns::gateway_policy(&req.params),
         "gateway.reads_since" => gateway::dns::reads_since(&req.params),
+        "gateway.dns_lookup" => gateway::dns::dns_lookup(&req.params),
         #[cfg(feature = "telemetry")]
         "analytics" => {
             let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone())
@@ -776,42 +793,163 @@ fn dispatch(
             }
         }
         "net.peer_stats_export" => {
-            let id = req
-                .params
-                .get("peer_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
             let path = req
                 .params
                 .get("path")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = match hex::decode(id) {
-                Ok(b) => b,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
+            let all = req
+                .params
+                .get("all")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if all {
+                match net::export_all_peer_stats(path) {
+                    Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
+                    Err(_) => {
+                        return Err(RpcError {
+                            code: -32602,
+                            message: "export failed",
+                        });
+                    }
                 }
-            };
-            let pk: [u8; 32] = match bytes.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
+            } else {
+                let id = req
+                    .params
+                    .get("peer_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let bytes = match hex::decode(id) {
+                    Ok(b) => b,
+                    Err(_) => {
+                        return Err(RpcError {
+                            code: -32602,
+                            message: "invalid params",
+                        })
+                    }
+                };
+                let pk: [u8; 32] = match bytes.try_into() {
+                    Ok(a) => a,
+                    Err(_) => {
+                        return Err(RpcError {
+                            code: -32602,
+                            message: "invalid params",
+                        })
+                    }
+                };
+                match net::export_peer_stats(&pk, path) {
+                    Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
+                    Err(_) => {
+                        return Err(RpcError {
+                            code: -32602,
+                            message: "export failed",
+                        });
+                    }
                 }
-            };
-            match net::export_peer_stats(&pk, path) {
-                Ok(()) => serde_json::json!({"status": "ok"}),
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "export failed",
-                    });
-                }
+            }
+        }
+        "net.peer_stats_persist" => match net::persist_peer_metrics() {
+            Ok(()) => serde_json::json!({"status": "ok"}),
+            Err(_) => {
+                return Err(RpcError {
+                    code: -32603,
+                    message: "persist failed",
+                });
+            }
+        },
+        "net.reputation_sync" => {
+            net::reputation_sync();
+            serde_json::json!({"status": "ok"})
+        }
+        "net.key_rotate" => {
+            let id = req
+                .params
+                .get("peer_id")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })?;
+            let new_key = req
+                .params
+                .get("new_key")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })?;
+            let sig_hex = req
+                .params
+                .get("signature")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })?;
+            let old_bytes = hex::decode(id).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let new_bytes = hex::decode(new_key).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let sig_bytes = hex::decode(sig_hex).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let old_pk: [u8; 32] = old_bytes.try_into().map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let new_pk: [u8; 32] = new_bytes.try_into().map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let sig = Signature::from_bytes(&sig_arr);
+            let vk = VerifyingKey::from_bytes(&old_pk).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            if vk.verify(&new_pk, &sig).is_err() {
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::PEER_KEY_ROTATE_TOTAL
+                    .with_label_values(&["bad_sig"])
+                    .inc();
+                return Err(RpcError {
+                    code: -32602,
+                    message: "bad signature",
+                });
+            }
+            if net::rotate_peer_key(&old_pk, new_pk) {
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::PEER_KEY_ROTATE_TOTAL
+                    .with_label_values(&["ok"])
+                    .inc();
+                serde_json::json!({"status":"ok"})
+            } else {
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::PEER_KEY_ROTATE_TOTAL
+                    .with_label_values(&["missing"])
+                    .inc();
+                return Err(RpcError {
+                    code: -32602,
+                    message: "unknown peer",
+                });
+            }
+        }
+        "net.config_reload" => {
+            if crate::config::reload() {
+                serde_json::json!({"status": "ok"})
+            } else {
+                return Err(RpcError {
+                    code: -32603,
+                    message: "reload failed",
+                });
             }
         }
         "kyc.verify" => {
@@ -927,6 +1065,14 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             compute_market::reputation_get(provider)
+        }
+        "compute.job_requirements" => {
+            let job_id = req
+                .params
+                .get("job_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            compute_market::job_requirements(job_id)
         }
         "stake.role" => pos::role(&req.params)?,
         "register_handle" => {

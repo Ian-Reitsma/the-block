@@ -22,6 +22,7 @@ jobs:
           filters: |
             monitoring:
               - 'monitoring/**'
+              - 'node/src/telemetry.rs'
         - name: install monitoring deps
           run: npm ci --prefix monitoring
         - name: monitor smoke
@@ -68,9 +69,16 @@ jobs:
       - name: verify cargo-nextest
         run: cargo nextest --version
       - name: cargo nextest
-        run: cargo nextest run --profile quic
+        run: |
+          cargo nextest run --profile quic --features telemetry 2>&1 | tee quic-nextest.log
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: upload quic nextest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quic-nextest
+          path: quic-nextest.log
       - name: gossip test
         run: cargo nextest run --profile quic gossip_converges_to_longest_chain --retries 2
         env:

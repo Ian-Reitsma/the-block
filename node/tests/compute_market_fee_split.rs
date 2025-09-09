@@ -14,6 +14,7 @@ fn mixed_split_escrow_and_settlement() {
         fee_pct_ct: 25,
         capability: the_block::compute_market::scheduler::Capability::default(),
         reputation: 0,
+        reputation_multiplier: 1.0,
     };
     offer.validate().unwrap();
     let (ct, it) = admission::reserve(
@@ -46,6 +47,7 @@ fn full_ct_split_and_refund() {
         fee_pct_ct: 100,
         capability: the_block::compute_market::scheduler::Capability::default(),
         reputation: 0,
+        reputation_multiplier: 1.0,
     };
     offer.validate().unwrap();
     let (ct, it) = admission::reserve(

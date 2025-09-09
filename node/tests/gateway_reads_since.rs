@@ -12,18 +12,18 @@ fn reads_since_reports_receipts() {
     let sk = SigningKey::from_bytes(&[1u8; 32]);
     let pk = sk.verifying_key();
     let mut msg = Vec::new();
-    msg.extend(b"test");
+    msg.extend(b"test.block");
     msg.extend(txt.as_bytes());
     let sig = sk.sign(&msg);
     let params = json!({
-        "domain":"test",
+        "domain":"test.block",
         "txt":txt,
         "pubkey":hex::encode(pk.to_bytes()),
         "sig":hex::encode(sig.to_bytes()),
     });
     let _ = publish_record(&params);
-    let _ = gateway_policy(&json!({"domain":"test"}));
-    let _ = gateway_policy(&json!({"domain":"test"}));
-    let r = reads_since(&json!({"domain":"test","epoch":0}));
+    let _ = gateway_policy(&json!({"domain":"test.block"}));
+    let _ = gateway_policy(&json!({"domain":"test.block"}));
+    let r = reads_since(&json!({"domain":"test.block","epoch":0}));
     assert_eq!(r["reads_total"].as_u64().unwrap(), 2);
 }

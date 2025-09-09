@@ -18,6 +18,9 @@ proptest! {
         init();
         let dir = temp_dir("nonce_supply_prop");
         let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+        // Align difficulty accounting with the freshly opened chain so the
+        // first mined block starts from the expected baseline.
+        bc.recompute_difficulty();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         let (sk, _pk) = generate_keypair();

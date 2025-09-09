@@ -3,9 +3,9 @@ use rand::{thread_rng, RngCore};
 use serial_test::serial;
 use std::convert::TryInto;
 use std::process::Command;
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use tempfile::tempdir;
-use the_block::net::{self, set_max_peer_metrics};
+use the_block::net::{self, set_max_peer_metrics, HandshakeError, simulate_handshake_fail};
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
     generate_keypair,
@@ -60,7 +60,8 @@ async fn peer_stats_rpc() {
 
     // simulate a handshake to populate metrics
     let peers = PeerSet::new(Vec::new());
-    let (sk_bytes, pk) = generate_keypair();
+    let (sk_bytes, pk_vec) = generate_keypair();
+    let pk: [u8; 32] = pk_vec.as_slice().try_into().unwrap();
     let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
     let hello = Hello {
         network_id: [0u8; 4],
@@ -74,6 +75,8 @@ async fn peer_stats_rpc() {
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
+    simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
+    simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -167,7 +170,8 @@ async fn peer_stats_reset_rpc() {
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
 
     let peers = PeerSet::new(Vec::new());
-    let (sk_bytes, pk) = generate_keypair();
+    let (sk_bytes, pk_vec) = generate_keypair();
+    let pk: [u8; 32] = pk_vec.as_slice().try_into().unwrap();
     let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
     let hello = Hello {
         network_id: [0u8; 4],
@@ -226,8 +230,9 @@ async fn peer_stats_export_rpc() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let peers = PeerSet::new(Vec::new());
-    let (sk_bytes, pk) = generate_keypair();
+    let (sk_bytes, pk_bytes) = generate_keypair();
     let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
+    let pk: [u8; 32] = pk_bytes.try_into().unwrap();
     let hello = Hello {
         network_id: [0u8; 4],
         proto_version: PROTOCOL_VERSION,
@@ -252,20 +257,96 @@ async fn peer_stats_export_rpc() {
     ));
     let addr = expect_timeout(rx).await.unwrap();
 
-    let path = dir.path().join("export.json");
+    the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
+    let path = "export.json";
     let peer_id = hex::encode(pk);
     let body = format!(
         "{{\"method\":\"net.peer_stats_export\",\"params\":{{\"peer_id\":\"{}\",\"path\":\"{}\"}}}}",
         peer_id,
-        path.display()
+        path
     );
     let val = rpc(&addr, &body).await;
     assert_eq!(val["result"]["status"].as_str(), Some("ok"));
-    let contents = std::fs::read_to_string(&path).unwrap();
+    let contents = std::fs::read_to_string(dir.path().join(path)).unwrap();
     let m: serde_json::Value = serde_json::from_str(&contents).unwrap();
     assert_eq!(m["requests"].as_u64().unwrap(), 1);
 
     handle.abort();
+    Settlement::shutdown();
+}
+
+#[test]
+#[serial]
+fn peer_stats_export_invalid_path() {
+    let dir = init_env();
+    the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    let peers = PeerSet::new(Vec::new());
+    let (sk_bytes, pk_bytes) = generate_keypair();
+    let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
+    let pk: [u8; 32] = pk_bytes.try_into().unwrap();
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello), &sk);
+    peers.handle_message(msg, None, &bc);
+
+    let err = the_block::net::export_peer_stats(&pk, "../evil.json").unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+
+    Settlement::shutdown();
+}
+
+#[test]
+#[serial]
+fn peer_stats_export_concurrent() {
+    let dir = init_env();
+    the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    let peers = PeerSet::new(Vec::new());
+    let (sk_bytes, pk_bytes) = generate_keypair();
+    let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
+    let pk: [u8; 32] = pk_bytes.try_into().unwrap();
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello), &sk);
+    peers.handle_message(msg, None, &bc);
+
+    let barrier = Arc::new(Barrier::new(2));
+    let path = "race.json";
+    let pk1 = pk;
+    let pk2 = pk;
+    let barrier1 = Arc::clone(&barrier);
+    let barrier2 = Arc::clone(&barrier);
+    let t1 = std::thread::spawn(move || {
+        barrier1.wait();
+        the_block::net::export_peer_stats(&pk1, path)
+    });
+    let t2 = std::thread::spawn(move || {
+        barrier2.wait();
+        the_block::net::export_peer_stats(&pk2, path)
+    });
+    let r1 = t1.join().unwrap();
+    let r2 = t2.join().unwrap();
+    assert!(r1.is_ok() || r2.is_ok());
+
     Settlement::shutdown();
 }
 
@@ -303,6 +384,10 @@ async fn peer_stats_cli_show_and_reputation() {
     ));
     let addr = expect_timeout(rx).await.unwrap();
 
+    net::set_track_handshake_fail(true);
+    simulate_handshake_fail(pk.clone().try_into().unwrap(), HandshakeError::Tls);
+    net::set_track_handshake_fail(false);
+
     let peer_id = hex::encode(pk);
     let output = Command::new(env!("CARGO_BIN_EXE_net"))
         .args([
@@ -320,6 +405,16 @@ async fn peer_stats_cli_show_and_reputation() {
         String::from_utf8_lossy(&output.stderr)
     );
     let _stdout = String::from_utf8_lossy(&output.stdout);
+
+    let val = rpc(
+        &addr,
+        &format!(
+            "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
+            peer_id
+        ),
+    )
+    .await;
+    assert_eq!(val["result"]["handshake_fail"]["tls"].as_u64(), Some(1));
 
     let output = Command::new(env!("CARGO_BIN_EXE_net"))
         .args([
@@ -421,10 +516,11 @@ async fn peer_stats_drop_counter_rpc() {
         quic_addr: None,
         quic_cert: None,
     };
+    std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
+    the_block::net::set_p2p_max_per_sec(10);
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, Some(addr), &bc);
-
-    for _ in 0..200 {
+    for _ in 0..20 {
         let m = Message::new(Payload::Hello(vec![]), &sk);
         peers.handle_message(m, Some(addr), &bc);
     }
@@ -457,6 +553,8 @@ async fn peer_stats_drop_counter_rpc() {
     assert!(count >= 1);
     handle.abort();
     Settlement::shutdown();
+    std::env::remove_var("TB_P2P_MAX_PER_SEC");
+    the_block::net::set_p2p_max_per_sec(100);
 }
 
 #[tokio::test]
@@ -556,5 +654,42 @@ async fn peer_stats_all_pagination_rpc() {
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["peer_id"].as_str().unwrap(), pks[1]);
     handle.abort();
+    Settlement::shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn peer_stats_persist_restart() {
+    let dir = init_env();
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+
+    let peers = PeerSet::new(Vec::new());
+    let (sk_bytes, pk_vec) = generate_keypair();
+    let pk: [u8; 32] = pk_vec.as_slice().try_into().unwrap();
+    let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello), &sk);
+    peers.handle_message(msg, None, &bc);
+
+    let path = dir.path().join("metrics.json");
+    the_block::net::set_peer_metrics_path(path.to_str().unwrap().into());
+    the_block::net::set_peer_metrics_retention(60);
+    the_block::net::set_peer_metrics_compress(false);
+    the_block::net::persist_peer_metrics().unwrap();
+    the_block::net::clear_peer_metrics();
+    the_block::net::load_peer_metrics();
+    let stats = the_block::net::peer_stats(&pk).unwrap();
+    assert_eq!(stats.requests, 1);
+
     Settlement::shutdown();
 }

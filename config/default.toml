@@ -1,8 +1,22 @@
 # Default configuration for The-Block networking
 max_peer_metrics = 1024
 peer_metrics_export = true
+peer_metrics_path = "state/peer_metrics.json"
+peer_metrics_retention = 604800
+peer_metrics_compress = false
+metrics_export_dir = "state"
 track_peer_drop_reasons = true
+track_handshake_failures = true
 peer_reputation_decay = 0.01
+p2p_max_per_sec = 100
 provider_reputation_decay = 0.05
 provider_reputation_retention = 604800
+reputation_gossip = true
 scheduler_metrics = true
+gateway_dns_allow_external = false
+
+[compute_market]
+enable_preempt = false
+preempt_min_delta = 10
+reputation_multiplier_min = 0.5
+reputation_multiplier_max = 1.0

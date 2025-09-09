@@ -720,6 +720,48 @@ pub static SCHEDULER_ACTIVE_JOBS: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static SCHEDULER_EFFECTIVE_PRICE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "scheduler_effective_price",
+            "Effective compute price per unit by provider",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("gauge scheduler_effective_price: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_effective_price: {e}"));
+    g
+});
+
+pub static SCHEDULER_PREEMPT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "scheduler_preempt_total",
+            "Scheduler preemption events by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_preempt_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_preempt_total: {e}"));
+    c
+});
+
+pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "scheduler_accelerator_miss_total",
+        "Jobs requiring accelerators that could not be matched",
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_accelerator_miss_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_accelerator_miss_total: {e}"));
+    c
+});
+
 pub static REPUTATION_ADJUST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("reputation_adjust_total", "Reputation adjustments"),
@@ -1224,6 +1266,45 @@ pub static PEER_METRICS_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "peer_metrics_subscribers",
+        "Active peer metrics websocket subscribers",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static REPUTATION_GOSSIP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "reputation_gossip_total",
+            "Reputation gossip updates processed grouped by result",
+        ),
+        &["result"],
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_METRICS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "peer_metrics_dropped_total",
+        "Websocket peer metrics frames dropped",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new("peer_rejected_total", "Peers rejected grouped by reason"),
@@ -1251,10 +1332,10 @@ pub static PEER_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static PEER_HANDSHAKE_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub static HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
-            "peer_handshake_failure_total",
+            "handshake_fail_total",
             "Handshake failures grouped by reason",
         ),
         &["reason"],
@@ -1312,9 +1393,54 @@ pub static PEER_STATS_EXPORT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
             "peer_stats_export_total",
-            "Peer metric exports grouped by peer",
+            "Peer metric export attempts grouped by result",
         ),
-        &["peer_id"],
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_KEY_ROTATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_key_rotate_total",
+            "Peer key rotation attempts grouped by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static CONFIG_RELOAD_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "config_reload_total",
+            "Configuration reload attempts grouped by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "gateway_dns_lookup_total",
+            "Gateway DNS verification attempts grouped by status",
+        ),
+        &["status"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY

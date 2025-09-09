@@ -1,4 +1,7 @@
-.PHONY: lint
+.PHONY: lint gen
 
-lint:
+gen:
+	./tools/gen_dashboard.py
+
+lint: gen
 	npx jsonnet-lint grafana/dashboard.json

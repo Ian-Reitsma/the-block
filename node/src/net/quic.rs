@@ -15,6 +15,7 @@ use crate::telemetry::{
     QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS, QUIC_DISCONNECT_TOTAL,
     QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
 };
+use super::peer::HandshakeError;
 
 /// Error type for QUIC connection attempts.
 #[derive(Debug)]
@@ -107,14 +108,8 @@ pub async fn connect(
             #[cfg(feature = "telemetry")]
             {
                 QUIC_HANDSHAKE_FAIL_TOTAL.inc();
-                let reason = if e.to_string().to_lowercase().contains("certificate") {
-                    "bad_cert"
-                } else if e.to_string().to_lowercase().contains("timeout") {
-                    "timeout"
-                } else {
-                    "other"
-                };
-                super::peer::record_handshake_fail_addr(addr, reason);
+                let err = classify_err(&e);
+                super::peer::record_handshake_fail_addr(addr, err);
             }
             Err(ConnectError::Handshake)
         }
@@ -183,17 +178,27 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
             #[cfg(feature = "telemetry")]
             {
                 QUIC_HANDSHAKE_FAIL_TOTAL.inc();
-                let reason = if e.to_string().to_lowercase().contains("certificate") {
-                    "bad_cert"
-                } else if e.to_string().to_lowercase().contains("timeout") {
-                    "timeout"
-                } else {
-                    "other"
-                };
-                super::peer::record_handshake_fail_addr(addr, reason);
+                let err = classify_err(&e);
+                super::peer::record_handshake_fail_addr(addr, err);
             }
             Err(ConnectError::Handshake)
         }
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub(crate) fn classify_err(e: &quinn::ConnectError) -> HandshakeError {
+    let msg = e.to_string().to_lowercase();
+    if msg.contains("certificate") {
+        HandshakeError::Certificate
+    } else if msg.contains("tls") {
+        HandshakeError::Tls
+    } else if msg.contains("timeout") {
+        HandshakeError::Timeout
+    } else if msg.contains("version") {
+        HandshakeError::Version
+    } else {
+        HandshakeError::Other
     }
 }
 

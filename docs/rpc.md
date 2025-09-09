@@ -23,6 +23,7 @@
   returns `reads_total` and `last_access_ts` counters.
 - `gateway.reads_since?epoch=` – totals reads for the domain since the given
   epoch.
+- `gateway.dns_lookup` – returns `{record, verified}` without updating read counters.
 - `analytics` – returns `{reads, bytes}` served for a domain based on finalized
   `ReadAck` batches.
 - `microshard.roots.last?n=` – lists the most recent micro‑shard root headers.

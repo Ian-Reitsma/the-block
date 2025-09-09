@@ -48,6 +48,7 @@ fn open_mine_reopen() {
 
     {
         let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+        bc.recompute_difficulty();
         bc.add_account("a".into(), 0, 0).unwrap();
         bc.add_account("b".into(), 0, 0).unwrap();
         bc.mine_block("a").unwrap();
@@ -56,6 +57,7 @@ fn open_mine_reopen() {
     }
 
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    bc.recompute_difficulty();
     let payload = RawTxPayload {
         from_: "a".into(),
         to: "b".into(),

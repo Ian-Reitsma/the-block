@@ -498,6 +498,7 @@ fn discover_peers_from_file_loads_seeds() {
 #[serial]
 fn peer_rate_limit_and_ban() {
     std::env::set_var("TB_P2P_MAX_PER_SEC", "3");
+    the_block::net::set_p2p_max_per_sec(3);
     std::env::set_var("TB_P2P_BAN_SECS", "60");
     let dir = init_env();
     let addr = free_addr();
@@ -544,6 +545,7 @@ fn peer_rate_limit_and_ban() {
     assert!(node.blockchain().mempool_consumer.is_empty());
     std::env::remove_var("TB_P2P_MAX_PER_SEC");
     std::env::remove_var("TB_P2P_BAN_SECS");
+    the_block::net::set_p2p_max_per_sec(100);
     flag.trigger();
     jh.join().unwrap();
 }

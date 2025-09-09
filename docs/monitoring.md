@@ -78,6 +78,14 @@ make -C monitoring lint
 The lint uses `npx jsonnet-lint` to validate `grafana/dashboard.json` and will
 fail on unsupported panel types.
 
+### Dashboard generation
+
+`make -C monitoring lint` regenerates `grafana/dashboard.json` from metric
+definitions in `node/src/telemetry.rs` via `tools/gen_dashboard.py`. Each
+Prometheus counter or gauge becomes a Grafana timeseries panel. The
+auto-generated dashboard provides a starting point
+for operators to further customize panels.
+
 ## Synthetic chain health checks
 
 `scripts/synthetic.sh` runs a mine → gossip → tip cycle using the `probe` CLI and emits Prometheus metrics:
