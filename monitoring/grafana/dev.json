@@ -1,0 +1,1699 @@
+{
+  "panels": [
+    {
+      "description": "Remaining burst quota",
+      "id": 1,
+      "targets": [
+        {
+          "expr": "active_burst_quota"
+        }
+      ],
+      "title": "active_burst_quota",
+      "type": "timeseries"
+    },
+    {
+      "description": "effective active miners",
+      "id": 2,
+      "targets": [
+        {
+          "expr": "active_miners"
+        }
+      ],
+      "title": "active_miners",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current industrial admission mode",
+      "id": 3,
+      "targets": [
+        {
+          "expr": "admission_mode"
+        }
+      ],
+      "title": "admission_mode",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total peer metric ingests",
+      "id": 4,
+      "targets": [
+        {
+          "expr": "aggregator_ingest_total"
+        }
+      ],
+      "title": "aggregator_ingest_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Whether a service badge is active (1/0)",
+      "id": 5,
+      "targets": [
+        {
+          "expr": "badge_active"
+        }
+      ],
+      "title": "badge_active",
+      "type": "timeseries"
+    },
+    {
+      "description": "Unix timestamp of the last badge mint/burn",
+      "id": 6,
+      "targets": [
+        {
+          "expr": "badge_last_change_seconds"
+        }
+      ],
+      "title": "badge_last_change_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions rejected due to balance overflow",
+      "id": 7,
+      "targets": [
+        {
+          "expr": "balance_overflow_reject_total"
+        }
+      ],
+      "title": "balance_overflow_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Expiration timestamp for active peer bans",
+      "id": 8,
+      "targets": [
+        {
+          "expr": "banned_peer_expiration_seconds"
+        }
+      ],
+      "title": "banned_peer_expiration_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total peers currently banned",
+      "id": 9,
+      "targets": [
+        {
+          "expr": "banned_peers_total"
+        }
+      ],
+      "title": "banned_peers_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "base reward after logistic factor",
+      "id": 10,
+      "targets": [
+        {
+          "expr": "base_reward_ct"
+        }
+      ],
+      "title": "base_reward_ct",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total mined blocks",
+      "id": 11,
+      "targets": [
+        {
+          "expr": "block_mined_total"
+        }
+      ],
+      "title": "block_mined_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Unique peers tracked by aggregator",
+      "id": 12,
+      "targets": [
+        {
+          "expr": "cluster_peer_active_total"
+        }
+      ],
+      "title": "cluster_peer_active_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Unix timestamp of the last successful config reload",
+      "id": 13,
+      "targets": [
+        {
+          "expr": "config_reload_last_ts"
+        }
+      ],
+      "title": "config_reload_last_ts",
+      "type": "timeseries"
+    },
+    {
+      "description": "Configuration reload attempts grouped by result",
+      "id": 14,
+      "targets": [
+        {
+          "expr": "config_reload_total"
+        }
+      ],
+      "title": "config_reload_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Median consumer fee",
+      "id": 15,
+      "targets": [
+        {
+          "expr": "consumer_fee_p50"
+        }
+      ],
+      "title": "consumer_fee_p50",
+      "type": "timeseries"
+    },
+    {
+      "description": "p90 consumer fee",
+      "id": 16,
+      "targets": [
+        {
+          "expr": "consumer_fee_p90"
+        }
+      ],
+      "title": "consumer_fee_p90",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total courier receipt flush attempts",
+      "id": 17,
+      "targets": [
+        {
+          "expr": "courier_flush_attempt_total"
+        }
+      ],
+      "title": "courier_flush_attempt_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Failed courier receipt flush attempts",
+      "id": 18,
+      "targets": [
+        {
+          "expr": "courier_flush_failure_total"
+        }
+      ],
+      "title": "courier_flush_failure_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total funds locked in DEX escrow",
+      "id": 19,
+      "targets": [
+        {
+          "expr": "dex_escrow_locked"
+        }
+      ],
+      "title": "dex_escrow_locked",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of pending DEX escrows",
+      "id": 20,
+      "targets": [
+        {
+          "expr": "dex_escrow_pending"
+        }
+      ],
+      "title": "dex_escrow_pending",
+      "type": "timeseries"
+    },
+    {
+      "description": "Retarget calculations clamped to bounds",
+      "id": 21,
+      "targets": [
+        {
+          "expr": "difficulty_clamp_total"
+        }
+      ],
+      "title": "difficulty_clamp_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of difficulty retarget calculations",
+      "id": 22,
+      "targets": [
+        {
+          "expr": "difficulty_retarget_total"
+        }
+      ],
+      "title": "difficulty_retarget_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total DNS verification failures",
+      "id": 23,
+      "targets": [
+        {
+          "expr": "dns_verification_fail_total"
+        }
+      ],
+      "title": "dns_verification_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "drop_transaction failures for missing entries",
+      "id": 24,
+      "targets": [
+        {
+          "expr": "drop_not_found_total"
+        }
+      ],
+      "title": "drop_not_found_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions rejected as duplicate",
+      "id": 25,
+      "targets": [
+        {
+          "expr": "dup_tx_reject_total"
+        }
+      ],
+      "title": "dup_tx_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total mempool evictions",
+      "id": 26,
+      "targets": [
+        {
+          "expr": "evictions_total"
+        }
+      ],
+      "title": "evictions_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions rejected for low fee",
+      "id": 27,
+      "targets": [
+        {
+          "expr": "fee_floor_reject_total"
+        }
+      ],
+      "title": "fee_floor_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "base seconds for Fibonacci smoothing",
+      "id": 28,
+      "targets": [
+        {
+          "expr": "fib_window_base_secs"
+        }
+      ],
+      "title": "fib_window_base_secs",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total observed fork reorgs",
+      "id": 29,
+      "targets": [
+        {
+          "expr": "fork_reorg_total"
+        }
+      ],
+      "title": "fork_reorg_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Gateway DNS verification attempts grouped by status",
+      "id": 30,
+      "targets": [
+        {
+          "expr": "gateway_dns_lookup_total"
+        }
+      ],
+      "title": "gateway_dns_lookup_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Time for all peers to agree on the network tip",
+      "id": 31,
+      "targets": [
+        {
+          "expr": "gossip_convergence_seconds"
+        }
+      ],
+      "title": "gossip_convergence_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Duplicate gossip messages dropped",
+      "id": 32,
+      "targets": [
+        {
+          "expr": "gossip_duplicate_total"
+        }
+      ],
+      "title": "gossip_duplicate_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current gossip fanout",
+      "id": 33,
+      "targets": [
+        {
+          "expr": "gossip_fanout_gauge"
+        }
+      ],
+      "title": "gossip_fanout_gauge",
+      "type": "timeseries"
+    },
+    {
+      "description": "Delay between scheduled and actual activation",
+      "id": 34,
+      "targets": [
+        {
+          "expr": "gov_activation_delay_seconds"
+        }
+      ],
+      "title": "gov_activation_delay_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Governance activations",
+      "id": 35,
+      "targets": [
+        {
+          "expr": "gov_activation_total"
+        }
+      ],
+      "title": "gov_activation_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Open governance proposals",
+      "id": 36,
+      "targets": [
+        {
+          "expr": "gov_open_proposals"
+        }
+      ],
+      "title": "gov_open_proposals",
+      "type": "timeseries"
+    },
+    {
+      "description": "Governance proposals by status",
+      "id": 37,
+      "targets": [
+        {
+          "expr": "gov_proposals_total"
+        }
+      ],
+      "title": "gov_proposals_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Governance quorum",
+      "id": 38,
+      "targets": [
+        {
+          "expr": "gov_quorum_required"
+        }
+      ],
+      "title": "gov_quorum_required",
+      "type": "timeseries"
+    },
+    {
+      "description": "Governance rollbacks",
+      "id": 39,
+      "targets": [
+        {
+          "expr": "gov_rollback_total"
+        }
+      ],
+      "title": "gov_rollback_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Governance votes",
+      "id": 40,
+      "targets": [
+        {
+          "expr": "gov_votes_total"
+        }
+      ],
+      "title": "gov_votes_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "eta parameter for burst veto x1000",
+      "id": 41,
+      "targets": [
+        {
+          "expr": "haar_eta_milli"
+        }
+      ],
+      "title": "haar_eta_milli",
+      "type": "timeseries"
+    },
+    {
+      "description": "Handshake failures grouped by reason",
+      "id": 42,
+      "targets": [
+        {
+          "expr": "handshake_fail_total"
+        }
+      ],
+      "title": "handshake_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "A* heuristic mu x1000",
+      "id": 43,
+      "targets": [
+        {
+          "expr": "heuristic_mu_milli"
+        }
+      ],
+      "title": "heuristic_mu_milli",
+      "type": "timeseries"
+    },
+    {
+      "description": "Non-contiguous nonce submissions",
+      "id": 44,
+      "targets": [
+        {
+          "expr": "identity_nonce_skips_total"
+        }
+      ],
+      "title": "identity_nonce_skips_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Handle registration attempts",
+      "id": 45,
+      "targets": [
+        {
+          "expr": "identity_registrations_total"
+        }
+      ],
+      "title": "identity_registrations_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Rejected identity replay attempts",
+      "id": 46,
+      "targets": [
+        {
+          "expr": "identity_replays_blocked_total"
+        }
+      ],
+      "title": "identity_replays_blocked_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Industrial lane transactions admitted",
+      "id": 47,
+      "targets": [
+        {
+          "expr": "industrial_admitted_total"
+        }
+      ],
+      "title": "industrial_admitted_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Pending industrial compute slices",
+      "id": 48,
+      "targets": [
+        {
+          "expr": "industrial_backlog"
+        }
+      ],
+      "title": "industrial_backlog",
+      "type": "timeseries"
+    },
+    {
+      "description": "Industrial lane submissions deferred",
+      "id": 49,
+      "targets": [
+        {
+          "expr": "industrial_deferred_total"
+        }
+      ],
+      "title": "industrial_deferred_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current industrial subsidy multiplier",
+      "id": 50,
+      "targets": [
+        {
+          "expr": "industrial_multiplier"
+        }
+      ],
+      "title": "industrial_multiplier",
+      "type": "timeseries"
+    },
+    {
+      "description": "Latest price per compute unit",
+      "id": 51,
+      "targets": [
+        {
+          "expr": "industrial_price_per_unit"
+        }
+      ],
+      "title": "industrial_price_per_unit",
+      "type": "timeseries"
+    },
+    {
+      "description": "Industrial admission rejections by reason",
+      "id": 52,
+      "targets": [
+        {
+          "expr": "industrial_rejected_total"
+        }
+      ],
+      "title": "industrial_rejected_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total normalized compute units processed",
+      "id": 53,
+      "targets": [
+        {
+          "expr": "industrial_units_total"
+        }
+      ],
+      "title": "industrial_units_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Industrial compute utilisation percentage",
+      "id": 54,
+      "targets": [
+        {
+          "expr": "industrial_utilization"
+        }
+      ],
+      "title": "industrial_utilization",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions rejected for invalid fee selector",
+      "id": 55,
+      "targets": [
+        {
+          "expr": "invalid_selector_reject_total"
+        }
+      ],
+      "title": "invalid_selector_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Successful peer key rotations",
+      "id": 56,
+      "targets": [
+        {
+          "expr": "key_rotation_total"
+        }
+      ],
+      "title": "key_rotation_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Times the subsidy kill switch was activated",
+      "id": 57,
+      "targets": [
+        {
+          "expr": "kill_switch_trigger_total"
+        }
+      ],
+      "title": "kill_switch_trigger_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Lock acquisition failures due to poisoning",
+      "id": 58,
+      "targets": [
+        {
+          "expr": "lock_poison_total"
+        }
+      ],
+      "title": "lock_poison_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Logs dropped due to rate limiting",
+      "id": 59,
+      "targets": [
+        {
+          "expr": "log_drop_total"
+        }
+      ],
+      "title": "log_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total emitted log events",
+      "id": 60,
+      "targets": [
+        {
+          "expr": "log_emit_total"
+        }
+      ],
+      "title": "log_emit_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Size of serialized log events in bytes",
+      "id": 61,
+      "targets": [
+        {
+          "expr": "log_size_bytes"
+        }
+      ],
+      "title": "log_size_bytes",
+      "type": "timeseries"
+    },
+    {
+      "description": "Settlement loop latency",
+      "id": 62,
+      "targets": [
+        {
+          "expr": "match_loop_latency_seconds"
+        }
+      ],
+      "title": "match_loop_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total matched jobs",
+      "id": 63,
+      "targets": [
+        {
+          "expr": "matches_total"
+        }
+      ],
+      "title": "matches_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current mempool size",
+      "id": 64,
+      "targets": [
+        {
+          "expr": "mempool_size"
+        }
+      ],
+      "title": "mempool_size",
+      "type": "timeseries"
+    },
+    {
+      "description": "Times the miner reward logistic factor was recalculated",
+      "id": 65,
+      "targets": [
+        {
+          "expr": "miner_reward_recalc_total"
+        }
+      ],
+      "title": "miner_reward_recalc_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "QUIC handshake failures per peer grouped by reason",
+      "id": 66,
+      "targets": [
+        {
+          "expr": "net_peer_handshake_fail_total"
+        }
+      ],
+      "title": "net_peer_handshake_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions dropped because the sender account is missing",
+      "id": 67,
+      "targets": [
+        {
+          "expr": "orphan_sweep_total"
+        }
+      ],
+      "title": "orphan_sweep_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Successful handshakes by feature mask",
+      "id": 68,
+      "targets": [
+        {
+          "expr": "p2p_handshake_accept_total"
+        }
+      ],
+      "title": "p2p_handshake_accept_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Handshakes rejected by reason",
+      "id": 69,
+      "targets": [
+        {
+          "expr": "p2p_handshake_reject_total"
+        }
+      ],
+      "title": "p2p_handshake_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current active governance parameter values",
+      "id": 70,
+      "targets": [
+        {
+          "expr": "param_change_active"
+        }
+      ],
+      "title": "param_change_active",
+      "type": "timeseries"
+    },
+    {
+      "description": "Governance parameter changes pending activation",
+      "id": 71,
+      "targets": [
+        {
+          "expr": "param_change_pending"
+        }
+      ],
+      "title": "param_change_pending",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of settlement payouts capped per identity",
+      "id": 72,
+      "targets": [
+        {
+          "expr": "payout_cap_hits_total"
+        }
+      ],
+      "title": "payout_cap_hits_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Bytes sent to peer",
+      "id": 73,
+      "targets": [
+        {
+          "expr": "peer_bytes_sent_total"
+        }
+      ],
+      "title": "peer_bytes_sent_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Messages dropped grouped by reason",
+      "id": 74,
+      "targets": [
+        {
+          "expr": "peer_drop_total"
+        }
+      ],
+      "title": "peer_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total peer errors grouped by code",
+      "id": 75,
+      "targets": [
+        {
+          "expr": "peer_error_total"
+        }
+      ],
+      "title": "peer_error_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peer key rotation attempts grouped by result",
+      "id": 76,
+      "targets": [
+        {
+          "expr": "peer_key_rotate_total"
+        }
+      ],
+      "title": "peer_key_rotate_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of peers currently tracked for telemetry",
+      "id": 77,
+      "targets": [
+        {
+          "expr": "peer_metrics_active"
+        }
+      ],
+      "title": "peer_metrics_active",
+      "type": "timeseries"
+    },
+    {
+      "description": "Websocket peer metrics frames dropped",
+      "id": 78,
+      "targets": [
+        {
+          "expr": "peer_metrics_dropped_total"
+        }
+      ],
+      "title": "peer_metrics_dropped_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Approximate memory used by peer metrics map",
+      "id": 79,
+      "targets": [
+        {
+          "expr": "peer_metrics_memory_bytes"
+        }
+      ],
+      "title": "peer_metrics_memory_bytes",
+      "type": "timeseries"
+    },
+    {
+      "description": "Active peer metrics websocket subscribers",
+      "id": 80,
+      "targets": [
+        {
+          "expr": "peer_metrics_subscribers"
+        }
+      ],
+      "title": "peer_metrics_subscribers",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peers rejected grouped by reason",
+      "id": 81,
+      "targets": [
+        {
+          "expr": "peer_rejected_total"
+        }
+      ],
+      "title": "peer_rejected_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peer reputation score",
+      "id": 82,
+      "targets": [
+        {
+          "expr": "peer_reputation_score"
+        }
+      ],
+      "title": "peer_reputation_score",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total requests received from peer",
+      "id": 83,
+      "targets": [
+        {
+          "expr": "peer_request_total"
+        }
+      ],
+      "title": "peer_request_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Bulk peer metric export attempts grouped by result",
+      "id": 84,
+      "targets": [
+        {
+          "expr": "peer_stats_export_all_total"
+        }
+      ],
+      "title": "peer_stats_export_all_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peer metric export attempts grouped by result",
+      "id": 85,
+      "targets": [
+        {
+          "expr": "peer_stats_export_total"
+        }
+      ],
+      "title": "peer_stats_export_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peer metric queries grouped by peer",
+      "id": 86,
+      "targets": [
+        {
+          "expr": "peer_stats_query_total"
+        }
+      ],
+      "title": "peer_stats_query_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peer metric resets grouped by peer",
+      "id": 87,
+      "targets": [
+        {
+          "expr": "peer_stats_reset_total"
+        }
+      ],
+      "title": "peer_stats_reset_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Peer throttle events grouped by reason",
+      "id": 88,
+      "targets": [
+        {
+          "expr": "peer_throttle_total"
+        }
+      ],
+      "title": "peer_throttle_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total price entries adjusted by reputation weight",
+      "id": 89,
+      "targets": [
+        {
+          "expr": "price_weight_applied_total"
+        }
+      ],
+      "title": "price_weight_applied_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current reputation score per provider",
+      "id": 90,
+      "targets": [
+        {
+          "expr": "provider_reputation_score"
+        }
+      ],
+      "title": "provider_reputation_score",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total bytes received over QUIC",
+      "id": 91,
+      "targets": [
+        {
+          "expr": "quic_bytes_recv_total"
+        }
+      ],
+      "title": "quic_bytes_recv_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total bytes sent over QUIC",
+      "id": 92,
+      "targets": [
+        {
+          "expr": "quic_bytes_sent_total"
+        }
+      ],
+      "title": "quic_bytes_sent_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "QUIC connection handshake latency",
+      "id": 93,
+      "targets": [
+        {
+          "expr": "quic_conn_latency_seconds"
+        }
+      ],
+      "title": "quic_conn_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "QUIC disconnects by error code",
+      "id": 94,
+      "targets": [
+        {
+          "expr": "quic_disconnect_total"
+        }
+      ],
+      "title": "quic_disconnect_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total QUIC endpoint reuse count",
+      "id": 95,
+      "targets": [
+        {
+          "expr": "quic_endpoint_reuse_total"
+        }
+      ],
+      "title": "quic_endpoint_reuse_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total QUIC handshake failures by reason",
+      "id": 96,
+      "targets": [
+        {
+          "expr": "quic_handshake_fail_total"
+        }
+      ],
+      "title": "quic_handshake_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Reads denied by reason",
+      "id": 97,
+      "targets": [
+        {
+          "expr": "read_denied_total"
+        }
+      ],
+      "title": "read_denied_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Corrupted receipt entries on load",
+      "id": 98,
+      "targets": [
+        {
+          "expr": "receipt_corrupt_total"
+        }
+      ],
+      "title": "receipt_corrupt_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Receipt persistence failures",
+      "id": 99,
+      "targets": [
+        {
+          "expr": "receipt_persist_fail_total"
+        }
+      ],
+      "title": "receipt_persist_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total CT burned from rent escrow",
+      "id": 100,
+      "targets": [
+        {
+          "expr": "rent_escrow_burned_ct_total"
+        }
+      ],
+      "title": "rent_escrow_burned_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total CT locked in rent escrow",
+      "id": 101,
+      "targets": [
+        {
+          "expr": "rent_escrow_locked_ct_total"
+        }
+      ],
+      "title": "rent_escrow_locked_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total CT refunded from rent escrow",
+      "id": 102,
+      "targets": [
+        {
+          "expr": "rent_escrow_refunded_ct_total"
+        }
+      ],
+      "title": "rent_escrow_refunded_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Reputation adjustments",
+      "id": 103,
+      "targets": [
+        {
+          "expr": "reputation_adjust_total"
+        }
+      ],
+      "title": "reputation_adjust_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Reputation updates that failed verification or were stale",
+      "id": 104,
+      "targets": [
+        {
+          "expr": "reputation_gossip_fail_total"
+        }
+      ],
+      "title": "reputation_gossip_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Propagation latency for reputation updates",
+      "id": 105,
+      "targets": [
+        {
+          "expr": "reputation_gossip_latency_seconds"
+        }
+      ],
+      "title": "reputation_gossip_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Reputation gossip updates processed grouped by result",
+      "id": 106,
+      "targets": [
+        {
+          "expr": "reputation_gossip_total"
+        }
+      ],
+      "title": "reputation_gossip_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total RPC bans issued",
+      "id": 107,
+      "targets": [
+        {
+          "expr": "rpc_bans_total"
+        }
+      ],
+      "title": "rpc_bans_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total RPC client errors grouped by code",
+      "id": 108,
+      "targets": [
+        {
+          "expr": "rpc_client_error_total"
+        }
+      ],
+      "title": "rpc_client_error_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "RPC requests checked against the rate limiter",
+      "id": 109,
+      "targets": [
+        {
+          "expr": "rpc_rate_limit_attempt_total"
+        }
+      ],
+      "title": "rpc_rate_limit_attempt_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "RPC requests rejected by the rate limiter",
+      "id": 110,
+      "targets": [
+        {
+          "expr": "rpc_rate_limit_reject_total"
+        }
+      ],
+      "title": "rpc_rate_limit_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current RPC rate limiter tokens per client",
+      "id": 111,
+      "targets": [
+        {
+          "expr": "rpc_tokens_available"
+        }
+      ],
+      "title": "rpc_tokens_available",
+      "type": "timeseries"
+    },
+    {
+      "description": "Accelerator jobs that failed or were cancelled",
+      "id": 112,
+      "targets": [
+        {
+          "expr": "scheduler_accelerator_fail_total"
+        }
+      ],
+      "title": "scheduler_accelerator_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Jobs requiring accelerators that could not be matched",
+      "id": 113,
+      "targets": [
+        {
+          "expr": "scheduler_accelerator_miss_total"
+        }
+      ],
+      "title": "scheduler_accelerator_miss_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Jobs requiring accelerators that started successfully",
+      "id": 114,
+      "targets": [
+        {
+          "expr": "scheduler_accelerator_util_total"
+        }
+      ],
+      "title": "scheduler_accelerator_util_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of currently assigned jobs",
+      "id": 115,
+      "targets": [
+        {
+          "expr": "scheduler_active_jobs"
+        }
+      ],
+      "title": "scheduler_active_jobs",
+      "type": "timeseries"
+    },
+    {
+      "description": "Scheduler cancellations",
+      "id": 116,
+      "targets": [
+        {
+          "expr": "scheduler_cancel_total"
+        }
+      ],
+      "title": "scheduler_cancel_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Effective compute price per unit by provider",
+      "id": 117,
+      "targets": [
+        {
+          "expr": "scheduler_effective_price"
+        }
+      ],
+      "title": "scheduler_effective_price",
+      "type": "timeseries"
+    },
+    {
+      "description": "Time to perform a scheduler match",
+      "id": 118,
+      "targets": [
+        {
+          "expr": "scheduler_match_latency_seconds"
+        }
+      ],
+      "title": "scheduler_match_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Scheduler match outcomes by result",
+      "id": 119,
+      "targets": [
+        {
+          "expr": "scheduler_match_total"
+        }
+      ],
+      "title": "scheduler_match_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Scheduler preemption events by reason",
+      "id": 120,
+      "targets": [
+        {
+          "expr": "scheduler_preempt_total"
+        }
+      ],
+      "title": "scheduler_preempt_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "High-priority jobs exceeding wait threshold",
+      "id": 121,
+      "targets": [
+        {
+          "expr": "scheduler_priority_miss_total"
+        }
+      ],
+      "title": "scheduler_priority_miss_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Distribution of provider reputation scores",
+      "id": 122,
+      "targets": [
+        {
+          "expr": "scheduler_provider_reputation"
+        }
+      ],
+      "title": "scheduler_provider_reputation",
+      "type": "timeseries"
+    },
+    {
+      "description": "Receipts applied",
+      "id": 123,
+      "targets": [
+        {
+          "expr": "settle_applied_total"
+        }
+      ],
+      "title": "settle_applied_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Receipts failing settlement audit",
+      "id": 124,
+      "targets": [
+        {
+          "expr": "settle_audit_mismatch_total"
+        }
+      ],
+      "title": "settle_audit_mismatch_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Settlement failures",
+      "id": 125,
+      "targets": [
+        {
+          "expr": "settle_failed_total"
+        }
+      ],
+      "title": "settle_failed_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Settlement mode changes",
+      "id": 126,
+      "targets": [
+        {
+          "expr": "settle_mode_change_total"
+        }
+      ],
+      "title": "settle_mode_change_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total CT burned from slashing penalties",
+      "id": 127,
+      "targets": [
+        {
+          "expr": "slashing_burn_ct_total"
+        }
+      ],
+      "title": "slashing_burn_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Snapshot operation duration",
+      "id": 128,
+      "targets": [
+        {
+          "expr": "snapshot_duration_seconds"
+        }
+      ],
+      "title": "snapshot_duration_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total snapshot operation failures",
+      "id": 129,
+      "targets": [
+        {
+          "expr": "snapshot_fail_total"
+        }
+      ],
+      "title": "snapshot_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Snapshot interval in blocks",
+      "id": 130,
+      "targets": [
+        {
+          "expr": "snapshot_interval"
+        }
+      ],
+      "title": "snapshot_interval",
+      "type": "timeseries"
+    },
+    {
+      "description": "Last requested snapshot interval",
+      "id": 131,
+      "targets": [
+        {
+          "expr": "snapshot_interval_changed"
+        }
+      ],
+      "title": "snapshot_interval_changed",
+      "type": "timeseries"
+    },
+    {
+      "description": "Expired mempool entries dropped during startup",
+      "id": 132,
+      "targets": [
+        {
+          "expr": "startup_ttl_drop_total"
+        }
+      ],
+      "title": "startup_ttl_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Size of chunks put into storage",
+      "id": 133,
+      "targets": [
+        {
+          "expr": "storage_chunk_size_bytes"
+        }
+      ],
+      "title": "storage_chunk_size_bytes",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of storage writes that failed due to disk exhaustion",
+      "id": 134,
+      "targets": [
+        {
+          "expr": "storage_disk_full_total"
+        }
+      ],
+      "title": "storage_disk_full_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Final preferred chunk size after upload",
+      "id": 135,
+      "targets": [
+        {
+          "expr": "storage_final_chunk_size"
+        }
+      ],
+      "title": "storage_final_chunk_size",
+      "type": "timeseries"
+    },
+    {
+      "description": "Initial chunk size used for object upload",
+      "id": 136,
+      "targets": [
+        {
+          "expr": "storage_initial_chunk_size"
+        }
+      ],
+      "title": "storage_initial_chunk_size",
+      "type": "timeseries"
+    },
+    {
+      "description": "Observed provider loss rate",
+      "id": 137,
+      "targets": [
+        {
+          "expr": "storage_provider_loss_rate"
+        }
+      ],
+      "title": "storage_provider_loss_rate",
+      "type": "timeseries"
+    },
+    {
+      "description": "Observed provider RTT in milliseconds",
+      "id": 138,
+      "targets": [
+        {
+          "expr": "storage_provider_rtt_ms"
+        }
+      ],
+      "title": "storage_provider_rtt_ms",
+      "type": "timeseries"
+    },
+    {
+      "description": "Time to put a single chunk",
+      "id": 139,
+      "targets": [
+        {
+          "expr": "storage_put_chunk_seconds"
+        }
+      ],
+      "title": "storage_put_chunk_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Estimated time to upload object in seconds",
+      "id": 140,
+      "targets": [
+        {
+          "expr": "storage_put_eta_seconds"
+        }
+      ],
+      "title": "storage_put_eta_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total bytes reconstructed by repair loop",
+      "id": 141,
+      "targets": [
+        {
+          "expr": "storage_repair_bytes_total"
+        }
+      ],
+      "title": "storage_repair_bytes_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total storage repair failures",
+      "id": 142,
+      "targets": [
+        {
+          "expr": "storage_repair_failures_total"
+        }
+      ],
+      "title": "storage_repair_failures_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Multiplier auto-reduction events due to inflation guard",
+      "id": 143,
+      "targets": [
+        {
+          "expr": "subsidy_auto_reduced_total"
+        }
+      ],
+      "title": "subsidy_auto_reduced_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total subsidized bytes by type",
+      "id": 144,
+      "targets": [
+        {
+          "expr": "subsidy_bytes_total"
+        }
+      ],
+      "title": "subsidy_bytes_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total subsidized compute time in ms",
+      "id": 145,
+      "targets": [
+        {
+          "expr": "subsidy_cpu_ms_total"
+        }
+      ],
+      "title": "subsidy_cpu_ms_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current subsidy multipliers",
+      "id": 146,
+      "targets": [
+        {
+          "expr": "subsidy_multiplier"
+        }
+      ],
+      "title": "subsidy_multiplier",
+      "type": "timeseries"
+    },
+    {
+      "description": "True subsidy multipliers",
+      "id": 147,
+      "targets": [
+        {
+          "expr": "subsidy_multiplier_raw"
+        }
+      ],
+      "title": "subsidy_multiplier_raw",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions dropped due to TTL expiration",
+      "id": 148,
+      "targets": [
+        {
+          "expr": "ttl_drop_total"
+        }
+      ],
+      "title": "ttl_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total admitted transactions",
+      "id": 149,
+      "targets": [
+        {
+          "expr": "tx_admitted_total"
+        }
+      ],
+      "title": "tx_admitted_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total rejected transactions",
+      "id": 150,
+      "targets": [
+        {
+          "expr": "tx_rejected_total"
+        }
+      ],
+      "title": "tx_rejected_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total submitted transactions",
+      "id": 151,
+      "targets": [
+        {
+          "expr": "tx_submitted_total"
+        }
+      ],
+      "title": "tx_submitted_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "utilisation variance threshold x1000",
+      "id": 152,
+      "targets": [
+        {
+          "expr": "util_var_threshold_milli"
+        }
+      ],
+      "title": "util_var_threshold_milli",
+      "type": "timeseries"
+    },
+    {
+      "description": "WAL entries skipped due to checksum mismatch",
+      "id": 153,
+      "targets": [
+        {
+          "expr": "wal_corrupt_recovery_total"
+        }
+      ],
+      "title": "wal_corrupt_recovery_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Telemetry memory allocation in bytes",
+      "id": 154,
+      "targets": [
+        {
+          "expr": "telemetry_alloc_bytes"
+        }
+      ],
+      "title": "telemetry_alloc_bytes",
+      "type": "timeseries"
+    }
+  ],
+  "title": "Dev Dashboard"
+}

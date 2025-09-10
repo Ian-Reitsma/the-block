@@ -39,6 +39,16 @@ QUIC send fails, the relay retries over TCP to maintain delivery. Session-level
 metrics `quic_bytes_sent_total` and `quic_bytes_recv_total` record per-transport
 traffic alongside the `gossip_fanout_gauge` gauge.
 
+## Reputation Dissemination
+
+Reputation scores for compute providers propagate through signed
+`ReputationUpdate` messages. Each update carries a `provider_id`,
+`reputation_score`, and `epoch` timestamp. Nodes accept an update only if the
+epoch is newer than their locally persisted snapshot, otherwise
+`reputation_gossip_fail_total` increments. Propagation delay is recorded via the
+`reputation_gossip_latency_seconds` histogram. Operators can inspect local
+scores with `net reputation show <peer>` via the CLI.
+
 Setting the environment variable `TB_GOSSIP_FANOUT=all` disables the random
 selection and forces broadcast to every peer.  This override is useful for
 small testnets where full fanout is desired.
@@ -232,12 +242,13 @@ or connect from a browser:
 
 Operators may rotate a peer's network key without losing accumulated metrics.
 The new key must be signed by the current key to prove authority. Invoke the
-CLI or RPC with the old peer id, new public key, and signature:
+CLI or RPC with the stable peer id, new public key, and signature:
 
 ```bash
-net key rotate <peer_id> <new_key>
+net rotate-key <peer_id> <new_key>
 ```
 
 Internally this calls `net.key_rotate` which transfers existing metrics to the
-new key and appends an audit entry to `state/peer_key_history.log`. Metrics for
-the old key are no longer accessible once the rotation succeeds.
+new key, emits a `key_rotation_total` telemetry increment, and appends an audit
+entry to `state/peer_key_history.log` as well as the metrics aggregator. The old
+key is accepted for a brief grace period to allow propagation before revocation.

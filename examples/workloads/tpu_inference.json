@@ -2,7 +2,7 @@
   "job_id": "demo-tpu",
   "capability": {
     "cpu_cores": 4,
-    "accelerator": "TPUv3",
+    "accelerator": "TPU",
     "accelerator_memory_mb": 8192
   },
   "workload": "inference"

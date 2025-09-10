@@ -85,12 +85,15 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.peer_stats",
     "net.peer_stats_all",
     "net.peer_stats_reset",
-    "net.peer_stats_export",
-    "net.peer_stats_export_all",
+    "net.peer_stats_export", 
+    "net.peer_stats_export_all", 
     "net.peer_stats_persist",
     "net.peer_throttle",
     "net.reputation_sync",
+    "net.reputation_show",
+    "net.dns_verify",
     "net.key_rotate",
+    "net.handshake_failures",
     "kyc.verify",
     "pow.get_template",
     "dex_escrow_status",
@@ -107,6 +110,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
+    "config.reload",
     "consensus.pos.bond",
     "consensus.pos.unbond",
     "consensus.pos.slash",
@@ -1026,6 +1030,10 @@ fn dispatch(
                 });
             }
         }
+        "net.handshake_failures" => {
+            let entries = net::recent_handshake_failures();
+            serde_json::json!({"failures": entries})
+        }
         "net.config_reload" => {
             if crate::config::reload() {
                 serde_json::json!({"status": "ok"})
@@ -1139,7 +1147,14 @@ fn dispatch(
             }
         }
         "inflation.params" => inflation::params(&bc),
-        "compute_market.stats" => compute_market::stats(),
+        "compute_market.stats" => {
+            let accel = req.params.get("accelerator").and_then(|v| v.as_str()).and_then(|s| match s.to_lowercase().as_str() {
+                "fpga" => Some(crate::compute_market::Accelerator::Fpga),
+                "tpu" => Some(crate::compute_market::Accelerator::Tpu),
+                _ => None,
+            });
+            compute_market::stats(accel)
+        },
         "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
         "compute_market.scheduler_stats" => compute_market::scheduler_stats(),
         "compute.reputation_get" => {
@@ -1166,7 +1181,27 @@ fn dispatch(
                 .unwrap_or("");
             compute_market::job_cancel(job_id)
         }
+        "net.reputation_show" => {
+            let peer = req
+                .params
+                .get("peer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            net::reputation_show(peer)
+        }
+        "net.dns_verify" => {
+            let domain = req
+                .params
+                .get("domain")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            net::dns_verify(domain)
+        }
         "stake.role" => pos::role(&req.params)?,
+        "config.reload" => {
+            let ok = crate::config::reload();
+            serde_json::json!({"reloaded": ok})
+        }
         "register_handle" => {
             check_nonce(&req.params, &nonces)?;
             match handles.lock() {

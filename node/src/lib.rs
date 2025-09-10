@@ -76,6 +76,7 @@ pub mod identity;
 pub mod kyc;
 pub mod localnet;
 pub mod net;
+pub use net::peer_metrics_store;
 pub mod p2p;
 pub mod parallel;
 pub mod poh;
@@ -1571,6 +1572,7 @@ impl Blockchain {
         crate::compute_market::scheduler::set_reputation_gossip_enabled(cfg.reputation_gossip);
         crate::compute_market::scheduler::set_scheduler_metrics_enabled(cfg.scheduler_metrics);
         crate::gateway::dns::set_allow_external(cfg.gateway_dns_allow_external);
+        crate::gateway::dns::set_disable_verify(cfg.gateway_dns_disable_verify);
         crate::compute_market::scheduler::set_preempt_enabled(cfg.compute_market.enable_preempt);
         crate::compute_market::scheduler::set_preempt_min_delta(
             cfg.compute_market.preempt_min_delta,
@@ -2758,7 +2760,7 @@ impl Blockchain {
             if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
-                    telemetry::TTL_DROP_TOTAL.inc();
+                    telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
                 }
                 expired.push((sender, nonce, fpb));
             } else if !self.accounts.contains_key(&sender) {
@@ -2772,7 +2774,7 @@ impl Blockchain {
             if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
-                    telemetry::TTL_DROP_TOTAL.inc();
+                    telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
                 }
                 expired.push((sender, nonce, fpb));
             } else if !self.accounts.contains_key(&sender) {

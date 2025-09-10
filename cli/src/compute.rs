@@ -10,6 +10,18 @@ pub enum ComputeCmd {
         #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
+    /// List job cancellations
+    List {
+        #[arg(long)]
+        preempted: bool,
+    },
+    /// Show compute market stats
+    Stats {
+        #[arg(long, default_value = "http://localhost:26658")]
+        url: String,
+        #[arg(long)]
+        accelerator: Option<String>,
+    },
 }
 
 pub fn handle(cmd: ComputeCmd) {
@@ -42,5 +54,72 @@ pub fn handle(cmd: ComputeCmd) {
                 Err(e) => eprintln!("{e}"),
             }
         }
+        ComputeCmd::List { preempted } => {
+            let path = cancel_log_path();
+            if let Ok(contents) = std::fs::read_to_string(path) {
+                for line in contents.lines() {
+                    let mut parts = line.split_whitespace();
+                    if let (Some(job), Some(reason)) = (parts.next(), parts.next()) {
+                        if !preempted || reason == "preempted" {
+                            println!("{job} {reason}");
+                        }
+                    }
+                }
+            }
+        }
+        ComputeCmd::Stats { url, accelerator } => {
+            let client = RpcClient::from_env();
+            #[derive(serde::Serialize)]
+            struct Payload<'a> {
+                jsonrpc: &'static str,
+                id: u32,
+                method: &'static str,
+                params: serde_json::Value,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                auth: Option<&'a str>,
+            }
+            let params = if let Some(acc) = accelerator {
+                serde_json::json!({"accelerator": acc})
+            } else {
+                serde_json::Value::Null
+            };
+            let payload = Payload {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "compute_market.stats",
+                params,
+                auth: None,
+            };
+            if let Ok(resp) = client.call(&url, &payload) {
+                if let Ok(text) = resp.text() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(res) = val.get("result") {
+                            let base = res
+                                .get("industrial_price_base")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or_default();
+                            let weighted = res
+                                .get("industrial_price_weighted")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or_default();
+                            println!("base: {base} weighted: {weighted}");
+                        } else {
+                            println!("{}", text);
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+fn cancel_log_path() -> std::path::PathBuf {
+    std::env::var("TB_CANCEL_PATH")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".the_block")
+                .join("cancellations.log")
+        })
 }

@@ -42,10 +42,11 @@ files and advertise the QUIC address and certificate during the TCP handshake so
 peers can cache and validate the endpoint without manual distribution. Metrics
 `quic_conn_latency_seconds`, `quic_bytes_sent_total`, and
 `quic_bytes_recv_total` track session performance. Additional counters
-`quic_handshake_fail_total`, `net_peer_handshake_fail_total{peer_id,reason}`,
+`quic_handshake_fail_total{reason}`, `net_peer_handshake_fail_total{peer_id,reason}`,
 `handshake_fail_total{reason}`, and `quic_disconnect_total{code}` record failed
-handshakes and disconnect error codes
-for troubleshooting. `quic_endpoint_reuse_total`
+handshakes and disconnect error codes for troubleshooting. `net.quic failures`
+exposes recent failure reasons via RPC, and the CLI `net quic failures` prints
+the current buffer. `quic_endpoint_reuse_total`
 counts how often the client connection pool reused an existing endpoint.
 
 Certificates are stored with `0600` permissions and checked for ownership at
@@ -69,9 +70,9 @@ suite to avoid spurious handshake failures.
 ### QUIC Handshake Failures and TCP Fallback
 
 If a QUIC handshake fails, the node automatically retries the connection over
-TCP. Each failure increments `quic_handshake_fail_total`. A spike in this
+TCP. Each failure increments `quic_handshake_fail_total{reason}`. A spike in this
 counter usually indicates certificate mismatches or blocked UDP traffic. Use
-`net stats failures <peer>` to inspect reason-coded counts. When fallback occurs
+`net quic failures` or `net stats failures <peer>` to inspect reason-coded counts. When fallback occurs
 the gossip message proceeds over the established TCP channel,
 so functionality is preserved while operators investigate the root cause.
 

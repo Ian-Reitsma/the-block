@@ -2,6 +2,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::cmp::Reverse;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -9,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::courier;
+use super::{courier, Accelerator};
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 
@@ -24,9 +25,9 @@ pub struct Capability {
     /// GPU memory in megabytes.
     #[serde(default)]
     pub gpu_memory_mb: u32,
-    /// Optional accelerator identifier (e.g. TPU model).
+    /// Optional specialised accelerator type.
     #[serde(default)]
-    pub accelerator: Option<String>,
+    pub accelerator: Option<Accelerator>,
     /// Accelerator memory in megabytes.
     #[serde(default)]
     pub accelerator_memory_mb: u32,
@@ -62,7 +63,7 @@ impl Capability {
             return false;
         }
         if let Some(ref req_acc) = other.accelerator {
-            if self.accelerator.as_deref() != Some(req_acc.as_str()) {
+            if self.accelerator.as_ref() != Some(req_acc) {
                 return false;
             }
         }
@@ -72,6 +73,17 @@ impl Capability {
             return false;
         }
         true
+    }
+
+    /// Validate consistency of capability attributes.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.gpu.is_some() && self.gpu_memory_mb == 0 {
+            return Err("missing gpu_memory_mb");
+        }
+        if self.accelerator.is_some() && self.accelerator_memory_mb == 0 {
+            return Err("missing accelerator_memory_mb");
+        }
+        Ok(())
     }
 }
 
@@ -129,6 +141,7 @@ struct SchedulerState {
     preempt_total: u64,
     last_effective_price: Option<u64>,
     pending: BinaryHeap<QueuedJob>,
+    active_by_rep: BinaryHeap<Reverse<ActiveRepEntry>>,
     active_low: u64,
     priority_miss_total: u64,
 }
@@ -139,6 +152,24 @@ struct ActiveAssignment {
     reputation: i64,
     capability: Capability,
     priority: Priority,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+struct ActiveRepEntry {
+    reputation: i64,
+    job_id: String,
+}
+
+impl Ord for ActiveRepEntry {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
+        self.reputation.cmp(&other.reputation)
+    }
+}
+
+impl PartialOrd for ActiveRepEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -195,15 +226,54 @@ impl SchedulerState {
         price_per_unit: u64,
         multiplier: f64,
     ) {
+        let min = f64::from_bits(REPUTATION_MULT_MIN.load(Ordering::Relaxed));
+        let max = f64::from_bits(REPUTATION_MULT_MAX.load(Ordering::Relaxed));
+        let clamped = multiplier.clamp(min, max);
         self.offers.insert(
             provider.to_owned(),
             OfferEntry {
-                capability,
+                capability: capability.clone(),
                 reputation,
                 price_per_unit,
-                multiplier,
+                multiplier: clamped,
             },
         );
+        if PREEMPT_ENABLED.load(Ordering::Relaxed) {
+            self.maybe_preempt(provider, &capability, reputation);
+        }
+    }
+
+    fn maybe_preempt(&mut self, new_provider: &str, cap: &Capability, new_rep: i64) {
+        let min_delta = PREEMPT_MIN_DELTA.load(Ordering::Relaxed);
+        loop {
+            let job_id = match self.active_by_rep.peek() {
+                Some(Reverse(entry)) => entry.job_id.clone(),
+                None => break,
+            };
+            let stale = match self.active.get(&job_id) {
+                Some(assign) => {
+                    if new_rep - assign.reputation < min_delta
+                        || !cap.matches(&assign.capability)
+                    {
+                        break;
+                    }
+                    false
+                }
+                None => true,
+            };
+            if stale {
+                self.active_by_rep.pop();
+                continue;
+            }
+            if self.preempt(&job_id, new_provider, new_rep) {
+                self.active_by_rep.pop();
+                self.active_by_rep.push(Reverse(ActiveRepEntry {
+                    reputation: new_rep,
+                    job_id,
+                }));
+            }
+            break;
+        }
     }
 
     fn match_job(&mut self, need: &Capability) -> Option<String> {
@@ -219,7 +289,7 @@ impl SchedulerState {
                 }
             }
             if let Some(req_acc) = &need.accelerator {
-                if entry.capability.accelerator.as_deref() == Some(req_acc.as_str())
+                if entry.capability.accelerator.as_ref() == Some(req_acc)
                     && entry.capability.accelerator_memory_mb < need.accelerator_memory_mb
                 {
                     acc_mem_insufficient = true;
@@ -245,7 +315,7 @@ impl SchedulerState {
             let cap_label = if let Some(g) = &self.offers[prov].capability.gpu {
                 g.clone()
             } else if let Some(a) = &self.offers[prov].capability.accelerator {
-                a.clone()
+                format!("{:?}", a)
             } else {
                 "cpu".to_string()
             };
@@ -349,6 +419,44 @@ impl SchedulerState {
         }
     }
 
+    fn record_accelerator_success(&mut self, provider: &str) {
+        let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
+        *rep += 1;
+        {
+            let mut store = REPUTATION_STORE.lock().unwrap();
+            store.adjust(provider, 1);
+        }
+        #[cfg(feature = "telemetry")]
+        {
+            telemetry::REPUTATION_ADJUST_TOTAL
+                .with_label_values(&["accelerator_success"])
+                .inc();
+            telemetry::PROVIDER_REPUTATION_SCORE
+                .with_label_values(&[provider])
+                .set(*rep);
+            telemetry::SCHEDULER_REPUTATION_SCORE.observe(*rep as f64);
+        }
+    }
+
+    fn record_accelerator_failure(&mut self, provider: &str) {
+        let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
+        *rep -= 1;
+        {
+            let mut store = REPUTATION_STORE.lock().unwrap();
+            store.adjust(provider, -1);
+        }
+        #[cfg(feature = "telemetry")]
+        {
+            telemetry::REPUTATION_ADJUST_TOTAL
+                .with_label_values(&["accelerator_failure"])
+                .inc();
+            telemetry::PROVIDER_REPUTATION_SCORE
+                .with_label_values(&[provider])
+                .set(*rep);
+            telemetry::SCHEDULER_REPUTATION_SCORE.observe(*rep as f64);
+        }
+    }
+
     fn end_job(&mut self, job_id: &str) {
         if let Some(a) = self.active.remove(job_id) {
             if self.active_jobs > 0 {
@@ -372,6 +480,7 @@ impl SchedulerState {
         let min_delta = PREEMPT_MIN_DELTA.load(Ordering::Relaxed);
         if let Some(current) = self.active.get(job_id).cloned() {
             if new_rep - current.reputation >= min_delta {
+                courier::halt_job(job_id);
                 match courier::handoff_job(job_id, new_provider) {
                     Ok(()) => {
                         self.reputation
@@ -386,6 +495,17 @@ impl SchedulerState {
                                 priority: current.priority,
                             },
                         );
+                        self
+                            .active_by_rep
+                            .push(Reverse(ActiveRepEntry { reputation: new_rep, job_id: job_id.to_owned() }));
+                        self.record_failure(&current.provider);
+                        persist_cancellation(job_id, CancelReason::Preempted);
+                        if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                            #[cfg(feature = "telemetry")]
+                            telemetry::SCHEDULER_CANCEL_TOTAL
+                                .with_label_values(&["preempted"])
+                                .inc();
+                        }
                         self.preempt_total += 1;
                         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                             #[cfg(feature = "telemetry")]
@@ -418,10 +538,28 @@ impl SchedulerState {
     }
 
     fn cancel_job(&mut self, job_id: &str, provider: &str, reason: CancelReason) {
+        let accel = self
+            .active
+            .get(job_id)
+            .and_then(|a| a.capability.accelerator.clone());
         self.end_job(job_id);
         match reason {
-            CancelReason::Client => self.record_success(provider),
-            CancelReason::Provider => self.record_failure(provider),
+            CancelReason::Client => {
+                self.record_success(provider);
+                if accel.is_some() {
+                    self.record_accelerator_success(provider);
+                }
+            }
+            CancelReason::Provider => {
+                self.record_failure(provider);
+                if accel.is_some() {
+                    self.record_accelerator_failure(provider);
+                    if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                        #[cfg(feature = "telemetry")]
+                        telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+                    }
+                }
+            }
             CancelReason::Preempted => {}
         }
         persist_cancellation(job_id, reason);
@@ -529,7 +667,16 @@ impl SchedulerState {
                     priority: job.priority,
                 },
             );
+            self
+                .active_by_rep
+                .push(Reverse(ActiveRepEntry { reputation: rep, job_id: job.job_id.clone() }));
             self.active_jobs += 1;
+            if job.capability.accelerator.is_some()
+                && SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed)
+            {
+                #[cfg(feature = "telemetry")]
+                telemetry::SCHEDULER_ACCELERATOR_UTIL_TOTAL.inc();
+            }
             if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                 #[cfg(feature = "telemetry")]
                 telemetry::SCHEDULER_ACTIVE_JOBS.set(self.active_jobs as i64);
@@ -558,6 +705,7 @@ static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
         preempt_total: 0,
         last_effective_price: None,
         pending: BinaryHeap::new(),
+        active_by_rep: BinaryHeap::new(),
         active_low: 0,
         priority_miss_total: 0,
     })
@@ -644,10 +792,10 @@ impl ReputationStore {
     }
 
     /// Snapshot all reputation entries for gossiping.
-    pub fn snapshot(&self) -> Vec<crate::net::ReputationGossip> {
+    pub fn snapshot(&self) -> Vec<crate::net::ReputationUpdate> {
         self.data
             .iter()
-            .map(|(p, e)| crate::net::ReputationGossip {
+            .map(|(p, e)| crate::net::ReputationUpdate {
                 provider_id: p.clone(),
                 reputation_score: e.score,
                 epoch: e.epoch,
@@ -730,7 +878,7 @@ pub fn reputation_gossip_enabled() -> bool {
     REPUTATION_GOSSIP_ENABLED.load(Ordering::Relaxed)
 }
 
-pub fn reputation_snapshot() -> Vec<crate::net::ReputationGossip> {
+pub fn reputation_snapshot() -> Vec<crate::net::ReputationUpdate> {
     REPUTATION_STORE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -867,6 +1015,20 @@ pub fn record_success(provider: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .record_success(provider);
+}
+
+pub fn record_accelerator_success(provider: &str) {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .record_accelerator_success(provider);
+}
+
+pub fn record_accelerator_failure(provider: &str) {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .record_accelerator_failure(provider);
 }
 
 pub fn record_failure(provider: &str) {

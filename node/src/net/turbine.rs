@@ -5,7 +5,8 @@ use std::sync::Mutex;
 use blake3::Hasher;
 use once_cell::sync::Lazy;
 
-use crate::net::message::{BlobChunk, ReputationGossip};
+use crate::net::message::BlobChunk;
+use crate::net::peer::ReputationUpdate;
 use crate::net::peer::is_throttled_addr;
 use crate::net::{record_ip_drop, send_msg, Message};
 use ed25519_dalek::SigningKey;
@@ -24,7 +25,7 @@ pub fn broadcast_chunk(chunk: &BlobChunk, sk: &SigningKey, peers: &[SocketAddr])
 }
 
 /// Broadcast reputation gossip entries.
-pub fn broadcast_reputation(entries: &[ReputationGossip], sk: &SigningKey, peers: &[SocketAddr]) {
+pub fn broadcast_reputation(entries: &[ReputationUpdate], sk: &SigningKey, peers: &[SocketAddr]) {
     let msg = Message::new(
         crate::net::message::Payload::Reputation(entries.to_vec()),
         sk,

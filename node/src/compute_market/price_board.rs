@@ -26,13 +26,13 @@ use tracing::{info, warn};
 use crate::telemetry::{INDUSTRIAL_BACKLOG, INDUSTRIAL_PRICE_PER_UNIT, INDUSTRIAL_UTILIZATION};
 
 const MAGIC: [u8; 4] = MAGIC_PRICE_BOARD;
-const VERSION: u16 = 2;
+const VERSION: u16 = 3;
 
 /// Sliding window of recent prices with quantile bands per lane.
 #[derive(Serialize, Deserialize, Clone, Copy)]
 struct PriceEntry {
     price: u64,
-    multiplier: f64,
+    weighted: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -59,11 +59,15 @@ impl PriceBoard {
         if prices.len() == self.window {
             prices.pop_front();
         }
-        prices.push_back(PriceEntry { price, multiplier });
+        let weighted = (price as f64 * multiplier).round() as u64;
+        prices.push_back(PriceEntry { price, weighted });
         #[cfg(feature = "telemetry")]
         if let FeeLane::Industrial = lane {
-            let eff = (price as f64 * multiplier).round() as i64;
-            INDUSTRIAL_PRICE_PER_UNIT.set(eff);
+            INDUSTRIAL_PRICE_PER_UNIT.set(weighted as i64);
+        }
+        if multiplier != 1.0 {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::PRICE_WEIGHT_APPLIED_TOTAL.inc();
         }
         self.update_metrics(lane);
     }
@@ -92,10 +96,7 @@ impl PriceBoard {
         if prices.is_empty() {
             return None;
         }
-        let mut v: Vec<_> = prices
-            .iter()
-            .map(|e| (e.price as f64 * e.multiplier).round() as u64)
-            .collect();
+        let mut v: Vec<_> = prices.iter().map(|e| e.weighted).collect();
         v.sort_unstable();
         let median = v[v.len() / 2];
         let p25 = v[(v.len() as f64 * 0.25).floor() as usize];
@@ -107,6 +108,22 @@ impl PriceBoard {
         let (_, median, _) = self.bands(lane)?;
         let factor = 1.0 + backlog as f64 / self.window as f64;
         Some((median as f64 * factor).ceil() as u64)
+    }
+
+    pub fn raw_bands(&self, lane: FeeLane) -> Option<(u64, u64, u64)> {
+        let prices = match lane {
+            FeeLane::Consumer => &self.consumer,
+            FeeLane::Industrial => &self.industrial,
+        };
+        if prices.is_empty() {
+            return None;
+        }
+        let mut v: Vec<_> = prices.iter().map(|e| e.price).collect();
+        v.sort_unstable();
+        let median = v[v.len() / 2];
+        let p25 = v[(v.len() as f64 * 0.25).floor() as usize];
+        let p75 = v[(v.len() as f64 * 0.75).floor() as usize];
+        Some((p25, median, p75))
     }
 
     fn clear(&mut self) {
@@ -330,6 +347,10 @@ pub fn bands(lane: FeeLane) -> Option<(u64, u64, u64)> {
     BOARD.read().ok().and_then(|b| b.bands(lane))
 }
 
+pub fn raw_bands(lane: FeeLane) -> Option<(u64, u64, u64)> {
+    BOARD.read().ok().and_then(|b| b.raw_bands(lane))
+}
+
 /// Compute backlog adjusted bid using current bands for a lane.
 pub fn backlog_adjusted_bid(lane: FeeLane, backlog: usize) -> Option<u64> {
     BOARD
@@ -373,17 +394,43 @@ fn migrate(from_ver: u16, bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
             consumer: v1
                 .consumer
                 .into_iter()
-                .map(|p| PriceEntry {
-                    price: p,
-                    multiplier: 1.0,
-                })
+                .map(|p| PriceEntry { price: p, weighted: p })
                 .collect(),
             industrial: v1
                 .industrial
                 .into_iter()
-                .map(|p| PriceEntry {
-                    price: p,
-                    multiplier: 1.0,
+                .map(|p| PriceEntry { price: p, weighted: p })
+                .collect(),
+        })
+    } else if from_ver == 2 {
+        #[derive(Deserialize)]
+        struct V2Entry {
+            price: u64,
+            multiplier: f64,
+        }
+        #[derive(Deserialize)]
+        struct V2 {
+            window: usize,
+            consumer: VecDeque<V2Entry>,
+            industrial: VecDeque<V2Entry>,
+        }
+        let v2: V2 = bincode::deserialize(bytes).map_err(|_| MigrateErr::Unsupported(from_ver))?;
+        Ok(PriceBoard {
+            window: v2.window,
+            consumer: v2
+                .consumer
+                .into_iter()
+                .map(|e| PriceEntry {
+                    price: e.price,
+                    weighted: (e.price as f64 * e.multiplier).round() as u64,
+                })
+                .collect(),
+            industrial: v2
+                .industrial
+                .into_iter()
+                .map(|e| PriceEntry {
+                    price: e.price,
+                    weighted: (e.price as f64 * e.multiplier).round() as u64,
                 })
                 .collect(),
         })

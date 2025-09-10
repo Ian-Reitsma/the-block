@@ -12,9 +12,9 @@ use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{
@@ -24,17 +24,43 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
+use fs2::FileExt;
+use tokio::fs::OpenOptions as TokioOpenOptions;
+use tokio::runtime::Runtime;
 
 use tar::Builder;
 use tempfile::NamedTempFile;
 
-use super::ban_store;
+use super::{ban_store, peer_metrics_store};
 
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(feature = "telemetry")]
+fn log_suspicious(path: &str) {
+    let count = SUSPICIOUS_EXPORTS.fetch_add(1, Ordering::Relaxed) + 1;
+    if count % 100 == 0 {
+        tracing::warn!(%path, "suspicious metrics export attempt count={}", count);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+#[allow(dead_code)]
+fn log_suspicious(_path: &str) {}
+
+/// Gossiped reputation update.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ReputationUpdate {
+    /// Provider identifier being scored.
+    pub provider_id: String,
+    /// Reputation score for the provider.
+    pub reputation_score: i64,
+    /// Epoch the score was computed in.
+    pub epoch: u64,
 }
 
 /// Thread-safe peer set used by the gossip layer.
@@ -211,6 +237,13 @@ impl PeerSet {
         if let Ok(mut set) = self.authorized.lock() {
             set.insert(pk);
         }
+        let mut ids = PEER_IDENTITIES.lock().unwrap();
+        ids.entry(pk).or_insert(PeerIdentity {
+            peer_id: pk,
+            public_key: pk,
+            old_key: None,
+            rotated_at: None,
+        });
     }
 
     fn is_authorized(&self, pk: &[u8; 32]) -> bool {
@@ -354,16 +387,24 @@ impl PeerSet {
             return;
         }
 
-        record_request(&msg.pubkey);
+        let mut peer_key = msg.pubkey;
+        if let Some((new, revoke)) = ROTATED_KEYS.lock().unwrap().get(&peer_key).copied() {
+            if now_secs() > revoke {
+                return;
+            }
+            peer_key = new;
+        }
 
-        if let Err(code) = self.check_rate(&msg.pubkey) {
+        record_request(&peer_key);
+
+        if let Err(code) = self.check_rate(&peer_key) {
             telemetry_peer_error(code);
             let reason = match code {
                 PeerErrorCode::RateLimit => DropReason::RateLimit,
                 PeerErrorCode::Banned => DropReason::Blacklist,
                 _ => DropReason::Malformed,
             };
-            record_drop(&msg.pubkey, reason);
+            record_drop(&peer_key, reason);
             if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
                 if let Some(peer_addr) = addr {
                     if let Ok(mut a) = self.addrs.lock() {
@@ -371,7 +412,7 @@ impl PeerSet {
                     }
                 }
                 if let Ok(mut auth) = self.authorized.lock() {
-                    auth.remove(&msg.pubkey);
+                    auth.remove(&peer_key);
                 }
             }
             return;
@@ -390,7 +431,7 @@ impl PeerSet {
                             .with_label_values(&["protocol"])
                             .inc();
                     }
-                    record_handshake_fail(&msg.pubkey, HandshakeError::Version);
+                    record_handshake_fail(&peer_key, HandshakeError::Version);
                     return;
                 }
                 if (hs.feature_bits & crate::net::REQUIRED_FEATURES)
@@ -403,17 +444,17 @@ impl PeerSet {
                             .with_label_values(&["feature"])
                             .inc();
                     }
-                    record_handshake_fail(&msg.pubkey, HandshakeError::Other);
+                    record_handshake_fail(&peer_key, HandshakeError::Other);
                     return;
                 }
                 if hs.transport != Transport::Tcp && hs.transport != Transport::Quic {
                     telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                     return;
                 }
-                self.authorize(msg.pubkey);
+                self.authorize(peer_key);
                 if let Some(peer_addr) = addr {
                     self.add(peer_addr);
-                    self.map_addr(peer_addr, msg.pubkey);
+                    self.map_addr(peer_addr, peer_key);
                     self.set_transport(peer_addr, hs.transport);
                     if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
                         self.set_quic(peer_addr, qaddr, cert);
@@ -426,7 +467,7 @@ impl PeerSet {
                 }
             }
             Payload::Tx(tx) => {
-                if !self.is_authorized(&msg.pubkey) {
+                if !self.is_authorized(&peer_key) {
                     return;
                 }
                 if let Ok(mut bc) = chain.lock() {
@@ -434,7 +475,7 @@ impl PeerSet {
                 }
             }
             Payload::BlobTx(tx) => {
-                if !self.is_authorized(&msg.pubkey) {
+                if !self.is_authorized(&peer_key) {
                     return;
                 }
                 if let Ok(mut bc) = chain.lock() {
@@ -442,7 +483,7 @@ impl PeerSet {
                 }
             }
             Payload::Block(block) => {
-                if !self.is_authorized(&msg.pubkey) {
+                if !self.is_authorized(&peer_key) {
                     return;
                 }
                 if let Ok(mut bc) = chain.lock() {
@@ -464,7 +505,7 @@ impl PeerSet {
                 }
             }
             Payload::Chain(new_chain) => {
-                if !self.is_authorized(&msg.pubkey) {
+                if !self.is_authorized(&peer_key) {
                     return;
                 }
                 if let Ok(mut bc) = chain.lock() {
@@ -478,17 +519,17 @@ impl PeerSet {
                 }
             }
             Payload::BlobChunk(chunk) => {
-                if !self.is_authorized(&msg.pubkey) {
+                if !self.is_authorized(&peer_key) {
                     return;
                 }
-                if let Err(code) = self.check_shard_rate(&msg.pubkey, chunk.data.len()) {
+                if let Err(code) = self.check_shard_rate(&peer_key, chunk.data.len()) {
                     telemetry_peer_error(code);
                     let reason = match code {
                         PeerErrorCode::RateLimit => DropReason::RateLimit,
                         PeerErrorCode::Banned => DropReason::Blacklist,
                         _ => DropReason::Malformed,
                     };
-                    record_drop(&msg.pubkey, reason);
+                    record_drop(&peer_key, reason);
                     if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
                         if let Some(peer_addr) = addr {
                             if let Ok(mut a) = self.addrs.lock() {
@@ -496,7 +537,7 @@ impl PeerSet {
                             }
                         }
                         if let Ok(mut auth) = self.authorized.lock() {
-                            auth.remove(&msg.pubkey);
+                            auth.remove(&peer_key);
                         }
                     }
                     return;
@@ -517,6 +558,12 @@ impl PeerSet {
                             crate::telemetry::REPUTATION_GOSSIP_TOTAL
                                 .with_label_values(&[if _applied { "applied" } else { "ignored" }])
                                 .inc();
+                            let latency = now_secs().saturating_sub(e.epoch) as f64;
+                            crate::telemetry::REPUTATION_GOSSIP_LATENCY_SECONDS
+                                .observe(latency);
+                            if !_applied {
+                                crate::telemetry::REPUTATION_GOSSIP_FAIL_TOTAL.inc();
+                            }
                         }
                     }
                 }
@@ -572,7 +619,8 @@ pub enum HandshakeError {
 }
 
 impl HandshakeError {
-    fn as_str(&self) -> &'static str {
+    #[allow(dead_code)]
+    pub fn as_str(&self) -> &'static str {
         match self {
             HandshakeError::Tls => "tls",
             HandshakeError::Version => "version",
@@ -581,6 +629,21 @@ impl HandshakeError {
             HandshakeError::Other => "other",
         }
     }
+}
+
+/// Stable identity for a peer independent of its current public key.
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq, Hash)]
+pub struct PeerIdentity {
+    /// Logical identifier for the peer.
+    pub peer_id: [u8; 32],
+    /// Active public key used for message signatures.
+    pub public_key: [u8; 32],
+    /// Previously active key kept during rotation grace period.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_key: Option<[u8; 32]>,
+    /// Rotation timestamp for audit and expiry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotated_at: Option<u64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -738,6 +801,9 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
             #[cfg(feature = "telemetry")]
             let sends = entry.sends;
             map.insert(pk, entry);
+            if let Some(st) = map.get(&pk) {
+                persist_snapshot(&pk, st);
+            }
             update_active_gauge(map.len());
             update_memory_usage(map.len());
             #[cfg(feature = "telemetry")]
@@ -803,9 +869,12 @@ pub fn record_request(pk: &[u8; 32]) {
         broadcast_metrics(pk, &entry);
         #[cfg(feature = "telemetry")]
         let reqs = entry.requests;
-        map.insert(*pk, entry);
-        update_active_gauge(map.len());
-        update_memory_usage(map.len());
+            map.insert(*pk, entry);
+            if let Some(st) = map.get(pk) {
+                persist_snapshot(pk, st);
+            }
+            update_active_gauge(map.len());
+            update_memory_usage(map.len());
         #[cfg(feature = "telemetry")]
         {
             if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
@@ -839,6 +908,9 @@ pub fn record_request(pk: &[u8; 32]) {
         #[cfg(feature = "telemetry")]
         let reqs = entry.requests;
         map.insert(*pk, entry);
+        if let Some(st) = map.get(pk) {
+            persist_snapshot(pk, st);
+        }
         update_active_gauge(map.len());
         update_memory_usage(map.len());
         #[cfg(feature = "telemetry")]
@@ -869,6 +941,9 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         entry.last_updated = now_secs();
         broadcast_metrics(pk, &entry);
         map.insert(*pk, entry);
+        if let Some(st) = map.get(pk) {
+            persist_snapshot(pk, st);
+        }
         update_active_gauge(map.len());
         update_memory_usage(map.len());
     } else {
@@ -889,6 +964,9 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         *entry.drops.entry(reason).or_default() += 1;
         entry.last_updated = now_secs();
         map.insert(*pk, entry);
+        if let Some(st) = map.get(pk) {
+            persist_snapshot(pk, st);
+        }
         update_active_gauge(map.len());
         update_memory_usage(map.len());
     }
@@ -951,10 +1029,26 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
                 .inc();
         }
     }
+    let ts = now_secs();
+    let mut log = HANDSHAKE_LOG.lock().unwrap();
+    log.push_back((ts, hex::encode(pk), reason));
+    if log.len() > HANDSHAKE_LOG_CAP {
+        log.pop_front();
+    }
 }
 
 #[cfg(all(feature = "telemetry", feature = "quic"))]
 pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeError) {
+    let ts = now_secs();
+    {
+        let mut last = LAST_HANDSHAKE_ADDR.lock().unwrap();
+        if let Some(prev) = last.get(&addr) {
+            if ts.saturating_sub(*prev) < HANDSHAKE_DEBOUNCE_SECS {
+                return;
+            }
+        }
+        last.insert(addr, ts);
+    }
     if let Some(pk) = ADDR_MAP.lock().unwrap().get(&addr).copied() {
         record_handshake_fail(&pk, reason);
     }
@@ -962,6 +1056,15 @@ pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeErro
 
 pub fn simulate_handshake_fail(pk: [u8; 32], reason: HandshakeError) {
     record_handshake_fail(&pk, reason);
+}
+
+pub fn recent_handshake_failures() -> Vec<(u64, String, HandshakeError)> {
+    HANDSHAKE_LOG
+        .lock()
+        .unwrap()
+        .iter()
+        .cloned()
+        .collect()
 }
 
 fn update_reputation_metric(pk: &[u8; 32], score: f64) {
@@ -1035,7 +1138,19 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
             });
             let _ = writeln!(file, "{}", entry.to_string());
         }
-        ROTATED_KEYS.lock().unwrap().insert(new, *old);
+        let revoke = now_secs() + KEY_GRACE_SECS;
+        ROTATED_KEYS.lock().unwrap().insert(*old, (new, revoke));
+        let mut ids = PEER_IDENTITIES.lock().unwrap();
+        if let Some(mut ident) = ids.remove(old) {
+            ident.old_key = Some(*old);
+            ident.public_key = new;
+            ident.rotated_at = Some(now_secs());
+            ids.insert(new, ident);
+        }
+        drop(ids);
+        broadcast_key_rotation(old, &new);
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::KEY_ROTATION_TOTAL.inc();
         true
     } else {
         false
@@ -1058,14 +1173,40 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
     let res = (|| {
         let rel = Path::new(name);
         if rel.is_absolute() || rel.components().any(|c| matches!(c, Component::ParentDir)) {
+            #[cfg(feature = "telemetry")]
+            log_suspicious(name);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "invalid path",
             ));
         }
+        let fname = rel
+            .file_name()
+            .and_then(|v| v.to_str())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "file"))?;
+        if !(fname.ends_with(".json") || fname.ends_with(".json.gz")) {
+            #[cfg(feature = "telemetry")]
+            log_suspicious(fname);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid extension",
+            ));
+        }
         let dir = METRICS_EXPORT_DIR.lock().unwrap().clone();
         std::fs::create_dir_all(&dir)?;
         let path = Path::new(&dir).join(rel);
+        if path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            #[cfg(feature = "telemetry")]
+            log_suspicious(name);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "symlink not allowed",
+            ));
+        }
         let metrics = {
             let map = PEER_METRICS.lock().unwrap();
             map.get(pk).cloned()
@@ -1073,11 +1214,21 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
         let metrics =
             metrics.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "peer"))?;
         let json = serde_json::to_vec(&metrics)?;
-        let mut tmp = NamedTempFile::new_in(&dir)?;
+        let tmp_dir = tempfile::tempdir_in(&dir)?;
+        let mut tmp = NamedTempFile::new_in(tmp_dir.path())?;
+        tmp.as_file().lock_exclusive()?;
         tmp.write_all(&json)?;
         tmp.flush()?;
         let overwritten = path.exists();
         tmp.persist(&path)?;
+        tmp_dir.close()?;
+        let rt = Runtime::new().unwrap();
+        let _ = rt.block_on(
+            TokioOpenOptions::new()
+                .read(true)
+                .write(false)
+                .open(&path),
+        )?;
         Ok(overwritten)
     })();
 
@@ -1102,15 +1253,42 @@ pub fn export_all_peer_stats(
     let res = (|| {
         let rel = Path::new(name);
         if rel.is_absolute() || rel.components().any(|c| matches!(c, Component::ParentDir)) {
+            #[cfg(feature = "telemetry")]
+            log_suspicious(name);
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "invalid path",
+            ));
+        }
+        let fname = rel
+            .file_name()
+            .and_then(|v| v.to_str())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "file"))?;
+        if !(fname.ends_with(".tar.gz") || fname.ends_with(".json") || fname.ends_with(".json.gz")) {
+            #[cfg(feature = "telemetry")]
+            log_suspicious(fname);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "invalid extension",
             ));
         }
         let base = METRICS_EXPORT_DIR.lock().unwrap().clone();
         std::fs::create_dir_all(&base)?;
         let quota = PEER_METRICS_EXPORT_QUOTA.load(Ordering::Relaxed);
         let compress = PEER_METRICS_COMPRESS.load(Ordering::Relaxed);
+        let path = Path::new(&base).join(rel);
+        if path
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            #[cfg(feature = "telemetry")]
+            log_suspicious(name);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "symlink not allowed",
+            ));
+        }
 
         let keys: Vec<[u8; 32]> = {
             let map = PEER_METRICS.lock().unwrap();
@@ -1120,8 +1298,9 @@ pub fn export_all_peer_stats(
         let mut total_bytes = 0u64;
 
         if compress {
-            let path = Path::new(&base).join(format!("{name}.tar.gz"));
-            let mut tmp = NamedTempFile::new_in(&base)?;
+            let tmp_dir = tempfile::tempdir_in(&base)?;
+            let mut tmp = NamedTempFile::new_in(tmp_dir.path())?;
+            tmp.as_file().lock_exclusive()?;
             {
                 let enc = flate2::write::GzEncoder::new(
                     tmp.as_file_mut(),
@@ -1176,6 +1355,14 @@ pub fn export_all_peer_stats(
             }
             let overwritten = path.exists();
             tmp.persist(&path)?;
+            tmp_dir.close()?;
+            let rt = Runtime::new().unwrap();
+            let _ = rt.block_on(
+                TokioOpenOptions::new()
+                    .read(true)
+                    .write(false)
+                    .open(&path),
+            )?;
             #[cfg(feature = "telemetry")]
             log::info!(
                 "peer_stats_export_all count={} bytes={}",
@@ -1184,7 +1371,6 @@ pub fn export_all_peer_stats(
             );
             Ok(overwritten)
         } else {
-            let path = Path::new(&base).join(rel);
             let tmp_dir = tempfile::Builder::new()
                 .prefix("export")
                 .tempdir_in(&base)?;
@@ -1235,6 +1421,13 @@ pub fn export_all_peer_stats(
             }
             let tmp_path = tmp_dir.keep();
             std::fs::rename(tmp_path, &path)?;
+            let rt = Runtime::new().unwrap();
+            let _ = rt.block_on(
+                TokioOpenOptions::new()
+                    .read(true)
+                    .write(false)
+                    .open(&path),
+            )?;
             #[cfg(feature = "telemetry")]
             log::info!(
                 "peer_stats_export_all count={} bytes={} ",
@@ -1310,6 +1503,7 @@ fn remove_peer_metrics(pk: &[u8; 32]) {
 }
 
 #[cfg(not(feature = "telemetry"))]
+#[allow(dead_code)]
 fn remove_peer_metrics(_pk: &[u8; 32]) {}
 
 pub fn record_ip_drop(ip: &SocketAddr) {
@@ -1475,6 +1669,8 @@ static ADDR_MAP: Lazy<Mutex<HashMap<SocketAddr, [u8; 32]>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static MAX_PEER_METRICS: AtomicUsize = AtomicUsize::new(1024);
 static EXPORT_PEER_METRICS: AtomicBool = AtomicBool::new(true);
+#[cfg(feature = "telemetry")]
+static SUSPICIOUS_EXPORTS: AtomicU64 = AtomicU64::new(0);
 static TRACK_DROP_REASONS: AtomicBool = AtomicBool::new(true);
 static TRACK_HANDSHAKE_FAIL: AtomicBool = AtomicBool::new(true);
 static PEER_REPUTATION_DECAY: AtomicU64 = AtomicU64::new(f64::to_bits(0.01));
@@ -1492,8 +1688,24 @@ static KEY_HISTORY_PATH: Lazy<Mutex<String>> = Lazy::new(|| {
         .unwrap_or_else(|_| "state/peer_key_history.log".into());
     Mutex::new(path)
 });
-static ROTATED_KEYS: Lazy<Mutex<HashMap<[u8; 32], [u8; 32]>>> =
+/// Mapping of old keys to (new key, revoke timestamp).
+static ROTATED_KEYS: Lazy<Mutex<HashMap<[u8; 32], ([u8; 32], u64)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+/// Known peer identities keyed by their current public key.
+static PEER_IDENTITIES: Lazy<Mutex<HashMap<[u8; 32], PeerIdentity>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+const KEY_GRACE_SECS: u64 = 60 * 5;
+
+/// Recent handshake failures for debug introspection.
+static HANDSHAKE_LOG: Lazy<Mutex<VecDeque<(u64, String, HandshakeError)>>> =
+    Lazy::new(|| Mutex::new(VecDeque::new()));
+const HANDSHAKE_LOG_CAP: usize = 128;
+#[cfg(all(feature = "telemetry", feature = "quic"))]
+static LAST_HANDSHAKE_ADDR: Lazy<Mutex<HashMap<SocketAddr, u64>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+#[cfg(all(feature = "telemetry", feature = "quic"))]
+const HANDSHAKE_DEBOUNCE_SECS: u64 = 1;
+#[allow(dead_code)]
 const PEER_METRICS_VERSION: u32 = 1;
 
 #[derive(Clone, Serialize)]
@@ -1575,6 +1787,30 @@ pub fn broadcast_metrics(pk: &[u8; 32], m: &PeerMetrics) {
     }
 }
 
+fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
+    if let Some(client) = AGGREGATOR.lock().unwrap().clone() {
+        #[derive(Serialize)]
+        struct RotationEvent {
+            peer_id: String,
+            metrics: serde_json::Value,
+        }
+        let event = RotationEvent {
+            peer_id: hex::encode(old),
+            metrics: json!({ "key_rotation": hex::encode(new) }),
+        };
+        tokio::spawn(async move {
+            let _ = client
+                .client
+                .post(format!("{}/ingest", client.url))
+                .header("x-auth-token", client.token)
+                .json(&vec![event])
+                .send()
+                .await;
+        });
+    }
+}
+
+#[allow(dead_code)]
 const DROP_REASON_VARIANTS: &[DropReason] = &[
     DropReason::RateLimit,
     DropReason::Malformed,
@@ -1583,6 +1819,7 @@ const DROP_REASON_VARIANTS: &[DropReason] = &[
     DropReason::Other,
 ];
 
+#[allow(dead_code)]
 const HANDSHAKE_ERROR_VARIANTS: &[HandshakeError] = &[
     HandshakeError::Tls,
     HandshakeError::Version,
@@ -1605,6 +1842,10 @@ pub fn set_track_drop_reasons(val: bool) {
 
 pub fn set_track_handshake_fail(val: bool) {
     TRACK_HANDSHAKE_FAIL.store(val, Ordering::Relaxed);
+}
+
+pub fn track_handshake_fail_enabled() -> bool {
+    TRACK_HANDSHAKE_FAIL.load(Ordering::Relaxed)
 }
 
 pub fn set_peer_reputation_decay(rate: f64) {
@@ -1797,79 +2038,37 @@ fn register_peer_metrics(pk: &[u8; 32], m: &PeerMetrics) {
 #[cfg(not(feature = "telemetry"))]
 fn register_peer_metrics(_pk: &[u8; 32], _m: &PeerMetrics) {}
 
+fn persist_snapshot(pk: &[u8; 32], m: &PeerMetrics) {
+    if let Some(store) = peer_metrics_store::store() {
+        let ttl = PEER_METRICS_RETENTION.load(Ordering::Relaxed);
+        store.insert(pk, m, ttl);
+    }
+}
+
 pub fn persist_peer_metrics() -> std::io::Result<()> {
-    let path = PEER_METRICS_PATH.lock().unwrap().clone();
-    let compress = PEER_METRICS_COMPRESS.load(Ordering::Relaxed);
-    let map = PEER_METRICS.lock().unwrap();
-    let peers: Vec<_> = map
-        .iter()
-        .map(|(pk, m)| PersistEntry {
-            peer_id: hex::encode(pk),
-            metrics: m.clone(),
-        })
-        .collect();
-    let data = PersistFile {
-        version: PEER_METRICS_VERSION,
-        peers,
-    };
-    let json = serde_json::to_vec(&data)?;
-    if let Some(parent) = Path::new(&path).parent() {
-        fs::create_dir_all(parent)?;
+    if let Some(store) = peer_metrics_store::store() {
+        store
+            .flush()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     }
-    let tmp = format!("{}.tmp", path);
-    if compress {
-        let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        enc.write_all(&json)?;
-        fs::write(&tmp, enc.finish()?)?;
-    } else {
-        fs::write(&tmp, &json)?;
-    }
-    fs::rename(tmp, path)?;
     Ok(())
 }
 
 pub fn load_peer_metrics() {
-    let path = PEER_METRICS_PATH.lock().unwrap().clone();
     let ttl = PEER_METRICS_RETENTION.load(Ordering::Relaxed);
-    let compress = PEER_METRICS_COMPRESS.load(Ordering::Relaxed);
-    let data = match fs::read(&path) {
-        Ok(d) => d,
-        Err(_) => return,
-    };
-    let bytes = if compress {
-        let mut dec = flate2::read::GzDecoder::new(&data[..]);
-        let mut out = Vec::new();
-        if dec.read_to_end(&mut out).is_err() {
-            return;
-        }
-        out
-    } else {
-        data
-    };
-    if let Ok(file) = serde_json::from_slice::<PersistFile>(&bytes) {
-        if file.version != PEER_METRICS_VERSION {
-            return;
-        }
-        let now = now_secs();
+    if let Some(store) = peer_metrics_store::store() {
+        let entries = store.load(ttl);
         let mut map = PEER_METRICS.lock().unwrap();
         #[cfg(feature = "telemetry")]
         let export = EXPORT_PEER_METRICS.load(Ordering::Relaxed);
         #[cfg(not(feature = "telemetry"))]
         let export = false;
         map.clear();
-        for entry in file.peers {
-            if now.saturating_sub(entry.metrics.last_updated) > ttl {
-                continue;
+        for (pk, m) in entries {
+            if export {
+                register_peer_metrics(&pk, &m);
             }
-            if let Ok(bytes) = hex::decode(&entry.peer_id) {
-                if let Ok(pk) = <[u8; 32]>::try_from(bytes.as_slice()) {
-                    let m = entry.metrics;
-                    if export {
-                        register_peer_metrics(&pk, &m);
-                    }
-                    map.insert(pk, m);
-                }
-            }
+            map.insert(pk, m);
         }
         update_active_gauge(map.len());
         update_memory_usage(map.len());
@@ -1889,14 +2088,3 @@ pub fn clear_peer_metrics() {
     update_memory_usage(0);
 }
 
-#[derive(Serialize, Deserialize)]
-struct PersistEntry {
-    peer_id: String,
-    metrics: PeerMetrics,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PersistFile {
-    version: u32,
-    peers: Vec<PersistEntry>,
-}

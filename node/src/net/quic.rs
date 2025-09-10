@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use once_cell::sync::Lazy;
 use quinn::{Connection, Endpoint};
 use rcgen::generate_simple_self_signed;
 #[cfg(any(test, debug_assertions))]
@@ -19,8 +17,8 @@ use tokio::time::Instant;
 use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS, QUIC_DISCONNECT_TOTAL,
-    QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
+    sampled_observe, QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS,
+    QUIC_DISCONNECT_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
 };
 
 /// Error type for QUIC connection attempts.
@@ -43,20 +41,6 @@ impl std::fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
-static ENDPOINT_POOL: Lazy<Mutex<HashMap<SocketAddr, Endpoint>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
-
-fn get_or_create_endpoint(addr: SocketAddr) -> Result<Endpoint> {
-    let mut pool = ENDPOINT_POOL.lock().unwrap();
-    if let Some(ep) = pool.get(&addr) {
-        #[cfg(feature = "telemetry")]
-        QUIC_ENDPOINT_REUSE_TOTAL.inc();
-        return Ok(ep.clone());
-    }
-    let ep = Endpoint::client(addr)?;
-    pool.insert(addr, ep.clone());
-    Ok(ep)
-}
 
 /// Start a QUIC listener bound to `addr`, returning the endpoint
 /// and the generated self-signed certificate to share with peers.
@@ -67,8 +51,18 @@ pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
     let cert = Certificate(cert_der.clone());
     let key = PrivateKey(key_der);
     let server_config = quinn::ServerConfig::with_single_cert(vec![cert.clone()], key)?;
-    let endpoint = Endpoint::server(server_config, addr)?;
-    Ok((endpoint, cert))
+    let mut attempts = 0;
+    loop {
+        match Endpoint::server(server_config.clone(), addr) {
+            Ok(endpoint) => return Ok((endpoint, cert)),
+            Err(_e) if attempts < 3 => {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
+            }
+            Err(e) => return Err(anyhow!(e)),
+        }
+    }
 }
 
 /// Start a QUIC listener with an existing certificate and key.
@@ -80,8 +74,18 @@ pub async fn listen_with_cert(
     let cert = Certificate(cert_der.to_vec());
     let key = PrivateKey(key_der.to_vec());
     let server_config = quinn::ServerConfig::with_single_cert(vec![cert], key)?;
-    let endpoint = Endpoint::server(server_config, addr)?;
-    Ok(endpoint)
+    let mut attempts = 0;
+    loop {
+        match Endpoint::server(server_config.clone(), addr) {
+            Ok(endpoint) => return Ok(endpoint),
+            Err(_e) if attempts < 3 => {
+                attempts += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                continue;
+            }
+            Err(e) => return Err(anyhow!(e)),
+        }
+    }
 }
 
 /// Connect to a remote QUIC endpoint at `addr` trusting `cert`.
@@ -98,27 +102,47 @@ pub async fn connect(
         .with_root_certificates(roots)
         .with_no_client_auth();
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
-    let endpoint =
-        get_or_create_endpoint("0.0.0.0:0".parse().unwrap()).map_err(ConnectError::Other)?;
+    let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
+        .map_err(|e| ConnectError::Other(anyhow!(e)))?;
     let _start = Instant::now();
     let attempt = endpoint
         .connect_with(client_cfg, addr, "the-block")
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
-    match attempt.await {
-        Ok(conn) => {
+    let res = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
+    match res {
+        Ok(Ok(conn)) => {
             #[cfg(feature = "telemetry")]
-            QUIC_CONN_LATENCY_SECONDS.observe(_start.elapsed().as_secs_f64());
+            sampled_observe(&QUIC_CONN_LATENCY_SECONDS, _start.elapsed().as_secs_f64());
             Ok(conn)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             #[cfg(feature = "telemetry")]
             {
-                QUIC_HANDSHAKE_FAIL_TOTAL.inc();
                 let err = classify_err(&e);
+                if super::peer::track_handshake_fail_enabled() {
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[err.as_str()])
+                        .inc();
+                }
                 super::peer::record_handshake_fail_addr(addr, err);
             }
-            #[cfg(not(feature = "telemetry"))]
-            let _ = e;
+            tracing::error!(error = ?e, reason = classify_err(&e).as_str(), "quic_connect_fail");
+            Err(ConnectError::Handshake)
+        }
+        Err(_) => {
+            #[cfg(feature = "telemetry")]
+            {
+                if super::peer::track_handshake_fail_enabled() {
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[super::peer::HandshakeError::Timeout.as_str()])
+                        .inc();
+                }
+                super::peer::record_handshake_fail_addr(
+                    addr,
+                    super::peer::HandshakeError::Timeout,
+                );
+            }
+            tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake)
         }
     }
@@ -172,27 +196,39 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
-    let endpoint =
-        get_or_create_endpoint("0.0.0.0:0".parse().unwrap()).map_err(ConnectError::Other)?;
+    let endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
+        .map_err(|e| ConnectError::Other(anyhow!(e)))?;
     let _start = Instant::now();
     let attempt = endpoint
         .connect_with(client_cfg, addr, "the-block")
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
-    match attempt.await {
-        Ok(conn) => {
+    let res = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
+    match res {
+        Ok(Ok(conn)) => {
             #[cfg(feature = "telemetry")]
-            QUIC_CONN_LATENCY_SECONDS.observe(_start.elapsed().as_secs_f64());
+            sampled_observe(&QUIC_CONN_LATENCY_SECONDS, _start.elapsed().as_secs_f64());
             Ok(conn)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             #[cfg(feature = "telemetry")]
             {
                 QUIC_HANDSHAKE_FAIL_TOTAL.inc();
                 let err = classify_err(&e);
                 super::peer::record_handshake_fail_addr(addr, err);
             }
-            #[cfg(not(feature = "telemetry"))]
-            let _ = e;
+            tracing::error!(error = ?e, "quic_connect_fail");
+            Err(ConnectError::Handshake)
+        }
+        Err(_) => {
+            #[cfg(feature = "telemetry")]
+            {
+                QUIC_HANDSHAKE_FAIL_TOTAL.inc();
+                super::peer::record_handshake_fail_addr(
+                    addr,
+                    super::peer::HandshakeError::Timeout,
+                );
+            }
+            tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake)
         }
     }

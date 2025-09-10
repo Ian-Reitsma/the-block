@@ -8,13 +8,31 @@ use prometheus::{
 };
 use pyo3::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use ureq;
+#[cfg(feature = "telemetry")]
+use rand::Rng;
+#[cfg(feature = "telemetry")]
+use procfs::process::Process;
+#[cfg(feature = "telemetry")]
+use hdrhistogram::Histogram as HdrHistogram;
+#[cfg(feature = "telemetry")]
+use std::sync::{Mutex, Once};
 
 pub mod summary;
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+#[cfg(feature = "telemetry")]
+static SAMPLE_RATE: AtomicU64 = AtomicU64::new(1_000_000); // parts per million
+#[cfg(feature = "telemetry")]
+static COMPACTION_SECS: AtomicU64 = AtomicU64::new(60);
+#[cfg(feature = "telemetry")]
+static COMPACTOR: Once = Once::new();
+#[cfg(feature = "telemetry")]
+static HDR_MEMORY: Lazy<Mutex<HdrHistogram<u64>>> =
+    Lazy::new(|| HdrHistogram::new(3).unwrap().into());
 
 /// In-memory read metrics aggregated per domain.
 #[cfg(feature = "telemetry")]
@@ -79,6 +97,112 @@ impl ReadStats {
 pub static READ_STATS: Lazy<ReadStats> = Lazy::new(ReadStats::new);
 #[cfg(not(feature = "telemetry"))]
 pub static READ_STATS: ReadStats = ReadStats;
+
+#[cfg(feature = "telemetry")]
+fn should_sample() -> bool {
+    let rate = SAMPLE_RATE.load(Ordering::Relaxed);
+    if rate >= 1_000_000 {
+        return true;
+    }
+    rand::thread_rng().gen_range(0..1_000_000) < rate
+}
+
+#[cfg(feature = "telemetry")]
+fn sample_weight() -> u64 {
+    let rate = SAMPLE_RATE.load(Ordering::Relaxed);
+    if rate == 0 {
+        0
+    } else {
+        (1_000_000f64 / rate as f64).round() as u64
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn sampled_inc(counter: &IntCounter) {
+    if should_sample() {
+        counter.inc_by(sample_weight());
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn sampled_inc_vec(counter: &IntCounterVec, labels: &[&str]) {
+    if should_sample() {
+        counter
+            .with_label_values(labels)
+            .inc_by(sample_weight());
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn sampled_observe(hist: &Histogram, v: f64) {
+    if should_sample() {
+        hist.observe(v);
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_sample_rate(rate: f64) {
+    let scaled = (rate.clamp(0.0, 1.0) * 1_000_000.0) as u64;
+    SAMPLE_RATE.store(scaled, Ordering::Relaxed);
+}
+
+#[cfg(feature = "telemetry")]
+fn compact_histograms() {
+    HDR_MEMORY.lock().unwrap().reset();
+    update_memory_usage();
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_compaction_interval(secs: u64) {
+    COMPACTION_SECS.store(secs.max(1), Ordering::Relaxed);
+    COMPACTOR.call_once(|| {
+        std::thread::spawn(|| loop {
+            let interval = COMPACTION_SECS.load(Ordering::Relaxed);
+            std::thread::sleep(Duration::from_secs(interval));
+            compact_histograms();
+        });
+    });
+    update_memory_usage();
+}
+
+#[cfg(feature = "telemetry")]
+pub fn force_compact() {
+    compact_histograms();
+}
+
+#[cfg(feature = "telemetry")]
+pub fn current_alloc_bytes() -> u64 {
+    if let Ok(proc) = Process::myself() {
+        if let Ok(statm) = proc.statm() {
+            return statm.resident * procfs::page_size() as u64;
+        }
+    }
+    0
+}
+
+#[cfg(feature = "telemetry")]
+pub fn update_memory_usage() {
+    let bytes = current_alloc_bytes();
+    TELEMETRY_ALLOC_BYTES.set(bytes as i64);
+    HDR_MEMORY.lock().unwrap().record(bytes).ok();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn sampled_inc(_c: &IntCounter) {}
+#[cfg(not(feature = "telemetry"))]
+pub fn sampled_inc_vec(_c: &IntCounterVec, _l: &[&str]) {}
+#[cfg(not(feature = "telemetry"))]
+pub fn sampled_observe(_h: &Histogram, _v: f64) {}
+#[cfg(not(feature = "telemetry"))]
+pub fn set_sample_rate(_r: f64) {}
+#[cfg(not(feature = "telemetry"))]
+pub fn set_compaction_interval(_s: u64) {}
+#[cfg(not(feature = "telemetry"))]
+pub fn force_compact() {}
+#[cfg(not(feature = "telemetry"))]
+pub fn current_alloc_bytes() -> u64 { 0 }
+#[cfg(not(feature = "telemetry"))]
+pub fn update_memory_usage() {}
 
 pub static HAAR_ETA_MILLI: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("haar_eta_milli", "eta parameter for burst veto x1000").unwrap();
@@ -199,6 +323,13 @@ pub static SUBSIDY_MULTIPLIER_RAW: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static TELEMETRY_ALLOC_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("telemetry_alloc_bytes", "Telemetry memory allocation in bytes")
+        .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
 pub static INDUSTRIAL_BACKLOG: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("industrial_backlog", "Pending industrial compute slices").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
@@ -239,6 +370,16 @@ pub static INDUSTRIAL_PRICE_PER_UNIT: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("industrial_price_per_unit", "Latest price per compute unit").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
+});
+
+pub static PRICE_WEIGHT_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "price_weight_applied_total",
+        "Total price entries adjusted by reputation weight",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(c.clone())).unwrap();
+    c
 });
 
 pub static DEX_ESCROW_LOCKED: Lazy<IntGauge> = Lazy::new(|| {
@@ -786,6 +927,30 @@ pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static SCHEDULER_ACCELERATOR_UTIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "scheduler_accelerator_util_total",
+        "Jobs requiring accelerators that started successfully",
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_accelerator_util_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_accelerator_util_total: {e}"));
+    c
+});
+
+pub static SCHEDULER_ACCELERATOR_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "scheduler_accelerator_fail_total",
+        "Accelerator jobs that failed or were cancelled",
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_accelerator_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_accelerator_fail_total: {e}"));
+    c
+});
+
 pub static REPUTATION_ADJUST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("reputation_adjust_total", "Reputation adjustments"),
@@ -1329,6 +1494,32 @@ pub static REPUTATION_GOSSIP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static REPUTATION_GOSSIP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let h = Histogram::with_opts(
+        HistogramOpts::new(
+            "reputation_gossip_latency_seconds",
+            "Propagation latency for reputation updates",
+        ),
+    )
+    .unwrap_or_else(|e| panic!("histogram reputation_gossip_latency_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry reputation_gossip_latency_seconds: {e}"));
+    h
+});
+
+pub static REPUTATION_GOSSIP_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "reputation_gossip_fail_total",
+        "Reputation updates that failed verification or were stale",
+    )
+    .unwrap_or_else(|e| panic!("counter reputation_gossip_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry reputation_gossip_fail_total: {e}"));
+    c
+});
+
 pub static PEER_METRICS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "peer_metrics_dropped_total",
@@ -1505,6 +1696,15 @@ pub static PEER_KEY_ROTATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static KEY_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("key_rotation_total", "Successful peer key rotations")
+        .unwrap_or_else(|e| panic!("counter key rotation: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry key rotation: {e}"));
+    c
+});
+
 pub static CONFIG_RELOAD_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
@@ -1520,6 +1720,18 @@ pub static CONFIG_RELOAD_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static CONFIG_RELOAD_LAST_TS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "config_reload_last_ts",
+        "Unix timestamp of the last successful config reload",
+    )
+    .unwrap_or_else(|e| panic!("gauge: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
 pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
@@ -1529,6 +1741,18 @@ pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         &["status"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static DNS_VERIFICATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "dns_verification_fail_total",
+        "Total DNS verification failures",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -1679,9 +1903,15 @@ pub static QUIC_BYTES_RECV_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new("quic_handshake_fail_total", "Total QUIC handshake failures")
-        .unwrap_or_else(|e| panic!("counter quic handshake fail: {e}"));
+pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "quic_handshake_fail_total",
+            "Total QUIC handshake failures by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter vec quic handshake fail: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic handshake fail: {e}"));

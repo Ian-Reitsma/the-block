@@ -8,6 +8,10 @@ detailed in [docs/read_receipts.md](read_receipts.md).
 
 Signed DNS TXT records advertise gateway policy and track read counters; see [docs/gateway_dns.md](gateway_dns.md) for publishing and retrieval semantics.
 
+### DNS TXT Verification
+
+Nodes validating external domains fetch TXT records and require a `tb-verification=<node_id>` token before honoring on-chain DNS entries. Results are cached for one hour and exposed via `net dns verify <domain>` for manual checks. Operators may disable verification in development environments with `gateway_dns_disable_verify = true`.
+
 Security considerations are catalogued under
 [threat_model/hosting.md](threat_model/hosting.md).
 

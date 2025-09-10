@@ -17,6 +17,11 @@ provider_reputation_retention = 604800
 reputation_gossip = true
 scheduler_metrics = true
 gateway_dns_allow_external = false
+gateway_dns_disable_verify = false
+
+[telemetry]
+sample_rate = 1.0
+compaction_secs = 60
 
 [metrics_aggregator]
 url = "https://aggregator.local:9000"

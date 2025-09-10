@@ -1,0 +1,14 @@
+{
+    "slices": ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
+    "price_per_unit": 10,
+    "consumer_bond": 1,
+    "workloads": ["48656c6c6f"],
+    "capability": {
+        "cpu_cores": 4,
+        "gpu": null,
+        "gpu_memory_mb": 0,
+        "accelerator": "FPGA",
+        "accelerator_memory_mb": 2048
+    },
+    "deadline": 9999999999
+}

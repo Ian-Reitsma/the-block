@@ -12,3 +12,4 @@ bincode = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dex = { path = "../dex" }
+ed25519-dalek = { version = "2" }
