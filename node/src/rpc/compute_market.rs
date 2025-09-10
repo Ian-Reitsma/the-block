@@ -37,3 +37,13 @@ pub fn job_requirements(job_id: &str) -> serde_json::Value {
         json!({})
     }
 }
+
+/// Cancel an active job and release resources.
+pub fn job_cancel(job_id: &str) -> serde_json::Value {
+    if let Some(provider) = scheduler::active_provider(job_id) {
+        scheduler::cancel_job(job_id, &provider, scheduler::CancelReason::Client);
+        json!({ "status": "ok" })
+    } else {
+        json!({ "status": "unknown" })
+    }
+}

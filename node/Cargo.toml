@@ -44,6 +44,8 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"]
 flate2 = "1"
 indexmap = "2"
 clap = { version = "4", features = ["derive"] }
+colored = "2"
+clap_complete = "4"
 base64 = "0.22"
 base64ct = "1.6.0"
 dirs = "5"
@@ -82,8 +84,9 @@ rayon = "1"
 # webhook alerts
 ureq = { version = "2", features = ["json"], optional = true }
 pprof = { version = "0.13", features = ["flamegraph"] }
-quinn = { version = "0.11", features = ["rustls"], optional = true }
+quinn = { version = "0.10", features = ["rustls"], optional = true }
 rcgen = { version = "0.12", optional = true }
+rustls = { version = "0.21", features = ["dangerous_configuration"] }
 
 [features]
 fuzzy = ["proptest"]
@@ -111,6 +114,7 @@ tracing-test = { version = "0.2" }
 tracing = "0.1"
 tar = "0.4"
 jurisdiction = { path = "../crates/jurisdiction" }
+insta = { version = "1", features = ["glob"] }
 
 [[bench]]
 name = "startup_rebuild"

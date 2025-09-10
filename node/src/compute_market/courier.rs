@@ -1,8 +1,11 @@
 use super::scheduler::{self, Capability};
 use blake3::Hasher;
+use once_cell::sync::Lazy;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sled::Tree;
+use std::collections::HashSet;
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -129,16 +132,33 @@ impl CourierStore {
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static HANDOFF_FAIL: AtomicBool = AtomicBool::new(false);
+static CANCELED: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 pub fn handoff_job(job_id: &str, new_provider: &str) -> Result<(), &'static str> {
     if HANDOFF_FAIL.load(Ordering::Relaxed) {
         return Err("handoff failed");
     }
+    if CANCELED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(job_id)
+    {
+        return Err("job cancelled");
+    }
     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
     tracing::info!(job_id, provider = new_provider, "courier handoff");
+    #[cfg(not(any(feature = "telemetry", feature = "test-telemetry")))]
+    let _ = new_provider;
     Ok(())
 }
 
 pub fn set_handoff_fail(val: bool) {
     HANDOFF_FAIL.store(val, Ordering::Relaxed);
+}
+
+pub fn cancel_job(job_id: &str) {
+    CANCELED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(job_id.to_owned());
 }

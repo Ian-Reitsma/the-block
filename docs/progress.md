@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~97/100** with vision completion **~68/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~98/100** with vision completion **~69/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -35,21 +35,21 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~77 %
+## 2. Networking & Gossip — ~79 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
 - QUIC transport with certificate reuse, TCP fallback, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs` and `docs/networking.md`.
 - TTL-based duplicate suppression and sqrt-N fanout documented in `docs/gossip.md` and implemented in `node/src/gossip/relay.rs`.
-- Peer identifier fuzzing prevents malformed IDs from crashing DHT routing (`net/fuzz/peer_id.rs`).
-- Manual DHT recovery runbook (`docs/networking.md#dht-recovery`).
-- Peer database and chunk cache persist across restarts with configurable paths (`node/src/net/peer.rs` via `TB_PEER_DB_PATH` and `TB_CHUNK_DB_PATH`); `TB_PEER_SEED` fixes shuffle order for reproducible bootstraps.
-- ASN-aware A* routing oracle (`node/src/net/a_star.rs`) chooses k cheapest paths per shard and feeds compute-placement SLAs.
-- SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
-- Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
-- Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
-- Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC
-  and `net stats` CLI, capped by `max_peer_metrics`.
+  - Peer identifier fuzzing prevents malformed IDs from crashing DHT routing (`net/fuzz/peer_id.rs`).
+  - Manual DHT recovery runbook (`docs/networking.md#dht-recovery`).
+  - Peer database and chunk cache persist across restarts with configurable paths (`node/src/net/peer.rs` via `TB_PEER_DB_PATH` and `TB_CHUNK_DB_PATH`); `TB_PEER_SEED` fixes shuffle order for reproducible bootstraps.
+  - ASN-aware A* routing oracle (`node/src/net/a_star.rs`) chooses k cheapest paths per shard and feeds compute-placement SLAs.
+  - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
+  - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
+  - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
+  - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`.
+  - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
 
 **Gaps**
 - Large-scale WAN chaos experiments remain open.
@@ -104,15 +104,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~68 %
+## 6. Compute Marketplace & CBM — ~70 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
+- `compute.job_cancel` RPC releases resources and refunds bonds (`node/src/rpc/compute_market.rs`).
+- Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
 - Economic simulator outputs KPIs to CSV (`sim/src`).
 - Durable courier receipts with exponential backoff documented in `docs/compute_market_courier.md` and implemented in `node/src/compute_market/courier.rs`.
-- Capability-aware scheduler matches CPU/GPU workloads and weights offers by
-  provider reputation (`node/src/compute_market/scheduler.rs`).
 
 **Gaps**
 - Escrowed payments and SLA enforcement remain rudimentary.
@@ -157,13 +157,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~67 %
+## 10. Monitoring, Debugging & Profiling — ~69 %
 
 **Evidence**
-- Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
-- Service badge tracker exports uptime metrics and RPC status (`node/src/service_badge.rs`, `node/tests/service_badge.rs`). See `docs/service_badge.md`.
-- Monitoring stack via `make monitor` and docs in `docs/monitoring/README.md`.
-- Settlement audit CI job (`.github/workflows/ci.yml`).
+  - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
+  - Service badge tracker exports uptime metrics and RPC status (`node/src/service_badge.rs`, `node/tests/service_badge.rs`). See `docs/service_badge.md`.
+  - Monitoring stack via `make monitor` and docs in `docs/monitoring/README.md`.
+  - Cluster metrics aggregation with disk-backed retention (`metrics-aggregator` crate).
+  - Settlement audit CI job (`.github/workflows/ci.yml`).
 
 **Gaps**
 - Bridge and VM metrics are sparse.

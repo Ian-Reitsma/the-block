@@ -47,6 +47,22 @@
   # {"industrial_backlog":0,"industrial_utilization":0,"industrial_units_total":0,"industrial_price_per_unit":0}
   ```
 
+- `compute.job_cancel` – cancels an active job and rolls back resources.
+
+  - Parameters: `job_id` (string), optional `reason` (`client`|`provider`|`preempted`).
+  - Returns: `{ok: true}` on success or `{error: "unknown_job"|"already_completed"|"unauthorized"}`.
+  - Side effects: releases the scheduler slot, refunds any locked fees, and adjusts reputation.
+  - Telemetry: increments `scheduler_cancel_total{reason}`.
+  - Example:
+
+    ```bash
+    curl -s -d '{"method":"compute.job_cancel","params":{"job_id":"abc123"}}' \
+      -H 'Content-Type: application/json' localhost:26658
+    ```
+
+  - Requires standard RPC auth headers.
+  - See [docs/compute_market.md#cancellations](compute_market.md#cancellations) for semantics and race-condition notes.
+
   - `consensus.difficulty` – returns the current proof-of-work difficulty target and timestamp.
 
     ```bash

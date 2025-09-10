@@ -15,7 +15,6 @@ use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
-use std::mem::size_of;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{
@@ -154,12 +153,12 @@ impl PeerSet {
         }
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if metrics.len() == max {
-            if let Some(old) = evict_lru(&mut metrics) {
+            if let Some(_old) = evict_lru(&mut metrics) {
                 #[cfg(feature = "telemetry")]
                 {
-                    remove_peer_metrics(&old);
+                    remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
-                        let id = hex::encode(old);
+                        let id = hex::encode(_old);
                         tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
@@ -508,7 +507,7 @@ impl PeerSet {
             Payload::Reputation(entries) => {
                 if crate::compute_market::scheduler::reputation_gossip_enabled() {
                     for e in entries {
-                        let applied = crate::compute_market::scheduler::merge_reputation(
+                        let _applied = crate::compute_market::scheduler::merge_reputation(
                             &e.provider_id,
                             e.reputation_score,
                             e.epoch,
@@ -516,7 +515,7 @@ impl PeerSet {
                         #[cfg(feature = "telemetry")]
                         {
                             crate::telemetry::REPUTATION_GOSSIP_TOTAL
-                                .with_label_values(&[if applied { "applied" } else { "ignored" }])
+                                .with_label_values(&[if _applied { "applied" } else { "ignored" }])
                                 .inc();
                         }
                     }
@@ -544,8 +543,8 @@ pub enum DropReason {
     Other,
 }
 
-impl DropReason {
-    fn as_str(&self) -> &'static str {
+impl AsRef<str> for DropReason {
+    fn as_ref(&self) -> &str {
         match self {
             DropReason::RateLimit => "rate_limit",
             DropReason::Malformed => "malformed",
@@ -553,6 +552,12 @@ impl DropReason {
             DropReason::Duplicate => "duplicate",
             DropReason::Other => "other",
         }
+    }
+}
+
+impl std::fmt::Display for DropReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_ref())
     }
 }
 
@@ -730,6 +735,7 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
             update_peer_rates(&pk, &mut entry, bytes as u64, 0, now);
             entry.last_updated = now;
             broadcast_metrics(&pk, &entry);
+            #[cfg(feature = "telemetry")]
             let sends = entry.sends;
             map.insert(pk, entry);
             update_active_gauge(map.len());
@@ -749,12 +755,12 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
         } else {
             let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
             if map.len() == max {
-                if let Some(old) = evict_lru(&mut map) {
+                if let Some(_old) = evict_lru(&mut map) {
                     #[cfg(feature = "telemetry")]
                     {
-                        remove_peer_metrics(&old);
+                        remove_peer_metrics(&_old);
                         if crate::telemetry::should_log("p2p") {
-                            let id = hex::encode(old);
+                            let id = hex::encode(_old);
                             tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                         }
                     }
@@ -765,6 +771,7 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
             entry.sends += 1;
             update_peer_rates(&pk, &mut entry, bytes as u64, 0, now);
             entry.last_updated = now;
+            #[cfg(feature = "telemetry")]
             let sends = entry.sends;
             map.insert(pk, entry);
             update_active_gauge(map.len());
@@ -794,6 +801,7 @@ pub fn record_request(pk: &[u8; 32]) {
         update_peer_rates(pk, &mut entry, 0, 1, now);
         entry.last_updated = now;
         broadcast_metrics(pk, &entry);
+        #[cfg(feature = "telemetry")]
         let reqs = entry.requests;
         map.insert(*pk, entry);
         update_active_gauge(map.len());
@@ -813,12 +821,12 @@ pub fn record_request(pk: &[u8; 32]) {
     } else {
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if map.len() == max {
-            if let Some(old) = evict_lru(&mut map) {
+            if let Some(_old) = evict_lru(&mut map) {
                 #[cfg(feature = "telemetry")]
                 {
-                    remove_peer_metrics(&old);
+                    remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
-                        let id = hex::encode(old);
+                        let id = hex::encode(_old);
                         tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
@@ -828,6 +836,7 @@ pub fn record_request(pk: &[u8; 32]) {
         entry.requests += 1;
         update_peer_rates(pk, &mut entry, 0, 1, now);
         entry.last_updated = now;
+        #[cfg(feature = "telemetry")]
         let reqs = entry.requests;
         map.insert(*pk, entry);
         update_active_gauge(map.len());
@@ -865,12 +874,12 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     } else {
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if map.len() == max {
-            if let Some(old) = evict_lru(&mut map) {
+            if let Some(_old) = evict_lru(&mut map) {
                 #[cfg(feature = "telemetry")]
                 {
-                    remove_peer_metrics(&old);
+                    remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
-                        let id = hex::encode(old);
+                        let id = hex::encode(_old);
                         tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
@@ -888,7 +897,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let id = hex::encode(pk);
             crate::telemetry::PEER_DROP_TOTAL
-                .with_label_values(&[id.as_str(), reason.as_str()])
+                .with_label_values(&[id.as_str(), reason.as_ref()])
                 .inc();
         }
     }
@@ -911,12 +920,12 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     } else {
         let max = MAX_PEER_METRICS.load(Ordering::Relaxed);
         if map.len() == max {
-            if let Some(old) = evict_lru(&mut map) {
+            if let Some(_old) = evict_lru(&mut map) {
                 #[cfg(feature = "telemetry")]
                 {
-                    remove_peer_metrics(&old);
+                    remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
-                        let id = hex::encode(old);
+                        let id = hex::encode(_old);
                         tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
@@ -1167,6 +1176,7 @@ pub fn export_all_peer_stats(
             }
             let overwritten = path.exists();
             tmp.persist(&path)?;
+            #[cfg(feature = "telemetry")]
             log::info!(
                 "peer_stats_export_all count={} bytes={}",
                 initial_len,
@@ -1225,6 +1235,7 @@ pub fn export_all_peer_stats(
             }
             let tmp_path = tmp_dir.keep();
             std::fs::rename(tmp_path, &path)?;
+            #[cfg(feature = "telemetry")]
             log::info!(
                 "peer_stats_export_all count={} bytes={} ",
                 initial_len,
@@ -1289,7 +1300,7 @@ fn remove_peer_metrics(pk: &[u8; 32]) {
     let _ = crate::telemetry::PEER_BYTES_SENT_TOTAL.remove_label_values(&[id.as_str()]);
     for reason in DROP_REASON_VARIANTS {
         let _ =
-            crate::telemetry::PEER_DROP_TOTAL.remove_label_values(&[id.as_str(), reason.as_str()]);
+            crate::telemetry::PEER_DROP_TOTAL.remove_label_values(&[id.as_str(), reason.as_ref()]);
     }
     for reason in HANDSHAKE_ERROR_VARIANTS {
         let _ = crate::telemetry::PEER_HANDSHAKE_FAIL_TOTAL
@@ -1302,12 +1313,14 @@ fn remove_peer_metrics(pk: &[u8; 32]) {
 fn remove_peer_metrics(_pk: &[u8; 32]) {}
 
 pub fn record_ip_drop(ip: &SocketAddr) {
+    #[cfg(not(feature = "telemetry"))]
+    let _ = ip;
     #[cfg(feature = "telemetry")]
     {
         if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
             let id = ip.to_string();
             crate::telemetry::PEER_DROP_TOTAL
-                .with_label_values(&[id.as_str(), DropReason::Duplicate.as_str()])
+                .with_label_values(&[id.as_str(), DropReason::Duplicate.as_ref()])
                 .inc();
         }
     }
@@ -1494,6 +1507,15 @@ static METRIC_TX: Lazy<broadcast::Sender<PeerSnapshot>> = Lazy::new(|| {
     tx
 });
 
+#[derive(Clone)]
+struct AggregatorClient {
+    url: String,
+    token: String,
+    client: reqwest::Client,
+}
+
+static AGGREGATOR: Lazy<Mutex<Option<AggregatorClient>>> = Lazy::new(|| Mutex::new(None));
+
 pub struct MetricsReceiver {
     inner: broadcast::Receiver<PeerSnapshot>,
 }
@@ -1535,10 +1557,21 @@ pub fn broadcast_metrics(pk: &[u8; 32], m: &PeerMetrics) {
         peer_id: hex::encode(pk),
         metrics: m.clone(),
     };
-    if METRIC_TX.send(snap).is_err() {
+    if METRIC_TX.send(snap.clone()).is_err() {
         DROPPED_FRAMES.fetch_add(1, Ordering::Relaxed);
         #[cfg(feature = "telemetry")]
         crate::telemetry::PEER_METRICS_DROPPED.inc();
+    }
+    if let Some(client) = AGGREGATOR.lock().unwrap().clone() {
+        tokio::spawn(async move {
+            let _ = client
+                .client
+                .post(format!("{}/ingest", client.url))
+                .header("x-auth-token", client.token)
+                .json(&vec![snap])
+                .send()
+                .await;
+        });
     }
 }
 
@@ -1576,6 +1609,19 @@ pub fn set_track_handshake_fail(val: bool) {
 
 pub fn set_peer_reputation_decay(rate: f64) {
     PEER_REPUTATION_DECAY.store(rate.to_bits(), Ordering::Relaxed);
+}
+
+pub fn set_metrics_aggregator(url: Option<String>, token: Option<String>) {
+    let mut guard = AGGREGATOR.lock().unwrap();
+    if let (Some(url), Some(token)) = (url, token) {
+        *guard = Some(AggregatorClient {
+            url,
+            token,
+            client: reqwest::Client::new(),
+        });
+    } else {
+        *guard = None;
+    }
 }
 
 pub fn set_peer_metrics_sample_rate(rate: u64) {
@@ -1736,7 +1782,7 @@ fn register_peer_metrics(pk: &[u8; 32], m: &PeerMetrics) {
             .inc_by(m.bytes_sent);
         for (r, c) in &m.drops {
             crate::telemetry::PEER_DROP_TOTAL
-                .with_label_values(&[id.as_str(), r.as_str()])
+                .with_label_values(&[id.as_str(), r.as_ref()])
                 .inc_by(*c);
         }
         for (r, c) in &m.handshake_fail {
@@ -1808,6 +1854,8 @@ pub fn load_peer_metrics() {
         let mut map = PEER_METRICS.lock().unwrap();
         #[cfg(feature = "telemetry")]
         let export = EXPORT_PEER_METRICS.load(Ordering::Relaxed);
+        #[cfg(not(feature = "telemetry"))]
+        let export = false;
         map.clear();
         for entry in file.peers {
             if now.saturating_sub(entry.metrics.last_updated) > ttl {

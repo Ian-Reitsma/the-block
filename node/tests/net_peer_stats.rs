@@ -1,7 +1,9 @@
 use ed25519_dalek::SigningKey;
+use insta::assert_snapshot;
 use rand::{thread_rng, RngCore};
 use serial_test::serial;
 use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use std::time::Duration;
@@ -627,7 +629,8 @@ async fn peer_stats_cli_show_and_reputation() {
         quic_cert: None,
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
-    peers.handle_message(msg, None, &bc);
+    let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
+    peers.handle_message(msg, Some(addr_map), &bc);
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -645,16 +648,16 @@ async fn peer_stats_cli_show_and_reputation() {
     net::set_track_handshake_fail(false);
 
     let peer_id = hex::encode(pk);
-    let output = Command::new(env!("CARGO_BIN_EXE_net"))
-        .args([
-            "stats",
-            "show",
-            "--rpc",
-            &format!("http://{}", addr),
-            &peer_id,
-        ])
-        .output()
-        .unwrap();
+    let peer_id_clone = peer_id.clone();
+    let rpc_url = format!("http://{}", addr);
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_net"))
+            .args(["stats", "show", "--rpc", &rpc_url, &peer_id_clone])
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
     assert!(
         output.status.success(),
         "stderr: {}",
@@ -672,21 +675,148 @@ async fn peer_stats_cli_show_and_reputation() {
     .await;
     assert_eq!(val["result"]["handshake_fail"]["tls"].as_u64(), Some(1));
 
-    let output = Command::new(env!("CARGO_BIN_EXE_net"))
-        .args([
-            "stats",
-            "reputation",
-            "--rpc",
-            &format!("http://{}", addr),
-            &peer_id,
-        ])
-        .output()
-        .unwrap();
+    let peer_id_clone = peer_id.clone();
+    let rpc_url = format!("http://{}", addr);
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_net"))
+            .args(["stats", "reputation", "--rpc", &rpc_url, &peer_id_clone])
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
     assert!(
         output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+
+    handle.abort();
+    Settlement::shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn peer_stats_cli_show_table_snapshot() {
+    let dir = init_env();
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    let peers = PeerSet::new(Vec::new());
+    let (sk_bytes, pk) = generate_keypair();
+    let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello), &sk);
+    let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
+    peers.handle_message(msg, Some(addr_map), &bc);
+
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        Default::default(),
+        tx,
+    ));
+    let addr = expect_timeout(rx).await.unwrap();
+
+    let peer_id = hex::encode(pk);
+    let rpc_url = format!("http://{}", addr);
+    let peer_id_clone = peer_id.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_net"))
+            .env("CLICOLOR_FORCE", "1")
+            .args([
+                "stats",
+                "show",
+                "--rpc",
+                &rpc_url,
+                "--format",
+                "table",
+                &peer_id_clone,
+            ])
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_snapshot!("stats_show_table", stdout);
+
+    handle.abort();
+    Settlement::shutdown();
+}
+
+#[tokio::test]
+#[serial]
+async fn peer_stats_cli_show_json_snapshot() {
+    let dir = init_env();
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    let peers = PeerSet::new(Vec::new());
+    let (sk_bytes, pk) = generate_keypair();
+    let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello), &sk);
+    let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
+    peers.handle_message(msg, Some(addr_map), &bc);
+
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        Default::default(),
+        tx,
+    ));
+    let addr = expect_timeout(rx).await.unwrap();
+
+    let peer_id = hex::encode(pk);
+    let rpc_url = format!("http://{}", addr);
+    let peer_id_clone = peer_id.clone();
+    let output = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_net"))
+            .args([
+                "stats",
+                "show",
+                "--rpc",
+                &rpc_url,
+                "--format",
+                "json",
+                &peer_id_clone,
+            ])
+            .output()
+            .unwrap()
+    })
+    .await
+    .unwrap();
+    assert!(output.status.success());
+    let mut val: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    if let Some(rep) = val.get_mut("reputation") {
+        *rep = serde_json::json!(1.0);
+    }
+    let stdout = serde_json::to_string_pretty(&val).unwrap();
+    assert_snapshot!("stats_show_json", stdout);
 
     handle.abort();
     Settlement::shutdown();

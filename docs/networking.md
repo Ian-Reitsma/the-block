@@ -115,15 +115,46 @@ is reduced by 10% on every rate-limit violation. Inspect scores with
 `net stats reputation <peer_id>` and tune decay via `config.toml`.
 
 Per-peer counters are retrievable via the loopback-only `net.peer_stats` RPC or
-the `net stats <peer_id>` CLI:
+the `net stats` CLI:
 
 ```bash
-net stats <peer_id>
+blockctl net stats <peer_id>
 ```
 
-Each query increments `peer_stats_query_total{peer_id}`. For bulk inspection,
-use `net.peer_stats_all` or `net stats --all` with optional `offset` and `limit`
-parameters.
+The CLI accepts several flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--format <table|json>` | Output style (`table` is default). |
+| `--drop-reason <reason>` | Show peers with drops matching the given reason. |
+| `--min-reputation <f64>` | Include only peers with reputation ≥ threshold. |
+| `--all` | List every tracked peer with pagination. |
+| `--limit <n>` | Page size when using `--all` (default 50). |
+| `--offset <n>` | Starting index when paging with `--all`. |
+
+Drop rates ≥5 % render in yellow and ≥20 % in red. The command exits with `0`
+on success, `2` when a peer is unknown, and `3` if access is unauthorized.
+
+Examples:
+
+```bash
+# JSON output filtered by drop reason and reputation
+blockctl net stats --drop-reason throttle --min-reputation 0.5 --format json
+
+# Paginate through the full peer set
+blockctl net stats --all --limit 25 --offset 25
+```
+
+Each query increments `peer_stats_query_total{peer_id}`. Results honour
+`peer_metrics_export` and `max_peer_metrics` configuration caps. For bulk
+inspection across the cluster, nodes can ship snapshots to the
+`metrics-aggregator` service.
+
+Use `net.peer_stats_all` or the CLI with `--all` to fetch paginated results.
+When `--all` is issued without explicit paging flags, the command pauses after
+each page; press <kbd>Enter</kbd> to advance. See
+[docs/gossip.md](gossip.md) for protocol semantics and
+[docs/operators/run_a_node.md](operators/run_a_node.md) for operator workflows.
 
 Invoking `net.peer_stats_reset` or the `net stats reset` CLI subcommand clears
 all counters for the specified peer. This operation removes the peer's metrics

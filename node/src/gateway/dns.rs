@@ -12,6 +12,7 @@ use std::sync::{
     Mutex,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "telemetry")]
 use tracing::warn;
 
 #[cfg(feature = "telemetry")]
@@ -137,6 +138,7 @@ fn verify_domain(domain: &str, pk_hex: &str) -> bool {
         GATEWAY_DNS_LOOKUP_TOTAL.with_label_values(&[status]).inc();
     }
     if !ok {
+        #[cfg(feature = "telemetry")]
         warn!(%domain, "gateway dns verification failed");
     }
     ok

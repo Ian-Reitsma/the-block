@@ -103,6 +103,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "compute_market.scheduler_stats",
     "compute.reputation_get",
     "compute.job_requirements",
+    "compute.job_cancel",
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
@@ -489,24 +490,28 @@ pub async fn handle_conn(
                         }
                     } else {
                         if method_str == "net.peer_stats_export" {
-                            if let Some(path) = r.params.get("path").and_then(|v| v.as_str()) {
+                            if let Some(_path) = r.params.get("path").and_then(|v| v.as_str()) {
+                                #[cfg(feature = "telemetry")]
                                 log::info!(
                                     "peer_stats_export operator={:?} path={}",
                                     peer_ip,
-                                    path
+                                    _path
                                 );
                             } else {
+                                #[cfg(feature = "telemetry")]
                                 log::info!("peer_stats_export operator={:?}", peer_ip);
                             }
                         } else if method_str == "net.peer_stats_export_all" {
+                            #[cfg(feature = "telemetry")]
                             log::info!("peer_stats_export_all operator={:?}", peer_ip);
                         } else if method_str == "net.peer_throttle" {
-                            let clear = r
+                            let _clear = r
                                 .params
                                 .get("clear")
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(false);
-                            log::info!("peer_throttle operator={:?} clear={}", peer_ip, clear);
+                            #[cfg(feature = "telemetry")]
+                            log::info!("peer_throttle operator={:?} clear={}", peer_ip, _clear);
                         }
 
                         match dispatch(
@@ -1152,6 +1157,14 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             compute_market::job_requirements(job_id)
+        }
+        "compute.job_cancel" => {
+            let job_id = req
+                .params
+                .get("job_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            compute_market::job_cancel(job_id)
         }
         "stake.role" => pos::role(&req.params)?,
         "register_handle" => {

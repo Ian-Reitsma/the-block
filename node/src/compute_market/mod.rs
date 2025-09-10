@@ -305,6 +305,7 @@ impl Market {
             offer.price_per_unit,
             offer.reputation_multiplier,
         );
+        #[cfg(feature = "telemetry")]
         let effective = (offer.price_per_unit as f64 * offer.reputation_multiplier).round() as u64;
         #[cfg(feature = "telemetry")]
         telemetry::SCHEDULER_EFFECTIVE_PRICE
@@ -336,9 +337,16 @@ impl Market {
     }
 
     /// Cancel an in-flight job, returning both bonds.
-    pub fn cancel_job(&mut self, job_id: &str) -> Option<(u64, u64)> {
+    pub fn cancel_job(
+        &mut self,
+        job_id: &str,
+        reason: scheduler::CancelReason,
+    ) -> Option<(u64, u64)> {
         let state = self.jobs.remove(job_id)?;
-        scheduler::end_job(job_id);
+        courier::cancel_job(job_id);
+        scheduler::cancel_job(job_id, &state.provider, reason);
+        settlement::Settlement::accrue(&state.provider, "bond_refund", state.provider_bond);
+        settlement::Settlement::refund_split(&state.job.buyer, state.job.consumer_bond, 0);
         Some((state.provider_bond, state.job.consumer_bond))
     }
 
@@ -703,9 +711,75 @@ mod tests {
             .submit_job(job)
             .unwrap_or_else(|e| panic!("submit job: {e}"));
         let bonds = market
-            .cancel_job("j2")
+            .cancel_job("j2", scheduler::CancelReason::Client)
             .unwrap_or_else(|| panic!("cancel job"));
         assert_eq!(bonds, (1, 1));
+    }
+
+    #[test]
+    fn cancel_mid_execution_records_event() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var(
+            "TB_CANCEL_PATH",
+            tmp.path().join("cancel.log").to_str().unwrap(),
+        );
+        let mut market = Market::new();
+        let offer = Offer {
+            job_id: "cj".into(),
+            provider: "prov".into(),
+            provider_bond: 1,
+            consumer_bond: 1,
+            units: 2,
+            price_per_unit: 5,
+            fee_pct_ct: 100,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
+            reputation_multiplier: 1.0,
+        };
+        market
+            .post_offer(offer)
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
+        let mut h = Hasher::new();
+        h.update(b"a");
+        let hash = *h.finalize().as_bytes();
+        let job = Job {
+            job_id: "cj".into(),
+            buyer: "buyer".into(),
+            slices: vec![hash, hash],
+            price_per_unit: 5,
+            consumer_bond: 1,
+            workloads: vec![
+                Workload::Transcode(b"a".to_vec()),
+                Workload::Transcode(b"a".to_vec()),
+            ],
+            capability: scheduler::Capability::default(),
+            deadline: u64::MAX,
+            priority: scheduler::Priority::Normal,
+        };
+        market
+            .submit_job(job)
+            .unwrap_or_else(|e| panic!("submit job: {e}"));
+        let proof = SliceProof {
+            reference: hash,
+            output: hash,
+            payout: 5,
+        };
+        market
+            .submit_slice("cj", proof)
+            .unwrap_or_else(|e| panic!("submit slice: {e}"));
+        let bonds = market
+            .cancel_job("cj", scheduler::CancelReason::Client)
+            .unwrap_or_else(|| panic!("cancel"));
+        assert_eq!(bonds, (1, 1));
+        let log = std::fs::read_to_string(tmp.path().join("cancel.log")).unwrap();
+        assert!(log.contains("cj client"));
+        assert!(scheduler::job_requirements("cj").is_none());
+    }
+
+    #[test]
+    fn courier_cancel_stops_handoff() {
+        courier::cancel_job("c1");
+        assert!(courier::handoff_job("c1", "prov").is_err());
     }
 
     #[test]

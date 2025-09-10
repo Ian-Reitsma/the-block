@@ -18,6 +18,10 @@ reputation_gossip = true
 scheduler_metrics = true
 gateway_dns_allow_external = false
 
+[metrics_aggregator]
+url = "https://aggregator.local:9000"
+auth_token = "changeme"
+
 [compute_market]
 enable_preempt = false
 preempt_min_delta = 10

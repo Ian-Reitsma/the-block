@@ -2,8 +2,10 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 mod bridge;
+mod compute;
 mod dex;
 use bridge::BridgeCmd;
+use compute::ComputeCmd;
 use dex::DexCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 
@@ -49,6 +51,11 @@ enum Commands {
         #[command(subcommand)]
         action: DexCmd,
     },
+    /// Compute marketplace utilities
+    Compute {
+        #[command(subcommand)]
+        action: ComputeCmd,
+    },
 }
 
 fn main() {
@@ -89,5 +96,6 @@ fn main() {
         }
         Commands::Bridge { action } => bridge::handle(action),
         Commands::Dex { action } => dex::handle(action),
+        Commands::Compute { action } => compute::handle(action),
     }
 }

@@ -1551,6 +1551,12 @@ impl Blockchain {
         crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
         crate::net::set_metrics_export_dir(cfg.metrics_export_dir.clone());
         crate::net::set_peer_metrics_export_quota(cfg.peer_metrics_export_quota_bytes);
+        crate::net::set_metrics_aggregator(
+            cfg.metrics_aggregator.as_ref().map(|c| c.url.clone()),
+            cfg.metrics_aggregator
+                .as_ref()
+                .map(|c| c.auth_token.clone()),
+        );
         crate::net::set_track_drop_reasons(cfg.track_peer_drop_reasons);
         crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
         crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
@@ -2629,6 +2635,7 @@ impl Blockchain {
                         .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }
+            #[cfg(feature = "telemetry")]
             let tx_hash = tx.id();
             #[cfg(feature = "telemetry-json")]
             log_event(
@@ -2658,6 +2665,7 @@ impl Blockchain {
         {
             self.dec_mempool_size(entry.tx.lane);
             let tx = entry.tx;
+            #[cfg(feature = "telemetry")]
             let tx_hash = tx.id();
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =

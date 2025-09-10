@@ -42,6 +42,71 @@ and `kill_switch_trigger_total` so operators can correlate reward shifts with
 governance interventions. After running a monitor command, open Grafana and
 import `monitoring/grafana/dashboard.json` to explore the live panels.
 
+### Cluster-wide peer metrics
+
+Nodes can push their per-peer statistics to an external
+`metrics-aggregator` service for fleet-level visibility.
+
+#### Configuration
+
+Set the `metrics_aggregator` section in `config.toml` with the aggregator `url`
+and shared `auth_token`. Additional environment variables tune persistence:
+
+- `AGGREGATOR_DB` — path to the SQLite snapshot (default: `./aggregator.db`).
+- `AGGREGATOR_RETENTION_SECS` — prune entries older than this many seconds
+  (default: `604800` for 7 days).
+
+Enable TLS by supplying `--tls-cert` and `--tls-key` files when starting the
+aggregator. Nodes verify the certificate via the standard Rustls store.
+Token-based auth uses the `auth_token`; rotate it periodically and restart
+nodes to pick up the new value.
+
+#### Behaviour and resilience
+
+If the aggregator restarts or becomes unreachable, nodes queue updates
+in memory and retry with backoff until the service recovers. Aggregated
+snapshots deduplicate on peer ID so multiple nodes reporting the same
+peer collapse into a single record.
+
+#### Metrics and alerts
+
+The aggregator exposes Prometheus gauges `cluster_peer_active_total` and
+counters `aggregator_ingest_total`. Recommended scrape targets are both
+the aggregator itself and the node exporters. Alert when
+`cluster_peer_active_total` drops unexpectedly or when
+`aggregator_ingest_total` stops increasing.
+
+#### Threat model
+
+Attackers may attempt auth token reuse, replay submissions, or file-path
+traversal via `AGGREGATOR_DB`. Restrict token scope, use TLS, and run the
+service under a dedicated user with confined file permissions.
+
+#### Deployment
+
+`deploy/metrics-aggregator.yaml` ships a Kubernetes manifest that mounts the
+database path and injects secrets for TLS keys and auth tokens.
+
+#### Quick start
+
+1. Launch the aggregator:
+   ```bash
+   AGGREGATOR_DB=/var/lib/tb/aggregator.db \
+   metrics-aggregator --auth-token $TOKEN
+   ```
+2. Point a node to it by setting `metrics_aggregator.url` and
+   `metrics_aggregator.auth_token` in `config.toml`.
+3. Verify ingestion by hitting `http://aggregator:9300/metrics` and
+   looking for `aggregator_ingest_total`.
+
+#### Troubleshooting
+
+| Status/Log message | Meaning | Fix |
+| --- | --- | --- |
+| `401 unauthorized` | Bad `auth_token` | Rotate token on both node and service |
+| `503 unavailable` | Aggregator down | Node will retry; check service logs |
+| `db_locked` in logs | SQLite busy | Place DB on faster disk or increase backoff |
+
 Operators can clone the dashboard JSON and add environment-specific panels—for
 example, graphing `subsidy_bytes_total{type="storage"}` per account or plotting
 `rent_escrow_burned_ct_total` over time to spot churn. Exported JSONs should be
