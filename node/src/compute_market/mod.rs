@@ -19,6 +19,14 @@ pub mod workloads;
 
 pub use errors::MarketError;
 
+/// Supported specialised accelerators.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Accelerator {
+    Fpga,
+    Tpu,
+}
+
 /// Minimum bond required on each side of a compute offer.
 pub const MIN_BOND: u64 = 1;
 
@@ -64,6 +72,9 @@ impl Offer {
         }
         if !scheduler::validate_multiplier(self.reputation_multiplier) {
             return Err("invalid reputation multiplier");
+        }
+        if let Err(e) = self.capability.validate() {
+            return Err(e);
         }
         Ok(())
     }
@@ -360,6 +371,11 @@ impl Market {
             .as_secs();
         if now > state.job.deadline {
             scheduler::record_failure(&state.provider);
+            if state.job.capability.accelerator.is_some() {
+                scheduler::record_accelerator_failure(&state.provider);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+            }
             let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
             self.jobs.remove(job_id);
             scheduler::end_job(job_id);
@@ -375,15 +391,30 @@ impl Market {
             .ok_or("no such slice")?;
         if &proof.reference != expected_ref {
             scheduler::record_failure(&state.provider);
+            if state.job.capability.accelerator.is_some() {
+                scheduler::record_accelerator_failure(&state.provider);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+            }
             return Err("reference mismatch");
         }
         if !proof.verify() {
             scheduler::record_failure(&state.provider);
+            if state.job.capability.accelerator.is_some() {
+                scheduler::record_accelerator_failure(&state.provider);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+            }
             return Err("invalid proof");
         }
         let slice_units = state.job.workloads[state.paid_slices].units();
         if proof.payout != slice_units * state.price_per_unit {
             scheduler::record_failure(&state.provider);
+            if state.job.capability.accelerator.is_some() {
+                scheduler::record_accelerator_failure(&state.provider);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+            }
             return Err("payout mismatch");
         }
         #[cfg(feature = "telemetry")]
@@ -400,9 +431,17 @@ impl Market {
         let state = self.jobs.get(job_id)?;
         if !state.completed {
             scheduler::record_failure(&state.provider);
+            if state.job.capability.accelerator.is_some() {
+                scheduler::record_accelerator_failure(&state.provider);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+            }
             return None;
         }
         scheduler::record_success(&state.provider);
+        if state.job.capability.accelerator.is_some() {
+            scheduler::record_accelerator_success(&state.provider);
+        }
         let provider_bond = state.provider_bond;
         let consumer_bond = state.job.consumer_bond;
         self.jobs.remove(job_id);

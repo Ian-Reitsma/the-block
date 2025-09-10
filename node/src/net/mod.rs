@@ -3,6 +3,7 @@ pub mod ban_store;
 pub mod discovery;
 mod message;
 pub mod peer;
+pub mod peer_metrics_store;
 #[cfg(feature = "quic")]
 pub mod quic;
 #[cfg(not(feature = "quic"))]
@@ -32,12 +33,13 @@ use std::thread;
 use std::time::Duration;
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
-pub use message::{BlobChunk, Message, Payload, ReputationGossip};
+pub use message::{BlobChunk, Message, Payload};
+pub use peer::ReputationUpdate;
 pub use peer::{
     clear_peer_metrics, clear_throttle, export_all_peer_stats, export_peer_stats, known_peers,
     load_peer_metrics, p2p_max_bytes_per_sec, p2p_max_per_sec, peer_reputation_decay, peer_stats,
     peer_stats_all, peer_stats_map, persist_peer_metrics, record_request, reset_peer_metrics,
-    rotate_peer_key, set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
+    recent_handshake_failures, rotate_peer_key, set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
     set_p2p_max_bytes_per_sec, set_p2p_max_per_sec, set_peer_metrics_compress,
     set_peer_metrics_export, set_peer_metrics_export_quota, set_peer_metrics_path,
     set_peer_metrics_retention, set_peer_metrics_sample_rate, set_peer_reputation_decay,
@@ -47,12 +49,39 @@ pub use peer::{
 
 pub use peer::simulate_handshake_fail;
 
+/// Manually verify DNS TXT record for `domain`.
+pub fn dns_verify(domain: &str) -> serde_json::Value {
+    let v = crate::gateway::dns::dns_lookup(&serde_json::json!({ "domain": domain }));
+    let verified = v
+        .get("verified")
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false);
+    serde_json::json!({ "domain": domain, "verified": verified })
+}
+
 pub fn record_ip_drop(ip: &std::net::SocketAddr) {
     peer::record_ip_drop(ip);
 }
 
 /// Broadcast local reputation scores to known peers.
 pub fn reputation_sync() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST_SYNC: AtomicU64 = AtomicU64::new(0);
+    const MIN_INTERVAL: u64 = 5;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let last = LAST_SYNC.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < MIN_INTERVAL {
+        return;
+    }
+    if LAST_SYNC
+        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
     if !crate::compute_market::scheduler::reputation_gossip_enabled() {
         return;
     }
@@ -66,6 +95,14 @@ pub fn reputation_sync() {
     }
     let sk = load_net_key();
     turbine::broadcast_reputation(&entries, &sk, &peers);
+}
+
+/// Return current reputation score for `peer`.
+pub fn reputation_show(peer: &str) -> serde_json::Value {
+    serde_json::json!({
+        "peer": peer,
+        "score": crate::compute_market::scheduler::reputation_get(peer),
+    })
 }
 
 /// Current gossip protocol version.

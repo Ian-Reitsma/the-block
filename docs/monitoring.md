@@ -82,6 +82,13 @@ Attackers may attempt auth token reuse, replay submissions, or file-path
 traversal via `AGGREGATOR_DB`. Restrict token scope, use TLS, and run the
 service under a dedicated user with confined file permissions.
 
+Peer metrics exports sanitize relative paths, reject symlinks, and lock files during assembly to avoid race conditions. Only `.json`, `.json.gz`, or `.tar.gz` extensions are honored, and suspicious requests are logged with rate limiting. Disable exports entirely by setting `peer_metrics_export = false` in `config/default.toml` on sensitive nodes.
+
+Key rotations propagate through the same channel. After issuing `net rotate-key`,
+nodes increment `key_rotation_total` and persist the event to
+`state/peer_key_history.log` as well as the cluster-wide metrics aggregator.
+Old keys remain valid for five minutes to allow fleet convergence.
+
 #### Deployment
 
 `deploy/metrics-aggregator.yaml` ships a Kubernetes manifest that mounts the

@@ -78,6 +78,12 @@
     },
     {
       "deprecated": false,
+      "description": "Unix timestamp of the last successful config reload",
+      "labels": [],
+      "name": "config_reload_last_ts"
+    },
+    {
+      "deprecated": false,
       "description": "Configuration reload attempts grouped by result",
       "labels": [],
       "name": "config_reload_total"
@@ -129,6 +135,12 @@
       "description": "Number of difficulty retarget calculations",
       "labels": [],
       "name": "difficulty_retarget_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total DNS verification failures",
+      "labels": [],
+      "name": "dns_verification_fail_total"
     },
     {
       "deprecated": false,
@@ -334,6 +346,12 @@
     },
     {
       "deprecated": false,
+      "description": "Successful peer key rotations",
+      "labels": [],
+      "name": "key_rotation_total"
+    },
+    {
+      "deprecated": false,
       "description": "Times the subsidy kill switch was activated",
       "labels": [],
       "name": "kill_switch_trigger_total"
@@ -530,6 +548,12 @@
     },
     {
       "deprecated": false,
+      "description": "Total price entries adjusted by reputation weight",
+      "labels": [],
+      "name": "price_weight_applied_total"
+    },
+    {
+      "deprecated": false,
       "description": "Current reputation score per provider",
       "labels": [],
       "name": "provider_reputation_score"
@@ -568,8 +592,10 @@
     },
     {
       "deprecated": false,
-      "description": "Total QUIC handshake failures",
-      "labels": [],
+      "description": "Total QUIC handshake failures by reason",
+      "labels": [
+        "reason"
+      ],
       "name": "quic_handshake_fail_total"
     },
     {
@@ -620,6 +646,18 @@
     },
     {
       "deprecated": false,
+      "description": "Reputation updates that failed verification or were stale",
+      "labels": [],
+      "name": "reputation_gossip_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Propagation latency for reputation updates",
+      "labels": [],
+      "name": "reputation_gossip_latency_seconds"
+    },
+    {
+      "deprecated": false,
       "description": "Reputation gossip updates processed grouped by result",
       "labels": [],
       "name": "reputation_gossip_total"
@@ -656,9 +694,21 @@
     },
     {
       "deprecated": false,
+      "description": "Accelerator jobs that failed or were cancelled",
+      "labels": [],
+      "name": "scheduler_accelerator_fail_total"
+    },
+    {
+      "deprecated": false,
       "description": "Jobs requiring accelerators that could not be matched",
       "labels": [],
       "name": "scheduler_accelerator_miss_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Jobs requiring accelerators that started successfully",
+      "labels": [],
+      "name": "scheduler_accelerator_util_total"
     },
     {
       "deprecated": false,
@@ -905,6 +955,12 @@
       "description": "WAL entries skipped due to checksum mismatch",
       "labels": [],
       "name": "wal_corrupt_recovery_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Telemetry memory allocation in bytes",
+      "labels": [],
+      "name": "telemetry_alloc_bytes"
     }
   ]
 }

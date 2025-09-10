@@ -1,4 +1,5 @@
 use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
+use crate::net::peer::ReputationUpdate;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
@@ -46,7 +47,7 @@ pub enum Payload {
     /// Disseminate a single erasure-coded shard of a blob.
     BlobChunk(BlobChunk),
     /// Propagate provider reputation scores.
-    Reputation(Vec<ReputationGossip>),
+    Reputation(Vec<ReputationUpdate>),
 }
 
 /// Individual erasure-coded shard associated with a blob root.
@@ -62,16 +63,7 @@ pub struct BlobChunk {
     pub data: Vec<u8>,
 }
 
-/// Reputation gossip payload.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ReputationGossip {
-    /// Provider identifier being scored.
-    pub provider_id: String,
-    /// Reputation score for the provider.
-    pub reputation_score: i64,
-    /// Epoch the score was computed in.
-    pub epoch: u64,
-}
+// ReputationUpdate defined in peer.rs
 
 /// Attempt to decode a [`Message`] from raw bytes.
 #[cfg(feature = "fuzzy")]

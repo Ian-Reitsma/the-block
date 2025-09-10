@@ -133,6 +133,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static HANDOFF_FAIL: AtomicBool = AtomicBool::new(false);
 static CANCELED: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static HALTED: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
 pub fn handoff_job(job_id: &str, new_provider: &str) -> Result<(), &'static str> {
     if HANDOFF_FAIL.load(Ordering::Relaxed) {
@@ -161,4 +162,18 @@ pub fn cancel_job(job_id: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(job_id.to_owned());
+}
+
+pub fn halt_job(job_id: &str) {
+    HALTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(job_id.to_owned());
+}
+
+pub fn was_halted(job_id: &str) -> bool {
+    HALTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(job_id)
 }

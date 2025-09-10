@@ -33,6 +33,10 @@ tar -xzf node-<ver>-x86_64.tar.gz -C ~/.block
 ~/.block/node --datadir ~/.block/datadir --config ~/.block/config.toml
 ```
 
+## Config reload
+
+The node watches `config/default.toml` for changes and reloads rate-limit and reputation settings without restart. Trigger a manual reload with `config reload` from the CLI. Successful reloads increment `config_reload_total{result="ok"}` and update `config_reload_last_ts`; malformed files are logged and ignored.
+
 Bond CT for a service role once the node is running:
 
 ```sh

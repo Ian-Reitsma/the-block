@@ -11,12 +11,13 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
 };
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use tracing::warn;
 
 #[cfg(feature = "telemetry")]
-use crate::telemetry::GATEWAY_DNS_LOOKUP_TOTAL;
+use crate::telemetry::{GATEWAY_DNS_LOOKUP_TOTAL, DNS_VERIFICATION_FAIL_TOTAL};
 use trust_dns_resolver::{config::*, Resolver};
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
@@ -25,6 +26,7 @@ static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
 });
 
 static ALLOW_EXTERNAL: AtomicBool = AtomicBool::new(false);
+static DISABLE_VERIFY: AtomicBool = AtomicBool::new(false);
 const VERIFY_TTL: Duration = Duration::from_secs(3600);
 
 type TxtResolver = Box<dyn Fn(&str) -> Vec<String> + Send + Sync>;
@@ -34,24 +36,32 @@ static VERIFY_CACHE: Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn default_txt_resolver(domain: &str) -> Vec<String> {
-    Resolver::new(ResolverConfig::default(), ResolverOpts::default())
-        .ok()
-        .and_then(|r| r.txt_lookup(domain).ok())
-        .map(|lookup| {
-            lookup
-                .iter()
-                .flat_map(|r| {
-                    r.txt_data()
-                        .iter()
-                        .filter_map(|d| std::str::from_utf8(d).ok().map(|s| s.to_string()))
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let mut delay = Duration::from_millis(100);
+    for _ in 0..3 {
+        if let Ok(r) = Resolver::new(ResolverConfig::default(), ResolverOpts::default()) {
+            if let Ok(lookup) = r.txt_lookup(domain) {
+                return lookup
+                    .iter()
+                    .flat_map(|r| {
+                        r.txt_data()
+                            .iter()
+                            .filter_map(|d| std::str::from_utf8(d).ok().map(|s| s.to_string()))
+                    })
+                    .collect();
+            }
+        }
+        thread::sleep(delay);
+        delay *= 2;
+    }
+    Vec::new()
 }
 
 pub fn set_allow_external(val: bool) {
     ALLOW_EXTERNAL.store(val, Ordering::Relaxed);
+}
+
+pub fn set_disable_verify(val: bool) {
+    DISABLE_VERIFY.store(val, Ordering::Relaxed);
 }
 
 pub fn set_txt_resolver<F>(f: F)
@@ -110,15 +120,19 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
     Ok(serde_json::json!({"status":"ok"}))
 }
 
-fn verify_domain(domain: &str, pk_hex: &str) -> bool {
+pub fn verify_txt(domain: &str, node_id: &str) -> bool {
+    if DISABLE_VERIFY.load(Ordering::Relaxed) {
+        return true;
+    }
     if domain.ends_with(".block") {
         return true;
     }
     if !ALLOW_EXTERNAL.load(Ordering::Relaxed) {
         return false;
     }
+    let key = format!("{}:{}", domain, node_id);
     let now = Instant::now();
-    if let Some((ok, ts)) = VERIFY_CACHE.lock().unwrap().get(domain) {
+    if let Some((ok, ts)) = VERIFY_CACHE.lock().unwrap().get(&key) {
         if now.duration_since(*ts) < VERIFY_TTL {
             return *ok;
         }
@@ -127,15 +141,19 @@ fn verify_domain(domain: &str, pk_hex: &str) -> bool {
         let resolver = TXT_RESOLVER.lock().unwrap();
         resolver(domain)
     };
-    let ok = txts.iter().any(|t| t.contains(pk_hex));
+    let needle = format!("tb-verification={}", node_id);
+    let ok = txts.iter().any(|t| t.contains(&needle));
     VERIFY_CACHE
         .lock()
         .unwrap()
-        .insert(domain.to_string(), (ok, now));
+        .insert(key, (ok, now));
     #[cfg(feature = "telemetry")]
     {
         let status = if ok { "verified" } else { "rejected" };
         GATEWAY_DNS_LOOKUP_TOTAL.with_label_values(&[status]).inc();
+        if !ok {
+            DNS_VERIFICATION_FAIL_TOTAL.inc();
+        }
     }
     if !ok {
         #[cfg(feature = "telemetry")]
@@ -154,7 +172,7 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
                 .get(&format!("dns_keys/{}", domain))
                 .and_then(|v| String::from_utf8(v).ok())
                 .unwrap_or_default();
-            if verify_domain(domain, &pk) {
+            if verify_txt(domain, &pk) {
                 let reads_key = format!("dns_reads/{}", domain);
                 let last_key = format!("dns_last/{}", domain);
                 let mut reads = db
@@ -203,7 +221,7 @@ pub fn dns_lookup(params: &Value) -> serde_json::Value {
         .unwrap_or_default();
     let verified = txt
         .as_ref()
-        .map(|_| verify_domain(domain, &pk))
+        .map(|_| verify_txt(domain, &pk))
         .unwrap_or(false);
     serde_json::json!({"record": txt, "verified": verified})
 }

@@ -4,9 +4,15 @@ use std::path::PathBuf;
 mod bridge;
 mod compute;
 mod dex;
+mod net;
+mod config;
+mod telemetry;
 use bridge::BridgeCmd;
 use compute::ComputeCmd;
 use dex::DexCmd;
+use net::NetCmd;
+use config::ConfigCmd;
+use telemetry::TelemetryCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 
 #[derive(Parser)]
@@ -56,6 +62,21 @@ enum Commands {
         #[command(subcommand)]
         action: ComputeCmd,
     },
+    /// Networking utilities
+    Net {
+        #[command(subcommand)]
+        action: NetCmd,
+    },
+    /// Config utilities
+    Config {
+        #[command(subcommand)]
+        action: ConfigCmd,
+    },
+    /// Telemetry diagnostics
+    Telemetry {
+        #[command(subcommand)]
+        action: TelemetryCmd,
+    },
 }
 
 fn main() {
@@ -97,5 +118,8 @@ fn main() {
         Commands::Bridge { action } => bridge::handle(action),
         Commands::Dex { action } => dex::handle(action),
         Commands::Compute { action } => compute::handle(action),
+        Commands::Net { action } => net::handle(action),
+        Commands::Config { action } => config::handle(action),
+        Commands::Telemetry { action } => telemetry::handle(action),
     }
 }

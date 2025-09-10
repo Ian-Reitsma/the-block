@@ -1,10 +1,9 @@
-.PHONY: lint gen schema
+.PHONY: lint dashboard
 
-schema:
-	./tools/gen_schema.py
+dashboard:
+	cargo build --manifest-path Cargo.toml >/dev/null
+	jq -e . grafana/dashboard.json >/dev/null
 
-gen: schema
-	./tools/gen_dashboard.py
-
-lint: gen
+lint: dashboard
 	npx jsonnet-lint grafana/dashboard.json
+

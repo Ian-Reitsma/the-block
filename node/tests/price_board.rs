@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 #[cfg(feature = "test-telemetry")]
 use the_block::compute_market::price_board::init_with_clock;
-use the_block::compute_market::price_board::{backlog_adjusted_bid, bands, record_price, reset};
+use the_block::compute_market::price_board::{backlog_adjusted_bid, bands, raw_bands, record_price, reset};
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use the_block::compute_market::price_board::{init, persist, reset_path_for_test};
 use the_block::transaction::FeeLane;
@@ -30,6 +30,17 @@ fn computes_bands() {
     assert_eq!(b.0, 2);
     assert_eq!(b.1, 3);
     assert_eq!(b.2, 4);
+}
+
+#[test]
+#[serial]
+fn records_weighted_prices() {
+    reset();
+    record_price(FeeLane::Consumer, 100, 0.5);
+    let w = bands(FeeLane::Consumer).unwrap().1;
+    let r = raw_bands(FeeLane::Consumer).unwrap().1;
+    assert_eq!(r, 100);
+    assert_eq!(w, 50);
 }
 
 #[test]

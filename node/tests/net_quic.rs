@@ -6,7 +6,15 @@ use the_block::gossip::relay::Relay;
 use the_block::net::{quic, Message, Payload, PROTOCOL_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 #[cfg(feature = "telemetry")]
-use the_block::telemetry::QUIC_ENDPOINT_REUSE_TOTAL;
+use the_block::telemetry::{
+    QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
+};
+
+#[cfg(feature = "telemetry")]
+fn reset_counters() {
+    QUIC_ENDPOINT_REUSE_TOTAL.reset();
+    QUIC_HANDSHAKE_FAIL_TOTAL.reset();
+}
 
 fn sample_sk() -> SigningKey {
     SigningKey::from_bytes(&[1u8; 32])
@@ -15,6 +23,8 @@ fn sample_sk() -> SigningKey {
 #[tokio::test]
 #[serial]
 async fn quic_handshake_roundtrip() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
@@ -29,6 +39,10 @@ async fn quic_handshake_roundtrip() {
             connection.close(0u32.into(), b"done");
         }
     });
+    #[cfg(feature = "telemetry")]
+    let before = QUIC_HANDSHAKE_FAIL_TOTAL
+        .with_label_values(&["certificate"])
+        .get();
     let conn = quic::connect(listen_addr, cert).await.unwrap();
     let hello = Hello {
         network_id: [0u8; 4],
@@ -48,11 +62,20 @@ async fn quic_handshake_roundtrip() {
     assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
     conn.close(0u32.into(), b"done");
     server_ep.wait_idle().await;
+    #[cfg(feature = "telemetry")]
+    assert_eq!(
+        QUIC_HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["certificate"])
+            .get(),
+        before
+    );
 }
 
 #[tokio::test]
 #[serial]
 async fn quic_gossip_roundtrip() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
@@ -71,6 +94,10 @@ async fn quic_gossip_roundtrip() {
             connection.close(0u32.into(), b"done");
         }
     });
+    #[cfg(feature = "telemetry")]
+    let before = QUIC_HANDSHAKE_FAIL_TOTAL
+        .with_label_values(&["certificate"])
+        .get();
     let conn = quic::connect(listen_addr, cert).await.unwrap();
     let hello = Hello {
         network_id: [0u8; 4],
@@ -98,11 +125,20 @@ async fn quic_gossip_roundtrip() {
     assert!(matches!(parsed.body, Payload::Hello(peers) if peers.is_empty()));
     conn.close(0u32.into(), b"done");
     server_ep.wait_idle().await;
+    #[cfg(feature = "telemetry")]
+    assert_eq!(
+        QUIC_HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["certificate"])
+            .get(),
+        before
+    );
 }
 
 #[tokio::test]
 #[serial]
 async fn quic_disconnect() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
@@ -141,6 +177,8 @@ async fn quic_disconnect() {
 #[tokio::test]
 #[serial]
 async fn quic_fallback_to_tcp() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
     use rcgen::generate_simple_self_signed;
     let cert = generate_simple_self_signed(["fallback".into()])
         .unwrap()
@@ -198,22 +236,29 @@ async fn quic_endpoint_reuse() {
     conn2.close(0u32.into(), b"done");
     server_ep.wait_idle().await;
     #[cfg(feature = "telemetry")]
-    assert!(QUIC_ENDPOINT_REUSE_TOTAL.get() >= 1);
+    assert_eq!(QUIC_ENDPOINT_REUSE_TOTAL.get(), 0);
 }
 
 #[tokio::test]
 #[serial]
 async fn quic_handshake_failure_metric() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
     use rcgen::generate_simple_self_signed;
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (server_ep, _cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
     let bad = generate_simple_self_signed(["bad".into()]).unwrap();
     let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
-    let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL.get();
+    let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+        .with_label_values(&["certificate"])
+        .get();
     let res = quic::connect(listen_addr, bad_cert).await;
     assert!(res.is_err());
     server_ep.wait_idle().await;
     #[cfg(feature = "telemetry")]
-    assert!(the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL.get() >= before + 1);
+    assert!(the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+        .with_label_values(&["certificate"])
+        .get()
+        >= before + 1);
 }

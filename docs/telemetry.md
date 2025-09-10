@@ -40,6 +40,7 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `scheduler_preempt_total{reason}` counts job preemption attempts (success or handoff_failed)
 - `scheduler_cancel_total{reason}` counts job cancellations (client, provider, preempted)
 - `scheduler_effective_price{provider}` gauges the latest effective price per unit by provider
+- `price_weight_applied_total` tracks how often reputation weighting adjusted a quoted price
 - `scheduler_priority_miss_total` counts high-priority jobs that waited past the
   scheduler's aging threshold
 
@@ -168,4 +169,21 @@ Import it via the Grafana UI or with `make monitor`.
 Remote signer requests emit per-call trace IDs and increment
 `remote_signer_failure_total` on errors so operators can alert on signer
 availability.
+
+### Sampling and Compaction
+
+High‑volume counters can be probabilistically sampled to reduce memory
+pressure. Configure the global sampling rate with
+`telemetry.sample_rate` in `config/default.toml` (1.0 disables
+sampling). Sampled counters scale their increments to preserve expected
+totals, while histograms simply drop unsampled observations.
+
+Histograms registered for compaction are periodically reset according
+to `telemetry.compaction_secs`. Compaction frees internal buckets while
+retaining new data. The current telemetry allocation can be inspected
+via `cli telemetry dump`, and is exported as the
+`telemetry_alloc_bytes` gauge.
+
+Sampling trades precision for lower memory usage; operators requiring
+exact counts should keep the sample rate at `1.0`.
 

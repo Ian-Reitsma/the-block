@@ -8,8 +8,7 @@ use signal_hook::consts::signal::SIGHUP;
 use signal_hook::iterator::Signals;
 use std::fs;
 use std::path::Path;
-use std::sync::mpsc::channel;
-use std::sync::RwLock;
+use std::sync::{mpsc::channel, Arc, RwLock};
 use std::thread;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -29,6 +28,8 @@ pub struct NodeConfig {
     pub peer_metrics_export: bool,
     #[serde(default = "default_peer_metrics_path")]
     pub peer_metrics_path: String,
+    #[serde(default = "default_peer_metrics_db")]
+    pub peer_metrics_db: String,
     #[serde(default = "default_peer_metrics_retention")]
     pub peer_metrics_retention: u64,
     #[serde(default)]
@@ -61,10 +62,14 @@ pub struct NodeConfig {
     pub scheduler_metrics: bool,
     #[serde(default = "default_false")]
     pub gateway_dns_allow_external: bool,
+    #[serde(default = "default_false")]
+    pub gateway_dns_disable_verify: bool,
     #[serde(default)]
     pub lighthouse: LighthouseConfig,
     #[serde(default)]
     pub quic: Option<QuicConfig>,
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
 }
 
 impl Default for NodeConfig {
@@ -80,6 +85,7 @@ impl Default for NodeConfig {
             max_peer_metrics: default_max_peer_metrics(),
             peer_metrics_export: default_true(),
             peer_metrics_path: default_peer_metrics_path(),
+            peer_metrics_db: default_peer_metrics_db(),
             peer_metrics_retention: default_peer_metrics_retention(),
             peer_metrics_compress: false,
             peer_metrics_sample_rate: default_peer_metrics_sample_rate(),
@@ -96,8 +102,27 @@ impl Default for NodeConfig {
             reputation_gossip: default_true(),
             scheduler_metrics: default_true(),
             gateway_dns_allow_external: default_false(),
+            gateway_dns_disable_verify: default_false(),
             lighthouse: LighthouseConfig::default(),
             quic: None,
+            telemetry: TelemetryConfig::default(),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct TelemetryConfig {
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: f64,
+    #[serde(default = "default_compaction_secs")]
+    pub compaction_secs: u64,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate: default_sample_rate(),
+            compaction_secs: default_compaction_secs(),
         }
     }
 }
@@ -110,6 +135,40 @@ pub struct AggregatorConfig {
 
 static CONFIG_DIR: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
 static CURRENT_CONFIG: Lazy<RwLock<NodeConfig>> = Lazy::new(|| RwLock::new(NodeConfig::default()));
+#[derive(Clone)]
+pub struct RateLimitConfig {
+    pub p2p_max_per_sec: u32,
+    pub p2p_max_bytes_per_sec: u64,
+}
+#[derive(Clone)]
+pub struct ReputationConfig {
+    pub peer_reputation_decay: f64,
+    pub provider_reputation_decay: f64,
+    pub provider_reputation_retention: u64,
+}
+static RATE_LIMIT_CFG: Lazy<Arc<RwLock<RateLimitConfig>>> = Lazy::new(|| {
+    let cfg = NodeConfig::default();
+    Arc::new(RwLock::new(RateLimitConfig {
+        p2p_max_per_sec: cfg.p2p_max_per_sec,
+        p2p_max_bytes_per_sec: cfg.p2p_max_bytes_per_sec,
+    }))
+});
+static REPUTATION_CFG: Lazy<Arc<RwLock<ReputationConfig>>> = Lazy::new(|| {
+    let cfg = NodeConfig::default();
+    Arc::new(RwLock::new(ReputationConfig {
+        peer_reputation_decay: cfg.peer_reputation_decay,
+        provider_reputation_decay: cfg.provider_reputation_decay,
+        provider_reputation_retention: cfg.provider_reputation_retention,
+    }))
+});
+
+pub fn rate_limit_cfg() -> Arc<RwLock<RateLimitConfig>> {
+    Arc::clone(&RATE_LIMIT_CFG)
+}
+
+pub fn reputation_cfg() -> Arc<RwLock<ReputationConfig>> {
+    Arc::clone(&REPUTATION_CFG)
+}
 
 fn default_max_peer_metrics() -> usize {
     1024
@@ -159,6 +218,10 @@ fn default_peer_metrics_sample_rate() -> u32 {
     1
 }
 
+fn default_peer_metrics_db() -> String {
+    std::env::var("PEER_METRICS_DB").unwrap_or_else(|_| "state/peer_metrics.db".into())
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComputeMarketConfig {
     pub settle_mode: crate::compute_market::settlement::SettleMode,
@@ -202,6 +265,14 @@ impl Default for ComputeMarketConfig {
 
 fn default_false() -> bool {
     false
+}
+
+fn default_sample_rate() -> f64 {
+    1.0
+}
+
+fn default_compaction_secs() -> u64 {
+    60
 }
 
 fn default_preempt_min_delta() -> i64 {
@@ -258,7 +329,7 @@ impl Default for RpcConfig {
 
 impl NodeConfig {
     pub fn load(dir: &str) -> Self {
-        let path = format!("{}/config.toml", dir);
+        let path = format!("{}/default.toml", dir);
         fs::read_to_string(&path)
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
@@ -271,7 +342,7 @@ impl NodeConfig {
 
     pub fn save(&self, dir: &str) -> std::io::Result<()> {
         fs::create_dir_all(dir)?;
-        let path = format!("{}/config.toml", dir);
+        let path = format!("{}/default.toml", dir);
         let data =
             toml::to_string(self).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         fs::write(path, data)
@@ -279,12 +350,23 @@ impl NodeConfig {
 }
 
 fn load_file(dir: &str) -> Result<NodeConfig> {
-    let path = format!("{}/config.toml", dir);
+    let path = format!("{}/default.toml", dir);
     let data = fs::read_to_string(&path)?;
     Ok(toml::from_str(&data)?)
 }
 
 fn apply(cfg: &NodeConfig) {
+    {
+        let mut rl = RATE_LIMIT_CFG.write().unwrap();
+        rl.p2p_max_per_sec = cfg.p2p_max_per_sec;
+        rl.p2p_max_bytes_per_sec = cfg.p2p_max_bytes_per_sec;
+    }
+    {
+        let mut rep = REPUTATION_CFG.write().unwrap();
+        rep.peer_reputation_decay = cfg.peer_reputation_decay;
+        rep.provider_reputation_decay = cfg.provider_reputation_decay;
+        rep.provider_reputation_retention = cfg.provider_reputation_retention;
+    }
     crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
     crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
@@ -294,12 +376,21 @@ fn apply(cfg: &NodeConfig) {
     );
     crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
     crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
+    crate::net::set_peer_metrics_export(cfg.peer_metrics_export);
+    crate::net::peer_metrics_store::init(&cfg.peer_metrics_db);
     crate::net::set_metrics_aggregator(
         cfg.metrics_aggregator.as_ref().map(|c| c.url.clone()),
         cfg.metrics_aggregator
             .as_ref()
             .map(|c| c.auth_token.clone()),
     );
+    crate::gateway::dns::set_allow_external(cfg.gateway_dns_allow_external);
+    crate::gateway::dns::set_disable_verify(cfg.gateway_dns_disable_verify);
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::set_sample_rate(cfg.telemetry.sample_rate);
+        crate::telemetry::set_compaction_interval(cfg.telemetry.compaction_secs);
+    }
 }
 
 pub fn reload() -> bool {
@@ -312,7 +403,14 @@ pub fn reload() -> bool {
             apply(&cfg);
             *CURRENT_CONFIG.write().unwrap() = cfg;
             #[cfg(feature = "telemetry")]
-            CONFIG_RELOAD_TOTAL.with_label_values(&["ok"]).inc();
+            {
+                CONFIG_RELOAD_TOTAL.with_label_values(&["ok"]).inc();
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                crate::telemetry::CONFIG_RELOAD_LAST_TS.set(ts);
+            }
             true
         }
         Err(e) => {
@@ -336,7 +434,7 @@ pub fn watch(dir: &str) {
     thread::spawn(move || {
         let (tx, rx) = channel();
         let mut watcher: RecommendedWatcher = notify::recommended_watcher(tx).expect("watcher");
-        let path = Path::new(&cfg_dir).join("config.toml");
+        let path = Path::new(&cfg_dir).join("default.toml");
         watcher
             .watch(&path, RecursiveMode::NonRecursive)
             .expect("watch config");

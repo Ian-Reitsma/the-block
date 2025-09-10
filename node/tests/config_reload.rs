@@ -1,7 +1,7 @@
 use serial_test::serial;
 use tempfile::tempdir;
 use the_block::{
-    config::{set_current, watch, NodeConfig},
+    config::{set_current, watch, NodeConfig, rate_limit_cfg, reputation_cfg},
     net::{p2p_max_per_sec, peer_reputation_decay, set_p2p_max_per_sec, set_peer_reputation_decay},
 };
 
@@ -26,6 +26,8 @@ fn reload_updates_limits() {
     the_block::config::reload();
     assert_eq!(p2p_max_per_sec(), 5);
     assert!((peer_reputation_decay() - 0.5).abs() < 1e-6);
+    assert_eq!(rate_limit_cfg().read().unwrap().p2p_max_per_sec, 5);
+    assert!((reputation_cfg().read().unwrap().peer_reputation_decay - 0.5).abs() < 1e-6);
     // cleanup defaults
     set_p2p_max_per_sec(100);
     set_peer_reputation_decay(0.01);

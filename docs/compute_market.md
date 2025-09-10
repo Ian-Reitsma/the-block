@@ -125,7 +125,8 @@ triggered with `net reputation sync`, which broadcasts the current snapshot to
 known peers. Incoming entries replace local scores only if their epoch is
 greater than the stored value and the score lies within `[-1000,1000]`. The
 `reputation_gossip_total{result="applied|ignored"}` counter tracks update
-processing. Set `reputation_gossip = false` in `config.toml` to opt out of the
+processing alongside `reputation_gossip_latency_seconds` and
+`reputation_gossip_fail_total`. Set `reputation_gossip = false` in `config.toml` to opt out of the
 protocol.
 
 ### Preemption
@@ -138,6 +139,11 @@ via the courier. Successful migrations increment
 `scheduler_preempt_total{reason="handoff_failed"}` and leave the original
 assignment intact. Preemption counts are exposed through the
 `compute_market.scheduler_stats` RPC.
+
+Preemption decreases the displaced provider's reputation and logs the event in
+`cancellations.log` with reason `preempted`. The CLI lists these using
+`tb-cli compute list --preempted`. Resources on the old node are halted before
+handoff to avoid double execution.
 
 ### Cancellations
 
@@ -167,6 +173,20 @@ Attempting to cancel a completed job returns:
 ```text
 job already completed
 ```
+
+### Reputation Weighting
+
+Providers advertise a base price per compute unit. A reputation-derived weight
+`w`, clamped within configured bounds, adjusts the price to reward reliable
+participants:
+
+```
+effective_price = base_price * w
+```
+
+Weighted and raw median prices surface via `compute_market.stats` under
+`industrial_price_weighted` and `industrial_price_base`. Each adjusted entry
+increments the `price_weight_applied_total` counter.
 
 Exit code `0` indicates success; non-zero codes map to `not_found` or
 `already_done` errors. Refunds surface in `compute_market_fee_split`
@@ -210,8 +230,8 @@ implementation simply hashes the contents with BLAKE3. Sample slice files and a
 `generate_slice.py` helper live under `examples/workloads/`.
 
 `gpu_inference.json` demonstrates requesting an RTX4090-capable provider with 16 GB of VRAM. Additional examples illustrate a
-CPU-only task (`cpu_only.json`), a multi-GPU request (`multi_gpu.json`), and an
-accelerator-driven workload (`tpu_inference.json`):
+CPU-only task (`cpu_only.json`), a multi-GPU request (`multi_gpu.json`), and
+accelerator-driven workloads (`tpu_inference.json`, `fpga_inference.json`):
 
 ```bash
 cat examples/workloads/gpu_inference.json
@@ -246,10 +266,13 @@ for observability.
 ### Accelerator Requests
 
 Jobs may request specialized accelerators such as TPUs or FPGAs. Providers
-advertise `accelerator` and `accelerator_memory_mb` in their capability
-descriptor. When a job's accelerator requirement cannot be met—either because no
-provider offers the requested model or available memory is insufficient—the
-`scheduler_accelerator_miss_total` counter increments to aid capacity planning.
+advertise an `accelerator` field taking `FPGA` or `TPU` plus
+`accelerator_memory_mb` in their capability descriptor. When a job's
+accelerator requirement cannot be met—either because no provider offers the
+requested model or available memory is insufficient—the
+`scheduler_accelerator_miss_total` counter increments. Successfully scheduled
+accelerator jobs bump `scheduler_accelerator_util_total` while failures or
+cancellations bump `scheduler_accelerator_fail_total`.
 
 Default reputation decay and retention values are configurable in
 `config/default.toml` via `provider_reputation_decay` and
