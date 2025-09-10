@@ -1,4 +1,6 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
+use colored::*;
 use ed25519_dalek::Signer;
 use hex;
 use reqwest::blocking::Client;
@@ -6,6 +8,12 @@ use serde_json::json;
 use std::time::Duration;
 use the_block::net::load_net_key;
 use tungstenite::{connect, protocol::Message as WsMessage};
+
+#[derive(Copy, Clone, ValueEnum)]
+enum OutputFormat {
+    Table,
+    Json,
+}
 
 #[derive(Parser)]
 #[command(author, version, about = "Network diagnostics utilities")]
@@ -49,6 +57,12 @@ enum Command {
         #[command(subcommand)]
         action: KeyCmd,
     },
+    /// Generate shell completions
+    Completions {
+        /// Shell type
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -66,6 +80,15 @@ enum StatsCmd {
         /// Pagination limit
         #[arg(long, default_value_t = 100)]
         limit: usize,
+        /// Output format
+        #[arg(long, value_enum, default_value = "table")]
+        format: OutputFormat,
+        /// Filter by drop reason
+        #[arg(long)]
+        drop_reason: Option<String>,
+        /// Minimum reputation to include
+        #[arg(long)]
+        min_reputation: Option<f64>,
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
@@ -193,6 +216,7 @@ fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, req
         .timeout(Duration::from_secs(5))
         .build()?
         .post(rpc)
+        .header(reqwest::header::HOST, "localhost")
         .header(reqwest::header::CONNECTION, "close")
         .json(&req)
         .send()?
@@ -208,50 +232,128 @@ fn main() {
                 all,
                 offset,
                 limit,
+                format,
+                drop_reason,
+                min_reputation,
                 rpc,
             } => {
+                const DROP_ALERT: f64 = 0.1;
                 if all {
-                    let req = json!({
-                        "method": "net.peer_stats_all",
-                        "params": {"offset": offset, "limit": limit},
-                    });
-                    match post_json(&rpc, req) {
-                        Ok(val) => {
-                            if let Some(arr) = val["result"].as_array() {
-                                for entry in arr {
-                                    let id = entry["peer_id"].as_str().unwrap_or("");
-                                    let m = &entry["metrics"];
-                                    let reqs = m["requests"].as_u64().unwrap_or(0);
-                                    let bytes = m["bytes_sent"].as_u64().unwrap_or(0);
-                                    let drops = m["drops"]
-                                        .as_object()
-                                        .map(|o| {
-                                            o.iter()
-                                                .map(|(k, v)| {
-                                                    format!("{k}:{}", v.as_u64().unwrap_or(0))
-                                                })
-                                                .collect::<Vec<_>>()
-                                                .join(",")
-                                        })
-                                        .unwrap_or_else(|| "".into());
-                                    let hf = m["handshake_fail"]
-                                        .as_object()
-                                        .map(|o| {
-                                            o.iter()
-                                                .map(|(k, v)| {
-                                                    format!("{k}:{}", v.as_u64().unwrap_or(0))
-                                                })
-                                                .collect::<Vec<_>>()
-                                                .join(",")
-                                        })
-                                        .unwrap_or_else(|| "".into());
-                                    println!(
-                                        "peer={id} requests={reqs} bytes_sent={bytes} drops={drops} handshake_fail={hf}"
-                                    );
+                    let mut off = offset;
+                    let mut total_req = 0u64;
+                    let mut total_bytes = 0u64;
+                    let mut total_drop = 0u64;
+                    let mut active = 0u64;
+                    let mut rows = Vec::new();
+                    loop {
+                        let req = json!({
+                            "method": "net.peer_stats_all",
+                            "params": {"offset": off, "limit": limit},
+                        });
+                        let val = match post_json(&rpc, req) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                eprintln!("request error: {e}");
+                                std::process::exit(1);
+                            }
+                        };
+                        let arr = val["result"].as_array().cloned().unwrap_or_default();
+                        if arr.is_empty() {
+                            break;
+                        }
+                        for entry in &arr {
+                            let id = entry["peer_id"].as_str().unwrap_or("").to_string();
+                            let m = &entry["metrics"];
+                            let rep = m["reputation"]["score"].as_f64().unwrap_or(0.0);
+                            if let Some(min) = min_reputation {
+                                if rep < min {
+                                    continue;
                                 }
                             }
+                            let drops_map = m["drops"].as_object();
+                            if let Some(reason) = &drop_reason {
+                                if drops_map
+                                    .and_then(|o| o.get(reason))
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0)
+                                    == 0
+                                {
+                                    continue;
+                                }
+                            }
+                            let reqs = m["requests"].as_u64().unwrap_or(0);
+                            let bytes = m["bytes_sent"].as_u64().unwrap_or(0);
+                            let drops_total = drops_map
+                                .map(|o| o.values().filter_map(|v| v.as_u64()).sum())
+                                .unwrap_or(0);
+                            if reqs > 0 {
+                                active += 1;
+                            }
+                            total_req += reqs;
+                            total_bytes += bytes;
+                            total_drop += drops_total;
+                            rows.push(json!({
+                                "peer": id,
+                                "requests": reqs,
+                                "bytes_sent": bytes,
+                                "drops": drops_total,
+                                "reputation": rep,
+                            }));
                         }
-                        Err(e) => eprintln!("request error: {e}"),
+                        off += arr.len();
+                        if arr.len() < limit {
+                            break;
+                        }
+                        if matches!(format, OutputFormat::Table) {
+                            eprint!("-- more --");
+                            let _ = std::io::stdin().read_line(&mut String::new());
+                        }
+                    }
+                    match format {
+                        OutputFormat::Json => {
+                            let out = json!({
+                                "peers": rows,
+                                "summary": {
+                                    "total_peers": rows.len(),
+                                    "active": active,
+                                    "requests": total_req,
+                                    "bytes_sent": total_bytes,
+                                    "drops": total_drop,
+                                }
+                            });
+                            println!("{}", serde_json::to_string_pretty(&out).unwrap());
+                        }
+                        OutputFormat::Table => {
+                            for r in &rows {
+                                let drop_ratio = if r["requests"].as_u64().unwrap_or(0) > 0 {
+                                    r["drops"].as_u64().unwrap_or(0) as f64
+                                        / r["requests"].as_u64().unwrap() as f64
+                                } else {
+                                    0.0
+                                };
+                                let line = format!(
+                                    "peer={} requests={} bytes_sent={} drops={} reputation={:.2}",
+                                    r["peer"].as_str().unwrap(),
+                                    r["requests"].as_u64().unwrap_or(0),
+                                    r["bytes_sent"].as_u64().unwrap_or(0),
+                                    r["drops"].as_u64().unwrap_or(0),
+                                    r["reputation"].as_f64().unwrap_or(0.0)
+                                );
+                                if drop_ratio > DROP_ALERT {
+                                    println!("{}", line.red());
+                                } else {
+                                    println!("{line}");
+                                }
+                            }
+                            println!(
+                                "total_peers={} active={} requests={} bytes_sent={} drops={}",
+                                rows.len(),
+                                active,
+                                total_req,
+                                total_bytes,
+                                total_drop
+                            );
+                        }
                     }
                 } else if let Some(id) = peer_id {
                     let req = json!({
@@ -260,37 +362,80 @@ fn main() {
                     });
                     match post_json(&rpc, req) {
                         Ok(val) => {
+                            if let Some(err) = val.get("error") {
+                                let msg = err["message"].as_str().unwrap_or("");
+                                if msg.contains("unknown peer") {
+                                    eprintln!("unknown peer");
+                                    std::process::exit(2);
+                                } else if msg.contains("unauthorized") {
+                                    eprintln!("unauthorized");
+                                    std::process::exit(3);
+                                }
+                                eprintln!("{msg}");
+                                std::process::exit(1);
+                            }
                             let res = &val["result"];
-                            let reqs = res["requests"].as_u64().unwrap_or(0);
-                            let bytes = res["bytes_sent"].as_u64().unwrap_or(0);
-                            let drops = res["drops"]
-                                .as_object()
-                                .map(|o| {
-                                    o.iter()
-                                        .map(|(k, v)| format!("{k}:{}", v.as_u64().unwrap_or(0)))
-                                        .collect::<Vec<_>>()
-                                        .join(",")
-                                })
-                                .unwrap_or_else(|| "".into());
-                            let hf = res["handshake_fail"]
-                                .as_object()
-                                .map(|o| {
-                                    o.iter()
-                                        .map(|(k, v)| format!("{k}:{}", v.as_u64().unwrap_or(0)))
-                                        .collect::<Vec<_>>()
-                                        .join(",")
-                                })
-                                .unwrap_or_else(|| "".into());
-                            let thr = res["throttle_reason"].as_str().unwrap_or("");
-                            let until = res["throttled_until"].as_u64().unwrap_or(0);
-                            println!(
-                                "requests={reqs} bytes_sent={bytes} drops={drops} handshake_fail={hf} throttle={thr} until={until}"
-                            );
+                            let rep = res["reputation"]["score"].as_f64().unwrap_or(0.0);
+                            if let Some(min) = min_reputation {
+                                if rep < min {
+                                    eprintln!("filtered");
+                                    std::process::exit(1);
+                                }
+                            }
+                            if let Some(reason) = &drop_reason {
+                                let drops = res["drops"].as_object();
+                                if drops
+                                    .and_then(|o| o.get(reason))
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0)
+                                    == 0
+                                {
+                                    eprintln!("filtered");
+                                    std::process::exit(1);
+                                }
+                            }
+                            match format {
+                                OutputFormat::Json => {
+                                    println!("{}", serde_json::to_string_pretty(res).unwrap());
+                                }
+                                OutputFormat::Table => {
+                                    let reqs = res["requests"].as_u64().unwrap_or(0);
+                                    let bytes = res["bytes_sent"].as_u64().unwrap_or(0);
+                                    let drops_total = res["drops"]
+                                        .as_object()
+                                        .map(|o| o.values().filter_map(|v| v.as_u64()).sum())
+                                        .unwrap_or(0);
+                                    let drop_ratio = if reqs > 0 {
+                                        drops_total as f64 / reqs as f64
+                                    } else {
+                                        0.0
+                                    };
+                                    let thr = res["throttle_reason"].as_str().unwrap_or("");
+                                    let until = res["throttled_until"].as_u64().unwrap_or(0);
+                                    let line = format!(
+                                        "requests={reqs} bytes_sent={bytes} drops={drops_total} reputation={:.2} throttle={} until={}",
+                                        rep, thr, until
+                                    );
+                                    if drop_ratio > DROP_ALERT {
+                                        println!("{}", line.red());
+                                    } else {
+                                        println!("{line}");
+                                    }
+                                    println!(
+                                        "total_peers=1 active={} requests={reqs} bytes_sent={bytes} drops={drops_total}",
+                                        if reqs > 0 { 1 } else { 0 }
+                                    );
+                                }
+                            }
                         }
-                        Err(e) => eprintln!("request error: {e}"),
+                        Err(e) => {
+                            eprintln!("request error: {e}");
+                            std::process::exit(1);
+                        }
                     }
                 } else {
                     eprintln!("peer_id required unless --all is specified");
+                    std::process::exit(1);
                 }
             }
             StatsCmd::Reset { peer_id, rpc } => {
@@ -392,7 +537,7 @@ fn main() {
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if val["result"]["status"].as_str() == Some("ok") {
-                        if clear {
+                            if clear {
                                 println!("cleared");
                             } else {
                                 println!("throttled");
@@ -512,6 +657,11 @@ fn main() {
                 Ok(v) => println!("{}", v),
                 Err(e) => eprintln!("{e}"),
             }
+        }
+        Command::Completions { shell } => {
+            use clap_complete::generate;
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "net", &mut std::io::stdout());
         }
     }
 }

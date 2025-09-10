@@ -24,6 +24,12 @@
     },
     {
       "deprecated": false,
+      "description": "Total peer metric ingests",
+      "labels": [],
+      "name": "aggregator_ingest_total"
+    },
+    {
+      "deprecated": false,
       "description": "Whether a service badge is active (1/0)",
       "labels": [],
       "name": "badge_active"
@@ -63,6 +69,12 @@
       "description": "Total mined blocks",
       "labels": [],
       "name": "block_mined_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Unique peers tracked by aggregator",
+      "labels": [],
+      "name": "cluster_peer_active_total"
     },
     {
       "deprecated": false,
@@ -653,6 +665,14 @@
       "description": "Number of currently assigned jobs",
       "labels": [],
       "name": "scheduler_active_jobs"
+    },
+    {
+      "deprecated": false,
+      "description": "Scheduler cancellations",
+      "labels": [
+        "reason"
+      ],
+      "name": "scheduler_cancel_total"
     },
     {
       "deprecated": false,

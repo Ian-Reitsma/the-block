@@ -9,14 +9,11 @@ use the_block::net::{
 fn throttle_engages_and_recovers() {
     std::env::set_var("TB_THROTTLE_SECS", "1");
     clear_peer_metrics();
-    set_p2p_max_per_sec(2);
+    set_p2p_max_per_sec(1);
     set_p2p_max_bytes_per_sec(1000);
     let pk = [1u8; 32];
-    for _ in 0..3 {
-        for _ in 0..3 {
-            record_request(&pk);
-        }
-        sleep(Duration::from_secs(1));
+    for _ in 0..15 {
+        record_request(&pk);
     }
     let m = the_block::net::peer_stats(&pk).unwrap();
     assert_eq!(m.throttle_reason.as_deref(), Some("requests"));

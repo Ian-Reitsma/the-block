@@ -1,0 +1,6 @@
+---
+source: node/tests/net_peer_stats.rs
+expression: stdout
+---
+requests=1 bytes_sent=0 drops=0 reputation=0.00 throttle= until=0
+total_peers=1 active=1 requests=1 bytes_sent=0 drops=0

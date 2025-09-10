@@ -3,12 +3,14 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::courier;
+#[cfg(feature = "telemetry")]
 use crate::telemetry;
 
 /// Hardware capability descriptor for a provider or workload.
@@ -90,6 +92,31 @@ enum MatchOutcome {
     Success,
     CapabilityMismatch,
     ReputationFailure,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum CancelReason {
+    Client,
+    Provider,
+    Preempted,
+}
+
+impl CancelReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CancelReason::Client => "client",
+            CancelReason::Provider => "provider",
+            CancelReason::Preempted => "preempted",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "provider" => CancelReason::Provider,
+            "preempted" => CancelReason::Preempted,
+            _ => CancelReason::Client,
+        }
+    }
 }
 
 struct SchedulerState {
@@ -390,6 +417,22 @@ impl SchedulerState {
         }
     }
 
+    fn cancel_job(&mut self, job_id: &str, provider: &str, reason: CancelReason) {
+        self.end_job(job_id);
+        match reason {
+            CancelReason::Client => self.record_success(provider),
+            CancelReason::Provider => self.record_failure(provider),
+            CancelReason::Preempted => {}
+        }
+        persist_cancellation(job_id, reason);
+        if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+            #[cfg(feature = "telemetry")]
+            telemetry::SCHEDULER_CANCEL_TOTAL
+                .with_label_values(&[reason.as_str()])
+                .inc();
+        }
+    }
+
     fn active_provider(&self, job_id: &str) -> Option<String> {
         self.active.get(job_id).map(|a| a.provider.clone())
     }
@@ -458,7 +501,9 @@ impl SchedulerState {
         let cap_pct = LOW_PRIORITY_CAP_PCT.load(Ordering::Relaxed);
         while let Some(job) = self.pending.peek() {
             if job.priority == Priority::Low {
-                if (self.active_low + 1) * 100 > cap_pct * (self.active_jobs + 1) {
+                if self.active_jobs > 0
+                    && (self.active_low + 1) * 100 > cap_pct * (self.active_jobs + 1)
+                {
                     break;
                 }
             }
@@ -716,6 +761,27 @@ fn reputation_db_path() -> PathBuf {
         })
 }
 
+fn cancel_log_path() -> PathBuf {
+    std::env::var("TB_CANCEL_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".the_block")
+                .join("cancellations.log")
+        })
+}
+
+fn persist_cancellation(job_id: &str, reason: CancelReason) {
+    let path = cancel_log_path();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{} {}", job_id, reason.as_str());
+    }
+}
+
 fn current_ts() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -737,6 +803,7 @@ pub fn register_offer(
 }
 
 pub fn match_offer(need: &Capability) -> Option<String> {
+    #[cfg(feature = "telemetry")]
     let start = std::time::Instant::now();
     let res = SCHEDULER
         .lock()
@@ -749,12 +816,7 @@ pub fn match_offer(need: &Capability) -> Option<String> {
     res
 }
 
-pub fn start_job_with_priority(
-    job_id: &str,
-    provider: &str,
-    cap: Capability,
-    priority: Priority,
-) {
+pub fn start_job_with_priority(job_id: &str, provider: &str, cap: Capability, priority: Priority) {
     SCHEDULER
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -770,6 +832,13 @@ pub fn end_job(job_id: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .end_job(job_id);
+}
+
+pub fn cancel_job(job_id: &str, provider: &str, reason: CancelReason) {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .cancel_job(job_id, provider, reason);
 }
 
 pub fn try_preempt(job_id: &str, new_provider: &str, new_rep: i64) -> bool {

@@ -1,0 +1,13 @@
+---
+source: node/tests/net_peer_stats.rs
+expression: stdout
+---
+{
+  "bytes_sent": 0,
+  "drops": {},
+  "handshake_fail": {},
+  "reputation": 1.0,
+  "requests": 1,
+  "throttle_reason": null,
+  "throttled_until": 0
+}

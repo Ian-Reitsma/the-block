@@ -21,7 +21,8 @@ members = [
   "net/fuzz",
   "gateway/fuzz",
   "dex",
-  "inflation"
+  "inflation",
+  "metrics-aggregator"
 ]
 default-members = [
   "node",

@@ -117,7 +117,11 @@ sent, and drop totals. Each successful lookup increments the
 `peer_stats_query_total{peer_id}` counter and is only available from the
 loopback interface. To retrieve metrics for multiple peers at once, use the
 `net.peer_stats_all` RPC or `net stats --all`, which accept optional `offset`
-and `limit` parameters for pagination:
+and `limit` parameters for pagination. The CLI supports table or JSON output via
+`--format table|json`, filtering by drop reason (`--drop-reason`) or minimum
+reputation (`--min-reputation`), and interactive paging for large peer sets.
+Rows with drop rates ≥5 % show in yellow and ≥20 % in red, and exit codes surface
+errors (`0` success, `2` unknown peer, `3` unauthorized):
 
 ```bash
 net stats <peer_id>
@@ -179,6 +183,7 @@ To export metrics for offline analysis, use:
 ```bash
 net stats export <peer_id> --path peer.json
 net stats export --all --path bulk [--min-reputation 0.5 --active-within 60]
+net stats --all --format json --drop-reason rate_limit --min-reputation 0.8
 ```
 
 The `net.peer_stats_export` RPC performs the on-disk write. Paths are relative
@@ -194,6 +199,9 @@ or active within a recent window.
 For inspection without writing to disk, the `net.peer_stats_export_all` RPC
 returns a JSON object mapping peer IDs to metrics and accepts the same filtering
 parameters.
+
+Operator workflows and CLI flag summaries are covered in
+[docs/operators/run_a_node.md](operators/run_a_node.md).
 
 ## Live Metrics Stream
 

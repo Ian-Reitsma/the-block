@@ -39,6 +39,8 @@ pub struct NodeConfig {
     pub metrics_export_dir: String,
     #[serde(default = "default_peer_metrics_export_quota_bytes")]
     pub peer_metrics_export_quota_bytes: u64,
+    #[serde(default)]
+    pub metrics_aggregator: Option<AggregatorConfig>,
     #[serde(default = "default_true")]
     pub track_peer_drop_reasons: bool,
     #[serde(default = "default_true")]
@@ -83,6 +85,7 @@ impl Default for NodeConfig {
             peer_metrics_sample_rate: default_peer_metrics_sample_rate(),
             metrics_export_dir: default_metrics_export_dir(),
             peer_metrics_export_quota_bytes: default_peer_metrics_export_quota_bytes(),
+            metrics_aggregator: None,
             track_peer_drop_reasons: default_true(),
             track_handshake_failures: default_true(),
             peer_reputation_decay: default_peer_reputation_decay(),
@@ -97,6 +100,12 @@ impl Default for NodeConfig {
             quic: None,
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct AggregatorConfig {
+    pub url: String,
+    pub auth_token: String,
 }
 
 static CONFIG_DIR: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
@@ -285,6 +294,12 @@ fn apply(cfg: &NodeConfig) {
     );
     crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
     crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
+    crate::net::set_metrics_aggregator(
+        cfg.metrics_aggregator.as_ref().map(|c| c.url.clone()),
+        cfg.metrics_aggregator
+            .as_ref()
+            .map(|c| c.auth_token.clone()),
+    );
 }
 
 pub fn reload() -> bool {

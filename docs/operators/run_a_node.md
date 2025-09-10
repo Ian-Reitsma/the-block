@@ -1,11 +1,14 @@
 # Run a node
 
 ## Hardware
+
 - 4 cores
 - 8 GB RAM
 - SSD with at least 50 GB free
 
+
 ## Ports
+
 - P2P: `3033` (TCP and UDP if using QUIC)
 - RPC: `3030`
 - Metrics: `9898`
@@ -21,11 +24,12 @@ files.  Certificates rotate automatically after the number of days specified by
 only to avoid peers rejecting the endpoint.
 
 ## Quickstart
+
 ```sh
 curl -LO <release-tar>
 ./scripts/verify_release.sh node-<ver>-x86_64.tar.gz checksums.txt checksums.txt.sig
 mkdir -p ~/.block
- tar -xzf node-<ver>-x86_64.tar.gz -C ~/.block
+tar -xzf node-<ver>-x86_64.tar.gz -C ~/.block
 ~/.block/node --datadir ~/.block/datadir --config ~/.block/config.toml
 ```
 
@@ -54,8 +58,40 @@ writes a JSON snapshot for offline analysis. `net stats --all` paginates through
 all tracked peers, while `net stats reputation` shows the current reputation
 score used for adaptive rate limits.
 
+| Flag | Description |
+| ---- | ----------- |
+| `--format table\|json` | Choose human-readable tables or machine-friendly JSON. |
+| `--drop-reason <reason>` | Filter peers by a specific drop cause such as `rate_limit`. |
+| `--min-reputation <score>` | Only include peers with reputation at or above the given value. |
+| `--offset <n>` / `--limit <m>` | Page through large peer sets; combine with `--all` to stream every peer. |
+
+Rows with a drop rate ≥5 % render in yellow and ≥20 % in red to flag misbehaving
+peers. Exit codes convey status: `0` on success, `2` if a peer is unknown, and
+`3` when the RPC server rejects the request. Examples:
+
+```bash
+# JSON output for high-reputation peers dropping messages due to rate limits
+net stats --format json --drop-reason rate_limit --min-reputation 0.8
+
+# Interactive pagination of all peers (press Enter to advance pages)
+net stats --all --limit 50
+```
+
+The CLI honours `peer_metrics_export` and `max_peer_metrics` configuration
+limits. See [docs/gossip.md](../gossip.md) for protocol details and additional
+RPC examples.
+
+Generate shell completions with:
+
+```bash
+net completions bash > /etc/bash_completion.d/net
+source /etc/bash_completion.d/net
+```
+
 ### systemd
+
 Create `/etc/systemd/system/the-block.service`:
+
 ```ini
 [Unit]
 Description=The Block node
@@ -69,12 +105,15 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 ```
+
 Enable and start:
+
 ```sh
 systemctl enable --now the-block
 ```
 
 ### Firewall
+
 Allow P2P and metrics if required; restrict RPC to localhost.
 Run the node with `--metrics-addr` and `--features telemetry` to surface
 `read_denied_total` and `subsidy_bytes_total{type="storage"}` counters for monitoring.

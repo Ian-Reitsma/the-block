@@ -3,13 +3,19 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
-use futures::StreamExt;
 use once_cell::sync::Lazy;
-use quinn::{rustls, Connection, Endpoint, Incoming};
+use quinn::{Connection, Endpoint};
 use rcgen::generate_simple_self_signed;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(any(test, debug_assertions))]
+use rustls::client::{
+    HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier, WebPkiVerifier,
+};
+use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
+#[cfg(any(test, debug_assertions))]
+use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
 use tokio::time::Instant;
 
+#[cfg(feature = "telemetry")]
 use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -52,17 +58,17 @@ fn get_or_create_endpoint(addr: SocketAddr) -> Result<Endpoint> {
     Ok(ep)
 }
 
-/// Start a QUIC listener bound to `addr`, returning the endpoint, incoming stream
-/// handle, and the generated self-signed certificate to share with peers.
-pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Incoming, quinn::Certificate)> {
+/// Start a QUIC listener bound to `addr`, returning the endpoint
+/// and the generated self-signed certificate to share with peers.
+pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
     let cert = generate_simple_self_signed(["the-block".to_string()])?;
     let cert_der = cert.serialize_der()?;
     let key_der = cert.serialize_private_key_der();
-    let cert = quinn::Certificate::from_der(&cert_der)?;
-    let key = quinn::PrivateKey::from_der(&key_der)?;
+    let cert = Certificate(cert_der.clone());
+    let key = PrivateKey(key_der);
     let server_config = quinn::ServerConfig::with_single_cert(vec![cert.clone()], key)?;
-    let (endpoint, incoming) = Endpoint::server(server_config, addr)?;
-    Ok((endpoint, incoming, cert))
+    let endpoint = Endpoint::server(server_config, addr)?;
+    Ok((endpoint, cert))
 }
 
 /// Start a QUIC listener with an existing certificate and key.
@@ -70,39 +76,39 @@ pub async fn listen_with_cert(
     addr: SocketAddr,
     cert_der: &[u8],
     key_der: &[u8],
-) -> Result<(Endpoint, Incoming)> {
-    let cert = quinn::Certificate::from_der(cert_der)?;
-    let key = quinn::PrivateKey::from_der(key_der)?;
+) -> Result<Endpoint> {
+    let cert = Certificate(cert_der.to_vec());
+    let key = PrivateKey(key_der.to_vec());
     let server_config = quinn::ServerConfig::with_single_cert(vec![cert], key)?;
-    let (endpoint, incoming) = Endpoint::server(server_config, addr)?;
-    Ok((endpoint, incoming))
+    let endpoint = Endpoint::server(server_config, addr)?;
+    Ok(endpoint)
 }
 
 /// Connect to a remote QUIC endpoint at `addr` trusting `cert`.
 pub async fn connect(
     addr: SocketAddr,
-    cert: quinn::Certificate,
+    cert: Certificate,
 ) -> std::result::Result<Connection, ConnectError> {
-    let mut roots = rustls::RootCertStore::empty();
+    let mut roots = RootCertStore::empty();
     roots
-        .add(rustls::Certificate(cert.clone().into_der()))
+        .add(&cert)
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
-    let crypto = rustls::ClientConfig::builder()
+    let crypto = ClientConfig::builder()
         .with_safe_defaults()
         .with_root_certificates(roots)
         .with_no_client_auth();
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
     let endpoint =
         get_or_create_endpoint("0.0.0.0:0".parse().unwrap()).map_err(ConnectError::Other)?;
-    let start = Instant::now();
+    let _start = Instant::now();
     let attempt = endpoint
         .connect_with(client_cfg, addr, "the-block")
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
     match attempt.await {
         Ok(conn) => {
             #[cfg(feature = "telemetry")]
-            QUIC_CONN_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
-            Ok(conn.connection)
+            QUIC_CONN_LATENCY_SECONDS.observe(_start.elapsed().as_secs_f64());
+            Ok(conn)
         }
         Err(e) => {
             #[cfg(feature = "telemetry")]
@@ -111,6 +117,8 @@ pub async fn connect(
                 let err = classify_err(&e);
                 super::peer::record_handshake_fail_addr(addr, err);
             }
+            #[cfg(not(feature = "telemetry"))]
+            let _ = e;
             Err(ConnectError::Handshake)
         }
     }
@@ -123,56 +131,58 @@ pub async fn connect(
 #[cfg(any(test, debug_assertions))]
 pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connection, ConnectError> {
     struct SkipCertVerification;
-    impl rustls::client::ServerCertVerifier for SkipCertVerification {
+    impl ServerCertVerifier for SkipCertVerification {
         fn verify_server_cert(
             &self,
-            _end_entity: &rustls::Certificate,
-            _intermediates: &[rustls::Certificate],
-            _server_name: &rustls::ServerName,
+            _end_entity: &Certificate,
+            _intermediates: &[Certificate],
+            _server_name: &ServerName,
             _scts: &mut dyn Iterator<Item = &[u8]>,
             _ocsp_response: &[u8],
             _now: std::time::SystemTime,
-        ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-            Ok(rustls::client::ServerCertVerified::assertion())
+        ) -> Result<ServerCertVerified, rustls::Error> {
+            Ok(ServerCertVerified::assertion())
         }
 
         fn verify_tls12_signature(
             &self,
             _message: &[u8],
-            _cert: &rustls::Certificate,
-            _dss: &rustls::client::Tls12Signer,
-        ) -> Result<rustls::client::HandshakeSignatureValid, rustls::Error> {
-            Ok(rustls::client::HandshakeSignatureValid::assertion())
+            _cert: &Certificate,
+            _dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            Ok(HandshakeSignatureValid::assertion())
         }
 
         fn verify_tls13_signature(
             &self,
             _message: &[u8],
-            _cert: &rustls::Certificate,
-            _dss: &rustls::client::Tls13Signer,
-        ) -> Result<rustls::client::HandshakeSignatureValid, rustls::Error> {
-            Ok(rustls::client::HandshakeSignatureValid::assertion())
+            _cert: &Certificate,
+            _dss: &DigitallySignedStruct,
+        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+            Ok(HandshakeSignatureValid::assertion())
         }
 
-        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-            rustls::client::WebPkiVerifier::supported_verify_schemes()
+        fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+            WebPkiVerifier::new(RootCertStore::empty(), None).supported_verify_schemes()
         }
     }
     let verifier = Arc::new(SkipCertVerification);
-    let crypto = rustls::ClientConfig::builder()
+    let crypto = ClientConfig::builder()
         .with_safe_defaults()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
     let client_cfg = quinn::ClientConfig::new(Arc::new(crypto));
     let endpoint =
         get_or_create_endpoint("0.0.0.0:0".parse().unwrap()).map_err(ConnectError::Other)?;
-    let start = Instant::now();
-    let attempt = endpoint.connect_with(client_cfg, addr, "the-block")?;
+    let _start = Instant::now();
+    let attempt = endpoint
+        .connect_with(client_cfg, addr, "the-block")
+        .map_err(|e| ConnectError::Other(anyhow!(e)))?;
     match attempt.await {
         Ok(conn) => {
             #[cfg(feature = "telemetry")]
-            QUIC_CONN_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
-            Ok(conn.connection)
+            QUIC_CONN_LATENCY_SECONDS.observe(_start.elapsed().as_secs_f64());
+            Ok(conn)
         }
         Err(e) => {
             #[cfg(feature = "telemetry")]
@@ -181,13 +191,15 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
                 let err = classify_err(&e);
                 super::peer::record_handshake_fail_addr(addr, err);
             }
+            #[cfg(not(feature = "telemetry"))]
+            let _ = e;
             Err(ConnectError::Handshake)
         }
     }
 }
 
 #[cfg(feature = "telemetry")]
-pub(crate) fn classify_err(e: &quinn::ConnectError) -> HandshakeError {
+pub(crate) fn classify_err(e: &quinn::ConnectionError) -> HandshakeError {
     let msg = e.to_string().to_lowercase();
     if msg.contains("certificate") {
         HandshakeError::Certificate
@@ -227,45 +239,39 @@ pub async fn send(conn: &Connection, data: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Receive a single uni-stream from `incoming`, returning the bytes if any.
-pub async fn recv(incoming: &mut quinn::IncomingUniStreams) -> Option<Vec<u8>> {
-    if let Some(stream) = incoming.next().await {
-        match stream {
-            Ok(mut s) => {
-                let mut buf = Vec::new();
-                match s.read_to_end(&mut buf).await {
-                    Ok(_) => {
-                        #[cfg(feature = "telemetry")]
-                        QUIC_BYTES_RECV_TOTAL.inc_by(buf.len() as u64);
-                        Some(buf)
-                    }
-                    Err(_) => {
-                        #[cfg(feature = "telemetry")]
-                        QUIC_DISCONNECT_TOTAL
-                            .with_label_values(&["read_error"])
-                            .inc();
-                        None
-                    }
-                }
-            }
-            Err(e) => {
+/// Receive a single uni-stream from `conn`, returning the bytes if any.
+pub async fn recv(conn: &Connection) -> Option<Vec<u8>> {
+    match conn.accept_uni().await {
+        Ok(mut s) => match s.read_to_end(usize::MAX).await {
+            Ok(buf) => {
                 #[cfg(feature = "telemetry")]
-                record_conn_err(&e);
+                QUIC_BYTES_RECV_TOTAL.inc_by(buf.len() as u64);
+                Some(buf)
+            }
+            Err(_) => {
+                #[cfg(feature = "telemetry")]
+                QUIC_DISCONNECT_TOTAL
+                    .with_label_values(&["read_error"])
+                    .inc();
                 None
             }
+        },
+        Err(e) => {
+            #[cfg(feature = "telemetry")]
+            record_conn_err(&e);
+            #[cfg(not(feature = "telemetry"))]
+            let _ = e;
+            None
         }
-    } else {
-        None
     }
 }
 
 #[cfg(feature = "telemetry")]
 fn record_conn_err(e: &quinn::ConnectionError) {
-    use std::convert::From;
     let code: u64 = match e {
         quinn::ConnectionError::ApplicationClosed(ac) => ac.error_code.into(),
         quinn::ConnectionError::ConnectionClosed(cc) => cc.error_code.into(),
-        quinn::ConnectionError::Reset(r) => r.error_code.into(),
+        quinn::ConnectionError::Reset => 0,
         quinn::ConnectionError::TransportError(te) => te.code.into(),
         _ => 0,
     };

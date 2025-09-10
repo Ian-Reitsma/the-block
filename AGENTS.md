@@ -48,7 +48,7 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~97/100** with vision completion **~68/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~98/100** with vision completion **~69/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. Recent additions such as the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC pushed the project over these milestones. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -300,7 +300,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~97/100 · Vision completion: ~68/100.
+Mainnet readiness: ~98/100 · Vision completion: ~69/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -308,6 +308,7 @@ Mainnet readiness: ~97/100 · Vision completion: ~68/100.
 - Proof-of-History tick generator and Turbine-style gossip for deterministic propagation.
 - Parallel execution engine with optional GPU hash workloads.
 - Modular wallet framework with hardware signer support and CLI utilities.
+- Cluster-wide `metrics-aggregator` service and graceful `compute.job_cancel` RPC for reputation-aware rollbacks.
 - Cross-chain exchange adapters, light-client crate, indexer with explorer, and benchmark/simulation tools.
 - Free-read architecture with receipt batching, execution receipts, governance-seeded read reward pool, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
 - Fee-priority mempool with EIP-1559 base fee evolution; high-fee transactions evict low-fee ones and each block nudges the base fee toward a target fullness.
@@ -582,19 +583,19 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
   - Progress: 74%
-- **Networking & Gossip** ([docs/networking.md](docs/networking.md))
-  - [x] QUIC transport with TCP fallback
-  - [x] Per-peer rate-limit telemetry and CLI/RPC introspection
-  - [ ] Large-scale WAN chaos testing
-  - Progress: 77%
+  - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
+    - [x] QUIC transport with TCP fallback
+    - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
+    - [ ] Large-scale WAN chaos testing
+    - Progress: 79%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements and WAL-backed stores
   - [ ] Incentive-backed DHT marketplace
   - Progress: 76%
-- **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
-  - [x] Capability-aware scheduler with reputation weighting
-  - [ ] SLA arbitration and heterogeneous payments
-  - Progress: 68%
+  - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
+    - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
+    - [ ] SLA arbitration and heterogeneous payments
+    - Progress: 70%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [ ] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
@@ -609,13 +610,17 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Light client verification
   - [ ] Relayer incentives
   - Progress: 45%
-- **Wallets** ([docs/wallets.md](docs/wallets.md))
-  - [x] CLI enhancements
-  - [x] Hardware wallet integration
-  - [x] Remote signer workflows
-  - Progress: 80%
-- **Performance** ([docs/performance.md](docs/performance.md))
-  - [x] Consensus benchmarks
-  - [ ] VM throughput measurements
-  - [x] Profiling harness
-  - Progress: 67%
+  - **Wallets** ([docs/wallets.md](docs/wallets.md))
+    - [x] CLI enhancements
+    - [x] Hardware wallet integration
+    - [x] Remote signer workflows
+    - Progress: 80%
+  - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
+    - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
+    - [ ] Automated anomaly detection
+    - Progress: 69%
+  - **Performance** ([docs/performance.md](docs/performance.md))
+    - [x] Consensus benchmarks
+    - [ ] VM throughput measurements
+    - [x] Profiling harness
+    - Progress: 67%

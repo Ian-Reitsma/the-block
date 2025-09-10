@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-aggregator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics-aggregator
+  template:
+    metadata:
+      labels:
+        app: metrics-aggregator
+    spec:
+      containers:
+        - name: metrics-aggregator
+          image: metrics-aggregator:latest
+          env:
+            - name: AGGREGATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aggregator-secret
+                  key: token
+          ports:
+            - containerPort: 9000
+          args: []
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-aggregator
+spec:
+  selector:
+    app: metrics-aggregator
+  ports:
+    - port: 9000
+      targetPort: 9000

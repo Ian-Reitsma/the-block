@@ -762,6 +762,18 @@ pub static SCHEDULER_PREEMPT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static SCHEDULER_CANCEL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("scheduler_cancel_total", "Scheduler cancellations"),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter scheduler_cancel_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_cancel_total: {e}"));
+    c
+});
+
 pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_miss_total",
@@ -1327,6 +1339,26 @@ pub static PEER_METRICS_DROPPED: Lazy<IntCounter> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
+});
+
+pub static AGGREGATOR_INGEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("aggregator_ingest_total", "Total peer metric ingests").unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static CLUSTER_PEER_ACTIVE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "cluster_peer_active_total",
+        "Unique peers tracked by aggregator",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
 });
 
 pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {

@@ -38,9 +38,14 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `scheduler_provider_reputation` histogram tracks reputation score distribution
 - `scheduler_active_jobs` gauges currently assigned jobs
 - `scheduler_preempt_total{reason}` counts job preemption attempts (success or handoff_failed)
+- `scheduler_cancel_total{reason}` counts job cancellations (client, provider, preempted)
 - `scheduler_effective_price{provider}` gauges the latest effective price per unit by provider
 - `scheduler_priority_miss_total` counts high-priority jobs that waited past the
   scheduler's aging threshold
+
+The `scheduler_cancel_total{reason}` counter ties into the compute-market
+`compute.job_cancel` RPC, exposing whether cancellations were triggered by the
+client, provider, or preemption logic.
 - Configuration knobs: `max_peer_metrics` bounds per-peer labels;
   set `peer_metrics_export = false` to disable them,
   `track_peer_drop_reasons = false` to collapse drop reasons,
@@ -60,6 +65,28 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
   escrowed funds.
 - `difficulty_retarget_total`, `difficulty_clamp_total` track retarget executions and clamp events.
 - `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total` capture QUIC session metrics.
+
+### Cluster Aggregator
+
+Deploying the optional `metrics-aggregator` service (see
+[`deploy/metrics-aggregator.yaml`](../deploy/metrics-aggregator.yaml)) surfaces
+cluster-wide gauges when compiled with `--features telemetry`:
+
+- `cluster_peer_active_total{node_id}` – number of active peers per reporting node (cardinality ≈ node count).
+- `aggregator_ingest_total{node_id,result}` – ingestion attempts by node and result (`ok` or `error`), cardinality ≤ node count × 2.
+
+Prometheus query examples:
+
+```promql
+# Cancellation rate by reason
+sum(rate(scheduler_cancel_total[5m])) by (reason)
+
+# Active peers across the cluster
+sum(cluster_peer_active_total)
+```
+
+Nodes queue metrics locally if the aggregator is unreachable, so collector
+outages do not block operation.
 
 The gauge `banned_peers_total` exposes the number of peers currently banned and
 is updated whenever bans are added or expire. Each ban's expiry is also tracked

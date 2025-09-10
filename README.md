@@ -64,14 +64,17 @@ test real services today.
   anchor activity on-chain and mint the corresponding `READ_SUB_CT` reward.
   See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
   flow. (76.0% Complete)
-- The compute marketplace pays nodes for deterministic CPU and GPU work
+ - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
-  `pct_ct`, and receipts hash into blocks before conversion to CT through
-  multipliers, laying the foundation for compute-backed money. (68.0% Complete)
+  `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
+  RPC and `compute cancel <job_id>` CLI, and hashes receipts into blocks before
+  conversion to CT through multipliers. (70.0% Complete)
 - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
-  letting operators run `net stats`, `net stats --all`, and `net stats reset`
-  to inspect or clear counters. Metrics are bounded by `max_peer_metrics` so
-  abusive peers cannot exhaust memory. (77.0% Complete)
+  letting operators run `net stats`, filter by reputation or drop reason, emit
+  JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
+  A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
+  `aggregator_ingest_total` gauges, and metrics are bounded by `max_peer_metrics`
+  so abusive peers cannot exhaust memory. (79.0% Complete)
 - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
   resolves forks deterministically, and validates blocks with BLAKE3 hashes and
   VDF-anchored randomness. (74.0% Complete)
@@ -94,8 +97,8 @@ test real services today.
   users with secure key management, staking tools, remote signer support, and
   compliance options as needed. (80.0% Complete)
 - Monitoring, debugging, and profiling tools export Prometheus metrics,
-  structured traces, and readiness endpoints to keep operators informed in
-  production. (67.0% Complete)
+  structured traces, readiness endpoints, and a cluster-wide `metrics-aggregator`
+  for fleet visibility. (69.0% Complete)
 - Economic simulation and formal verification suites model inflation scenarios
   and encode consensus invariants, laying groundwork for provable safety. (35.0%
   Complete)
@@ -111,7 +114,10 @@ test real services today.
 - Sliding-window difficulty retargeting keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC and `difficulty_*` metrics.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently. See [docs/scheduler.md](docs/scheduler.md).
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
-- Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages.
+- Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages and jobs can be cancelled gracefully via `compute cancel <job_id>`.
+- Cluster-wide `metrics-aggregator` collects peer snapshots while the `net stats`
+  CLI supports JSON output, drop-reason and reputation filtering, pagination, and
+  colorized drop-rate warnings.
 - Modular wallet framework with hardware and remote signer support; command-line tools wrap the wallet crate and expose key management and staking helpers.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Versioned P2P handshake negotiates feature bits, records peer metadata, and enforces minimum protocol versions. See [docs/p2p_protocol.md](docs/p2p_protocol.md).
@@ -185,9 +191,11 @@ python demo.py
 Start a node with telemetry and metrics:
 
 ```bash
+AGGREGATOR_AUTH_TOKEN=secret \
 cargo run --features telemetry --bin node -- run \
   --rpc-addr 127.0.0.1:3030 \
   --metrics-addr 127.0.0.1:9100 \
+  --metrics-aggregator-url http://127.0.0.1:9101 \
   --mempool-purge-interval 5 \
   --snapshot-interval 600
 ```
@@ -196,6 +204,12 @@ Submit an industrial lane transaction via CLI:
 
 ```bash
 blockctl tx submit --lane industrial --from alice --to bob --amount 1 --fee 1 --nonce 1
+```
+
+Cancel a job and roll back resources:
+
+```bash
+blockctl compute cancel <job_id>
 ```
 
 Demo assertions against `/metrics` only trigger when built with `--features telemetry`.
@@ -308,20 +322,64 @@ curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":9,"method":"localnet.submit_receipt","params":{"receipt":"<hex>"}}'
 ```
 
+### Compute Marketplace Cancellations
+
+Gracefully stop a running job and refund locked fees:
+
+```bash
+# cancel a job via CLI
+blockctl compute cancel <job_id>
+
+# equivalent JSON-RPC call
+curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
+'{"jsonrpc":"2.0","id":16,"method":"compute.job_cancel","params":{"job_id":"<hex>","reason":"client"}}'
+```
+
+Successful cancellations free scheduler slots, roll back courier state, and
+increment `scheduler_cancel_total{reason}`. Providers may take a reputation hit
+depending on the supplied reason.
+
 Inspect per-peer metrics:
 
 ```bash
+# table output for one peer
 blockctl net stats <peer_id>
-blockctl net stats --all
+
+# JSON output filtered by drops and reputation
+blockctl net stats --drop-reason throttle --min-reputation 0.4 --format json
+
+# paginate through the full set
+blockctl net stats --all --limit 50 --offset 50
+
+# export and reset metrics
 blockctl net stats export <peer_id> --path /tmp/peer.json
 blockctl net stats reset <peer_id>
-blockctl net stats reputation <peer_id>
+
+# generate bash completions
+blockctl net completion bash > /etc/bash_completion.d/blockctl-net
+
+# equivalent RPC
 curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 '{"jsonrpc":"2.0","id":15,"method":"net.peer_stats","params":{"peer_id":"<hex>"}}'
 ```
-All commands are restricted to the loopback interface. `net stats reset` zeroes
-counters, `net stats reputation` prints the adaptive rate-limit score, and all
-metrics honour `max_peer_metrics` to cap memory.
+
+Sample table output ends with a summary line:
+
+```
+PEER          REQS  DROPS  RATE
+12D3KooW...     10      1   10%
+---
+1 peer (1 active)
+```
+
+Rows turn yellow when drop rate exceeds 5 % and red at 20 %. The command exits
+with `0` on success, `2` for unknown peers, and `3` when access is unauthorized.
+Results honour `peer_metrics_export` and `max_peer_metrics` limits, and can be
+pushed to the `metrics-aggregator` for cluster-level views. See
+[docs/operators/run_a_node.md](docs/operators/run_a_node.md) and
+[docs/gossip.md](docs/gossip.md) for deeper usage.
+
+All `net` commands bind to the loopback interface for safety.
 
 Discovery, handshake, and proximity rules are detailed in [docs/localnet.md](docs/localnet.md).
 
@@ -338,3 +396,30 @@ curl -s 127.0.0.1:3030 -H 'Content-Type: application/json' -d \
 `gateway.dns_lookup` reports whether a domain's public DNS record matches the on-chain entry. `gateway.policy` responses include `reads_total` and `last_access_ts` counters.
 Domains outside `.block` must host a TXT record containing the on-chain public key to prevent spoofing. Operational details live in
 [docs/gateway_dns.md](docs/gateway_dns.md).
+
+## Telemetry & Metrics
+
+An optional `metrics-aggregator` service collects peer statistics from multiple
+nodes and exposes REST and Prometheus endpoints for fleet-wide monitoring. When
+enabled via `metrics_aggregator.url` and `metrics_aggregator.auth_token` in
+`config.toml`, nodes push snapshots that surface
+`cluster_peer_active_total{node_id}` and `aggregator_ingest_total{node_id}`.
+Secure deployments protect the channel with TLS and rotate the shared auth token
+regularly. See [docs/monitoring.md](docs/monitoring.md) for deployment details
+and alerting examples.
+
+Quick start:
+
+```bash
+# launch the aggregator
+metrics-aggregator --listen 127.0.0.1:9101 &
+
+# point a node at it
+AGGREGATOR_AUTH_TOKEN=secret \
+blockctl node --config ~/.block/config.toml \
+  --metrics-aggregator-url http://127.0.0.1:9101
+```
+
+The compute marketplace's cancellation API integrates with telemetry: calling
+`compute.job_cancel` or `blockctl compute cancel` increments
+`scheduler_cancel_total{reason}` and the node refunds any locked bonds.

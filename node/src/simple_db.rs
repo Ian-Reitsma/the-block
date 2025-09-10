@@ -228,7 +228,7 @@ fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize op"))?;
     let mut h = Hasher::new();
     h.update(&op_bytes);
-    let id = match &op {
+    let _id = match &op {
         WalOp::Record(r) => r.id,
         WalOp::End { last_id } => *last_id,
     };
@@ -244,7 +244,7 @@ fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
         .open(wal_path)?;
     #[cfg(feature = "telemetry")]
     if crate::telemetry::should_log("storage") {
-        let span = crate::log_context!(block = id);
+        let span = crate::log_context!(block = _id);
         tracing::info!(parent: &span, "wal_append");
     }
     f.write_all(&bytes)?;

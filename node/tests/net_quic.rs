@@ -1,6 +1,6 @@
 #![cfg(feature = "quic")]
 use ed25519_dalek::SigningKey;
-use futures::StreamExt;
+use serial_test::serial;
 use std::io::Read;
 use the_block::gossip::relay::Relay;
 use the_block::net::{quic, Message, Payload, PROTOCOL_VERSION};
@@ -13,23 +13,18 @@ fn sample_sk() -> SigningKey {
 }
 
 #[tokio::test]
+#[serial]
 async fn quic_handshake_roundtrip() {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, mut incoming, cert) = quic::listen(addr).await.unwrap();
+    let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
     let (tx, rx) = tokio::sync::oneshot::channel();
+    let ep = server_ep.clone();
     tokio::spawn(async move {
-        if let Some(conn) = incoming.next().await {
-            let quinn::NewConnection {
-                connection,
-                mut uni_streams,
-                ..
-            } = conn.await.unwrap();
-            if let Some(stream) = uni_streams.next().await {
-                let mut s = stream.unwrap();
-                let mut buf = Vec::new();
-                s.read_to_end(&mut buf).await.unwrap();
-                tx.send(buf).unwrap();
+        if let Some(conn) = ep.accept().await {
+            let connection = conn.await.unwrap();
+            if let Some(bytes) = quic::recv(&connection).await {
+                tx.send(bytes).unwrap();
             }
             connection.close(0u32.into(), b"done");
         }
@@ -56,23 +51,21 @@ async fn quic_handshake_roundtrip() {
 }
 
 #[tokio::test]
+#[serial]
 async fn quic_gossip_roundtrip() {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, mut incoming, cert) = quic::listen(addr).await.unwrap();
+    let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
     let (hs_tx, hs_rx) = tokio::sync::oneshot::channel();
     let (msg_tx, msg_rx) = tokio::sync::oneshot::channel();
+    let ep = server_ep.clone();
     tokio::spawn(async move {
-        if let Some(conn) = incoming.next().await {
-            let quinn::NewConnection {
-                connection,
-                mut uni_streams,
-                ..
-            } = conn.await.unwrap();
-            if let Some(bytes) = quic::recv(&mut uni_streams).await {
+        if let Some(conn) = ep.accept().await {
+            let connection = conn.await.unwrap();
+            if let Some(bytes) = quic::recv(&connection).await {
                 hs_tx.send(bytes).unwrap();
             }
-            if let Some(bytes) = quic::recv(&mut uni_streams).await {
+            if let Some(bytes) = quic::recv(&connection).await {
                 msg_tx.send(bytes).unwrap();
             }
             connection.close(0u32.into(), b"done");
@@ -108,19 +101,17 @@ async fn quic_gossip_roundtrip() {
 }
 
 #[tokio::test]
+#[serial]
 async fn quic_disconnect() {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, mut incoming, cert) = quic::listen(addr).await.unwrap();
+    let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
     let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+    let ep = server_ep.clone();
     tokio::spawn(async move {
-        if let Some(conn) = incoming.next().await {
-            let quinn::NewConnection {
-                connection,
-                mut uni_streams,
-                ..
-            } = conn.await.unwrap();
-            let _ = quic::recv(&mut uni_streams).await;
+        if let Some(conn) = ep.accept().await {
+            let connection = conn.await.unwrap();
+            let _ = quic::recv(&connection).await;
             connection.close(0u32.into(), b"server");
             connection.closed().await;
             close_tx.send(()).unwrap();
@@ -148,6 +139,7 @@ async fn quic_disconnect() {
 }
 
 #[tokio::test]
+#[serial]
 async fn quic_fallback_to_tcp() {
     use rcgen::generate_simple_self_signed;
     let cert = generate_simple_self_signed(["fallback".into()])
@@ -175,20 +167,28 @@ async fn quic_fallback_to_tcp() {
         quic_cert: None,
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-    relay.broadcast(&msg, &[(addr, Transport::Quic, Some(cert))]);
+    let msg_clone = msg.clone();
+    tokio::task::spawn_blocking(move || {
+        let relay = relay;
+        relay.broadcast(&msg_clone, &[(addr, Transport::Quic, Some(cert))]);
+    })
+    .await
+    .unwrap();
     let recv = rx.await.unwrap();
     let parsed: Message = bincode::deserialize(&recv).unwrap();
     assert!(matches!(parsed.body, Payload::Handshake(_)));
 }
 
 #[tokio::test]
+#[serial]
 async fn quic_endpoint_reuse() {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, mut incoming, cert) = quic::listen(addr).await.unwrap();
+    let (server_ep, cert) = quic::listen(addr).await.unwrap();
+    let ep = server_ep.clone();
     tokio::spawn(async move {
-        while let Some(conn) = incoming.next().await {
-            let c = conn.await.unwrap();
-            c.connection.close(0u32.into(), b"done");
+        while let Some(conn) = ep.accept().await {
+            let connection = conn.await.unwrap();
+            connection.close(0u32.into(), b"done");
         }
     });
     let listen_addr = server_ep.local_addr().unwrap();
@@ -202,16 +202,18 @@ async fn quic_endpoint_reuse() {
 }
 
 #[tokio::test]
+#[serial]
 async fn quic_handshake_failure_metric() {
     use rcgen::generate_simple_self_signed;
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, _incoming, _cert) = quic::listen(addr).await.unwrap();
+    let (server_ep, _cert) = quic::listen(addr).await.unwrap();
     let listen_addr = server_ep.local_addr().unwrap();
     let bad = generate_simple_self_signed(["bad".into()]).unwrap();
-    let bad_cert = quinn::Certificate::from_der(&bad.serialize_der().unwrap()).unwrap();
+    let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
+    let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL.get();
     let res = quic::connect(listen_addr, bad_cert).await;
     assert!(res.is_err());
     server_ep.wait_idle().await;
     #[cfg(feature = "telemetry")]
-    assert!(the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL.get() >= 1);
+    assert!(the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL.get() >= before + 1);
 }

@@ -139,6 +139,56 @@ via the courier. Successful migrations increment
 assignment intact. Preemption counts are exposed through the
 `compute_market.scheduler_stats` RPC.
 
+### Cancellations
+
+Consumers or providers may abort an active job via `compute.job_cancel`. The
+scheduler releases the slot, refunds posted bonds, and records the event in a
+`cancellations.log` ledger for replay protection. The counter
+`scheduler_cancel_total{reason="client|provider|preempted"}` tracks aggregate
+reasons. Provider reputation adjusts based on the supplied reason: client-driven
+cancels do not penalise the worker, while provider faults decrement their
+score. Repeated provider-initiated cancellations may incur settlement
+penalties.
+
+Cancel a job from the CLI with:
+
+```bash
+tb-cli compute cancel <job_id>
+```
+
+Sample output on success:
+
+```text
+cancelled job abc123
+```
+
+Attempting to cancel a completed job returns:
+
+```text
+job already completed
+```
+
+Exit code `0` indicates success; non-zero codes map to `not_found` or
+`already_done` errors. Refunds surface in `compute_market_fee_split`
+metrics and the wallet balance. Each cancellation is appended to
+`cancellations.log` for replay protection, and reputation impacts are
+defined in `node/src/compute_market/scheduler.rs`.
+
+To cancel multiple jobs in bulk:
+
+```bash
+for id in $(cat jobs.txt); do tb-cli compute cancel "$id" || true; done
+```
+
+Troubleshooting:
+
+- **Timeouts** – increase RPC timeout or verify network reachability.
+- **Courier handoff errors** – ensure the courier has acknowledged the
+  cancel; reissue if necessary.
+
+See [docs/gossip.md](gossip.md) for general CLI conventions and transport
+flags.
+
 ### Priority and Aging
 
 Workloads may supply a `priority` field (`low`, `normal`, or `high`) when
