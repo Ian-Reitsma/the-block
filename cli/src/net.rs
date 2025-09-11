@@ -1,7 +1,7 @@
 use clap::Subcommand;
+use hex;
 use serde_json::json;
 use the_block::rpc::client::RpcClient;
-use hex;
 
 #[derive(Subcommand)]
 pub enum NetCmd {
@@ -112,7 +112,11 @@ pub fn handle(cmd: NetCmd) {
                 }
             }
         },
-        NetCmd::RotateKey { peer_id, new_key, url } => {
+        NetCmd::RotateKey {
+            peer_id,
+            new_key,
+            url,
+        } => {
             use ed25519_dalek::Signer;
             let sk = the_block::net::load_net_key();
             let new_bytes = hex::decode(&new_key).expect("invalid new key hex");

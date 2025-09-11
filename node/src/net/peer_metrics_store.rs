@@ -115,7 +115,9 @@ pub fn init(path: &str) {
 pub fn store() -> Option<PeerMetricsStoreGuard<'static>> {
     STORE
         .get()
-        .map(|m| PeerMetricsStoreGuard { inner: m.lock().unwrap() })
+        .map(|m| PeerMetricsStoreGuard {
+            inner: m.lock().unwrap(),
+        })
         .and_then(|g| if g.inner.is_some() { Some(g) } else { None })
 }
 

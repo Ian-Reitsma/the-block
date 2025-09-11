@@ -17,7 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{GATEWAY_DNS_LOOKUP_TOTAL, DNS_VERIFICATION_FAIL_TOTAL};
+use crate::telemetry::{DNS_VERIFICATION_FAIL_TOTAL, GATEWAY_DNS_LOOKUP_TOTAL};
 use trust_dns_resolver::{config::*, Resolver};
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
@@ -143,10 +143,7 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
     };
     let needle = format!("tb-verification={}", node_id);
     let ok = txts.iter().any(|t| t.contains(&needle));
-    VERIFY_CACHE
-        .lock()
-        .unwrap()
-        .insert(key, (ok, now));
+    VERIFY_CACHE.lock().unwrap().insert(key, (ok, now));
     #[cfg(feature = "telemetry")]
     {
         let status = if ok { "verified" } else { "rejected" };

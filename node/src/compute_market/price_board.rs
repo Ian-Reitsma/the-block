@@ -394,12 +394,18 @@ fn migrate(from_ver: u16, bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
             consumer: v1
                 .consumer
                 .into_iter()
-                .map(|p| PriceEntry { price: p, weighted: p })
+                .map(|p| PriceEntry {
+                    price: p,
+                    weighted: p,
+                })
                 .collect(),
             industrial: v1
                 .industrial
                 .into_iter()
-                .map(|p| PriceEntry { price: p, weighted: p })
+                .map(|p| PriceEntry {
+                    price: p,
+                    weighted: p,
+                })
                 .collect(),
         })
     } else if from_ver == 2 {

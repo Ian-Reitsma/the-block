@@ -3,15 +3,15 @@ use std::path::PathBuf;
 
 mod bridge;
 mod compute;
+mod config;
 mod dex;
 mod net;
-mod config;
 mod telemetry;
 use bridge::BridgeCmd;
 use compute::ComputeCmd;
+use config::ConfigCmd;
 use dex::DexCmd;
 use net::NetCmd;
-use config::ConfigCmd;
 use telemetry::TelemetryCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 

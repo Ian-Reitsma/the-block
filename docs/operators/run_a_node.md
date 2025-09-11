@@ -53,6 +53,7 @@ net stats reset <peer_id>
 net stats export <peer_id> --path /tmp/peer.json
 net stats --all
 net stats reputation <peer_id>
+net stats --backpressure
 ```
 
 `net stats` prints request, byte, and drop counters for the given peer. `net
@@ -68,6 +69,7 @@ score used for adaptive rate limits.
 | `--drop-reason <reason>` | Filter peers by a specific drop cause such as `rate_limit`. |
 | `--min-reputation <score>` | Only include peers with reputation at or above the given value. |
 | `--offset <n>` / `--limit <m>` | Page through large peer sets; combine with `--all` to stream every peer. |
+| `--backpressure` | Show peers currently throttled for exceeding quotas. |
 
 Rows with a drop rate ≥5 % render in yellow and ≥20 % in red to flag misbehaving
 peers. Exit codes convey status: `0` on success, `2` if a peer is unknown, and
@@ -84,6 +86,14 @@ net stats --all --limit 50
 The CLI honours `peer_metrics_export` and `max_peer_metrics` configuration
 limits. See [docs/gossip.md](../gossip.md) for protocol details and additional
 RPC examples.
+
+Backpressure limits derive from `p2p_max_per_sec` and `p2p_max_bytes_per_sec`
+in `config.toml`; throttle duration defaults to `TB_THROTTLE_SECS` seconds and
+grows exponentially on repeated breaches. Clear a peer's throttle state with:
+
+```bash
+net backpressure clear <peer_id>
+```
 
 Generate shell completions with:
 

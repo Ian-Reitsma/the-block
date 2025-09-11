@@ -26,6 +26,7 @@ compaction_secs = 60
 [metrics_aggregator]
 url = "https://aggregator.local:9000"
 auth_token = "changeme"
+retention_secs = 604800
 
 [compute_market]
 enable_preempt = false

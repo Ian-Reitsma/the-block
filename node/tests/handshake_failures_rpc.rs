@@ -1,10 +1,10 @@
 use ed25519_dalek::SigningKey;
 use serial_test::serial;
 use std::sync::{Arc, Mutex};
-use the_block::net::{self, Hello, Message, Payload, PROTOCOL_VERSION};
-use the_block::{generate_keypair, rpc::run_rpc_server, Blockchain};
-use the_block::p2p::handshake::Transport;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
+use the_block::net::{self, Hello, Message, Payload, PROTOCOL_VERSION};
+use the_block::p2p::handshake::Transport;
+use the_block::{generate_keypair, rpc::run_rpc_server, Blockchain};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use util::timeout::expect_timeout;
@@ -47,10 +47,10 @@ async fn rpc_reports_handshake_failures() {
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let peers = net::PeerSet::new(Vec::new());
     let (sk_bytes, pk_vec) = generate_keypair();
-    let pk: [u8;32] = pk_vec.as_slice().try_into().unwrap();
+    let pk: [u8; 32] = pk_vec.as_slice().try_into().unwrap();
     let sk = SigningKey::from_bytes(&sk_bytes[..].try_into().unwrap());
     let hello = Hello {
-        network_id: [0u8;4],
+        network_id: [0u8; 4],
         proto_version: PROTOCOL_VERSION,
         feature_bits: net::REQUIRED_FEATURES,
         agent: "test".into(),
@@ -67,7 +67,13 @@ async fn rpc_reports_handshake_failures() {
 
     let mining = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(Arc::clone(&bc), Arc::clone(&mining), "127.0.0.1:0".to_string(), Default::default(), tx));
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        Default::default(),
+        tx,
+    ));
     let addr = expect_timeout(rx).await.unwrap();
     let res = rpc(&addr, "{\"method\":\"net.handshake_failures\"}").await;
     assert!(res["result"]["failures"].as_array().unwrap().len() >= 1);

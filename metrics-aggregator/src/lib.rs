@@ -1,16 +1,31 @@
+use age::Encryptor;
 use axum::{
-    extract::{Path as AxumPath, State},
-    http::StatusCode,
+    extract::{Path as AxumPath, Query, State},
+    http::{header, StatusCode},
+    response::Response,
     routing::{get, post},
     Json, Router,
 };
+use bytes::Bytes;
+use openssl::{
+    rand::rand_bytes,
+    sha::sha256,
+    symm::{Cipher, Crypter, Mode},
+};
+#[cfg(feature = "etcd-client")]
+use etcd_client::Client;
 use once_cell::sync::Lazy;
 use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt;
+use tokio_util::io::{ReaderStream, StreamReader};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerStat {
@@ -21,52 +36,115 @@ pub struct PeerStat {
 #[derive(Clone)]
 pub struct AppState {
     pub data: Arc<Mutex<HashMap<String, VecDeque<(u64, serde_json::Value)>>>>,
-    pub token: String,
-    path: PathBuf,
+    pub token: Arc<RwLock<String>>,
+    token_path: Option<PathBuf>,
+    db: sled::Db,
     retention_secs: u64,
+    max_export_peers: usize,
+    wal: Option<Arc<Wal>>,
 }
 
 impl AppState {
     pub fn new(token: String, path: impl AsRef<Path>, retention_secs: u64) -> Self {
-        let path = path.as_ref().to_path_buf();
-        let data = std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        Self {
-            data: Arc::new(Mutex::new(data)),
-            token,
-            path,
-            retention_secs,
+        Self::new_with_opts(token, None, path, retention_secs, None)
+    }
+
+    pub fn new_with_opts(
+        token: String,
+        token_path: Option<PathBuf>,
+        path: impl AsRef<Path>,
+        retention_secs: u64,
+        wal: Option<PathBuf>,
+    ) -> Self {
+        let db = sled::open(path).expect("open db");
+        let mut data = HashMap::new();
+        for item in db.iter() {
+            if let Ok((k, v)) = item {
+                if let Ok(deque) = serde_json::from_slice(&v) {
+                    if let Ok(key) = String::from_utf8(k.to_vec()) {
+                        data.insert(key, deque);
+                    }
+                }
+            }
         }
+        let wal = wal.and_then(|p| Wal::open(p).ok()).map(Arc::new);
+        let state = Self {
+            data: Arc::new(Mutex::new(data)),
+            token: Arc::new(RwLock::new(token)),
+            token_path,
+            db,
+            retention_secs,
+            max_export_peers: 1000,
+            wal,
+        };
+        state.prune();
+        state
     }
 
     fn persist(&self) {
-        if let Ok(map) = self.data.lock() {
-            if let Some(parent) = self.path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(&self.path, serde_json::to_vec(&*map).unwrap());
-        }
+        let _ = self.db.flush();
     }
 
-    fn prune(&self) {
+    fn prune(&self) -> u64 {
         let cutoff = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
             .saturating_sub(self.retention_secs);
+        let mut removed = 0u64;
         if let Ok(mut map) = self.data.lock() {
-            map.retain(|_, deque| {
+            map.retain(|peer, deque| {
+                let before = deque.len();
                 deque.retain(|(ts, _)| *ts >= cutoff);
-                !deque.is_empty()
+                let after = deque.len();
+                removed += (before - after) as u64;
+                if after == 0 {
+                    let _ = self.db.remove(peer);
+                    false
+                } else {
+                    let _ = self.db.insert(peer, serde_json::to_vec(deque).unwrap());
+                    true
+                }
             });
         }
+        if removed > 0 {
+            RETENTION_PRUNED_TOTAL.inc_by(removed);
+            let _ = self.db.flush();
+        }
+        removed
+    }
+
+    fn current_token(&self) -> String {
+        if let Some(path) = &self.token_path {
+            if let Ok(t) = std::fs::read_to_string(path) {
+                let mut guard = self.token.write().unwrap();
+                let t = t.trim().to_string();
+                if *guard != t {
+                    *guard = t.clone();
+                }
+            }
+        }
+        self.token.read().unwrap().clone()
+    }
+
+    pub fn spawn_cleanup(&self) {
+        let state = self.clone();
+        tokio::spawn(async move {
+            use tokio::time::{interval, Duration};
+            let mut ticker = interval(Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                state.prune();
+            }
+        });
     }
 }
 
 static INGEST_TOTAL: Lazy<IntCounter> =
     Lazy::new(|| IntCounter::new("aggregator_ingest_total", "Total peer metric ingests").unwrap());
+
+static BULK_EXPORT_TOTAL: Lazy<IntCounter> =
+    Lazy::new(|| IntCounter::new("bulk_export_total", "Total bulk export attempts").unwrap());
 
 static ACTIVE_PEERS: Lazy<IntGauge> = Lazy::new(|| {
     IntGauge::new(
@@ -76,10 +154,30 @@ static ACTIVE_PEERS: Lazy<IntGauge> = Lazy::new(|| {
     .unwrap()
 });
 
+static REPLICATION_LAG: Lazy<IntGauge> = Lazy::new(|| {
+    IntGauge::new(
+        "aggregator_replication_lag_seconds",
+        "Seconds since last WAL entry applied",
+    )
+    .unwrap()
+});
+
+static RETENTION_PRUNED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    IntCounter::new(
+        "aggregator_retention_pruned_total",
+        "Peer metric samples pruned by retention",
+    )
+    .unwrap()
+});
+
 static REGISTRY: Lazy<Registry> = Lazy::new(|| {
     let r = Registry::new();
     r.register(Box::new(INGEST_TOTAL.clone())).unwrap();
     r.register(Box::new(ACTIVE_PEERS.clone())).unwrap();
+    r.register(Box::new(BULK_EXPORT_TOTAL.clone())).unwrap();
+    r.register(Box::new(REPLICATION_LAG.clone())).unwrap();
+    r.register(Box::new(RETENTION_PRUNED_TOTAL.clone()))
+        .unwrap();
     r
 });
 
@@ -110,10 +208,11 @@ async fn ingest(
     headers: axum::http::HeaderMap,
     Json(payload): Json<Vec<PeerStat>>,
 ) -> StatusCode {
+    let token = state.current_token();
     if headers
         .get("x-auth-token")
         .and_then(|h| h.to_str().ok())
-        .map(|h| h == state.token)
+        .map(|h| h == token)
         .unwrap_or(false)
     {
         let mut map = state.data.lock().unwrap();
@@ -121,11 +220,16 @@ async fn ingest(
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        for stat in payload {
-            let entry = map.entry(stat.peer_id).or_insert_with(VecDeque::new);
+        for stat in payload.clone() {
+            let entry = map
+                .entry(stat.peer_id.clone())
+                .or_insert_with(VecDeque::new);
             if let Some((ts, last)) = entry.back_mut() {
                 if *ts == now {
                     merge(last, &stat.metrics);
+                    let _ = state
+                        .db
+                        .insert(&stat.peer_id, serde_json::to_vec(entry).unwrap());
                     continue;
                 }
             }
@@ -133,12 +237,19 @@ async fn ingest(
             if entry.len() > 1024 {
                 entry.pop_front();
             }
+            let _ = state
+                .db
+                .insert(&stat.peer_id, serde_json::to_vec(entry).unwrap());
         }
         ACTIVE_PEERS.set(map.len() as i64);
         INGEST_TOTAL.inc();
         drop(map);
         state.prune();
         state.persist();
+        if let Some(wal) = &state.wal {
+            let _ = wal.append(&payload);
+            REPLICATION_LAG.set(0);
+        }
         StatusCode::OK
     } else {
         StatusCode::UNAUTHORIZED
@@ -164,6 +275,106 @@ async fn cluster(State(state): State<AppState>) -> Json<usize> {
     Json(map.len())
 }
 
+#[derive(Deserialize)]
+struct ExportAllQuery {
+    recipient: Option<String>,
+    password: Option<String>,
+}
+
+async fn export_all(
+    State(state): State<AppState>,
+    Query(params): Query<ExportAllQuery>,
+) -> Result<Response, StatusCode> {
+    if params.recipient.is_some() && params.password.is_some() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let map = {
+        let map = state.data.lock().unwrap();
+        if map.len() > state.max_export_peers {
+            return Err(StatusCode::PAYLOAD_TOO_LARGE);
+        }
+        map.clone()
+    };
+
+    BULK_EXPORT_TOTAL.inc();
+
+    let recipient = params.recipient.clone();
+    let password = params.password.clone();
+    let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
+    tokio::task::spawn_blocking(move || {
+        use zip::write::FileOptions;
+        let mut cursor = io::Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            for (peer_id, deque) in map {
+                let json = serde_json::to_vec(&deque).unwrap();
+                let name = format!("{peer_id}.json");
+                writer.start_file(name, FileOptions::default()).unwrap();
+                writer.write_all(&json).unwrap();
+            }
+            let _ = writer.finish();
+        }
+        let bytes = cursor.into_inner();
+        let data = if let Some(rec) = recipient {
+            use std::str::FromStr;
+            let recipient = age::x25519::Recipient::from_str(&rec).unwrap();
+            let encryptor = Encryptor::with_recipients(vec![
+                Box::new(recipient) as Box<dyn age::Recipient + Send>
+            ])
+            .unwrap();
+            let mut out = Vec::new();
+            let mut w = encryptor.wrap_output(&mut out).unwrap();
+            w.write_all(&bytes).unwrap();
+            w.finish().unwrap();
+            out
+        } else if let Some(pass) = password {
+            let mut iv = [0u8; 16];
+            rand_bytes(&mut iv).unwrap();
+            let key = sha256(pass.as_bytes());
+            let cipher = Cipher::aes_256_cbc();
+            let mut crypter = Crypter::new(cipher, Mode::Encrypt, &key, Some(&iv)).unwrap();
+            let mut out = vec![0u8; bytes.len() + cipher.block_size()];
+            let mut count = crypter.update(&bytes, &mut out).unwrap();
+            count += crypter.finalize(&mut out[count..]).unwrap();
+            out.truncate(count);
+            let mut combined = Vec::with_capacity(iv.len() + out.len());
+            combined.extend_from_slice(&iv);
+            combined.extend_from_slice(&out);
+            combined
+        } else {
+            bytes
+        };
+        for chunk in data.chunks(8192) {
+            if tx.blocking_send(chunk.to_vec()).is_err() {
+                return;
+            }
+        }
+    });
+
+    let stream = ReceiverStream::new(rx).map(|chunk| Ok::<Bytes, io::Error>(Bytes::from(chunk)));
+    let reader = StreamReader::new(stream);
+    let body_stream = ReaderStream::new(reader);
+    let body = axum::body::Body::from_stream(body_stream);
+    let mut resp = Response::new(body);
+    if params.recipient.is_some() {
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("application/age"),
+        );
+    } else if params.password.is_some() {
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("application/octet-stream"),
+        );
+    } else {
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            header::HeaderValue::from_static("application/zip"),
+        );
+    }
+    Ok(resp)
+}
+
 async fn metrics() -> String {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
@@ -177,8 +388,54 @@ pub fn router(state: AppState) -> Router {
         .route("/ingest", post(ingest))
         .route("/peer/:id", get(peer))
         .route("/cluster", get(cluster))
+        .route("/export/all", get(export_all))
+        .route("/healthz", get(health))
         .route("/metrics", get(metrics))
         .with_state(state)
+}
+
+async fn health() -> StatusCode {
+    StatusCode::OK
+}
+
+struct Wal {
+    file: Mutex<std::fs::File>,
+}
+
+#[cfg(feature = "etcd-client")]
+#[allow(dead_code)]
+pub async fn run_leader_election(endpoints: Vec<String>, state: AppState) {
+    if let Ok(mut client) = Client::connect(endpoints, None).await {
+        if let Ok(resp) = client.lease_grant(5, None).await {
+            let lease_id = resp.id();
+            if client
+                .put("metrics-aggregator/leader", "", Some(lease_id))
+                .await
+                .is_ok()
+            {
+                let _ = client.lease_keep_alive(lease_id).await;
+            }
+        }
+    }
+    let _ = state; // suppress unused warning when feature disabled
+}
+
+impl Wal {
+    fn open(path: PathBuf) -> io::Result<Self> {
+        use std::fs::OpenOptions;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        Ok(Self {
+            file: Mutex::new(file),
+        })
+    }
+
+    fn append(&self, stats: &[PeerStat]) -> io::Result<()> {
+        let mut guard = self.file.lock().unwrap();
+        let line = serde_json::to_vec(stats)?;
+        guard.write_all(&line)?;
+        guard.write_all(b"\n")?;
+        guard.flush()
+    }
 }
 
 #[cfg(test)]
@@ -186,8 +443,10 @@ mod tests {
     use super::*;
     use axum::body::{self, Body};
     use axum::http::{Request, StatusCode};
+    use std::io::Cursor;
     use tempfile::tempdir;
     use tower::ServiceExt; // for `oneshot`
+    use zip::ZipArchive;
 
     #[tokio::test]
     async fn dedupes_by_peer() {
@@ -257,5 +516,148 @@ mod tests {
         state.prune();
         let map = state.data.lock().unwrap();
         assert!(map.get("p").map(|d| d.is_empty()).unwrap_or(true));
+    }
+
+    #[tokio::test]
+    async fn export_all_zips_and_checksums() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
+        {
+            let app = router(state.clone());
+            let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}, {"peer_id": "p2", "metrics": {"v": 2}}]);
+            let req = Request::builder()
+                .method("POST")
+                .uri("/ingest")
+                .header("content-type", "application/json")
+                .header("x-auth-token", "t")
+                .body(Body::from(payload.to_string()))
+                .unwrap();
+            let _ = app.oneshot(req).await.unwrap();
+        }
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/export/all")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let hash = blake3::hash(&body_bytes);
+        assert_ne!(hash.as_bytes(), &[0u8; 32]);
+        let cursor = Cursor::new(body_bytes);
+        let mut zip = ZipArchive::new(cursor).unwrap();
+        assert_eq!(zip.len(), 2);
+        let mut file = zip.by_name("p1.json").unwrap();
+        let mut contents = String::new();
+        use std::io::Read;
+        file.read_to_string(&mut contents).unwrap();
+        let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
+        assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn export_all_encrypts() {
+        use age::{x25519::Identity, Decryptor};
+        let dir = tempdir().unwrap();
+        let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
+        {
+            let app = router(state.clone());
+            let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}]);
+            let req = Request::builder()
+                .method("POST")
+                .uri("/ingest")
+                .header("content-type", "application/json")
+                .header("x-auth-token", "t")
+                .body(Body::from(payload.to_string()))
+                .unwrap();
+            let _ = app.oneshot(req).await.unwrap();
+        }
+        let id = Identity::generate();
+        let recipient = id.to_public().to_string();
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/export/all?recipient={}", recipient))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/age"
+        );
+        let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let decryptor = Decryptor::new(&body_bytes[..]).unwrap();
+        let mut plain = Vec::new();
+        if let Decryptor::Recipients(d) = decryptor {
+            use std::io::Read;
+            let mut r = d
+                .decrypt(std::iter::once(&id as &dyn age::Identity))
+                .unwrap();
+            r.read_to_end(&mut plain).unwrap();
+        } else {
+            panic!();
+        }
+        let mut zip = ZipArchive::new(Cursor::new(plain)).unwrap();
+        assert_eq!(zip.len(), 1);
+        let mut file = zip.by_name("p1.json").unwrap();
+        let mut contents = String::new();
+        use std::io::Read;
+        file.read_to_string(&mut contents).unwrap();
+        let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
+        assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn export_all_openssl_encrypts() {
+        use openssl::symm::{decrypt, Cipher};
+        let dir = tempdir().unwrap();
+        let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
+        {
+            let app = router(state.clone());
+            let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}]);
+            let req = Request::builder()
+                .method("POST")
+                .uri("/ingest")
+                .header("content-type", "application/json")
+                .header("x-auth-token", "t")
+                .body(Body::from(payload.to_string()))
+                .unwrap();
+            let _ = app.oneshot(req).await.unwrap();
+        }
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/export/all?password=secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/octet-stream"
+        );
+        let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let (iv, cipher) = body_bytes.split_at(16);
+        let key = sha256(b"secret");
+        let plain = decrypt(Cipher::aes_256_cbc(), &key, Some(iv), cipher).unwrap();
+        let mut zip = ZipArchive::new(Cursor::new(plain)).unwrap();
+        assert_eq!(zip.len(), 1);
+        let mut file = zip.by_name("p1.json").unwrap();
+        let mut contents = String::new();
+        use std::io::Read;
+        file.read_to_string(&mut contents).unwrap();
+        let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
+        assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
     }
 }

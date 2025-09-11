@@ -6,9 +6,7 @@ use the_block::gossip::relay::Relay;
 use the_block::net::{quic, Message, Payload, PROTOCOL_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 #[cfg(feature = "telemetry")]
-use the_block::telemetry::{
-    QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
-};
+use the_block::telemetry::{QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL};
 
 #[cfg(feature = "telemetry")]
 fn reset_counters() {
@@ -257,8 +255,10 @@ async fn quic_handshake_failure_metric() {
     assert!(res.is_err());
     server_ep.wait_idle().await;
     #[cfg(feature = "telemetry")]
-    assert!(the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["certificate"])
-        .get()
-        >= before + 1);
+    assert!(
+        the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["certificate"])
+            .get()
+            >= before + 1
+    );
 }

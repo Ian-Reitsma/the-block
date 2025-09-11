@@ -212,8 +212,14 @@ penalties. Inspect a peer's status with:
 net stats <peer_id>
 ```
 
-The output includes `throttle=<reason>` while a peer is throttled. Operators can
-manually engage or clear throttling:
+The output includes `throttle=<reason>` while a peer is throttled. List all
+currently throttled peers with:
+
+```bash
+net stats --backpressure
+```
+
+Operators can manually engage or clear throttling:
 
 ```bash
 net stats throttle <peer_id>
@@ -221,7 +227,9 @@ net stats throttle <peer_id> --clear
 ```
 
 Each action increments the `peer_throttle_total{reason}` counter for
-observability.
+observability. Cleared throttles also register under
+`peer_backpressure_active_total{reason}` and dropped requests under
+`peer_backpressure_dropped_total{reason}`.
 
 For deterministic tests, setting `TB_PEER_SEED=<u64>` fixes the shuffle order
 returned by `PeerSet::bootstrap`. This allows reproducible bootstrap sequences

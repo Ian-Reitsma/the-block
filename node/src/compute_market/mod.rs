@@ -3,6 +3,8 @@ use crate::telemetry;
 use crate::transaction::FeeLane;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::thread;
+use std::time::Duration;
 
 pub mod admission;
 pub mod cbm;
@@ -18,6 +20,7 @@ pub mod workload;
 pub mod workloads;
 
 pub use errors::MarketError;
+pub use scheduler::job_status;
 
 /// Supported specialised accelerators.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -355,7 +358,19 @@ impl Market {
     ) -> Option<(u64, u64)> {
         let state = self.jobs.remove(job_id)?;
         courier::cancel_job(job_id);
-        scheduler::cancel_job(job_id, &state.provider, reason);
+        let mut attempt = 0u32;
+        let mut delay = Duration::from_millis(50);
+        while attempt < 5 {
+            if courier::release_resources(job_id) {
+                break;
+            }
+            attempt += 1;
+            thread::sleep(delay);
+            delay *= 2;
+        }
+        if !scheduler::cancel_job(job_id, &state.provider, reason) {
+            return None;
+        }
         settlement::Settlement::accrue(&state.provider, "bond_refund", state.provider_bond);
         settlement::Settlement::refund_split(&state.job.buyer, state.job.consumer_bond, 0);
         Some((state.provider_bond, state.job.consumer_bond))
@@ -612,6 +627,7 @@ mod tests {
 
     #[test]
     fn job_lifecycle_and_finalize() {
+        scheduler::reset_for_test();
         let mut market = Market::new();
         let job_id = "job1".to_string();
         let offer = Offer {
@@ -665,6 +681,7 @@ mod tests {
 
     #[test]
     fn backlog_adjusts_price() {
+        scheduler::reset_for_test();
         let mut market = Market::new();
         let mut h = Hasher::new();
         h.update(b"a");
@@ -712,6 +729,7 @@ mod tests {
 
     #[test]
     fn cancel_paths() {
+        scheduler::reset_for_test();
         let mut market = Market::new();
         let offer = Offer {
             job_id: "j2".into(),
@@ -757,6 +775,7 @@ mod tests {
 
     #[test]
     fn cancel_mid_execution_records_event() {
+        scheduler::reset_for_test();
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var(
             "TB_CANCEL_PATH",
@@ -817,12 +836,14 @@ mod tests {
 
     #[test]
     fn courier_cancel_stops_handoff() {
+        scheduler::reset_for_test();
         courier::cancel_job("c1");
         assert!(courier::handoff_job("c1", "prov").is_err());
     }
 
     #[test]
     fn execute_job_path() {
+        scheduler::reset_for_test();
         let mut market = Market::new();
         let job_id = "exec".to_string();
         let offer = Offer {

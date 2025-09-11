@@ -1,5 +1,5 @@
-use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
 use crate::net::peer::ReputationUpdate;
+use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;

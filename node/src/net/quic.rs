@@ -41,7 +41,6 @@ impl std::fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
-
 /// Start a QUIC listener bound to `addr`, returning the endpoint
 /// and the generated self-signed certificate to share with peers.
 pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
@@ -137,10 +136,7 @@ pub async fn connect(
                         .with_label_values(&[super::peer::HandshakeError::Timeout.as_str()])
                         .inc();
                 }
-                super::peer::record_handshake_fail_addr(
-                    addr,
-                    super::peer::HandshakeError::Timeout,
-                );
+                super::peer::record_handshake_fail_addr(addr, super::peer::HandshakeError::Timeout);
             }
             tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake)
@@ -212,8 +208,12 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
         Ok(Err(e)) => {
             #[cfg(feature = "telemetry")]
             {
-                QUIC_HANDSHAKE_FAIL_TOTAL.inc();
                 let err = classify_err(&e);
+                if super::peer::track_handshake_fail_enabled() {
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[err.as_str()])
+                        .inc();
+                }
                 super::peer::record_handshake_fail_addr(addr, err);
             }
             tracing::error!(error = ?e, "quic_connect_fail");
@@ -222,11 +222,12 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
         Err(_) => {
             #[cfg(feature = "telemetry")]
             {
-                QUIC_HANDSHAKE_FAIL_TOTAL.inc();
-                super::peer::record_handshake_fail_addr(
-                    addr,
-                    super::peer::HandshakeError::Timeout,
-                );
+                if super::peer::track_handshake_fail_enabled() {
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[super::peer::HandshakeError::Timeout.as_str()])
+                        .inc();
+                }
+                super::peer::record_handshake_fail_addr(addr, super::peer::HandshakeError::Timeout);
             }
             tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake)

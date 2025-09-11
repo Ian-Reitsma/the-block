@@ -131,6 +131,14 @@ impl Default for TelemetryConfig {
 pub struct AggregatorConfig {
     pub url: String,
     pub auth_token: String,
+    #[serde(default)]
+    pub srv_record: Option<String>,
+    #[serde(default = "default_retention_secs")]
+    pub retention_secs: u64,
+}
+
+fn default_retention_secs() -> u64 {
+    7 * 24 * 60 * 60
 }
 
 static CONFIG_DIR: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
@@ -378,12 +386,7 @@ fn apply(cfg: &NodeConfig) {
     crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
     crate::net::set_peer_metrics_export(cfg.peer_metrics_export);
     crate::net::peer_metrics_store::init(&cfg.peer_metrics_db);
-    crate::net::set_metrics_aggregator(
-        cfg.metrics_aggregator.as_ref().map(|c| c.url.clone()),
-        cfg.metrics_aggregator
-            .as_ref()
-            .map(|c| c.auth_token.clone()),
-    );
+    crate::net::set_metrics_aggregator(cfg.metrics_aggregator.clone());
     crate::gateway::dns::set_allow_external(cfg.gateway_dns_allow_external);
     crate::gateway::dns::set_disable_verify(cfg.gateway_dns_disable_verify);
     #[cfg(feature = "telemetry")]
@@ -396,6 +399,10 @@ fn apply(cfg: &NodeConfig) {
 pub fn reload() -> bool {
     let dir = CONFIG_DIR.read().unwrap().clone();
     if dir.is_empty() {
+        return false;
+    }
+    let path = Path::new(&dir).join("default.toml");
+    if !path.exists() {
         return false;
     }
     match load_file(&dir) {
