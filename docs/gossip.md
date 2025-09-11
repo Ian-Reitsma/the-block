@@ -133,6 +133,16 @@ reputation (`--min-reputation`), and interactive paging for large peer sets.
 Rows with drop rates ≥5 % show in yellow and ≥20 % in red, and exit codes surface
 errors (`0` success, `2` unknown peer, `3` unauthorized):
 
+Additional flags improve usability:
+
+- `--sort-by latency|drop-rate|reputation` orders peers before display.
+- `--filter <regex>` matches peer IDs or addresses.
+- `--watch <secs>` refreshes the listing periodically.
+- `--summary` prints only aggregate totals.
+
+Latency columns embed a Unicode sparkline scaled to the slowest peer, and table
+output clamps to terminal width to avoid wrapping.
+
 ```bash
 net stats <peer_id>
 ```

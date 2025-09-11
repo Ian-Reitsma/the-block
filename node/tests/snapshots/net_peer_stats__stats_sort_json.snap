@@ -1,0 +1,29 @@
+---
+source: node/tests/net_peer_stats.rs
+expression: stdout
+---
+{
+  "peers": [
+    {
+      "bytes_sent": 0,
+      "drops": 0,
+      "peer": "peer0",
+      "reputation": 1.0,
+      "requests": 1
+    },
+    {
+      "bytes_sent": 0,
+      "drops": 0,
+      "peer": "peer1",
+      "reputation": 1.0,
+      "requests": 1
+    }
+  ],
+  "summary": {
+    "active": 2,
+    "bytes_sent": 0,
+    "drops": 0,
+    "requests": 2,
+    "total_peers": 2
+  }
+}

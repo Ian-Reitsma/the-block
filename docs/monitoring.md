@@ -52,14 +52,25 @@ Nodes can push their per-peer statistics to an external
 Set the `metrics_aggregator` section in `config.toml` with the aggregator `url`
 and shared `auth_token`. Additional environment variables tune persistence:
 
-- `AGGREGATOR_DB` — path to the SQLite snapshot (default: `./aggregator.db`).
+- `AGGREGATOR_DB` — path to the sled database directory (default:
+  `./peer_metrics.db`).
 - `AGGREGATOR_RETENTION_SECS` — prune entries older than this many seconds
-  (default: `604800` for 7 days).
+  (default: `604800` for 7 days). The same value can be set in
+  `metrics_aggregator.retention_secs` within `config.toml`.
 
 Enable TLS by supplying `--tls-cert` and `--tls-key` files when starting the
 aggregator. Nodes verify the certificate via the standard Rustls store.
-Token-based auth uses the `auth_token`; rotate it periodically and restart
-nodes to pick up the new value.
+Token-based auth uses the `auth_token`; when the token is stored on disk
+both the node and aggregator reload it for new requests without requiring
+a restart.
+
+Snapshots persist across restarts in a disk-backed sled store keyed by
+peer ID. On startup the aggregator drops entries older than
+`retention_secs` and schedules a periodic cleanup that prunes stale rows,
+incrementing the `aggregator_retention_pruned_total` counter. Operators
+can force a sweep by running `aggregator prune --before <timestamp>`.
+`scripts/aggregator_backup.sh` and `scripts/aggregator_restore.sh` offer
+simple archive and restore helpers for the database directory.
 
 #### Behaviour and resilience
 
@@ -67,6 +78,15 @@ If the aggregator restarts or becomes unreachable, nodes queue updates
 in memory and retry with backoff until the service recovers. Aggregated
 snapshots deduplicate on peer ID so multiple nodes reporting the same
 peer collapse into a single record.
+
+### High-availability deployment
+
+Run multiple aggregators for resilience. Each instance performs leader
+election via an external key-value store such as `etcd`; followers tail a
+write-ahead log to stay consistent. Nodes can discover aggregators through
+DNS SRV records and automatically fail over when the leader becomes
+unreachable. Load balancers should scrape `/healthz` on each instance and
+watch the `aggregator_replication_lag_seconds` gauge for replica drift.
 
 #### Metrics and alerts
 
@@ -83,6 +103,23 @@ traversal via `AGGREGATOR_DB`. Restrict token scope, use TLS, and run the
 service under a dedicated user with confined file permissions.
 
 Peer metrics exports sanitize relative paths, reject symlinks, and lock files during assembly to avoid race conditions. Only `.json`, `.json.gz`, or `.tar.gz` extensions are honored, and suspicious requests are logged with rate limiting. Disable exports entirely by setting `peer_metrics_export = false` in `config/default.toml` on sensitive nodes.
+
+#### Bulk exports
+
+Operators can download all peer snapshots in one operation via the aggregator’s `GET /export/all` endpoint. The response is a ZIP archive where each entry is `<peer_id>.json`. The binary `net stats export --all --path bulk.zip --rpc http://aggregator:9300` streams this archive to disk. The service rejects requests when the peer count exceeds `max_export_peers` and increments the `bulk_export_total` counter for visibility.
+For sensitive deployments the archive can be encrypted in transit by passing an `age` recipient:
+
+```
+net stats export --all --path bulk.zip.age --age-recipient <RECIPIENT>
+```
+The CLI forwards the recipient to the aggregator which encrypts the ZIP stream and sets the `application/age` content type.
+
+Alternatively, operators can supply an OpenSSL passphrase to encrypt with AES-256-CBC:
+
+```
+net stats export --all --path bulk.zip.enc --openssl-pass <PASSPHRASE>
+```
+The first 16 bytes of the response contain the IV; the remainder is the ciphertext.
 
 Key rotations propagate through the same channel. After issuing `net rotate-key`,
 nodes increment `key_rotation_total` and persist the event to

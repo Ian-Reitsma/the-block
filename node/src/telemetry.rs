@@ -1,24 +1,24 @@
 use blake3;
 #[cfg(feature = "telemetry")]
 use dashmap::DashMap;
+#[cfg(feature = "telemetry")]
+use hdrhistogram::Histogram as HdrHistogram;
 use once_cell::sync::Lazy;
+#[cfg(feature = "telemetry")]
+use procfs::process::Process;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
     IntGaugeVec, Opts, Registry, TextEncoder,
 };
 use pyo3::prelude::*;
+#[cfg(feature = "telemetry")]
+use rand::Rng;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "telemetry")]
+use std::sync::{Mutex, Once};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use ureq;
-#[cfg(feature = "telemetry")]
-use rand::Rng;
-#[cfg(feature = "telemetry")]
-use procfs::process::Process;
-#[cfg(feature = "telemetry")]
-use hdrhistogram::Histogram as HdrHistogram;
-#[cfg(feature = "telemetry")]
-use std::sync::{Mutex, Once};
 
 pub mod summary;
 
@@ -127,9 +127,7 @@ pub fn sampled_inc(counter: &IntCounter) {
 #[cfg(feature = "telemetry")]
 pub fn sampled_inc_vec(counter: &IntCounterVec, labels: &[&str]) {
     if should_sample() {
-        counter
-            .with_label_values(labels)
-            .inc_by(sample_weight());
+        counter.with_label_values(labels).inc_by(sample_weight());
     }
 }
 
@@ -200,7 +198,9 @@ pub fn set_compaction_interval(_s: u64) {}
 #[cfg(not(feature = "telemetry"))]
 pub fn force_compact() {}
 #[cfg(not(feature = "telemetry"))]
-pub fn current_alloc_bytes() -> u64 { 0 }
+pub fn current_alloc_bytes() -> u64 {
+    0
+}
 #[cfg(not(feature = "telemetry"))]
 pub fn update_memory_usage() {}
 
@@ -324,8 +324,11 @@ pub static SUBSIDY_MULTIPLIER_RAW: Lazy<IntGaugeVec> = Lazy::new(|| {
 });
 
 pub static TELEMETRY_ALLOC_BYTES: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new("telemetry_alloc_bytes", "Telemetry memory allocation in bytes")
-        .unwrap();
+    let g = IntGauge::new(
+        "telemetry_alloc_bytes",
+        "Telemetry memory allocation in bytes",
+    )
+    .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
 });
@@ -870,6 +873,30 @@ pub static SCHEDULER_PRIORITY_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_priority_miss_total: {e}"));
+    c
+});
+
+pub static SCHEDULER_JOB_AGE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let h = Histogram::with_opts(HistogramOpts::new(
+        "job_age_seconds",
+        "Time a job waited in the scheduler queue",
+    ))
+    .unwrap_or_else(|e| panic!("hist job_age_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry job_age_seconds: {e}"));
+    h
+});
+
+pub static SCHEDULER_PRIORITY_BOOST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "priority_boost_total",
+        "Jobs whose priority was boosted due to aging",
+    )
+    .unwrap_or_else(|e| panic!("counter priority_boost_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry priority_boost_total: {e}"));
     c
 });
 
@@ -1495,12 +1522,10 @@ pub static REPUTATION_GOSSIP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 });
 
 pub static REPUTATION_GOSSIP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    let h = Histogram::with_opts(
-        HistogramOpts::new(
-            "reputation_gossip_latency_seconds",
-            "Propagation latency for reputation updates",
-        ),
-    )
+    let h = Histogram::with_opts(HistogramOpts::new(
+        "reputation_gossip_latency_seconds",
+        "Propagation latency for reputation updates",
+    ))
     .unwrap_or_else(|e| panic!("histogram reputation_gossip_latency_seconds: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))
@@ -1671,6 +1696,36 @@ pub static PEER_THROTTLE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         prometheus::Opts::new(
             "peer_throttle_total",
             "Peer throttle events grouped by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_BACKPRESSURE_ACTIVE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_backpressure_active_total",
+            "Backpressure activations grouped by reason",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_BACKPRESSURE_DROPPED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "peer_backpressure_dropped_total",
+            "Requests dropped due to backpressure grouped by reason",
         ),
         &["reason"],
     )

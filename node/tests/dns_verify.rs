@@ -1,4 +1,6 @@
-use the_block::gateway::dns::{set_allow_external, set_txt_resolver, clear_verify_cache, set_disable_verify, verify_txt};
+use the_block::gateway::dns::{
+    clear_verify_cache, set_allow_external, set_disable_verify, set_txt_resolver, verify_txt,
+};
 
 #[test]
 fn verifies_token() {

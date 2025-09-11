@@ -6,8 +6,8 @@ use blake3::Hasher;
 use once_cell::sync::Lazy;
 
 use crate::net::message::BlobChunk;
-use crate::net::peer::ReputationUpdate;
 use crate::net::peer::is_throttled_addr;
+use crate::net::peer::ReputationUpdate;
 use crate::net::{record_ip_drop, send_msg, Message};
 use ed25519_dalek::SigningKey;
 

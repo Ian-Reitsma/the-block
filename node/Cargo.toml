@@ -90,6 +90,8 @@ pprof = { version = "0.13", features = ["flamegraph"] }
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rcgen = { version = "0.12", optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
+regex = "1"
+terminal_size = "0.2"
 
 [features]
 fuzzy = ["proptest"]
@@ -118,6 +120,7 @@ tracing = "0.1"
 tar = "0.4"
 jurisdiction = { path = "../crates/jurisdiction" }
 insta = { version = "1", features = ["glob"] }
+axum = { version = "0.7", features = ["json"] }
 
 [[bench]]
 name = "startup_rebuild"

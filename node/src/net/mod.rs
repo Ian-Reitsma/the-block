@@ -38,13 +38,13 @@ pub use peer::ReputationUpdate;
 pub use peer::{
     clear_peer_metrics, clear_throttle, export_all_peer_stats, export_peer_stats, known_peers,
     load_peer_metrics, p2p_max_bytes_per_sec, p2p_max_per_sec, peer_reputation_decay, peer_stats,
-    peer_stats_all, peer_stats_map, persist_peer_metrics, record_request, reset_peer_metrics,
-    recent_handshake_failures, rotate_peer_key, set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
-    set_p2p_max_bytes_per_sec, set_p2p_max_per_sec, set_peer_metrics_compress,
-    set_peer_metrics_export, set_peer_metrics_export_quota, set_peer_metrics_path,
-    set_peer_metrics_retention, set_peer_metrics_sample_rate, set_peer_reputation_decay,
-    set_track_drop_reasons, set_track_handshake_fail, throttle_peer, DropReason, HandshakeError,
-    PeerMetrics, PeerReputation, PeerSet, PeerStat,
+    peer_stats_all, peer_stats_map, persist_peer_metrics, recent_handshake_failures,
+    record_request, reset_peer_metrics, rotate_peer_key, set_max_peer_metrics,
+    set_metrics_aggregator, set_metrics_export_dir, set_p2p_max_bytes_per_sec, set_p2p_max_per_sec,
+    set_peer_metrics_compress, set_peer_metrics_export, set_peer_metrics_export_quota,
+    set_peer_metrics_path, set_peer_metrics_retention, set_peer_metrics_sample_rate,
+    set_peer_reputation_decay, set_track_drop_reasons, set_track_handshake_fail, throttle_peer,
+    DropReason, HandshakeError, PeerMetrics, PeerReputation, PeerSet, PeerStat,
 };
 
 pub use peer::simulate_handshake_fail;
@@ -52,10 +52,7 @@ pub use peer::simulate_handshake_fail;
 /// Manually verify DNS TXT record for `domain`.
 pub fn dns_verify(domain: &str) -> serde_json::Value {
     let v = crate::gateway::dns::dns_lookup(&serde_json::json!({ "domain": domain }));
-    let verified = v
-        .get("verified")
-        .and_then(|b| b.as_bool())
-        .unwrap_or(false);
+    let verified = v.get("verified").and_then(|b| b.as_bool()).unwrap_or(false);
     serde_json::json!({ "domain": domain, "verified": verified })
 }
 

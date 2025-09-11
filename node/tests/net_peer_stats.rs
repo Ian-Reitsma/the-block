@@ -1,4 +1,5 @@
 use ed25519_dalek::SigningKey;
+use hex;
 use insta::assert_snapshot;
 use rand::{thread_rng, RngCore};
 use serial_test::serial;
@@ -25,6 +26,7 @@ mod util;
 fn init_env() -> tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
+    the_block::net::clear_peer_metrics();
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
     // Ensure rate-limit tests trigger drops by tightening default limits.
     std::env::set_var("TB_P2P_SHARD_BURST", "100");
@@ -824,6 +826,137 @@ async fn peer_stats_cli_show_json_snapshot() {
 
 #[tokio::test]
 #[serial]
+async fn peer_stats_cli_sort_filter_snapshot() {
+    let dir = init_env();
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    let peers = PeerSet::new(Vec::new());
+
+    // first peer with reputation penalty
+    let (sk1_bytes, pk1_vec) = generate_keypair();
+    let pk1: [u8; 32] = pk1_vec.as_slice().try_into().unwrap();
+    let sk1 = SigningKey::from_bytes(&sk1_bytes[..].try_into().unwrap());
+    let hello1 = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg1 = Message::new(Payload::Handshake(hello1), &sk1);
+    peers.handle_message(msg1, None, &bc);
+    simulate_handshake_fail(pk1.clone().try_into().unwrap(), HandshakeError::Tls);
+
+    // second peer
+    let (sk2_bytes, _pk2_vec) = generate_keypair();
+    let sk2 = SigningKey::from_bytes(&sk2_bytes[..].try_into().unwrap());
+    let hello2 = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: the_block::net::REQUIRED_FEATURES,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Tcp,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
+    peers.handle_message(msg2, None, &bc);
+
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        Default::default(),
+        tx,
+    ));
+    let addr = expect_timeout(rx).await.unwrap();
+    let rpc_url = format!("http://{}", addr);
+
+    // sort by reputation
+    let output = tokio::task::spawn_blocking({
+        let rpc_url = rpc_url.clone();
+        move || {
+            Command::new(env!("CARGO_BIN_EXE_net"))
+                .args([
+                    "stats",
+                    "show",
+                    "--all",
+                    "--sort-by",
+                    "reputation",
+                    "--format",
+                    "json",
+                    "--rpc",
+                    &rpc_url,
+                ])
+                .output()
+                .unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert!(output.status.success());
+    let mut val: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    if let Some(arr) = val.get_mut("peers").and_then(|v| v.as_array_mut()) {
+        for (i, p) in arr.iter_mut().enumerate() {
+            if let Some(obj) = p.as_object_mut() {
+                obj.remove("latency");
+                obj.insert(
+                    "peer".into(),
+                    serde_json::Value::String(format!("peer{}", i)),
+                );
+                obj.insert("reputation".into(), serde_json::Value::from(1.0));
+            }
+        }
+    }
+    let stdout = serde_json::to_string_pretty(&val).unwrap();
+    assert_snapshot!("stats_sort_json", stdout);
+
+    // filter by first peer prefix
+    let prefix = &hex::encode(pk1)[..4];
+    let output2 = tokio::task::spawn_blocking({
+        let rpc_url = rpc_url.clone();
+        let patt = format!("^{}", prefix);
+        move || {
+            Command::new(env!("CARGO_BIN_EXE_net"))
+                .args([
+                    "stats", "show", "--all", "--filter", &patt, "--format", "json", "--rpc",
+                    &rpc_url,
+                ])
+                .output()
+                .unwrap()
+        }
+    })
+    .await
+    .unwrap();
+    assert!(output2.status.success());
+    let mut val2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
+    if let Some(arr) = val2.get_mut("peers").and_then(|v| v.as_array_mut()) {
+        for (i, p) in arr.iter_mut().enumerate() {
+            if let Some(obj) = p.as_object_mut() {
+                obj.remove("latency");
+                obj.insert(
+                    "peer".into(),
+                    serde_json::Value::String(format!("peer{}", i)),
+                );
+                obj.insert("reputation".into(), serde_json::Value::from(1.0));
+            }
+        }
+    }
+    let stdout2 = serde_json::to_string_pretty(&val2).unwrap();
+    assert_snapshot!("stats_filter_json", stdout2);
+
+    handle.abort();
+    Settlement::shutdown();
+}
+
+#[tokio::test]
+#[serial]
 async fn peer_stats_malformed_id() {
     let dir = init_env();
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
@@ -1050,6 +1183,11 @@ async fn peer_stats_persist_restart() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
 
+    let db_path = dir.path().join("metrics.db");
+    the_block::net::peer_metrics_store::init(db_path.to_str().unwrap());
+    the_block::net::set_peer_metrics_retention(60);
+    the_block::net::set_peer_metrics_compress(false);
+
     let peers = PeerSet::new(Vec::new());
     let (sk_bytes, pk_vec) = generate_keypair();
     let pk: [u8; 32] = pk_vec.as_slice().try_into().unwrap();
@@ -1067,10 +1205,6 @@ async fn peer_stats_persist_restart() {
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
 
-    let path = dir.path().join("metrics.json");
-    the_block::net::set_peer_metrics_path(path.to_str().unwrap().into());
-    the_block::net::set_peer_metrics_retention(60);
-    the_block::net::set_peer_metrics_compress(false);
     the_block::net::persist_peer_metrics().unwrap();
     the_block::net::clear_peer_metrics();
     the_block::net::load_peer_metrics();

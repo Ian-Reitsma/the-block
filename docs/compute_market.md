@@ -117,6 +117,15 @@ compute stats --effective` CLI. Query job capability descriptors through
 `~/.the_block/reputation.json` and decay toward zero at the rate configured by
 `provider_reputation_decay`.
 
+### Fair-Share Scheduling
+
+Queued jobs age over time and gain an *effective priority* boost bounded by
+`max_priority_boost`. The aging rate is controlled by `aging_rate` and prevents
+low-priority work from starving when high-priority traffic dominates. The
+scheduler persists enqueue timestamps so restarts do not reset aging. Operators
+can inspect the aged queue with `compute queue` and monitor
+`job_age_seconds` and `priority_boost_total` metrics to tune fairness.
+
 ### Reputation Gossip
 
 Nodes exchange provider scores using a lightweight gossip message carrying
@@ -427,6 +436,15 @@ Usage decays linearly over a 60 s window.  For each buyer and provider a
 `Quota` structs and refilled by the same decay timer.  Both limits are evaluated
 before jobs enter the market, returning `RejectReason::{Capacity,FairShare,BurstExhausted}`
 on failure.
+
+### Cancellation Edge Cases and Refunds
+
+When a job is cancelled, the courier rolls back any resource reservations via
+`release_resources(job_id)` with exponential backoff. If the job finishes while
+the cancellation is in flight, the scheduler detects the completed state and
+skips the cancellation. Reasons are persisted for audit, and operators can query
+state with `compute market status <job_id>`. Refunds honour the original CT/IT
+split.
 
 ### Querying Admission Parameters
 

@@ -10,13 +10,14 @@ async fn main() {
         .expect("invalid addr");
     let token = env::var("AGGREGATOR_TOKEN").unwrap_or_default();
     let db: PathBuf = env::var("AGGREGATOR_DB")
-        .unwrap_or_else(|_| "peer_metrics.json".into())
+        .unwrap_or_else(|_| "peer_metrics.db".into())
         .into();
     let retention = env::var("AGGREGATOR_RETENTION_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(24 * 60 * 60);
     let state = AppState::new(token, db, retention);
+    state.spawn_cleanup();
     let app = router(state);
     if let (Ok(cert), Ok(key)) = (env::var("AGGREGATOR_CERT"), env::var("AGGREGATOR_KEY")) {
         let config = RustlsConfig::from_pem_file(cert, key)

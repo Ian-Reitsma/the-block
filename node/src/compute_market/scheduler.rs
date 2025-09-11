@@ -1,8 +1,8 @@
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -46,6 +46,14 @@ pub struct SchedulerStats {
     pub queued_normal: u64,
     pub queued_low: u64,
     pub priority_miss: u64,
+    pub pending: Vec<PendingJob>,
+}
+
+#[derive(Serialize)]
+pub struct PendingJob {
+    pub job_id: String,
+    pub priority: Priority,
+    pub effective_priority: f64,
 }
 
 impl Capability {
@@ -111,6 +119,8 @@ pub enum CancelReason {
     Client,
     Provider,
     Preempted,
+    ClientTimeout,
+    ProviderFault,
 }
 
 impl CancelReason {
@@ -119,6 +129,8 @@ impl CancelReason {
             CancelReason::Client => "client",
             CancelReason::Provider => "provider",
             CancelReason::Preempted => "preempted",
+            CancelReason::ClientTimeout => "client_timeout",
+            CancelReason::ProviderFault => "provider_fault",
         }
     }
 
@@ -126,6 +138,8 @@ impl CancelReason {
         match s {
             "provider" => CancelReason::Provider,
             "preempted" => CancelReason::Preempted,
+            "client_timeout" => CancelReason::ClientTimeout,
+            "provider_fault" => CancelReason::ProviderFault,
             _ => CancelReason::Client,
         }
     }
@@ -185,21 +199,42 @@ impl Default for Priority {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct QueuedJob {
     job_id: String,
     provider: String,
     capability: Capability,
     priority: Priority,
     enqueue_ts: u64,
+    /// Cached effective priority scaled by 1000 for ordering.
+    effective_priority: i64,
+}
+
+impl QueuedJob {
+    fn base_priority_value(&self) -> f64 {
+        match self.priority {
+            Priority::High => 0.0,
+            Priority::Normal => 1.0,
+            Priority::Low => 2.0,
+        }
+    }
+
+    fn recompute_effective(&mut self) {
+        let age = current_ts().saturating_sub(self.enqueue_ts) as f64;
+        let rate = aging_rate();
+        let max_boost = max_priority_boost();
+        let boost = (age * rate).min(max_boost);
+        let eff = (self.base_priority_value() - boost) * 1000.0;
+        self.effective_priority = eff.round() as i64;
+    }
 }
 
 impl Ord for QueuedJob {
     fn cmp(&self, other: &Self) -> CmpOrdering {
-        match self.priority.cmp(&other.priority) {
-            CmpOrdering::Equal => other.enqueue_ts.cmp(&self.enqueue_ts),
-            ord => ord,
-        }
+        self.effective_priority
+            .cmp(&other.effective_priority)
+            .reverse()
+            .then_with(|| other.enqueue_ts.cmp(&self.enqueue_ts))
     }
 }
 
@@ -252,9 +287,7 @@ impl SchedulerState {
             };
             let stale = match self.active.get(&job_id) {
                 Some(assign) => {
-                    if new_rep - assign.reputation < min_delta
-                        || !cap.matches(&assign.capability)
-                    {
+                    if new_rep - assign.reputation < min_delta || !cap.matches(&assign.capability) {
                         break;
                     }
                     false
@@ -495,9 +528,10 @@ impl SchedulerState {
                                 priority: current.priority,
                             },
                         );
-                        self
-                            .active_by_rep
-                            .push(Reverse(ActiveRepEntry { reputation: new_rep, job_id: job_id.to_owned() }));
+                        self.active_by_rep.push(Reverse(ActiveRepEntry {
+                            reputation: new_rep,
+                            job_id: job_id.to_owned(),
+                        }));
                         self.record_failure(&current.provider);
                         persist_cancellation(job_id, CancelReason::Preempted);
                         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -537,20 +571,20 @@ impl SchedulerState {
         }
     }
 
-    fn cancel_job(&mut self, job_id: &str, provider: &str, reason: CancelReason) {
-        let accel = self
-            .active
-            .get(job_id)
-            .and_then(|a| a.capability.accelerator.clone());
+    fn cancel_job(&mut self, job_id: &str, provider: &str, reason: CancelReason) -> bool {
+        let accel = match self.active.get(job_id) {
+            Some(a) => a.capability.accelerator.clone(),
+            None => return false,
+        };
         self.end_job(job_id);
         match reason {
-            CancelReason::Client => {
+            CancelReason::Client | CancelReason::ClientTimeout => {
                 self.record_success(provider);
                 if accel.is_some() {
                     self.record_accelerator_success(provider);
                 }
             }
-            CancelReason::Provider => {
+            CancelReason::Provider | CancelReason::ProviderFault => {
                 self.record_failure(provider);
                 if accel.is_some() {
                     self.record_accelerator_failure(provider);
@@ -569,6 +603,7 @@ impl SchedulerState {
                 .with_label_values(&[reason.as_str()])
                 .inc();
         }
+        true
     }
 
     fn active_provider(&self, job_id: &str) -> Option<String> {
@@ -600,12 +635,18 @@ impl SchedulerState {
         let mut queued_high = 0;
         let mut queued_normal = 0;
         let mut queued_low = 0;
+        let mut pending_jobs = Vec::new();
         for q in self.pending.iter() {
             match q.priority {
                 Priority::High => queued_high += 1,
                 Priority::Normal => queued_normal += 1,
                 Priority::Low => queued_low += 1,
             }
+            pending_jobs.push(PendingJob {
+                job_id: q.job_id.clone(),
+                priority: q.priority,
+                effective_priority: q.effective_priority as f64 / 1000.0,
+            });
         }
         SchedulerStats {
             success,
@@ -619,23 +660,28 @@ impl SchedulerState {
             queued_normal,
             queued_low,
             priority_miss: self.priority_miss_total,
+            pending: pending_jobs,
         }
     }
 
     fn enqueue_job(&mut self, job_id: &str, provider: &str, cap: Capability, priority: Priority) {
         let now = current_ts();
-        let job = QueuedJob {
+        let mut job = QueuedJob {
             job_id: job_id.to_owned(),
             provider: provider.to_owned(),
             capability: cap,
             priority,
             enqueue_ts: now,
+            effective_priority: 0,
         };
+        job.recompute_effective();
         self.pending.push(job);
+        self.persist_pending();
         self.try_start_jobs();
     }
 
     fn try_start_jobs(&mut self) {
+        self.rebuild_pending();
         let cap_pct = LOW_PRIORITY_CAP_PCT.load(Ordering::Relaxed);
         while let Some(job) = self.pending.peek() {
             if job.priority == Priority::Low {
@@ -651,6 +697,16 @@ impl SchedulerState {
                 self.active_low += 1;
             }
             let wait = current_ts().saturating_sub(job.enqueue_ts);
+            let base = job.base_priority_value();
+            let eff = job.effective_priority as f64 / 1000.0;
+            if base - eff > 0.0 && SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                #[cfg(feature = "telemetry")]
+                telemetry::SCHEDULER_PRIORITY_BOOST_TOTAL.inc();
+            }
+            if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
+                #[cfg(feature = "telemetry")]
+                telemetry::SCHEDULER_JOB_AGE_SECONDS.observe(wait as f64);
+            }
             if job.priority != Priority::Low && wait > PRIORITY_MISS_SECS {
                 self.priority_miss_total += 1;
                 if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -667,9 +723,11 @@ impl SchedulerState {
                     priority: job.priority,
                 },
             );
-            self
-                .active_by_rep
-                .push(Reverse(ActiveRepEntry { reputation: rep, job_id: job.job_id.clone() }));
+            courier::reserve_resources(&job.job_id);
+            self.active_by_rep.push(Reverse(ActiveRepEntry {
+                reputation: rep,
+                job_id: job.job_id.clone(),
+            }));
             self.active_jobs += 1;
             if job.capability.accelerator.is_some()
                 && SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed)
@@ -681,6 +739,27 @@ impl SchedulerState {
                 #[cfg(feature = "telemetry")]
                 telemetry::SCHEDULER_ACTIVE_JOBS.set(self.active_jobs as i64);
             }
+            self.persist_pending();
+        }
+    }
+
+    fn rebuild_pending(&mut self) {
+        let mut jobs: Vec<_> = self.pending.drain().collect();
+        for j in &mut jobs {
+            j.recompute_effective();
+        }
+        for j in jobs {
+            self.pending.push(j);
+        }
+    }
+
+    fn persist_pending(&self) {
+        let path = pending_path();
+        if let Some(dir) = path.parent() {
+            let _ = fs::create_dir_all(dir);
+        }
+        if let Ok(json) = serde_json::to_vec(&self.pending.clone().into_vec()) {
+            let _ = fs::write(path, json);
         }
     }
 }
@@ -704,7 +783,7 @@ static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
         active: HashMap::new(),
         preempt_total: 0,
         last_effective_price: None,
-        pending: BinaryHeap::new(),
+        pending: load_pending(),
         active_by_rep: BinaryHeap::new(),
         active_low: 0,
         priority_miss_total: 0,
@@ -832,6 +911,8 @@ static REPUTATION_MULT_MIN: AtomicU64 = AtomicU64::new((0.5f64).to_bits());
 static REPUTATION_MULT_MAX: AtomicU64 = AtomicU64::new((1.0f64).to_bits());
 static LOW_PRIORITY_CAP_PCT: AtomicU64 = AtomicU64::new(50);
 static REPUTATION_GOSSIP_ENABLED: AtomicBool = AtomicBool::new(true);
+static AGING_RATE: AtomicU64 = AtomicU64::new((0.001f64).to_bits());
+static MAX_PRIORITY_BOOST: AtomicU64 = AtomicU64::new((1.0f64).to_bits());
 
 fn provider_reputation_decay() -> f64 {
     f64::from_bits(PROVIDER_REPUTATION_DECAY.load(Ordering::Relaxed))
@@ -885,11 +966,116 @@ pub fn reputation_snapshot() -> Vec<crate::net::ReputationUpdate> {
         .snapshot()
 }
 
+fn lookup_cancellation(job_id: &str) -> Option<String> {
+    let path = cancel_log_path();
+    if let Ok(contents) = fs::read_to_string(path) {
+        for line in contents.lines().rev() {
+            let mut parts = line.split_whitespace();
+            if let (Some(id), Some(reason)) = (parts.next(), parts.next()) {
+                if id == job_id {
+                    return Some(reason.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn job_status(job_id: &str) -> serde_json::Value {
+    let sched = SCHEDULER.lock().unwrap();
+    if sched.active.contains_key(job_id) {
+        serde_json::json!({"status": "active"})
+    } else if sched.pending.iter().any(|j| j.job_id == job_id) {
+        serde_json::json!({"status": "queued"})
+    } else if let Some(reason) = lookup_cancellation(job_id) {
+        serde_json::json!({"status": "canceled", "reason": reason})
+    } else {
+        serde_json::json!({"status": "unknown"})
+    }
+}
+
+fn aging_rate() -> f64 {
+    f64::from_bits(AGING_RATE.load(Ordering::Relaxed))
+}
+
+fn max_priority_boost() -> f64 {
+    f64::from_bits(MAX_PRIORITY_BOOST.load(Ordering::Relaxed))
+}
+
+pub fn set_aging_rate(rate: f64) {
+    AGING_RATE.store(rate.to_bits(), Ordering::Relaxed);
+}
+
+pub fn set_max_priority_boost(v: f64) {
+    MAX_PRIORITY_BOOST.store(v.to_bits(), Ordering::Relaxed);
+}
+
+fn pending_path() -> PathBuf {
+    std::env::var("TB_PENDING_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".the_block")
+                .join("pending_jobs.json")
+        })
+}
+
+fn load_pending() -> BinaryHeap<QueuedJob> {
+    if let Ok(bytes) = fs::read(pending_path()) {
+        if let Ok(mut jobs) = serde_json::from_slice::<Vec<QueuedJob>>(&bytes) {
+            for j in &mut jobs {
+                j.recompute_effective();
+            }
+            let mut heap = BinaryHeap::new();
+            for j in jobs {
+                heap.push(j);
+            }
+            return heap;
+        }
+    }
+    BinaryHeap::new()
+}
+
 pub fn merge_reputation(provider: &str, score: i64, epoch: u64) -> bool {
     REPUTATION_STORE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .merge(provider, score, epoch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn aging_reorders_jobs() {
+        let mut q1 = QueuedJob {
+            job_id: "low".into(),
+            provider: "p1".into(),
+            capability: Capability::default(),
+            priority: Priority::Low,
+            enqueue_ts: current_ts() - 10,
+            effective_priority: 0,
+        };
+        let mut q2 = QueuedJob {
+            job_id: "high".into(),
+            provider: "p2".into(),
+            capability: Capability::default(),
+            priority: Priority::High,
+            enqueue_ts: current_ts(),
+            effective_priority: 0,
+        };
+        set_aging_rate(1.0);
+        set_max_priority_boost(5.0);
+        q1.recompute_effective();
+        q2.recompute_effective();
+        let mut heap = BinaryHeap::new();
+        heap.push(q2.clone());
+        heap.push(q1.clone());
+        let top = heap.pop().unwrap();
+        assert_eq!(top.job_id, "low");
+    }
 }
 
 pub fn validate_multiplier(m: f64) -> bool {
@@ -982,11 +1168,11 @@ pub fn end_job(job_id: &str) {
         .end_job(job_id);
 }
 
-pub fn cancel_job(job_id: &str, provider: &str, reason: CancelReason) {
+pub fn cancel_job(job_id: &str, provider: &str, reason: CancelReason) -> bool {
     SCHEDULER
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .cancel_job(job_id, provider, reason);
+        .cancel_job(job_id, provider, reason)
 }
 
 pub fn try_preempt(job_id: &str, new_provider: &str, new_rep: i64) -> bool {

@@ -85,10 +85,11 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.peer_stats",
     "net.peer_stats_all",
     "net.peer_stats_reset",
-    "net.peer_stats_export", 
-    "net.peer_stats_export_all", 
+    "net.peer_stats_export",
+    "net.peer_stats_export_all",
     "net.peer_stats_persist",
     "net.peer_throttle",
+    "net.backpressure_clear",
     "net.reputation_sync",
     "net.reputation_show",
     "net.dns_verify",
@@ -481,6 +482,7 @@ pub async fn handle_conn(
                         | "net.peer_stats_export"
                         | "net.peer_stats_export_all"
                         | "net.peer_throttle"
+                        | "net.backpressure_clear"
                 ) {
                     let local = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
                     if !local {
@@ -516,6 +518,9 @@ pub async fn handle_conn(
                                 .unwrap_or(false);
                             #[cfg(feature = "telemetry")]
                             log::info!("peer_throttle operator={:?} clear={}", peer_ip, _clear);
+                        } else if method_str == "net.backpressure_clear" {
+                            #[cfg(feature = "telemetry")]
+                            log::info!("backpressure_clear operator={:?}", peer_ip);
                         }
 
                         match dispatch(
@@ -945,6 +950,39 @@ fn dispatch(
                 serde_json::json!({"status": "ok"})
             }
         }
+        "net.backpressure_clear" => {
+            let id = req
+                .params
+                .get("peer_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bytes = match hex::decode(id) {
+                Ok(b) => b,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            let pk: [u8; 32] = match bytes.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                }
+            };
+            if net::clear_throttle(&pk) {
+                serde_json::json!({"status": "ok"})
+            } else {
+                return Err(RpcError {
+                    code: -32602,
+                    message: "unknown peer",
+                });
+            }
+        }
         "net.reputation_sync" => {
             net::reputation_sync();
             serde_json::json!({"status": "ok"})
@@ -1148,15 +1186,27 @@ fn dispatch(
         }
         "inflation.params" => inflation::params(&bc),
         "compute_market.stats" => {
-            let accel = req.params.get("accelerator").and_then(|v| v.as_str()).and_then(|s| match s.to_lowercase().as_str() {
-                "fpga" => Some(crate::compute_market::Accelerator::Fpga),
-                "tpu" => Some(crate::compute_market::Accelerator::Tpu),
-                _ => None,
-            });
+            let accel = req
+                .params
+                .get("accelerator")
+                .and_then(|v| v.as_str())
+                .and_then(|s| match s.to_lowercase().as_str() {
+                    "fpga" => Some(crate::compute_market::Accelerator::Fpga),
+                    "tpu" => Some(crate::compute_market::Accelerator::Tpu),
+                    _ => None,
+                });
             compute_market::stats(accel)
-        },
+        }
         "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
         "compute_market.scheduler_stats" => compute_market::scheduler_stats(),
+        "compute.job_status" => {
+            let job_id = req
+                .params
+                .get("job_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            crate::compute_market::job_status(job_id)
+        }
         "compute.reputation_get" => {
             let provider = req
                 .params

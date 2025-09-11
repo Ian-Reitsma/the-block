@@ -8,11 +8,13 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
     let (backlog, util) = price_board::backlog_utilization();
     let weighted = price_board::bands(FeeLane::Industrial).map(|(_, m, _)| m);
     let raw = price_board::raw_bands(FeeLane::Industrial).map(|(_, m, _)| m);
+    let sched = scheduler::stats();
     json!({
         "industrial_backlog": backlog,
         "industrial_utilization": util,
         "industrial_price_weighted": weighted,
         "industrial_price_base": raw,
+        "pending": sched.pending,
     })
 }
 

@@ -1,4 +1,7 @@
-use the_block::compute_market::{scheduler::{self, Capability, ReputationStore}, Accelerator};
+use the_block::compute_market::{
+    scheduler::{self, Capability, ReputationStore},
+    Accelerator,
+};
 
 #[test]
 fn chooses_lowest_effective_price() {

@@ -27,6 +27,8 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_metrics_active` gauges the number of peers currently tracked
 - `peer_metrics_memory_bytes` approximates memory used by peer metrics
 - `peer_throttle_total{reason}` counts peers temporarily throttled for request or bandwidth limits
+- `peer_backpressure_active_total{reason}` increments when a peer is throttled for exceeding limits
+- `peer_backpressure_dropped_total{reason}` counts requests rejected due to active backpressure
 - `peer_stats_query_total{peer_id}` counts RPC and CLI lookups
 - `peer_stats_reset_total{peer_id}` counts manual metric resets
 - `peer_stats_export_total{result}` counts JSON snapshot export attempts (ok, error)

@@ -30,6 +30,12 @@
     },
     {
       "deprecated": false,
+      "description": "Peer metric samples pruned by retention",
+      "labels": [],
+      "name": "aggregator_retention_pruned_total"
+    },
+    {
+      "deprecated": false,
       "description": "Whether a service badge is active (1/0)",
       "labels": [],
       "name": "badge_active"
@@ -548,6 +554,18 @@
     },
     {
       "deprecated": false,
+      "description": "Backpressure activations grouped by reason",
+      "labels": [],
+      "name": "peer_backpressure_active_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Requests dropped due to backpressure grouped by reason",
+      "labels": [],
+      "name": "peer_backpressure_dropped_total"
+    },
+    {
+      "deprecated": false,
       "description": "Total price entries adjusted by reputation weight",
       "labels": [],
       "name": "price_weight_applied_total"
@@ -722,7 +740,15 @@
       "labels": [
         "reason"
       ],
-      "name": "scheduler_cancel_total"
+      "name": "scheduler_cancel_total",
+      "alerts": [
+        {
+          "expr": "increase(scheduler_cancel_total[5m]) > 100",
+          "for": "5m",
+          "labels": {"severity": "warning"},
+          "annotations": {"summary": "High scheduler cancellation rate"}
+        }
+      ]
     },
     {
       "deprecated": false,
@@ -753,6 +779,18 @@
       "description": "High-priority jobs exceeding wait threshold",
       "labels": [],
       "name": "scheduler_priority_miss_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Time a job waited in the scheduler queue",
+      "labels": [],
+      "name": "job_age_seconds"
+    },
+    {
+      "deprecated": false,
+      "description": "Jobs whose priority was boosted due to aging",
+      "labels": [],
+      "name": "priority_boost_total"
     },
     {
       "deprecated": false,
