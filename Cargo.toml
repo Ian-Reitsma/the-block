@@ -15,6 +15,7 @@ members = [
   "tools/installer",
   "tools/debugger",
   "tools/analytics_audit",
+  "tools/gov_graph",
   "explorer",
   "bridges",
   "cli",

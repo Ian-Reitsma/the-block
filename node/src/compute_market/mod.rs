@@ -152,6 +152,22 @@ impl WorkloadRunner {
         }
     }
 
+    /// Detect host hardware capability for scheduling.
+    pub fn hardware_capability() -> scheduler::Capability {
+        let cpu = num_cpus::get() as u8;
+        let gpu = std::env::var("TB_GPU_MODEL").ok();
+        let frameworks = std::env::var("TB_FRAMEWORKS")
+            .ok()
+            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default();
+        scheduler::Capability {
+            cpu_cores: cpu,
+            gpu,
+            frameworks,
+            ..Default::default()
+        }
+    }
+
     /// Run the workload for a given slice ID asynchronously. Results are cached so
     /// repeated executions avoid recomputation.
     pub async fn run(&self, slice_id: usize, w: Workload) -> [u8; 32] {
@@ -214,13 +230,18 @@ struct JobState {
 pub struct Market {
     offers: HashMap<String, Offer>,
     jobs: HashMap<String, JobState>,
+    seen_jobs: std::collections::HashSet<String>,
 }
 
 impl Market {
     /// Create an empty market.
     pub fn new() -> Self {
         admission::record_available_shards(100);
-        Self::default()
+        Self {
+            offers: HashMap::new(),
+            jobs: HashMap::new(),
+            seen_jobs: std::collections::HashSet::new(),
+        }
     }
 
     /// Post an offer from a provider.
@@ -314,6 +335,10 @@ impl Market {
             .offers
             .remove(&job.job_id)
             .ok_or(MarketError::JobNotFound)?;
+        #[cfg(feature = "telemetry")]
+        if self.seen_jobs.contains(&job.job_id) {
+            telemetry::JOB_RESUBMITTED_TOTAL.inc();
+        }
         price_board::record_price(
             FeeLane::Industrial,
             offer.price_per_unit,
@@ -333,13 +358,20 @@ impl Market {
             paid_slices: 0,
             completed: false,
         };
-        scheduler::start_job_with_priority(
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|e| panic!("time: {e}"))
+            .as_secs();
+        let expected = state.job.deadline.saturating_sub(now);
+        scheduler::start_job_with_expected(
             &offer.job_id,
             &offer.provider,
             state.job.capability.clone(),
             state.job.priority,
+            expected,
         );
         self.jobs.insert(state.job.job_id.clone(), state);
+        self.seen_jobs.insert(offer.job_id);
         #[cfg(feature = "telemetry")]
         telemetry::INDUSTRIAL_ADMITTED_TOTAL.inc();
         Ok(())
@@ -392,6 +424,8 @@ impl Market {
                 crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
             }
             let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
             self.jobs.remove(job_id);
             scheduler::end_job(job_id);
             return Err("deadline exceeded");
@@ -452,6 +486,19 @@ impl Market {
                 crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
             }
             return None;
+        }
+        if let Some((expected, actual)) = scheduler::job_duration(job_id) {
+            if expected > 0 && actual > expected {
+                scheduler::record_failure(&state.provider);
+                if state.job.capability.accelerator.is_some() {
+                    scheduler::record_accelerator_failure(&state.provider);
+                    #[cfg(feature = "telemetry")]
+                    crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+                }
+                let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
+            }
         }
         scheduler::record_success(&state.provider);
         if state.job.capability.accelerator.is_some() {

@@ -413,7 +413,13 @@ the comfort threshold governable.
 
 Admission decisions are logged with job identifiers, requested shards, and current mode to aid post-mortems.
 
-Providers that miss declared job deadlines have their bonds slashed via `penalize_sla`, incrementing `industrial_rejected_total{reason="SLA"}` for dashboard alerts. Operators should set Prometheus rules to page when this counter rises.
+Providers that miss declared job deadlines have their bonds slashed via `penalize_sla`, incrementing `industrial_rejected_total{reason="SLA"}` for dashboard alerts. Operators should set Prometheus rules to page when this counter rises. The scheduler tracks each job's expected versus actual runtime and records overruns in the `compute_job_timeout_total` counter. Jobs resubmitted after a timeout bump `job_resubmitted_total`, aiding SLA enforcement audits.
+
+Providers advertise hardware capabilities—including supported frameworks like CUDA or OpenCL—through offer capabilities. Clients can query a provider's registered hardware via the `compute.provider_hardware` RPC:
+
+```bash
+curl localhost:26658 -d '{"jsonrpc":"2.0","id":1,"method":"compute.provider_hardware","params":{"provider":"prov1"}}'
+```
 
 ## Fair-Share Caps and Burst Quotas
 

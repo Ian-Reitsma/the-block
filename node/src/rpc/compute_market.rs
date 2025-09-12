@@ -54,3 +54,12 @@ pub fn job_cancel(job_id: &str) -> serde_json::Value {
         json!({ "status": "unknown" })
     }
 }
+
+/// Return advertised hardware capability for a provider.
+pub fn provider_hardware(provider: &str) -> serde_json::Value {
+    if let Some(cap) = scheduler::provider_capability(provider) {
+        serde_json::to_value(cap).unwrap()
+    } else {
+        json!({})
+    }
+}

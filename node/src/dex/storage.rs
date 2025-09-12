@@ -2,11 +2,18 @@
 
 use super::order_book::{Order, OrderBook};
 use crate::simple_db::SimpleDb;
-use dex::escrow::{Escrow, PaymentProof};
+use dex::escrow::{Escrow, EscrowId, PaymentProof};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct TradeLog(Order, Order, u64, PaymentProof);
+
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
+pub struct EscrowState {
+    pub escrow: Escrow,
+    pub locks: BTreeMap<EscrowId, (Order, Order, u64, u64)>, // buy,sell,qty,locked_at
+}
 
 #[derive(Default)]
 pub struct DexStore {
@@ -59,15 +66,16 @@ impl DexStore {
         res
     }
 
-    pub fn save_escrow(&mut self, esc: &Escrow) {
-        if let Ok(bytes) = bincode::serialize(esc) {
+    pub fn save_escrow_state(&mut self, state: &EscrowState) {
+        if let Ok(bytes) = bincode::serialize(state) {
             let _ = self.db.insert("escrow", bytes);
             self.db.flush();
         }
     }
 
-    pub fn load_escrow(&self) -> Escrow {
-        self.db
+    pub fn load_escrow_state(&self) -> EscrowState {
+        self
+            .db
             .get("escrow")
             .and_then(|b| bincode::deserialize(&b).ok())
             .unwrap_or_default()

@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
 use quinn::{Connection, Endpoint};
 use rcgen::generate_simple_self_signed;
 #[cfg(any(test, debug_assertions))]
@@ -18,7 +20,7 @@ use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     sampled_observe, QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CONN_LATENCY_SECONDS,
-    QUIC_DISCONNECT_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
+    QUIC_DISCONNECT_TOTAL, QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL,
 };
 
 /// Error type for QUIC connection attempts.
@@ -142,6 +144,33 @@ pub async fn connect(
             Err(ConnectError::Handshake)
         }
     }
+}
+
+static CONNECTIONS: Lazy<DashMap<SocketAddr, Connection>> = Lazy::new(|| DashMap::new());
+
+/// Obtain a cached QUIC connection to `addr` if available, otherwise establish
+/// a new one. Reused connections are counted via `QUIC_ENDPOINT_REUSE_TOTAL`.
+pub async fn get_connection(
+    addr: SocketAddr,
+    cert: Certificate,
+) -> std::result::Result<Connection, ConnectError> {
+    if let Some(existing) = CONNECTIONS.get(&addr) {
+        if existing.close_reason().is_none() {
+            #[cfg(feature = "telemetry")]
+            QUIC_ENDPOINT_REUSE_TOTAL.inc();
+            return Ok(existing.clone());
+        } else {
+            CONNECTIONS.remove(&addr);
+        }
+    }
+    let conn = connect(addr, cert).await?;
+    CONNECTIONS.insert(addr, conn.clone());
+    Ok(conn)
+}
+
+/// Drop a pooled connection for `addr` if present.
+pub fn drop_connection(addr: &SocketAddr) {
+    CONNECTIONS.remove(addr);
 }
 
 /// Connect to `addr` without verifying the remote certificate.

@@ -41,9 +41,13 @@ if [[ -n "$PART" ]]; then
     sleep "$start_t"
     iptables -I INPUT -p tcp --sport "$port" -j DROP 2>/dev/null || true
     iptables -I OUTPUT -p tcp --dport "$port" -j DROP 2>/dev/null || true
+    iptables -I INPUT -p udp --sport "$port" -j DROP 2>/dev/null || true
+    iptables -I OUTPUT -p udp --dport "$port" -j DROP 2>/dev/null || true
     sleep $((end_t - start_t))
     iptables -D INPUT -p tcp --sport "$port" -j DROP 2>/dev/null || true
     iptables -D OUTPUT -p tcp --dport "$port" -j DROP 2>/dev/null || true
+    iptables -D INPUT -p udp --sport "$port" -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -p udp --dport "$port" -j DROP 2>/dev/null || true
   ) &
 fi
 sleep "$DUR"

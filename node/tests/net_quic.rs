@@ -3,10 +3,11 @@ use ed25519_dalek::SigningKey;
 use serial_test::serial;
 use std::io::Read;
 use the_block::gossip::relay::Relay;
-use the_block::net::{quic, Message, Payload, PROTOCOL_VERSION};
+use the_block::net::{self, quic, Message, Payload, PeerSet, PROTOCOL_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry::{QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL};
+use the_block::Blockchain;
 
 #[cfg(feature = "telemetry")]
 fn reset_counters() {
@@ -261,4 +262,83 @@ async fn quic_handshake_failure_metric() {
             .get()
             >= before + 1
     );
+}
+
+#[tokio::test]
+#[serial]
+async fn quic_handshake_timeout() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
+    use rcgen::generate_simple_self_signed;
+    let cert = generate_simple_self_signed(["timeout".into()])
+        .unwrap()
+        .serialize_der()
+        .unwrap();
+    let addr: std::net::SocketAddr = "127.0.0.1:9".parse().unwrap();
+    let cert = rustls::Certificate(cert);
+    #[cfg(feature = "telemetry")]
+    let before = QUIC_HANDSHAKE_FAIL_TOTAL
+        .with_label_values(&["timeout"])
+        .get();
+    let res = quic::connect(addr, cert).await;
+    assert!(res.is_err());
+    #[cfg(feature = "telemetry")]
+    assert!(
+        QUIC_HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["timeout"])
+            .get()
+            >= before + 1
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn quic_version_mismatch() {
+    #[cfg(feature = "telemetry")]
+    reset_counters();
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let (server_ep, cert) = quic::listen(addr).await.unwrap();
+    let listen_addr = server_ep.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let ep = server_ep.clone();
+    tokio::spawn(async move {
+        if let Some(conn) = ep.accept().await {
+            let connection = conn.await.unwrap();
+            if let Some(bytes) = quic::recv(&connection).await {
+                tx.send(bytes).unwrap();
+            }
+            connection.close(0u32.into(), b"done");
+        }
+    });
+    let conn = quic::connect(listen_addr, cert).await.unwrap();
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION - 1,
+        feature_bits: 0,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Quic,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+    quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        .await
+        .unwrap();
+    let recv = rx.await.unwrap();
+    let parsed: Message = bincode::deserialize(&recv).unwrap();
+    let peers = PeerSet::new(Vec::new());
+    let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
+    net::set_track_handshake_fail(true);
+    peers.handle_message(parsed, Some(listen_addr), &chain);
+    #[cfg(feature = "telemetry")]
+    assert!(
+        the_block::telemetry::HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["protocol"])
+            .get()
+            >= 1
+    );
+    net::set_track_handshake_fail(false);
+    conn.close(0u32.into(), b"done");
+    server_ep.wait_idle().await;
 }

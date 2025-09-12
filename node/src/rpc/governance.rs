@@ -19,13 +19,14 @@ fn parse_key(k: &str) -> Option<ParamKey> {
     }
 }
 
-pub fn gov_propose(
+pub fn submit_proposal(
     store: &GovStore,
     proposer: String,
     key: &str,
     new_value: i64,
     min: i64,
     max: i64,
+    deps: Vec<u64>,
     current_epoch: u64,
     vote_deadline: u64,
 ) -> Result<serde_json::Value, RpcError> {
@@ -44,6 +45,7 @@ pub fn gov_propose(
         vote_deadline_epoch: vote_deadline,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps,
     };
     let id = store.submit(p).map_err(|_| RpcError {
         code: -32061,
@@ -52,7 +54,7 @@ pub fn gov_propose(
     Ok(json!({"id": id}))
 }
 
-pub fn gov_vote(
+pub fn vote_proposal(
     store: &GovStore,
     voter: String,
     proposal_id: u64,
@@ -64,6 +66,40 @@ pub fn gov_vote(
         "no" => VoteChoice::No,
         _ => VoteChoice::Abstain,
     };
+    // ensure dependencies activated
+    let tree = store.proposals();
+    if let Some(raw) = tree
+        .get(bincode::serialize(&proposal_id).unwrap())
+        .map_err(|_| RpcError {
+            code: -32068,
+            message: "storage",
+        })?
+    {
+        let prop: Proposal = bincode::deserialize(&raw).map_err(|_| RpcError {
+            code: -32069,
+            message: "decode",
+        })?;
+        for dep in &prop.deps {
+            if let Some(dr) = tree
+                .get(bincode::serialize(dep).unwrap())
+                .map_err(|_| RpcError {
+                    code: -32068,
+                    message: "storage",
+                })?
+            {
+                let dp: Proposal = bincode::deserialize(&dr).map_err(|_| RpcError {
+                    code: -32069,
+                    message: "decode",
+                })?;
+                if dp.status != ProposalStatus::Activated {
+                    return Err(RpcError {
+                        code: -32070,
+                        message: "dependency not active",
+                    });
+                }
+            }
+        }
+    }
     let v = Vote {
         proposal_id,
         voter,
@@ -78,6 +114,40 @@ pub fn gov_vote(
             message: "vote failed",
         })?;
     Ok(json!({"ok":true}))
+}
+
+// Backwards-compatible wrappers
+pub fn gov_propose(
+    store: &GovStore,
+    proposer: String,
+    key: &str,
+    new_value: i64,
+    min: i64,
+    max: i64,
+    current_epoch: u64,
+    vote_deadline: u64,
+) -> Result<serde_json::Value, RpcError> {
+    submit_proposal(
+        store,
+        proposer,
+        key,
+        new_value,
+        min,
+        max,
+        vec![],
+        current_epoch,
+        vote_deadline,
+    )
+}
+
+pub fn gov_vote(
+    store: &GovStore,
+    voter: String,
+    proposal_id: u64,
+    choice: &str,
+    current_epoch: u64,
+) -> Result<serde_json::Value, RpcError> {
+    vote_proposal(store, voter, proposal_id, choice, current_epoch)
 }
 
 pub fn gov_list(store: &GovStore) -> Result<serde_json::Value, RpcError> {

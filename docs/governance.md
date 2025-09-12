@@ -26,6 +26,15 @@ Rollback semantics and CLI usage are documented in
 exposes rollback-related metrics so operators can verify that gauges reset after
 reverts.
 
+### Dependencies and Treasury
+
+Proposals may declare dependencies on previously activated proposals. The
+dependency graph is enforced as a DAG, and voting on a proposal is only allowed
+once all of its dependencies have activated. This allows staged rollouts and
+conflict resolution. Additionally, a governance treasury collects a configurable
+percentage of block subsidies in a `TreasuryState`, providing funds for future
+initiatives.
+
 ## Proposing an Upgrade
 
 1. Draft a feature flag JSON file under `governance/feature_flags/` describing

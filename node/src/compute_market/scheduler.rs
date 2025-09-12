@@ -31,6 +31,9 @@ pub struct Capability {
     /// Accelerator memory in megabytes.
     #[serde(default)]
     pub accelerator_memory_mb: u32,
+    /// Supported compute frameworks (e.g., CUDA, OpenCL).
+    #[serde(default)]
+    pub frameworks: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -79,6 +82,11 @@ impl Capability {
             && self.accelerator_memory_mb < other.accelerator_memory_mb
         {
             return false;
+        }
+        for fw in &other.frameworks {
+            if !self.frameworks.iter().any(|f| f == fw) {
+                return false;
+            }
         }
         true
     }
@@ -166,6 +174,8 @@ struct ActiveAssignment {
     reputation: i64,
     capability: Capability,
     priority: Priority,
+    start_ts: u64,
+    expected_secs: u64,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -208,6 +218,7 @@ struct QueuedJob {
     enqueue_ts: u64,
     /// Cached effective priority scaled by 1000 for ordering.
     effective_priority: i64,
+    expected_secs: u64,
 }
 
 impl QueuedJob {
@@ -614,6 +625,17 @@ impl SchedulerState {
         self.active.get(job_id).map(|a| a.capability.clone())
     }
 
+    fn provider_capability(&self, provider: &str) -> Option<Capability> {
+        self.offers.get(provider).map(|o| o.capability.clone())
+    }
+
+    fn job_duration(&self, job_id: &str) -> Option<(u64, u64)> {
+        self.active.get(job_id).map(|a| {
+            let actual = current_ts().saturating_sub(a.start_ts);
+            (a.expected_secs, actual)
+        })
+    }
+
     fn metrics(&self) -> serde_json::Value {
         serde_json::json!({
             "reputation": self.reputation,
@@ -664,7 +686,14 @@ impl SchedulerState {
         }
     }
 
-    fn enqueue_job(&mut self, job_id: &str, provider: &str, cap: Capability, priority: Priority) {
+    fn enqueue_job(
+        &mut self,
+        job_id: &str,
+        provider: &str,
+        cap: Capability,
+        priority: Priority,
+        expected_secs: u64,
+    ) {
         let now = current_ts();
         let mut job = QueuedJob {
             job_id: job_id.to_owned(),
@@ -673,6 +702,7 @@ impl SchedulerState {
             priority,
             enqueue_ts: now,
             effective_priority: 0,
+            expected_secs,
         };
         job.recompute_effective();
         self.pending.push(job);
@@ -721,6 +751,8 @@ impl SchedulerState {
                     reputation: rep,
                     capability: job.capability.clone(),
                     priority: job.priority,
+                    start_ts: current_ts(),
+                    expected_secs: job.expected_secs,
                 },
             );
             courier::reserve_resources(&job.job_id);
@@ -1150,15 +1182,29 @@ pub fn match_offer(need: &Capability) -> Option<String> {
     res
 }
 
-pub fn start_job_with_priority(job_id: &str, provider: &str, cap: Capability, priority: Priority) {
+pub fn start_job_with_expected(
+    job_id: &str,
+    provider: &str,
+    cap: Capability,
+    priority: Priority,
+    expected_secs: u64,
+) {
     SCHEDULER
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .enqueue_job(job_id, provider, cap, priority);
+        .enqueue_job(job_id, provider, cap, priority, expected_secs);
+}
+
+pub fn start_job_with_priority(job_id: &str, provider: &str, cap: Capability, priority: Priority) {
+    start_job_with_expected(job_id, provider, cap, priority, 0);
 }
 
 pub fn start_job(job_id: &str, provider: &str, cap: Capability) {
     start_job_with_priority(job_id, provider, cap, Priority::Normal);
+}
+
+pub fn start_job_expected(job_id: &str, provider: &str, cap: Capability, expected_secs: u64) {
+    start_job_with_expected(job_id, provider, cap, Priority::Normal, expected_secs);
 }
 
 pub fn end_job(job_id: &str) {
@@ -1194,6 +1240,20 @@ pub fn job_requirements(job_id: &str) -> Option<Capability> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .job_requirements(job_id)
+}
+
+pub fn provider_capability(provider: &str) -> Option<Capability> {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .provider_capability(provider)
+}
+
+pub fn job_duration(job_id: &str) -> Option<(u64, u64)> {
+    SCHEDULER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .job_duration(job_id)
 }
 
 pub fn record_success(provider: &str) {

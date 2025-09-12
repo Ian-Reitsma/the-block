@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
-use super::{trust_lines::TrustLedger, DexStore};
-use dex::escrow::Escrow;
+use super::{storage::EscrowState, DexStore};
+use dex::escrow::EscrowId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -111,39 +111,44 @@ impl OrderBook {
     }
 
     /// Place an order and settle resulting trades against the provided trust ledger.
-    pub fn place_and_settle(
+    pub fn place_and_lock(
         &mut self,
         order: Order,
-        ledger: &mut TrustLedger,
-        escrow: &mut Escrow,
+        esc_state: &mut EscrowState,
     ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
-        self.place_settle_persist(order, ledger, None, escrow)
+        self.place_lock_persist(order, None, esc_state)
     }
 
-    pub fn place_settle_persist(
+    pub fn place_lock_persist(
         &mut self,
         order: Order,
-        ledger: &mut TrustLedger,
         mut store: Option<&mut DexStore>,
-        escrow: &mut Escrow,
+        esc_state: &mut EscrowState,
     ) -> Result<Vec<(Order, Order, u64)>, &'static str> {
         let trades = self.place(order)?;
         for (buy, sell, qty) in &trades {
             let value = sell.price * *qty;
-            let eid = escrow.lock(buy.account.clone(), sell.account.clone(), value);
-            let proof = escrow
-                .release(eid, value)
-                .expect("release full trade amount");
-            ledger.adjust(&buy.account, &sell.account, value as i64);
-            ledger.adjust(&sell.account, &buy.account, -(value as i64));
+            let eid: EscrowId = esc_state
+                .escrow
+                .lock(buy.account.clone(), sell.account.clone(), value);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            esc_state
+                .locks
+                .insert(eid, (buy.clone(), sell.clone(), *qty, now));
             #[cfg(feature = "telemetry")]
             {
-                crate::telemetry::DEX_ESCROW_LOCKED.set(escrow.total_locked() as i64);
-                crate::telemetry::DEX_ESCROW_PENDING.set(escrow.count() as i64);
+                crate::telemetry::DEX_ESCROW_LOCKED
+                    .set(esc_state.escrow.total_locked() as i64);
+                crate::telemetry::DEX_ESCROW_PENDING
+                    .set(esc_state.escrow.count() as i64);
+                crate::telemetry::DEX_LIQUIDITY_LOCKED_TOTAL
+                    .set(esc_state.escrow.total_locked() as i64);
             }
             if let Some(st) = store.as_deref_mut() {
-                st.log_trade(&(buy.clone(), sell.clone(), *qty), &proof);
-                st.save_escrow(escrow);
+                st.save_escrow_state(esc_state);
             }
         }
         if let Some(st) = store.as_deref_mut() {

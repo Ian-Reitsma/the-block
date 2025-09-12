@@ -82,6 +82,7 @@ pub fn record(
     pk: [u8; 32],
     sig: Vec<u8>,
     auditor_sig: Vec<u8>,
+    trace_id: &str,
 ) -> IoResult<()> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -120,6 +121,8 @@ pub fn record(
     append_exec(&receipt, epoch, seq)?;
     CPU_MS.fetch_add(cpu_ms, Ordering::Relaxed);
     BYTES_OUT.fetch_add(bytes_out, Ordering::Relaxed);
+    #[cfg(feature = "telemetry")]
+    tracing::info!(%trace_id, provider_id, bytes_out, cpu_ms, "exec receipt");
     #[cfg(feature = "telemetry")]
     {
         SUBSIDY_CPU_MS_TOTAL.inc_by(cpu_ms);

@@ -1,6 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use dex::escrow::{verify_proof, PaymentProof};
+use ed25519_dalek::Signature;
 use hex::{decode, encode};
 use reqwest::blocking::Client;
+use serde_json::json;
+use std::convert::TryInto;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -23,8 +27,20 @@ enum Commands {
         #[arg(long, help = "32-byte seed in hex", conflicts_with = "remote_signer")]
         seed: Option<String>,
         message: String,
-        #[arg(long, help = "remote signer endpoint", conflicts_with = "seed")]
-        remote_signer: Option<String>,
+        #[arg(
+            long = "remote-signer",
+            help = "remote signer endpoint (repeatable)",
+            conflicts_with = "seed"
+        )]
+        remote_signer: Vec<String>,
+        #[arg(long, help = "client TLS certificate (PEM)", requires = "signer_key")]
+        signer_cert: Option<String>,
+        #[arg(long, help = "client TLS private key (PEM)", requires = "signer_cert")]
+        signer_key: Option<String>,
+        #[arg(long, help = "CA certificate for remote signer")]
+        signer_ca: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        threshold: usize,
     },
     /// Sign a message using a mock hardware wallet.
     SignHw { message: String },
@@ -40,20 +56,35 @@ enum Commands {
         )]
         seed: Option<String>,
         #[arg(
-            long,
-            help = "remote signer endpoint",
+            long = "remote-signer",
+            help = "remote signer endpoint (repeatable)",
             required_unless_present = "seed"
         )]
-        remote_signer: Option<String>,
+        remote_signer: Vec<String>,
+        #[arg(long, help = "client TLS certificate (PEM)", requires = "signer_key")]
+        signer_cert: Option<String>,
+        #[arg(long, help = "client TLS private key (PEM)", requires = "signer_cert")]
+        signer_key: Option<String>,
+        #[arg(long, help = "CA certificate for remote signer")]
+        signer_ca: Option<String>,
         #[arg(long, help = "withdraw instead of bond")]
         withdraw: bool,
         #[arg(long, default_value = "http://127.0.0.1:8545")]
         url: String,
+        #[arg(long, default_value_t = 1)]
+        threshold: usize,
     },
     /// Query rent-escrow balance for an account
     EscrowBalance {
         account: String,
         #[arg(long, default_value = "http://127.0.0.1:8545")]
+        url: String,
+    },
+    /// Release funds from a DEX escrow, verifying the provided proof
+    EscrowRelease {
+        id: u64,
+        amount: u64,
+        #[arg(long, default_value = "http://127.0.0.1:26658")]
         url: String,
     },
     /// Chunk a file and build a BlobTx, printing the blob root
@@ -90,10 +121,26 @@ fn main() {
             seed,
             message,
             remote_signer,
+            signer_cert,
+            signer_key,
+            signer_ca,
+            threshold,
         } => {
-            let sig = if let Some(url) = remote_signer {
-                let signer = RemoteSigner::connect(&url).expect("connect signer");
-                signer.sign(message.as_bytes()).expect("sign")
+            if !remote_signer.is_empty() {
+                if let Some(cert) = signer_cert {
+                    std::env::set_var("REMOTE_SIGNER_TLS_CERT", cert);
+                }
+                if let Some(key) = signer_key {
+                    std::env::set_var("REMOTE_SIGNER_TLS_KEY", key);
+                }
+                if let Some(ca) = signer_ca {
+                    std::env::set_var("REMOTE_SIGNER_TLS_CA", ca);
+                }
+                let signer =
+                    RemoteSigner::connect_multi(&remote_signer, threshold).expect("connect signer");
+                let sigs = signer.sign_multisig(message.as_bytes()).expect("sign");
+                let agg: Vec<u8> = sigs.into_iter().flat_map(|s| s.to_bytes()).collect();
+                println!("{}", encode(agg));
             } else {
                 let seed = seed.expect("seed required");
                 let seed_bytes = decode(&seed).expect("hex seed");
@@ -101,9 +148,9 @@ fn main() {
                 let mut seed_arr = [0u8; 32];
                 seed_arr.copy_from_slice(&seed_bytes);
                 let wallet = Wallet::from_seed(&seed_arr);
-                wallet.sign(message.as_bytes()).expect("sign")
-            };
-            println!("{}", encode(sig.to_bytes()));
+                let sig = wallet.sign(message.as_bytes()).expect("sign");
+                println!("{}", encode(sig.to_bytes()));
+            }
         }
         Commands::SignHw { message } => {
             let mut hw = MockHardwareWallet::new();
@@ -116,18 +163,34 @@ fn main() {
             amount,
             seed,
             remote_signer,
+            signer_cert,
+            signer_key,
+            signer_ca,
             withdraw,
             url,
+            threshold,
         } => {
             let role_str = format!("{:?}", role).to_lowercase();
             let sig;
             let id;
-            if let Some(url_signer) = remote_signer {
-                let signer = RemoteSigner::connect(&url_signer).expect("connect signer");
+            if !remote_signer.is_empty() {
+                if let Some(cert) = signer_cert {
+                    std::env::set_var("REMOTE_SIGNER_TLS_CERT", cert);
+                }
+                if let Some(key) = signer_key {
+                    std::env::set_var("REMOTE_SIGNER_TLS_KEY", key);
+                }
+                if let Some(ca) = signer_ca {
+                    std::env::set_var("REMOTE_SIGNER_TLS_CA", ca);
+                }
+                let signer =
+                    RemoteSigner::connect_multi(&remote_signer, threshold).expect("connect signer");
                 let action = if withdraw { "unbond" } else { "bond" };
                 let msg = format!("{action}:{role_str}:{amount}");
-                sig = signer.sign(msg.as_bytes()).expect("sign");
-                id = encode(signer.public_key().to_bytes());
+                let sigs = signer.sign_multisig(msg.as_bytes()).expect("sign");
+                let agg: Vec<u8> = sigs.iter().flat_map(|s| s.to_bytes()).collect();
+                sig = Signature::from_bytes(&agg[0..64].try_into().unwrap());
+                id = encode(signer.public_keys()[0].to_bytes());
             } else {
                 let seed = seed.expect("seed required");
                 let bytes = decode(&seed).expect("seed hex");
@@ -171,6 +234,37 @@ fn main() {
             match client.post(&url).json(&payload).send() {
                 Ok(resp) => match resp.json::<serde_json::Value>() {
                     Ok(v) => println!("{}", v["result"].as_u64().unwrap_or(0)),
+                    Err(e) => eprintln!("parse error: {e}"),
+                },
+                Err(e) => eprintln!("rpc error: {e}"),
+            }
+        }
+        Commands::EscrowRelease { id, amount, url } => {
+            let payload = json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "dex.escrow_release",
+                "params": {"id": id, "amount": amount},
+            });
+            let client = Client::new();
+            match client.post(&url).json(&payload).send() {
+                Ok(resp) => match resp.json::<serde_json::Value>() {
+                    Ok(v) => {
+                        if let Some(res) = v.get("result") {
+                            let proof: PaymentProof =
+                                serde_json::from_value(res["proof"].clone()).expect("proof");
+                            let root: [u8; 32] =
+                                serde_json::from_value(res["root"].clone()).expect("root");
+                            let idx = res["idx"].as_u64().unwrap_or(0) as usize;
+                            if verify_proof(proof.leaf, idx, &proof.path, root) {
+                                println!("released");
+                            } else {
+                                eprintln!("invalid proof");
+                            }
+                        } else if let Some(err) = v.get("error") {
+                            eprintln!("{}", err);
+                        }
+                    }
                     Err(e) => eprintln!("parse error: {e}"),
                 },
                 Err(e) => eprintln!("rpc error: {e}"),

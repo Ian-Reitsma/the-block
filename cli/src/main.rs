@@ -5,12 +5,14 @@ mod bridge;
 mod compute;
 mod config;
 mod dex;
+mod gov;
 mod net;
 mod telemetry;
 use bridge::BridgeCmd;
 use compute::ComputeCmd;
 use config::ConfigCmd;
 use dex::DexCmd;
+use gov::GovCmd;
 use net::NetCmd;
 use telemetry::TelemetryCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
@@ -67,6 +69,11 @@ enum Commands {
         #[command(subcommand)]
         action: NetCmd,
     },
+    /// Governance utilities
+    Gov {
+        #[command(subcommand)]
+        action: GovCmd,
+    },
     /// Config utilities
     Config {
         #[command(subcommand)]
@@ -119,6 +126,7 @@ fn main() {
         Commands::Dex { action } => dex::handle(action),
         Commands::Compute { action } => compute::handle(action),
         Commands::Net { action } => net::handle(action),
+        Commands::Gov { action } => gov::handle(action),
         Commands::Config { action } => config::handle(action),
         Commands::Telemetry { action } => telemetry::handle(action),
     }

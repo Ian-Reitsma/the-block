@@ -12,6 +12,7 @@ fn chooses_lowest_effective_price() {
         gpu_memory_mb: 16384,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     scheduler::register_offer("gpu1", cap_gpu.clone(), 10, 100, 1.0);
     scheduler::register_offer("gpu2", cap_gpu.clone(), 5, 100, 0.8);
@@ -30,6 +31,7 @@ fn no_match_for_incompatible_capability() {
         gpu_memory_mb: 0,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     let need = Capability {
         cpu_cores: 16,
@@ -37,6 +39,7 @@ fn no_match_for_incompatible_capability() {
         gpu_memory_mb: 0,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     scheduler::register_offer("cpu", cap_cpu, 0, 100, 1.0);
     assert!(scheduler::match_offer(&need).is_none());
@@ -51,6 +54,7 @@ fn gpu_memory_mismatch_records_failure() {
         gpu_memory_mb: 8192,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     scheduler::register_offer("gpu8", cap_gpu.clone(), 0, 100, 1.0);
     let need = Capability {
@@ -59,6 +63,7 @@ fn gpu_memory_mismatch_records_failure() {
         gpu_memory_mb: 16384,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     assert!(scheduler::match_offer(&need).is_none());
     #[cfg(feature = "telemetry")]
@@ -82,6 +87,7 @@ fn scheduler_stats_rpc() {
         gpu_memory_mb: 0,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     scheduler::register_offer("cpu", cap.clone(), 0, 100, 1.0);
     scheduler::match_offer(&cap);
@@ -131,6 +137,7 @@ fn matches_accelerator_with_memory() {
         gpu_memory_mb: 0,
         accelerator: Some(Accelerator::Tpu),
         accelerator_memory_mb: 8192,
+        frameworks: vec![],
     };
     scheduler::register_offer("tpu1", cap_acc.clone(), 0, 100, 1.0);
     let provider = scheduler::match_offer(&cap_acc).expect("match");
@@ -146,6 +153,7 @@ fn unmatched_accelerator_records_metric() {
         gpu_memory_mb: 0,
         accelerator: Some(Accelerator::Tpu),
         accelerator_memory_mb: 4096,
+        frameworks: vec![],
     };
     #[cfg(feature = "telemetry")]
     {
@@ -169,6 +177,7 @@ fn rpc_job_requirements_returns_accelerator() {
         gpu_memory_mb: 0,
         accelerator: Some(Accelerator::Fpga),
         accelerator_memory_mb: 2048,
+        frameworks: vec![],
     };
     scheduler::start_job("job", "prov", cap.clone());
     let req = the_block::rpc::compute_market::job_requirements("job");
@@ -190,6 +199,7 @@ fn preempts_lower_reputation() {
             gpu_memory_mb: 0,
             accelerator: None,
             accelerator_memory_mb: 0,
+            frameworks: vec![],
         },
     );
     assert_eq!(scheduler::active_provider("job"), Some("low".into()));
@@ -213,6 +223,7 @@ fn preemption_rolls_back_on_failure() {
             gpu_memory_mb: 0,
             accelerator: None,
             accelerator_memory_mb: 0,
+            frameworks: vec![],
         },
     );
     the_block::compute_market::courier::set_handoff_fail(true);
@@ -238,6 +249,7 @@ fn offer_triggers_preemption() {
             gpu_memory_mb: 0,
             accelerator: None,
             accelerator_memory_mb: 0,
+            frameworks: vec![],
         },
     );
     assert_eq!(scheduler::active_provider("job"), Some("low".into()));
@@ -249,6 +261,7 @@ fn offer_triggers_preemption() {
             gpu_memory_mb: 0,
             accelerator: None,
             accelerator_memory_mb: 0,
+            frameworks: vec![],
         },
         5,
         100,
@@ -281,6 +294,7 @@ fn priority_queue_favors_high_priority() {
         gpu_memory_mb: 0,
         accelerator: None,
         accelerator_memory_mb: 0,
+        frameworks: vec![],
     };
     scheduler::start_job_with_priority("low1", "p1", cap.clone(), Priority::Low);
     scheduler::start_job_with_priority("low2", "p2", cap.clone(), Priority::Low);

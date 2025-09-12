@@ -4,8 +4,21 @@ use thiserror::Error;
 
 /// Common signer interface for software and hardware wallets.
 pub trait WalletSigner {
+    /// Return the primary public key for this signer.
     fn public_key(&self) -> PublicKey;
+    /// Produce a single signature over `msg`.
     fn sign(&self, msg: &[u8]) -> Result<Signature, WalletError>;
+
+    /// Return all participating public keys when operating in multisig mode.
+    fn public_keys(&self) -> Vec<PublicKey> {
+        vec![self.public_key()]
+    }
+
+    /// Produce signatures from all required parties. Default implementation
+    /// falls back to a single signer.
+    fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<Signature>, WalletError> {
+        self.sign(msg).map(|s| vec![s])
+    }
 }
 
 #[derive(Debug, Error)]

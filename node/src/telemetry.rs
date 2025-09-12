@@ -397,6 +397,16 @@ pub static DEX_ESCROW_PENDING: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static DEX_LIQUIDITY_LOCKED_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "dex_liquidity_locked_total",
+        "Total liquidity currently locked in DEX escrow",
+    )
+    .unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
 pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("subsidy_bytes_total", "Total subsidized bytes by type"),
@@ -802,6 +812,18 @@ pub static STORAGE_DISK_FULL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_compaction_total",
+        "Number of RocksDB compaction operations",
+    )
+    .unwrap_or_else(|e| panic!("counter storage_compaction_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_compaction_total: {e}"));
+    c
+});
+
 pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("matches_total", "Total matched jobs"),
@@ -939,6 +961,30 @@ pub static SCHEDULER_CANCEL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry scheduler_cancel_total: {e}"));
+    c
+});
+
+pub static COMPUTE_JOB_TIMEOUT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "compute_job_timeout_total",
+        "Jobs exceeding declared deadlines",
+    )
+    .unwrap_or_else(|e| panic!("counter compute_job_timeout_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry compute_job_timeout_total: {e}"));
+    c
+});
+
+pub static JOB_RESUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "job_resubmitted_total",
+        "Jobs resubmitted after provider failure",
+    )
+    .unwrap_or_else(|e| panic!("counter job_resubmitted_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry job_resubmitted_total: {e}"));
     c
 });
 
@@ -1149,6 +1195,18 @@ pub static GOV_OPEN_PROPOSALS: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static GOV_PROPOSALS_PENDING: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "gov_proposals_pending",
+        "Governance proposals pending activation",
+    )
+    .unwrap_or_else(|e| panic!("gauge gov_proposals_pending: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_proposals_pending: {e}"));
+    g
+});
+
 pub static GOV_QUORUM_REQUIRED: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("gov_quorum_required", "Governance quorum")
         .unwrap_or_else(|e| panic!("gauge gov_quorum_required: {e}"));
@@ -1260,6 +1318,18 @@ pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 pub static BLOCK_MINED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("block_mined_total", "Total mined blocks")
         .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static BLOCK_APPLY_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "block_apply_fail_total",
+        "Blocks that failed atomic application",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -1604,6 +1674,36 @@ pub static PEER_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static PEER_HANDSHAKE_SUCCESS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "net_peer_handshake_success_total",
+            "Successful handshakes per peer",
+        ),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_TLS_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "net_peer_tls_error_total",
+            "TLS errors encountered per peer",
+        ),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
@@ -1842,6 +1942,33 @@ pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
             "Total RPC client errors grouped by code",
         ),
         &["code"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "remote_signer_request_total",
+        "Total remote signer requests",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static REMOTE_SIGNER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "remote_signer_error_total",
+            "Total remote signer errors grouped by reason",
+        ),
+        &["reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
@@ -2165,6 +2292,7 @@ fn gather() -> String {
         &*TX_SUBMITTED_TOTAL,
         &*TX_REJECTED_TOTAL,
         &*BLOCK_MINED_TOTAL,
+        &*BLOCK_APPLY_FAIL_TOTAL,
         &*GOSSIP_CONVERGENCE_SECONDS,
         FORK_REORG_TOTAL.with_label_values(&["0"]),
         &*TTL_DROP_TOTAL,

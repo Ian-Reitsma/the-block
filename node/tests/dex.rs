@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use the_block::dex::{escrow::Escrow, Order, OrderBook, Side, TrustLedger};
+use the_block::dex::{storage::EscrowState, Order, OrderBook, Side, TrustLedger};
 
 #[test]
 fn trust_line_transfer() {
@@ -35,13 +35,16 @@ fn order_matching() {
         max_slippage_bps: 0,
     };
     book.place(buy).unwrap();
-    let mut escrow = Escrow::default();
-    let trades = book
-        .place_and_settle(sell, &mut ledger, &mut escrow)
-        .unwrap();
+    let mut esc_state = EscrowState::default();
+    let trades = book.place_and_lock(sell, &mut esc_state).unwrap();
     assert_eq!(trades.len(), 1);
     assert_eq!(trades[0].2, 10);
-    // Buyer owes seller 50 units
+    // Funds locked in escrow; ledger unchanged until release
+    assert_eq!(ledger.balance("alice", "bob"), 0);
+    let eid = *esc_state.locks.keys().next().unwrap();
+    esc_state.escrow.release(eid, 50).unwrap();
+    ledger.adjust("alice", "bob", 50);
+    ledger.adjust("bob", "alice", -50);
     assert_eq!(ledger.balance("alice", "bob"), 50);
 }
 
