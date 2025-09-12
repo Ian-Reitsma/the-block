@@ -1,6 +1,8 @@
 use rand::Rng;
 use reqwest::blocking::{Client, Response};
+use reqwest::error::ErrorKind;
 use serde::{Deserialize, Serialize};
+use std::io;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -11,6 +13,7 @@ pub struct RpcClient {
     base_timeout: Duration,
     jitter: Duration,
     max_retries: u32,
+    fault_rate: f64,
 }
 
 impl RpcClient {
@@ -31,11 +34,16 @@ impl RpcClient {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(3);
+        let fault = std::env::var("TB_RPC_FAULT_RATE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
         Self {
             http: Client::new(),
             base_timeout: Duration::from_millis(base),
             jitter: Duration::from_millis(jitter),
             max_retries: retries,
+            fault_rate: fault,
         }
     }
 
@@ -51,12 +59,23 @@ impl RpcClient {
         base + Duration::from_millis(extra)
     }
 
+    fn maybe_inject_fault(&self) -> Result<(), reqwest::Error> {
+        if self.fault_rate > 0.0 && rand::thread_rng().gen_bool(self.fault_rate) {
+            return Err(reqwest::Error::new(
+                ErrorKind::Request,
+                io::Error::new(io::ErrorKind::Other, "injected fault"),
+            ));
+        }
+        Ok(())
+    }
+
     /// Perform a JSON-RPC call to `url` with `payload`, retrying on timeout.
     pub fn call<T: Serialize>(&self, url: &str, payload: &T) -> Result<Response, reqwest::Error> {
         let mut attempt = 0;
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
+            self.maybe_inject_fault()?;
             let res = self.http.post(url).json(payload).timeout(timeout).send();
             match res {
                 Ok(r) => return Ok(r),
@@ -147,6 +166,7 @@ mod tests {
             base_timeout: Duration::from_millis(100),
             jitter: Duration::from_millis(50),
             max_retries: 1,
+            fault_rate: 0.0,
         };
         for _ in 0..20 {
             let t = client.timeout_with_jitter();

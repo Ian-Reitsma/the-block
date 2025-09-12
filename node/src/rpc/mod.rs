@@ -26,6 +26,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
 
@@ -46,6 +47,7 @@ pub mod dex;
 pub mod governance;
 pub mod identity;
 pub mod inflation;
+pub mod jurisdiction;
 pub mod light;
 pub mod pos;
 pub mod vm;
@@ -64,6 +66,7 @@ pub struct RpcRuntimeConfig {
     request_timeout: Duration,
     enable_debug: bool,
     admin_token: Option<String>,
+    relay_only: bool,
 }
 
 const PUBLIC_METHODS: &[&str] = &[
@@ -126,6 +129,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "rent.escrow.balance",
     "light.latest_header",
     "service_badge_verify",
+    "jurisdiction.status",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -141,6 +145,7 @@ const ADMIN_METHODS: &[&str] = &[
     "gov_params",
     "gov_rollback_last",
     "gov_rollback",
+    "jurisdiction.set",
 ];
 
 const BADGE_METHODS: &[&str] = &[
@@ -429,7 +434,17 @@ pub async fn handle_conn(
             let id = r.id.clone();
             let method_str = r.method.as_str();
             let authorized = match cfg.admin_token.as_ref() {
-                Some(t) => auth.as_deref() == Some(&format!("Bearer {t}")),
+                Some(t) => {
+                    let expected = format!("Bearer {t}");
+                    match auth.as_deref() {
+                        Some(h) => {
+                            let a = h.as_bytes();
+                            let b = expected.as_bytes();
+                            a.len() == b.len() && a.ct_eq(b).into()
+                        }
+                        None => false,
+                    }
+                }
                 None => false,
             };
             if DEBUG_METHODS.contains(&method_str) {
@@ -1399,7 +1414,8 @@ fn dispatch(
             match bc.lock() {
                 Ok(guard) => {
                     let base = guard.path.clone();
-                    match crate::le_portal::record_request(&base, agency, case) {
+                    let jurisdiction = guard.config.jurisdiction.as_deref().unwrap_or("UNSPEC");
+                    match crate::le_portal::record_request(&base, agency, case, jurisdiction) {
                         Ok(_) => serde_json::json!({"status": "ok"}),
                         Err(_) => serde_json::json!({"error": "io"}),
                     }
@@ -1450,7 +1466,8 @@ fn dispatch(
             match bc.lock() {
                 Ok(guard) => {
                     let base = guard.path.clone();
-                    match crate::le_portal::record_action(&base, agency, action) {
+                    let jurisdiction = guard.config.jurisdiction.as_deref().unwrap_or("UNSPEC");
+                    match crate::le_portal::record_action(&base, agency, action, jurisdiction) {
                         Ok(hash) => serde_json::json!({"hash": hash}),
                         Err(_) => serde_json::json!({"error": "io"}),
                     }
@@ -1520,30 +1537,49 @@ fn dispatch(
             serde_json::json!({"status": "ok"})
         }
         "start_mining" => {
-            check_nonce(&req.params, &nonces)?;
-            let miner = req
-                .params
-                .get("miner")
-                .and_then(|v| v.as_str())
-                .unwrap_or("miner");
-            if !mining.swap(true, Ordering::SeqCst) {
-                let bc = Arc::clone(&bc);
-                let miner = miner.to_string();
-                let flag = Arc::clone(&mining);
-                std::thread::spawn(move || {
-                    while flag.load(Ordering::SeqCst) {
-                        if let Ok(mut g) = bc.lock() {
-                            let _ = g.mine_block(&miner);
+            if cfg.relay_only {
+                serde_json::json!({
+                    "error": {"code": -32075, "message": "relay_only"}
+                })
+            } else {
+                check_nonce(&req.params, &nonces)?;
+                let miner = req
+                    .params
+                    .get("miner")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("miner");
+                if !mining.swap(true, Ordering::SeqCst) {
+                    let bc = Arc::clone(&bc);
+                    let miner = miner.to_string();
+                    let flag = Arc::clone(&mining);
+                    std::thread::spawn(move || {
+                        while flag.load(Ordering::SeqCst) {
+                            if let Ok(mut g) = bc.lock() {
+                                let _ = g.mine_block(&miner);
+                            }
                         }
-                    }
-                });
+                    });
+                }
+                serde_json::json!({"status": "ok"})
             }
-            serde_json::json!({"status": "ok"})
         }
         "stop_mining" => {
             check_nonce(&req.params, &nonces)?;
             mining.store(false, Ordering::SeqCst);
             serde_json::json!({"status": "ok"})
+        }
+        "jurisdiction.status" => jurisdiction::status(&bc)?,
+        "jurisdiction.set" => {
+            check_nonce(&req.params, &nonces)?;
+            let path = req
+                .params
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32072,
+                    message: "missing path",
+                })?;
+            jurisdiction::set(&bc, path)?
         }
         "metrics" => {
             #[cfg(feature = "telemetry")]
@@ -1876,6 +1912,7 @@ pub async fn run_rpc_server(
         request_timeout: Duration::from_millis(cfg.request_timeout_ms),
         enable_debug: cfg.enable_debug,
         admin_token,
+        relay_only: cfg.relay_only,
     });
     let global = Arc::new(Semaphore::new(1024));
     loop {

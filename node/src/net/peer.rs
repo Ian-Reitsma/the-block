@@ -725,6 +725,8 @@ pub struct PeerMetrics {
     #[serde(default)]
     pub handshake_success: u64,
     #[serde(default)]
+    pub last_handshake_ms: u64,
+    #[serde(default)]
     pub tls_errors: u64,
     #[serde(default)]
     pub reputation: PeerReputation,
@@ -1135,6 +1137,30 @@ fn record_handshake_success(pk: &[u8; 32]) {
             .with_label_values(&[id.as_str()])
             .inc();
     }
+}
+
+pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
+    let mut map = PEER_METRICS.lock().unwrap();
+    maybe_consolidate(&mut map);
+    if let Some(mut entry) = map.swap_remove(pk) {
+        entry.last_handshake_ms = ms;
+        entry.last_updated = now_secs();
+        broadcast_metrics(pk, &entry);
+        map.insert(*pk, entry);
+        update_active_gauge(map.len());
+        update_memory_usage(map.len());
+    } else {
+        let mut entry = PeerMetrics::default();
+        entry.last_handshake_ms = ms;
+        entry.last_updated = now_secs();
+        map.insert(*pk, entry);
+        update_active_gauge(map.len());
+        update_memory_usage(map.len());
+    }
+}
+
+pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
+    ADDR_MAP.lock().unwrap().get(addr).copied()
 }
 
 #[cfg(all(feature = "telemetry", feature = "quic"))]
@@ -1756,6 +1782,11 @@ pub fn known_peers() -> Vec<SocketAddr> {
     } else {
         Vec::new()
     }
+}
+
+/// Return known peers with transport information and optional QUIC certificates.
+pub fn known_peers_with_info() -> Vec<(SocketAddr, Transport, Option<Vec<u8>>)> {
+    PeerSet::new(Vec::new()).list_with_info()
 }
 
 static P2P_MAX_PER_SEC: Lazy<AtomicU32> = Lazy::new(|| {

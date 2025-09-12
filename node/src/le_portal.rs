@@ -8,6 +8,7 @@ pub struct LeRequest {
     pub timestamp: u64,
     pub agency: String,
     pub case_hash: String,
+    pub jurisdiction: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -15,13 +16,19 @@ pub struct LeAction {
     pub timestamp: u64,
     pub agency: String,
     pub action_hash: String,
+    pub jurisdiction: String,
 }
 
 fn log_path(base: &str, file: &str) -> std::path::PathBuf {
     std::path::Path::new(base).join(file)
 }
 
-pub fn record_request(base: &str, agency: &str, case_id: &str) -> std::io::Result<String> {
+pub fn record_request(
+    base: &str,
+    agency: &str,
+    case_id: &str,
+    jurisdiction: &str,
+) -> std::io::Result<String> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -31,6 +38,7 @@ pub fn record_request(base: &str, agency: &str, case_id: &str) -> std::io::Resul
         timestamp: ts,
         agency: agency.to_string(),
         case_hash: case_hash.clone(),
+        jurisdiction: jurisdiction.to_string(),
     };
     let line =
         serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE request: {e}"));
@@ -61,7 +69,12 @@ pub fn list_requests(base: &str) -> std::io::Result<Vec<LeRequest>> {
     Ok(out)
 }
 
-pub fn record_action(base: &str, agency: &str, action: &str) -> std::io::Result<String> {
+pub fn record_action(
+    base: &str,
+    agency: &str,
+    action: &str,
+    jurisdiction: &str,
+) -> std::io::Result<String> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -71,6 +84,7 @@ pub fn record_action(base: &str, agency: &str, action: &str) -> std::io::Result<
         timestamp: ts,
         agency: agency.to_string(),
         action_hash: action_hash.clone(),
+        jurisdiction: jurisdiction.to_string(),
     };
     let line = serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE action: {e}"));
     let mut file = OpenOptions::new()

@@ -1,4 +1,6 @@
-use clap::{Parser, Subcommand, ValueEnum};
+#![deny(warnings)]
+
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use dex::escrow::{verify_proof, PaymentProof};
 use ed25519_dalek::Signature;
 use hex::{decode, encode};
@@ -91,6 +93,8 @@ enum Commands {
     BlobPut { file: String, owner: String },
     /// Retrieve a blob by its manifest hash and write to an output file
     BlobGet { blob_id: String, out: String },
+    /// Show help information
+    Help,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -292,6 +296,9 @@ fn main() {
                 }
                 Err(e) => eprintln!("get error: {e}"),
             }
+        }
+        Commands::Help => {
+            Cli::command().print_help().expect("print help");
         }
     }
 }

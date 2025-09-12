@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    transaction::verify_stateless, Account, Block, Blockchain, TokenBalance, TxAdmissionError,
+    simple_db::DbDelta, transaction::verify_stateless, Account, Block, Blockchain, TokenBalance,
+    TxAdmissionError,
 };
 
 #[cfg(feature = "telemetry")]
@@ -70,9 +71,75 @@ pub fn validate_and_apply(
     Ok(deltas)
 }
 
-/// Commit validated state deltas to the chain.
-pub fn commit(chain: &mut Blockchain, deltas: Vec<StateDelta>) {
-    for delta in deltas {
-        chain.accounts.insert(delta.address, delta.account);
+/// RAII guard for block execution. Mutations are rolled back on drop unless
+/// [`commit`](ExecutionContext::commit) is called.
+pub struct ExecutionContext<'a> {
+    chain: &'a mut Blockchain,
+    /// Prior account states for rollback.
+    account_deltas: Vec<(String, Option<Account>)>,
+    /// Database mutations for rollback.
+    db_deltas: Vec<DbDelta>,
+    committed: bool,
+}
+
+impl<'a> ExecutionContext<'a> {
+    pub fn new(chain: &'a mut Blockchain) -> Self {
+        Self {
+            chain,
+            account_deltas: Vec::new(),
+            db_deltas: Vec::new(),
+            committed: false,
+        }
     }
+
+    /// Apply state deltas and persist them to the database. Any I/O failure
+    /// triggers an automatic rollback when the context drops.
+    pub fn apply(&mut self, deltas: Vec<StateDelta>) -> std::io::Result<()> {
+        for delta in deltas {
+            let prev = self
+                .chain
+                .accounts
+                .insert(delta.address.clone(), delta.account.clone());
+            self.account_deltas.push((delta.address.clone(), prev));
+            let key = format!("acct:{}", delta.address);
+            let bytes = bincode::serialize(&delta.account)
+                .unwrap_or_else(|e| panic!("serialize account: {e}"));
+            self.chain
+                .db
+                .insert_with_delta(&key, bytes, &mut self.db_deltas)?;
+        }
+        Ok(())
+    }
+
+    /// Finalise block execution by flushing the database.
+    pub fn commit(mut self) -> std::io::Result<()> {
+        self.chain.db.flush();
+        self.committed = true;
+        Ok(())
+    }
+}
+
+impl Drop for ExecutionContext<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.chain.db.rollback(std::mem::take(&mut self.db_deltas));
+            for (addr, prev) in self.account_deltas.drain(..).rev() {
+                match prev {
+                    Some(acc) => {
+                        self.chain.accounts.insert(addr, acc);
+                    }
+                    None => {
+                        self.chain.accounts.remove(&addr);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Commit validated state deltas to the chain atomically.
+pub fn commit(chain: &mut Blockchain, deltas: Vec<StateDelta>) -> std::io::Result<()> {
+    let mut ctx = ExecutionContext::new(chain);
+    ctx.apply(deltas)?;
+    ctx.commit()
 }

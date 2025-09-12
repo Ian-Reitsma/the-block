@@ -1415,6 +1415,18 @@ pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static TX_JURISDICTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("tx_jurisdiction_total", "Transactions by jurisdiction"),
+        &["jurisdiction"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static BLOCK_MINED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("block_mined_total", "Total mined blocks")
         .unwrap_or_else(|e| panic!("counter: {e}"));
@@ -1650,6 +1662,30 @@ pub static PEER_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
+});
+
+pub static MESH_PEER_CONNECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new("mesh_peer_connected_total", "Total mesh peers discovered"),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static MESH_PEER_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        prometheus::Opts::new("mesh_peer_latency_ms", "Mesh peer latency in milliseconds"),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
 });
 
 pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -2251,6 +2287,18 @@ pub static QUIC_ENDPOINT_REUSE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static QUIC_FALLBACK_TCP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "quic_fallback_tcp_total",
+        "Total times QUIC connections fell back to TCP",
+    )
+    .unwrap_or_else(|e| panic!("counter quic fallback tcp: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic fallback tcp: {e}"));
+    c
+});
+
 pub static BADGE_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("badge_active", "Whether a service badge is active (1/0)")
         .unwrap_or_else(|e| panic!("gauge: {e}"));
@@ -2285,6 +2333,10 @@ impl Recorder {
 
     pub fn block_mined(&self) {
         BLOCK_MINED_TOTAL.inc();
+    }
+
+    pub fn tx_jurisdiction(&self, j: &str) {
+        TX_JURISDICTION_TOTAL.with_label_values(&[j]).inc();
     }
 }
 

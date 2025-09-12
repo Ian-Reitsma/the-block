@@ -1,4 +1,17 @@
-use std::collections::VecDeque;
+use once_cell::sync::Lazy;
+use std::collections::{HashMap, VecDeque};
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
+use std::time::{Duration, Instant};
+
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{MESH_PEER_CONNECTED_TOTAL, MESH_PEER_LATENCY_MS};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HopProof {
@@ -13,6 +26,101 @@ pub struct Bundle {
 
 pub struct RangeBoost {
     queue: VecDeque<Bundle>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MeshPeer {
+    pub addr: String,
+    pub latency_ms: u128,
+}
+
+static PEER_LATENCY: Lazy<Mutex<HashMap<String, u128>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static MESH_TASK_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub fn mesh_active() -> bool {
+    MESH_TASK_ACTIVE.load(Ordering::SeqCst)
+}
+
+fn record_latency(addr: String, latency: u128) {
+    let mut guard = PEER_LATENCY.lock().unwrap();
+    let is_new = !guard.contains_key(&addr);
+    guard.insert(addr.clone(), latency);
+    #[cfg(feature = "telemetry")]
+    {
+        if is_new {
+            MESH_PEER_CONNECTED_TOTAL.with_label_values(&[&addr]).inc();
+        }
+        MESH_PEER_LATENCY_MS
+            .with_label_values(&[&addr])
+            .set(latency as i64);
+    }
+}
+
+pub fn peer_latency(addr: &SocketAddr) -> Option<u128> {
+    PEER_LATENCY
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&addr.to_string()).cloned())
+}
+
+pub fn best_peer() -> Option<MeshPeer> {
+    let map = PEER_LATENCY.lock().ok()?;
+    map.iter().min_by_key(|(_, l)| **l).map(|(a, l)| MeshPeer {
+        addr: a.clone(),
+        latency_ms: *l,
+    })
+}
+
+pub fn discover_peers() -> Vec<MeshPeer> {
+    MESH_TASK_ACTIVE.store(true, Ordering::SeqCst);
+    let peers_env = std::env::var("TB_MESH_STATIC_PEERS").unwrap_or_default();
+    let mut peers = Vec::new();
+    for addr in peers_env.split(',').filter(|a| !a.is_empty()) {
+        if addr.starts_with("unix:") {
+            #[cfg(unix)]
+            {
+                let path = &addr[5..];
+                let start = Instant::now();
+                if let Ok(mut stream) = UnixStream::connect(path) {
+                    let _ = stream.write_all(&[0u8]);
+                    let mut buf = [0u8; 1];
+                    let _ = stream.read(&mut buf);
+                    let latency = start.elapsed().as_millis();
+                    record_latency(addr.to_string(), latency);
+                    peers.push(MeshPeer {
+                        addr: addr.to_string(),
+                        latency_ms: latency,
+                    });
+                }
+            }
+        } else if let Ok(sock) = addr.parse::<SocketAddr>() {
+            let start = Instant::now();
+            if let Ok(mut stream) = TcpStream::connect_timeout(&sock, Duration::from_millis(100)) {
+                let _ = stream.write_all(&[0u8]);
+                let mut buf = [0u8; 1];
+                let _ = stream.read(&mut buf);
+                let latency = start.elapsed().as_millis();
+                record_latency(sock.to_string(), latency);
+                peers.push(MeshPeer {
+                    addr: sock.to_string(),
+                    latency_ms: latency,
+                });
+            }
+        } else if addr.starts_with("bt:") {
+            #[cfg(all(feature = "bluetooth", any(target_os = "linux", target_os = "macos")))]
+            {
+                let latency = 0;
+                record_latency(addr.to_string(), latency);
+                peers.push(MeshPeer {
+                    addr: addr.to_string(),
+                    latency_ms: latency,
+                });
+            }
+        }
+    }
+    peers.sort_by_key(|p| p.latency_ms);
+    MESH_TASK_ACTIVE.store(false, Ordering::SeqCst);
+    peers
 }
 
 impl RangeBoost {

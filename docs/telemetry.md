@@ -100,8 +100,8 @@ outages do not block operation.
 
 The canonical metric list lives in `monitoring/metrics.json`. After adding or
 renaming metrics, regenerate the Grafana dashboards with
-`cargo build -p monitoring` or `monitoring/tools/gen_templates.py` to keep
-`monitoring/grafana/*.json` in sync.
+`scripts/gen-grafana.sh` (a thin wrapper over `monitoring/tools/gen_templates.py`)
+to keep `monitoring/grafana/*.json` in sync.
 
 The gauge `banned_peers_total` exposes the number of peers currently banned and
 is updated whenever bans are added or expire. Each ban's expiry is also tracked

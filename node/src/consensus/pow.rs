@@ -1,6 +1,9 @@
 use super::constants::DIFFICULTY_WINDOW;
 use super::difficulty;
+use crate::range_boost;
 use blake3::Hasher;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
@@ -54,6 +57,9 @@ fn target(difficulty: u64) -> u64 {
 
 fn solve(mut header: BlockHeader, tgt: u64) -> BlockHeader {
     loop {
+        if range_boost::mesh_active() {
+            thread::sleep(Duration::from_millis(10));
+        }
         let hash = header.hash();
         let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
         if value <= tgt {

@@ -1,6 +1,6 @@
 use blake3::Hasher;
-use subtle::ConstantTimeEq;
 use std::thread;
+use subtle::ConstantTimeEq;
 
 pub const MODULUS_BITS: usize = 512; // placeholder for Pietrzak modulus size
 

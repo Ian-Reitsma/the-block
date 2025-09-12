@@ -16,7 +16,8 @@ Two chambers participate in ratifying upgrades:
 3. Cast votes via `gov vote <id> --house ops|builders`.
 4. After both houses reach quorum and the timelock elapses, execute with `gov exec <id>`.
 5. Inspect progress at any time with `gov status <id>` which reports vote totals,
-   execution state and remaining timelock.
+   execution state and remaining timelock. Use `gov list` to view all proposals
+   and their dependencies in a single summary.
 
 Both houses must reach quorum before a proposal enters a timelock period,
 after which it may be executed on-chain.

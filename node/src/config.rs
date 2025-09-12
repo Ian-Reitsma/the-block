@@ -64,12 +64,16 @@ pub struct NodeConfig {
     pub gateway_dns_allow_external: bool,
     #[serde(default = "default_false")]
     pub gateway_dns_disable_verify: bool,
+    #[serde(default = "default_gateway_blocklist")]
+    pub gateway_blocklist: String,
     #[serde(default)]
     pub lighthouse: LighthouseConfig,
     #[serde(default)]
     pub quic: Option<QuicConfig>,
     #[serde(default)]
     pub telemetry: TelemetryConfig,
+    #[serde(default)]
+    pub jurisdiction: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -103,9 +107,11 @@ impl Default for NodeConfig {
             scheduler_metrics: default_true(),
             gateway_dns_allow_external: default_false(),
             gateway_dns_disable_verify: default_false(),
+            gateway_blocklist: default_gateway_blocklist(),
             lighthouse: LighthouseConfig::default(),
             quic: None,
             telemetry: TelemetryConfig::default(),
+            jurisdiction: None,
         }
     }
 }
@@ -188,6 +194,10 @@ fn default_true() -> bool {
 
 fn default_peer_reputation_decay() -> f64 {
     0.01
+}
+
+fn default_gateway_blocklist() -> String {
+    "gateway-blocklist.txt".into()
 }
 
 fn default_p2p_max_per_sec() -> u32 {
@@ -307,6 +317,8 @@ pub struct RpcConfig {
     pub request_timeout_ms: u64,
     pub enable_debug: bool,
     pub admin_token_file: Option<String>,
+    #[serde(default)]
+    pub relay_only: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -331,6 +343,7 @@ impl Default for RpcConfig {
             request_timeout_ms: 5_000,
             enable_debug: false,
             admin_token_file: Some("secrets/admin.token".into()),
+            relay_only: false,
         }
     }
 }
@@ -386,9 +399,11 @@ fn apply(cfg: &NodeConfig) {
     crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
     crate::net::set_peer_metrics_export(cfg.peer_metrics_export);
     crate::net::peer_metrics_store::init(&cfg.peer_metrics_db);
+    crate::net::load_peer_metrics();
     crate::net::set_metrics_aggregator(cfg.metrics_aggregator.clone());
     crate::gateway::dns::set_allow_external(cfg.gateway_dns_allow_external);
     crate::gateway::dns::set_disable_verify(cfg.gateway_dns_disable_verify);
+    crate::web::gateway::load_blocklist(&cfg.gateway_blocklist);
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::set_sample_rate(cfg.telemetry.sample_rate);

@@ -85,6 +85,7 @@ impl RelayerProof {
 pub struct BridgeConfig {
     pub confirm_depth: u64,
     pub fee_per_byte: u64,
+    pub headers_dir: String,
 }
 
 impl Default for BridgeConfig {
@@ -92,6 +93,7 @@ impl Default for BridgeConfig {
         Self {
             confirm_depth: 6,
             fee_per_byte: 0,
+            headers_dir: "state/bridge_headers".into(),
         }
     }
 }
@@ -107,15 +109,40 @@ pub struct Bridge {
 
 impl Default for Bridge {
     fn default() -> Self {
-        Self {
-            locked: HashMap::new(),
-            verified_headers: HashSet::new(),
-            cfg: BridgeConfig::default(),
-        }
+        Self::new(BridgeConfig::default())
     }
 }
 
 impl Bridge {
+    fn load_headers(dir: &str) -> HashSet<[u8; 32]> {
+        let mut set = HashSet::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for e in entries.flatten() {
+                if let Ok(bytes) = std::fs::read(e.path()) {
+                    if let Ok(hdr) = serde_json::from_slice::<PowHeader>(&bytes) {
+                        let h = light_client::Header {
+                            chain_id: hdr.chain_id.clone(),
+                            height: hdr.height,
+                            merkle_root: hdr.merkle_root,
+                            signature: hdr.signature,
+                        };
+                        set.insert(light_client::header_hash(&h));
+                    }
+                }
+            }
+        }
+        set
+    }
+
+    pub fn new(cfg: BridgeConfig) -> Self {
+        let headers = Self::load_headers(&cfg.headers_dir);
+        Self {
+            locked: HashMap::new(),
+            verified_headers: headers,
+            cfg,
+        }
+    }
+
     pub fn locked(&self, user: &str) -> u64 {
         self.locked.get(user).copied().unwrap_or(0)
     }

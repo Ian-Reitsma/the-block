@@ -13,9 +13,17 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Create a snapshot from the given data directory
-    Create { data_dir: String, #[arg(long)] db_path: Option<String> },
+    Create {
+        data_dir: String,
+        #[arg(long)]
+        db_path: Option<String>,
+    },
     /// Apply the latest snapshot and print its root
-    Apply { data_dir: String, #[arg(long)] db_path: Option<String> },
+    Apply {
+        data_dir: String,
+        #[arg(long)]
+        db_path: Option<String>,
+    },
     /// List available snapshot heights
     List { data_dir: String },
 }
@@ -31,7 +39,10 @@ fn main() {
                 .write_snapshot(bc.block_height, bc.accounts())
                 .expect("snapshot");
         }
-        Command::Apply { data_dir, db_path: _ } => {
+        Command::Apply {
+            data_dir,
+            db_path: _,
+        } => {
             let mgr = SnapshotManager::new(data_dir, 0);
             if let Ok(Some((h, _, root))) = mgr.load_latest() {
                 println!("{h}:{root}");

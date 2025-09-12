@@ -158,7 +158,12 @@ impl WorkloadRunner {
         let gpu = std::env::var("TB_GPU_MODEL").ok();
         let frameworks = std::env::var("TB_FRAMEWORKS")
             .ok()
-            .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
             .unwrap_or_default();
         scheduler::Capability {
             cpu_cores: cpu,

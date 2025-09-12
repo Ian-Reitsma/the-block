@@ -16,6 +16,7 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "RentRateCtPerByte" => Some(ParamKey::RentRateCtPerByte),
         "MinerRewardLogisticTarget" => Some(ParamKey::MinerRewardLogisticTarget),
         "BadgeExpirySecs" => Some(ParamKey::BadgeExpirySecs),
+        "JurisdictionRegion" => Some(ParamKey::JurisdictionRegion),
         _ => None,
     }
 }

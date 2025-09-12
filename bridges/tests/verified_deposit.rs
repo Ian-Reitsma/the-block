@@ -1,5 +1,6 @@
 use bridges::light_client::{header_hash, Header, Proof};
-use bridges::{header::PowHeader, relayer::RelayerSet, Bridge, RelayerProof};
+use bridges::{header::PowHeader, relayer::RelayerSet, Bridge, BridgeConfig, RelayerProof};
+use tempfile::tempdir;
 
 #[cfg(feature = "telemetry")]
 use bridges::{PROOF_VERIFY_FAILURE_TOTAL, PROOF_VERIFY_SUCCESS_TOTAL};
@@ -49,7 +50,12 @@ fn sample_proof_valid() -> Proof {
 
 #[test]
 fn deposit_valid_proof() {
-    let mut bridge = Bridge::default();
+    let dir = tempdir().unwrap();
+    let cfg = BridgeConfig {
+        headers_dir: dir.path().to_str().unwrap().into(),
+        ..BridgeConfig::default()
+    };
+    let mut bridge = Bridge::new(cfg);
     let header = sample_header();
     let proof = sample_proof_valid();
     let mut relayers = RelayerSet::default();
@@ -71,7 +77,12 @@ fn deposit_valid_proof() {
 
 #[test]
 fn deposit_invalid_proof() {
-    let mut bridge = Bridge::default();
+    let dir = tempdir().unwrap();
+    let cfg = BridgeConfig {
+        headers_dir: dir.path().to_str().unwrap().into(),
+        ..BridgeConfig::default()
+    };
+    let mut bridge = Bridge::new(cfg);
     let header = sample_header();
     let mut bad = sample_proof_valid();
     bad.path[0][0] ^= 0xff;
@@ -94,7 +105,12 @@ fn deposit_invalid_proof() {
 
 #[test]
 fn deposit_replay_fails() {
-    let mut bridge = Bridge::default();
+    let dir = tempdir().unwrap();
+    let cfg = BridgeConfig {
+        headers_dir: dir.path().to_str().unwrap().into(),
+        ..BridgeConfig::default()
+    };
+    let mut bridge = Bridge::new(cfg);
     let header = sample_header();
     let proof = sample_proof_valid();
     let mut relayers = RelayerSet::default();

@@ -45,6 +45,16 @@ pub fn execute(code: &[u8], meter: &mut GasMeter) -> Result<Vec<u64>, &'static s
                 let a = stack.pop().ok_or("stack underflow")?;
                 stack.push(a / b);
             }
+            OpCode::And => {
+                let b = stack.pop().ok_or("stack underflow")?;
+                let a = stack.pop().ok_or("stack underflow")?;
+                stack.push(a & b);
+            }
+            OpCode::Or => {
+                let b = stack.pop().ok_or("stack underflow")?;
+                let a = stack.pop().ok_or("stack underflow")?;
+                stack.push(a | b);
+            }
         }
     }
     Ok(stack)
@@ -82,5 +92,46 @@ mod tests {
         let stack = execute(&code, &mut meter).unwrap();
         assert_eq!(stack, vec![5]);
         assert_eq!(meter.used(), 5); // push(1+1)*2 + add
+    }
+
+    #[test]
+    fn bitwise_ops() {
+        let code: Vec<u8> = vec![
+            OpCode::Push as u8,
+            0b1100,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            OpCode::Push as u8,
+            0b1010,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            OpCode::And as u8,
+            OpCode::Push as u8,
+            0b0011,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            OpCode::Or as u8,
+            OpCode::Halt as u8,
+        ];
+        let mut meter = GasMeter::new(20);
+        let stack = execute(&code, &mut meter).unwrap();
+        assert_eq!(stack, vec![0b1111]);
+        // pushes:3 *2 gas =6, and=1, or=1 -> total 8 gas
+        assert_eq!(meter.used(), 8);
     }
 }

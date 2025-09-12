@@ -15,6 +15,10 @@ pub enum OpCode {
     Mul = 0x04,
     /// Pop two values, push first divided by second (truncating).
     Div = 0x05,
+    /// Pop two values, push bitwise AND.
+    And = 0x06,
+    /// Pop two values, push bitwise OR.
+    Or = 0x07,
 }
 
 impl OpCode {
@@ -26,6 +30,8 @@ impl OpCode {
             0x03 => Some(Self::Sub),
             0x04 => Some(Self::Mul),
             0x05 => Some(Self::Div),
+            0x06 => Some(Self::And),
+            0x07 => Some(Self::Or),
             _ => None,
         }
     }
@@ -38,6 +44,8 @@ impl OpCode {
             OpCode::Sub,
             OpCode::Mul,
             OpCode::Div,
+            OpCode::And,
+            OpCode::Or,
         ]
     }
 }

@@ -23,6 +23,8 @@ enum Command {
     Exec { id: u64 },
     /// Show proposal status
     Status { id: u64 },
+    /// List all proposals and their current status
+    List,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -81,6 +83,14 @@ fn main() {
                 "id={} ops_for={} builders_for={} executed={} timelock_remaining={}s",
                 p.id, p.ops_for, p.builders_for, p.executed, remaining
             );
+        }
+        Command::List => {
+            for p in gov.list() {
+                println!(
+                    "id={} ops_for={} builders_for={} executed={} deps={:?}",
+                    p.id, p.ops_for, p.builders_for, p.executed, p.deps
+                );
+            }
         }
     }
 }

@@ -25,4 +25,3 @@ fn permission_error() {
     });
     assert!(res.is_err());
 }
-

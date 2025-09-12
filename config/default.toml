@@ -18,6 +18,7 @@ reputation_gossip = true
 scheduler_metrics = true
 gateway_dns_allow_external = false
 gateway_dns_disable_verify = false
+gateway_blocklist = "gateway-blocklist.txt"
 
 [telemetry]
 sample_rate = 1.0

@@ -1,5 +1,5 @@
-use the_block::governance::{GovStore, Proposal};
 use std::env;
+use the_block::governance::{GovStore, Proposal};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
