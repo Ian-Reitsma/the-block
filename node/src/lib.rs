@@ -128,7 +128,7 @@ pub mod consensus;
 pub use consensus::pow;
 pub mod commit_reveal;
 pub mod constants;
-pub use constants::{domain_tag, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
+pub use constants::{domain_tag, domain_tag_for, CHAIN_ID, FEE_SPEC_VERSION, GENESIS_HASH, TX_VERSION};
 pub mod fee;
 pub mod fees;
 pub mod hash_genesis;

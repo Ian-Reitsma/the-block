@@ -312,6 +312,13 @@ impl PeerSet {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .ban(pk, ts);
+            #[cfg(feature = "telemetry")]
+            {
+                let id = hex::encode(pk);
+                crate::telemetry::P2P_REQUEST_LIMIT_HITS_TOTAL
+                    .with_label_values(&[id.as_str()])
+                    .inc();
+            }
             return Err(PeerErrorCode::RateLimit);
         }
         Ok(())
@@ -363,6 +370,13 @@ impl PeerSet {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .ban(pk, ts);
+        #[cfg(feature = "telemetry")]
+        {
+            let id = hex::encode(pk);
+            crate::telemetry::P2P_REQUEST_LIMIT_HITS_TOTAL
+                .with_label_values(&[id.as_str()])
+                .inc();
+        }
         Err(PeerErrorCode::RateLimit)
     }
 

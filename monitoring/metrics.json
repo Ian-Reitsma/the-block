@@ -48,6 +48,18 @@
     },
     {
       "deprecated": false,
+      "description": "Total service badges issued",
+      "labels": [],
+      "name": "badge_issued_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total service badges revoked",
+      "labels": [],
+      "name": "badge_revoked_total"
+    },
+    {
+      "deprecated": false,
       "description": "Transactions rejected due to balance overflow",
       "labels": [],
       "name": "balance_overflow_reject_total"
@@ -129,6 +141,24 @@
       "description": "Number of pending DEX escrows",
       "labels": [],
       "name": "dex_escrow_pending"
+    },
+    {
+      "deprecated": false,
+      "description": "Total liquidity currently locked in DEX escrow",
+      "labels": [],
+      "name": "dex_liquidity_locked_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Orders submitted to the DEX by side",
+      "labels": ["side"],
+      "name": "dex_orders_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total matched trade quantity across all DEX pairs",
+      "labels": [],
+      "name": "dex_trade_volume"
     },
     {
       "deprecated": false,
@@ -346,6 +376,18 @@
     },
     {
       "deprecated": false,
+      "description": "Total compute provider SLA violations",
+      "labels": [],
+      "name": "compute_sla_violations_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Rolling uptime percentage for the compute provider",
+      "labels": [],
+      "name": "compute_provider_uptime"
+    },
+    {
+      "deprecated": false,
       "description": "Transactions rejected for invalid fee selector",
       "labels": [],
       "name": "invalid_selector_reject_total"
@@ -467,6 +509,12 @@
       "description": "Messages dropped grouped by reason",
       "labels": [],
       "name": "peer_drop_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Per-peer hits on the request rate limiter",
+      "labels": ["peer_id"],
+      "name": "p2p_request_limit_hits_total"
     },
     {
       "deprecated": false,
@@ -963,6 +1011,12 @@
       "description": "Transactions dropped due to TTL expiration",
       "labels": [],
       "name": "ttl_drop_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Gossip dedup entries removed due to TTL expiry",
+      "labels": [],
+      "name": "gossip_ttl_drop_total"
     },
     {
       "deprecated": false,

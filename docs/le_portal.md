@@ -48,6 +48,17 @@ falls within the expected window. Absence or delay signals potential gag orders.
    policies permit. Review `docs/jurisdiction.md` for region‑specific
    requirements and retention policies.
 
+## Audit Trail & Badge Policy
+
+`record_action` appends an agency-tagged, timestamped hash to `le_actions.log`
+to provide a tamper-evident trail of law-enforcement operations
+[`node/src/le_portal.rs#L69-L98`](../node/src/le_portal.rs#L69-L98). Access to
+`record_le_request`, `warrant_canary`, and the new audit endpoints is gated by
+service badges. Badges expire after a governance-controlled interval and can be
+renewed without downtime. Metrics `badge_issued_total` and
+`badge_revoked_total` track lifecycle events, while policy updates flow through
+the governance parameter `BadgeExpirySecs`.
+
 ## Example
 
 ```rust

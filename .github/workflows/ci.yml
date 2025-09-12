@@ -91,10 +91,18 @@ jobs:
         run: cargo nextest run --features telemetry compute_market::courier_retry_updates_metrics price_board
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: metrics naming check
+        run: cargo test -p metrics-aggregator --test naming
+        env:
+          LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
       - name: doc tests
         run: cargo test --doc --all-features
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --deny warnings
       - name: snapshot restore
         run: scripts/snapshot_ci.sh
         env:

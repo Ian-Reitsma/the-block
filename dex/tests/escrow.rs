@@ -8,7 +8,7 @@ fn full_and_partial_and_proofs() {
     // First partial release
     let proof1 = esc.release(id, 40).unwrap();
     let leaf1: [u8; 32] = *blake3::hash(&40u64.to_le_bytes()).as_bytes();
-    assert!(verify_proof(proof1.leaf, 0, &proof1.path, leaf1));
+    assert!(verify_proof(proof1.leaf, 0, &proof1.path, leaf1, proof1.algo));
     // Second release finalises escrow
     let proof2 = esc.release(id, 60).unwrap();
     let leaf2: [u8; 32] = *blake3::hash(&60u64.to_le_bytes()).as_bytes();
@@ -16,7 +16,7 @@ fn full_and_partial_and_proofs() {
     buf[..32].copy_from_slice(&leaf1);
     buf[32..].copy_from_slice(&leaf2);
     let root2: [u8; 32] = *blake3::hash(&buf).as_bytes();
-    assert!(verify_proof(proof2.leaf, 1, &proof2.path, root2));
+    assert!(verify_proof(proof2.leaf, 1, &proof2.path, root2, proof2.algo));
     assert!(esc.status(id).is_none());
 }
 
@@ -42,7 +42,7 @@ fn multi_fill_trades() {
     buf3[..32].copy_from_slice(&h01);
     buf3[32..].copy_from_slice(&h22);
     let root: [u8; 32] = *blake3::hash(&buf3).as_bytes();
-    assert!(verify_proof(proof.leaf, 2, &proof.path, root));
+    assert!(verify_proof(proof.leaf, 2, &proof.path, root, proof.algo));
     assert!(esc.status(id).is_none());
 }
 

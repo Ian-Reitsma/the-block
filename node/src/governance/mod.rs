@@ -37,4 +37,5 @@ pub enum ParamKey {
     LogisticSlope,
     MinerHysteresis,
     HeuristicMuMilli,
+    BadgeExpirySecs,
 }

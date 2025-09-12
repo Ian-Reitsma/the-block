@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use crate::net::{send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE};
+use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_TTL_DROP_TOTAL};
 
 /// Relay provides TTL-based duplicate suppression and fanout selection.
 pub struct Relay {
@@ -34,7 +34,13 @@ impl Relay {
         let h = Self::hash_msg(msg);
         let mut guard = self.recent.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
+        let before = guard.len();
         guard.retain(|_, t| now.duration_since(*t) < self.ttl);
+        let dropped = before - guard.len();
+        #[cfg(feature = "telemetry")]
+        if dropped > 0 {
+            GOSSIP_TTL_DROP_TOTAL.inc_by(dropped as u64);
+        }
         if guard.contains_key(&h) {
             #[cfg(feature = "telemetry")]
             GOSSIP_DUPLICATE_TOTAL.inc();

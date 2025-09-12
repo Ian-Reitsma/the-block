@@ -60,15 +60,18 @@ const _: () = assert_genesis_hash();
 use bincode::Options;
 use std::sync::LazyLock;
 
+/// Compute the 16-byte domain separation tag for a given chain ID.
+pub fn domain_tag_for(id: u32) -> [u8; 16] {
+    let mut buf = [0u8; 16];
+    let prefix = b"THE_BLOCKv2|"; // 12 bytes
+    buf[..prefix.len()].copy_from_slice(prefix);
+    buf[prefix.len()..prefix.len() + 4].copy_from_slice(&id.to_le_bytes());
+    buf
+}
+
 /// Returns the 16-byte domain separation tag used in all signing operations.
 pub fn domain_tag() -> &'static [u8] {
-    static TAG: LazyLock<[u8; 16]> = LazyLock::new(|| {
-        let mut buf = [0u8; 16];
-        let prefix = b"THE_BLOCKv2|"; // 12 bytes
-        buf[..prefix.len()].copy_from_slice(prefix);
-        buf[prefix.len()..prefix.len() + 4].copy_from_slice(&CHAIN_ID.to_le_bytes());
-        buf
-    });
+    static TAG: LazyLock<[u8; 16]> = LazyLock::new(|| domain_tag_for(CHAIN_ID));
     &*TAG
 }
 

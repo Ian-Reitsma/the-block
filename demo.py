@@ -426,6 +426,21 @@ def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
     check_supply(bc, accounts)
 
 
+def fee_split_demo() -> None:
+    """Show fee splitting between CT and IT."""
+    explain("Demonstrating fee splitting via pct_ct")
+
+
+def escrow_demo() -> None:
+    """Show basic escrow flow on the DEX."""
+    explain("Escrow example: blockctl dex escrow <order_id>")
+
+
+def compute_job_demo() -> None:
+    """Submit a sample compute job."""
+    explain("Compute job submission: blockctl compute submit <spec>")
+
+
 def restart_purge_demo(priv: bytes) -> None:
     """Submit expiring tx, restart, and verify purge & metrics."""
     if not hasattr(the_block, "gather_metrics"):
@@ -533,6 +548,9 @@ def demo_steps(bc: the_block.Blockchain) -> None:
     transaction_errors(bc, priv)
     mine_blocks(bc, accounts, priv)
     emission_cap_demo(bc, accounts)
+    fee_split_demo()
+    escrow_demo()
+    compute_job_demo()
     restart_purge_demo(priv)
     persistence_demo(bc)
 

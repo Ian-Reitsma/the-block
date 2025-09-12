@@ -31,6 +31,9 @@ impl<'a> Runtime<'a> {
     pub fn set_rent_rate(&mut self, v: i64) {
         self.bc.params.rent_rate_ct_per_byte = v;
     }
+    pub fn set_badge_expiry(&mut self, v: u64) {
+        crate::service_badge::set_badge_ttl_secs(v);
+    }
 }
 
 pub struct ParamSpec {
@@ -70,6 +73,7 @@ pub struct Params {
     pub fib_window_base_secs: i64,
     pub heuristic_mu_milli: i64,
     pub industrial_multiplier: i64,
+    pub badge_expiry_secs: i64,
 }
 
 impl Default for Params {
@@ -96,6 +100,7 @@ impl Default for Params {
             fib_window_base_secs: 4,
             heuristic_mu_milli: 500,
             industrial_multiplier: 100,
+            badge_expiry_secs: 30 * 24 * 60 * 60,
         }
     }
 }
@@ -110,6 +115,11 @@ fn apply_consumer_fee_p90(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 fn apply_industrial_capacity(v: i64, p: &mut Params) -> Result<(), ()> {
     p.industrial_admission_min_capacity = v;
+    Ok(())
+}
+
+fn apply_badge_expiry(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.badge_expiry_secs = v;
     Ok(())
 }
 fn apply_fairshare_global_max(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -189,7 +199,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 15] = [
+    static REGS: [ParamSpec; 16] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -357,6 +367,19 @@ pub fn registry() -> &'static [ParamSpec] {
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_heuristic_mu,
             apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::BadgeExpirySecs,
+            default: 30 * 24 * 60 * 60,
+            min: 3_600,
+            max: 365 * 24 * 60 * 60,
+            unit: "seconds",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_badge_expiry,
+            apply_runtime: |v, rt| {
+                rt.set_badge_expiry(v as u64);
+                Ok(())
+            },
         },
     ];
     &REGS

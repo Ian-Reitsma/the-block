@@ -35,3 +35,17 @@ proptest! {
         peers.handle_message(msg, None, &bc);
     }
 }
+
+proptest! {
+    #[test]
+    fn fuzz_malformed_handshake(raw in proptest::collection::vec(any::<u8>(), 0..256)) {
+        let dir = tempdir().unwrap();
+        net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
+        std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
+        let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+        let peers = PeerSet::new(vec![]);
+        if let Ok(msg) = bincode::deserialize::<Message>(&raw) {
+            peers.handle_message(msg, None, &bc);
+        }
+    }
+}

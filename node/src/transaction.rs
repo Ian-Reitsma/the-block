@@ -5,13 +5,25 @@
 
 use crate::{constants::bincode_config, constants::domain_tag, to_array_32, to_array_64};
 use bincode::Options;
+use blake3::Hasher;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
+use lru::LruCache;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 
 use crate::{fee, fee::FeeError, TxAdmissionError};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+thread_local! {
+    static MSG_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+}
+
+static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> =
+    Lazy::new(|| Mutex::new(LruCache::new(1024)));
 
 /// Distinct fee lanes for transaction scheduling.
 #[pyclass]
@@ -288,38 +300,108 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
 
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
-    if !tx.signer_pubkeys.is_empty() && !tx.aggregate_signature.is_empty() && tx.threshold > 0 {
+    let key = {
+        let bytes = bincode::serialize(tx).unwrap_or_default();
+        let mut h = Hasher::new();
+        h.update(&bytes);
+        h.finalize().into()
+    };
+    if let Some(result) = SIG_CACHE.lock().get(&key).copied() {
+        return result;
+    }
+
+    let payload_bytes = canonical_payload_bytes(&tx.payload);
+    let domain = domain_tag();
+    let res = if !tx.signer_pubkeys.is_empty()
+        && !tx.aggregate_signature.is_empty()
+        && tx.threshold > 0
+    {
         let sigs: Vec<&[u8]> = tx.aggregate_signature.chunks(64).collect();
         if sigs.len() < tx.threshold as usize || sigs.len() != tx.signer_pubkeys.len() {
-            return false;
-        }
-        for (pk_bytes, sig_bytes) in tx.signer_pubkeys.iter().zip(sigs) {
-            if let (Some(pk), Some(sig_arr)) = (to_array_32(pk_bytes), to_array_64(sig_bytes)) {
-                if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-                    let mut m = domain_tag().to_vec();
-                    m.extend(canonical_payload_bytes(&tx.payload));
-                    let sig = Signature::from_bytes(&sig_arr);
-                    if vk.verify(&m, &sig).is_err() {
-                        return false;
+            false
+        } else {
+            let mut ok = true;
+            for (pk_bytes, sig_bytes) in tx.signer_pubkeys.iter().zip(sigs) {
+                let valid = if let (Some(pk), Some(sig_arr)) =
+                    (to_array_32(pk_bytes), to_array_64(sig_bytes))
+                {
+                    if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+                        MSG_BUF.with(|buf| {
+                            let mut buf = buf.borrow_mut();
+                            buf.clear();
+                            buf.extend_from_slice(domain);
+                            buf.extend_from_slice(&payload_bytes);
+                            let sig = Signature::from_bytes(&sig_arr);
+                            vk.verify(&buf, &sig).is_ok()
+                        })
+                    } else {
+                        false
                     }
                 } else {
-                    return false;
+                    false
+                };
+                if !valid {
+                    ok = false;
+                    break;
                 }
-            } else {
-                return false;
+            }
+            ok
+        }
+    } else if let (Some(pk), Some(sig_bytes)) =
+        (to_array_32(&tx.public_key), to_array_64(&tx.signature))
+    {
+        if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+            MSG_BUF.with(|buf| {
+                let mut buf = buf.borrow_mut();
+                buf.clear();
+                buf.extend_from_slice(domain);
+                buf.extend_from_slice(&payload_bytes);
+                let sig = Signature::from_bytes(&sig_bytes);
+                vk.verify(&buf, &sig).is_ok()
+            })
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    SIG_CACHE.lock().put(key, res);
+    res
+}
+
+/// Batch verify a slice of signed transactions, returning per-transaction results.
+pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
+    use ed25519_dalek::Signature as DalekSig;
+    let domain = domain_tag();
+    let mut msgs = Vec::new();
+    let mut sigs = Vec::new();
+    let mut vks = Vec::new();
+    let mut indices = Vec::new();
+    for (i, tx) in txs.iter().enumerate() {
+        if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
+            if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+                let payload_bytes = canonical_payload_bytes(&tx.payload);
+                let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());
+                msg.extend_from_slice(domain);
+                msg.extend_from_slice(&payload_bytes);
+                msgs.push(msg);
+                sigs.push(DalekSig::from_bytes(&sig_bytes));
+                vks.push(vk);
+                indices.push(i);
             }
         }
-        return true;
     }
-    if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
-        if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-            let mut m = domain_tag().to_vec();
-            m.extend(canonical_payload_bytes(&tx.payload));
-            let sig = Signature::from_bytes(&sig_bytes);
-            return vk.verify(&m, &sig).is_ok();
+    let msg_refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
+    let res = if ed25519_dalek::verify_batch(&msg_refs, &sigs, &vks).is_ok() {
+        let mut out = vec![false; txs.len()];
+        for &i in &indices {
+            out[i] = true;
         }
-    }
-    false
+        out
+    } else {
+        txs.iter().map(verify_signed_tx).collect()
+    };
+    res
 }
 
 /// Python wrapper for [`sign_tx`]. Raises `ValueError` on invalid key length.

@@ -796,7 +796,7 @@ dependencies = [
  "blake2s_simd",
  "byteorder",
  "cfg-if 1.0.3",
- "crossbeam",
+ "crossbeam 0.7.3",
  "futures",
  "hex",
  "lazy_static",
@@ -1429,8 +1429,21 @@ dependencies = [
  "crossbeam-channel 0.4.4",
  "crossbeam-deque 0.7.4",
  "crossbeam-epoch 0.8.2",
- "crossbeam-queue",
+ "crossbeam-queue 0.2.3",
  "crossbeam-utils 0.7.2",
+]
+
+[[package]]
+name = "crossbeam"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1137cd7e7fc0fb5d3c5a8678be38ec56e819125d8d7907411fe24ccb943faca8"
+dependencies = [
+ "crossbeam-channel 0.5.15",
+ "crossbeam-deque 0.8.6",
+ "crossbeam-epoch 0.9.18",
+ "crossbeam-queue 0.3.12",
+ "crossbeam-utils 0.8.21",
 ]
 
 [[package]]
@@ -1506,6 +1519,15 @@ dependencies = [
  "cfg-if 0.1.10",
  "crossbeam-utils 0.7.2",
  "maybe-uninit",
+]
+
+[[package]]
+name = "crossbeam-queue"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f58bbc28f91df819d0aa2a2c00cd19754769c2fad90579b3592b1c9ba7a3115"
+dependencies = [
+ "crossbeam-utils 0.8.21",
 ]
 
 [[package]]
@@ -1709,7 +1731,10 @@ name = "dex"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "criterion",
  "serde",
+ "sha3",
+ "subtle",
 ]
 
 [[package]]
@@ -3490,6 +3515,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "json"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "078e285eafdfb6c4b434e0d31e8cfcb5115b651496faca5749b88fafd4f23bfd"
+
+[[package]]
 name = "jurisdiction"
 version = "0.1.0"
 dependencies = [
@@ -3499,6 +3530,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "keccak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecc2af9a1119c51f12a14607e783cb977bde58bc069ff0c3da1095e635d70654"
+dependencies = [
+ "cpufeatures",
 ]
 
 [[package]]
@@ -4022,6 +4062,8 @@ dependencies = [
 name = "light-client"
 version = "0.1.0"
 dependencies = [
+ "blake3",
+ "flate2",
  "serde",
 ]
 
@@ -4097,6 +4139,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e999beba7b6e8345721bd280141ed958096a2e4abdf74f67ff4ce49b4b54e47a"
 dependencies = [
  "hashbrown 0.12.3",
+]
+
+[[package]]
+name = "lru"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4a83fb7698b3643a0e34f9ae6f2e8f0178c0fd42f8b59d493aa271ff3a5bf21"
+dependencies = [
+ "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -4203,6 +4254,7 @@ dependencies = [
  "once_cell",
  "openssl",
  "prometheus",
+ "regex",
  "serde",
  "serde_json",
  "sled",
@@ -5778,7 +5830,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7263373d500d4d4f505d43a2a662d475a894aa94503a1ee28e9188b5f3960d4f"
 dependencies = [
  "libm",
- "lru",
+ "lru 0.7.8",
  "parking_lot 0.11.2",
  "smallvec",
  "spin 0.9.8",
@@ -6630,6 +6682,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha3"
+version = "0.10.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
+dependencies = [
+ "digest 0.10.7",
+ "keccak",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7117,6 +7179,7 @@ dependencies = [
  "bincode",
  "blake3",
  "bridges",
+ "bytes",
  "chacha20poly1305",
  "clap",
  "clap_complete",
@@ -7144,11 +7207,13 @@ dependencies = [
  "libp2p",
  "log",
  "logtest",
+ "lru 0.11.1",
  "nalgebra 0.32.6",
  "nix 0.27.1",
  "notify",
  "num_cpus",
  "once_cell",
+ "parking_lot 0.12.4",
  "pprof",
  "pqcrypto-dilithium",
  "procfs",
@@ -7176,6 +7241,7 @@ dependencies = [
  "sled",
  "state",
  "statrs",
+ "subtle",
  "tar",
  "tempfile",
  "terminal_size",
@@ -7185,6 +7251,7 @@ dependencies = [
  "tokio-util",
  "toml 0.8.23",
  "tracing",
+ "tracing-chrome",
  "tracing-subscriber",
  "tracing-test",
  "trust-dns-resolver",
@@ -7626,6 +7693,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "tracing-chrome"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1ac1f6a3a47e9c755e65ef974653c978da2246487a16044a8ee1d9a0a67257c"
+dependencies = [
+ "crossbeam 0.8.4",
+ "json",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -8099,10 +8178,12 @@ dependencies = [
  "ed25519-dalek 1.0.1",
  "hex",
  "hidapi",
+ "hkdf",
  "httpmock",
  "ledger",
  "native-tls",
  "once_cell",
+ "pqcrypto-dilithium",
  "rand 0.7.3",
  "rcgen 0.11.3",
  "reqwest 0.11.27",
@@ -8110,6 +8191,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test 1.0.0",
+ "sha2 0.10.9",
+ "subtle",
  "tempfile",
  "thiserror 1.0.69",
  "tiny_http",

@@ -2,7 +2,7 @@ use crate::compute_market::courier_store::ReceiptStore;
 use crate::compute_market::receipt::Receipt;
 use crate::transaction::FeeLane;
 use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 

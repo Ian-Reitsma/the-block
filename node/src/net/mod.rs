@@ -182,8 +182,11 @@ impl Node {
                     if stream.read_to_end(&mut buf).is_ok() {
                         #[cfg(feature = "telemetry")]
                         if crate::telemetry::should_log("p2p") {
+                            let trace = crate::telemetry::log_context();
                             let span = crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
-                            tracing::info!(parent: &span, peer = ?addr, len = buf.len(), "recv_msg");
+                            span.in_scope(|| {
+                                tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
+                            });
                         }
                         if let Ok(msg) = bincode::deserialize::<Message>(&buf) {
                             peers.handle_message(msg, addr, &chain);

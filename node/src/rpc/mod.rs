@@ -46,7 +46,9 @@ pub mod dex;
 pub mod governance;
 pub mod identity;
 pub mod inflation;
+pub mod light;
 pub mod pos;
+pub mod vm;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -76,6 +78,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "settlement_status",
     "settlement.audit",
     "localnet.submit_receipt",
+    "record_le_request",
+    "warrant_canary",
+    "le.list_requests",
+    "le.record_action",
     "dns.publish_record",
     "gateway.policy",
     "gateway.reads_since",
@@ -118,6 +124,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "consensus.pos.unbond",
     "consensus.pos.slash",
     "rent.escrow.balance",
+    "light.latest_header",
+    "service_badge_verify",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -133,8 +141,13 @@ const ADMIN_METHODS: &[&str] = &[
     "gov_params",
     "gov_rollback_last",
     "gov_rollback",
+];
+
+const BADGE_METHODS: &[&str] = &[
     "record_le_request",
     "warrant_canary",
+    "le.list_requests",
+    "le.record_action",
 ];
 
 const DEBUG_METHODS: &[&str] = &["set_difficulty", "start_mining", "stop_mining"];
@@ -148,6 +161,8 @@ struct RpcRequest {
     params: serde_json::Value,
     #[serde(default)]
     id: Option<serde_json::Value>,
+    #[serde(default)]
+    badge: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -616,6 +631,24 @@ fn dispatch(
     nonces: Arc<Mutex<HashSet<u64>>>,
     handles: Arc<Mutex<HandleRegistry>>,
 ) -> Result<serde_json::Value, RpcError> {
+    if BADGE_METHODS.contains(&req.method.as_str()) {
+        let badge = req
+            .params
+            .get("badge")
+            .and_then(|v| v.as_str())
+            .or(req.badge.as_deref())
+            .ok_or(RpcError {
+                code: -32602,
+                message: "badge required",
+            })?;
+        if !crate::service_badge::verify(badge) {
+            return Err(RpcError {
+                code: -32602,
+                message: "invalid badge",
+            });
+        }
+    }
+
     Ok(match req.method.as_str() {
         "set_difficulty" => {
             let val = req
@@ -1243,6 +1276,10 @@ fn dispatch(
         "consensus.pos.bond" => pos::bond(&req.params)?,
         "consensus.pos.unbond" => pos::unbond(&req.params)?,
         "consensus.pos.slash" => pos::slash(&req.params)?,
+        "light.latest_header" => {
+            let guard = bc.lock().unwrap();
+            serde_json::to_value(light::latest_header(&guard)).unwrap()
+        }
         "rent.escrow.balance" => {
             let esc = RentEscrow::open("rent_escrow.db");
             if let Some(id) = req.params.get("id").and_then(|v| v.as_str()) {
@@ -1387,6 +1424,47 @@ fn dispatch(
                 }
                 Err(_) => serde_json::json!({"error": "lock poisoned"}),
             }
+        }
+        "le.list_requests" => match bc.lock() {
+            Ok(guard) => {
+                let base = guard.path.clone();
+                match crate::le_portal::list_requests(&base) {
+                    Ok(v) => serde_json::to_value(v).unwrap_or_default(),
+                    Err(_) => serde_json::json!({"error": "io"}),
+                }
+            }
+            Err(_) => serde_json::json!({"error": "lock poisoned"}),
+        },
+        "le.record_action" => {
+            check_nonce(&req.params, &nonces)?;
+            let agency = req
+                .params
+                .get("agency")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let action = req
+                .params
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match bc.lock() {
+                Ok(guard) => {
+                    let base = guard.path.clone();
+                    match crate::le_portal::record_action(&base, agency, action) {
+                        Ok(hash) => serde_json::json!({"hash": hash}),
+                        Err(_) => serde_json::json!({"error": "io"}),
+                    }
+                }
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
+        "service_badge_verify" => {
+            let badge = req
+                .params
+                .get("badge")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            serde_json::json!({"valid": crate::service_badge::verify(badge)})
         }
         "submit_tx" => {
             check_nonce(&req.params, &nonces)?;
@@ -1705,6 +1783,51 @@ fn dispatch(
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             let mut rt = crate::governance::Runtime { bc: &mut *chain };
             governance::gov_rollback(&GOV_STORE, id, &mut params, &mut rt, epoch)?
+        }
+        "vm.estimate_gas" => {
+            let code_hex = req
+                .params
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let code = hex::decode(code_hex).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let gas = vm::estimate_gas(code);
+            serde_json::json!({"gas_used": gas})
+        }
+        "vm.exec_trace" => {
+            let code_hex = req
+                .params
+                .get("code")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let code = hex::decode(code_hex).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            let trace = vm::exec_trace(code);
+            serde_json::json!({"trace": trace})
+        }
+        "vm.storage_read" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let data = vm::storage_read(id).unwrap_or_default();
+            serde_json::json!({"data": hex::encode(data)})
+        }
+        "vm.storage_write" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let data_hex = req
+                .params
+                .get("data")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let bytes = hex::decode(data_hex).map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid params",
+            })?;
+            vm::storage_write(id, bytes);
+            serde_json::json!({"status": "ok"})
         }
         _ => {
             return Err(RpcError {

@@ -3,6 +3,7 @@ use blake3;
 use dashmap::DashMap;
 #[cfg(feature = "telemetry")]
 use hdrhistogram::Histogram as HdrHistogram;
+use hex;
 use once_cell::sync::Lazy;
 #[cfg(feature = "telemetry")]
 use procfs::process::Process;
@@ -13,7 +14,9 @@ use prometheus::{
 use pyo3::prelude::*;
 #[cfg(feature = "telemetry")]
 use rand::Rng;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 #[cfg(feature = "telemetry")]
 use std::sync::{Mutex, Once};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -203,6 +206,19 @@ pub fn current_alloc_bytes() -> u64 {
 }
 #[cfg(not(feature = "telemetry"))]
 pub fn update_memory_usage() {}
+
+#[cfg(feature = "telemetry")]
+pub fn log_context() -> tracing::Span {
+    use rand::RngCore;
+    let mut buf = [0u8; 8];
+    rand::thread_rng().fill_bytes(&mut buf);
+    tracing::info_span!("trace", trace_id = %hex::encode(buf))
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn log_context() -> tracing::Span {
+    tracing::info_span!("trace")
+}
 
 pub static HAAR_ETA_MILLI: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("haar_eta_milli", "eta parameter for burst veto x1000").unwrap();
@@ -407,6 +423,30 @@ pub static DEX_LIQUIDITY_LOCKED_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static DEX_ORDERS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("dex_orders_total", "Orders submitted to the DEX by side"),
+        &["side"],
+    )
+    .unwrap_or_else(|e| panic!("counter dex orders: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry dex orders: {e}"));
+    c
+});
+
+pub static DEX_TRADE_VOLUME: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "dex_trade_volume",
+        "Total matched trade quantity across all DEX pairs",
+    )
+    .unwrap_or_else(|e| panic!("counter dex trade volume: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry dex trade volume: {e}"));
+    c
+});
+
 pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("subsidy_bytes_total", "Total subsidized bytes by type"),
@@ -428,6 +468,42 @@ pub static SUBSIDY_CPU_MS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry subsidy cpu: {e}"));
+    c
+});
+
+pub static VM_GAS_USED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("vm_gas_used_total", "Total gas consumed by VM executions")
+        .unwrap_or_else(|e| panic!("counter vm gas used: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry vm gas used: {e}"));
+    c
+});
+
+pub static VM_OUT_OF_GAS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("vm_out_of_gas_total", "VM executions that ran out of gas")
+        .unwrap_or_else(|e| panic!("counter vm out of gas: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry vm out of gas: {e}"));
+    c
+});
+
+pub static BADGE_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("badge_issued_total", "Service badges issued")
+        .unwrap_or_else(|e| panic!("counter badge issued: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry badge issued: {e}"));
+    c
+});
+
+pub static BADGE_REVOKED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("badge_revoked_total", "Service badges revoked")
+        .unwrap_or_else(|e| panic!("counter badge revoked: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry badge revoked: {e}"));
     c
 });
 
@@ -988,6 +1064,30 @@ pub static JOB_RESUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "compute_sla_violations_total",
+        "Total compute provider SLA violations",
+    )
+    .unwrap_or_else(|e| panic!("counter compute_sla_violations_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry compute_sla_violations_total: {e}"));
+    c
+});
+
+pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "compute_provider_uptime",
+        "Rolling uptime percentage for the compute provider",
+    )
+    .unwrap_or_else(|e| panic!("gauge compute_provider_uptime: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry compute_provider_uptime: {e}"));
+    g
+});
+
 pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_miss_total",
@@ -1372,6 +1472,18 @@ pub static TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static GOSSIP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "gossip_ttl_drop_total",
+        "Gossip dedup entries removed due to TTL expiry",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "startup_ttl_drop_total",
@@ -1532,6 +1644,21 @@ pub static PEER_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new("peer_drop_total", "Messages dropped grouped by reason"),
         &["peer_id", "reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "p2p_request_limit_hits_total",
+            "Per-peer hits on the request rate limiter",
+        ),
+        &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
     REGISTRY
@@ -2212,6 +2339,7 @@ pub static LOG_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
 
 static LOG_SEC: AtomicU64 = AtomicU64::new(0);
 static LOG_COUNT: AtomicU64 = AtomicU64::new(0);
+static LOG_TOGGLES: Lazy<RwLock<HashMap<String, bool>>> = Lazy::new(|| RwLock::new(HashMap::new()));
 
 /// Maximum log events per second before sampling kicks in.
 pub const LOG_LIMIT: u64 = 100;
@@ -2219,6 +2347,12 @@ pub const LOG_LIMIT: u64 = 100;
 pub const LOG_SAMPLE_STRIDE: u64 = 100;
 
 pub fn should_log(subsystem: &str) -> bool {
+    if let Some(enabled) = LOG_TOGGLES.read().unwrap().get(subsystem) {
+        if !*enabled {
+            LOG_DROP_TOTAL.with_label_values(&[subsystem]).inc();
+            return false;
+        }
+    }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -2236,6 +2370,13 @@ pub fn should_log(subsystem: &str) -> bool {
         LOG_DROP_TOTAL.with_label_values(&[subsystem]).inc();
         false
     }
+}
+
+pub fn set_log_enabled(subsystem: &str, enabled: bool) {
+    LOG_TOGGLES
+        .write()
+        .unwrap()
+        .insert(subsystem.to_owned(), enabled);
 }
 
 pub fn observe_log_size(bytes: usize) {
@@ -2297,10 +2438,17 @@ fn gather() -> String {
         FORK_REORG_TOTAL.with_label_values(&["0"]),
         &*TTL_DROP_TOTAL,
         &*STARTUP_TTL_DROP_TOTAL,
+        &*GOSSIP_TTL_DROP_TOTAL,
         &*LOCK_POISON_TOTAL,
         &*ORPHAN_SWEEP_TOTAL,
         &*GOSSIP_DUPLICATE_TOTAL,
         &*GOSSIP_FANOUT_GAUGE,
+        DEX_ORDERS_TOTAL.with_label_values(&["buy"]),
+        DEX_ORDERS_TOTAL.with_label_values(&["sell"]),
+        &*DEX_TRADE_VOLUME,
+        &*COMPUTE_SLA_VIOLATIONS_TOTAL,
+        &*COMPUTE_PROVIDER_UPTIME,
+        P2P_REQUEST_LIMIT_HITS_TOTAL.with_label_values(&[""]),
         &*INVALID_SELECTOR_REJECT_TOTAL,
         &*BALANCE_OVERFLOW_REJECT_TOTAL,
         &*DROP_NOT_FOUND_TOTAL,
