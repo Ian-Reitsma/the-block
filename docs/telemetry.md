@@ -169,7 +169,8 @@ traces to an external collector.  The default Grafana bundle ships with a
 Import it via the Grafana UI or with `make monitor`.
 
 Remote signer requests emit per-call trace IDs and increment
-`remote_signer_failure_total` on errors so operators can alert on signer
+`remote_signer_request_total`; any failures bump
+`remote_signer_error_total{reason}` so operators can alert on signer
 availability.
 
 ### Sampling and Compaction

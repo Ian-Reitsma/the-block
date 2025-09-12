@@ -60,6 +60,15 @@ fn load_key(id: &str) -> SigningKey {
     read_pem(&data).expect("parse key")
 }
 
+fn default_db_path() -> String {
+    dirs::home_dir()
+        .expect("home directory")
+        .join(".block")
+        .join("db")
+        .to_string_lossy()
+        .into_owned()
+}
+
 #[derive(Parser)]
 #[command(author, version, about = "Run a basic node or manage wallet keys")]
 struct Cli {
@@ -86,6 +95,10 @@ enum Commands {
         /// Expose Prometheus metrics on this address (requires `--features telemetry`)
         #[arg(long, value_name = "ADDR")]
         metrics_addr: Option<String>,
+
+        /// Path to RocksDB state database
+        #[arg(long, default_value_t = default_db_path())]
+        db_path: String,
 
         /// Directory for chain data
         #[arg(long, default_value = "node-data")]
@@ -190,6 +203,7 @@ async fn main() -> std::process::ExitCode {
             mempool_purge_interval,
             snapshot_interval,
             metrics_addr,
+            db_path,
             data_dir,
             log_format,
             log_level,
@@ -207,7 +221,7 @@ async fn main() -> std::process::ExitCode {
             } else {
                 fmt.init();
             }
-            let mut inner = Blockchain::open(&data_dir).expect("open blockchain");
+            let mut inner = Blockchain::open_with_db(&data_dir, &db_path).expect("open blockchain");
             if snapshot_interval != inner.config.snapshot_interval {
                 inner.snapshot.set_interval(snapshot_interval);
                 inner.config.snapshot_interval = snapshot_interval;

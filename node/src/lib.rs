@@ -174,6 +174,8 @@ pub enum TxAdmissionError {
     LockPoisoned = ERR_LOCK_POISONED,
     #[error("pending limit reached")]
     PendingLimitReached = ERR_PENDING_LIMIT,
+    #[error("additional signatures required")]
+    PendingSignatures = ERR_PENDING_SIGNATURES,
 }
 
 impl TxAdmissionError {
@@ -195,6 +197,23 @@ create_exception!(the_block, ErrFeeTooLow, PyException);
 create_exception!(the_block, ErrMempoolFull, PyException);
 create_exception!(the_block, ErrLockPoisoned, PyException);
 create_exception!(the_block, ErrPendingLimit, PyException);
+create_exception!(the_block, ErrPendingSignatures, PyException);
+create_exception!(the_block, ErrBalanceUnderflow, PyException);
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[error("balance underflow")]
+pub struct BalanceUnderflow;
+
+impl From<BalanceUnderflow> for PyErr {
+    fn from(_: BalanceUnderflow) -> Self {
+        ErrBalanceUnderflow::new_err("balance underflow")
+    }
+}
+
+fn checked_sub_assign(target: &mut u64, val: u64) -> Result<(), BalanceUnderflow> {
+    *target = target.checked_sub(val).ok_or(BalanceUnderflow)?;
+    Ok(())
+}
 
 impl From<TxAdmissionError> for PyErr {
     fn from(e: TxAdmissionError) -> Self {
@@ -234,6 +253,10 @@ impl From<TxAdmissionError> for PyErr {
                 TxAdmissionError::PendingLimitReached => {
                     (py.get_type::<ErrPendingLimit>(), "pending limit reached")
                 }
+                TxAdmissionError::PendingSignatures => (
+                    py.get_type::<ErrPendingSignatures>(),
+                    "additional signatures required",
+                ),
             };
             let err = match ty.call1((msg,)) {
                 Ok(e) => e,
@@ -452,15 +475,12 @@ impl<'a> Reservation<'a> {
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            self.account.pending_consumer = self
-                .account
-                .pending_consumer
-                .saturating_sub(self.reserve_consumer);
-            self.account.pending_industrial = self
-                .account
-                .pending_industrial
-                .saturating_sub(self.reserve_industrial);
-            self.account.pending_nonce = self.account.pending_nonce.saturating_sub(1);
+            let _ = checked_sub_assign(&mut self.account.pending_consumer, self.reserve_consumer);
+            let _ = checked_sub_assign(
+                &mut self.account.pending_industrial,
+                self.reserve_industrial,
+            );
+            let _ = checked_sub_assign(&mut self.account.pending_nonce, 1);
             self.account.pending_nonces.remove(&self.nonce);
         }
     }
@@ -647,6 +667,8 @@ pub struct Blockchain {
     mempool_size_consumer: std::sync::atomic::AtomicUsize,
     mempool_size_industrial: std::sync::atomic::AtomicUsize,
     mempool_mutex: Mutex<()>,
+    /// Transactions waiting on additional signatures.
+    pub pending_multisig: DashMap<Vec<u8>, SignedTransaction>,
     orphan_counter: std::sync::atomic::AtomicUsize,
     panic_on_evict: std::sync::atomic::AtomicBool,
     panic_on_admit: std::sync::atomic::AtomicI32,
@@ -718,6 +740,8 @@ pub struct Blockchain {
     pub blob_scheduler: blob_chain::BlobScheduler,
     /// Pending read acknowledgements awaiting batching
     pub read_batcher: crate::read_receipt::ReadBatcher,
+    /// Tracker for intermediate block hashes used in reorg rollback
+    pub reorg: crate::blockchain::reorg::ReorgTracker,
     /// Recent miners for base-reward logistic feedback
     recent_miners: VecDeque<String>,
     /// Recent block timestamps for difficulty retargeting
@@ -789,6 +813,7 @@ impl Default for Blockchain {
             mempool_size_consumer: std::sync::atomic::AtomicUsize::new(0),
             mempool_size_industrial: std::sync::atomic::AtomicUsize::new(0),
             mempool_mutex: Mutex::new(()),
+            pending_multisig: DashMap::new(),
             orphan_counter: std::sync::atomic::AtomicUsize::new(0),
             panic_on_evict: std::sync::atomic::AtomicBool::new(false),
             panic_on_admit: std::sync::atomic::AtomicI32::new(-1),
@@ -829,6 +854,7 @@ impl Default for Blockchain {
             pending_blob_bytes: 0,
             blob_scheduler: blob_chain::BlobScheduler::default(),
             read_batcher: crate::read_receipt::ReadBatcher::new(),
+            reorg: crate::blockchain::reorg::ReorgTracker::default(),
             recent_miners: VecDeque::new(),
             recent_timestamps: VecDeque::new(),
             logistic_last_n: 0.0,
@@ -1036,10 +1062,17 @@ impl Blockchain {
     }
 
     #[staticmethod]
-    pub fn open(path: &str) -> PyResult<Self> {
+    pub fn open_with_db(path: &str, db_path: &str) -> PyResult<Self> {
         // Open an existing database and auto-migrate to schema v4.
         // See `docs/detailed_updates.md` for layout history.
-        let mut db = Db::open(path);
+        let mut db = Db::open(db_path);
+        db.flush_wal();
+        state::migrate(
+            |k| db.get(k),
+            |k, v| {
+                let _ = db.insert(k, v);
+            },
+        );
         let (
             mut chain,
             mut accounts,
@@ -1495,10 +1528,16 @@ impl Blockchain {
                                         {
                                             let total_c = tx.payload.amount_consumer + fee_c;
                                             let total_i = tx.payload.amount_industrial + fee_i;
-                                            s.balance.consumer =
-                                                s.balance.consumer.saturating_sub(total_c);
-                                            s.balance.industrial =
-                                                s.balance.industrial.saturating_sub(total_i);
+                                            if s.balance.consumer < total_c
+                                                || s.balance.industrial < total_i
+                                            {
+                                                return Err(ErrBalanceUnderflow::new_err(
+                                                    "balance underflow",
+                                                ));
+                                            }
+                                            s.balance.consumer -= total_c;
+                                            s.balance.industrial -= total_i;
+
                                             s.nonce = tx.payload.nonce;
                                         }
                                     }
@@ -1760,6 +1799,10 @@ impl Blockchain {
         Ok(bc)
     }
 
+    pub fn open(path: &str) -> PyResult<Self> {
+        Self::open_with_db(path, path)
+    }
+
     #[staticmethod]
     pub fn with_difficulty(path: &str, difficulty: u64) -> PyResult<Self> {
         let mut bc = Blockchain::open(path)?;
@@ -1935,6 +1978,11 @@ impl Blockchain {
         let _ = self.purge_expired();
         #[cfg(feature = "telemetry")]
         self.record_submit();
+        if tx.threshold > 0 && tx.signer_pubkeys.len() < tx.threshold as usize {
+            let key = blake3::hash(&canonical_payload_bytes(&tx.payload));
+            self.pending_multisig.insert(key.as_bytes().to_vec(), tx);
+            return Err(TxAdmissionError::PendingSignatures);
+        }
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
         let size = bincode::serialize(&tx)
@@ -2148,9 +2196,15 @@ impl Blockchain {
                     {
                         let total_c = ev_entry.tx.payload.amount_consumer + c;
                         let total_i = ev_entry.tx.payload.amount_industrial + i;
-                        acc.pending_consumer = acc.pending_consumer.saturating_sub(total_c);
-                        acc.pending_industrial = acc.pending_industrial.saturating_sub(total_i);
-                        acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                        if acc.pending_consumer < total_c
+                            || acc.pending_industrial < total_i
+                            || acc.pending_nonce == 0
+                        {
+                            return Err(TxAdmissionError::InsufficientBalance);
+                        }
+                        acc.pending_consumer -= total_c;
+                        acc.pending_industrial -= total_i;
+                        acc.pending_nonce -= 1;
                         acc.pending_nonces.remove(&ev_nonce);
                     }
                 } else {
@@ -2615,10 +2669,15 @@ impl Blockchain {
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                    acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
-                    acc.pending_industrial =
-                        acc.pending_industrial.saturating_sub(total_industrial);
-                    acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                    if acc.pending_consumer < total_consumer
+                        || acc.pending_industrial < total_industrial
+                        || acc.pending_nonce == 0
+                    {
+                        return Err(TxAdmissionError::InsufficientBalance);
+                    }
+                    acc.pending_consumer -= total_consumer;
+                    acc.pending_industrial -= total_industrial;
+                    acc.pending_nonce -= 1;
                     acc.pending_nonces.remove(&nonce);
                 }
             }
@@ -2670,10 +2729,15 @@ impl Blockchain {
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                    acc.pending_consumer = acc.pending_consumer.saturating_sub(total_consumer);
-                    acc.pending_industrial =
-                        acc.pending_industrial.saturating_sub(total_industrial);
-                    acc.pending_nonce = acc.pending_nonce.saturating_sub(1);
+                    if acc.pending_consumer < total_consumer
+                        || acc.pending_industrial < total_industrial
+                        || acc.pending_nonce == 0
+                    {
+                        return Err(TxAdmissionError::InsufficientBalance);
+                    }
+                    acc.pending_consumer -= total_consumer;
+                    acc.pending_industrial -= total_industrial;
+                    acc.pending_nonce -= 1;
                     acc.pending_nonces.remove(&nonce);
                 }
             }
@@ -3121,8 +3185,11 @@ impl Blockchain {
                         crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee).unwrap_or((0, 0));
                     let total_c = tx.payload.amount_consumer + fee_c;
                     let total_i = tx.payload.amount_industrial + fee_i;
-                    s.balance.consumer = s.balance.consumer.saturating_sub(total_c);
-                    s.balance.industrial = s.balance.industrial.saturating_sub(total_i);
+                    if s.balance.consumer < total_c || s.balance.industrial < total_i {
+                        return Err(ErrBalanceUnderflow::new_err("balance underflow"));
+                    }
+                    s.balance.consumer -= total_c;
+                    s.balance.industrial -= total_i;
                     s.nonce = tx.payload.nonce;
                 }
             }
@@ -3250,6 +3317,7 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                self.reorg.record(&block.hash);
                 self.recent_timestamps.push_back(block.timestamp_millis);
                 if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
                     self.recent_timestamps.pop_front();
@@ -3282,7 +3350,11 @@ impl Blockchain {
                     let rolling = if prev == 0 {
                         0.0
                     } else {
-                        (self.emission_consumer.saturating_sub(prev)) as f64 / prev as f64
+                        let delta = self
+                            .emission_consumer
+                            .checked_sub(prev)
+                            .ok_or(BalanceUnderflow)?;
+                        delta as f64 / prev as f64
                     };
                     let raw = retune_multipliers(
                         &mut self.params,
@@ -3387,13 +3459,19 @@ impl Blockchain {
                                     .unwrap_or((0, 0));
                             let total_consumer = tx.payload.amount_consumer + fee_consumer;
                             let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                            s.balance.consumer = s.balance.consumer.saturating_sub(total_consumer);
-                            s.balance.industrial =
-                                s.balance.industrial.saturating_sub(total_industrial);
-                            s.pending_consumer = s.pending_consumer.saturating_sub(total_consumer);
-                            s.pending_industrial =
-                                s.pending_industrial.saturating_sub(total_industrial);
-                            s.pending_nonce = s.pending_nonce.saturating_sub(1);
+                            if s.balance.consumer < total_consumer
+                                || s.balance.industrial < total_industrial
+                                || s.pending_consumer < total_consumer
+                                || s.pending_industrial < total_industrial
+                                || s.pending_nonce == 0
+                            {
+                                return Err(ErrBalanceUnderflow::new_err("balance underflow"));
+                            }
+                            s.balance.consumer -= total_consumer;
+                            s.balance.industrial -= total_industrial;
+                            s.pending_consumer -= total_consumer;
+                            s.pending_industrial -= total_industrial;
+                            s.pending_nonce -= 1;
                             s.pending_nonces.remove(&tx.payload.nonce);
                             s.nonce = tx.payload.nonce;
                         }
@@ -3700,14 +3778,13 @@ impl Blockchain {
                         let (fee_consumer, fee_industrial) =
                             crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
                                 .unwrap_or((0, 0));
-                        s.balance.consumer = s
-                            .balance
-                            .consumer
-                            .saturating_sub(tx.payload.amount_consumer + fee_consumer);
-                        s.balance.industrial = s
-                            .balance
-                            .industrial
-                            .saturating_sub(tx.payload.amount_industrial + fee_industrial);
+                        let total_c = tx.payload.amount_consumer + fee_consumer;
+                        let total_i = tx.payload.amount_industrial + fee_industrial;
+                        if s.balance.consumer < total_c || s.balance.industrial < total_i {
+                            return Err(ErrBalanceUnderflow::new_err("balance underflow"));
+                        }
+                        s.balance.consumer -= total_c;
+                        s.balance.industrial -= total_i;
                         s.nonce = tx.payload.nonce;
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
@@ -3806,6 +3883,7 @@ impl Blockchain {
             self.emission_consumer += block.coinbase_consumer.0;
             self.emission_industrial += block.coinbase_industrial.0;
             self.chain.push(block.clone());
+            self.reorg.record(&block.hash);
             self.recent_timestamps.push_back(block.timestamp_millis);
             if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
                 self.recent_timestamps.pop_front();
@@ -4593,6 +4671,7 @@ pub const ERR_PENDING_LIMIT: u16 = 13;
 pub const ERR_FEE_TOO_LARGE: u16 = 14;
 pub const ERR_RENT_ESCROW_INSUFFICIENT: u16 = 15;
 pub const ERR_DNS_SIG_INVALID: u16 = 16;
+pub const ERR_PENDING_SIGNATURES: u16 = 17;
 
 #[pyclass]
 pub struct PyRemoteSigner {
@@ -4613,10 +4692,18 @@ impl PyRemoteSigner {
     }
 
     pub fn sign(&self, msg: &[u8]) -> PyResult<Vec<u8>> {
-        self.inner
-            .sign(msg)
-            .map(|s| s.to_bytes().to_vec())
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+        crate::telemetry::sampled_inc(&crate::telemetry::REMOTE_SIGNER_REQUEST_TOTAL);
+        match self.inner.sign(msg) {
+            Ok(s) => Ok(s.to_bytes().to_vec()),
+            Err(e) => {
+                let reason = e.to_string();
+                crate::telemetry::sampled_inc_vec(
+                    &crate::telemetry::REMOTE_SIGNER_ERROR_TOTAL,
+                    &[&reason],
+                );
+                Err(PyRuntimeError::new_err(reason))
+            }
+        }
     }
 }
 
@@ -4678,6 +4765,10 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
     m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
     m.add("ErrPendingLimit", ErrPendingLimit::type_object(m.py()))?;
+    m.add(
+        "ErrPendingSignatures",
+        ErrPendingSignatures::type_object(m.py()),
+    )?;
     m.add("ERR_OK", ERR_OK)?;
     m.add("ERR_UNKNOWN_SENDER", ERR_UNKNOWN_SENDER)?;
     m.add("ERR_INSUFFICIENT_BALANCE", ERR_INSUFFICIENT_BALANCE)?;
@@ -4695,6 +4786,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ERR_PENDING_LIMIT", ERR_PENDING_LIMIT)?;
     m.add("ERR_RENT_ESCROW_INSUFFICIENT", ERR_RENT_ESCROW_INSUFFICIENT)?;
     m.add("ERR_DNS_SIG_INVALID", ERR_DNS_SIG_INVALID)?;
+    m.add("ERR_PENDING_SIGNATURES", ERR_PENDING_SIGNATURES)?;
     #[cfg(feature = "telemetry")]
     {
         m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;

@@ -1,8 +1,8 @@
 use super::{registry, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_ROLLBACK_TOTAL, GOV_VOTES_TOTAL,
-    PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
+    governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_PROPOSALS_PENDING, GOV_ROLLBACK_TOTAL,
+    GOV_VOTES_TOTAL, PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
@@ -72,7 +72,7 @@ impl GovStore {
         }
     }
 
-    pub(crate) fn proposals(&self) -> sled::Tree {
+    pub fn proposals(&self) -> sled::Tree {
         self.db
             .open_tree("proposals")
             .unwrap_or_else(|e| panic!("open proposals tree: {e}"))
@@ -107,6 +107,12 @@ impl GovStore {
         if p.new_value < p.min || p.new_value > p.max {
             return Err(sled::Error::Unsupported("out of bounds".into()));
         }
+        // Ensure dependencies exist and graph remains acyclic
+        for dep in &p.deps {
+            if self.proposals().get(ser(dep)?)?.is_none() {
+                return Err(sled::Error::Unsupported("missing dependency".into()));
+            }
+        }
         let next = self
             .next_id()
             .get("id")?
@@ -115,8 +121,35 @@ impl GovStore {
             .unwrap_or(0);
         self.next_id().insert("id", ser(&(next + 1))?)?;
         p.id = next;
+        // collect existing proposals for cycle detection
+        let mut existing = std::collections::HashMap::new();
+        for item in self.proposals().iter() {
+            let (k, v) = item?;
+            let id: u64 = de(&k)?;
+            let prop: Proposal = de(&v)?;
+            existing.insert(id, prop);
+        }
+        if !super::validate_dag(&existing, &p) {
+            return Err(sled::Error::Unsupported("cycle".into()));
+        }
         self.proposals().insert(ser(&p.id)?, ser(&p)?)?;
+        #[cfg(feature = "telemetry")]
+        self.update_pending_gauge()?;
         Ok(next)
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn update_pending_gauge(&self) -> sled::Result<()> {
+        let mut pending = 0i64;
+        for item in self.proposals().iter() {
+            let (_, v) = item?;
+            let prop: Proposal = de(&v)?;
+            if prop.status == ProposalStatus::Open || prop.status == ProposalStatus::Passed {
+                pending += 1;
+            }
+        }
+        GOV_PROPOSALS_PENDING.set(pending);
+        Ok(())
     }
 
     pub fn vote(&self, proposal_id: u64, mut v: Vote, current_epoch: u64) -> sled::Result<()> {
@@ -210,6 +243,8 @@ impl GovStore {
             }
         }
         self.proposals().insert(&key, ser(&prop)?)?;
+        #[cfg(feature = "telemetry")]
+        self.update_pending_gauge()?;
         Ok(prop.status)
     }
 
@@ -317,6 +352,8 @@ impl GovStore {
         for e in to_remove {
             queue.remove(ser(&e)?)?;
         }
+        #[cfg(feature = "telemetry")]
+        self.update_pending_gauge()?;
         Ok(())
     }
 
@@ -355,6 +392,8 @@ impl GovStore {
                     .inc();
                 governance_webhook("rollback", last.proposal_id);
             }
+            #[cfg(feature = "telemetry")]
+            self.update_pending_gauge()?;
             return Ok(());
         }
         Err(sled::Error::ReportableBug("no activation".into()))
@@ -422,6 +461,7 @@ impl GovStore {
                 .with_label_values(&[key_name(prop.key)])
                 .inc();
             governance_webhook("rollback", proposal_id);
+            self.update_pending_gauge()?;
         }
         Ok(())
     }

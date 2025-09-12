@@ -111,6 +111,9 @@ pub const REQUIRED_FEATURES: u32 =
     (crate::p2p::FeatureBit::FeeRoutingV2 as u32) | COMPUTE_MARKET_V1;
 
 /// Feature bits this node advertises.
+#[cfg(feature = "quic")]
+pub const LOCAL_FEATURES: u32 = REQUIRED_FEATURES | (crate::p2p::FeatureBit::QuicTransport as u32);
+#[cfg(not(feature = "quic"))]
 pub const LOCAL_FEATURES: u32 = REQUIRED_FEATURES;
 
 /// A minimal TCP gossip node.
@@ -223,13 +226,18 @@ impl Node {
         // send handshake to each peer
         let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
         let nonce = OsRng.next_u64();
+        let transport = if self.quic_addr.is_some() {
+            Transport::Quic
+        } else {
+            Transport::Tcp
+        };
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION,
             feature_bits: LOCAL_FEATURES,
             agent,
             nonce,
-            transport: Transport::Tcp,
+            transport,
             quic_addr: self.quic_addr,
             quic_cert: self.quic_cert.clone(),
         };
@@ -344,11 +352,11 @@ pub(crate) fn send_quic_msg(
     let cert = Certificate(cert.to_vec());
     let rt = Runtime::new().unwrap();
     rt.block_on(async move {
-        let conn = quic::connect(addr, cert).await?;
-        quic::send(&conn, &bytes)
-            .await
-            .map_err(|e| quic::ConnectError::Other(anyhow!(e)))?;
-        conn.close(0u32.into(), b"done");
+        let conn = quic::get_connection(addr, cert).await?;
+        if let Err(e) = quic::send(&conn, &bytes).await {
+            quic::drop_connection(&addr);
+            return Err(quic::ConnectError::Other(anyhow!(e)));
+        }
         Ok(())
     })
 }

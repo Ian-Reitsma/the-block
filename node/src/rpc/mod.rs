@@ -38,6 +38,7 @@ use tokio::sync::oneshot;
 
 #[cfg(feature = "telemetry")]
 pub mod analytics;
+pub mod bridge;
 pub mod client;
 pub mod compute_market;
 pub mod consensus;
@@ -108,6 +109,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "compute.reputation_get",
     "compute.job_requirements",
     "compute.job_cancel",
+    "compute.provider_hardware",
     "stake.role",
     "consensus.difficulty",
     "consensus.pos.register",
@@ -125,6 +127,8 @@ const ADMIN_METHODS: &[&str] = &[
     "compute_back_to_dry_run",
     "gov_propose",
     "gov_vote",
+    "submit_proposal",
+    "vote_proposal",
     "gov_list",
     "gov_params",
     "gov_rollback_last",
@@ -660,6 +664,71 @@ fn dispatch(
         "settlement.audit" => {
             let res = Settlement::audit();
             serde_json::to_value(res).unwrap_or_else(|_| serde_json::json!([]))
+        }
+        "bridge.relayer_status" => {
+            let id = req
+                .params
+                .get("relayer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            bridge::relayer_status(id)
+        }
+        "bridge.verify_deposit" => {
+            let relayer = req
+                .params
+                .get("relayer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let user = req
+                .params
+                .get("user")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let amount = req
+                .params
+                .get("amount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let header = req
+                .params
+                .get("header")
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })
+                .and_then(|v| {
+                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                })?;
+            let proof = req
+                .params
+                .get("proof")
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })
+                .and_then(|v| {
+                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                })?;
+            let rproof = req
+                .params
+                .get("relayer_proof")
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })
+                .and_then(|v| {
+                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                })?;
+            bridge::verify_deposit(relayer, user, amount, header, proof, rproof)?
         }
         "localnet.submit_receipt" => {
             let hex = req
@@ -1231,6 +1300,14 @@ fn dispatch(
                 .unwrap_or("");
             compute_market::job_cancel(job_id)
         }
+        "compute.provider_hardware" => {
+            let provider = req
+                .params
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            compute_market::provider_hardware(provider)
+        }
         "net.reputation_show" => {
             let peer = req
                 .params
@@ -1536,6 +1613,65 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             governance::gov_vote(&GOV_STORE, voter, pid, choice, epoch)?
+        }
+        "submit_proposal" => {
+            let proposer = req
+                .params
+                .get("proposer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let key = req.params.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            let new_value = req
+                .params
+                .get("new_value")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let min = req.params.get("min").and_then(|v| v.as_i64()).unwrap_or(0);
+            let max = req.params.get("max").and_then(|v| v.as_i64()).unwrap_or(0);
+            let deps = req
+                .params
+                .get("deps")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
+                .unwrap_or_else(|| vec![]);
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let deadline = req
+                .params
+                .get("vote_deadline")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(epoch);
+            governance::submit_proposal(
+                &GOV_STORE, proposer, key, new_value, min, max, deps, epoch, deadline,
+            )?
+        }
+        "vote_proposal" => {
+            let voter = req
+                .params
+                .get("voter")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pid = req
+                .params
+                .get("proposal_id")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let choice = req
+                .params
+                .get("choice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("yes");
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            governance::vote_proposal(&GOV_STORE, voter, pid, choice, epoch)?
         }
         "gov_list" => governance::gov_list(&GOV_STORE)?,
         "gov_params" => {

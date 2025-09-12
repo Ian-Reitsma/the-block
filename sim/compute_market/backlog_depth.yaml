@@ -1,0 +1,9 @@
+# Simulate backlog depth impact on pricing
+jobs:
+  - id: job1
+    units: 10
+    deadline: 10
+providers:
+  - id: prov1
+    units: 5
+    price: 1

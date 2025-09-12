@@ -108,22 +108,34 @@ developers to exercise the same APIs against real hardware.
 ## Remote Signer
 
 Remote signer daemons let hardware devices or offline machines approve
-transactions without exposing private keys. The service exposes two HTTP
-endpoints:
+transactions without exposing private keys.  Signers advertise themselves via
+UDP broadcast (`wallet::remote_signer::discover`) and can be reached over HTTPS
+or mutually authenticated WebSockets.  Each signer exposes a `GET /pubkey`
+endpoint returning `{ "pubkey": "<hex>" }` and a `/sign` method over HTTP or
+WSS that accepts `{ "trace": "<uuid>", "msg": "<hex>" }`.
 
-- `GET /pubkey` returning `{ "pubkey": "<hex>" }`
-- `POST /sign` accepting `{ "trace": "<uuid>", "msg": "<hex>" }`
+Public keys are cached for 10 minutes to avoid repeated round‑trips.  Requests
+increment `remote_signer_request_total` and any failures increment
+`remote_signer_error_total{reason}`.
 
-Both the `sign` and `stake-role` CLI commands accept a `--remote-signer <url>`
-flag that overrides `--seed`. Each request prefixes the `REMOTE_SIGN|` domain
-tag, logs the unique trace ID, and retries on timeout. Example usage:
+The `sign` and `stake-role` CLI commands accept one or more
+`--remote-signer <url>` flags and a `--threshold <n>` option.  The wallet
+collects signatures until the threshold is met and concatenates them for
+multisig transactions. For WSS endpoints that require mutual TLS, supply
+`--signer-cert <pem>` and `--signer-key <pem>` to present a client
+certificate, and `--signer-ca <pem>` when the signer uses a non-standard
+certificate authority. These map to the `REMOTE_SIGNER_TLS_CERT`,
+`REMOTE_SIGNER_TLS_KEY`, and `REMOTE_SIGNER_TLS_CA` environment variables.
+Example usage:
 
 ```bash
-cargo run --bin wallet sign --message "hello" --remote-signer http://127.0.0.1:8000
+cargo run --bin wallet sign --message "hello" \
+    --remote-signer http://127.0.0.1:8000 \
+    --remote-signer http://127.0.0.1:8001 --threshold 2
 ```
 
-Deploy remote signers on trusted networks and transport over TLS or USB to
-avoid MITM attacks.
+Deploy remote signers on trusted networks and prefer the secure WSS transport
+to avoid MITM attacks.
 
 ## Key Management Guides
 

@@ -4,8 +4,18 @@ use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+pub mod header;
 pub mod light_client;
-use light_client::{header_hash, Header, Proof};
+pub mod lock;
+pub mod relayer;
+pub mod unlock;
+
+use header::PowHeader;
+use light_client::Proof;
+use relayer::RelayerSet;
+
+pub use header::PowHeader as BridgeHeader;
+pub use relayer::{Relayer, RelayerSet as Relayers};
 
 #[cfg(feature = "telemetry")]
 use once_cell::sync::Lazy;
@@ -37,6 +47,17 @@ pub static PROOF_VERIFY_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_INVALID_PROOF_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::with_opts(Opts::new(
+        "bridge_invalid_proof_total",
+        "Bridge proofs rejected as invalid",
+    ))
+    .expect("counter");
+    REGISTRY.register(Box::new(c.clone())).expect("register");
+    c
+});
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RelayerProof {
     pub relayer: String,
@@ -60,75 +81,66 @@ impl RelayerProof {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Clone)]
+#[derive(Debug, Clone)]
+pub struct BridgeConfig {
+    pub confirm_depth: u64,
+    pub fee_per_byte: u64,
+}
+
+impl Default for BridgeConfig {
+    fn default() -> Self {
+        Self {
+            confirm_depth: 6,
+            fee_per_byte: 0,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Bridge {
-    locked: HashMap<String, u64>,
+    pub locked: HashMap<String, u64>,
     #[serde(default)]
-    verified_headers: HashSet<[u8; 32]>,
+    pub verified_headers: HashSet<[u8; 32]>,
+    #[serde(skip)]
+    pub cfg: BridgeConfig,
+}
+
+impl Default for Bridge {
+    fn default() -> Self {
+        Self {
+            locked: HashMap::new(),
+            verified_headers: HashSet::new(),
+            cfg: BridgeConfig::default(),
+        }
+    }
 }
 
 impl Bridge {
-    pub fn lock(&mut self, user: &str, amount: u64, proof: &RelayerProof) -> bool {
-        if !proof.verify(user, amount) {
-            return false;
-        }
-        *self.locked.entry(user.to_string()).or_insert(0) += amount;
-        true
-    }
-    pub fn unlock(&mut self, user: &str, amount: u64, proof: &RelayerProof) -> bool {
-        if !proof.verify(user, amount) {
-            return false;
-        }
-        let entry = self.locked.entry(user.to_string()).or_insert(0);
-        if *entry < amount {
-            return false;
-        }
-        *entry -= amount;
-        true
-    }
-    pub fn deposit_verified(
-        &mut self,
-        user: &str,
-        amount: u64,
-        header: &Header,
-        proof: &Proof,
-    ) -> bool {
-        if !verify_header(header, proof) {
-            #[cfg(feature = "telemetry")]
-            PROOF_VERIFY_FAILURE_TOTAL.inc();
-            return false;
-        }
-        let h = header_hash(header);
-        if !self.verified_headers.insert(h) {
-            #[cfg(feature = "telemetry")]
-            PROOF_VERIFY_FAILURE_TOTAL.inc();
-            return false;
-        }
-        *self.locked.entry(user.to_string()).or_insert(0) += amount;
-        #[cfg(feature = "telemetry")]
-        PROOF_VERIFY_SUCCESS_TOTAL.inc();
-        true
-    }
     pub fn locked(&self, user: &str) -> u64 {
         self.locked.get(user).copied().unwrap_or(0)
     }
-}
 
-pub fn verify_header(header: &Header, proof: &Proof) -> bool {
-    light_client::verify(header, proof)
-}
+    pub fn deposit_with_relayer(
+        &mut self,
+        relayers: &mut RelayerSet,
+        relayer: &str,
+        user: &str,
+        amount: u64,
+        header: &PowHeader,
+        proof: &Proof,
+        rproof: &RelayerProof,
+    ) -> bool {
+        lock::lock(self, relayers, relayer, user, amount, header, proof, rproof)
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lock_unlock_with_proof() {
-        let mut b = Bridge::default();
-        let proof = RelayerProof::new("relayer", "alice", 50);
-        assert!(b.lock("alice", 50, &proof));
-        assert_eq!(b.locked("alice"), 50);
-        assert!(b.unlock("alice", 50, &proof));
-        assert_eq!(b.locked("alice"), 0);
+    pub fn unlock_with_relayer(
+        &mut self,
+        relayers: &mut RelayerSet,
+        relayer: &str,
+        user: &str,
+        amount: u64,
+        rproof: &RelayerProof,
+    ) -> bool {
+        unlock::unlock(self, relayers, relayer, user, amount, rproof)
     }
 }

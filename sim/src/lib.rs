@@ -16,6 +16,12 @@ use demand::DemandModel;
 use inflation::InflationModel;
 use liquidity::LiquidityModel;
 
+/// Storage backend selection for reproducible scenarios.
+pub enum Backend {
+    Memory,
+    RocksDb,
+}
+
 /// Economic and network simulation harness.
 pub struct Simulation {
     pub nodes: u64,
@@ -25,6 +31,7 @@ pub struct Simulation {
     pub bridging: BridgeModel,
     pub demand: DemandModel,
     pub backlog: f64,
+    pub backend: Backend,
 }
 
 impl Simulation {
@@ -38,7 +45,15 @@ impl Simulation {
             bridging: BridgeModel::default(),
             demand: DemandModel::default(),
             backlog: 0.0,
+            backend: Backend::Memory,
         }
+    }
+
+    /// Create a simulation with an explicit storage backend.
+    pub fn with_backend(nodes: u64, backend: Backend) -> Self {
+        let mut sim = Self::new(nodes);
+        sim.backend = backend;
+        sim
     }
 
     /// Run the simulation for the given number of steps and write a CSV dashboard.

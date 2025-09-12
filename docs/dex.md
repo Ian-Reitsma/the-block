@@ -30,13 +30,20 @@ trade is final.
 ### CLI Escrow Lifecycle
 
 ```bash
-# check pending escrow 7
+# check pending escrow 7 including outstanding amount and proofs
 blockctl dex escrow status 7
-# from: alice, to: bob, locked: 100, released: 20
+# {
+#   "from": "alice",
+#   "to": "bob",
+#   "total": 100,
+#   "released": 20,
+#   "outstanding": 80,
+#   "proofs": [{"amount":20,"proof":["aa..","bb.."]}]
+# }
 
-# release 40 units from escrow 7
-blockctl dex escrow release 7 40
-# released: 60, root: ab34…
+# release 40 units from escrow 7 and verify proof
+blockctl wallet escrow-release 7 40
+# released with proof
 ```
 
 `blockctl` wraps the `dex.escrow_status` and `dex.escrow_release` RPC calls. Each
@@ -57,11 +64,10 @@ release was recorded.
 
 ### Telemetry
 
-`dex_escrow_locked` gauges total funds locked in escrow, while
-`dex_escrow_pending` counts outstanding escrows. `dex_escrow_total` tracks the
-aggregate value of all escrowed funds. Operators can alert on any metric to
-detect stuck settlements. See [`docs/telemetry.md`](telemetry.md) for the full
-metric list.
+`dex_escrow_locked` and `dex_liquidity_locked_total` gauge total funds locked in
+escrow, while `dex_escrow_pending` counts outstanding escrows. Operators can
+alert on any metric to detect stuck settlements. See
+[`docs/telemetry.md`](telemetry.md) for the full metric list.
 
 ### Failure Modes and Recovery
 
@@ -96,7 +102,7 @@ For optimal routing, `dijkstra` assigns each hop a cost of `1` (one trust-line t
 ## 5. Example
 
 ```rust
-use the_block::dex::{OrderBook, Order, Side, TrustLedger};
+use the_block::dex::{storage::EscrowState, OrderBook, Order, Side, TrustLedger};
 
 let mut book = OrderBook::default();
 let mut ledger = TrustLedger::default();
@@ -107,7 +113,12 @@ ledger.authorize("bob", "carol");
 let buy = Order { id:0, account:"alice".into(), side:Side::Buy, amount:10, price:5, max_slippage_bps:0 };
 let sell = Order { id:0, account:"carol".into(), side:Side::Sell, amount:10, price:5, max_slippage_bps:0 };
 book.place(buy).unwrap();
-book.place_and_settle(sell, &mut ledger).unwrap();
+let mut esc_state = EscrowState::default();
+book.place_and_lock(sell, &mut esc_state).unwrap();
+let eid = *esc_state.locks.keys().next().unwrap();
+esc_state.escrow.release(eid, 50).unwrap();
+ledger.adjust("alice", "carol", 50);
+ledger.adjust("carol", "alice", -50);
 assert_eq!(ledger.balance("alice", "bob"), 50);
 assert_eq!(ledger.balance("bob", "carol"), 50);
 ```

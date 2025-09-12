@@ -54,6 +54,7 @@ base64ct = "1.6.0"
 dirs = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "test-util", "fs"] }
 sled = { version = "0.34" }
+rocksdb = "0.21"
 libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio", "noise", "yamux", "kad"] }
 futures = "0.3"
 unicode-normalization = "0.1"
@@ -80,6 +81,9 @@ httparse = "1"
 # account ledger for CT burns
 ledger = { path = "../ledger" }
 dex = { path = "../dex" }
+bridges = { path = "../bridges" }
+# hardware detection
+num_cpus = "1.17"
 # jittered RPC client
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime

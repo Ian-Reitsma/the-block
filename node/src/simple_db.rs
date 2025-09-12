@@ -1,127 +1,53 @@
+//! RocksDB-backed key-value store with a SimpleDb-compatible API.
+#![forbid(unsafe_code)]
+
+use std::io;
+use std::path::Path;
+
+use rocksdb::{DBWithTTL, Options};
+
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{STORAGE_DISK_FULL_TOTAL, WAL_CORRUPT_RECOVERY_TOTAL};
-use blake3::Hasher;
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, io, io::Write, path::Path};
+use crate::telemetry::{STORAGE_COMPACTION_TOTAL, STORAGE_DISK_FULL_TOTAL};
 
-#[derive(Serialize, Deserialize)]
-struct WalRecord {
-    key: String,
-    value: Option<Vec<u8>>,
-    id: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-enum WalOp {
-    Record(WalRecord),
-    End { last_id: u64 },
-}
-
-#[derive(Serialize, Deserialize)]
-struct WalEntry {
-    op: WalOp,
-    checksum: [u8; 32],
-}
-
-/// Minimal file-backed key-value store.
-#[derive(Default)]
+/// Minimal RocksDB wrapper preserving the legacy `SimpleDb` API.
 pub struct SimpleDb {
-    map: HashMap<String, Vec<u8>>,
-    path: String,
-    next_id: u64,
+    db: DBWithTTL,
     byte_limit: Option<usize>,
 }
 
+/// Record of a mutated key for rollback purposes.
+pub type DbDelta = (String, Option<Vec<u8>>);
+
 impl SimpleDb {
+    /// Open (or create) a database at the given path.
     pub fn open(path: &str) -> Self {
-        let db_path = Path::new(path).join("db");
-        let mut map: HashMap<String, Vec<u8>> = fs::read(&db_path)
-            .ok()
-            .and_then(|b| bincode::deserialize(&b).ok())
-            .unwrap_or_default();
-        let last_id = map
-            .get("__wal_id")
-            .and_then(|b| bincode::deserialize(b).ok())
-            .unwrap_or(0u64);
-        let wal_path = Path::new(path).join("wal");
-        if let Ok(bytes) = fs::read(&wal_path) {
-            let mut cur = std::io::Cursor::new(bytes);
-            let mut entries = Vec::new();
-            while let Ok(entry) = bincode::deserialize_from::<_, WalEntry>(&mut cur) {
-                entries.push(entry);
-            }
-            if matches!(entries.last().map(|e| &e.op), Some(WalOp::End { .. })) {
-                let _ = fs::remove_file(&wal_path);
-            } else {
-                let mut applied = last_id;
-                for entry in entries {
-                    let op_bytes = match bincode::serialize(&entry.op) {
-                        Ok(b) => b,
-                        Err(_) => continue,
-                    };
-                    let mut h = Hasher::new();
-                    h.update(&op_bytes);
-                    if entry.checksum != *h.finalize().as_bytes() {
-                        #[cfg(feature = "telemetry")]
-                        WAL_CORRUPT_RECOVERY_TOTAL.inc();
-                        continue;
-                    }
-                    if let WalOp::Record(rec) = entry.op {
-                        if rec.id > applied {
-                            match rec.value {
-                                Some(val) => {
-                                    map.insert(rec.key, val);
-                                }
-                                None => {
-                                    map.remove(&rec.key);
-                                }
-                            }
-                            applied = rec.id;
-                        }
-                    }
-                }
-                let _ = fs::remove_file(&wal_path);
-                if let Ok(bytes) = bincode::serialize(&applied) {
-                    map.insert("__wal_id".into(), bytes);
-                }
-                #[cfg(feature = "telemetry")]
-                if crate::telemetry::should_log("storage") {
-                    let span = crate::log_context!(block = applied);
-                    tracing::info!(parent: &span, "wal_replay");
-                }
-                if let Ok(bytes) = bincode::serialize(&map) {
-                    let _ = fs::write(&db_path, bytes);
-                }
-            }
-        }
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        // Enable compaction and TTL pruning (1 day by default).
+        let db = DBWithTTL::open(&opts, Path::new(path), 24 * 60 * 60).expect("open rocksdb");
         Self {
-            map,
-            path: path.to_string(),
-            next_id: last_id + 1,
+            db,
             byte_limit: None,
         }
     }
 
+    /// Flush outstanding WAL entries to SST files.
+    pub fn flush_wal(&self) {
+        let _ = self.db.flush_wal(true);
+    }
+
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
-        self.map.get(key).cloned()
+        self.db.get(key.as_bytes()).ok().flatten()
     }
 
     pub fn try_insert(&mut self, key: &str, value: Vec<u8>) -> io::Result<Option<Vec<u8>>> {
-        let id = self.next_id;
-        self.next_id += 1;
-        log_wal(
-            &self.path,
-            WalOp::Record(WalRecord {
-                key: key.to_string(),
-                value: Some(value.clone()),
-                id,
-            }),
-        )?;
-        if let Ok(bytes) = bincode::serialize(&id) {
-            self.map.insert("__wal_id".into(), bytes);
+        if let Some(limit) = self.byte_limit {
+            if value.len() > limit {
+                return Err(io::Error::new(io::ErrorKind::Other, "byte limit exceeded"));
+            }
         }
-        let prev = self.map.insert(key.to_string(), value);
-        self.try_flush()?;
+        let prev = self.db.get(key.as_bytes()).ok().flatten();
+        self.db.put(key.as_bytes(), &value).map_err(to_io_err)?;
         Ok(prev)
     }
 
@@ -129,22 +55,22 @@ impl SimpleDb {
         self.try_insert(key, value).ok().flatten()
     }
 
+    /// Insert a value while capturing previous contents into `deltas` for rollback.
+    pub fn insert_with_delta(
+        &mut self,
+        key: &str,
+        value: Vec<u8>,
+        deltas: &mut Vec<DbDelta>,
+    ) -> io::Result<()> {
+        let prev = self.db.get(key.as_bytes()).ok().flatten();
+        self.db.put(key.as_bytes(), &value).map_err(to_io_err)?;
+        deltas.push((key.to_string(), prev));
+        Ok(())
+    }
+
     pub fn try_remove(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
-        let id = self.next_id;
-        self.next_id += 1;
-        log_wal(
-            &self.path,
-            WalOp::Record(WalRecord {
-                key: key.to_string(),
-                value: None,
-                id,
-            }),
-        )?;
-        if let Ok(bytes) = bincode::serialize(&id) {
-            self.map.insert("__wal_id".into(), bytes);
-        }
-        let prev = self.map.remove(key);
-        self.try_flush()?;
+        let prev = self.db.get(key.as_bytes()).ok().flatten();
+        self.db.delete(key.as_bytes()).map_err(to_io_err)?;
         Ok(prev)
     }
 
@@ -152,61 +78,37 @@ impl SimpleDb {
         self.try_remove(key).ok().flatten()
     }
 
+    /// Roll back a batch of prior mutations.
+    pub fn rollback(&mut self, deltas: Vec<DbDelta>) {
+        for (key, prev) in deltas.into_iter().rev() {
+            match prev {
+                Some(v) => {
+                    let _ = self.db.put(key.as_bytes(), v);
+                }
+                None => {
+                    let _ = self.db.delete(key.as_bytes());
+                }
+            }
+        }
+    }
+
     pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
-        self.map
-            .keys()
-            .filter(|k| k.starts_with(prefix))
-            .cloned()
+        self.db
+            .prefix_iterator(prefix.as_bytes())
+            .filter_map(|res| res.ok())
+            .filter_map(|(k, _)| String::from_utf8(k.to_vec()).ok())
             .collect()
     }
 
     pub fn try_flush(&self) -> io::Result<()> {
-        let db_path = Path::new(&self.path).join("db");
-        if let Some(parent) = db_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let bytes = bincode::serialize(&self.map)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize map"))?;
-        if let Some(limit) = self.byte_limit {
-            if bytes.len() > limit {
-                return Err(io::Error::new(io::ErrorKind::Other, "byte limit exceeded"));
-            }
-        }
-        if let Err(e) = fs::write(&db_path, &bytes) {
-            if e.raw_os_error() == Some(28) {
+        self.db.flush().map_err(|e| {
+            if e.as_ref().contains("No space") {
                 #[cfg(feature = "telemetry")]
                 STORAGE_DISK_FULL_TOTAL.inc();
             }
-            return Err(e);
-        }
-        let wal_path = Path::new(&self.path).join("wal");
-        let mut f = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&wal_path)?;
-        let last = self
-            .map
-            .get("__wal_id")
-            .and_then(|b| bincode::deserialize(b).ok())
-            .unwrap_or(0);
-        let op = WalOp::End { last_id: last };
-        let op_bytes = bincode::serialize(&op)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize op"))?;
-        let mut h = Hasher::new();
-        h.update(&op_bytes);
-        let entry = WalEntry {
-            op,
-            checksum: *h.finalize().as_bytes(),
-        };
-        let entry_bytes = bincode::serialize(&entry)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize entry"))?;
-        f.write_all(&entry_bytes)?;
-        #[cfg(feature = "telemetry")]
-        if crate::telemetry::should_log("storage") {
-            let span = crate::log_context!(block = last);
-            tracing::info!(parent: &span, "wal_compact");
-        }
-        let _ = fs::remove_file(&wal_path);
+            to_io_err(e)
+        })?;
+        self.compact();
         Ok(())
     }
 
@@ -217,36 +119,15 @@ impl SimpleDb {
     pub fn set_byte_limit(&mut self, limit: usize) {
         self.byte_limit = Some(limit);
     }
+
+    /// Trigger manual compaction over the full key range.
+    pub fn compact(&self) {
+        self.db.compact_range::<&[u8], &[u8]>(None, None);
+        #[cfg(feature = "telemetry")]
+        STORAGE_COMPACTION_TOTAL.inc();
+    }
 }
 
-fn log_wal(path: &str, op: WalOp) -> io::Result<()> {
-    let wal_path = Path::new(path).join("wal");
-    if let Some(parent) = wal_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let op_bytes = bincode::serialize(&op)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize op"))?;
-    let mut h = Hasher::new();
-    h.update(&op_bytes);
-    let _id = match &op {
-        WalOp::Record(r) => r.id,
-        WalOp::End { last_id } => *last_id,
-    };
-    let entry = WalEntry {
-        op,
-        checksum: *h.finalize().as_bytes(),
-    };
-    let bytes = bincode::serialize(&entry)
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "serialize entry"))?;
-    let mut f = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(wal_path)?;
-    #[cfg(feature = "telemetry")]
-    if crate::telemetry::should_log("storage") {
-        let span = crate::log_context!(block = _id);
-        tracing::info!(parent: &span, "wal_append");
-    }
-    f.write_all(&bytes)?;
-    Ok(())
+fn to_io_err(e: rocksdb::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, e)
 }

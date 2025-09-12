@@ -467,6 +467,7 @@ impl PeerSet {
                     return;
                 }
                 self.authorize(peer_key);
+                record_handshake_success(&peer_key);
                 if let Some(peer_addr) = addr {
                     self.add(peer_addr);
                     self.map_addr(peer_addr, peer_key);
@@ -707,6 +708,10 @@ pub struct PeerMetrics {
     pub drops: HashMap<DropReason, u64>,
     #[serde(default)]
     pub handshake_fail: HashMap<HandshakeError, u64>,
+    #[serde(default)]
+    pub handshake_success: u64,
+    #[serde(default)]
+    pub tls_errors: u64,
     #[serde(default)]
     pub reputation: PeerReputation,
     #[serde(default)]
@@ -1032,6 +1037,9 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.handshake_fail.entry(reason).or_default() += 1;
+        if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
+            entry.tls_errors += 1;
+        }
         entry.reputation.penalize(0.95);
         entry.last_updated = now_secs();
         broadcast_metrics(pk, &entry);
@@ -1054,6 +1062,9 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         }
         let mut entry = PeerMetrics::default();
         entry.handshake_fail.insert(reason, 1);
+        if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
+            entry.tls_errors = 1;
+        }
         entry.reputation.penalize(0.95);
         entry.last_updated = now_secs();
         map.insert(*pk, entry);
@@ -1070,6 +1081,11 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
             crate::telemetry::HANDSHAKE_FAIL_TOTAL
                 .with_label_values(&[reason.as_str()])
                 .inc();
+            if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
+                crate::telemetry::PEER_TLS_ERROR_TOTAL
+                    .with_label_values(&[id.as_str()])
+                    .inc();
+            }
         }
     }
     let ts = now_secs();
@@ -1077,6 +1093,33 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     log.push_back((ts, hex::encode(pk), reason));
     if log.len() > HANDSHAKE_LOG_CAP {
         log.pop_front();
+    }
+}
+
+fn record_handshake_success(pk: &[u8; 32]) {
+    let mut map = PEER_METRICS.lock().unwrap();
+    maybe_consolidate(&mut map);
+    if let Some(mut entry) = map.swap_remove(pk) {
+        entry.handshake_success += 1;
+        entry.last_updated = now_secs();
+        broadcast_metrics(pk, &entry);
+        map.insert(*pk, entry);
+        update_active_gauge(map.len());
+        update_memory_usage(map.len());
+    } else {
+        let mut entry = PeerMetrics::default();
+        entry.handshake_success = 1;
+        entry.last_updated = now_secs();
+        map.insert(*pk, entry);
+        update_active_gauge(map.len());
+        update_memory_usage(map.len());
+    }
+    #[cfg(feature = "telemetry")]
+    if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
+        let id = hex::encode(pk);
+        crate::telemetry::PEER_HANDSHAKE_SUCCESS_TOTAL
+            .with_label_values(&[id.as_str()])
+            .inc();
     }
 }
 

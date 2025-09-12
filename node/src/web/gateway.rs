@@ -253,6 +253,7 @@ async fn handle_func(
                     [0u8; 32],
                     Vec::new(),
                     Vec::new(),
+                    &crate::logging::corr_id_hash(&func_id),
                 );
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::READ_STATS.record(&domain, bytes_out);

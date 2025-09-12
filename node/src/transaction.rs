@@ -9,6 +9,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
 use serde::{Deserialize, Serialize};
 
+use crate::{fee, fee::FeeError, TxAdmissionError};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -118,10 +119,44 @@ pub struct SignedTransaction {
     pub public_key: Vec<u8>,
     #[pyo3(get, set)]
     pub signature: Vec<u8>,
+    /// Optional set of signer public keys for multisig.
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub signer_pubkeys: Vec<Vec<u8>>,
+    /// Aggregated signatures concatenated in order.
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub aggregate_signature: Vec<u8>,
+    /// Required number of signatures.
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub threshold: u8,
     /// Fee lane classification for admission and scheduling.
     #[pyo3(get, set)]
     #[serde(default)]
     pub lane: FeeLane,
+}
+
+/// Result of attempting to apply a transaction to state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransactionResult {
+    Applied(SignedTransaction),
+    Rejected {
+        tx: SignedTransaction,
+        error: TxAdmissionError,
+    },
+}
+
+/// Perform stateless checks (signature, fee selector) before stateful execution.
+pub fn verify_stateless(tx: &SignedTransaction) -> Result<(), TxAdmissionError> {
+    if !verify_signed_tx(tx) {
+        return Err(TxAdmissionError::BadSignature);
+    }
+    match fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+        Ok(_) => Ok(()),
+        Err(FeeError::InvalidSelector) => Err(TxAdmissionError::InvalidSelector),
+        Err(FeeError::Overflow) => Err(TxAdmissionError::FeeOverflow),
+    }
 }
 
 #[pymethods]
@@ -137,6 +172,9 @@ impl SignedTransaction {
             payload,
             public_key,
             signature,
+            signer_pubkeys: Vec::new(),
+            aggregate_signature: Vec::new(),
+            threshold: 0,
             lane,
         }
     }
@@ -250,6 +288,29 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
 
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
+    if !tx.signer_pubkeys.is_empty() && !tx.aggregate_signature.is_empty() && tx.threshold > 0 {
+        let sigs: Vec<&[u8]> = tx.aggregate_signature.chunks(64).collect();
+        if sigs.len() < tx.threshold as usize || sigs.len() != tx.signer_pubkeys.len() {
+            return false;
+        }
+        for (pk_bytes, sig_bytes) in tx.signer_pubkeys.iter().zip(sigs) {
+            if let (Some(pk), Some(sig_arr)) = (to_array_32(pk_bytes), to_array_64(sig_bytes)) {
+                if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+                    let mut m = domain_tag().to_vec();
+                    m.extend(canonical_payload_bytes(&tx.payload));
+                    let sig = Signature::from_bytes(&sig_arr);
+                    if vk.verify(&m, &sig).is_err() {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
     if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
         if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
             let mut m = domain_tag().to_vec();

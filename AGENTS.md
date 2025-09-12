@@ -8,12 +8,13 @@ Quick Index
 - Status & Roadmap: see `docs/roadmap.md`
 - Progress Snapshot: see `docs/progress.md` for subsystem status and gaps
 - Networking, per-peer telemetry, & DHT recovery: see `docs/networking.md`
+- QUIC handshake & fallback rules: see `docs/quic.md`
 - Economic formulas: see `docs/economics.md`
 - Blob root scheduling: see `docs/blob_chain.md`
 - Law-enforcement portal & canary runbook: see `docs/le_portal.md`
 - Range-boost queue semantics: see `docs/range_boost.md`
 - Read acknowledgement batching and audit workflow: see `docs/read_receipts.md`
-- SimpleDb WAL and byte-limit mechanics: see `docs/simple_db.md`
+- RocksDB layout and migration: see `state/README.md`
 - Parallel execution and transaction scheduling: see `docs/scheduler.md`
 - PoH tick generator: see `docs/poh.md`
 - Commit–reveal scheme: see `docs/commit_reveal.md`
