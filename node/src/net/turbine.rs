@@ -1,6 +1,7 @@
+use bytes::{BufMut, BytesMut};
+use parking_lot::Mutex;
 use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
-use std::sync::Mutex;
 
 use blake3::Hasher;
 use once_cell::sync::Lazy;
@@ -42,12 +43,14 @@ where
         Lazy::new(|| Mutex::new((HashSet::new(), VecDeque::new())));
     const MAX_SEEN: usize = 1024;
     let hash = {
-        let bytes = bincode::serialize(msg).unwrap_or_default();
+        let size = bincode::serialized_size(msg).unwrap_or(0) as usize;
+        let mut buf = BytesMut::with_capacity(size);
+        bincode::serialize_into(&mut buf.writer(), msg).unwrap_or_default();
         let mut h = Hasher::new();
-        h.update(&bytes);
+        h.update(&buf);
         *h.finalize().as_bytes()
     };
-    let mut guard = SEEN.lock().unwrap();
+    let mut guard = SEEN.lock();
     if guard.0.contains(&hash) {
         for p in peers {
             record_ip_drop(p);

@@ -27,4 +27,5 @@ openssl = { version = "0.10", features = ["vendored"] }
 [dev-dependencies]
 tower = "0.5"
 tempfile = "3"
+regex = "1"
 

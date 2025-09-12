@@ -52,6 +52,7 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::LogisticSlope => "logistic_slope_milli",
         ParamKey::MinerHysteresis => "miner_hysteresis",
         ParamKey::HeuristicMuMilli => "heuristic_mu_milli",
+        ParamKey::BadgeExpirySecs => "badge_expiry_secs",
     }
 }
 
@@ -298,6 +299,7 @@ impl GovStore {
                                 ParamKey::LogisticSlope => params.logistic_slope_milli,
                                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
+                                ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -448,6 +450,7 @@ impl GovStore {
                 ParamKey::LogisticSlope => params.logistic_slope_milli,
                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
+                ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;

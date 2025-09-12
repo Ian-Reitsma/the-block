@@ -96,7 +96,7 @@ For optimal routing, `dijkstra` assigns each hop a cost of `1` (one trust-line t
 
 ## 4. Monitoring
 
-- Metrics `dex_orders_total{side=*}` and `dex_trades_total` track activity.
+- Metrics `dex_orders_total{side=*}` and `dex_trade_volume` track order flow and matched quantity.
 - Per-hop routing costs and fallback usage are exported when telemetry is enabled, helping operators spot imbalances or saturated lines.
 
 ## 5. Example

@@ -12,10 +12,11 @@ Structured telemetry logs include the following fields. All identifiers are priv
 - `cid`: short correlation identifier derived from a transaction hash or block height.
 - `tx`: transaction hash included on all mempool admission and rejection logs for traceability.
 
-Use the `log_context!` macro to attach these correlation IDs when emitting network, consensus, or storage spans. The node binary exposes `--log-format` (plain or json) and `--log-level` flags for per-module filtering; see `config/logging.json` for an example configuration.
+Use the `log_context!` macro and `telemetry::log_context()` helper to attach correlation and trace IDs when emitting network, consensus, or storage spans. The node binary exposes `--log-format` (plain or json) and `--log-level` flags for per-module filtering; see `config/logging.json` for an example configuration.
 
 Logs are sampled and rate limited; emitted and dropped counts are exported via `log_emit_total{subsystem}` and `log_drop_total{subsystem}` on the `/metrics` endpoint. A `redact_at_rest` helper can hash or delete log files older than a configured number of hours.
 The logger permits up to 100 events per second before sampling kicks in. Once the limit is exceeded, only one out of every 100 events is emitted while the rest are dropped, preventing log bursts from overwhelming block propagation.
+Specific subsystems can be disabled at runtime with `telemetry::set_log_enabled`.
 
 Counters `peer_error_total{code}` and `rpc_client_error_total{code}` track rate‑limited and banned peers and RPC clients for observability.
 All per-peer metrics include a `peer_id` label and, where applicable, a
@@ -29,6 +30,7 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_throttle_total{reason}` counts peers temporarily throttled for request or bandwidth limits
 - `peer_backpressure_active_total{reason}` increments when a peer is throttled for exceeding limits
 - `peer_backpressure_dropped_total{reason}` counts requests rejected due to active backpressure
+- `p2p_request_limit_hits_total{peer_id}` increments when a peer exceeds its request rate
 - `peer_stats_query_total{peer_id}` counts RPC and CLI lookups
 - `peer_stats_reset_total{peer_id}` counts manual metric resets
 - `peer_stats_export_total{result}` counts JSON snapshot export attempts (ok, error)
@@ -59,15 +61,18 @@ client, provider, or preemption logic.
   every N events and scales by the chosen rate. Larger values reduce
   update overhead but counters may lag by up to `N-1` events. Zero-value
   peer entries are reclaimed periodically to compact memory.
-- `industrial_backlog`, `industrial_utilization`, `industrial_units_total`, and
-  `industrial_price_per_unit` surface demand for industrial workloads and feed
-  `Block::industrial_subsidies()`; see [docs/compute_market.md](compute_market.md)
-  for gauge definitions.
-- `dex_escrow_locked`, `dex_escrow_pending`, and `dex_escrow_total` expose funds
-  locked, the count of outstanding DEX escrows, and the aggregate value of all
-  escrowed funds.
-- `difficulty_retarget_total`, `difficulty_clamp_total` track retarget executions and clamp events.
-- `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total` capture QUIC session metrics.
+ - `industrial_backlog`, `industrial_utilization`, `industrial_units_total`, and
+    `industrial_price_per_unit` surface demand for industrial workloads and feed
+    `Block::industrial_subsidies()`; see [docs/compute_market.md](compute_market.md)
+    for gauge definitions.
+ - `compute_sla_violations_total` increments when a provider misses a declared
+    SLA, while `compute_provider_uptime` gauges the rolling uptime percentage.
+ - `dex_escrow_locked`, `dex_escrow_pending`, `dex_liquidity_locked_total`,
+    `dex_orders_total{side}`, and `dex_trade_volume` expose escrowed funds,
+    pending escrows, total locked liquidity, submitted orders, and matched
+    quantity across all pairs.
+ - `difficulty_retarget_total`, `difficulty_clamp_total` track retarget executions and clamp events.
+ - `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total` capture QUIC session metrics.
 
 ### Cluster Aggregator
 
@@ -91,12 +96,20 @@ sum(cluster_peer_active_total)
 Nodes queue metrics locally if the aggregator is unreachable, so collector
 outages do not block operation.
 
+### Telemetry schema and dashboards
+
+The canonical metric list lives in `monitoring/metrics.json`. After adding or
+renaming metrics, regenerate the Grafana dashboards with
+`cargo build -p monitoring` or `monitoring/tools/gen_templates.py` to keep
+`monitoring/grafana/*.json` in sync.
+
 The gauge `banned_peers_total` exposes the number of peers currently banned and
 is updated whenever bans are added or expire. Each ban's expiry is also tracked
 via `banned_peer_expiration_seconds{peer}`.
 
-Network-level drop behaviour is surfaced via `ttl_drop_total` and
-`startup_ttl_drop_total`, while `orphan_sweep_total` records the number of
+Network-level drop behaviour is surfaced via `ttl_drop_total`,
+`startup_ttl_drop_total`, and `gossip_ttl_drop_total`, while
+`orphan_sweep_total` records the number of
 orphan blocks purged during maintenance passes.
 
 Manage the persistent ban store with the `ban` CLI:

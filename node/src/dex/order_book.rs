@@ -31,6 +31,8 @@ pub struct OrderBook {
 
 impl OrderBook {
     pub fn place(&mut self, mut order: Order) -> Result<Vec<(Order, Order, u64)>, &'static str> {
+        #[cfg(feature = "telemetry")]
+        let _trace = crate::telemetry::log_context();
         let limit = match order.side {
             Side::Buy => order.price * (10_000 + order.max_slippage_bps) / 10_000,
             Side::Sell => {
@@ -54,6 +56,14 @@ impl OrderBook {
 
         order.id = self.next_id;
         self.next_id += 1;
+        #[cfg(feature = "telemetry")]
+        {
+            let side = match order.side {
+                Side::Buy => "buy",
+                Side::Sell => "sell",
+            };
+            crate::telemetry::sampled_inc_vec(&crate::telemetry::DEX_ORDERS_TOTAL, &[side]);
+        }
         let mut trades = Vec::new();
         match order.side {
             Side::Buy => {
@@ -66,6 +76,8 @@ impl OrderBook {
                         order.amount -= qty;
                         ask.amount -= qty;
                         trades.push((order.clone(), ask.clone(), qty));
+                        #[cfg(feature = "telemetry")]
+                        crate::telemetry::DEX_TRADE_VOLUME.inc_by(qty as u64);
                         if ask.amount > 0 {
                             queue.push_front(ask);
                         }
@@ -91,6 +103,8 @@ impl OrderBook {
                         order.amount -= qty;
                         bid.amount -= qty;
                         trades.push((bid.clone(), order.clone(), qty));
+                        #[cfg(feature = "telemetry")]
+                        crate::telemetry::DEX_TRADE_VOLUME.inc_by(qty as u64);
                         if bid.amount > 0 {
                             queue.push_front(bid);
                         }
@@ -128,9 +142,10 @@ impl OrderBook {
         let trades = self.place(order)?;
         for (buy, sell, qty) in &trades {
             let value = sell.price * *qty;
-            let eid: EscrowId = esc_state
-                .escrow
-                .lock(buy.account.clone(), sell.account.clone(), value);
+            let eid: EscrowId =
+                esc_state
+                    .escrow
+                    .lock(buy.account.clone(), sell.account.clone(), value);
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -140,10 +155,8 @@ impl OrderBook {
                 .insert(eid, (buy.clone(), sell.clone(), *qty, now));
             #[cfg(feature = "telemetry")]
             {
-                crate::telemetry::DEX_ESCROW_LOCKED
-                    .set(esc_state.escrow.total_locked() as i64);
-                crate::telemetry::DEX_ESCROW_PENDING
-                    .set(esc_state.escrow.count() as i64);
+                crate::telemetry::DEX_ESCROW_LOCKED.set(esc_state.escrow.total_locked() as i64);
+                crate::telemetry::DEX_ESCROW_PENDING.set(esc_state.escrow.count() as i64);
                 crate::telemetry::DEX_LIQUIDITY_LOCKED_TOTAL
                     .set(esc_state.escrow.total_locked() as i64);
             }

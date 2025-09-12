@@ -9,7 +9,8 @@ use clap::{Parser, Subcommand};
 use ed25519_dalek::SigningKey;
 #[cfg(feature = "telemetry")]
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing_chrome::ChromeLayerBuilder;
+use tracing_subscriber::{prelude::*, EnvFilter};
 
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
@@ -135,6 +136,10 @@ enum Commands {
         /// Rotate QUIC certificates after this many days
         #[arg(long)]
         quic_cert_ttl_days: Option<u64>,
+
+        /// Enable runtime profiling and emit Chrome trace to `trace.json`
+        #[arg(long, default_value_t = false)]
+        profiling: bool,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -213,14 +218,30 @@ async fn main() -> std::process::ExitCode {
             quic_cert: _quic_cert,
             quic_key: _quic_key,
             quic_cert_ttl_days: _quic_cert_ttl_days,
+            profiling,
         } => {
             let filter = EnvFilter::new(log_level.join(","));
-            let fmt = tracing_subscriber::fmt().with_env_filter(filter);
-            if log_format == "json" {
-                fmt.json().init();
+            let (profiler, _chrome) = if profiling {
+                let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+                    .file("trace.json")
+                    .build();
+                let subscriber = tracing_subscriber::registry()
+                    .with(filter)
+                    .with(chrome_layer);
+                tracing::subscriber::set_global_default(subscriber).expect("set subscriber");
+                (
+                    Some(pprof::ProfilerGuard::new(100).expect("profiler")),
+                    Some(guard),
+                )
             } else {
-                fmt.init();
-            }
+                let fmt = tracing_subscriber::fmt().with_env_filter(filter);
+                if log_format == "json" {
+                    fmt.json().init();
+                } else {
+                    fmt.init();
+                }
+                (None, None)
+            };
             let mut inner = Blockchain::open_with_db(&data_dir, &db_path).expect("open blockchain");
             if snapshot_interval != inner.config.snapshot_interval {
                 inner.snapshot.set_interval(snapshot_interval);
@@ -228,11 +249,6 @@ async fn main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
-            let profiler = if std::env::var("TB_PROFILE").ok().is_some() {
-                Some(pprof::ProfilerGuard::new(100).expect("profiler"))
-            } else {
-                None
-            };
 
             let receipt_store = ReceiptStore::open(&format!("{data_dir}/receipts"));
             let match_stop = CancellationToken::new();
@@ -433,7 +449,7 @@ async fn main() -> std::process::ExitCode {
                 }
                 CourierCmd::Flush => {
                     let store = CourierStore::open("courier.db");
-                    match store.flush(|_| true) {
+                    match store.flush_async(|_| async { true }).await {
                         Ok(_) => std::process::ExitCode::SUCCESS,
                         Err(e) => {
                             eprintln!("flush failed: {e}");

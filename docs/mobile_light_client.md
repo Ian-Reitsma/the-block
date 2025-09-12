@@ -7,14 +7,22 @@ is exposed via the `light_client` crate and can be embedded in native apps.
 ## Background Sync
 
 ```rust
-use light_client::{SyncOptions, sync_background};
+use light_client::{LightClient, SyncOptions, sync_background, Header};
 
+let genesis = Header::default();
+let mut client = LightClient::new(genesis);
 let opts = SyncOptions { wifi_only: true, require_charging: true, min_battery: 0.3 };
-sync_background(opts);
+sync_background(&mut client, opts, |_start| Vec::new());
 ```
 
 The helper checks platform power and connectivity hints before contacting the
 network, conserving user resources.
+
+### Compressed Log Uploads
+
+Logs generated during background sync can be compressed with
+`light_client::upload_compressed_logs` before being sent to the telemetry
+collector, reducing bandwidth for mobile clients.
 
 ## SDKs
 

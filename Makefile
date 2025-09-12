@@ -10,7 +10,12 @@ monitor:
 	@:
 
 fuzz-wal:
-        cargo +nightly fuzz run wal_fuzz -- -max_total_time=60 -artifact_prefix=fuzz/wal/ -runs=0
+	cargo +nightly fuzz run wal_fuzz -- -max_total_time=60 -artifact_prefix=fuzz/wal/ -runs=0
 
 dashboard:
 	make -C monitoring dashboard
+
+doc-ci:
+	@rustc tools/refcheck.rs -O -o /tmp/refcheck
+	@/tmp/refcheck docs
+	cargo test --doc

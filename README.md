@@ -63,49 +63,51 @@ test real services today.
   and API responses without charging end users; signed `ReadAck` receipts
   anchor activity on-chain and mint the corresponding `READ_SUB_CT` reward.
   See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
-  flow. (76.0% Complete)
+  flow. (77.0% Complete)
  - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
   RPC and `compute cancel <job_id>` CLI, and hashes receipts into blocks before
-  conversion to CT through multipliers. (70.0% Complete)
+  conversion to CT through multipliers. (71.0% Complete)
 - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
   letting operators run `net stats`, filter by reputation or drop reason, emit
   JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
   A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
   `aggregator_ingest_total` gauges, and metrics are bounded by `max_peer_metrics`
-  so abusive peers cannot exhaust memory. (79.0% Complete)
+  so abusive peers cannot exhaust memory. (80.0% Complete)
 - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
   resolves forks deterministically, and validates blocks with BLAKE3 hashes and
-  VDF-anchored randomness. (74.0% Complete)
+  VDF-anchored randomness. (75.0% Complete)
 - Governance and subsidy economics use on-chain proposals to retune `beta`,
   `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
-  two percent while funding service roles. (78.0% Complete)
+  two percent while funding service roles. (79.0% Complete)
 - The smart-contract VM couples a minimal bytecode engine with UTXO and account
   models, enabling deployable contracts and fee markets alongside traditional
-  PoW headers. (50.0% Complete)
+  PoW headers. (55.0% Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, and telemetry gauges `dex_escrow_locked`,
-  `dex_escrow_pending`, and `dex_escrow_total` track utilisation. (72.0%
+  `dex_escrow_pending`, and `dex_escrow_total` track utilisation. (74.0%
   Complete)
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
   Light-client verification guards all transfers. (45.0% Complete)
 - Wallets, light clients, and optional KYC hooks provide desktop and mobile
   users with secure key management, staking tools, remote signer support, and
-  compliance options as needed. (80.0% Complete)
+  compliance options as needed. (82.0% Complete)
 - Monitoring, debugging, and profiling tools export Prometheus metrics,
   structured traces, readiness endpoints, and a cluster-wide `metrics-aggregator`
-  for fleet visibility. (69.0% Complete)
+  for fleet visibility. (71.0% Complete)
 - Economic simulation and formal verification suites model inflation scenarios
   and encode consensus invariants, laying groundwork for provable safety. (35.0%
   Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
-  subsidy events to make participation feasible on phones. (52.0% Complete)
+  subsidy events to make participation feasible on phones. (55.0% Complete)
 
 ## Vision & Current State
+
+Mainnet readiness sits at **~99/100** with vision completion **~70/100**.
 
 ### Live now
 

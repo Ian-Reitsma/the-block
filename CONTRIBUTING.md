@@ -34,3 +34,9 @@ mdbook build docs
 Continuous integration runs this command for every pull request, so ensure it
 passes locally before submitting patches.
 
+## Branch Strategy
+
+- Fork or create a feature branch off `main` for all changes.
+- Rebase against `main` before opening a pull request; avoid merge commits.
+- Squash merges are performed by maintainers; do not force-push after review starts.
+

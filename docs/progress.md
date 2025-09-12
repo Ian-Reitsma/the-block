@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~98/100** with vision completion **~69/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99/100** with vision completion **~70/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,7 +16,7 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~74 %
+## 1. Consensus & Core Execution — ~75 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -35,7 +35,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~79 %
+## 2. Networking & Gossip — ~80 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -55,7 +55,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~78 %
+## 3. Governance & Subsidy Economy — ~79 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -92,7 +92,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — ~50 %
+## 5. Smart‑Contract VM & UTXO/PoW — ~60 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -104,7 +104,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~70 %
+## 6. Compute Marketplace & CBM — ~71 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -117,7 +117,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrowed payments and SLA enforcement remain rudimentary.
 
-## 7. Trust Lines & DEX — ~72 %
+## 7. Trust Lines & DEX — ~74 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -132,7 +132,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~80 %
+## 8. Wallets, Light Clients & KYC — ~82 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -157,7 +157,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~69 %
+## 10. Monitoring, Debugging & Profiling — ~71 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -181,7 +181,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 12. Mobile UX & Contribution Metrics — ~52 %
+## 12. Mobile UX & Contribution Metrics — ~55 %
 
 **Evidence**
 - Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).

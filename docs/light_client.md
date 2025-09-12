@@ -16,10 +16,12 @@ pub struct SyncOptions {
 }
 ```
 
-`sync_background(opts)` short-circuits when Wi‑Fi is unavailable, the device is
-not charging, or the battery level falls below `min_battery`. Real deployments
-should replace the stubbed `on_wifi`, `is_charging`, and `battery_level` helpers
-with platform-specific checks in the mobile SDKs.
+`sync_background(client, opts, fetch)` short-circuits when Wi‑Fi is unavailable,
+the device is not charging, or the battery level falls below `min_battery`.
+When the checks pass, it fetches headers starting from the client's tip via the
+provided `fetch(start_height)` closure and verifies them before appending.
+Real deployments should replace the stubbed `on_wifi`, `is_charging`, and
+`battery_level` helpers with platform-specific checks in the mobile SDKs.
 
 ## Header Verification
 
@@ -28,10 +30,8 @@ vector of headers and appends new ones after basic height checks:
 
 ```rust
 pub fn verify_and_append(&mut self, h: Header) -> Result<(), ()> {
-    // Real implementation should verify PoW difficulty, signatures, and
-    // parent linkage.  The demo simply appends for now.
-    self.chain.push(h);
-    Ok(())
+    // Verifies previous hash linkage, PoW difficulty and optional checkpoints
+    // before appending.
 }
 ```
 
@@ -41,6 +41,14 @@ A production client must additionally verify:
 - The previous hash matches the tip of the local chain.
 - Validator signatures or finality proofs if operating in PoS mode.
 - Checkpoint headers sourced from trusted channels.
+
+### Checkpoint Invalidation
+
+Trusted checkpoints can be revoked by governance in the event of a detected
+fork. Clients must track checkpoint hashes by height and refuse headers whose
+`checkpoint_hash` no longer matches the trusted list. When a checkpoint is
+invalidated, the light client should roll back to the last valid height and
+re-sync from that point to avoid following an obsolete chain.
 
 ## Security Model
 
@@ -56,12 +64,12 @@ account state or receipts before acting on them.
 ## Usage Example
 
 ```rust
-use light_client::{Header, LightClient, SyncOptions};
+use light_client::{Header, LightClient, SyncOptions, sync_background};
 
-let mut lc = LightClient::new(Header { height: 0 });
+let genesis = Header { height: 0, ..Default::default() };
+let mut lc = LightClient::new(genesis);
 let opts = SyncOptions { wifi_only: true, require_charging: true, min_battery: 0.5 };
-light_client::sync_background(opts);
-lc.verify_and_append(Header { height: 1 }).unwrap();
+sync_background(&mut lc, opts, |_start| Vec::new());
 ```
 
 ## Further Reading

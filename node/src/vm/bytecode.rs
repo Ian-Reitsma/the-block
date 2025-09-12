@@ -1,4 +1,4 @@
-use crate::vm::gas::GasMeter;
+use crate::vm::gas::{self, GasMeter};
 pub use crate::vm::opcodes::OpCode;
 
 /// Execute bytecode returning the final stack as `Vec<u64>` and total gas used.
@@ -9,7 +9,7 @@ pub fn execute(code: &[u8], meter: &mut GasMeter) -> Result<Vec<u64>, &'static s
     while pc < code.len() {
         let op = OpCode::from_byte(code[pc]).ok_or("bad opcode")?;
         pc += 1;
-        meter.charge(1)?;
+        meter.charge(gas::cost(op))?;
         match op {
             OpCode::Halt => break,
             OpCode::Push => {
@@ -19,7 +19,7 @@ pub fn execute(code: &[u8], meter: &mut GasMeter) -> Result<Vec<u64>, &'static s
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(&code[pc..pc + 8]);
                 pc += 8;
-                meter.charge(1)?; // charge for immediate read
+                meter.charge(gas::GAS_IMMEDIATE)?;
                 stack.push(u64::from_le_bytes(buf));
             }
             OpCode::Add => {
@@ -31,6 +31,19 @@ pub fn execute(code: &[u8], meter: &mut GasMeter) -> Result<Vec<u64>, &'static s
                 let b = stack.pop().ok_or("stack underflow")?;
                 let a = stack.pop().ok_or("stack underflow")?;
                 stack.push(a.wrapping_sub(b));
+            }
+            OpCode::Mul => {
+                let b = stack.pop().ok_or("stack underflow")?;
+                let a = stack.pop().ok_or("stack underflow")?;
+                stack.push(a.wrapping_mul(b));
+            }
+            OpCode::Div => {
+                let b = stack.pop().ok_or("stack underflow")?;
+                if b == 0 {
+                    return Err("div by zero");
+                }
+                let a = stack.pop().ok_or("stack underflow")?;
+                stack.push(a / b);
             }
         }
     }
@@ -68,6 +81,6 @@ mod tests {
         let mut meter = GasMeter::new(10);
         let stack = execute(&code, &mut meter).unwrap();
         assert_eq!(stack, vec![5]);
-        assert_eq!(meter.used(), 6); // push(1+1)*2 + add + halt
+        assert_eq!(meter.used(), 5); // push(1+1)*2 + add
     }
 }

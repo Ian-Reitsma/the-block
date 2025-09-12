@@ -10,6 +10,13 @@ pub struct LeRequest {
     pub case_hash: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct LeAction {
+    pub timestamp: u64,
+    pub agency: String,
+    pub action_hash: String,
+}
+
 fn log_path(base: &str, file: &str) -> std::path::PathBuf {
     std::path::Path::new(base).join(file)
 }
@@ -49,6 +56,45 @@ pub fn list_requests(base: &str) -> std::io::Result<Vec<LeRequest>> {
         }
         if let Ok(req) = serde_json::from_str::<LeRequest>(line) {
             out.push(req);
+        }
+    }
+    Ok(out)
+}
+
+pub fn record_action(base: &str, agency: &str, action: &str) -> std::io::Result<String> {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let action_hash = blake3::hash(action.as_bytes()).to_hex().to_string();
+    let entry = LeAction {
+        timestamp: ts,
+        agency: agency.to_string(),
+        action_hash: action_hash.clone(),
+    };
+    let line = serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE action: {e}"));
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log_path(base, "le_actions.log"))?;
+    writeln!(file, "{}", line)?;
+    Ok(action_hash)
+}
+
+pub fn list_actions(base: &str) -> std::io::Result<Vec<LeAction>> {
+    let path = log_path(base, "le_actions.log");
+    let data = match fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    let mut out = Vec::new();
+    for line in data.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(act) = serde_json::from_str::<LeAction>(line) {
+            out.push(act);
         }
     }
     Ok(out)

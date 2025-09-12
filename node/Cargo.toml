@@ -17,6 +17,7 @@ rand = "0.8"
 rand_core = "0.6"
 hdrhistogram = "7"
 procfs = "0.15"
+subtle = "2"
 # DNS lookups
 trust-dns-resolver = "0.23"
 # Error handling and system utilities
@@ -91,6 +92,10 @@ rayon = "1"
 # webhook alerts
 ureq = { version = "2", features = ["json"], optional = true }
 pprof = { version = "0.13", features = ["flamegraph"] }
+bytes = "1"
+lru = "0.11"
+parking_lot = "0.12"
+tracing-chrome = "0.6"
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rcgen = { version = "0.12", optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
@@ -136,6 +141,10 @@ harness = false
 
 [[bench]]
 name = "telemetry_memory"
+harness = false
+
+[[bench]]
+name = "order_book"
 harness = false
 
 [[test]]

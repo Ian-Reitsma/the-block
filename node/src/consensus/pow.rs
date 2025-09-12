@@ -52,11 +52,11 @@ fn target(difficulty: u64) -> u64 {
     u64::MAX / difficulty.max(1)
 }
 
-fn solve(mut header: BlockHeader) -> BlockHeader {
+fn solve(mut header: BlockHeader, tgt: u64) -> BlockHeader {
     loop {
         let hash = header.hash();
         let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
-        if value <= target(header.difficulty) {
+        if value <= tgt {
             return header;
         }
         header.nonce = header.nonce.wrapping_add(1);
@@ -68,15 +68,18 @@ pub struct Miner {
     difficulty: u64,
     target_millis: u64,
     timestamps: Vec<u64>,
+    target_value: u64,
 }
 
 impl Miner {
     /// Create a new miner with an initial difficulty and target spacing in milliseconds.
     pub fn new(initial_difficulty: u64, target_millis: u64) -> Self {
+        let diff = initial_difficulty.max(1);
         Self {
-            difficulty: initial_difficulty.max(1),
+            difficulty: diff,
             target_millis,
             timestamps: Vec::new(),
+            target_value: target(diff),
         }
     }
 
@@ -100,7 +103,7 @@ impl Miner {
             tracing::info!(parent: s, "pow_start");
         }
         header.difficulty = self.difficulty;
-        let mined = solve(header);
+        let mined = solve(header, self.target_value);
         #[cfg(feature = "telemetry")]
         if let Some(s) = span {
             tracing::info!(parent: &s, nonce = mined.nonce, "pow_end");
@@ -112,6 +115,7 @@ impl Miner {
         }
         self.difficulty =
             difficulty::retarget(self.difficulty, &self.timestamps, self.target_millis);
+        self.target_value = target(self.difficulty);
         mined
     }
 }

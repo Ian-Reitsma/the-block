@@ -11,6 +11,10 @@ pub enum OpCode {
     Add = 0x02,
     /// Pop two values, push first minus second.
     Sub = 0x03,
+    /// Pop two values, push their product.
+    Mul = 0x04,
+    /// Pop two values, push first divided by second (truncating).
+    Div = 0x05,
 }
 
 impl OpCode {
@@ -20,12 +24,21 @@ impl OpCode {
             0x01 => Some(Self::Push),
             0x02 => Some(Self::Add),
             0x03 => Some(Self::Sub),
+            0x04 => Some(Self::Mul),
+            0x05 => Some(Self::Div),
             _ => None,
         }
     }
 
     pub fn all() -> &'static [OpCode] {
-        &[OpCode::Halt, OpCode::Push, OpCode::Add, OpCode::Sub]
+        &[
+            OpCode::Halt,
+            OpCode::Push,
+            OpCode::Add,
+            OpCode::Sub,
+            OpCode::Mul,
+            OpCode::Div,
+        ]
     }
 }
 

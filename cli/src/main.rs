@@ -7,6 +7,7 @@ mod config;
 mod dex;
 mod gov;
 mod net;
+mod service_badge;
 mod telemetry;
 use bridge::BridgeCmd;
 use compute::ComputeCmd;
@@ -14,6 +15,7 @@ use config::ConfigCmd;
 use dex::DexCmd;
 use gov::GovCmd;
 use net::NetCmd;
+use service_badge::ServiceBadgeCmd;
 use telemetry::TelemetryCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 
@@ -84,6 +86,11 @@ enum Commands {
         #[command(subcommand)]
         action: TelemetryCmd,
     },
+    /// Service badge utilities
+    ServiceBadge {
+        #[command(subcommand)]
+        action: ServiceBadgeCmd,
+    },
 }
 
 fn main() {
@@ -129,5 +136,6 @@ fn main() {
         Commands::Gov { action } => gov::handle(action),
         Commands::Config { action } => config::handle(action),
         Commands::Telemetry { action } => telemetry::handle(action),
+        Commands::ServiceBadge { action } => service_badge::handle(action),
     }
 }

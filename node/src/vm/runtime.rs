@@ -1,6 +1,6 @@
 use super::{
     abi, bytecode,
-    gas::GasMeter,
+    gas::{self, GasMeter},
     state::{ContractId, State},
 };
 
@@ -48,8 +48,9 @@ impl Vm {
         gas_price: u64,
         balance: &mut u64,
     ) -> Result<(Vec<u8>, u64), &'static str> {
-        let code = self.state.code(id).ok_or("unknown contract")?;
         let mut meter = GasMeter::new(gas_limit);
+        let code = self.state.code(id).ok_or("unknown contract")?;
+        meter.charge(gas::GAS_CODE_READ)?;
         // execute bytecode; append input as pushes onto stack
         let mut exec_code = code.clone();
         if !input.is_empty() {
@@ -69,6 +70,7 @@ impl Vm {
         *balance -= fee;
         // store last stack element as state if any
         if let Some(last) = stack.last() {
+            meter.charge(gas::GAS_STORAGE_WRITE)?;
             self.state.set_storage(id, last.to_le_bytes().to_vec());
         }
         Ok((stack.iter().flat_map(|v| v.to_le_bytes()).collect(), used))
@@ -78,6 +80,11 @@ impl Vm {
     #[must_use]
     pub fn read(&self, id: ContractId) -> Option<Vec<u8>> {
         self.state.storage(id)
+    }
+
+    /// Overwrite contract state directly.
+    pub fn write(&mut self, id: ContractId, data: Vec<u8>) {
+        self.state.set_storage(id, data);
     }
 }
 

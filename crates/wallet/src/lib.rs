@@ -1,5 +1,8 @@
 use ed25519_dalek::{Keypair, PublicKey, Signature, Signer};
+use hkdf::Hkdf;
 use rand::rngs::OsRng;
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 
 /// Common signer interface for software and hardware wallets.
@@ -31,6 +34,19 @@ pub enum WalletError {
     Failure(String),
 }
 
+/// Derive a 32-byte key using HKDF-SHA256.
+pub fn derive_key(master: &[u8], info: &[u8]) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(None, master);
+    let mut okm = [0u8; 32];
+    hk.expand(info, &mut okm).expect("hkdf expand");
+    okm
+}
+
+/// Perform a constant-time equality check to avoid timing leaks.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    a.ct_eq(b).into()
+}
+
 /// A software wallet holding an Ed25519 keypair.
 pub struct Wallet {
     keypair: Keypair,
@@ -38,6 +54,26 @@ pub struct Wallet {
 
 pub mod remote_signer;
 pub mod stake;
+
+#[cfg(feature = "dilithium")]
+pub mod pq {
+    use pqcrypto_dilithium::dilithium2::{self, DetachedSignature, PublicKey, SecretKey};
+
+    /// Generate a Dilithium keypair.
+    pub fn generate() -> (PublicKey, SecretKey) {
+        dilithium2::keypair()
+    }
+
+    /// Sign a message using Dilithium2.
+    pub fn sign(sk: &SecretKey, msg: &[u8]) -> DetachedSignature {
+        dilithium2::detached_sign(msg, sk)
+    }
+
+    /// Verify a Dilithium2 signature.
+    pub fn verify(pk: &PublicKey, msg: &[u8], sig: &DetachedSignature) -> bool {
+        dilithium2::verify_detached_signature(sig, msg, pk).is_ok()
+    }
+}
 
 impl Wallet {
     /// Create a wallet from a 32-byte seed.
@@ -185,5 +221,25 @@ mod tests {
         assert_eq!(sig1.to_bytes(), sig2.to_bytes());
         hw.disconnect();
         assert!(hw.sign(msg).is_err());
+    }
+
+    #[test]
+    fn hkdf_derivation() {
+        let master = b"master";
+        let info = b"ctx";
+        let k1 = derive_key(master, info);
+        let k2 = derive_key(master, info);
+        assert_eq!(k1, k2);
+        assert!(constant_time_eq(&k1, &k2));
+    }
+
+    #[cfg(feature = "dilithium")]
+    #[test]
+    fn dilithium_round_trip() {
+        use crate::pq;
+        let (pk, sk) = pq::generate();
+        let msg = b"pq";
+        let sig = pq::sign(&sk, msg);
+        assert!(pq::verify(&pk, msg, &sig));
     }
 }

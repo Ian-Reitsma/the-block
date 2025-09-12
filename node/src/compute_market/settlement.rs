@@ -2,8 +2,8 @@
 use crate::telemetry::SLASHING_BURN_CT_TOTAL;
 use ledger::utxo_account::AccountLedger;
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettleMode {
@@ -33,7 +33,10 @@ impl Settlement {
             .debit(provider, amount);
         if res.is_ok() {
             #[cfg(feature = "telemetry")]
-            SLASHING_BURN_CT_TOTAL.inc_by(amount);
+            {
+                SLASHING_BURN_CT_TOTAL.inc_by(amount);
+                crate::telemetry::COMPUTE_SLA_VIOLATIONS_TOTAL.inc();
+            }
         }
         res.map_err(|_| ())
     }
