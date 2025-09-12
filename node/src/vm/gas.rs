@@ -12,7 +12,7 @@ pub fn cost(op: OpCode) -> u64 {
     match op {
         OpCode::Halt => 0,
         OpCode::Push => 1,
-        OpCode::Add | OpCode::Sub => 1,
+        OpCode::Add | OpCode::Sub | OpCode::And | OpCode::Or => 1,
         OpCode::Mul => 2,
         OpCode::Div => 3,
     }

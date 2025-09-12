@@ -99,7 +99,7 @@ fn block_application_is_atomic() {
     // Remove invalid tx and reapply
     block.transactions = vec![tx1];
     let deltas = validate_and_apply(&bc, &block).expect("valid block");
-    commit(&mut bc, deltas);
+    commit(&mut bc, deltas).unwrap();
     assert_eq!(bc.accounts["alice"].balance.consumer, 90);
     assert_eq!(bc.accounts["bob"].balance.consumer, 10);
 }

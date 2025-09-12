@@ -8,7 +8,7 @@ identifiers or messages in cleartext.
 ## Request Logging
 
 `record_request` hashes the caller-supplied `case_id` with BLAKE3 and appends a
-JSON line containing the timestamp, agency name, and resulting `case_hash` to
+JSON line containing the timestamp, agency name, jurisdiction, and resulting `case_hash` to
 `le_requests.log`
 [`node/src/le_portal.rs#L17-L36`](../node/src/le_portal.rs#L17-L36). The function
 returns the 64‑hex character hash so operators can audit inclusion without
@@ -50,7 +50,7 @@ falls within the expected window. Absence or delay signals potential gag orders.
 
 ## Audit Trail & Badge Policy
 
-`record_action` appends an agency-tagged, timestamped hash to `le_actions.log`
+`record_action` appends an agency-tagged, jurisdiction-tagged, timestamped hash to `le_actions.log`
 to provide a tamper-evident trail of law-enforcement operations
 [`node/src/le_portal.rs#L69-L98`](../node/src/le_portal.rs#L69-L98). Access to
 `record_le_request`, `warrant_canary`, and the new audit endpoints is gated by
@@ -65,7 +65,7 @@ the governance parameter `BadgeExpirySecs`.
 use the_block::le_portal::{record_request, list_requests, record_canary};
 
 let base = "/var/log/the-block";
-let hash = record_request(base, "Agency", "case123")?;
+let hash = record_request(base, "Agency", "case123", "US")?;
 println!("case hash: {hash}");
 let entries = list_requests(base)?;
 assert_eq!(entries[0].case_hash, hash);

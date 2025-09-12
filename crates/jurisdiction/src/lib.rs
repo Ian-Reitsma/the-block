@@ -17,6 +17,16 @@ impl PolicyPack {
         let bytes = std::fs::read(path)?;
         Ok(serde_json::from_slice(&bytes)?)
     }
+
+    /// Built-in template for a given region code (e.g. "US").
+    pub fn template(region: &str) -> Option<Self> {
+        let raw = match region {
+            "US" => Some(include_str!("../policies/us.json")),
+            "EU" => Some(include_str!("../policies/eu.json")),
+            _ => None,
+        }?;
+        serde_json::from_str(raw).ok()
+    }
 }
 
 /// Encrypt metadata for storage if the `pq` feature is enabled.

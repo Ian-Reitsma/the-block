@@ -32,7 +32,33 @@ assert!(pack.consent_required);
 
 Policy packs live alongside the node configuration and can be swapped without
 recompiling.  Governance may distribute canonical packs and validators can load
-them at runtime.
+them at runtime.  Built‑in templates are available via `PolicyPack::template("US")`
+or `PolicyPack::template("EU")` and can be used as starting points.
+
+Governance proposals may update the active jurisdiction by voting on the
+`jurisdiction_region` parameter.  When executed, the node records the change via
+the law‑enforcement portal so auditors have a tamper‑evident trail of policy
+changes.  See [`node/src/governance/params.rs`](../node/src/governance/params.rs)
+for the runtime hook.
+
+To run a node with a specific jurisdiction pack pass the file path via
+`--jurisdiction`:
+
+```
+the-block-node run --jurisdiction examples/jurisdiction/us.json
+```
+
+The active jurisdiction is exposed over RPC through `jurisdiction.status` and
+can be updated at runtime with `jurisdiction.set` (admin token required).
+Transactions processed while a policy is active are tagged with the region in
+the `tx_jurisdiction_total{jurisdiction="US"}` metric.
+
+For multi‑jurisdiction deployments run separate node instances with distinct
+policy packs and Prometheus labels, or use orchestration tooling to mount the
+appropriate pack per region.
+
+Example packs live under [`examples/jurisdiction/`](../examples/jurisdiction/)
+for quick testing.
 
 ## Law-Enforcement Request Log
 

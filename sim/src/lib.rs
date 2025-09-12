@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
+use rocksdb::DB;
 use serde::Serialize;
 
 pub mod bridging;
@@ -18,6 +19,7 @@ use inflation::InflationModel;
 use liquidity::LiquidityModel;
 
 /// Storage backend selection for reproducible scenarios.
+#[derive(Clone, Copy)]
 pub enum Backend {
     Memory,
     RocksDb,
@@ -33,11 +35,17 @@ pub struct Simulation {
     pub demand: DemandModel,
     pub backlog: f64,
     pub backend: Backend,
+    rng: StdRng,
+    db: Option<DB>,
 }
 
 impl Simulation {
     /// Create a new simulation with default economic models.
     pub fn new(nodes: u64) -> Self {
+        let seed = std::env::var("TB_SIM_SEED")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(42);
         Self {
             nodes,
             subsidy: 0.0,
@@ -47,12 +55,18 @@ impl Simulation {
             demand: DemandModel::default(),
             backlog: 0.0,
             backend: Backend::Memory,
+            rng: StdRng::seed_from_u64(seed),
+            db: None,
         }
     }
 
     /// Create a simulation with an explicit storage backend.
     pub fn with_backend(nodes: u64, backend: Backend) -> Self {
         let mut sim = Self::new(nodes);
+        if let Backend::RocksDb = backend {
+            let path = std::env::var("SIM_DB_PATH").unwrap_or_else(|_| "sim.db".into());
+            sim.db = Some(DB::open_default(path).expect("open sim db"));
+        }
         sim.backend = backend;
         sim
     }
@@ -62,7 +76,7 @@ impl Simulation {
         let mut wtr = csv::Writer::from_path(out)?;
         for step in 0..steps {
             let snap = self.step(step);
-            wtr.serialize(snap)?;
+            wtr.serialize(&snap)?;
         }
         wtr.flush().map_err(csv::Error::from)
     }
@@ -96,8 +110,7 @@ impl Simulation {
 
     /// Advance the simulation by one step.
     pub fn step(&mut self, step: u64) -> Snapshot {
-        let mut rng = rand::thread_rng();
-        let inc: f64 = rng.gen_range(0.0..1.0);
+        let inc: f64 = self.rng.gen_range(0.0..1.0);
         self.subsidy += inc;
         let supply = self.inflation.apply(inc);
         let liquidity = self.liquidity.update(inc);
@@ -117,7 +130,7 @@ impl Simulation {
             self.liquidity.token_reserve / self.backlog.max(1.0)
         };
         let readiness = 1.0 / (1.0 + self.backlog);
-        Snapshot {
+        let snap = Snapshot {
             step,
             subsidy: self.subsidy,
             supply,
@@ -129,7 +142,13 @@ impl Simulation {
             inflation_rate,
             sell_coverage,
             readiness,
+        };
+        if let Some(db) = &self.db {
+            let key = step.to_be_bytes();
+            let val = bincode::serialize(&snap).expect("serialize snapshot");
+            let _ = db.put(key, val);
         }
+        snap
     }
 }
 

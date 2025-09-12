@@ -38,7 +38,7 @@ Sequence:
 
 1. Relayers fetch an external `Header` and Merkle `Proof` for the deposit event.
 2. `blockctl bridge deposit --header header.json --proof proof.json` calls the `bridge.verify_deposit` RPC which forwards to `Bridge::deposit_with_relayer`.
-3. `deposit_with_relayer` invokes `verify_pow` and `light_client::verify`, credits the user on success, and persists the header hash under `state/bridge_headers/<hash>` to prevent replay.
+3. `deposit_with_relayer` invokes `verify_pow` and `light_client::verify`, credits the user on success, and persists the full header JSON under `state/bridge_headers/<hash>.json` to prevent replay and allow audit.
 4. Telemetry counters `bridge_proof_verify_success_total` and `bridge_proof_verify_failure_total` track verification results.
 
 Sample `header.json` and `proof.json` files reside in `examples/bridges/` for development testing.
@@ -80,7 +80,7 @@ Relayers stake native tokens to participate in bridge operations. Each `Relayer`
 
 1. The relayer commitment is recomputed and compared against the supplied `RelayerProof`.
 2. `PowHeader` encapsulates an external header and lightweight PoW target; `verify_deposit` rejects headers that fail the `verify_pow` check.
-3. The Merkle path is validated and the header hash recorded to prevent replays.
+3. The Merkle path is validated and the header JSON recorded to prevent replays.
 
 Invalid submissions increment `bridge_invalid_proof_total`, slash one unit of stake, and bump the `relayer_slash_total` counter. Operators can query current collateral via `bridge.relayer_status`.
 

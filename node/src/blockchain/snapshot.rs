@@ -320,6 +320,31 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
     res
 }
 
+pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, String)> {
+    let data = fs::read(path)?;
+    let snap: Snapshot = bincode::deserialize(&data)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let mut accounts = HashMap::new();
+    for s in snap.accounts {
+        accounts.insert(
+            s.address,
+            Account {
+                address: String::new(),
+                balance: crate::TokenBalance {
+                    consumer: s.consumer,
+                    industrial: s.industrial,
+                },
+                nonce: s.nonce,
+                pending_consumer: 0,
+                pending_industrial: 0,
+                pending_nonce: 0,
+                pending_nonces: HashSet::new(),
+            },
+        );
+    }
+    Ok((snap.height, accounts, snap.root))
+}
+
 pub fn account_proof(
     accounts: &HashMap<String, Account>,
     address: &str,

@@ -12,7 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 mod rate_limit;
+use once_cell::sync::Lazy;
 use rate_limit::RateLimitFilter;
+use std::fs;
 
 use futures::{SinkExt, StreamExt};
 use hyper::service::{make_service_fn, service_fn};
@@ -57,7 +59,7 @@ pub async fn run(
     read_tx: mpsc::Sender<ReadAck>,
 ) -> anyhow::Result<()> {
     let buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>> = Arc::new(Mutex::new(HashMap::new()));
-    let filter: Arc<Mutex<RateLimitFilter>> = Arc::new(Mutex::new(RateLimitFilter::new()));
+    let filter = Arc::clone(&IP_FILTER);
     let make = make_service_fn(move |conn: &hyper::server::conn::AddrStream| {
         let ip = conn.remote_addr();
         let buckets = Arc::clone(&buckets);
@@ -144,6 +146,31 @@ fn check_bucket(
         filter.lock().unwrap().insert(key);
         crate::net::peer::record_ip_drop(ip);
         false
+    }
+}
+
+static IP_FILTER: Lazy<Arc<Mutex<RateLimitFilter>>> =
+    Lazy::new(|| Arc::new(Mutex::new(RateLimitFilter::new())));
+
+pub fn load_blocklist(path: &str) {
+    if let Ok(data) = fs::read_to_string(path) {
+        let mut keys = Vec::new();
+        for line in data.lines() {
+            if let Ok(addr) = line.parse::<std::net::IpAddr>() {
+                let key = match addr {
+                    std::net::IpAddr::V4(v4) => u32::from(v4) as u64,
+                    std::net::IpAddr::V6(v6) => {
+                        let o = v6.octets();
+                        let mut b = [0u8; 8];
+                        b.copy_from_slice(&o[0..8]);
+                        u64::from_le_bytes(b)
+                    }
+                };
+                keys.push(key);
+            }
+        }
+        let mut guard = IP_FILTER.lock().unwrap();
+        guard.replace(keys);
     }
 }
 

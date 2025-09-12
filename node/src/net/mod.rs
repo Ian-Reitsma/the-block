@@ -8,11 +8,12 @@ pub mod peer_metrics_store;
 pub mod quic;
 #[cfg(not(feature = "quic"))]
 pub mod quic {
+    use super::peer::HandshakeError;
     use anyhow::Error;
 
     #[derive(Debug)]
     pub enum ConnectError {
-        Handshake,
+        Handshake(HandshakeError),
         Other(Error),
     }
 }
@@ -82,7 +83,7 @@ pub fn reputation_sync() {
     if !crate::compute_market::scheduler::reputation_gossip_enabled() {
         return;
     }
-    let peers = known_peers();
+    let peers = peer::known_peers_with_info();
     if peers.is_empty() {
         return;
     }
@@ -307,8 +308,7 @@ impl Node {
     fn broadcast(&self, msg: &Message) {
         let peers = self.peers.list_with_info();
         if std::env::var("TB_GOSSIP_ALGO").ok().as_deref() == Some("turbine") {
-            let addrs: Vec<SocketAddr> = peers.iter().map(|(a, _, _)| *a).collect();
-            turbine::broadcast(msg, &addrs);
+            turbine::broadcast(msg, &peers);
         } else {
             self.relay.broadcast(msg, &peers);
         }
@@ -349,19 +349,30 @@ pub(crate) fn send_quic_msg(
     msg: &Message,
 ) -> Result<(), quic::ConnectError> {
     use crate::net::quic;
+    #[cfg(feature = "telemetry")]
+    use crate::telemetry::QUIC_FALLBACK_TCP_TOTAL;
     use rustls::Certificate;
     use tokio::runtime::Runtime;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     let cert = Certificate(cert.to_vec());
     let rt = Runtime::new().unwrap();
-    rt.block_on(async move {
+    let res = rt.block_on(async {
         let conn = quic::get_connection(addr, cert).await?;
         if let Err(e) = quic::send(&conn, &bytes).await {
             quic::drop_connection(&addr);
             return Err(quic::ConnectError::Other(anyhow!(e)));
         }
         Ok(())
-    })
+    });
+    match res {
+        Err(quic::ConnectError::Handshake(_)) => {
+            #[cfg(feature = "telemetry")]
+            QUIC_FALLBACK_TCP_TOTAL.inc();
+            send_msg(addr, msg).map_err(|e| quic::ConnectError::Other(anyhow!(e)))?;
+            Ok(())
+        }
+        other => other,
+    }
 }
 
 #[cfg(not(feature = "quic"))]

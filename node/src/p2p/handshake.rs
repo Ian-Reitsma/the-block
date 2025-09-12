@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use once_cell::sync::Lazy;
@@ -84,6 +86,18 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
         return HelloAck {
             ok: false,
             reason: Some("old_proto".into()),
+            features_accepted: 0,
+            min_backoff_ms: 1000,
+        };
+    }
+    if hello.proto_version > SUPPORTED_VERSION {
+        #[cfg(feature = "telemetry")]
+        telemetry::P2P_HANDSHAKE_REJECT_TOTAL
+            .with_label_values(&["new_proto"])
+            .inc();
+        return HelloAck {
+            ok: false,
+            reason: Some("new_proto".into()),
             features_accepted: 0,
             min_backoff_ms: 1000,
         };

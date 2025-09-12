@@ -41,6 +41,11 @@ impl RateLimitFilter {
         }
     }
 
+    pub fn replace(&mut self, keys: Vec<u64>) {
+        self.keys = keys;
+        self.rebuild();
+    }
+
     pub fn insert(&mut self, k: u64) {
         self.keys.push(k);
         self.rebuild();

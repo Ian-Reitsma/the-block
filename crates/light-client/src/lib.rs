@@ -78,10 +78,7 @@ impl LightClient {
     }
 
     pub fn verify_and_append(&mut self, h: Header) -> Result<(), ()> {
-        let last = self
-            .chain
-            .last()
-            .ok_or(())?;
+        let last = self.chain.last().ok_or(())?;
         if h.prev_hash != last.hash() {
             return Err(());
         }
@@ -162,7 +159,9 @@ mod tests {
         loop {
             let hash = h.hash();
             let v = u64::from_le_bytes(hash[..8].try_into().unwrap());
-            if v <= u64::MAX / h.difficulty { break; }
+            if v <= u64::MAX / h.difficulty {
+                break;
+            }
             h.nonce = h.nonce.wrapping_add(1);
         }
         h

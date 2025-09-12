@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use quinn::{Connection, Endpoint};
+use rand::Rng;
 use rcgen::generate_simple_self_signed;
 #[cfg(any(test, debug_assertions))]
 use rustls::client::{
@@ -15,7 +16,6 @@ use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
 use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
 use tokio::time::Instant;
 
-#[cfg(feature = "telemetry")]
 use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -26,8 +26,8 @@ use crate::telemetry::{
 /// Error type for QUIC connection attempts.
 #[derive(Debug)]
 pub enum ConnectError {
-    /// Handshake failed with the remote peer.
-    Handshake,
+    /// Handshake failed with the remote peer and includes a reason.
+    Handshake(HandshakeError),
     /// Other connection failure.
     Other(anyhow::Error),
 }
@@ -35,7 +35,7 @@ pub enum ConnectError {
 impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Handshake => write!(f, "handshake failed"),
+            Self::Handshake(e) => write!(f, "handshake failed: {}", e.as_str()),
             Self::Other(e) => write!(f, "{e}"),
         }
     }
@@ -112,14 +112,18 @@ pub async fn connect(
     let res = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
     match res {
         Ok(Ok(conn)) => {
+            let elapsed = _start.elapsed();
             #[cfg(feature = "telemetry")]
-            sampled_observe(&QUIC_CONN_LATENCY_SECONDS, _start.elapsed().as_secs_f64());
+            sampled_observe(&QUIC_CONN_LATENCY_SECONDS, elapsed.as_secs_f64());
+            if let Some(pk) = super::peer::pk_from_addr(&addr) {
+                super::peer::record_handshake_latency(&pk, elapsed.as_millis() as u64);
+            }
             Ok(conn)
         }
         Ok(Err(e)) => {
+            let err = classify_err(&e);
             #[cfg(feature = "telemetry")]
             {
-                let err = classify_err(&e);
                 if super::peer::track_handshake_fail_enabled() {
                     QUIC_HANDSHAKE_FAIL_TOTAL
                         .with_label_values(&[err.as_str()])
@@ -127,21 +131,22 @@ pub async fn connect(
                 }
                 super::peer::record_handshake_fail_addr(addr, err);
             }
-            tracing::error!(error = ?e, reason = classify_err(&e).as_str(), "quic_connect_fail");
-            Err(ConnectError::Handshake)
+            tracing::error!(error = ?e, reason = err.as_str(), "quic_connect_fail");
+            Err(ConnectError::Handshake(err))
         }
         Err(_) => {
+            let err = super::peer::HandshakeError::Timeout;
             #[cfg(feature = "telemetry")]
             {
                 if super::peer::track_handshake_fail_enabled() {
                     QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[super::peer::HandshakeError::Timeout.as_str()])
+                        .with_label_values(&[err.as_str()])
                         .inc();
                 }
-                super::peer::record_handshake_fail_addr(addr, super::peer::HandshakeError::Timeout);
+                super::peer::record_handshake_fail_addr(addr, err);
             }
             tracing::error!("quic_connect_timeout");
-            Err(ConnectError::Handshake)
+            Err(ConnectError::Handshake(err))
         }
     }
 }
@@ -235,9 +240,9 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
             Ok(conn)
         }
         Ok(Err(e)) => {
+            let err = classify_err(&e);
             #[cfg(feature = "telemetry")]
             {
-                let err = classify_err(&e);
                 if super::peer::track_handshake_fail_enabled() {
                     QUIC_HANDSHAKE_FAIL_TOTAL
                         .with_label_values(&[err.as_str()])
@@ -245,21 +250,22 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
                 }
                 super::peer::record_handshake_fail_addr(addr, err);
             }
-            tracing::error!(error = ?e, "quic_connect_fail");
-            Err(ConnectError::Handshake)
+            tracing::error!(error = ?e, reason = err.as_str(), "quic_connect_fail");
+            Err(ConnectError::Handshake(err))
         }
         Err(_) => {
+            let err = super::peer::HandshakeError::Timeout;
             #[cfg(feature = "telemetry")]
             {
                 if super::peer::track_handshake_fail_enabled() {
                     QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[super::peer::HandshakeError::Timeout.as_str()])
+                        .with_label_values(&[err.as_str()])
                         .inc();
                 }
-                super::peer::record_handshake_fail_addr(addr, super::peer::HandshakeError::Timeout);
+                super::peer::record_handshake_fail_addr(addr, err);
             }
             tracing::error!("quic_connect_timeout");
-            Err(ConnectError::Handshake)
+            Err(ConnectError::Handshake(err))
         }
     }
 }
@@ -282,6 +288,14 @@ pub(crate) fn classify_err(e: &quinn::ConnectionError) -> HandshakeError {
 
 /// Send raw bytes over a QUIC uni-stream recording telemetry counters.
 pub async fn send(conn: &Connection, data: &[u8]) -> Result<()> {
+    let mut rng = rand::thread_rng();
+    if let Ok(loss_str) = std::env::var("TB_QUIC_PACKET_LOSS") {
+        if let Ok(loss) = loss_str.parse::<f64>() {
+            if rng.gen_bool(loss) {
+                return Ok(());
+            }
+        }
+    }
     let mut stream = match conn.open_uni().await {
         Ok(s) => s,
         Err(e) => {
@@ -294,6 +308,13 @@ pub async fn send(conn: &Connection, data: &[u8]) -> Result<()> {
         #[cfg(feature = "telemetry")]
         record_write_err(&e);
         return Err(e.into());
+    }
+    if let Ok(dup_str) = std::env::var("TB_QUIC_PACKET_DUP") {
+        if let Ok(dup) = dup_str.parse::<f64>() {
+            if rng.gen_bool(dup) {
+                let _ = stream.write_all(data).await;
+            }
+        }
     }
     #[cfg(feature = "telemetry")]
     QUIC_BYTES_SENT_TOTAL.inc_by(data.len() as u64);
@@ -329,6 +350,23 @@ pub async fn recv(conn: &Connection) -> Option<Vec<u8>> {
             let _ = e;
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_err_variants() {
+        assert_eq!(
+            classify_err(&quinn::ConnectionError::VersionMismatch),
+            HandshakeError::Version
+        );
+        assert_eq!(
+            classify_err(&quinn::ConnectionError::TimedOut),
+            HandshakeError::Timeout
+        );
     }
 }
 

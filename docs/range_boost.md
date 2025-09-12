@@ -58,3 +58,25 @@ assert_eq!(bundle.proofs[0].relay, "peer1");
 
 Range Boost provides the foundation for opportunistic mesh relays, with future
 work planned for expiration, persistence, and incentivization.
+
+## Local Mesh Networking
+
+`discover_peers` performs Wi‑Fi and (on Linux/macOS when built with the
+`bluetooth` feature) Bluetooth discovery. Addresses supplied via the
+`TB_MESH_STATIC_PEERS` environment variable are probed and scored by round‑trip
+latency. Gossip relays prefer low‑latency neighbours, and PoW mining yields CPU
+time while mesh tasks are active to reduce contention.
+
+Run the node with local mesh support using the `--range-boost` flag:
+
+```shell
+the-block node run --range-boost
+```
+
+Telemetry records:
+
+- `mesh_peer_connected_total{peer_id}` – total mesh peers discovered.
+- `mesh_peer_latency_ms{peer_id}` – last observed latency in milliseconds.
+
+`node/tests/mesh_sim.rs` provides a UNIX-domain-socket harness that simulates
+mesh links and validates latency-based scoring.

@@ -53,6 +53,7 @@ async fn rpc_smoke() {
     let rpc_cfg = RpcConfig {
         admin_token_file: Some(token_file.to_str().unwrap().to_string()),
         enable_debug: true,
+        relay_only: false,
         ..Default::default()
     };
     let handle = tokio::spawn(run_rpc_server(
@@ -119,6 +120,7 @@ async fn rpc_nonce_replay_rejected() {
     let rpc_cfg = RpcConfig {
         admin_token_file: Some(token_file.to_str().unwrap().to_string()),
         enable_debug: true,
+        relay_only: false,
         ..Default::default()
     };
     let handle = tokio::spawn(run_rpc_server(
@@ -172,6 +174,7 @@ async fn rpc_concurrent_controls() {
     let rpc_cfg = RpcConfig {
         admin_token_file: Some(token_file.to_str().unwrap().to_string()),
         enable_debug: true,
+        relay_only: false,
         ..Default::default()
     };
     let handle = tokio::spawn(run_rpc_server(
@@ -245,6 +248,7 @@ async fn rpc_error_responses() {
     let rpc_cfg = RpcConfig {
         admin_token_file: Some(token_file.to_str().unwrap().to_string()),
         enable_debug: true,
+        relay_only: false,
         ..Default::default()
     };
     let handle = tokio::spawn(run_rpc_server(
@@ -294,6 +298,7 @@ async fn rpc_fragmented_request() {
     let rpc_cfg = RpcConfig {
         admin_token_file: Some(token_file.to_str().unwrap().to_string()),
         enable_debug: true,
+        relay_only: false,
         ..Default::default()
     };
     let handle = tokio::spawn(run_rpc_server(

@@ -69,7 +69,13 @@ impl Escrow {
     ) -> EscrowId {
         let id = self.next_id;
         self.next_id += 1;
-        let entry = EscrowEntry { from, to, total, algo, ..EscrowEntry::default() };
+        let entry = EscrowEntry {
+            from,
+            to,
+            total,
+            algo,
+            ..EscrowEntry::default()
+        };
         self.total_locked += total;
         self.entries.insert(id, entry);
         id
@@ -182,7 +188,11 @@ fn merkle_root(leaves: &[[u8; 32]], algo: HashAlgo) -> [u8; 32] {
         let mut next = Vec::with_capacity((level.len() + 1) / 2);
         for i in (0..level.len()).step_by(2) {
             let a = level[i];
-            let b = if i + 1 < level.len() { level[i + 1] } else { level[i] };
+            let b = if i + 1 < level.len() {
+                level[i + 1]
+            } else {
+                level[i]
+            };
             next.push(hash_pair(a, b, algo));
         }
         level = next;
@@ -199,7 +209,11 @@ fn build_proof(leaves: &[[u8; 32]], idx: usize, algo: HashAlgo) -> Option<Paymen
     let mut index = idx;
     while level.len() > 1 {
         let sibling = if index % 2 == 0 {
-            if index + 1 < level.len() { level[index + 1] } else { level[index] }
+            if index + 1 < level.len() {
+                level[index + 1]
+            } else {
+                level[index]
+            }
         } else {
             level[index - 1]
         };
@@ -207,13 +221,21 @@ fn build_proof(leaves: &[[u8; 32]], idx: usize, algo: HashAlgo) -> Option<Paymen
         let mut next = Vec::with_capacity((level.len() + 1) / 2);
         for i in (0..level.len()).step_by(2) {
             let a = level[i];
-            let b = if i + 1 < level.len() { level[i + 1] } else { level[i] };
+            let b = if i + 1 < level.len() {
+                level[i + 1]
+            } else {
+                level[i]
+            };
             next.push(hash_pair(a, b, algo));
         }
         index /= 2;
         level = next;
     }
-    Some(PaymentProof { leaf: leaves[idx], path, algo })
+    Some(PaymentProof {
+        leaf: leaves[idx],
+        path,
+        algo,
+    })
 }
 
 pub fn verify_proof(
@@ -246,7 +268,13 @@ mod tests {
         let id = es.lock("a".into(), "b".into(), 100);
         let proof = es.release(id, 40).unwrap();
         let entry = es.status(id).unwrap();
-        assert!(verify_proof(proof.leaf, 0, &proof.path, entry.root, proof.algo));
+        assert!(verify_proof(
+            proof.leaf,
+            0,
+            &proof.path,
+            entry.root,
+            proof.algo
+        ));
     }
 
     #[test]
@@ -255,7 +283,12 @@ mod tests {
         let id = es.lock_with_algo("a".into(), "b".into(), 100, HashAlgo::Sha3);
         let proof = es.release(id, 40).unwrap();
         let entry = es.status(id).unwrap();
-        assert!(verify_proof(proof.leaf, 0, &proof.path, entry.root, proof.algo));
+        assert!(verify_proof(
+            proof.leaf,
+            0,
+            &proof.path,
+            entry.root,
+            proof.algo
+        ));
     }
 }
-

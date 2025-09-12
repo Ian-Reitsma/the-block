@@ -342,3 +342,48 @@ async fn quic_version_mismatch() {
     conn.close(0u32.into(), b"done");
     server_ep.wait_idle().await;
 }
+
+#[tokio::test]
+#[serial]
+async fn quic_packet_loss_env() {
+    std::env::set_var("TB_QUIC_PACKET_LOSS", "1.0");
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let (server_ep, cert) = quic::listen(addr).await.unwrap();
+    let listen_addr = server_ep.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let ep = server_ep.clone();
+    tokio::spawn(async move {
+        if let Some(conn) = ep.accept().await {
+            let connection = conn.await.unwrap();
+            let res = tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                quic::recv(&connection),
+            )
+            .await;
+            tx.send(res.is_err()).unwrap();
+            connection.close(0u32.into(), b"done");
+        }
+    });
+    let conn = quic::connect(listen_addr, cert).await.unwrap();
+    let hello = Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: 0,
+        agent: "test".into(),
+        nonce: 0,
+        transport: Transport::Quic,
+        quic_addr: None,
+        quic_cert: None,
+    };
+    let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+    quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        .await
+        .unwrap();
+    assert!(
+        rx.await.unwrap(),
+        "expected receive timeout due to packet loss"
+    );
+    std::env::remove_var("TB_QUIC_PACKET_LOSS");
+    conn.close(0u32.into(), b"done");
+    server_ep.wait_idle().await;
+}

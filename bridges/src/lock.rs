@@ -46,6 +46,11 @@ pub fn lock(
         relayers.slash(relayer, amount.min(1));
         return false;
     }
+    // Persist the full header for audit and replay protection.
+    let dir = &bridge.cfg.headers_dir;
+    let _ = std::fs::create_dir_all(dir);
+    let path = std::path::Path::new(dir).join(format!("{}.json", hex::encode(hh)));
+    let _ = std::fs::write(&path, serde_json::to_vec(header).unwrap_or_default());
     *bridge.locked.entry(user.to_string()).or_insert(0) += amount;
     true
 }

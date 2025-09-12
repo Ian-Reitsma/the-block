@@ -10,7 +10,9 @@ while [[ $# -gt 0 ]]; do
     --duration) DUR="$2"; shift 2 ;;
     --partition) PART="$2"; shift 2 ;;
     --kill) KILL="$2"; shift 2 ;;
-    *) echo "usage: $0 [--nodes N] [--duration SECS] [--partition IDX@START-END] [--kill IDX@TIME]" >&2; exit 1 ;;
+    --quic-loss) export TB_QUIC_PACKET_LOSS="$2"; shift 2 ;;
+    --quic-dup) export TB_QUIC_PACKET_DUP="$2"; shift 2 ;;
+    *) echo "usage: $0 [--nodes N] [--duration SECS] [--partition IDX@START-END] [--kill IDX@TIME] [--quic-loss P] [--quic-dup P]" >&2; exit 1 ;;
   esac
 done
 schedule=$(mktemp)

@@ -13,4 +13,3 @@ fn domain_tag_mismatch_fails() {
     let vk = sk.verifying_key();
     assert!(vk.verify(&wrong, &sig).is_err());
 }
-

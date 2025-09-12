@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo deps --all-deps --manifest-path node/Cargo.toml -o docs/architecture/node.dot
-if command -v dot >/dev/null 2>&1; then
-  dot -Tsvg docs/architecture/node.dot -o docs/architecture/node.svg
-fi
+{
+  echo '# Node Dependency Tree'
+  echo
+  echo 'This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.'
+  echo
+  echo '```'
+  cargo tree --manifest-path node/Cargo.toml
+  echo '```'
+} > docs/architecture/node.md

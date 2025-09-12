@@ -1,0 +1,25 @@
+name: coverage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  tarpaulin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Run coverage
+        run: cargo tarpaulin --out Xml
+      - name: Upload report
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: tarpaulin-report.xml

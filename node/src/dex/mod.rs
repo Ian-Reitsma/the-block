@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-pub mod exchange_hooks;
 pub mod audit;
+pub mod exchange_hooks;
 pub mod order_book;
 pub mod storage;
 pub mod trust_lines;

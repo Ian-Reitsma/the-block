@@ -34,6 +34,21 @@ impl<'a> Runtime<'a> {
     pub fn set_badge_expiry(&mut self, v: u64) {
         crate::service_badge::set_badge_ttl_secs(v);
     }
+    pub fn set_jurisdiction_region(&mut self, v: i64) {
+        let region = match v {
+            1 => "US",
+            2 => "EU",
+            _ => "UNSPEC",
+        };
+        self.bc.config.jurisdiction = Some(region.to_string());
+        self.bc.save_config();
+        let _ = crate::le_portal::record_action(
+            &self.bc.path,
+            "governance",
+            &format!("set_jurisdiction_{region}"),
+            region,
+        );
+    }
 }
 
 pub struct ParamSpec {
@@ -74,6 +89,7 @@ pub struct Params {
     pub heuristic_mu_milli: i64,
     pub industrial_multiplier: i64,
     pub badge_expiry_secs: i64,
+    pub jurisdiction_region: i64,
 }
 
 impl Default for Params {
@@ -101,6 +117,7 @@ impl Default for Params {
             heuristic_mu_milli: 500,
             industrial_multiplier: 100,
             badge_expiry_secs: 30 * 24 * 60 * 60,
+            jurisdiction_region: 0,
         }
     }
 }
@@ -120,6 +137,10 @@ fn apply_industrial_capacity(v: i64, p: &mut Params) -> Result<(), ()> {
 
 fn apply_badge_expiry(v: i64, p: &mut Params) -> Result<(), ()> {
     p.badge_expiry_secs = v;
+    Ok(())
+}
+fn apply_jurisdiction_region(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.jurisdiction_region = v;
     Ok(())
 }
 fn apply_fairshare_global_max(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -199,7 +220,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 16] = [
+    static REGS: [ParamSpec; 17] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -378,6 +399,19 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_badge_expiry,
             apply_runtime: |v, rt| {
                 rt.set_badge_expiry(v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::JurisdictionRegion,
+            default: 0,
+            min: 0,
+            max: 10,
+            unit: "code",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_jurisdiction_region,
+            apply_runtime: |v, rt| {
+                rt.set_jurisdiction_region(v);
                 Ok(())
             },
         },

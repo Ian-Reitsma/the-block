@@ -38,4 +38,5 @@ pub enum ParamKey {
     MinerHysteresis,
     HeuristicMuMilli,
     BadgeExpirySecs,
+    JurisdictionRegion,
 }

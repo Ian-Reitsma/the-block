@@ -8,6 +8,7 @@ use rand::seq::SliceRandom;
 
 use crate::net::{send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
+use crate::range_boost;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_TTL_DROP_TOTAL};
 
@@ -63,11 +64,7 @@ impl Relay {
             }
             Transport::Quic => {
                 if let Some(c) = cert {
-                    if let Err(crate::net::quic::ConnectError::Handshake) =
-                        send_quic_msg(addr, &c, m)
-                    {
-                        let _ = send_msg(addr, m);
-                    }
+                    let _ = send_quic_msg(addr, &c, m);
                 }
             }
         });
@@ -88,15 +85,17 @@ impl Relay {
         let fanout_all = std::env::var("TB_GOSSIP_FANOUT")
             .map(|v| v == "all")
             .unwrap_or(false);
+        let mut list = peers.to_vec();
+        list.sort_by_key(|(addr, _, _)| range_boost::peer_latency(addr).unwrap_or(u128::MAX));
         let fanout = if fanout_all {
-            peers.len()
+            list.len()
         } else {
-            Self::compute_fanout(peers.len()).min(peers.len().max(1))
+            Self::compute_fanout(list.len()).min(list.len().max(1))
         };
         #[cfg(feature = "telemetry")]
         GOSSIP_FANOUT_GAUGE.set(fanout as i64);
-        let mut list = peers.to_vec();
         if !fanout_all {
+            list.truncate(fanout);
             let mut rng = rand::thread_rng();
             list.shuffle(&mut rng);
         }

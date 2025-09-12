@@ -35,16 +35,9 @@ pub fn escrow_status(id: u64) -> serde_json::Value {
 pub fn escrow_release(id: u64, amount: u64) -> Result<serde_json::Value, &'static str> {
     let mut store = STORE.lock().unwrap();
     let mut state = store.load_escrow_state();
-    let (buy, sell, _qty, locked_at) = state
-        .locks
-        .get(&id)
-        .cloned()
-        .ok_or("not_found")?;
+    let (buy, sell, _qty, locked_at) = state.locks.get(&id).cloned().ok_or("not_found")?;
     check_liquidity_rules(locked_at)?;
-    let proof = state
-        .escrow
-        .release(id, amount)
-        .ok_or("invalid_release")?;
+    let proof = state.escrow.release(id, amount).ok_or("invalid_release")?;
     if let Some(entry) = state.escrow.status(id) {
         if entry.released == entry.total {
             state.locks.remove(&id);

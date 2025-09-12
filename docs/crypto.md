@@ -14,6 +14,11 @@ Wallet utilities expose an HKDF-SHA256 based `derive_key` helper for generating
 independent subkeys. The function performs constant-time comparisons to avoid
 timing leaks.
 
+## RPC Authentication
+
+Administrative RPC tokens are compared in constant time so attackers cannot
+leak secrets via timing side channels.
+
 ## Post-Quantum Signatures
 
 The wallet crate optionally enables Dilithium2 signatures behind the

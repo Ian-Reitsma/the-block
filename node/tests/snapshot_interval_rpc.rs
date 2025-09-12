@@ -50,6 +50,7 @@ async fn snapshot_interval_persist() {
     let rpc_cfg = the_block::config::RpcConfig {
         admin_token_file: Some(token_file.to_str().unwrap().to_string()),
         enable_debug: true,
+        relay_only: false,
         ..Default::default()
     };
     let handle = tokio::spawn(run_rpc_server(
@@ -107,6 +108,7 @@ async fn snapshot_interval_restart_cycle() {
         let rpc_cfg = the_block::config::RpcConfig {
             admin_token_file: Some(token_file.to_str().unwrap().to_string()),
             enable_debug: true,
+            relay_only: false,
             ..Default::default()
         };
         let handle = tokio::spawn(run_rpc_server(

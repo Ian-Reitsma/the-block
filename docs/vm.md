@@ -12,6 +12,8 @@ current schedule is:
 | `sub`     | 1   |
 | `mul`     | 2   |
 | `div`     | 3   |
+| `and`     | 1   |
+| `or`      | 1   |
 | storage read  | 10  |
 | storage write | 20  |
 | contract code load | 5 |

@@ -1,5 +1,5 @@
-use the_block::compute_market::{self, scheduler, Market, Offer, Job, Workload, SliceProof};
 use the_block::compute_market::scheduler::Capability;
+use the_block::compute_market::{self, scheduler, Job, Market, Offer, SliceProof, Workload};
 
 #[test]
 fn job_timeout_and_resubmit_penalizes() {
@@ -13,7 +13,10 @@ fn job_timeout_and_resubmit_penalizes() {
         units: 1,
         price_per_unit: 1,
         fee_pct_ct: 0,
-        capability: Capability { cpu_cores: 1, ..Default::default() },
+        capability: Capability {
+            cpu_cores: 1,
+            ..Default::default()
+        },
         reputation: 0,
         reputation_multiplier: 1.0,
     };
@@ -25,19 +28,26 @@ fn job_timeout_and_resubmit_penalizes() {
     let job = Job {
         job_id: "job1".into(),
         buyer: "buyer".into(),
-        slices: vec![[0u8;32]],
+        slices: vec![[0u8; 32]],
         price_per_unit: 1,
         consumer_bond: 5,
         workloads: vec![Workload::Transcode(vec![])],
-        capability: Capability { cpu_cores:1, ..Default::default() },
+        capability: Capability {
+            cpu_cores: 1,
+            ..Default::default()
+        },
         deadline: now + 1,
         priority: scheduler::Priority::Normal,
     };
     market.submit_job(job).unwrap();
     std::thread::sleep(std::time::Duration::from_secs(2));
-    let proof = SliceProof { reference: [0u8;32], output: [0u8;32], payout: 1 };
+    let proof = SliceProof {
+        reference: [0u8; 32],
+        output: [0u8; 32],
+        payout: 1,
+    };
     assert!(market.submit_slice("job1", proof).is_err());
-    #[cfg(feature="telemetry")]
+    #[cfg(feature = "telemetry")]
     assert_eq!(the_block::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.get(), 1);
     // resubmit
     let offer2 = Offer {
@@ -48,7 +58,10 @@ fn job_timeout_and_resubmit_penalizes() {
         units: 1,
         price_per_unit: 1,
         fee_pct_ct: 0,
-        capability: Capability { cpu_cores:1, ..Default::default() },
+        capability: Capability {
+            cpu_cores: 1,
+            ..Default::default()
+        },
         reputation: 0,
         reputation_multiplier: 1.0,
     };
@@ -56,15 +69,18 @@ fn job_timeout_and_resubmit_penalizes() {
     let job2 = Job {
         job_id: "job1".into(),
         buyer: "buyer".into(),
-        slices: vec![[0u8;32]],
+        slices: vec![[0u8; 32]],
         price_per_unit: 1,
         consumer_bond: 5,
         workloads: vec![Workload::Transcode(vec![])],
-        capability: Capability { cpu_cores:1, ..Default::default() },
+        capability: Capability {
+            cpu_cores: 1,
+            ..Default::default()
+        },
         deadline: now + 10,
         priority: scheduler::Priority::Normal,
     };
     market.submit_job(job2).unwrap();
-    #[cfg(feature="telemetry")]
+    #[cfg(feature = "telemetry")]
     assert_eq!(the_block::telemetry::JOB_RESUBMITTED_TOTAL.get(), 1);
 }

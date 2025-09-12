@@ -1,3 +1,4 @@
+#![deny(warnings)]
 #![allow(clippy::expect_used)]
 
 use std::fs;
@@ -121,6 +122,22 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         quic: bool,
 
+        /// Enable local mesh networking
+        #[arg(long, default_value_t = false)]
+        range_boost: bool,
+
+        /// Disable mining and operate as a relay-only node
+        #[arg(long, default_value_t = false)]
+        relay_only: bool,
+
+        /// Address to serve a status page on
+        #[arg(long)]
+        status_addr: Option<String>,
+
+        /// Load chain state from snapshot file before starting
+        #[arg(long)]
+        snapshot: Option<String>,
+
         /// Port for QUIC listener
         #[arg(long)]
         quic_port: Option<u16>,
@@ -140,6 +157,10 @@ enum Commands {
         /// Enable runtime profiling and emit Chrome trace to `trace.json`
         #[arg(long, default_value_t = false)]
         profiling: bool,
+
+        /// Path to jurisdiction policy pack
+        #[arg(long)]
+        jurisdiction: Option<String>,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -190,18 +211,6 @@ enum CourierCmd {
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
-    // Load jurisdiction policy pack if provided
-    if let Ok(p) = std::env::var("JURISDICTION_PACK") {
-        match jurisdiction::PolicyPack::load(&p) {
-            Ok(pack) => {
-                #[cfg(feature = "telemetry")]
-                info!("jurisdiction pack loaded region={}", pack.region);
-                #[cfg(not(feature = "telemetry"))]
-                println!("jurisdiction pack loaded region={}", pack.region);
-            }
-            Err(e) => eprintln!("failed to load jurisdiction pack: {e}"),
-        }
-    }
     let code = match cli.command {
         Commands::Run {
             rpc_addr,
@@ -214,11 +223,16 @@ async fn main() -> std::process::ExitCode {
             log_level,
             dry_run,
             quic,
+            range_boost,
+            relay_only,
+            status_addr,
+            snapshot,
             quic_port: _quic_port,
             quic_cert: _quic_cert,
             quic_key: _quic_key,
             quic_cert_ttl_days: _quic_cert_ttl_days,
             profiling,
+            jurisdiction,
         } => {
             let filter = EnvFilter::new(log_level.join(","));
             let (profiler, _chrome) = if profiling {
@@ -243,6 +257,28 @@ async fn main() -> std::process::ExitCode {
                 (None, None)
             };
             let mut inner = Blockchain::open_with_db(&data_dir, &db_path).expect("open blockchain");
+            if let Some(path) = snapshot.as_ref() {
+                if let Ok((height, accounts, _root)) =
+                    the_block::blockchain::snapshot::load_file(path)
+                {
+                    inner.accounts = accounts;
+                    inner.block_height = height;
+                }
+            }
+            if let Some(path) = jurisdiction.as_ref() {
+                match jurisdiction::PolicyPack::load(path) {
+                    Ok(pack) => {
+                        inner.config.jurisdiction = Some(pack.region.clone());
+                        let _ = the_block::le_portal::record_action(
+                            "le_jurisdiction.log",
+                            "jurisdiction",
+                            &format!("loaded {}", pack.region),
+                            &pack.region,
+                        );
+                    }
+                    Err(e) => eprintln!("failed to load jurisdiction pack: {e}"),
+                }
+            }
             if snapshot_interval != inner.config.snapshot_interval {
                 inner.snapshot.set_interval(snapshot_interval);
                 inner.config.snapshot_interval = snapshot_interval;
@@ -273,9 +309,17 @@ async fn main() -> std::process::ExitCode {
                 spawn_purge_loop_thread(Arc::clone(&bc), mempool_purge_interval, flag.as_arc());
             }
 
+            if range_boost {
+                std::thread::spawn(|| loop {
+                    the_block::range_boost::discover_peers();
+                    std::thread::sleep(std::time::Duration::from_secs(30));
+                });
+            }
+
             let mining = Arc::new(AtomicBool::new(false));
             let (tx, rx) = tokio::sync::oneshot::channel();
-            let rpc_cfg = bc.lock().unwrap().config.rpc.clone();
+            let mut rpc_cfg = bc.lock().unwrap().config.rpc.clone();
+            rpc_cfg.relay_only = relay_only;
             let handle = tokio::spawn(run_rpc_server(
                 Arc::clone(&bc),
                 Arc::clone(&mining),
@@ -285,6 +329,13 @@ async fn main() -> std::process::ExitCode {
             ));
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
+            if let Some(addr) = status_addr {
+                let bc_status = Arc::clone(&bc);
+                tokio::spawn(async move {
+                    let addr: std::net::SocketAddr = addr.parse().unwrap();
+                    let _ = the_block::web::status::run(addr, bc_status).await;
+                });
+            }
             if quic {
                 #[cfg(feature = "quic")]
                 {
@@ -391,6 +442,7 @@ async fn main() -> std::process::ExitCode {
             let _ = handle.await;
             match_stop.cancel();
             the_block::compute_market::price_board::persist();
+            let _ = the_block::net::persist_peer_metrics();
             if let Some(g) = profiler {
                 if let Ok(report) = g.report().build() {
                     let file = std::fs::File::create("flamegraph.svg").expect("flamegraph");

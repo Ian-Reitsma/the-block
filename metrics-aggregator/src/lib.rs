@@ -7,14 +7,14 @@ use axum::{
     Json, Router,
 };
 use bytes::Bytes;
+#[cfg(feature = "etcd-client")]
+use etcd_client::Client;
+use once_cell::sync::Lazy;
 use openssl::{
     rand::rand_bytes,
     sha::sha256,
     symm::{Cipher, Crypter, Mode},
 };
-#[cfg(feature = "etcd-client")]
-use etcd_client::Client;
-use once_cell::sync::Lazy;
 use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};

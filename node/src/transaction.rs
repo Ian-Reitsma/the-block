@@ -378,7 +378,9 @@ pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
     let mut vks = Vec::new();
     let mut indices = Vec::new();
     for (i, tx) in txs.iter().enumerate() {
-        if let (Some(pk), Some(sig_bytes)) = (to_array_32(&tx.public_key), to_array_64(&tx.signature)) {
+        if let (Some(pk), Some(sig_bytes)) =
+            (to_array_32(&tx.public_key), to_array_64(&tx.signature))
+        {
             if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
                 let payload_bytes = canonical_payload_bytes(&tx.payload);
                 let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());

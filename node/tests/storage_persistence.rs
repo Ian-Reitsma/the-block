@@ -1,5 +1,5 @@
-use the_block::SimpleDb;
 use tempfile::tempdir;
+use the_block::SimpleDb;
 
 #[test]
 fn restart_recovers_state() {
@@ -13,4 +13,3 @@ fn restart_recovers_state() {
         assert_eq!(db.get("foo"), Some(b"bar".to_vec()));
     }
 }
-

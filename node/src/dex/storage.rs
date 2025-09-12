@@ -74,8 +74,7 @@ impl DexStore {
     }
 
     pub fn load_escrow_state(&self) -> EscrowState {
-        self
-            .db
+        self.db
             .get("escrow")
             .and_then(|b| bincode::deserialize(&b).ok())
             .unwrap_or_default()
