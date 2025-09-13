@@ -5,19 +5,32 @@ mod bridge;
 mod compute;
 mod config;
 mod dex;
+mod fee_estimator;
 mod gov;
+mod htlc;
+mod storage;
+mod snark;
 mod net;
 mod service_badge;
 mod telemetry;
+mod light_sync;
+#[cfg(feature = "quantum")]
+mod wallet;
 use bridge::BridgeCmd;
 use compute::ComputeCmd;
 use config::ConfigCmd;
 use dex::DexCmd;
 use gov::GovCmd;
+use htlc::HtlcCmd;
+use storage::StorageCmd;
+use snark::SnarkCmd;
 use net::NetCmd;
 use service_badge::ServiceBadgeCmd;
 use telemetry::TelemetryCmd;
+use light_sync::LightSyncCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
+#[cfg(feature = "quantum")]
+use wallet::WalletCmd;
 
 #[derive(Parser)]
 #[command(name = "contract")]
@@ -91,6 +104,37 @@ enum Commands {
         #[command(subcommand)]
         action: ServiceBadgeCmd,
     },
+    /// HTLC utilities
+    Htlc {
+        #[command(subcommand)]
+        action: HtlcCmd,
+    },
+    /// Storage market utilities
+    Storage {
+        #[command(subcommand)]
+        action: StorageCmd,
+    },
+    /// SNARK tooling
+    Snark {
+        #[command(subcommand)]
+        action: SnarkCmd,
+    },
+    /// Light client synchronization
+    LightSync {
+        #[command(subcommand)]
+        action: LightSyncCmd,
+    },
+    /// Fee estimation utilities
+    Fees {
+        /// Recent observed tip samples
+        #[arg(long, value_delimiter = ',')]
+        samples: Vec<u64>,
+    },
+    #[cfg(feature = "quantum")]
+    Wallet {
+        #[command(subcommand)]
+        action: WalletCmd,
+    },
 }
 
 fn main() {
@@ -137,5 +181,18 @@ fn main() {
         Commands::Config { action } => config::handle(action),
         Commands::Telemetry { action } => telemetry::handle(action),
         Commands::ServiceBadge { action } => service_badge::handle(action),
+        Commands::Htlc { action } => htlc::handle(action),
+        Commands::Storage { action } => storage::handle(action),
+        Commands::Snark { action } => snark::handle(action),
+        Commands::LightSync { action } => light_sync::handle(action),
+        Commands::Fees { samples } => {
+            let mut est = fee_estimator::RollingMedianEstimator::new(21);
+            for s in samples {
+                est.record(s);
+            }
+            println!("{}", est.suggest());
+        }
+        #[cfg(feature = "quantum")]
+        Commands::Wallet { action } => wallet::handle(action),
     }
 }

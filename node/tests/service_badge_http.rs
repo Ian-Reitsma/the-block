@@ -42,7 +42,7 @@ async fn badge_status_endpoint() {
         for _ in 0..90 {
             chain
                 .badge_tracker_mut()
-                .record_epoch(true, std::time::Duration::from_millis(0));
+                .record_epoch("node", true, std::time::Duration::from_millis(0));
         }
     }
 

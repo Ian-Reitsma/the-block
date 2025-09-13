@@ -30,6 +30,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
 
+pub mod ledger;
 pub mod limiter;
 use limiter::{ClientState, RpcClientErrorCode};
 
@@ -45,10 +46,13 @@ pub mod compute_market;
 pub mod consensus;
 pub mod dex;
 pub mod governance;
+pub mod htlc;
+pub mod storage;
 pub mod identity;
 pub mod inflation;
 pub mod jurisdiction;
 pub mod light;
+pub mod state_stream;
 pub mod pos;
 pub mod vm;
 
@@ -110,6 +114,10 @@ const PUBLIC_METHODS: &[&str] = &[
     "dex_escrow_status",
     "dex_escrow_release",
     "dex_escrow_proof",
+    "htlc_status",
+    "htlc_refund",
+    "storage_upload",
+    "storage_challenge",
     "pow.submit",
     "inflation.params",
     "compute_market.stats",
@@ -128,6 +136,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "consensus.pos.slash",
     "rent.escrow.balance",
     "light.latest_header",
+    "light.headers",
     "service_badge_verify",
     "jurisdiction.status",
 ];
@@ -300,6 +309,7 @@ pub async fn handle_conn(
     let mut host = String::new();
     let mut origin = String::new();
     let mut auth: Option<String> = None;
+    let mut ws_key: Option<String> = None;
     loop {
         line.clear();
         let read = match timeout(cfg.request_timeout, reader.read_line(&mut line)).await {
@@ -326,6 +336,8 @@ pub async fn handle_conn(
             origin = val.trim().to_string();
         } else if lower.starts_with("authorization:") {
             auth = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
+        } else if lower.starts_with("sec-websocket-key:") {
+            ws_key = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
         }
     }
 
@@ -372,7 +384,13 @@ pub async fn handle_conn(
         return;
     }
 
-    if method == "GET" && path == "/badge/status" {
+    if method == "GET" && path == "/state_stream" {
+        if let Some(key) = ws_key {
+            let stream = reader.into_inner();
+            state_stream::serve_state_stream(stream, key, Arc::clone(&bc)).await;
+        }
+        return;
+    } else if method == "GET" && path == "/badge/status" {
         let (active, last_mint, last_burn) = {
             let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
             chain.check_badges();
@@ -694,6 +712,15 @@ fn dispatch(
             } else {
                 serde_json::json!({"consumer": 0, "industrial": 0})
             }
+        }
+        "ledger.shard_of" => {
+            let addr = req
+                .params
+                .get("address")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let shard = ledger::shard_of(addr);
+            serde_json::json!({"shard": shard})
         }
         "settlement_status" => {
             let provider = req.params.get("provider").and_then(|v| v.as_str());
@@ -1218,12 +1245,13 @@ fn dispatch(
         }
         "pow.get_template" => {
             // simplistic template: zero prev/merkle
-            let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000);
+            let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1);
             serde_json::json!({
                 "prev_hash": hex::encode(tmpl.prev_hash),
                 "merkle_root": hex::encode(tmpl.merkle_root),
                 "checkpoint_hash": hex::encode(tmpl.checkpoint_hash),
                 "difficulty": tmpl.difficulty,
+                "base_fee": tmpl.base_fee,
                 "timestamp_millis": tmpl.timestamp_millis
             })
         }
@@ -1268,6 +1296,7 @@ fn dispatch(
                 checkpoint_hash,
                 nonce,
                 difficulty,
+                base_fee: header_obj["base_fee"].as_u64().unwrap_or(1),
                 timestamp_millis: timestamp,
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),
@@ -1294,6 +1323,12 @@ fn dispatch(
         "light.latest_header" => {
             let guard = bc.lock().unwrap();
             serde_json::to_value(light::latest_header(&guard)).unwrap()
+        }
+        "light.headers" => {
+            let start = req.params.get("start").and_then(|v| v.as_u64()).unwrap_or(0);
+            let limit = req.params.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
+            let guard = bc.lock().unwrap();
+            serde_json::to_value(light::headers_since(&guard, start, limit)).unwrap()
         }
         "rent.escrow.balance" => {
             let esc = RentEscrow::open("rent_escrow.db");
@@ -1490,13 +1525,21 @@ fn dispatch(
                 .ok()
                 .and_then(|b| bincode::deserialize::<SignedTransaction>(&b).ok())
             {
-                Some(tx) => match bc.lock() {
-                    Ok(mut guard) => match guard.submit_transaction(tx) {
-                        Ok(()) => serde_json::json!({"status": "ok"}),
-                        Err(e) => serde_json::json!({"error": format!("{e:?}")}),
-                    },
-                    Err(_) => serde_json::json!({"error": "lock poisoned"}),
-                },
+                Some(mut tx) => {
+                    if let Some(f) = req.params.get("max_fee").and_then(|v| v.as_u64()) {
+                        tx.payload.fee = f;
+                    }
+                    if let Some(t) = req.params.get("tip").and_then(|v| v.as_u64()) {
+                        tx.tip = t;
+                    }
+                    match bc.lock() {
+                        Ok(mut guard) => match guard.submit_transaction(tx) {
+                            Ok(()) => serde_json::json!({"status": "ok"}),
+                            Err(e) => serde_json::json!({"error": format!("{e:?}")}),
+                        },
+                        Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                    }
+                }
                 None => {
                     return Err(RpcError {
                         code: -32602,
@@ -1674,6 +1717,39 @@ fn dispatch(
                     message: "not found",
                 });
             }
+        }
+        "htlc_status" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            htlc::status(id)
+        }
+        "htlc_refund" => {
+            let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let now = req.params.get("now").and_then(|v| v.as_u64()).unwrap_or(0);
+            htlc::refund(id, now)
+        }
+        "storage_upload" => {
+            let object_id = req.params.get("object_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let provider_id = req.params.get("provider_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let original_bytes = req.params.get("original_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            let shares = req.params.get("shares").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            let price_per_block = req.params.get("price_per_block").and_then(|v| v.as_u64()).unwrap_or(0);
+            let start_block = req.params.get("start_block").and_then(|v| v.as_u64()).unwrap_or(0);
+            let retention_blocks = req.params.get("retention_blocks").and_then(|v| v.as_u64()).unwrap_or(0);
+            let contract = storage::StorageContract {
+                object_id,
+                provider_id,
+                original_bytes,
+                shares,
+                price_per_block,
+                start_block,
+                retention_blocks,
+            };
+            storage::upload(contract)
+        }
+        "storage_challenge" => {
+            let object_id = req.params.get("object_id").and_then(|v| v.as_str()).unwrap_or("");
+            let current_block = req.params.get("current_block").and_then(|v| v.as_u64()).unwrap_or(0);
+            storage::challenge(object_id, current_block)
         }
         "gov_propose" => {
             let proposer = req

@@ -6,12 +6,41 @@
 use crate::{constants::bincode_config, constants::domain_tag, to_array_32, to_array_64};
 use bincode::Options;
 use blake3::Hasher;
+#[cfg(feature = "quantum")]
+use crypto::dilithium;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
+use ledger::address::ShardId;
 use lru::LruCache;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum TxVersion {
+    Ed25519Only,
+    Dual,
+    DilithiumOnly,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct TxSignature {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ed25519: Vec<u8>,
+    #[cfg(feature = "quantum")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dilithium: Vec<u8>,
+}
+impl Default for TxSignature {
+    fn default() -> Self {
+        Self {
+            ed25519: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium: Vec::new(),
+        }
+    }
+}
+
 use std::cell::RefCell;
 
 use crate::{fee, fee::FeeError, TxAdmissionError};
@@ -51,7 +80,7 @@ impl Default for FeeLane {
 }
 
 #[pyclass]
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct RawTxPayload {
     #[pyo3(get, set)]
     pub from_: String,
@@ -96,6 +125,7 @@ impl RawTxPayload {
             memo,
         }
     }
+
     fn __repr__(&self) -> String {
         format!(
             "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, pct_ct={}, nonce={}, memo_len={})",
@@ -122,6 +152,28 @@ impl RawTxPayload {
     }
 }
 
+/// Wrapper for transactions spanning multiple shards.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct CrossShardEnvelope<T> {
+    /// Origin shard where the transaction is executed.
+    pub origin: ShardId,
+    /// Destination shard receiving any resulting state changes.
+    pub destination: ShardId,
+    /// Inner transaction payload.
+    pub payload: T,
+}
+
+impl<T> CrossShardEnvelope<T> {
+    /// Create a new cross-shard envelope.
+    pub fn new(origin: ShardId, destination: ShardId, payload: T) -> Self {
+        Self {
+            origin,
+            destination,
+            payload,
+        }
+    }
+}
+
 #[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SignedTransaction {
@@ -129,8 +181,16 @@ pub struct SignedTransaction {
     pub payload: RawTxPayload,
     #[pyo3(get, set)]
     pub public_key: Vec<u8>,
+    #[cfg(feature = "quantum")]
     #[pyo3(get, set)]
-    pub signature: Vec<u8>,
+    #[serde(default)]
+    pub dilithium_public_key: Vec<u8>,
+    #[pyo3(get, set)]
+    pub signature: TxSignature,
+    /// Priority fee paid to the miner above the base fee.
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub tip: u64,
     /// Optional set of signer public keys for multisig.
     #[pyo3(get, set)]
     #[serde(default)]
@@ -147,6 +207,27 @@ pub struct SignedTransaction {
     #[pyo3(get, set)]
     #[serde(default)]
     pub lane: FeeLane,
+    /// Signature mode for the transaction.
+    #[pyo3(get, set)]
+    #[serde(default)]
+    pub version: TxVersion,
+}
+impl Default for SignedTransaction {
+    fn default() -> Self {
+        Self {
+            payload: RawTxPayload::default(),
+            public_key: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium_public_key: Vec::new(),
+            signature: TxSignature::default(),
+            tip: 0,
+            signer_pubkeys: Vec::new(),
+            aggregate_signature: Vec::new(),
+            threshold: 0,
+            lane: FeeLane::Consumer,
+            version: TxVersion::Ed25519Only,
+        }
+    }
 }
 
 /// Result of attempting to apply a transaction to state.
@@ -183,20 +264,33 @@ impl SignedTransaction {
         SignedTransaction {
             payload,
             public_key,
-            signature,
+            #[cfg(feature = "quantum")]
+            dilithium_public_key: Vec::new(),
+            signature: TxSignature {
+                ed25519: signature,
+                #[cfg(feature = "quantum")]
+                dilithium: Vec::new(),
+            },
             signer_pubkeys: Vec::new(),
             aggregate_signature: Vec::new(),
             threshold: 0,
             lane,
+            version: TxVersion::Ed25519Only,
         }
     }
 
     fn __repr__(&self) -> String {
+        let ed_len = self.signature.ed25519.len();
+        #[cfg(feature = "quantum")]
+        let pq_len = self.signature.dilithium.len();
+        #[cfg(not(feature = "quantum"))]
+        let pq_len = 0;
         format!(
-            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{} bytes>, lane={:?})",
+            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{}|{} bytes>, lane={:?})",
             self.payload.__repr__(),
             self.public_key.len(),
-            self.signature.len(),
+            ed_len,
+            pq_len,
             self.lane,
         )
     }
@@ -279,6 +373,11 @@ pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("serialize: {e}"))
 }
 
+/// Determine the shard for a given encoded account address.
+pub fn shard_for_address(addr: &str) -> ShardId {
+    ledger::address::shard_id(addr)
+}
+
 /// Signs a transaction payload with the given Ed25519 private key.
 /// Returns `None` if the key length is invalid.
 pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransaction> {
@@ -290,11 +389,23 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
         m
     };
     let sig = sk.sign(&msg);
+    let signature = TxSignature {
+        ed25519: sig.to_bytes().to_vec(),
+        #[cfg(feature = "quantum")]
+        dilithium: Vec::new(),
+    };
     Some(SignedTransaction {
         payload: payload.clone(),
         public_key: sk.verifying_key().to_bytes().to_vec(),
-        signature: sig.to_bytes().to_vec(),
+        #[cfg(feature = "quantum")]
+        dilithium_public_key: Vec::new(),
+        signature,
+        tip: 0,
+        signer_pubkeys: Vec::new(),
+        aggregate_signature: Vec::new(),
+        threshold: 0,
         lane: FeeLane::Consumer,
+        version: TxVersion::Ed25519Only,
     })
 }
 
@@ -347,23 +458,79 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
             }
             ok
         }
-    } else if let (Some(pk), Some(sig_bytes)) =
-        (to_array_32(&tx.public_key), to_array_64(&tx.signature))
-    {
-        if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-            MSG_BUF.with(|buf| {
-                let mut buf = buf.borrow_mut();
-                buf.clear();
-                buf.extend_from_slice(domain);
-                buf.extend_from_slice(&payload_bytes);
-                let sig = Signature::from_bytes(&sig_bytes);
-                vk.verify(&buf, &sig).is_ok()
-            })
-        } else {
-            false
-        }
     } else {
-        false
+        match tx.version {
+            TxVersion::Ed25519Only => {
+                if let (Some(pk), Some(sig_bytes)) = (
+                    to_array_32(&tx.public_key),
+                    to_array_64(&tx.signature.ed25519),
+                ) {
+                    if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+                        MSG_BUF.with(|buf| {
+                            let mut buf = buf.borrow_mut();
+                            buf.clear();
+                            buf.extend_from_slice(domain);
+                            buf.extend_from_slice(&payload_bytes);
+                            let sig = Signature::from_bytes(&sig_bytes);
+                            vk.verify(&buf, &sig).is_ok()
+                        })
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            TxVersion::Dual => {
+                let ed_ok = if let (Some(pk), Some(sig_bytes)) = (
+                    to_array_32(&tx.public_key),
+                    to_array_64(&tx.signature.ed25519),
+                ) {
+                    if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+                        MSG_BUF.with(|buf| {
+                            let mut buf = buf.borrow_mut();
+                            buf.clear();
+                            buf.extend_from_slice(domain);
+                            buf.extend_from_slice(&payload_bytes);
+                            let sig = Signature::from_bytes(&sig_bytes);
+                            vk.verify(&buf, &sig).is_ok()
+                        })
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                #[cfg(feature = "quantum")]
+                let pq_ok =
+                    if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
+                        let mut msg = domain.to_vec();
+                        msg.extend_from_slice(&payload_bytes);
+                        dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
+                    } else {
+                        false
+                    };
+                #[cfg(not(feature = "quantum"))]
+                let pq_ok = false;
+                ed_ok && pq_ok
+            }
+            TxVersion::DilithiumOnly => {
+                #[cfg(feature = "quantum")]
+                {
+                    if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
+                        let mut msg = domain.to_vec();
+                        msg.extend_from_slice(&payload_bytes);
+                        dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
+                    } else {
+                        false
+                    }
+                }
+                #[cfg(not(feature = "quantum"))]
+                {
+                    false
+                }
+            }
+        }
     };
     SIG_CACHE.lock().put(key, res);
     res
@@ -378,18 +545,21 @@ pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
     let mut vks = Vec::new();
     let mut indices = Vec::new();
     for (i, tx) in txs.iter().enumerate() {
-        if let (Some(pk), Some(sig_bytes)) =
-            (to_array_32(&tx.public_key), to_array_64(&tx.signature))
-        {
-            if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-                let payload_bytes = canonical_payload_bytes(&tx.payload);
-                let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());
-                msg.extend_from_slice(domain);
-                msg.extend_from_slice(&payload_bytes);
-                msgs.push(msg);
-                sigs.push(DalekSig::from_bytes(&sig_bytes));
-                vks.push(vk);
-                indices.push(i);
+        if matches!(tx.version, TxVersion::Ed25519Only | TxVersion::Dual) {
+            if let (Some(pk), Some(sig_bytes)) = (
+                to_array_32(&tx.public_key),
+                to_array_64(&tx.signature.ed25519),
+            ) {
+                if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
+                    let payload_bytes = canonical_payload_bytes(&tx.payload);
+                    let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());
+                    msg.extend_from_slice(domain);
+                    msg.extend_from_slice(&payload_bytes);
+                    msgs.push(msg);
+                    sigs.push(DalekSig::from_bytes(&sig_bytes));
+                    vks.push(vk);
+                    indices.push(i);
+                }
             }
         }
     }

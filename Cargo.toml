@@ -1,7 +1,8 @@
 [workspace]
 members = [
+  "crypto",
   "node",
-"state",
+  "state",
   "ledger",
   "crates/probe",
   "crates/wallet",
@@ -16,6 +17,7 @@ members = [
   "tools/debugger",
   "tools/analytics_audit",
   "tools/gov_graph",
+  "tools/dual-key-migrate",
   "explorer",
   "bridges",
   "cli",
@@ -23,7 +25,8 @@ members = [
   "gateway/fuzz",
   "dex",
   "inflation",
-  "metrics-aggregator"
+  "metrics-aggregator",
+  "storage"
 ]
 default-members = [
   "node",

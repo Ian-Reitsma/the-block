@@ -71,7 +71,7 @@ mechanics.
 
 Both formats are deterministic; identical inputs always yield the same hash. The
 `WorkloadRunner` dispatches to the appropriate reference job based on the
-`Workload` enum and returns the proof hash for inclusion in `SliceProof`. Each
+`Workload` enum and returns the proof hash for inclusion in an `ExecutionReceipt`. Each
 slice is processed in a `tokio::task::spawn_blocking` worker, allowing multiple
 slices to execute in parallel. Results are cached per slice ID so repeated
 invocations avoid recomputation. Parallel execution is deterministic—the same

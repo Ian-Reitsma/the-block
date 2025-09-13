@@ -377,13 +377,13 @@
     {
       "deprecated": false,
       "description": "Total compute provider SLA violations",
-      "labels": [],
+      "labels": ["provider"],
       "name": "compute_sla_violations_total"
     },
     {
       "deprecated": false,
       "description": "Rolling uptime percentage for the compute provider",
-      "labels": [],
+      "labels": ["provider"],
       "name": "compute_provider_uptime"
     },
     {
@@ -515,6 +515,12 @@
       "description": "Per-peer hits on the request rate limiter",
       "labels": ["peer_id"],
       "name": "p2p_request_limit_hits_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Rate limit drops per peer",
+      "labels": ["peer_id"],
+      "name": "peer_rate_limit_total"
     },
     {
       "deprecated": false,

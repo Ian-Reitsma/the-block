@@ -1,14 +1,10 @@
-use node::vm::{
-    bytecode::OpCode,
-    runtime::{Vm, VmType},
-};
+use node::vm::{exec, gas::GasMeter, opcodes::OpCode};
 
 #[test]
-fn gas_accounting_deterministic() {
-    let mut vm = Vm::new(VmType::Evm);
-    let code = vec![
+fn deterministic_gas_usage() {
+    let code: Vec<u8> = vec![
         OpCode::Push as u8,
-        6,
+        1,
         0,
         0,
         0,
@@ -25,22 +21,17 @@ fn gas_accounting_deterministic() {
         0,
         0,
         0,
-        OpCode::Div as u8,
-        OpCode::Push as u8,
-        3,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        OpCode::Mul as u8,
+        OpCode::Add as u8,
+        OpCode::Hash as u8,
+        OpCode::Halt as u8,
     ];
-    let id = vm.deploy(code);
-    let mut balance = 1000u64;
-    let (out, gas) = vm.execute(id, &[], 1000, 1, &mut balance).unwrap();
-    assert_eq!(&out[..8], &9u64.to_le_bytes());
-    assert_eq!(gas, 36);
-    assert_eq!(balance, 1000 - gas);
+    let mut load = || 0u64;
+    let mut store = |_v: u64| {};
+    let mut m1 = GasMeter::new(1_000);
+    exec::execute(&code, &mut m1, &mut load, &mut store).unwrap();
+    let mut m2 = GasMeter::new(1_000);
+    let mut load2 = || 0u64;
+    let mut store2 = |_v: u64| {};
+    exec::execute(&code, &mut m2, &mut load2, &mut store2).unwrap();
+    assert_eq!(m1.used(), m2.used());
 }

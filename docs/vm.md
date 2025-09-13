@@ -12,10 +12,13 @@ current schedule is:
 | `sub`     | 1   |
 | `mul`     | 2   |
 | `div`     | 3   |
+| `mod`     | 3   |
 | `and`     | 1   |
 | `or`      | 1   |
-| storage read  | 10  |
-| storage write | 20  |
+| `xor`     | 1   |
+| `load`    | 10  |
+| `store`   | 20  |
+| `hash`    | 50  |
 | contract code load | 5 |
 
 Immediates for `push` cost an additional unit via `GAS_IMMEDIATE`.
@@ -36,4 +39,6 @@ Transactions supply a `gas_limit` and `gas_price`. Fees are deducted
 `gas_used * gas_price` from the caller's balance.
 
 For tooling, `rpc/vm.rs` exposes helper methods to estimate gas usage,
-trace execution, and inspect contract storage.
+trace execution, and inspect contract storage. Storage can also be
+manipulated directly via the `vm.storage_read` and `vm.storage_write`
+RPC calls for off-chain inspection.

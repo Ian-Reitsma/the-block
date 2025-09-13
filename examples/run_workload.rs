@@ -9,6 +9,7 @@ fn main() {
     let data = fs::read(file).expect("read slice");
     let workload = match kind.as_str() {
         "inference" => Workload::Inference(data),
+        "snark" => Workload::Snark(data),
         _ => Workload::Transcode(data),
     };
     let _priority = match prio.as_str() {

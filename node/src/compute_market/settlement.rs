@@ -27,6 +27,8 @@ impl Settlement {
     pub fn shutdown() {}
 
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
+        #[cfg(feature = "telemetry")]
+        let _span = crate::log_context!(provider = provider);
         let res = ACCOUNTS
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -35,7 +37,9 @@ impl Settlement {
             #[cfg(feature = "telemetry")]
             {
                 SLASHING_BURN_CT_TOTAL.inc_by(amount);
-                crate::telemetry::COMPUTE_SLA_VIOLATIONS_TOTAL.inc();
+                crate::telemetry::COMPUTE_SLA_VIOLATIONS_TOTAL
+                    .with_label_values(&[provider])
+                    .inc();
             }
         }
         res.map_err(|_| ())

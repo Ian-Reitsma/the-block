@@ -1,4 +1,8 @@
-use crate::net::peer::PeerMetrics;
+use crate::net::peer::{DropReason, PeerMetrics};
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{verbose, PEER_RATE_LIMIT_TOTAL};
+#[cfg(feature = "telemetry")]
+use hex;
 use once_cell::sync::OnceCell;
 use sled::Tree;
 use std::collections::HashMap;
@@ -30,6 +34,15 @@ impl PeerMetricsStore {
         key.extend_from_slice(&ts.to_be_bytes());
         if let Ok(val) = bincode::serialize(metrics) {
             let _ = self.tree.insert(key, val);
+        }
+        #[cfg(feature = "telemetry")]
+        if verbose() {
+            if let Some(cnt) = metrics.drops.get(&DropReason::RateLimit) {
+                let peer_hex = hex::encode(pk);
+                PEER_RATE_LIMIT_TOTAL
+                    .with_label_values(&[peer_hex.as_str()])
+                    .set(*cnt as i64);
+            }
         }
         self.prune(pk, retention);
     }

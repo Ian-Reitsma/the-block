@@ -10,6 +10,7 @@ pub struct BlockEncoder<'a> {
     pub timestamp: u64,
     pub nonce: u64,
     pub difficulty: u64,
+    pub base_fee: u64,
     pub coin_c: u64,
     pub coin_i: u64,
     pub storage_sub: u64,
@@ -36,6 +37,7 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.timestamp.to_le_bytes());
         h.update(&self.nonce.to_le_bytes());
         h.update(&self.difficulty.to_le_bytes());
+        h.update(&self.base_fee.to_le_bytes());
         h.update(&self.coin_c.to_le_bytes());
         h.update(&self.coin_i.to_le_bytes());
         h.update(&self.storage_sub.to_le_bytes());

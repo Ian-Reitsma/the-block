@@ -4,6 +4,7 @@ use crate::{
     simple_db::DbDelta, transaction::verify_stateless, Account, Block, Blockchain, TokenBalance,
     TxAdmissionError,
 };
+use ledger::address;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::BLOCK_APPLY_FAIL_TOTAL;
@@ -13,6 +14,7 @@ use crate::telemetry::BLOCK_APPLY_FAIL_TOTAL;
 pub struct StateDelta {
     pub address: String,
     pub account: Account,
+    pub shard: address::ShardId,
 }
 
 /// Validate all transactions in `block` against `chain` without
@@ -65,6 +67,7 @@ pub fn validate_and_apply(
             deltas.push(StateDelta {
                 address: addr,
                 account: acc.clone(),
+                shard: address::shard_id(&acc.address),
             });
         }
     }

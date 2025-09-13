@@ -13,6 +13,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 anyhow = "1"
 the_block = { path = "../node" }
 blake3 = "1"
+storage = { path = "../storage" }
 
 [dev-dependencies]
 tempfile = "3"

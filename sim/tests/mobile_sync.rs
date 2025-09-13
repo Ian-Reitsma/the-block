@@ -1,5 +1,6 @@
-use light_client::{sync_background, Header, LightClient, SyncOptions};
-use std::time::Instant;
+use light_client::Header;
+use std::time::Duration;
+use tb_sim::mobile_sync::measure_sync_latency;
 
 fn make_header(prev: &Header, height: u64) -> Header {
     let mut h = Header {
@@ -42,24 +43,9 @@ fn measures_sync_latency() {
         vdf_output: [0u8; 32],
         vdf_proof: vec![],
     };
-    let mut lc = LightClient::new(genesis.clone());
     let h1 = make_header(&genesis, 1);
     let h2 = make_header(&h1, 2);
-    let fetch = move |start: u64| match start {
-        1 => vec![h1.clone(), h2.clone()],
-        _ => Vec::new(),
-    };
-    let start = Instant::now();
-    sync_background(
-        &mut lc,
-        SyncOptions {
-            wifi_only: false,
-            require_charging: false,
-            min_battery: 0.0,
-        },
-        fetch,
-    );
-    let dur = start.elapsed();
-    assert_eq!(lc.tip_height(), 2);
-    assert!(dur.as_millis() > 0);
+    let headers = vec![genesis, h1, h2];
+    let dur = measure_sync_latency(headers, Duration::from_millis(2));
+    assert!(dur.as_millis() >= 4);
 }

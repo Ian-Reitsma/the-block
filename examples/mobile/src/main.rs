@@ -1,5 +1,6 @@
-use light_client::{sync_background, Header, LightClient, SyncOptions};
+use light_client::{sync_background, upload_compressed_logs, Header, LightClient, SyncOptions};
 use wallet::remote_signer::RemoteSigner;
+use reqwest::blocking::Client;
 use std::fs::File;
 use std::io::Read;
 use std::thread;
@@ -27,6 +28,8 @@ fn main() {
     let opts = SyncOptions { wifi_only: true, require_charging: false, min_battery: 0.1 };
     sync_background(&mut client, opts, fetch);
     println!("synced {} headers", client.chain.len());
+    let compressed = upload_compressed_logs(b"demo log line");
+    println!("compressed log size {} bytes", compressed.len());
 
     // start a minimal remote signer service
     let server = Server::http("127.0.0.1:0").expect("server");
@@ -69,6 +72,11 @@ fn main() {
 }
 
 fn notify_tx(id: &str) {
+    let client = Client::new();
+    let _ = client
+        .post("http://localhost:8080/push")
+        .json(&serde_json::json!({"tx": id}))
+        .send();
     println!("push notification: tx {id}");
 }
 

@@ -28,9 +28,10 @@ exceeds a configured threshold.
 
 ## Transaction Admission
 
-Transactions must bid a fee ≥ `base_fee`. The mempool sorts by effective fee
-and evicts the lowest bidders when full. After a block is mined, the miner
-collects the `base_fee` and any tips above it.
+Transactions must bid a fee ≥ `base_fee`. The mempool sorts by priority tips
+and evicts the lowest bidders when full. When a block is mined, the protocol
+burns the `base_fee` portion of each transaction and credits only the tip
+excess to the miner.
 
 ## Querying the Base Fee
 
