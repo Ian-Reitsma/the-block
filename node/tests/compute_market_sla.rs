@@ -1,5 +1,5 @@
 use the_block::compute_market::scheduler::Capability;
-use the_block::compute_market::{self, scheduler, Job, Market, Offer, SliceProof, Workload};
+use the_block::compute_market::{self, scheduler, ExecutionReceipt, Job, Market, Offer, Workload};
 
 #[test]
 fn job_timeout_and_resubmit_penalizes() {
@@ -41,10 +41,11 @@ fn job_timeout_and_resubmit_penalizes() {
     };
     market.submit_job(job).unwrap();
     std::thread::sleep(std::time::Duration::from_secs(2));
-    let proof = SliceProof {
+    let proof = ExecutionReceipt {
         reference: [0u8; 32],
         output: [0u8; 32],
         payout: 1,
+        proof: None,
     };
     assert!(market.submit_slice("job1", proof).is_err());
     #[cfg(feature = "telemetry")]

@@ -1,5 +1,5 @@
 use crate::{WalletError, WalletSigner};
-use ed25519_dalek::{PublicKey, Signature};
+use ed25519_dalek::{PublicKey, Signature, Verifier};
 use hex;
 use ledger::crypto::remote_tag;
 use native_tls::{Certificate as NativeCertificate, Identity, TlsConnector};
@@ -122,7 +122,11 @@ impl RemoteSigner {
         if endpoints.is_empty() || threshold == 0 || threshold > endpoints.len() {
             return Err(WalletError::Failure("invalid signer configuration".into()));
         }
-        let timeout = Duration::from_secs(5);
+        let timeout_ms = std::env::var("REMOTE_SIGNER_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5_000);
+        let timeout = Duration::from_millis(timeout_ms);
         let mut builder = Client::builder().timeout(timeout);
         let mut tls = None;
         if let (Ok(cert_path), Ok(key_path)) = (
@@ -246,10 +250,10 @@ impl RemoteSigner {
         let (mut socket, _) = tungstenite::client::client(req, stream)
             .map_err(|e| WalletError::Failure(e.to_string()))?;
         socket
-            .write_message(Message::Text(serde_json::to_string(payload).unwrap()))
+            .send(Message::Text(serde_json::to_string(payload).unwrap()))
             .map_err(|e| WalletError::Failure(e.to_string()))?;
         let msg = socket
-            .read_message()
+            .read()
             .map_err(|e| WalletError::Failure(e.to_string()))?;
         let txt = match msg {
             Message::Text(t) => t,
@@ -282,21 +286,30 @@ impl WalletSigner for RemoteSigner {
 
     fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<Signature>, WalletError> {
         let tagged = remote_tag(msg);
-        let msg_hex = hex::encode(tagged);
+        let msg_hex = hex::encode(&tagged);
         let trace_id = Uuid::new_v4();
         let payload = SignReq {
             trace: &trace_id.to_string(),
             msg: msg_hex,
         };
         let mut sigs = Vec::new();
-        for ep in &self.endpoints {
+        for (i, ep) in self.endpoints.iter().enumerate() {
             let res = if ep.starts_with("ws") {
                 self.sign_ws(ep, &payload)
             } else {
                 self.sign_http(ep, &payload)
             };
             match res {
-                Ok(sig) => sigs.push(sig),
+                Ok(sig) => {
+                    if self.pubkeys[i].verify(&tagged, &sig).is_ok() {
+                        sigs.push(sig);
+                    } else {
+                        warn!(%trace_id, "invalid signature");
+                        if self.endpoints.len() - sigs.len() <= self.threshold - sigs.len() {
+                            return Err(WalletError::Failure("invalid signature".into()));
+                        }
+                    }
+                }
                 Err(e) => {
                     warn!(%trace_id, error=%e, "signer failure");
                     if self.endpoints.len() - sigs.len() <= self.threshold - sigs.len() {

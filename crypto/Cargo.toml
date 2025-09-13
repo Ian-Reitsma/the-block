@@ -1,0 +1,12 @@
+[package]
+name = "crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Post-quantum Dilithium implementation
+pqcrypto-dilithium = { version = "0.5", optional = true }
+pqcrypto-traits = { version = "0.3", optional = true }
+
+[features]
+quantum = ["pqcrypto-dilithium", "pqcrypto-traits"]

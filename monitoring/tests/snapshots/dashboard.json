@@ -1,217 +1,21 @@
 {
   "panels": [
     {
-      "description": "Remaining burst quota",
       "id": 1,
-      "targets": [
-        {
-          "expr": "active_burst_quota"
-        }
-      ],
-      "title": "active_burst_quota",
-      "type": "timeseries"
+      "title": "DEX",
+      "type": "row"
     },
     {
-      "description": "effective active miners",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
       "id": 2,
-      "targets": [
-        {
-          "expr": "active_miners"
+      "options": {
+        "legend": {
+          "showLegend": false
         }
-      ],
-      "title": "active_miners",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current industrial admission mode",
-      "id": 3,
-      "targets": [
-        {
-          "expr": "admission_mode"
-        }
-      ],
-      "title": "admission_mode",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total peer metric ingests",
-      "id": 4,
-      "targets": [
-        {
-          "expr": "aggregator_ingest_total"
-        }
-      ],
-      "title": "aggregator_ingest_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer metric samples pruned by retention",
-      "id": 5,
-      "targets": [
-        {
-          "expr": "aggregator_retention_pruned_total"
-        }
-      ],
-      "title": "aggregator_retention_pruned_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Whether a service badge is active (1/0)",
-      "id": 6,
-      "targets": [
-        {
-          "expr": "badge_active"
-        }
-      ],
-      "title": "badge_active",
-      "type": "timeseries"
-    },
-    {
-      "description": "Unix timestamp of the last badge mint/burn",
-      "id": 7,
-      "targets": [
-        {
-          "expr": "badge_last_change_seconds"
-        }
-      ],
-      "title": "badge_last_change_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Transactions rejected due to balance overflow",
-      "id": 8,
-      "targets": [
-        {
-          "expr": "balance_overflow_reject_total"
-        }
-      ],
-      "title": "balance_overflow_reject_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Expiration timestamp for active peer bans",
-      "id": 9,
-      "targets": [
-        {
-          "expr": "banned_peer_expiration_seconds"
-        }
-      ],
-      "title": "banned_peer_expiration_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total peers currently banned",
-      "id": 10,
-      "targets": [
-        {
-          "expr": "banned_peers_total"
-        }
-      ],
-      "title": "banned_peers_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "base reward after logistic factor",
-      "id": 11,
-      "targets": [
-        {
-          "expr": "base_reward_ct"
-        }
-      ],
-      "title": "base_reward_ct",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total mined blocks",
-      "id": 12,
-      "targets": [
-        {
-          "expr": "block_mined_total"
-        }
-      ],
-      "title": "block_mined_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Unique peers tracked by aggregator",
-      "id": 13,
-      "targets": [
-        {
-          "expr": "cluster_peer_active_total"
-        }
-      ],
-      "title": "cluster_peer_active_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Unix timestamp of the last successful config reload",
-      "id": 14,
-      "targets": [
-        {
-          "expr": "config_reload_last_ts"
-        }
-      ],
-      "title": "config_reload_last_ts",
-      "type": "timeseries"
-    },
-    {
-      "description": "Configuration reload attempts grouped by result",
-      "id": 15,
-      "targets": [
-        {
-          "expr": "config_reload_total"
-        }
-      ],
-      "title": "config_reload_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Median consumer fee",
-      "id": 16,
-      "targets": [
-        {
-          "expr": "consumer_fee_p50"
-        }
-      ],
-      "title": "consumer_fee_p50",
-      "type": "timeseries"
-    },
-    {
-      "description": "p90 consumer fee",
-      "id": 17,
-      "targets": [
-        {
-          "expr": "consumer_fee_p90"
-        }
-      ],
-      "title": "consumer_fee_p90",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total courier receipt flush attempts",
-      "id": 18,
-      "targets": [
-        {
-          "expr": "courier_flush_attempt_total"
-        }
-      ],
-      "title": "courier_flush_attempt_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Failed courier receipt flush attempts",
-      "id": 19,
-      "targets": [
-        {
-          "expr": "courier_flush_failure_total"
-        }
-      ],
-      "title": "courier_flush_failure_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total funds locked in DEX escrow",
-      "id": 20,
+      },
       "targets": [
         {
           "expr": "dex_escrow_locked"
@@ -221,8 +25,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Number of pending DEX escrows",
-      "id": 21,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "dex_escrow_pending"
@@ -232,8 +44,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Total liquidity currently locked in DEX escrow",
-      "id": 22,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "dex_liquidity_locked_total"
@@ -243,8 +63,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Orders submitted to the DEX by side",
-      "id": 23,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "dex_orders_total"
@@ -254,8 +82,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Total matched trade quantity across all DEX pairs",
-      "id": 24,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "dex_trade_volume"
@@ -265,382 +101,21 @@
       "type": "timeseries"
     },
     {
-      "description": "Retarget calculations clamped to bounds",
-      "id": 25,
-      "targets": [
-        {
-          "expr": "difficulty_clamp_total"
-        }
-      ],
-      "title": "difficulty_clamp_total",
-      "type": "timeseries"
+      "id": 7,
+      "title": "Compute",
+      "type": "row"
     },
     {
-      "description": "Number of difficulty retarget calculations",
-      "id": 26,
-      "targets": [
-        {
-          "expr": "difficulty_retarget_total"
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "showLegend": false
         }
-      ],
-      "title": "difficulty_retarget_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total DNS verification failures",
-      "id": 27,
-      "targets": [
-        {
-          "expr": "dns_verification_fail_total"
-        }
-      ],
-      "title": "dns_verification_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "drop_transaction failures for missing entries",
-      "id": 28,
-      "targets": [
-        {
-          "expr": "drop_not_found_total"
-        }
-      ],
-      "title": "drop_not_found_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Transactions rejected as duplicate",
-      "id": 29,
-      "targets": [
-        {
-          "expr": "dup_tx_reject_total"
-        }
-      ],
-      "title": "dup_tx_reject_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total mempool evictions",
-      "id": 30,
-      "targets": [
-        {
-          "expr": "evictions_total"
-        }
-      ],
-      "title": "evictions_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Transactions rejected for low fee",
-      "id": 31,
-      "targets": [
-        {
-          "expr": "fee_floor_reject_total"
-        }
-      ],
-      "title": "fee_floor_reject_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "base seconds for Fibonacci smoothing",
-      "id": 32,
-      "targets": [
-        {
-          "expr": "fib_window_base_secs"
-        }
-      ],
-      "title": "fib_window_base_secs",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total observed fork reorgs",
-      "id": 33,
-      "targets": [
-        {
-          "expr": "fork_reorg_total"
-        }
-      ],
-      "title": "fork_reorg_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Gateway DNS verification attempts grouped by status",
-      "id": 34,
-      "targets": [
-        {
-          "expr": "gateway_dns_lookup_total"
-        }
-      ],
-      "title": "gateway_dns_lookup_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Time for all peers to agree on the network tip",
-      "id": 35,
-      "targets": [
-        {
-          "expr": "gossip_convergence_seconds"
-        }
-      ],
-      "title": "gossip_convergence_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Duplicate gossip messages dropped",
-      "id": 36,
-      "targets": [
-        {
-          "expr": "gossip_duplicate_total"
-        }
-      ],
-      "title": "gossip_duplicate_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current gossip fanout",
-      "id": 37,
-      "targets": [
-        {
-          "expr": "gossip_fanout_gauge"
-        }
-      ],
-      "title": "gossip_fanout_gauge",
-      "type": "timeseries"
-    },
-    {
-      "description": "Delay between scheduled and actual activation",
-      "id": 38,
-      "targets": [
-        {
-          "expr": "gov_activation_delay_seconds"
-        }
-      ],
-      "title": "gov_activation_delay_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Governance activations",
-      "id": 39,
-      "targets": [
-        {
-          "expr": "gov_activation_total"
-        }
-      ],
-      "title": "gov_activation_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Open governance proposals",
-      "id": 40,
-      "targets": [
-        {
-          "expr": "gov_open_proposals"
-        }
-      ],
-      "title": "gov_open_proposals",
-      "type": "timeseries"
-    },
-    {
-      "description": "Governance proposals by status",
-      "id": 41,
-      "targets": [
-        {
-          "expr": "gov_proposals_total"
-        }
-      ],
-      "title": "gov_proposals_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Governance quorum",
-      "id": 42,
-      "targets": [
-        {
-          "expr": "gov_quorum_required"
-        }
-      ],
-      "title": "gov_quorum_required",
-      "type": "timeseries"
-    },
-    {
-      "description": "Governance rollbacks",
-      "id": 43,
-      "targets": [
-        {
-          "expr": "gov_rollback_total"
-        }
-      ],
-      "title": "gov_rollback_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Governance votes",
-      "id": 44,
-      "targets": [
-        {
-          "expr": "gov_votes_total"
-        }
-      ],
-      "title": "gov_votes_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "eta parameter for burst veto x1000",
-      "id": 45,
-      "targets": [
-        {
-          "expr": "haar_eta_milli"
-        }
-      ],
-      "title": "haar_eta_milli",
-      "type": "timeseries"
-    },
-    {
-      "description": "Handshake failures grouped by reason",
-      "id": 46,
-      "targets": [
-        {
-          "expr": "handshake_fail_total"
-        }
-      ],
-      "title": "handshake_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "A* heuristic mu x1000",
-      "id": 47,
-      "targets": [
-        {
-          "expr": "heuristic_mu_milli"
-        }
-      ],
-      "title": "heuristic_mu_milli",
-      "type": "timeseries"
-    },
-    {
-      "description": "Non-contiguous nonce submissions",
-      "id": 48,
-      "targets": [
-        {
-          "expr": "identity_nonce_skips_total"
-        }
-      ],
-      "title": "identity_nonce_skips_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Handle registration attempts",
-      "id": 49,
-      "targets": [
-        {
-          "expr": "identity_registrations_total"
-        }
-      ],
-      "title": "identity_registrations_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Rejected identity replay attempts",
-      "id": 50,
-      "targets": [
-        {
-          "expr": "identity_replays_blocked_total"
-        }
-      ],
-      "title": "identity_replays_blocked_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Industrial lane transactions admitted",
-      "id": 51,
-      "targets": [
-        {
-          "expr": "industrial_admitted_total"
-        }
-      ],
-      "title": "industrial_admitted_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Pending industrial compute slices",
-      "id": 52,
-      "targets": [
-        {
-          "expr": "industrial_backlog"
-        }
-      ],
-      "title": "industrial_backlog",
-      "type": "timeseries"
-    },
-    {
-      "description": "Industrial lane submissions deferred",
-      "id": 53,
-      "targets": [
-        {
-          "expr": "industrial_deferred_total"
-        }
-      ],
-      "title": "industrial_deferred_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current industrial subsidy multiplier",
-      "id": 54,
-      "targets": [
-        {
-          "expr": "industrial_multiplier"
-        }
-      ],
-      "title": "industrial_multiplier",
-      "type": "timeseries"
-    },
-    {
-      "description": "Latest price per compute unit",
-      "id": 55,
-      "targets": [
-        {
-          "expr": "industrial_price_per_unit"
-        }
-      ],
-      "title": "industrial_price_per_unit",
-      "type": "timeseries"
-    },
-    {
-      "description": "Industrial admission rejections by reason",
-      "id": 56,
-      "targets": [
-        {
-          "expr": "industrial_rejected_total"
-        }
-      ],
-      "title": "industrial_rejected_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total normalized compute units processed",
-      "id": 57,
-      "targets": [
-        {
-          "expr": "industrial_units_total"
-        }
-      ],
-      "title": "industrial_units_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Industrial compute utilisation percentage",
-      "id": 58,
-      "targets": [
-        {
-          "expr": "industrial_utilization"
-        }
-      ],
-      "title": "industrial_utilization",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total compute provider SLA violations",
-      "id": 59,
+      },
       "targets": [
         {
           "expr": "compute_sla_violations_total"
@@ -650,8 +125,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Rolling uptime percentage for the compute provider",
-      "id": 60,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "compute_provider_uptime"
@@ -661,668 +144,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Transactions rejected for invalid fee selector",
-      "id": 61,
-      "targets": [
-        {
-          "expr": "invalid_selector_reject_total"
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "showLegend": false
         }
-      ],
-      "title": "invalid_selector_reject_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Successful peer key rotations",
-      "id": 62,
-      "targets": [
-        {
-          "expr": "key_rotation_total"
-        }
-      ],
-      "title": "key_rotation_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Times the subsidy kill switch was activated",
-      "id": 63,
-      "targets": [
-        {
-          "expr": "kill_switch_trigger_total"
-        }
-      ],
-      "title": "kill_switch_trigger_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Lock acquisition failures due to poisoning",
-      "id": 64,
-      "targets": [
-        {
-          "expr": "lock_poison_total"
-        }
-      ],
-      "title": "lock_poison_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Logs dropped due to rate limiting",
-      "id": 65,
-      "targets": [
-        {
-          "expr": "log_drop_total"
-        }
-      ],
-      "title": "log_drop_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total emitted log events",
-      "id": 66,
-      "targets": [
-        {
-          "expr": "log_emit_total"
-        }
-      ],
-      "title": "log_emit_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Size of serialized log events in bytes",
-      "id": 67,
-      "targets": [
-        {
-          "expr": "log_size_bytes"
-        }
-      ],
-      "title": "log_size_bytes",
-      "type": "timeseries"
-    },
-    {
-      "description": "Settlement loop latency",
-      "id": 68,
-      "targets": [
-        {
-          "expr": "match_loop_latency_seconds"
-        }
-      ],
-      "title": "match_loop_latency_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total matched jobs",
-      "id": 69,
-      "targets": [
-        {
-          "expr": "matches_total"
-        }
-      ],
-      "title": "matches_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current mempool size",
-      "id": 70,
-      "targets": [
-        {
-          "expr": "mempool_size"
-        }
-      ],
-      "title": "mempool_size",
-      "type": "timeseries"
-    },
-    {
-      "description": "Times the miner reward logistic factor was recalculated",
-      "id": 71,
-      "targets": [
-        {
-          "expr": "miner_reward_recalc_total"
-        }
-      ],
-      "title": "miner_reward_recalc_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "QUIC handshake failures per peer grouped by reason",
-      "id": 72,
-      "targets": [
-        {
-          "expr": "net_peer_handshake_fail_total"
-        }
-      ],
-      "title": "net_peer_handshake_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Transactions dropped because the sender account is missing",
-      "id": 73,
-      "targets": [
-        {
-          "expr": "orphan_sweep_total"
-        }
-      ],
-      "title": "orphan_sweep_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Successful handshakes by feature mask",
-      "id": 74,
-      "targets": [
-        {
-          "expr": "p2p_handshake_accept_total"
-        }
-      ],
-      "title": "p2p_handshake_accept_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Handshakes rejected by reason",
-      "id": 75,
-      "targets": [
-        {
-          "expr": "p2p_handshake_reject_total"
-        }
-      ],
-      "title": "p2p_handshake_reject_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current active governance parameter values",
-      "id": 76,
-      "targets": [
-        {
-          "expr": "param_change_active"
-        }
-      ],
-      "title": "param_change_active",
-      "type": "timeseries"
-    },
-    {
-      "description": "Governance parameter changes pending activation",
-      "id": 77,
-      "targets": [
-        {
-          "expr": "param_change_pending"
-        }
-      ],
-      "title": "param_change_pending",
-      "type": "timeseries"
-    },
-    {
-      "description": "Number of settlement payouts capped per identity",
-      "id": 78,
-      "targets": [
-        {
-          "expr": "payout_cap_hits_total"
-        }
-      ],
-      "title": "payout_cap_hits_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Bytes sent to peer",
-      "id": 79,
-      "targets": [
-        {
-          "expr": "peer_bytes_sent_total"
-        }
-      ],
-      "title": "peer_bytes_sent_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Messages dropped grouped by reason",
-      "id": 80,
-      "targets": [
-        {
-          "expr": "peer_drop_total"
-        }
-      ],
-      "title": "peer_drop_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Per-peer hits on the request rate limiter",
-      "id": 81,
-      "targets": [
-        {
-          "expr": "p2p_request_limit_hits_total"
-        }
-      ],
-      "title": "p2p_request_limit_hits_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total peer errors grouped by code",
-      "id": 82,
-      "targets": [
-        {
-          "expr": "peer_error_total"
-        }
-      ],
-      "title": "peer_error_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer key rotation attempts grouped by result",
-      "id": 83,
-      "targets": [
-        {
-          "expr": "peer_key_rotate_total"
-        }
-      ],
-      "title": "peer_key_rotate_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Number of peers currently tracked for telemetry",
-      "id": 84,
-      "targets": [
-        {
-          "expr": "peer_metrics_active"
-        }
-      ],
-      "title": "peer_metrics_active",
-      "type": "timeseries"
-    },
-    {
-      "description": "Websocket peer metrics frames dropped",
-      "id": 85,
-      "targets": [
-        {
-          "expr": "peer_metrics_dropped_total"
-        }
-      ],
-      "title": "peer_metrics_dropped_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Approximate memory used by peer metrics map",
-      "id": 86,
-      "targets": [
-        {
-          "expr": "peer_metrics_memory_bytes"
-        }
-      ],
-      "title": "peer_metrics_memory_bytes",
-      "type": "timeseries"
-    },
-    {
-      "description": "Active peer metrics websocket subscribers",
-      "id": 87,
-      "targets": [
-        {
-          "expr": "peer_metrics_subscribers"
-        }
-      ],
-      "title": "peer_metrics_subscribers",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peers rejected grouped by reason",
-      "id": 88,
-      "targets": [
-        {
-          "expr": "peer_rejected_total"
-        }
-      ],
-      "title": "peer_rejected_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer reputation score",
-      "id": 89,
-      "targets": [
-        {
-          "expr": "peer_reputation_score"
-        }
-      ],
-      "title": "peer_reputation_score",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total requests received from peer",
-      "id": 90,
-      "targets": [
-        {
-          "expr": "peer_request_total"
-        }
-      ],
-      "title": "peer_request_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Bulk peer metric export attempts grouped by result",
-      "id": 91,
-      "targets": [
-        {
-          "expr": "peer_stats_export_all_total"
-        }
-      ],
-      "title": "peer_stats_export_all_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer metric export attempts grouped by result",
-      "id": 92,
-      "targets": [
-        {
-          "expr": "peer_stats_export_total"
-        }
-      ],
-      "title": "peer_stats_export_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer metric queries grouped by peer",
-      "id": 93,
-      "targets": [
-        {
-          "expr": "peer_stats_query_total"
-        }
-      ],
-      "title": "peer_stats_query_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer metric resets grouped by peer",
-      "id": 94,
-      "targets": [
-        {
-          "expr": "peer_stats_reset_total"
-        }
-      ],
-      "title": "peer_stats_reset_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Peer throttle events grouped by reason",
-      "id": 95,
-      "targets": [
-        {
-          "expr": "peer_throttle_total"
-        }
-      ],
-      "title": "peer_throttle_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Backpressure activations grouped by reason",
-      "id": 96,
-      "targets": [
-        {
-          "expr": "peer_backpressure_active_total"
-        }
-      ],
-      "title": "peer_backpressure_active_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Requests dropped due to backpressure grouped by reason",
-      "id": 97,
-      "targets": [
-        {
-          "expr": "peer_backpressure_dropped_total"
-        }
-      ],
-      "title": "peer_backpressure_dropped_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total price entries adjusted by reputation weight",
-      "id": 98,
-      "targets": [
-        {
-          "expr": "price_weight_applied_total"
-        }
-      ],
-      "title": "price_weight_applied_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current reputation score per provider",
-      "id": 99,
-      "targets": [
-        {
-          "expr": "provider_reputation_score"
-        }
-      ],
-      "title": "provider_reputation_score",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total bytes received over QUIC",
-      "id": 100,
-      "targets": [
-        {
-          "expr": "quic_bytes_recv_total"
-        }
-      ],
-      "title": "quic_bytes_recv_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total bytes sent over QUIC",
-      "id": 101,
-      "targets": [
-        {
-          "expr": "quic_bytes_sent_total"
-        }
-      ],
-      "title": "quic_bytes_sent_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "QUIC connection handshake latency",
-      "id": 102,
-      "targets": [
-        {
-          "expr": "quic_conn_latency_seconds"
-        }
-      ],
-      "title": "quic_conn_latency_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "QUIC disconnects by error code",
-      "id": 103,
-      "targets": [
-        {
-          "expr": "quic_disconnect_total"
-        }
-      ],
-      "title": "quic_disconnect_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total QUIC endpoint reuse count",
-      "id": 104,
-      "targets": [
-        {
-          "expr": "quic_endpoint_reuse_total"
-        }
-      ],
-      "title": "quic_endpoint_reuse_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total QUIC handshake failures by reason",
-      "id": 105,
-      "targets": [
-        {
-          "expr": "quic_handshake_fail_total"
-        }
-      ],
-      "title": "quic_handshake_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Reads denied by reason",
-      "id": 106,
-      "targets": [
-        {
-          "expr": "read_denied_total"
-        }
-      ],
-      "title": "read_denied_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Corrupted receipt entries on load",
-      "id": 107,
-      "targets": [
-        {
-          "expr": "receipt_corrupt_total"
-        }
-      ],
-      "title": "receipt_corrupt_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Receipt persistence failures",
-      "id": 108,
-      "targets": [
-        {
-          "expr": "receipt_persist_fail_total"
-        }
-      ],
-      "title": "receipt_persist_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total CT burned from rent escrow",
-      "id": 109,
-      "targets": [
-        {
-          "expr": "rent_escrow_burned_ct_total"
-        }
-      ],
-      "title": "rent_escrow_burned_ct_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total CT locked in rent escrow",
-      "id": 110,
-      "targets": [
-        {
-          "expr": "rent_escrow_locked_ct_total"
-        }
-      ],
-      "title": "rent_escrow_locked_ct_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total CT refunded from rent escrow",
-      "id": 111,
-      "targets": [
-        {
-          "expr": "rent_escrow_refunded_ct_total"
-        }
-      ],
-      "title": "rent_escrow_refunded_ct_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Reputation adjustments",
-      "id": 112,
-      "targets": [
-        {
-          "expr": "reputation_adjust_total"
-        }
-      ],
-      "title": "reputation_adjust_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Reputation updates that failed verification or were stale",
-      "id": 113,
-      "targets": [
-        {
-          "expr": "reputation_gossip_fail_total"
-        }
-      ],
-      "title": "reputation_gossip_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Propagation latency for reputation updates",
-      "id": 114,
-      "targets": [
-        {
-          "expr": "reputation_gossip_latency_seconds"
-        }
-      ],
-      "title": "reputation_gossip_latency_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Reputation gossip updates processed grouped by result",
-      "id": 115,
-      "targets": [
-        {
-          "expr": "reputation_gossip_total"
-        }
-      ],
-      "title": "reputation_gossip_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total RPC bans issued",
-      "id": 116,
-      "targets": [
-        {
-          "expr": "rpc_bans_total"
-        }
-      ],
-      "title": "rpc_bans_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total RPC client errors grouped by code",
-      "id": 117,
-      "targets": [
-        {
-          "expr": "rpc_client_error_total"
-        }
-      ],
-      "title": "rpc_client_error_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "RPC requests checked against the rate limiter",
-      "id": 118,
-      "targets": [
-        {
-          "expr": "rpc_rate_limit_attempt_total"
-        }
-      ],
-      "title": "rpc_rate_limit_attempt_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "RPC requests rejected by the rate limiter",
-      "id": 119,
-      "targets": [
-        {
-          "expr": "rpc_rate_limit_reject_total"
-        }
-      ],
-      "title": "rpc_rate_limit_reject_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current RPC rate limiter tokens per client",
-      "id": 120,
-      "targets": [
-        {
-          "expr": "rpc_tokens_available"
-        }
-      ],
-      "title": "rpc_tokens_available",
-      "type": "timeseries"
-    },
-    {
-      "description": "Accelerator jobs that failed or were cancelled",
-      "id": 121,
+      },
       "targets": [
         {
           "expr": "scheduler_accelerator_fail_total"
@@ -1332,8 +163,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Jobs requiring accelerators that could not be matched",
-      "id": 122,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_accelerator_miss_total"
@@ -1343,8 +182,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Jobs requiring accelerators that started successfully",
-      "id": 123,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_accelerator_util_total"
@@ -1354,8 +201,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Number of currently assigned jobs",
-      "id": 124,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_active_jobs"
@@ -1365,8 +220,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Scheduler cancellations",
-      "id": 125,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_cancel_total"
@@ -1376,8 +239,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Effective compute price per unit by provider",
-      "id": 126,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_effective_price"
@@ -1387,8 +258,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Time to perform a scheduler match",
-      "id": 127,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_match_latency_seconds"
@@ -1398,8 +277,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Scheduler match outcomes by result",
-      "id": 128,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_match_total"
@@ -1409,8 +296,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Scheduler preemption events by reason",
-      "id": 129,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_preempt_total"
@@ -1420,8 +315,16 @@
       "type": "timeseries"
     },
     {
-      "description": "High-priority jobs exceeding wait threshold",
-      "id": 130,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "scheduler_priority_miss_total"
@@ -1431,30 +334,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Time a job waited in the scheduler queue",
-      "id": 131,
-      "targets": [
-        {
-          "expr": "job_age_seconds"
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "showLegend": false
         }
-      ],
-      "title": "job_age_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Jobs whose priority was boosted due to aging",
-      "id": 132,
-      "targets": [
-        {
-          "expr": "priority_boost_total"
-        }
-      ],
-      "title": "priority_boost_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Distribution of provider reputation scores",
-      "id": 133,
+      },
       "targets": [
         {
           "expr": "scheduler_provider_reputation"
@@ -1464,294 +353,78 @@
       "type": "timeseries"
     },
     {
-      "description": "Receipts applied",
-      "id": 134,
+      "id": 21,
+      "title": "Gossip",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
-          "expr": "settle_applied_total"
+          "expr": "gossip_convergence_seconds"
         }
       ],
-      "title": "settle_applied_total",
+      "title": "gossip_convergence_seconds",
       "type": "timeseries"
     },
     {
-      "description": "Receipts failing settlement audit",
-      "id": 135,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
-          "expr": "settle_audit_mismatch_total"
+          "expr": "gossip_duplicate_total"
         }
       ],
-      "title": "settle_audit_mismatch_total",
+      "title": "gossip_duplicate_total",
       "type": "timeseries"
     },
     {
-      "description": "Settlement failures",
-      "id": 136,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
-          "expr": "settle_failed_total"
+          "expr": "gossip_fanout_gauge"
         }
       ],
-      "title": "settle_failed_total",
+      "title": "gossip_fanout_gauge",
       "type": "timeseries"
     },
     {
-      "description": "Settlement mode changes",
-      "id": 137,
-      "targets": [
-        {
-          "expr": "settle_mode_change_total"
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "showLegend": false
         }
-      ],
-      "title": "settle_mode_change_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total CT burned from slashing penalties",
-      "id": 138,
-      "targets": [
-        {
-          "expr": "slashing_burn_ct_total"
-        }
-      ],
-      "title": "slashing_burn_ct_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Snapshot operation duration",
-      "id": 139,
-      "targets": [
-        {
-          "expr": "snapshot_duration_seconds"
-        }
-      ],
-      "title": "snapshot_duration_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total snapshot operation failures",
-      "id": 140,
-      "targets": [
-        {
-          "expr": "snapshot_fail_total"
-        }
-      ],
-      "title": "snapshot_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Snapshot interval in blocks",
-      "id": 141,
-      "targets": [
-        {
-          "expr": "snapshot_interval"
-        }
-      ],
-      "title": "snapshot_interval",
-      "type": "timeseries"
-    },
-    {
-      "description": "Last requested snapshot interval",
-      "id": 142,
-      "targets": [
-        {
-          "expr": "snapshot_interval_changed"
-        }
-      ],
-      "title": "snapshot_interval_changed",
-      "type": "timeseries"
-    },
-    {
-      "description": "Expired mempool entries dropped during startup",
-      "id": 143,
-      "targets": [
-        {
-          "expr": "startup_ttl_drop_total"
-        }
-      ],
-      "title": "startup_ttl_drop_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Size of chunks put into storage",
-      "id": 144,
-      "targets": [
-        {
-          "expr": "storage_chunk_size_bytes"
-        }
-      ],
-      "title": "storage_chunk_size_bytes",
-      "type": "timeseries"
-    },
-    {
-      "description": "Number of storage writes that failed due to disk exhaustion",
-      "id": 145,
-      "targets": [
-        {
-          "expr": "storage_disk_full_total"
-        }
-      ],
-      "title": "storage_disk_full_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Final preferred chunk size after upload",
-      "id": 146,
-      "targets": [
-        {
-          "expr": "storage_final_chunk_size"
-        }
-      ],
-      "title": "storage_final_chunk_size",
-      "type": "timeseries"
-    },
-    {
-      "description": "Initial chunk size used for object upload",
-      "id": 147,
-      "targets": [
-        {
-          "expr": "storage_initial_chunk_size"
-        }
-      ],
-      "title": "storage_initial_chunk_size",
-      "type": "timeseries"
-    },
-    {
-      "description": "Observed provider loss rate",
-      "id": 148,
-      "targets": [
-        {
-          "expr": "storage_provider_loss_rate"
-        }
-      ],
-      "title": "storage_provider_loss_rate",
-      "type": "timeseries"
-    },
-    {
-      "description": "Observed provider RTT in milliseconds",
-      "id": 149,
-      "targets": [
-        {
-          "expr": "storage_provider_rtt_ms"
-        }
-      ],
-      "title": "storage_provider_rtt_ms",
-      "type": "timeseries"
-    },
-    {
-      "description": "Time to put a single chunk",
-      "id": 150,
-      "targets": [
-        {
-          "expr": "storage_put_chunk_seconds"
-        }
-      ],
-      "title": "storage_put_chunk_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Estimated time to upload object in seconds",
-      "id": 151,
-      "targets": [
-        {
-          "expr": "storage_put_eta_seconds"
-        }
-      ],
-      "title": "storage_put_eta_seconds",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total bytes reconstructed by repair loop",
-      "id": 152,
-      "targets": [
-        {
-          "expr": "storage_repair_bytes_total"
-        }
-      ],
-      "title": "storage_repair_bytes_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total storage repair failures",
-      "id": 153,
-      "targets": [
-        {
-          "expr": "storage_repair_failures_total"
-        }
-      ],
-      "title": "storage_repair_failures_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Multiplier auto-reduction events due to inflation guard",
-      "id": 154,
-      "targets": [
-        {
-          "expr": "subsidy_auto_reduced_total"
-        }
-      ],
-      "title": "subsidy_auto_reduced_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total subsidized bytes by type",
-      "id": 155,
-      "targets": [
-        {
-          "expr": "subsidy_bytes_total"
-        }
-      ],
-      "title": "subsidy_bytes_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Total subsidized compute time in ms",
-      "id": 156,
-      "targets": [
-        {
-          "expr": "subsidy_cpu_ms_total"
-        }
-      ],
-      "title": "subsidy_cpu_ms_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Current subsidy multipliers",
-      "id": 157,
-      "targets": [
-        {
-          "expr": "subsidy_multiplier"
-        }
-      ],
-      "title": "subsidy_multiplier",
-      "type": "timeseries"
-    },
-    {
-      "description": "True subsidy multipliers",
-      "id": 158,
-      "targets": [
-        {
-          "expr": "subsidy_multiplier_raw"
-        }
-      ],
-      "title": "subsidy_multiplier_raw",
-      "type": "timeseries"
-    },
-    {
-      "description": "Transactions dropped due to TTL expiration",
-      "id": 159,
-      "targets": [
-        {
-          "expr": "ttl_drop_total"
-        }
-      ],
-      "title": "ttl_drop_total",
-      "type": "timeseries"
-    },
-    {
-      "description": "Gossip dedup entries removed due to TTL expiry",
-      "id": 160,
+      },
       "targets": [
         {
           "expr": "gossip_ttl_drop_total"
@@ -1761,8 +434,2700 @@
       "type": "timeseries"
     },
     {
-      "description": "Total admitted transactions",
+      "id": 26,
+      "title": "Other",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 27,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "active_burst_quota"
+        }
+      ],
+      "title": "active_burst_quota",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "active_miners"
+        }
+      ],
+      "title": "active_miners",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "admission_mode"
+        }
+      ],
+      "title": "admission_mode",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 30,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "aggregator_ingest_total"
+        }
+      ],
+      "title": "aggregator_ingest_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 31,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "aggregator_retention_pruned_total"
+        }
+      ],
+      "title": "aggregator_retention_pruned_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "badge_active"
+        }
+      ],
+      "title": "badge_active",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 33,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "badge_last_change_seconds"
+        }
+      ],
+      "title": "badge_last_change_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "badge_issued_total"
+        }
+      ],
+      "title": "badge_issued_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "badge_revoked_total"
+        }
+      ],
+      "title": "badge_revoked_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 36,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "balance_overflow_reject_total"
+        }
+      ],
+      "title": "balance_overflow_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 37,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "banned_peer_expiration_seconds"
+        }
+      ],
+      "title": "banned_peer_expiration_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 38,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "banned_peers_total"
+        }
+      ],
+      "title": "banned_peers_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 39,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "base_reward_ct"
+        }
+      ],
+      "title": "base_reward_ct",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 40,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "block_mined_total"
+        }
+      ],
+      "title": "block_mined_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 41,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "cluster_peer_active_total"
+        }
+      ],
+      "title": "cluster_peer_active_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 42,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "config_reload_last_ts"
+        }
+      ],
+      "title": "config_reload_last_ts",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 43,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "config_reload_total"
+        }
+      ],
+      "title": "config_reload_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 44,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "consumer_fee_p50"
+        }
+      ],
+      "title": "consumer_fee_p50",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 45,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "consumer_fee_p90"
+        }
+      ],
+      "title": "consumer_fee_p90",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 46,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "courier_flush_attempt_total"
+        }
+      ],
+      "title": "courier_flush_attempt_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 47,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "courier_flush_failure_total"
+        }
+      ],
+      "title": "courier_flush_failure_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 48,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "difficulty_clamp_total"
+        }
+      ],
+      "title": "difficulty_clamp_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 49,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "difficulty_retarget_total"
+        }
+      ],
+      "title": "difficulty_retarget_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 50,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dns_verification_fail_total"
+        }
+      ],
+      "title": "dns_verification_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 51,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "drop_not_found_total"
+        }
+      ],
+      "title": "drop_not_found_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 52,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "dup_tx_reject_total"
+        }
+      ],
+      "title": "dup_tx_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 53,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "evictions_total"
+        }
+      ],
+      "title": "evictions_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 54,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "fee_floor_reject_total"
+        }
+      ],
+      "title": "fee_floor_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 55,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "fib_window_base_secs"
+        }
+      ],
+      "title": "fib_window_base_secs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 56,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "fork_reorg_total"
+        }
+      ],
+      "title": "fork_reorg_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 57,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gateway_dns_lookup_total"
+        }
+      ],
+      "title": "gateway_dns_lookup_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 58,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_activation_delay_seconds"
+        }
+      ],
+      "title": "gov_activation_delay_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 59,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_activation_total"
+        }
+      ],
+      "title": "gov_activation_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 60,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_open_proposals"
+        }
+      ],
+      "title": "gov_open_proposals",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 61,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_proposals_total"
+        }
+      ],
+      "title": "gov_proposals_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 62,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_quorum_required"
+        }
+      ],
+      "title": "gov_quorum_required",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 63,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_rollback_total"
+        }
+      ],
+      "title": "gov_rollback_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 64,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "gov_votes_total"
+        }
+      ],
+      "title": "gov_votes_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 65,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "haar_eta_milli"
+        }
+      ],
+      "title": "haar_eta_milli",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 66,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "handshake_fail_total"
+        }
+      ],
+      "title": "handshake_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 67,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "heuristic_mu_milli"
+        }
+      ],
+      "title": "heuristic_mu_milli",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 68,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "identity_nonce_skips_total"
+        }
+      ],
+      "title": "identity_nonce_skips_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 69,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "identity_registrations_total"
+        }
+      ],
+      "title": "identity_registrations_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 70,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "identity_replays_blocked_total"
+        }
+      ],
+      "title": "identity_replays_blocked_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 71,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_admitted_total"
+        }
+      ],
+      "title": "industrial_admitted_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 72,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_backlog"
+        }
+      ],
+      "title": "industrial_backlog",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 73,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_deferred_total"
+        }
+      ],
+      "title": "industrial_deferred_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 74,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_multiplier"
+        }
+      ],
+      "title": "industrial_multiplier",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 75,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_price_per_unit"
+        }
+      ],
+      "title": "industrial_price_per_unit",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 76,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_rejected_total"
+        }
+      ],
+      "title": "industrial_rejected_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 77,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_units_total"
+        }
+      ],
+      "title": "industrial_units_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 78,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "industrial_utilization"
+        }
+      ],
+      "title": "industrial_utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 79,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "invalid_selector_reject_total"
+        }
+      ],
+      "title": "invalid_selector_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 80,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "key_rotation_total"
+        }
+      ],
+      "title": "key_rotation_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 81,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "kill_switch_trigger_total"
+        }
+      ],
+      "title": "kill_switch_trigger_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 82,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "lock_poison_total"
+        }
+      ],
+      "title": "lock_poison_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 83,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "log_drop_total"
+        }
+      ],
+      "title": "log_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 84,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "log_emit_total"
+        }
+      ],
+      "title": "log_emit_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 85,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "log_size_bytes"
+        }
+      ],
+      "title": "log_size_bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 86,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "match_loop_latency_seconds"
+        }
+      ],
+      "title": "match_loop_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 87,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "matches_total"
+        }
+      ],
+      "title": "matches_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 88,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "mempool_size"
+        }
+      ],
+      "title": "mempool_size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 89,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "miner_reward_recalc_total"
+        }
+      ],
+      "title": "miner_reward_recalc_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 90,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "net_peer_handshake_fail_total"
+        }
+      ],
+      "title": "net_peer_handshake_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 91,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "orphan_sweep_total"
+        }
+      ],
+      "title": "orphan_sweep_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 92,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "p2p_handshake_accept_total"
+        }
+      ],
+      "title": "p2p_handshake_accept_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 93,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "p2p_handshake_reject_total"
+        }
+      ],
+      "title": "p2p_handshake_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 94,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "param_change_active"
+        }
+      ],
+      "title": "param_change_active",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 95,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "param_change_pending"
+        }
+      ],
+      "title": "param_change_pending",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 96,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "payout_cap_hits_total"
+        }
+      ],
+      "title": "payout_cap_hits_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 97,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_bytes_sent_total"
+        }
+      ],
+      "title": "peer_bytes_sent_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 98,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_drop_total"
+        }
+      ],
+      "title": "peer_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 99,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "p2p_request_limit_hits_total"
+        }
+      ],
+      "title": "p2p_request_limit_hits_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 100,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_rate_limit_total"
+        }
+      ],
+      "title": "peer_rate_limit_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 101,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_error_total"
+        }
+      ],
+      "title": "peer_error_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 102,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_key_rotate_total"
+        }
+      ],
+      "title": "peer_key_rotate_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 103,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_metrics_active"
+        }
+      ],
+      "title": "peer_metrics_active",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 104,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_metrics_dropped_total"
+        }
+      ],
+      "title": "peer_metrics_dropped_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 105,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_metrics_memory_bytes"
+        }
+      ],
+      "title": "peer_metrics_memory_bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 106,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_metrics_subscribers"
+        }
+      ],
+      "title": "peer_metrics_subscribers",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 107,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_rejected_total"
+        }
+      ],
+      "title": "peer_rejected_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 108,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_reputation_score"
+        }
+      ],
+      "title": "peer_reputation_score",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 109,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_request_total"
+        }
+      ],
+      "title": "peer_request_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 110,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_stats_export_all_total"
+        }
+      ],
+      "title": "peer_stats_export_all_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 111,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_stats_export_total"
+        }
+      ],
+      "title": "peer_stats_export_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 112,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_stats_query_total"
+        }
+      ],
+      "title": "peer_stats_query_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 113,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_stats_reset_total"
+        }
+      ],
+      "title": "peer_stats_reset_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 114,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_throttle_total"
+        }
+      ],
+      "title": "peer_throttle_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 115,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_backpressure_active_total"
+        }
+      ],
+      "title": "peer_backpressure_active_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 116,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "peer_backpressure_dropped_total"
+        }
+      ],
+      "title": "peer_backpressure_dropped_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 117,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "price_weight_applied_total"
+        }
+      ],
+      "title": "price_weight_applied_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 118,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "provider_reputation_score"
+        }
+      ],
+      "title": "provider_reputation_score",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 119,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "quic_bytes_recv_total"
+        }
+      ],
+      "title": "quic_bytes_recv_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 120,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "quic_bytes_sent_total"
+        }
+      ],
+      "title": "quic_bytes_sent_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 121,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "quic_conn_latency_seconds"
+        }
+      ],
+      "title": "quic_conn_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 122,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "quic_disconnect_total"
+        }
+      ],
+      "title": "quic_disconnect_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 123,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "quic_endpoint_reuse_total"
+        }
+      ],
+      "title": "quic_endpoint_reuse_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 124,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "quic_handshake_fail_total"
+        }
+      ],
+      "title": "quic_handshake_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 125,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "read_denied_total"
+        }
+      ],
+      "title": "read_denied_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 126,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "receipt_corrupt_total"
+        }
+      ],
+      "title": "receipt_corrupt_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 127,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "receipt_persist_fail_total"
+        }
+      ],
+      "title": "receipt_persist_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 128,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rent_escrow_burned_ct_total"
+        }
+      ],
+      "title": "rent_escrow_burned_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 129,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rent_escrow_locked_ct_total"
+        }
+      ],
+      "title": "rent_escrow_locked_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 130,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rent_escrow_refunded_ct_total"
+        }
+      ],
+      "title": "rent_escrow_refunded_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 131,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "reputation_adjust_total"
+        }
+      ],
+      "title": "reputation_adjust_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 132,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "reputation_gossip_fail_total"
+        }
+      ],
+      "title": "reputation_gossip_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 133,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "reputation_gossip_latency_seconds"
+        }
+      ],
+      "title": "reputation_gossip_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 134,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "reputation_gossip_total"
+        }
+      ],
+      "title": "reputation_gossip_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 135,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rpc_bans_total"
+        }
+      ],
+      "title": "rpc_bans_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 136,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rpc_client_error_total"
+        }
+      ],
+      "title": "rpc_client_error_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 137,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rpc_rate_limit_attempt_total"
+        }
+      ],
+      "title": "rpc_rate_limit_attempt_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 138,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rpc_rate_limit_reject_total"
+        }
+      ],
+      "title": "rpc_rate_limit_reject_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 139,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rpc_tokens_available"
+        }
+      ],
+      "title": "rpc_tokens_available",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 140,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "job_age_seconds"
+        }
+      ],
+      "title": "job_age_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 141,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "priority_boost_total"
+        }
+      ],
+      "title": "priority_boost_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 142,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "settle_applied_total"
+        }
+      ],
+      "title": "settle_applied_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 143,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "settle_audit_mismatch_total"
+        }
+      ],
+      "title": "settle_audit_mismatch_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 144,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "settle_failed_total"
+        }
+      ],
+      "title": "settle_failed_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 145,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "settle_mode_change_total"
+        }
+      ],
+      "title": "settle_mode_change_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 146,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "slashing_burn_ct_total"
+        }
+      ],
+      "title": "slashing_burn_ct_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 147,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "snapshot_duration_seconds"
+        }
+      ],
+      "title": "snapshot_duration_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 148,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "snapshot_fail_total"
+        }
+      ],
+      "title": "snapshot_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 149,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "snapshot_interval"
+        }
+      ],
+      "title": "snapshot_interval",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 150,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "snapshot_interval_changed"
+        }
+      ],
+      "title": "snapshot_interval_changed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 151,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "startup_ttl_drop_total"
+        }
+      ],
+      "title": "startup_ttl_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 152,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_chunk_size_bytes"
+        }
+      ],
+      "title": "storage_chunk_size_bytes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 153,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_disk_full_total"
+        }
+      ],
+      "title": "storage_disk_full_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 154,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_final_chunk_size"
+        }
+      ],
+      "title": "storage_final_chunk_size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 155,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_initial_chunk_size"
+        }
+      ],
+      "title": "storage_initial_chunk_size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 156,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_provider_loss_rate"
+        }
+      ],
+      "title": "storage_provider_loss_rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 157,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_provider_rtt_ms"
+        }
+      ],
+      "title": "storage_provider_rtt_ms",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 158,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_put_chunk_seconds"
+        }
+      ],
+      "title": "storage_put_chunk_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 159,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_put_eta_seconds"
+        }
+      ],
+      "title": "storage_put_eta_seconds",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 160,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_repair_bytes_total"
+        }
+      ],
+      "title": "storage_repair_bytes_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
       "id": 161,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "storage_repair_failures_total"
+        }
+      ],
+      "title": "storage_repair_failures_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 162,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "subsidy_auto_reduced_total"
+        }
+      ],
+      "title": "subsidy_auto_reduced_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 163,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "subsidy_bytes_total"
+        }
+      ],
+      "title": "subsidy_bytes_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 164,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "subsidy_cpu_ms_total"
+        }
+      ],
+      "title": "subsidy_cpu_ms_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 165,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "subsidy_multiplier"
+        }
+      ],
+      "title": "subsidy_multiplier",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 166,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "subsidy_multiplier_raw"
+        }
+      ],
+      "title": "subsidy_multiplier_raw",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 167,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "ttl_drop_total"
+        }
+      ],
+      "title": "ttl_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 168,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "tx_admitted_total"
@@ -1772,8 +3137,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Total rejected transactions",
-      "id": 162,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 169,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "tx_rejected_total"
@@ -1783,8 +3156,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Total submitted transactions",
-      "id": 163,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 170,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "tx_submitted_total"
@@ -1794,8 +3175,16 @@
       "type": "timeseries"
     },
     {
-      "description": "utilisation variance threshold x1000",
-      "id": 164,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 171,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "util_var_threshold_milli"
@@ -1805,8 +3194,16 @@
       "type": "timeseries"
     },
     {
-      "description": "WAL entries skipped due to checksum mismatch",
-      "id": 165,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 172,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "wal_corrupt_recovery_total"
@@ -1816,8 +3213,16 @@
       "type": "timeseries"
     },
     {
-      "description": "Telemetry memory allocation in bytes",
-      "id": 166,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prom"
+      },
+      "id": 173,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
       "targets": [
         {
           "expr": "telemetry_alloc_bytes"
@@ -1826,5 +3231,8 @@
       "title": "telemetry_alloc_bytes",
       "type": "timeseries"
     }
-  ]
+  ],
+  "schemaVersion": 37,
+  "title": "The-Block Auto",
+  "version": 1
 }

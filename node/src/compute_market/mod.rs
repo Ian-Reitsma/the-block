@@ -18,6 +18,7 @@ pub mod scheduler;
 pub mod settlement;
 pub mod workload;
 pub mod workloads;
+pub mod snark;
 
 pub use errors::MarketError;
 pub use scheduler::job_status;
@@ -87,18 +88,30 @@ fn default_multiplier() -> f64 {
     1.0
 }
 
-/// A single slice of a job with a reference hash and output hash.
+/// Receipt for a workload slice including an optional SNARK proof.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct SliceProof {
+pub struct ExecutionReceipt {
     pub reference: [u8; 32],
     pub output: [u8; 32],
     pub payout: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<Vec<u8>>,
 }
 
-impl SliceProof {
-    /// Verify that the output matches the reference hash.
-    pub fn verify(&self) -> bool {
-        self.reference == self.output
+impl ExecutionReceipt {
+    /// Verify that the output matches the reference hash and any provided proof.
+    pub fn verify(&self, workload: &Workload) -> bool {
+        if self.reference != self.output {
+            return false;
+        }
+        if let Some(ref proof) = self.proof {
+            if let Workload::Snark(ref wasm) = workload {
+                return snark::verify(proof, wasm, &self.output);
+            } else {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -126,6 +139,7 @@ pub enum Workload {
     Transcode(Vec<u8>),
     Inference(Vec<u8>),
     GpuHash(Vec<u8>),
+    Snark(Vec<u8>),
 }
 
 impl Workload {
@@ -133,7 +147,10 @@ impl Workload {
     /// `compute_units` helper.
     pub fn units(&self) -> u64 {
         match self {
-            Workload::Transcode(data) | Workload::Inference(data) | Workload::GpuHash(data) => {
+            Workload::Transcode(data)
+            | Workload::Inference(data)
+            | Workload::GpuHash(data)
+            | Workload::Snark(data) => {
                 workload::compute_units(data)
             }
         }
@@ -188,6 +205,7 @@ impl WorkloadRunner {
             Workload::Transcode(data) => workloads::transcode::run(&data),
             Workload::Inference(data) => workloads::inference::run(&data),
             Workload::GpuHash(data) => workloads::gpu::run(&data),
+            Workload::Snark(data) => workloads::snark::run(&data),
         })
         .await
         .unwrap_or_else(|e| panic!("workload failed: {e}"));
@@ -414,7 +432,7 @@ impl Market {
     }
 
     /// Verify a slice proof and record the payout.
-    pub fn submit_slice(&mut self, job_id: &str, proof: SliceProof) -> Result<u64, &'static str> {
+    pub fn submit_slice(&mut self, job_id: &str, proof: ExecutionReceipt) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
         let state = self.jobs.get_mut(job_id).ok_or("unknown job")?;
         let now = SystemTime::now()
@@ -452,14 +470,20 @@ impl Market {
             }
             return Err("reference mismatch");
         }
-        if !proof.verify() {
+        if !proof.verify(&state.job.workloads[state.paid_slices]) {
             scheduler::record_failure(&state.provider);
             if state.job.capability.accelerator.is_some() {
                 scheduler::record_accelerator_failure(&state.provider);
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
             }
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::SNARK_FAIL_TOTAL.inc();
             return Err("invalid proof");
+        }
+        if proof.proof.is_some() {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::SNARK_VERIFICATIONS_TOTAL.inc();
         }
         let slice_units = state.job.workloads[state.paid_slices].units();
         if proof.payout != slice_units * state.price_per_unit {
@@ -538,12 +562,17 @@ impl Market {
             .zip(results.into_iter().zip(workloads.into_iter()))
         {
             let units = w.units();
-            let proof = SliceProof {
+            let proof_bytes = match &w {
+                Workload::Snark(wasm) => Some(snark::prove(wasm, &output)),
+                _ => None,
+            };
+            let receipt = ExecutionReceipt {
                 reference: expected,
                 output,
                 payout: units * price_per_unit,
+                proof: proof_bytes,
             };
-            total += self.submit_slice(job_id, proof)?;
+            total += self.submit_slice(job_id, receipt)?;
         }
         Ok(total)
     }
@@ -637,17 +666,18 @@ mod tests {
     }
 
     #[test]
-    fn slice_verification() {
+    fn execution_receipt_verification() {
         let data = b"hello";
         let mut h = Hasher::new();
         h.update(data);
         let hash = *h.finalize().as_bytes();
-        let proof = SliceProof {
+        let receipt = ExecutionReceipt {
             reference: hash,
             output: hash,
             payout: 1,
+            proof: None,
         };
-        assert!(proof.verify());
+        assert!(receipt.verify(&Workload::Transcode(data.to_vec())));
     }
 
     #[test]
@@ -714,10 +744,11 @@ mod tests {
         market
             .submit_job(job)
             .unwrap_or_else(|e| panic!("submit job: {e}"));
-        let proof = SliceProof {
+        let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
             payout: 5,
+            proof: None,
         };
         assert_eq!(
             market
@@ -869,10 +900,11 @@ mod tests {
         market
             .submit_job(job)
             .unwrap_or_else(|e| panic!("submit job: {e}"));
-        let proof = SliceProof {
+        let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
             payout: 5,
+            proof: None,
         };
         market
             .submit_slice("cj", proof)

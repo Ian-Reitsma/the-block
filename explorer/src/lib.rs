@@ -10,6 +10,9 @@ use the_block::{
     Block,
 };
 
+pub mod htlc_view;
+pub mod storage_view;
+pub mod snark_view;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptRecord {
     pub key: String,
@@ -98,6 +101,10 @@ impl Explorer {
             "CREATE TABLE IF NOT EXISTS compute_jobs (job_id TEXT PRIMARY KEY, buyer TEXT, provider TEXT, status TEXT)",
             [],
         )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS snark_proofs (job_id TEXT PRIMARY KEY, verified INTEGER)",
+            [],
+        )?;
         Ok(Self { path: p })
     }
 
@@ -155,6 +162,21 @@ impl Explorer {
             )
             .optional()?;
         Ok(bytes.map(|b| bincode::deserialize(&b).unwrap()))
+    }
+
+    /// Fetch the base fee at the specified block height if present.
+    pub fn base_fee_by_height(&self, height: u64) -> Result<Option<u64>> {
+        let conn = self.conn()?;
+        let bytes: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT data FROM blocks WHERE height=?1",
+                params![height],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(bytes
+            .and_then(|b| bincode::deserialize::<Block>(&b).ok())
+            .map(|b| b.base_fee))
     }
 
     pub fn get_tx(&self, hash: &str) -> Result<Option<SignedTransaction>> {

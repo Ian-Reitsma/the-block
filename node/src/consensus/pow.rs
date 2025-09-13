@@ -2,6 +2,8 @@ use super::constants::DIFFICULTY_WINDOW;
 use super::difficulty;
 use crate::range_boost;
 use blake3::Hasher;
+#[cfg(feature = "quantum")]
+use crypto::dilithium;
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,7 +16,13 @@ pub struct BlockHeader {
     pub checkpoint_hash: [u8; 32],
     pub nonce: u64,
     pub difficulty: u64,
+    /// Global base fee in effect for this header.
+    pub base_fee: u64,
     pub timestamp_millis: u64,
+    #[cfg(feature = "quantum")]
+    pub dilithium_pubkey: Vec<u8>,
+    #[cfg(feature = "quantum")]
+    pub dilithium_sig: Vec<u8>,
     /// Merkle/KZG roots for L2 blob commitments anchored in this block.
     pub l2_roots: Vec<[u8; 32]>,
     /// Total byte sizes per L2 root for accounting.
@@ -34,6 +42,8 @@ impl BlockHeader {
         h.update(&self.merkle_root);
         h.update(&self.checkpoint_hash);
         h.update(&self.nonce.to_le_bytes());
+        h.update(&self.difficulty.to_le_bytes());
+        h.update(&self.base_fee.to_le_bytes());
         h.update(&self.timestamp_millis.to_le_bytes());
         h.update(&(self.l2_roots.len() as u32).to_le_bytes());
         for r in &self.l2_roots {
@@ -48,6 +58,15 @@ impl BlockHeader {
         h.update(&(self.vdf_proof.len() as u32).to_le_bytes());
         h.update(&self.vdf_proof);
         h.finalize().into()
+    }
+
+    #[cfg(feature = "quantum")]
+    pub fn verify_dilithium(&self) -> bool {
+        if self.dilithium_pubkey.is_empty() || self.dilithium_sig.is_empty() {
+            return false;
+        }
+        let msg = self.hash();
+        dilithium::verify(&self.dilithium_pubkey, &msg, &self.dilithium_sig)
     }
 }
 
@@ -134,6 +153,7 @@ pub fn template(
     merkle_root: [u8; 32],
     checkpoint_hash: [u8; 32],
     difficulty: u64,
+    base_fee: u64,
 ) -> BlockHeader {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -145,7 +165,12 @@ pub fn template(
         checkpoint_hash,
         nonce: 0,
         difficulty,
+        base_fee,
         timestamp_millis: ts,
+        #[cfg(feature = "quantum")]
+        dilithium_pubkey: Vec::new(),
+        #[cfg(feature = "quantum")]
+        dilithium_sig: Vec::new(),
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),
         vdf_commit: [0u8; 32],
@@ -160,7 +185,7 @@ mod tests {
 
     #[test]
     fn mines_block() {
-        let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000);
+        let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000, 1);
         let mut miner = Miner::new(1_000_000, 1_000);
         let mined = miner.mine(header.clone());
         let hash = mined.hash();
@@ -171,13 +196,13 @@ mod tests {
     #[test]
     fn difficulty_decreases_when_blocks_slow() {
         let mut miner = Miner::new(1_000, 1_000);
-        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
         h1.timestamp_millis = 0;
         let _b1 = miner.mine(h1);
-        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
         h2.timestamp_millis = 3_000;
         let _b2 = miner.mine(h2);
-        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
         h3.timestamp_millis = 4_000;
         let b3 = miner.mine(h3);
         assert!(b3.difficulty < 1_000);
@@ -187,13 +212,13 @@ mod tests {
     #[test]
     fn difficulty_increases_when_blocks_fast() {
         let mut miner = Miner::new(1_000, 1_000);
-        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
         h1.timestamp_millis = 0;
         let _b1 = miner.mine(h1);
-        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
         h2.timestamp_millis = 500;
         let _b2 = miner.mine(h2);
-        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty());
+        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
         h3.timestamp_millis = 1_000;
         let b3 = miner.mine(h3);
         assert!(b3.difficulty > 1_000);

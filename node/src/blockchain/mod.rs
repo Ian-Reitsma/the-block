@@ -1,3 +1,6 @@
+pub mod fees;
+pub mod inter_shard;
 pub mod process;
 pub mod reorg;
+pub mod shard_fork_choice;
 pub mod snapshot;

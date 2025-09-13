@@ -1,6 +1,6 @@
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid};
-use the_block::compute_market::{price_board::PriceBoard, scheduler, *};
+use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};
 use the_block::transaction::FeeLane;
 use tokio_util::sync::CancellationToken;
 
@@ -27,12 +27,13 @@ fn slice_proof_verification() {
     let mut h = blake3::Hasher::new();
     h.update(data);
     let hash = *h.finalize().as_bytes();
-    let proof = SliceProof {
+    let proof = ExecutionReceipt {
         reference: hash,
         output: hash,
         payout: 1,
+        proof: None,
     };
-    assert!(proof.verify());
+    assert!(proof.verify(&Workload::Transcode(data.to_vec())));
 }
 
 #[test]
@@ -74,10 +75,11 @@ fn market_job_flow_and_finalize() {
         priority: scheduler::Priority::Normal,
     };
     market.submit_job(job).unwrap();
-    let proof = SliceProof {
+    let proof = ExecutionReceipt {
         reference: ref_hash,
         output: ref_hash,
         payout: 5,
+        proof: None,
     };
     let payout = market.submit_slice("job1", proof).unwrap();
     assert_eq!(payout, 5);

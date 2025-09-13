@@ -258,6 +258,12 @@ pub static ACTIVE_MINERS: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static BASE_FEE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("base_fee", "current base fee").unwrap();
+    REGISTRY.register(Box::new(g.clone())).unwrap();
+    g
+});
+
 pub static BASE_REWARD_CT: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("base_reward_ct", "base reward after logistic factor").unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
@@ -444,6 +450,48 @@ pub static DEX_TRADE_VOLUME: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry dex trade volume: {e}"));
+    c
+});
+
+pub static HTLC_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("htlc_created_total", "HTLC contracts created")
+        .unwrap_or_else(|e| panic!("counter htlc created: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry htlc created: {e}"));
+    c
+});
+
+pub static HTLC_REFUNDED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("htlc_refunded_total", "HTLC contracts refunded")
+        .unwrap_or_else(|e| panic!("counter htlc refunded: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry htlc refunded: {e}"));
+    c
+});
+
+pub static STATE_STREAM_SUBSCRIBERS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "state_stream_subscribers_total",
+        "Total websocket state stream subscribers",
+    )
+    .unwrap_or_else(|e| panic!("counter state stream subs: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry state stream subs: {e}"));
+    c
+});
+
+pub static STATE_STREAM_LAG_ALERT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "state_stream_lag_alert_total",
+        "Clients falling behind alert count",
+    )
+    .unwrap_or_else(|e| panic!("counter state stream lag: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry state stream lag: {e}"));
     c
 });
 
@@ -900,6 +948,30 @@ pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static STORAGE_CONTRACT_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_contract_created_total",
+        "Total number of storage contracts created",
+    )
+    .unwrap_or_else(|e| panic!("counter storage_contract_created_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_contract_created_total: {e}"));
+    c
+});
+
+pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "retrieval_failure_total",
+        "Total failed proof-of-retrievability challenges",
+    )
+    .unwrap_or_else(|e| panic!("counter retrieval_failure_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry retrieval_failure_total: {e}"));
+    c
+});
+
 pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("matches_total", "Total matched jobs"),
@@ -909,6 +981,30 @@ pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry matches_total: {e}"));
+    c
+});
+
+pub static SNARK_VERIFICATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "snark_verifications_total",
+        "Successfully verified SNARK proofs",
+    )
+    .unwrap_or_else(|e| panic!("counter snark_verifications_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry snark_verifications_total: {e}"));
+    c
+});
+
+pub static SNARK_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "snark_fail_total",
+        "Failed SNARK proof verifications",
+    )
+    .unwrap_or_else(|e| panic!("counter snark_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry snark_fail_total: {e}"));
     c
 });
 
@@ -1064,10 +1160,13 @@ pub static JOB_RESUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new(
-        "compute_sla_violations_total",
-        "Total compute provider SLA violations",
+pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "compute_sla_violations_total",
+            "Total compute provider SLA violations",
+        ),
+        &["provider"],
     )
     .unwrap_or_else(|e| panic!("counter compute_sla_violations_total: {e}"));
     REGISTRY
@@ -1076,10 +1175,13 @@ pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGauge> = Lazy::new(|| {
-    let g = IntGauge::new(
-        "compute_provider_uptime",
-        "Rolling uptime percentage for the compute provider",
+pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "compute_provider_uptime",
+            "Rolling uptime percentage for the compute provider",
+        ),
+        &["provider"],
     )
     .unwrap_or_else(|e| panic!("gauge compute_provider_uptime: {e}"));
     REGISTRY
@@ -1701,6 +1803,21 @@ pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     c
+});
+
+pub static PEER_RATE_LIMIT_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "peer_rate_limit_total",
+            "Rate limit drops per peer",
+        ),
+        &["peer_id"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec peer_rate_limit_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry peer_rate_limit_total: {e}"));
+    g
 });
 
 pub static PEER_METRICS_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
@@ -2498,9 +2615,10 @@ fn gather() -> String {
         DEX_ORDERS_TOTAL.with_label_values(&["buy"]),
         DEX_ORDERS_TOTAL.with_label_values(&["sell"]),
         &*DEX_TRADE_VOLUME,
-        &*COMPUTE_SLA_VIOLATIONS_TOTAL,
-        &*COMPUTE_PROVIDER_UPTIME,
+        COMPUTE_SLA_VIOLATIONS_TOTAL.with_label_values(&["__"]),
+        COMPUTE_PROVIDER_UPTIME.with_label_values(&["__"]),
         P2P_REQUEST_LIMIT_HITS_TOTAL.with_label_values(&[""]),
+        PEER_RATE_LIMIT_TOTAL.with_label_values(&["__"]),
         &*INVALID_SELECTOR_REJECT_TOTAL,
         &*BALANCE_OVERFLOW_REJECT_TOTAL,
         &*DROP_NOT_FOUND_TOTAL,
@@ -2613,3 +2731,17 @@ pub fn serve_metrics(addr: &str) -> PyResult<String> {
     std::mem::forget(handle);
     Ok(addr)
 }
+#[cfg(all(feature = "telemetry", feature = "telemetry-verbose"))]
+const VERBOSE: bool = true;
+#[cfg(not(all(feature = "telemetry", feature = "telemetry-verbose")))]
+const VERBOSE: bool = false;
+
+#[cfg(feature = "telemetry")]
+pub fn verbose() -> bool {
+    VERBOSE
+}
+#[cfg(not(feature = "telemetry"))]
+pub fn verbose() -> bool {
+    false
+}
+

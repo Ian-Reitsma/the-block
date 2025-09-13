@@ -5,9 +5,10 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use tiny_http::{Response, Server};
 use tungstenite::Message;
-use wallet::{remote_signer::RemoteSigner, Wallet, WalletSigner};
+use wallet::{remote_signer::RemoteSigner, Wallet, WalletError, WalletSigner};
 
 fn spawn_failing_signer() -> (String, thread::JoinHandle<()>) {
     let server = Server::http("127.0.0.1:0").unwrap();
@@ -15,7 +16,7 @@ fn spawn_failing_signer() -> (String, thread::JoinHandle<()>) {
     let wallet = Wallet::generate();
     let pk_hex = hex::encode(wallet.public_key().to_bytes());
     let handle = thread::spawn(move || {
-        for mut request in server.incoming_requests() {
+        for request in server.incoming_requests() {
             match request.url() {
                 "/pubkey" => {
                     let resp = Response::from_string(format!("{{\"pubkey\":\"{}\"}}", pk_hex));
@@ -108,6 +109,79 @@ fn remote_signer_threshold_error() {
     h2.join().unwrap();
 }
 
+fn spawn_invalid_signer() -> (String, thread::JoinHandle<()>) {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let addr = format!("http://{}", server.server_addr());
+    let wallet = Wallet::generate();
+    let pk_hex = hex::encode(wallet.public_key().to_bytes());
+    let handle = thread::spawn(move || {
+        for request in server.incoming_requests() {
+            match request.url() {
+                "/pubkey" => {
+                    let resp = Response::from_string(format!("{{\"pubkey\":\"{}\"}}", pk_hex));
+                    let _ = request.respond(resp);
+                }
+                "/sign" => {
+                    let resp = Response::from_string("{\"sig\":\"00\"}");
+                    let _ = request.respond(resp);
+                    break;
+                }
+                _ => {
+                    let _ = request.respond(Response::empty(404));
+                }
+            }
+        }
+    });
+    (addr, handle)
+}
+
+fn spawn_timeout_signer() -> (String, thread::JoinHandle<()>) {
+    let server = Server::http("127.0.0.1:0").unwrap();
+    let addr = format!("http://{}", server.server_addr());
+    let wallet = Wallet::generate();
+    let pk_hex = hex::encode(wallet.public_key().to_bytes());
+    let handle = thread::spawn(move || {
+        for request in server.incoming_requests() {
+            match request.url() {
+                "/pubkey" => {
+                    let resp = Response::from_string(format!("{{\"pubkey\":\"{}\"}}", pk_hex));
+                    let _ = request.respond(resp);
+                }
+                "/sign" => {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+                _ => {
+                    let _ = request.respond(Response::empty(404));
+                }
+            }
+        }
+    });
+    (addr, handle)
+}
+
+#[test]
+#[serial]
+fn remote_signer_invalid_signature() {
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
+    let (url, handle) = spawn_invalid_signer();
+    let signer = RemoteSigner::connect(&url).expect("connect");
+    let res = signer.sign(b"data");
+    assert!(res.is_err());
+    handle.join().unwrap();
+}
+
+#[test]
+#[serial]
+fn remote_signer_timeout() {
+    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "100");
+    let (url, handle) = spawn_timeout_signer();
+    let signer = RemoteSigner::connect(&url).expect("connect");
+    let res = signer.sign(b"data");
+    assert!(matches!(res, Err(WalletError::Timeout)));
+    handle.join().unwrap();
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
+}
+
 #[test]
 #[serial]
 fn remote_signer_mtls_ws() {
@@ -190,7 +264,7 @@ fn remote_signer_mtls_ws() {
         let conn = rustls::ServerConnection::new(server_cfg.clone()).unwrap();
         let tls = rustls::StreamOwned::new(conn, stream);
         let mut ws = tungstenite::accept(tls).unwrap();
-        let msg = ws.read_message().unwrap();
+        let msg = ws.read().unwrap();
         let txt = match msg {
             Message::Text(t) => t,
             _ => panic!(),
@@ -209,7 +283,7 @@ fn remote_signer_mtls_ws() {
         let resp = Resp {
             sig: hex::encode(sig.to_bytes()),
         };
-        ws.write_message(Message::Text(serde_json::to_string(&resp).unwrap()))
+        ws.send(Message::Text(serde_json::to_string(&resp).unwrap()))
             .unwrap();
     });
 

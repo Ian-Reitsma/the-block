@@ -3,8 +3,9 @@ use serde_json::Value;
 use std::sync::Mutex;
 
 use crate::vm::{
-    bytecode::OpCode,
+    exec,
     gas::GasMeter,
+    opcodes::OpCode,
     runtime::{Vm, VmType},
     state::ContractId,
 };
@@ -14,7 +15,9 @@ static VM: Lazy<Mutex<Vm>> = Lazy::new(|| Mutex::new(Vm::new(VmType::Evm)));
 /// Estimate gas for executing the provided bytecode.
 pub fn estimate_gas(code: Vec<u8>) -> u64 {
     let mut meter = GasMeter::new(u64::MAX);
-    let _ = crate::vm::bytecode::execute(&code, &mut meter);
+    let mut load = || 0u64;
+    let mut store = |_v: u64| {};
+    let _ = exec::execute(&code, &mut meter, &mut load, &mut store);
     meter.used()
 }
 

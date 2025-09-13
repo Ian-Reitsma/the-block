@@ -16,12 +16,12 @@ availability revokes the badge until uptime is re‑established.
 ```rust
 use the_block::ServiceBadgeTracker;
 let mut t = ServiceBadgeTracker::new();
-for _ in 0..90 { t.record_epoch(true, std::time::Duration::from_millis(50)); }
+for _ in 0..90 { t.record_epoch("node", true, std::time::Duration::from_millis(50)); }
 assert!(t.has_badge());
 ```
 
 Epochs are recorded automatically from `Blockchain::mine_block`, but external
-systems may call `record_epoch` for test harnesses.
+systems may call `record_epoch` with a provider identifier for test harnesses.
 
 ## Telemetry & RPC
 

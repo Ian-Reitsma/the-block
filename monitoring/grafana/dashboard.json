@@ -78,8 +78,30 @@
       "type": "timeseries"
     },
     {
-      "description": "Transactions rejected due to balance overflow",
+      "description": "Total service badges issued",
       "id": 8,
+      "targets": [
+        {
+          "expr": "badge_issued_total"
+        }
+      ],
+      "title": "badge_issued_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total service badges revoked",
+      "id": 9,
+      "targets": [
+        {
+          "expr": "badge_revoked_total"
+        }
+      ],
+      "title": "badge_revoked_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions rejected due to balance overflow",
+      "id": 10,
       "targets": [
         {
           "expr": "balance_overflow_reject_total"
@@ -90,7 +112,7 @@
     },
     {
       "description": "Expiration timestamp for active peer bans",
-      "id": 9,
+      "id": 11,
       "targets": [
         {
           "expr": "banned_peer_expiration_seconds"
@@ -101,7 +123,7 @@
     },
     {
       "description": "Total peers currently banned",
-      "id": 10,
+      "id": 12,
       "targets": [
         {
           "expr": "banned_peers_total"
@@ -112,7 +134,7 @@
     },
     {
       "description": "base reward after logistic factor",
-      "id": 11,
+      "id": 13,
       "targets": [
         {
           "expr": "base_reward_ct"
@@ -123,7 +145,7 @@
     },
     {
       "description": "Total mined blocks",
-      "id": 12,
+      "id": 14,
       "targets": [
         {
           "expr": "block_mined_total"
@@ -134,7 +156,7 @@
     },
     {
       "description": "Unique peers tracked by aggregator",
-      "id": 13,
+      "id": 15,
       "targets": [
         {
           "expr": "cluster_peer_active_total"
@@ -145,7 +167,7 @@
     },
     {
       "description": "Unix timestamp of the last successful config reload",
-      "id": 14,
+      "id": 16,
       "targets": [
         {
           "expr": "config_reload_last_ts"
@@ -156,7 +178,7 @@
     },
     {
       "description": "Configuration reload attempts grouped by result",
-      "id": 15,
+      "id": 17,
       "targets": [
         {
           "expr": "config_reload_total"
@@ -167,7 +189,7 @@
     },
     {
       "description": "Median consumer fee",
-      "id": 16,
+      "id": 18,
       "targets": [
         {
           "expr": "consumer_fee_p50"
@@ -178,7 +200,7 @@
     },
     {
       "description": "p90 consumer fee",
-      "id": 17,
+      "id": 19,
       "targets": [
         {
           "expr": "consumer_fee_p90"
@@ -189,7 +211,7 @@
     },
     {
       "description": "Total courier receipt flush attempts",
-      "id": 18,
+      "id": 20,
       "targets": [
         {
           "expr": "courier_flush_attempt_total"
@@ -200,7 +222,7 @@
     },
     {
       "description": "Failed courier receipt flush attempts",
-      "id": 19,
+      "id": 21,
       "targets": [
         {
           "expr": "courier_flush_failure_total"
@@ -211,7 +233,7 @@
     },
     {
       "description": "Total funds locked in DEX escrow",
-      "id": 20,
+      "id": 22,
       "targets": [
         {
           "expr": "dex_escrow_locked"
@@ -222,7 +244,7 @@
     },
     {
       "description": "Number of pending DEX escrows",
-      "id": 21,
+      "id": 23,
       "targets": [
         {
           "expr": "dex_escrow_pending"
@@ -233,7 +255,7 @@
     },
     {
       "description": "Total liquidity currently locked in DEX escrow",
-      "id": 22,
+      "id": 24,
       "targets": [
         {
           "expr": "dex_liquidity_locked_total"
@@ -244,7 +266,7 @@
     },
     {
       "description": "Orders submitted to the DEX by side",
-      "id": 23,
+      "id": 25,
       "targets": [
         {
           "expr": "dex_orders_total"
@@ -255,7 +277,7 @@
     },
     {
       "description": "Total matched trade quantity across all DEX pairs",
-      "id": 24,
+      "id": 26,
       "targets": [
         {
           "expr": "dex_trade_volume"
@@ -266,7 +288,7 @@
     },
     {
       "description": "Retarget calculations clamped to bounds",
-      "id": 25,
+      "id": 27,
       "targets": [
         {
           "expr": "difficulty_clamp_total"
@@ -277,7 +299,7 @@
     },
     {
       "description": "Number of difficulty retarget calculations",
-      "id": 26,
+      "id": 28,
       "targets": [
         {
           "expr": "difficulty_retarget_total"
@@ -288,7 +310,7 @@
     },
     {
       "description": "Total DNS verification failures",
-      "id": 27,
+      "id": 29,
       "targets": [
         {
           "expr": "dns_verification_fail_total"
@@ -299,7 +321,7 @@
     },
     {
       "description": "drop_transaction failures for missing entries",
-      "id": 28,
+      "id": 30,
       "targets": [
         {
           "expr": "drop_not_found_total"
@@ -310,7 +332,7 @@
     },
     {
       "description": "Transactions rejected as duplicate",
-      "id": 29,
+      "id": 31,
       "targets": [
         {
           "expr": "dup_tx_reject_total"
@@ -321,7 +343,7 @@
     },
     {
       "description": "Total mempool evictions",
-      "id": 30,
+      "id": 32,
       "targets": [
         {
           "expr": "evictions_total"
@@ -332,7 +354,7 @@
     },
     {
       "description": "Transactions rejected for low fee",
-      "id": 31,
+      "id": 33,
       "targets": [
         {
           "expr": "fee_floor_reject_total"
@@ -343,7 +365,7 @@
     },
     {
       "description": "base seconds for Fibonacci smoothing",
-      "id": 32,
+      "id": 34,
       "targets": [
         {
           "expr": "fib_window_base_secs"
@@ -354,7 +376,7 @@
     },
     {
       "description": "Total observed fork reorgs",
-      "id": 33,
+      "id": 35,
       "targets": [
         {
           "expr": "fork_reorg_total"
@@ -365,7 +387,7 @@
     },
     {
       "description": "Gateway DNS verification attempts grouped by status",
-      "id": 34,
+      "id": 36,
       "targets": [
         {
           "expr": "gateway_dns_lookup_total"
@@ -376,7 +398,7 @@
     },
     {
       "description": "Time for all peers to agree on the network tip",
-      "id": 35,
+      "id": 37,
       "targets": [
         {
           "expr": "gossip_convergence_seconds"
@@ -387,7 +409,7 @@
     },
     {
       "description": "Duplicate gossip messages dropped",
-      "id": 36,
+      "id": 38,
       "targets": [
         {
           "expr": "gossip_duplicate_total"
@@ -398,7 +420,7 @@
     },
     {
       "description": "Current gossip fanout",
-      "id": 37,
+      "id": 39,
       "targets": [
         {
           "expr": "gossip_fanout_gauge"
@@ -409,7 +431,7 @@
     },
     {
       "description": "Delay between scheduled and actual activation",
-      "id": 38,
+      "id": 40,
       "targets": [
         {
           "expr": "gov_activation_delay_seconds"
@@ -420,7 +442,7 @@
     },
     {
       "description": "Governance activations",
-      "id": 39,
+      "id": 41,
       "targets": [
         {
           "expr": "gov_activation_total"
@@ -431,7 +453,7 @@
     },
     {
       "description": "Open governance proposals",
-      "id": 40,
+      "id": 42,
       "targets": [
         {
           "expr": "gov_open_proposals"
@@ -442,7 +464,7 @@
     },
     {
       "description": "Governance proposals by status",
-      "id": 41,
+      "id": 43,
       "targets": [
         {
           "expr": "gov_proposals_total"
@@ -453,7 +475,7 @@
     },
     {
       "description": "Governance quorum",
-      "id": 42,
+      "id": 44,
       "targets": [
         {
           "expr": "gov_quorum_required"
@@ -464,7 +486,7 @@
     },
     {
       "description": "Governance rollbacks",
-      "id": 43,
+      "id": 45,
       "targets": [
         {
           "expr": "gov_rollback_total"
@@ -475,7 +497,7 @@
     },
     {
       "description": "Governance votes",
-      "id": 44,
+      "id": 46,
       "targets": [
         {
           "expr": "gov_votes_total"
@@ -486,7 +508,7 @@
     },
     {
       "description": "eta parameter for burst veto x1000",
-      "id": 45,
+      "id": 47,
       "targets": [
         {
           "expr": "haar_eta_milli"
@@ -497,7 +519,7 @@
     },
     {
       "description": "Handshake failures grouped by reason",
-      "id": 46,
+      "id": 48,
       "targets": [
         {
           "expr": "handshake_fail_total"
@@ -508,7 +530,7 @@
     },
     {
       "description": "A* heuristic mu x1000",
-      "id": 47,
+      "id": 49,
       "targets": [
         {
           "expr": "heuristic_mu_milli"
@@ -519,7 +541,7 @@
     },
     {
       "description": "Non-contiguous nonce submissions",
-      "id": 48,
+      "id": 50,
       "targets": [
         {
           "expr": "identity_nonce_skips_total"
@@ -530,7 +552,7 @@
     },
     {
       "description": "Handle registration attempts",
-      "id": 49,
+      "id": 51,
       "targets": [
         {
           "expr": "identity_registrations_total"
@@ -541,7 +563,7 @@
     },
     {
       "description": "Rejected identity replay attempts",
-      "id": 50,
+      "id": 52,
       "targets": [
         {
           "expr": "identity_replays_blocked_total"
@@ -552,7 +574,7 @@
     },
     {
       "description": "Industrial lane transactions admitted",
-      "id": 51,
+      "id": 53,
       "targets": [
         {
           "expr": "industrial_admitted_total"
@@ -563,7 +585,7 @@
     },
     {
       "description": "Pending industrial compute slices",
-      "id": 52,
+      "id": 54,
       "targets": [
         {
           "expr": "industrial_backlog"
@@ -574,7 +596,7 @@
     },
     {
       "description": "Industrial lane submissions deferred",
-      "id": 53,
+      "id": 55,
       "targets": [
         {
           "expr": "industrial_deferred_total"
@@ -585,7 +607,7 @@
     },
     {
       "description": "Current industrial subsidy multiplier",
-      "id": 54,
+      "id": 56,
       "targets": [
         {
           "expr": "industrial_multiplier"
@@ -596,7 +618,7 @@
     },
     {
       "description": "Latest price per compute unit",
-      "id": 55,
+      "id": 57,
       "targets": [
         {
           "expr": "industrial_price_per_unit"
@@ -607,7 +629,7 @@
     },
     {
       "description": "Industrial admission rejections by reason",
-      "id": 56,
+      "id": 58,
       "targets": [
         {
           "expr": "industrial_rejected_total"
@@ -618,7 +640,7 @@
     },
     {
       "description": "Total normalized compute units processed",
-      "id": 57,
+      "id": 59,
       "targets": [
         {
           "expr": "industrial_units_total"
@@ -629,7 +651,7 @@
     },
     {
       "description": "Industrial compute utilisation percentage",
-      "id": 58,
+      "id": 60,
       "targets": [
         {
           "expr": "industrial_utilization"
@@ -640,7 +662,7 @@
     },
     {
       "description": "Total compute provider SLA violations",
-      "id": 59,
+      "id": 61,
       "targets": [
         {
           "expr": "compute_sla_violations_total"
@@ -651,7 +673,7 @@
     },
     {
       "description": "Rolling uptime percentage for the compute provider",
-      "id": 60,
+      "id": 62,
       "targets": [
         {
           "expr": "compute_provider_uptime"
@@ -662,7 +684,7 @@
     },
     {
       "description": "Transactions rejected for invalid fee selector",
-      "id": 61,
+      "id": 63,
       "targets": [
         {
           "expr": "invalid_selector_reject_total"
@@ -673,7 +695,7 @@
     },
     {
       "description": "Successful peer key rotations",
-      "id": 62,
+      "id": 64,
       "targets": [
         {
           "expr": "key_rotation_total"
@@ -684,7 +706,7 @@
     },
     {
       "description": "Times the subsidy kill switch was activated",
-      "id": 63,
+      "id": 65,
       "targets": [
         {
           "expr": "kill_switch_trigger_total"
@@ -695,7 +717,7 @@
     },
     {
       "description": "Lock acquisition failures due to poisoning",
-      "id": 64,
+      "id": 66,
       "targets": [
         {
           "expr": "lock_poison_total"
@@ -706,7 +728,7 @@
     },
     {
       "description": "Logs dropped due to rate limiting",
-      "id": 65,
+      "id": 67,
       "targets": [
         {
           "expr": "log_drop_total"
@@ -717,7 +739,7 @@
     },
     {
       "description": "Total emitted log events",
-      "id": 66,
+      "id": 68,
       "targets": [
         {
           "expr": "log_emit_total"
@@ -728,7 +750,7 @@
     },
     {
       "description": "Size of serialized log events in bytes",
-      "id": 67,
+      "id": 69,
       "targets": [
         {
           "expr": "log_size_bytes"
@@ -739,7 +761,7 @@
     },
     {
       "description": "Settlement loop latency",
-      "id": 68,
+      "id": 70,
       "targets": [
         {
           "expr": "match_loop_latency_seconds"
@@ -750,7 +772,7 @@
     },
     {
       "description": "Total matched jobs",
-      "id": 69,
+      "id": 71,
       "targets": [
         {
           "expr": "matches_total"
@@ -761,7 +783,7 @@
     },
     {
       "description": "Current mempool size",
-      "id": 70,
+      "id": 72,
       "targets": [
         {
           "expr": "mempool_size"
@@ -772,7 +794,7 @@
     },
     {
       "description": "Times the miner reward logistic factor was recalculated",
-      "id": 71,
+      "id": 73,
       "targets": [
         {
           "expr": "miner_reward_recalc_total"
@@ -783,7 +805,7 @@
     },
     {
       "description": "QUIC handshake failures per peer grouped by reason",
-      "id": 72,
+      "id": 74,
       "targets": [
         {
           "expr": "net_peer_handshake_fail_total"
@@ -794,7 +816,7 @@
     },
     {
       "description": "Transactions dropped because the sender account is missing",
-      "id": 73,
+      "id": 75,
       "targets": [
         {
           "expr": "orphan_sweep_total"
@@ -805,7 +827,7 @@
     },
     {
       "description": "Successful handshakes by feature mask",
-      "id": 74,
+      "id": 76,
       "targets": [
         {
           "expr": "p2p_handshake_accept_total"
@@ -816,7 +838,7 @@
     },
     {
       "description": "Handshakes rejected by reason",
-      "id": 75,
+      "id": 77,
       "targets": [
         {
           "expr": "p2p_handshake_reject_total"
@@ -827,7 +849,7 @@
     },
     {
       "description": "Current active governance parameter values",
-      "id": 76,
+      "id": 78,
       "targets": [
         {
           "expr": "param_change_active"
@@ -838,7 +860,7 @@
     },
     {
       "description": "Governance parameter changes pending activation",
-      "id": 77,
+      "id": 79,
       "targets": [
         {
           "expr": "param_change_pending"
@@ -849,7 +871,7 @@
     },
     {
       "description": "Number of settlement payouts capped per identity",
-      "id": 78,
+      "id": 80,
       "targets": [
         {
           "expr": "payout_cap_hits_total"
@@ -860,7 +882,7 @@
     },
     {
       "description": "Bytes sent to peer",
-      "id": 79,
+      "id": 81,
       "targets": [
         {
           "expr": "peer_bytes_sent_total"
@@ -871,7 +893,7 @@
     },
     {
       "description": "Messages dropped grouped by reason",
-      "id": 80,
+      "id": 82,
       "targets": [
         {
           "expr": "peer_drop_total"
@@ -882,7 +904,7 @@
     },
     {
       "description": "Per-peer hits on the request rate limiter",
-      "id": 81,
+      "id": 83,
       "targets": [
         {
           "expr": "p2p_request_limit_hits_total"
@@ -892,8 +914,19 @@
       "type": "timeseries"
     },
     {
+      "description": "Rate limit drops per peer",
+      "id": 84,
+      "targets": [
+        {
+          "expr": "peer_rate_limit_total"
+        }
+      ],
+      "title": "peer_rate_limit_total",
+      "type": "timeseries"
+    },
+    {
       "description": "Total peer errors grouped by code",
-      "id": 82,
+      "id": 85,
       "targets": [
         {
           "expr": "peer_error_total"
@@ -904,7 +937,7 @@
     },
     {
       "description": "Peer key rotation attempts grouped by result",
-      "id": 83,
+      "id": 86,
       "targets": [
         {
           "expr": "peer_key_rotate_total"
@@ -915,7 +948,7 @@
     },
     {
       "description": "Number of peers currently tracked for telemetry",
-      "id": 84,
+      "id": 87,
       "targets": [
         {
           "expr": "peer_metrics_active"
@@ -926,7 +959,7 @@
     },
     {
       "description": "Websocket peer metrics frames dropped",
-      "id": 85,
+      "id": 88,
       "targets": [
         {
           "expr": "peer_metrics_dropped_total"
@@ -937,7 +970,7 @@
     },
     {
       "description": "Approximate memory used by peer metrics map",
-      "id": 86,
+      "id": 89,
       "targets": [
         {
           "expr": "peer_metrics_memory_bytes"
@@ -948,7 +981,7 @@
     },
     {
       "description": "Active peer metrics websocket subscribers",
-      "id": 87,
+      "id": 90,
       "targets": [
         {
           "expr": "peer_metrics_subscribers"
@@ -959,7 +992,7 @@
     },
     {
       "description": "Peers rejected grouped by reason",
-      "id": 88,
+      "id": 91,
       "targets": [
         {
           "expr": "peer_rejected_total"
@@ -970,7 +1003,7 @@
     },
     {
       "description": "Peer reputation score",
-      "id": 89,
+      "id": 92,
       "targets": [
         {
           "expr": "peer_reputation_score"
@@ -981,7 +1014,7 @@
     },
     {
       "description": "Total requests received from peer",
-      "id": 90,
+      "id": 93,
       "targets": [
         {
           "expr": "peer_request_total"
@@ -992,7 +1025,7 @@
     },
     {
       "description": "Bulk peer metric export attempts grouped by result",
-      "id": 91,
+      "id": 94,
       "targets": [
         {
           "expr": "peer_stats_export_all_total"
@@ -1003,7 +1036,7 @@
     },
     {
       "description": "Peer metric export attempts grouped by result",
-      "id": 92,
+      "id": 95,
       "targets": [
         {
           "expr": "peer_stats_export_total"
@@ -1014,7 +1047,7 @@
     },
     {
       "description": "Peer metric queries grouped by peer",
-      "id": 93,
+      "id": 96,
       "targets": [
         {
           "expr": "peer_stats_query_total"
@@ -1025,7 +1058,7 @@
     },
     {
       "description": "Peer metric resets grouped by peer",
-      "id": 94,
+      "id": 97,
       "targets": [
         {
           "expr": "peer_stats_reset_total"
@@ -1036,7 +1069,7 @@
     },
     {
       "description": "Peer throttle events grouped by reason",
-      "id": 95,
+      "id": 98,
       "targets": [
         {
           "expr": "peer_throttle_total"
@@ -1047,7 +1080,7 @@
     },
     {
       "description": "Backpressure activations grouped by reason",
-      "id": 96,
+      "id": 99,
       "targets": [
         {
           "expr": "peer_backpressure_active_total"
@@ -1058,7 +1091,7 @@
     },
     {
       "description": "Requests dropped due to backpressure grouped by reason",
-      "id": 97,
+      "id": 100,
       "targets": [
         {
           "expr": "peer_backpressure_dropped_total"
@@ -1069,7 +1102,7 @@
     },
     {
       "description": "Total price entries adjusted by reputation weight",
-      "id": 98,
+      "id": 101,
       "targets": [
         {
           "expr": "price_weight_applied_total"
@@ -1080,7 +1113,7 @@
     },
     {
       "description": "Current reputation score per provider",
-      "id": 99,
+      "id": 102,
       "targets": [
         {
           "expr": "provider_reputation_score"
@@ -1091,7 +1124,7 @@
     },
     {
       "description": "Total bytes received over QUIC",
-      "id": 100,
+      "id": 103,
       "targets": [
         {
           "expr": "quic_bytes_recv_total"
@@ -1102,7 +1135,7 @@
     },
     {
       "description": "Total bytes sent over QUIC",
-      "id": 101,
+      "id": 104,
       "targets": [
         {
           "expr": "quic_bytes_sent_total"
@@ -1113,7 +1146,7 @@
     },
     {
       "description": "QUIC connection handshake latency",
-      "id": 102,
+      "id": 105,
       "targets": [
         {
           "expr": "quic_conn_latency_seconds"
@@ -1124,7 +1157,7 @@
     },
     {
       "description": "QUIC disconnects by error code",
-      "id": 103,
+      "id": 106,
       "targets": [
         {
           "expr": "quic_disconnect_total"
@@ -1135,7 +1168,7 @@
     },
     {
       "description": "Total QUIC endpoint reuse count",
-      "id": 104,
+      "id": 107,
       "targets": [
         {
           "expr": "quic_endpoint_reuse_total"
@@ -1146,7 +1179,7 @@
     },
     {
       "description": "Total QUIC handshake failures by reason",
-      "id": 105,
+      "id": 108,
       "targets": [
         {
           "expr": "quic_handshake_fail_total"
@@ -1157,7 +1190,7 @@
     },
     {
       "description": "Reads denied by reason",
-      "id": 106,
+      "id": 109,
       "targets": [
         {
           "expr": "read_denied_total"
@@ -1168,7 +1201,7 @@
     },
     {
       "description": "Corrupted receipt entries on load",
-      "id": 107,
+      "id": 110,
       "targets": [
         {
           "expr": "receipt_corrupt_total"
@@ -1179,7 +1212,7 @@
     },
     {
       "description": "Receipt persistence failures",
-      "id": 108,
+      "id": 111,
       "targets": [
         {
           "expr": "receipt_persist_fail_total"
@@ -1190,7 +1223,7 @@
     },
     {
       "description": "Total CT burned from rent escrow",
-      "id": 109,
+      "id": 112,
       "targets": [
         {
           "expr": "rent_escrow_burned_ct_total"
@@ -1201,7 +1234,7 @@
     },
     {
       "description": "Total CT locked in rent escrow",
-      "id": 110,
+      "id": 113,
       "targets": [
         {
           "expr": "rent_escrow_locked_ct_total"
@@ -1212,7 +1245,7 @@
     },
     {
       "description": "Total CT refunded from rent escrow",
-      "id": 111,
+      "id": 114,
       "targets": [
         {
           "expr": "rent_escrow_refunded_ct_total"
@@ -1223,7 +1256,7 @@
     },
     {
       "description": "Reputation adjustments",
-      "id": 112,
+      "id": 115,
       "targets": [
         {
           "expr": "reputation_adjust_total"
@@ -1234,7 +1267,7 @@
     },
     {
       "description": "Reputation updates that failed verification or were stale",
-      "id": 113,
+      "id": 116,
       "targets": [
         {
           "expr": "reputation_gossip_fail_total"
@@ -1245,7 +1278,7 @@
     },
     {
       "description": "Propagation latency for reputation updates",
-      "id": 114,
+      "id": 117,
       "targets": [
         {
           "expr": "reputation_gossip_latency_seconds"
@@ -1256,7 +1289,7 @@
     },
     {
       "description": "Reputation gossip updates processed grouped by result",
-      "id": 115,
+      "id": 118,
       "targets": [
         {
           "expr": "reputation_gossip_total"
@@ -1267,7 +1300,7 @@
     },
     {
       "description": "Total RPC bans issued",
-      "id": 116,
+      "id": 119,
       "targets": [
         {
           "expr": "rpc_bans_total"
@@ -1278,7 +1311,7 @@
     },
     {
       "description": "Total RPC client errors grouped by code",
-      "id": 117,
+      "id": 120,
       "targets": [
         {
           "expr": "rpc_client_error_total"
@@ -1289,7 +1322,7 @@
     },
     {
       "description": "RPC requests checked against the rate limiter",
-      "id": 118,
+      "id": 121,
       "targets": [
         {
           "expr": "rpc_rate_limit_attempt_total"
@@ -1300,7 +1333,7 @@
     },
     {
       "description": "RPC requests rejected by the rate limiter",
-      "id": 119,
+      "id": 122,
       "targets": [
         {
           "expr": "rpc_rate_limit_reject_total"
@@ -1311,7 +1344,7 @@
     },
     {
       "description": "Current RPC rate limiter tokens per client",
-      "id": 120,
+      "id": 123,
       "targets": [
         {
           "expr": "rpc_tokens_available"
@@ -1322,7 +1355,7 @@
     },
     {
       "description": "Accelerator jobs that failed or were cancelled",
-      "id": 121,
+      "id": 124,
       "targets": [
         {
           "expr": "scheduler_accelerator_fail_total"
@@ -1333,7 +1366,7 @@
     },
     {
       "description": "Jobs requiring accelerators that could not be matched",
-      "id": 122,
+      "id": 125,
       "targets": [
         {
           "expr": "scheduler_accelerator_miss_total"
@@ -1344,7 +1377,7 @@
     },
     {
       "description": "Jobs requiring accelerators that started successfully",
-      "id": 123,
+      "id": 126,
       "targets": [
         {
           "expr": "scheduler_accelerator_util_total"
@@ -1355,7 +1388,7 @@
     },
     {
       "description": "Number of currently assigned jobs",
-      "id": 124,
+      "id": 127,
       "targets": [
         {
           "expr": "scheduler_active_jobs"
@@ -1366,7 +1399,7 @@
     },
     {
       "description": "Scheduler cancellations",
-      "id": 125,
+      "id": 128,
       "targets": [
         {
           "expr": "scheduler_cancel_total"
@@ -1377,7 +1410,7 @@
     },
     {
       "description": "Effective compute price per unit by provider",
-      "id": 126,
+      "id": 129,
       "targets": [
         {
           "expr": "scheduler_effective_price"
@@ -1388,7 +1421,7 @@
     },
     {
       "description": "Time to perform a scheduler match",
-      "id": 127,
+      "id": 130,
       "targets": [
         {
           "expr": "scheduler_match_latency_seconds"
@@ -1399,7 +1432,7 @@
     },
     {
       "description": "Scheduler match outcomes by result",
-      "id": 128,
+      "id": 131,
       "targets": [
         {
           "expr": "scheduler_match_total"
@@ -1410,7 +1443,7 @@
     },
     {
       "description": "Scheduler preemption events by reason",
-      "id": 129,
+      "id": 132,
       "targets": [
         {
           "expr": "scheduler_preempt_total"
@@ -1421,7 +1454,7 @@
     },
     {
       "description": "High-priority jobs exceeding wait threshold",
-      "id": 130,
+      "id": 133,
       "targets": [
         {
           "expr": "scheduler_priority_miss_total"
@@ -1432,7 +1465,7 @@
     },
     {
       "description": "Time a job waited in the scheduler queue",
-      "id": 131,
+      "id": 134,
       "targets": [
         {
           "expr": "job_age_seconds"
@@ -1443,7 +1476,7 @@
     },
     {
       "description": "Jobs whose priority was boosted due to aging",
-      "id": 132,
+      "id": 135,
       "targets": [
         {
           "expr": "priority_boost_total"
@@ -1454,7 +1487,7 @@
     },
     {
       "description": "Distribution of provider reputation scores",
-      "id": 133,
+      "id": 136,
       "targets": [
         {
           "expr": "scheduler_provider_reputation"
@@ -1465,7 +1498,7 @@
     },
     {
       "description": "Receipts applied",
-      "id": 134,
+      "id": 137,
       "targets": [
         {
           "expr": "settle_applied_total"
@@ -1476,7 +1509,7 @@
     },
     {
       "description": "Receipts failing settlement audit",
-      "id": 135,
+      "id": 138,
       "targets": [
         {
           "expr": "settle_audit_mismatch_total"
@@ -1487,7 +1520,7 @@
     },
     {
       "description": "Settlement failures",
-      "id": 136,
+      "id": 139,
       "targets": [
         {
           "expr": "settle_failed_total"
@@ -1498,7 +1531,7 @@
     },
     {
       "description": "Settlement mode changes",
-      "id": 137,
+      "id": 140,
       "targets": [
         {
           "expr": "settle_mode_change_total"
@@ -1509,7 +1542,7 @@
     },
     {
       "description": "Total CT burned from slashing penalties",
-      "id": 138,
+      "id": 141,
       "targets": [
         {
           "expr": "slashing_burn_ct_total"
@@ -1520,7 +1553,7 @@
     },
     {
       "description": "Snapshot operation duration",
-      "id": 139,
+      "id": 142,
       "targets": [
         {
           "expr": "snapshot_duration_seconds"
@@ -1531,7 +1564,7 @@
     },
     {
       "description": "Total snapshot operation failures",
-      "id": 140,
+      "id": 143,
       "targets": [
         {
           "expr": "snapshot_fail_total"
@@ -1542,7 +1575,7 @@
     },
     {
       "description": "Snapshot interval in blocks",
-      "id": 141,
+      "id": 144,
       "targets": [
         {
           "expr": "snapshot_interval"
@@ -1553,7 +1586,7 @@
     },
     {
       "description": "Last requested snapshot interval",
-      "id": 142,
+      "id": 145,
       "targets": [
         {
           "expr": "snapshot_interval_changed"
@@ -1564,7 +1597,7 @@
     },
     {
       "description": "Expired mempool entries dropped during startup",
-      "id": 143,
+      "id": 146,
       "targets": [
         {
           "expr": "startup_ttl_drop_total"
@@ -1575,7 +1608,7 @@
     },
     {
       "description": "Size of chunks put into storage",
-      "id": 144,
+      "id": 147,
       "targets": [
         {
           "expr": "storage_chunk_size_bytes"
@@ -1586,7 +1619,7 @@
     },
     {
       "description": "Number of storage writes that failed due to disk exhaustion",
-      "id": 145,
+      "id": 148,
       "targets": [
         {
           "expr": "storage_disk_full_total"
@@ -1597,7 +1630,7 @@
     },
     {
       "description": "Final preferred chunk size after upload",
-      "id": 146,
+      "id": 149,
       "targets": [
         {
           "expr": "storage_final_chunk_size"
@@ -1608,7 +1641,7 @@
     },
     {
       "description": "Initial chunk size used for object upload",
-      "id": 147,
+      "id": 150,
       "targets": [
         {
           "expr": "storage_initial_chunk_size"
@@ -1619,7 +1652,7 @@
     },
     {
       "description": "Observed provider loss rate",
-      "id": 148,
+      "id": 151,
       "targets": [
         {
           "expr": "storage_provider_loss_rate"
@@ -1630,7 +1663,7 @@
     },
     {
       "description": "Observed provider RTT in milliseconds",
-      "id": 149,
+      "id": 152,
       "targets": [
         {
           "expr": "storage_provider_rtt_ms"
@@ -1641,7 +1674,7 @@
     },
     {
       "description": "Time to put a single chunk",
-      "id": 150,
+      "id": 153,
       "targets": [
         {
           "expr": "storage_put_chunk_seconds"
@@ -1652,7 +1685,7 @@
     },
     {
       "description": "Estimated time to upload object in seconds",
-      "id": 151,
+      "id": 154,
       "targets": [
         {
           "expr": "storage_put_eta_seconds"
@@ -1663,7 +1696,7 @@
     },
     {
       "description": "Total bytes reconstructed by repair loop",
-      "id": 152,
+      "id": 155,
       "targets": [
         {
           "expr": "storage_repair_bytes_total"
@@ -1674,7 +1707,7 @@
     },
     {
       "description": "Total storage repair failures",
-      "id": 153,
+      "id": 156,
       "targets": [
         {
           "expr": "storage_repair_failures_total"
@@ -1685,7 +1718,7 @@
     },
     {
       "description": "Multiplier auto-reduction events due to inflation guard",
-      "id": 154,
+      "id": 157,
       "targets": [
         {
           "expr": "subsidy_auto_reduced_total"
@@ -1696,7 +1729,7 @@
     },
     {
       "description": "Total subsidized bytes by type",
-      "id": 155,
+      "id": 158,
       "targets": [
         {
           "expr": "subsidy_bytes_total"
@@ -1707,7 +1740,7 @@
     },
     {
       "description": "Total subsidized compute time in ms",
-      "id": 156,
+      "id": 159,
       "targets": [
         {
           "expr": "subsidy_cpu_ms_total"
@@ -1718,7 +1751,7 @@
     },
     {
       "description": "Current subsidy multipliers",
-      "id": 157,
+      "id": 160,
       "targets": [
         {
           "expr": "subsidy_multiplier"
@@ -1729,7 +1762,7 @@
     },
     {
       "description": "True subsidy multipliers",
-      "id": 158,
+      "id": 161,
       "targets": [
         {
           "expr": "subsidy_multiplier_raw"
@@ -1740,7 +1773,7 @@
     },
     {
       "description": "Transactions dropped due to TTL expiration",
-      "id": 159,
+      "id": 162,
       "targets": [
         {
           "expr": "ttl_drop_total"
@@ -1751,7 +1784,7 @@
     },
     {
       "description": "Gossip dedup entries removed due to TTL expiry",
-      "id": 160,
+      "id": 163,
       "targets": [
         {
           "expr": "gossip_ttl_drop_total"
@@ -1762,7 +1795,7 @@
     },
     {
       "description": "Total admitted transactions",
-      "id": 161,
+      "id": 164,
       "targets": [
         {
           "expr": "tx_admitted_total"
@@ -1773,7 +1806,7 @@
     },
     {
       "description": "Total rejected transactions",
-      "id": 162,
+      "id": 165,
       "targets": [
         {
           "expr": "tx_rejected_total"
@@ -1784,7 +1817,7 @@
     },
     {
       "description": "Total submitted transactions",
-      "id": 163,
+      "id": 166,
       "targets": [
         {
           "expr": "tx_submitted_total"
@@ -1795,7 +1828,7 @@
     },
     {
       "description": "utilisation variance threshold x1000",
-      "id": 164,
+      "id": 167,
       "targets": [
         {
           "expr": "util_var_threshold_milli"
@@ -1806,7 +1839,7 @@
     },
     {
       "description": "WAL entries skipped due to checksum mismatch",
-      "id": 165,
+      "id": 168,
       "targets": [
         {
           "expr": "wal_corrupt_recovery_total"
@@ -1817,7 +1850,7 @@
     },
     {
       "description": "Telemetry memory allocation in bytes",
-      "id": 166,
+      "id": 169,
       "targets": [
         {
           "expr": "telemetry_alloc_bytes"

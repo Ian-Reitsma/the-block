@@ -1,8 +1,9 @@
 use light_client::{sync_background, Header, LightClient, SyncOptions};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Measure the time required to sync a batch of headers on a simulated mobile client.
-pub fn measure_sync_latency(headers: Vec<Header>) -> std::time::Duration {
+/// Each fetched header incurs an artificial `delay` to model network latency.
+pub fn measure_sync_latency(headers: Vec<Header>, delay: Duration) -> Duration {
     let mut iter = headers.into_iter();
     let genesis = match iter.next() {
         Some(h) => h,
@@ -11,11 +12,12 @@ pub fn measure_sync_latency(headers: Vec<Header>) -> std::time::Duration {
     let mut client = LightClient::new(genesis);
     let remaining: Vec<Header> = iter.collect();
     let fetch = move |start: u64| {
-        remaining
-            .clone()
-            .into_iter()
-            .filter(|h| h.height >= start)
-            .collect()
+        let mut out = Vec::new();
+        for h in remaining.clone().into_iter().filter(|h| h.height >= start) {
+            std::thread::sleep(delay);
+            out.push(h);
+        }
+        out
     };
     let opts = SyncOptions {
         wifi_only: false,

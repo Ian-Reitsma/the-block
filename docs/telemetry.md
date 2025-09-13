@@ -31,6 +31,7 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_backpressure_active_total{reason}` increments when a peer is throttled for exceeding limits
 - `peer_backpressure_dropped_total{reason}` counts requests rejected due to active backpressure
 - `p2p_request_limit_hits_total{peer_id}` increments when a peer exceeds its request rate
+- `peer_rate_limit_total{peer_id}` records drops due to per-peer rate limiting
 - `peer_stats_query_total{peer_id}` counts RPC and CLI lookups
 - `peer_stats_reset_total{peer_id}` counts manual metric resets
 - `peer_stats_export_total{result}` counts JSON snapshot export attempts (ok, error)
@@ -65,8 +66,8 @@ client, provider, or preemption logic.
     `industrial_price_per_unit` surface demand for industrial workloads and feed
     `Block::industrial_subsidies()`; see [docs/compute_market.md](compute_market.md)
     for gauge definitions.
- - `compute_sla_violations_total` increments when a provider misses a declared
-    SLA, while `compute_provider_uptime` gauges the rolling uptime percentage.
+ - `compute_sla_violations_total{provider}` increments when a provider misses a declared
+   SLA, while `compute_provider_uptime{provider}` gauges the rolling uptime percentage.
  - `dex_escrow_locked`, `dex_escrow_pending`, `dex_liquidity_locked_total`,
     `dex_orders_total{side}`, and `dex_trade_volume` expose escrowed funds,
     pending escrows, total locked liquidity, submitted orders, and matched
@@ -99,9 +100,11 @@ outages do not block operation.
 ### Telemetry schema and dashboards
 
 The canonical metric list lives in `monitoring/metrics.json`. After adding or
-renaming metrics, regenerate the Grafana dashboards with
-`scripts/gen-grafana.sh` (a thin wrapper over `monitoring/tools/gen_templates.py`)
-to keep `monitoring/grafana/*.json` in sync.
+renaming metrics, run `python monitoring/tools/gen_dashboard.py` and commit the
+updated `monitoring/grafana/dashboard.json` along with
+`monitoring/tests/snapshots/dashboard.json`. This keeps dashboards synchronized
+with the schema, and `cargo test -p metrics-aggregator --test naming` enforces
+metric naming conventions.
 
 The gauge `banned_peers_total` exposes the number of peers currently banned and
 is updated whenever bans are added or expire. Each ban's expiry is also tracked

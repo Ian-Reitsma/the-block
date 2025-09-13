@@ -50,6 +50,14 @@ fork. Clients must track checkpoint hashes by height and refuse headers whose
 invalidated, the light client should roll back to the last valid height and
 re-sync from that point to avoid following an obsolete chain.
 
+### Header Cache Rules
+
+Mobile deployments retain only a sliding window of recent headers to conserve
+storage. Older entries beyond a few thousand blocks may be evicted, but any
+height anchoring a trusted checkpoint must remain cached until the checkpoint
+expires or is explicitly revoked. Cache eviction must never drop a header that
+is still required to verify PoW linkage from the last checkpoint.
+
 ## Security Model
 
 The demo implementation assumes a trusted bootstrap header.  Without cryptographic

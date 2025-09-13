@@ -171,3 +171,9 @@ impl Bridge {
         unlock::unlock(self, relayers, relayer, user, amount, rproof)
     }
 }
+
+/// Detects whether a given output script represents an HTLC.
+/// Currently this is a simple prefix check for illustrative purposes.
+pub fn is_htlc_output(script: &[u8]) -> bool {
+    script.starts_with(b"htlc:")
+}

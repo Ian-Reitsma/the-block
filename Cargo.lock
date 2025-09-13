@@ -1318,10 +1318,18 @@ dependencies = [
  "clap",
  "dex",
  "ed25519-dalek 2.2.0",
+ "futures",
  "hex",
+ "light-client",
+ "ripemd160",
  "serde",
  "serde_json",
+ "sha3",
+ "storage",
  "the_block",
+ "tokio",
+ "tokio-tungstenite 0.20.1",
+ "wallet",
 ]
 
 [[package]]
@@ -1556,6 +1564,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
+name = "crypto"
+version = "0.1.0"
+dependencies = [
+ "pqcrypto-dilithium",
+ "pqcrypto-traits",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1734,6 +1750,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "criterion",
+ "hex",
  "serde",
  "sha3",
  "subtle",
@@ -1829,6 +1846,17 @@ name = "dtoa"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6add3b8cff394282be81f3fc1a0605db594ed69890078ca6e2cab1c408bcf04"
+
+[[package]]
+name = "dual-key-migrate"
+version = "0.1.0"
+dependencies = [
+ "crypto",
+ "hex",
+ "serde",
+ "serde_json",
+ "wallet",
+]
 
 [[package]]
 name = "dunce"
@@ -2030,6 +2058,7 @@ dependencies = [
  "hex",
  "rusqlite",
  "serde",
+ "storage",
  "tempfile",
  "the_block",
  "tokio",
@@ -4065,9 +4094,16 @@ dependencies = [
 name = "light-client"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "blake3",
+ "ed25519-dalek 1.0.1",
  "flate2",
+ "futures",
+ "rand 0.8.5",
  "serde",
+ "tokio",
+ "tokio-tungstenite 0.20.1",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -5995,6 +6031,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ripemd160"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f923401a7e6614f2838037bd9bac86c003d1629446d2b5816d3159472071be4f"
+
+[[package]]
 name = "rocksdb"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6930,6 +6972,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "storage"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "str_stack"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7128,12 +7178,14 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "csv",
+ "dex",
  "light-client",
  "rand 0.8.5",
  "rocksdb",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha3",
  "tempfile",
 ]
 
@@ -7208,6 +7260,7 @@ dependencies = [
  "colored",
  "crc32fast",
  "criterion",
+ "crypto",
  "csv",
  "dashmap",
  "dex",
@@ -7251,6 +7304,7 @@ dependencies = [
  "reed-solomon-erasure",
  "regex",
  "reqwest 0.11.27",
+ "ripemd160",
  "rocksdb",
  "rustdct",
  "rustls 0.21.12",
@@ -7259,10 +7313,13 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "serial_test 3.2.0",
+ "sha1",
+ "sha3",
  "signal-hook",
  "sled",
  "state",
  "statrs",
+ "storage",
  "subtle",
  "tar",
  "tempfile",
@@ -7283,6 +7340,7 @@ dependencies = [
  "wait-timeout",
  "wallet",
  "xorfilter-rs",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -9128,7 +9186,7 @@ dependencies = [
  "pbkdf2",
  "sha1",
  "time",
- "zstd",
+ "zstd 0.11.2+zstd.1.5.2",
 ]
 
 [[package]]
@@ -9137,7 +9195,16 @@ version = "0.11.2+zstd.1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20cc960326ece64f010d2d2107537f26dc589a6573a316bd5b1dba685fa5fde4"
 dependencies = [
- "zstd-safe",
+ "zstd-safe 5.0.2+zstd.1.5.2",
+]
+
+[[package]]
+name = "zstd"
+version = "0.12.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a27595e173641171fc74a1232b7b1c7a7cb6e18222c11e9dfb9888fa424c53c"
+dependencies = [
+ "zstd-safe 6.0.6",
 ]
 
 [[package]]
@@ -9145,6 +9212,16 @@ name = "zstd-safe"
 version = "5.0.2+zstd.1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d2a5585e04f9eea4b2a3d1eca508c4dee9592a89ef6f450c11719da0726f4db"
+dependencies = [
+ "libc",
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "6.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee98ffd0b48ee95e6c5168188e44a54550b1564d9d530ee21d5f0eaed1069581"
 dependencies = [
  "libc",
  "zstd-sys",

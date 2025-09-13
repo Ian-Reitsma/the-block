@@ -628,7 +628,7 @@ impl MempoolEntry {
         if self.serialized_size == 0 {
             0
         } else {
-            self.tx.payload.fee / self.serialized_size
+            self.tx.tip / self.serialized_size
         }
     }
 
@@ -943,7 +943,7 @@ impl Blockchain {
         let mut fees = Vec::new();
         for entry in map.iter() {
             ages.push(now.saturating_sub(entry.timestamp_millis));
-            fees.push(entry.tx.payload.fee);
+            fees.push(entry.tx.tip);
         }
         ages.sort_unstable();
         fees.sort_unstable();
@@ -1125,6 +1125,7 @@ impl Blockchain {
                                 b.timestamp_millis,
                                 b.nonce,
                                 b.difficulty,
+                                b.base_fee,
                                 b.coinbase_consumer,
                                 b.coinbase_industrial,
                                 b.storage_sub_ct,
@@ -1250,6 +1251,7 @@ impl Blockchain {
                                     b.timestamp_millis,
                                     b.nonce,
                                     b.difficulty,
+                                    b.base_fee,
                                     b.coinbase_consumer,
                                     b.coinbase_industrial,
                                     b.storage_sub_ct,
@@ -1394,6 +1396,7 @@ impl Blockchain {
                             b.timestamp_millis,
                             b.nonce,
                             b.difficulty,
+                            b.base_fee,
                             b.coinbase_consumer,
                             b.coinbase_industrial,
                             b.storage_sub_ct,
@@ -1726,11 +1729,7 @@ impl Blockchain {
                 let size = bincode::serialize(&e.tx)
                     .map(|b| b.len() as u64)
                     .unwrap_or(0);
-                let fpb = if size == 0 {
-                    0
-                } else {
-                    e.tx.payload.fee / size
-                };
+                let fpb = if size == 0 { 0 } else { e.tx.tip / size };
                 #[cfg(feature = "telemetry")]
                 let _span = tracing::span!(
                     tracing::Level::TRACE,
@@ -1764,7 +1763,7 @@ impl Blockchain {
                     bc.inc_mempool_size(e.tx.lane);
                     if let Some(acc) = bc.accounts.get_mut(&e.sender) {
                         if let Ok((fee_consumer, fee_industrial)) =
-                            crate::fee::decompose(e.tx.payload.pct_ct, e.tx.payload.fee)
+                            crate::fee::decompose(e.tx.payload.pct_ct, bc.base_fee + e.tx.tip)
                         {
                             acc.pending_consumer += e.tx.payload.amount_consumer + fee_consumer;
                             acc.pending_industrial +=
@@ -1997,7 +1996,7 @@ impl Blockchain {
                 TxAdmissionError::FeeOverflow
             })?
             .len() as u64;
-        let fee_per_byte = if size == 0 { 0 } else { tx.payload.fee / size };
+        let fee_per_byte = if size == 0 { 0 } else { tx.tip / size };
         #[cfg(feature = "telemetry")]
         let _pool_guard = {
             let span = tracing::span!(
@@ -2093,8 +2092,14 @@ impl Blockchain {
             self.record_reject("fee_too_large");
             return Err(TxAdmissionError::FeeTooLarge);
         }
+        let required_total = self.base_fee.saturating_add(tx.tip);
+        if tx.payload.fee < required_total {
+            #[cfg(feature = "telemetry")]
+            self.record_reject("fee_too_low");
+            return Err(TxAdmissionError::FeeTooLow);
+        }
         let (fee_consumer, fee_industrial) =
-            match crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+            match crate::fee::decompose(tx.payload.pct_ct, required_total) {
                 Ok(v) => v,
                 Err(FeeError::InvalidSelector) => {
                     #[cfg(feature = "telemetry")]
@@ -2196,9 +2201,10 @@ impl Blockchain {
                 mempool.remove(&(ev_sender.clone(), ev_nonce));
                 self.dec_mempool_size(lane);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
-                    if let Ok((c, i)) =
-                        crate::fee::decompose(ev_entry.tx.payload.pct_ct, ev_entry.tx.payload.fee)
-                    {
+                    if let Ok((c, i)) = crate::fee::decompose(
+                        ev_entry.tx.payload.pct_ct,
+                        self.base_fee + ev_entry.tx.tip,
+                    ) {
                         let total_c = ev_entry.tx.payload.amount_consumer + c;
                         let total_i = ev_entry.tx.payload.amount_industrial + i;
                         if acc.pending_consumer < total_c
@@ -2466,7 +2472,7 @@ impl Blockchain {
                     FeeLane::Consumer => self.min_fee_per_byte_consumer,
                     FeeLane::Industrial => self.min_fee_per_byte_industrial,
                 };
-                let floor = lane_min.max(self.base_fee);
+                let floor = lane_min;
                 if fee_per_byte < floor {
                     #[cfg(feature = "telemetry")]
                     {
@@ -2557,7 +2563,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry")]
                     let tx_hash = tx.id();
                     #[cfg(feature = "telemetry")]
-                    let fee_val = tx.payload.fee;
+                    let fee_val = tx.tip;
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_else(|e| panic!("time: {e}"));
@@ -2670,7 +2676,7 @@ impl Blockchain {
             let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                    crate::fee::decompose(tx.payload.pct_ct, self.base_fee + tx.tip)
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -2730,7 +2736,7 @@ impl Blockchain {
             let tx_hash = tx.id();
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                    crate::fee::decompose(tx.payload.pct_ct, self.base_fee + tx.tip)
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -3122,7 +3128,7 @@ impl Blockchain {
         let mut fee_sum_industrial: u128 = 0;
         for tx in &included {
             if let Ok((fee_consumer, fee_industrial)) =
-                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                crate::fee::decompose(tx.payload.pct_ct, tx.tip)
             {
                 fee_sum_consumer += fee_consumer as u128;
                 fee_sum_industrial += fee_industrial as u128;
@@ -3175,8 +3181,18 @@ impl Blockchain {
                 memo: Vec::new(),
             },
             public_key: vec![],
-            signature: vec![],
+            #[cfg(feature = "quantum")]
+            dilithium_public_key: Vec::new(),
+            signature: TxSignature {
+                ed25519: Vec::new(),
+                #[cfg(feature = "quantum")]
+                dilithium: Vec::new(),
+            },
+            signer_pubkeys: Vec::new(),
+            aggregate_signature: Vec::new(),
+            threshold: 0,
             lane: transaction::FeeLane::Consumer,
+            version: TxVersion::Ed25519Only,
         };
         let mut txs = vec![coinbase.clone()];
         txs.extend(included.clone());
@@ -3187,7 +3203,8 @@ impl Blockchain {
             if tx.payload.from_ != "0".repeat(34) {
                 if let Some(s) = shadow_accounts.get_mut(&tx.payload.from_) {
                     let (fee_c, fee_i) =
-                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee).unwrap_or((0, 0));
+                        crate::fee::decompose(tx.payload.pct_ct, block_base_fee + tx.tip)
+                            .unwrap_or((0, 0));
                     let total_c = tx.payload.amount_consumer + fee_c;
                     let total_i = tx.payload.amount_industrial + fee_i;
                     if s.balance.consumer < total_c || s.balance.industrial < total_i {
@@ -3299,6 +3316,7 @@ impl Blockchain {
                 timestamp_millis,
                 nonce,
                 diff,
+                block_base_fee,
                 TokenAmount::new(coinbase_consumer),
                 TokenAmount::new(coinbase_industrial),
                 storage_sub_token,
@@ -3322,6 +3340,10 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                let _ = self.db.put(
+                    format!("base_fee:{}", block.index).as_bytes(),
+                    &block_base_fee.to_le_bytes(),
+                );
                 self.reorg.record(&block.hash);
                 self.recent_timestamps.push_back(block.timestamp_millis);
                 if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
@@ -3460,7 +3482,7 @@ impl Blockchain {
                         changed.insert(tx.payload.from_.clone());
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             let (fee_consumer, fee_industrial) =
-                                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                crate::fee::decompose(tx.payload.pct_ct, block_base_fee + tx.tip)
                                     .unwrap_or((0, 0));
                             let total_consumer = tx.payload.amount_consumer + fee_consumer;
                             let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -3558,7 +3580,7 @@ impl Blockchain {
                 self.record_block_mined();
                 if self.block_height % 600 == 0 {
                     self.badge_tracker
-                        .record_epoch(true, Duration::from_millis(0));
+                    .record_epoch(miner_addr, true, Duration::from_millis(0));
                     self.check_badges();
                 }
                 if self.block_height % self.snapshot.interval == 0 {
@@ -3582,7 +3604,9 @@ impl Blockchain {
                 // Adjust base fee for the next block based on how full this block was.
                 let gas_used =
                     (included.len() as u64).saturating_mul(crate::fees::TARGET_GAS_PER_BLOCK / 10);
-                self.base_fee = crate::fees::next_base_fee(block_base_fee, gas_used);
+                self.base_fee = crate::blockchain::fees::compute(block_base_fee, gas_used);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::BASE_FEE.set(self.base_fee as i64);
 
                 self.persist_chain()?;
 
@@ -3627,6 +3651,7 @@ impl Blockchain {
             block.timestamp_millis,
             block.nonce,
             block.difficulty,
+            block.base_fee,
             block.coinbase_consumer,
             block.coinbase_industrial,
             block.storage_sub_ct,
@@ -3684,7 +3709,7 @@ impl Blockchain {
                 return Ok(false);
             }
             *exp += 1;
-            match crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+            match crate::fee::decompose(tx.payload.pct_ct, tx.tip) {
                 Ok((fee_consumer, fee_industrial)) => {
                     fee_tot_consumer += fee_consumer as u128;
                     fee_tot_industrial += fee_industrial as u128;
@@ -3771,7 +3796,7 @@ impl Blockchain {
                         .ok_or_else(|| PyValueError::new_err("Invalid pubkey in chain"))?;
                     let vk = VerifyingKey::from_bytes(&pk)
                         .map_err(|_| PyValueError::new_err("Invalid pubkey in chain"))?;
-                    let sig_bytes = to_array_64(&tx.signature)
+                    let sig_bytes = to_array_64(&tx.signature.ed25519)
                         .ok_or_else(|| PyValueError::new_err("Invalid signature in chain"))?;
                     let sig = Signature::from_bytes(&sig_bytes);
                     let mut msg = domain_tag().to_vec();
@@ -3781,7 +3806,7 @@ impl Blockchain {
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                         let (fee_consumer, fee_industrial) =
-                            crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                            crate::fee::decompose(tx.payload.pct_ct, block.base_fee + tx.tip)
                                 .unwrap_or((0, 0));
                         let total_c = tx.payload.amount_consumer + fee_consumer;
                         let total_i = tx.payload.amount_industrial + fee_industrial;
@@ -3960,6 +3985,7 @@ impl Blockchain {
                 b.timestamp_millis,
                 b.nonce,
                 b.difficulty,
+                b.base_fee,
                 b.coinbase_consumer,
                 b.coinbase_industrial,
                 b.storage_sub_ct,
@@ -4002,7 +4028,7 @@ impl Blockchain {
                         Ok(vk) => vk,
                         Err(_) => return false,
                     };
-                    let sig_bytes = match to_array_64(&tx.signature) {
+                    let sig_bytes = match to_array_64(&tx.signature.ed25519) {
                         Some(b) => b,
                         None => return false,
                     };
@@ -4024,7 +4050,7 @@ impl Blockchain {
                 if !seen.insert(tx.id()) {
                     return false;
                 }
-                match crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+                match crate::fee::decompose(tx.payload.pct_ct, tx.tip) {
                     Ok((fee_consumer, fee_industrial)) => {
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
@@ -4546,6 +4572,7 @@ fn calculate_hash(
     timestamp: u64,
     nonce: u64,
     difficulty: u64,
+    base_fee: u64,
     coin_c: TokenAmount,
     coin_i: TokenAmount,
     storage_sub: TokenAmount,
@@ -4572,6 +4599,7 @@ fn calculate_hash(
         timestamp,
         nonce,
         difficulty,
+        base_fee,
         coin_c: coin_c.0,
         coin_i: coin_i.0,
         storage_sub: storage_sub.0,

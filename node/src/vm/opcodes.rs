@@ -19,6 +19,16 @@ pub enum OpCode {
     And = 0x06,
     /// Pop two values, push bitwise OR.
     Or = 0x07,
+    /// Pop two values, push first modulo second.
+    Mod = 0x08,
+    /// Pop two values, push bitwise XOR.
+    Xor = 0x09,
+    /// Load value from contract storage and push onto stack.
+    Load = 0x0a,
+    /// Pop value and store to contract storage.
+    Store = 0x0b,
+    /// Pop value, push first 8 bytes of BLAKE3 hash.
+    Hash = 0x0c,
 }
 
 impl OpCode {
@@ -32,6 +42,11 @@ impl OpCode {
             0x05 => Some(Self::Div),
             0x06 => Some(Self::And),
             0x07 => Some(Self::Or),
+            0x08 => Some(Self::Mod),
+            0x09 => Some(Self::Xor),
+            0x0a => Some(Self::Load),
+            0x0b => Some(Self::Store),
+            0x0c => Some(Self::Hash),
             _ => None,
         }
     }
@@ -46,6 +61,11 @@ impl OpCode {
             OpCode::Div,
             OpCode::And,
             OpCode::Or,
+            OpCode::Mod,
+            OpCode::Xor,
+            OpCode::Load,
+            OpCode::Store,
+            OpCode::Hash,
         ]
     }
 }

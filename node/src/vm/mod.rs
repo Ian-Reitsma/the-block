@@ -1,5 +1,7 @@
 pub mod abi;
 pub mod bytecode;
+pub mod contracts;
+pub mod exec;
 pub mod gas;
 pub mod opcodes;
 pub mod runtime;

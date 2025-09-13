@@ -238,3 +238,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: settlement audit
         run: cargo test -p the_block --test settlement_audit --release
+
+  quantum:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: "1.86.0"
+          override: true
+          target: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: test quantum
+        run: cargo test --all --features "quantum test-telemetry" --release

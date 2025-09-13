@@ -7,7 +7,7 @@ use std::time::Duration;
 /// use node::service_badge::ServiceBadgeTracker;
 /// use std::time::Duration;
 /// let mut tracker = ServiceBadgeTracker::default();
-/// tracker.record_epoch(true, Duration::from_millis(1));
+/// tracker.record_epoch("node", true, Duration::from_millis(1));
 /// assert!(tracker.uptime_percent() > 0.0);
 /// ```
 static BADGE_TTL_SECS: AtomicU64 = AtomicU64::new(30 * 24 * 60 * 60);
@@ -35,14 +35,16 @@ impl ServiceBadgeTracker {
     ///
     /// A valid proof counts toward uptime; missing or invalid proofs are
     /// treated as downtime and may revoke an existing badge.
-    pub fn record_epoch(&mut self, proof_ok: bool, latency: Duration) {
+    pub fn record_epoch(&mut self, provider: &str, proof_ok: bool, latency: Duration) {
         self.total_epochs += 1;
         if proof_ok {
             self.uptime_epochs += 1;
         }
         self.latency_samples.push(latency);
         #[cfg(feature = "telemetry")]
-        crate::telemetry::COMPUTE_PROVIDER_UPTIME.set(self.uptime_percent().round() as i64);
+        crate::telemetry::COMPUTE_PROVIDER_UPTIME
+            .with_label_values(&[provider])
+            .set(self.uptime_percent().round() as i64);
         // Update badge status on each epoch so lapses trigger revocation.
         self.check_badges();
     }
