@@ -38,6 +38,11 @@ pub struct Simulation {
     pub backend: Backend,
     rng: StdRng,
     db: Option<DB>,
+    partition_steps: u64,
+    reconciliation_latency: u64,
+    session_keys: u64,
+    session_expired: u64,
+    wasm_exec: u64,
 }
 
 impl Simulation {
@@ -58,6 +63,11 @@ impl Simulation {
             backend: Backend::Memory,
             rng: StdRng::seed_from_u64(seed),
             db: None,
+            partition_steps: 0,
+            reconciliation_latency: 0,
+            session_keys: 0,
+            session_expired: 0,
+            wasm_exec: 0,
         }
     }
 
@@ -70,6 +80,12 @@ impl Simulation {
         }
         sim.backend = backend;
         sim
+    }
+
+    /// Start a simulated network partition lasting `steps` steps.
+    pub fn start_partition(&mut self, steps: u64) {
+        self.partition_steps = steps;
+        self.reconciliation_latency = steps;
     }
 
     /// Run the simulation for the given number of steps and write a CSV dashboard.
@@ -115,6 +131,9 @@ impl Simulation {
         self.subsidy += inc;
         let supply = self.inflation.apply(inc);
         let liquidity = self.liquidity.update(inc);
+        if self.partition_steps > 0 {
+            self.partition_steps -= 1;
+        }
         let bridged = self.bridging.flow(inc);
         let (consumer_demand, industrial_demand) = self.demand.project();
         let total_demand = consumer_demand + industrial_demand;
@@ -124,6 +143,15 @@ impl Simulation {
             let diff = liquidity - total_demand;
             self.backlog = (self.backlog - diff).max(0.0);
         }
+        // simple session-key churn proportional to demand
+        let churn = (total_demand * 10.0) as u64;
+        self.session_keys += churn;
+        if self.rng.gen_bool(0.1) && self.session_keys > 0 {
+            self.session_keys -= 1;
+            self.session_expired += 1;
+        }
+        // simulate heavy wasm contract executions
+        self.wasm_exec = self.rng.gen_range(0..1000);
         let inflation_rate = self.inflation.rate;
         let sell_coverage = if self.backlog == 0.0 {
             1.0
@@ -131,6 +159,7 @@ impl Simulation {
             self.liquidity.token_reserve / self.backlog.max(1.0)
         };
         let readiness = 1.0 / (1.0 + self.backlog);
+        let partition_active = self.partition_steps > 0;
         let snap = Snapshot {
             step,
             subsidy: self.subsidy,
@@ -143,7 +172,15 @@ impl Simulation {
             inflation_rate,
             sell_coverage,
             readiness,
+            partition_active,
+            reconciliation_latency: self.reconciliation_latency,
+            active_sessions: self.session_keys,
+            expired_sessions: self.session_expired,
+            wasm_exec: self.wasm_exec,
         };
+        if !partition_active && self.reconciliation_latency > 0 {
+            self.reconciliation_latency -= 1;
+        }
         if let Some(db) = &self.db {
             let key = step.to_be_bytes();
             let val = bincode::serialize(&snap).expect("serialize snapshot");

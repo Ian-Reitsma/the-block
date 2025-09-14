@@ -48,4 +48,7 @@ pub enum ParamKey {
     BadgeRevokeUptime,
     JurisdictionRegion,
     AiDiagnosticsEnabled,
+    KalmanRShort,
+    KalmanRMed,
+    KalmanRLong,
 }

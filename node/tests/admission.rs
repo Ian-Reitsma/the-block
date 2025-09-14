@@ -177,6 +177,7 @@ fn validate_block_rejects_nonce_gap() {
         timestamp_millis: 0,
         transactions: txs,
         difficulty: diff,
+        retune_hint: 0,
         nonce,
         hash,
         coinbase_consumer: TokenAmount::new(reward_c),

@@ -1,13 +1,15 @@
 #![deny(warnings)]
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 mod ai;
 mod bridge;
 mod compute;
 mod config;
+mod debug_cli;
 mod dex;
+mod difficulty;
 mod fee_estimator;
 mod gov;
 mod htlc;
@@ -24,6 +26,7 @@ use bridge::BridgeCmd;
 use compute::ComputeCmd;
 use config::ConfigCmd;
 use dex::DexCmd;
+use difficulty::DifficultyCmd;
 use gov::GovCmd;
 use htlc::HtlcCmd;
 use light_sync::LightSyncCmd;
@@ -36,6 +39,16 @@ use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 #[cfg(feature = "quantum")]
 use wallet::WalletCmd;
 
+fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
+    let engine = wasmtime::Engine::default();
+    if let Ok(module) = wasmtime::Module::new(&engine, bytes) {
+        let exports: Vec<String> = module.exports().map(|e| e.name().to_string()).collect();
+        serde_json::to_vec(&exports).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "contract")]
 #[command(about = "Contract management CLI")]
@@ -46,9 +59,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Deploy raw bytecode provided as hex string
+    /// Deploy contract code. Provide either hex `code` or a WASM file.
     Deploy {
-        code: String,
+        #[arg(required_unless_present = "wasm")]
+        code: Option<String>,
+        #[arg(long)]
+        wasm: Option<PathBuf>,
         #[arg(long, default_value = "contracts.bin")]
         state: String,
     },
@@ -88,6 +104,11 @@ enum Commands {
         #[command(subcommand)]
         action: NetCmd,
     },
+    /// Difficulty utilities
+    Difficulty {
+        #[command(subcommand)]
+        action: DifficultyCmd,
+    },
     /// Governance utilities
     Gov {
         #[command(subcommand)]
@@ -103,6 +124,8 @@ enum Commands {
         #[command(subcommand)]
         action: TelemetryCmd,
     },
+    /// Interactive VM debugger
+    Debug { code: String },
     /// Service badge utilities
     ServiceBadge {
         #[command(subcommand)]
@@ -149,12 +172,21 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.cmd {
-        Commands::Deploy { code, state } => {
+        Commands::Deploy { code, wasm, state } => {
             let path = PathBuf::from(state);
             let mut vm = Vm::new_persistent(VmType::Wasm, path);
-            let bytes = hex::decode(code).expect("invalid hex code");
-            let id = vm.deploy(bytes);
-            println!("{}", id);
+            if let Some(w) = wasm {
+                let bytes = fs::read(&w).expect("read wasm");
+                let meta = extract_wasm_metadata(&bytes);
+                let id = vm.deploy_wasm(bytes, meta);
+                println!("{}", id);
+            } else if let Some(code_hex) = code {
+                let bytes = hex::decode(code_hex).expect("invalid hex code");
+                let id = vm.deploy(bytes);
+                println!("{}", id);
+            } else {
+                eprintln!("no code provided");
+            }
         }
         Commands::Call {
             id,
@@ -186,9 +218,11 @@ fn main() {
         Commands::Dex { action } => dex::handle(action),
         Commands::Compute { action } => compute::handle(action),
         Commands::Net { action } => net::handle(action),
+        Commands::Difficulty { action } => difficulty::handle(action),
         Commands::Gov { action } => gov::handle(action),
         Commands::Config { action } => config::handle(action),
         Commands::Telemetry { action } => telemetry::handle(action),
+        Commands::Debug { code } => debug_cli::run(code),
         Commands::ServiceBadge { action } => service_badge::handle(action),
         Commands::Htlc { action } => htlc::handle(action),
         Commands::Storage { action } => storage::handle(action),

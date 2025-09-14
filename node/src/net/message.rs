@@ -13,6 +13,9 @@ pub struct Message {
     pub signature: Vec<u8>,
     /// Inner message payload.
     pub body: Payload,
+    /// Optional partition marker propagated in gossip headers.
+    #[serde(default)]
+    pub partition: Option<u64>,
 }
 
 impl Message {
@@ -25,6 +28,7 @@ impl Message {
             pubkey: sk.verifying_key().to_bytes(),
             signature: sig.to_bytes().to_vec(),
             body,
+            partition: None,
         }
     }
 }

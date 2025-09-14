@@ -26,6 +26,7 @@ fn recovers_from_crash_during_import() {
                 pending_industrial: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
             },
         );
         let sk = [1u8; 32];
@@ -46,10 +47,11 @@ fn recovers_from_crash_during_import() {
         let block = the_block::Block {
             index: 1,
             previous_hash: String::new(),
-            timestamp_millis: 0,
-            transactions: vec![tx],
-            difficulty: 0,
-            nonce: 0,
+        timestamp_millis: 0,
+        transactions: vec![tx],
+        difficulty: 0,
+        retune_hint: 0,
+        nonce: 0,
             hash: String::new(),
             coinbase_consumer: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),

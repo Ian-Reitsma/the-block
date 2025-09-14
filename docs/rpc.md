@@ -63,16 +63,20 @@
   - Requires standard RPC auth headers.
   - See [docs/compute_market.md#cancellations](compute_market.md#cancellations) for semantics and race-condition notes.
 
-  - `consensus.difficulty` – returns the current proof-of-work difficulty target and timestamp.
+  - `consensus.difficulty` – returns the current proof-of-work difficulty target, retune hint, and timestamp.
 
     ```bash
     curl -s localhost:26658/consensus.difficulty | jq
-    # {"difficulty":12345,"timestamp_millis":1700000000000}
+    # {"difficulty":12345,"retune_hint":2,"timestamp_millis":1700000000000}
     ```
 
     The timestamp is in milliseconds; polling once per block (≈1 s) is
     sufficient for monitoring. See [docs/difficulty.md](difficulty.md) for the
     retarget algorithm.
+
+  - `vm.trace?code=` – WebSocket endpoint streaming execution traces for the
+    provided hex-encoded WASM or bytecode. Requires the node to run with
+    `--enable-vm-debug` and is intended for development only.
 
   - `stake.role` – queries bonded CT for a service role.
 

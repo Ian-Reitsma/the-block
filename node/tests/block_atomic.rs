@@ -21,6 +21,7 @@ fn block_application_is_atomic() {
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: std::collections::HashSet::new(),
+            sessions: Vec::new(),
         },
     );
     bc.accounts.insert(
@@ -36,6 +37,7 @@ fn block_application_is_atomic() {
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: std::collections::HashSet::new(),
+            sessions: Vec::new(),
         },
     );
 
@@ -70,6 +72,7 @@ fn block_application_is_atomic() {
         timestamp_millis: 0,
         transactions: vec![tx1.clone(), tx2.clone()],
         difficulty: 0,
+        retune_hint: 0,
         nonce: 0,
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),

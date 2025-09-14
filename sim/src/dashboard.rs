@@ -16,4 +16,9 @@ pub struct Snapshot {
     pub inflation_rate: f64,
     pub sell_coverage: f64,
     pub readiness: f64,
+    pub partition_active: bool,
+    pub reconciliation_latency: u64,
+    pub active_sessions: u64,
+    pub expired_sessions: u64,
+    pub wasm_exec: u64,
 }

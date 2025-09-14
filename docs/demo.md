@@ -21,7 +21,7 @@ current difficulty: 1125
 ```
 
 Difficulty values come from the `consensus.difficulty` JSON‑RPC endpoint and
-reflect the sliding‑window retarget algorithm. QUIC mode also reports that the
+reflect the multi‑window Kalman retune algorithm. QUIC mode also reports that the
 peer upgraded from TCP during the handshake.
 
 For a step‑by‑step narrative of each phase in the script, including key

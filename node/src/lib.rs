@@ -27,10 +27,9 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "telemetry-json")]
 use serde_json::json;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
     Arc, Mutex, MutexGuard,
 };
 use std::thread;
@@ -60,7 +59,6 @@ const RECENT_MINER_WINDOW: usize = 120;
 const HBAR: f64 = 1.054_571_817e-34; // J·s
 const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
 const TAU_B: f64 = 1.0; // block interval in seconds
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 static VDF_KAPPA: AtomicU64 = AtomicU64::new(1u64 << 28);
 const F_HW_BASE: f64 = 3.0e9; // reference 3 GHz hardware
 
@@ -80,6 +78,7 @@ pub mod identity;
 pub mod kyc;
 pub mod localnet;
 pub mod net;
+pub mod partition_recover;
 pub use net::peer_metrics_store;
 pub mod p2p;
 pub mod parallel;
@@ -115,6 +114,10 @@ pub use governance::{
     ProposalStatus, Utilization, Vote, VoteChoice, ACTIVATION_DELAY, QUORUM,
     ROLLBACK_WINDOW_EPOCHS,
 };
+
+pub mod accounts;
+
+pub mod mempool;
 
 pub mod compute_market;
 pub mod le_portal;
@@ -182,6 +185,8 @@ pub enum TxAdmissionError {
     PendingLimitReached = ERR_PENDING_LIMIT,
     #[error("additional signatures required")]
     PendingSignatures = ERR_PENDING_SIGNATURES,
+    #[error("session expired")]
+    SessionExpired = ERR_SESSION_EXPIRED,
 }
 
 impl TxAdmissionError {
@@ -204,6 +209,7 @@ create_exception!(the_block, ErrMempoolFull, PyException);
 create_exception!(the_block, ErrLockPoisoned, PyException);
 create_exception!(the_block, ErrPendingLimit, PyException);
 create_exception!(the_block, ErrPendingSignatures, PyException);
+create_exception!(the_block, ErrSessionExpired, PyException);
 create_exception!(the_block, ErrBalanceUnderflow, PyException);
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +268,10 @@ impl From<TxAdmissionError> for PyErr {
                 TxAdmissionError::PendingSignatures => (
                     py.get_type::<ErrPendingSignatures>(),
                     "additional signatures required",
+                ),
+                TxAdmissionError::SessionExpired => (
+                    py.get_type::<ErrSessionExpired>(),
+                    "session expired",
                 ),
             };
             let err = match ty.call1((msg,)) {
@@ -444,6 +454,29 @@ pub struct Account {
     pub pending_nonce: u64,
     #[serde(default)]
     pub pending_nonces: HashSet<u64>,
+    #[serde(default)]
+    pub sessions: Vec<accounts::SessionPolicy>,
+}
+
+impl accounts::AccountValidation for Account {
+    fn validate_tx(&mut self, tx: &SignedTransaction) -> Result<(), TxAdmissionError> {
+        if let Some(policy) = self
+            .sessions
+            .iter_mut()
+            .find(|p| p.public_key == tx.public_key)
+        {
+            if policy.is_expired() {
+                #[cfg(feature = "telemetry")]
+                telemetry::SESSION_KEY_EXPIRED_TOTAL.inc();
+                return Err(TxAdmissionError::SessionExpired);
+            }
+            if tx.payload.nonce <= policy.nonce {
+                return Err(TxAdmissionError::Duplicate);
+            }
+            policy.nonce = tx.payload.nonce;
+        }
+        Ok(())
+    }
 }
 
 struct Reservation<'a> {
@@ -536,6 +569,10 @@ pub struct Block {
     #[pyo3(get)]
     #[serde(default)]
     pub difficulty: u64,
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Miner-provided hint about recent hash-rate trend
+    pub retune_hint: i8,
     #[pyo3(get)]
     pub nonce: u64,
     #[pyo3(get)]
@@ -676,6 +713,8 @@ pub struct Blockchain {
     pub accounts: HashMap<String, Account>,
     #[pyo3(get, set)]
     pub difficulty: u64,
+    /// Hint from previous retune summarizing hash-rate trend
+    pub retune_hint: i8,
     /// Consumer lane mempool entries keyed by `(sender, nonce)`.
     pub mempool_consumer: DashMap<(String, u64), MempoolEntry>,
     /// Industrial lane mempool entries keyed by `(sender, nonce)`.
@@ -824,6 +863,7 @@ impl Default for Blockchain {
             chain: Vec::new(),
             accounts: HashMap::new(),
             difficulty: difficulty::expected_difficulty_from_chain(&[] as &[Block]),
+            retune_hint: 0,
             mempool_consumer: DashMap::new(),
             mempool_industrial: DashMap::new(),
             mempool_size_consumer: std::sync::atomic::AtomicUsize::new(0),
@@ -1157,6 +1197,7 @@ impl Blockchain {
                                 b.vdf_commit,
                                 b.vdf_output,
                                 &b.vdf_proof,
+                                b.retune_hint,
                             );
                         }
                         let mut em_c = 0u64;
@@ -1283,6 +1324,7 @@ impl Blockchain {
                                     b.vdf_commit,
                                     b.vdf_output,
                                     &b.vdf_proof,
+                                    b.retune_hint,
                                 );
                                 em_c = em_c.saturating_add(b.coinbase_consumer.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
@@ -1428,6 +1470,7 @@ impl Blockchain {
                             b.vdf_commit,
                             b.vdf_output,
                             &b.vdf_proof,
+                            b.retune_hint,
                         );
                     }
                     let mut em_c = 0u64;
@@ -1522,12 +1565,16 @@ impl Blockchain {
         bc.block_reward_consumer = br_c;
         bc.block_reward_industrial = br_i;
         bc.block_height = bh;
-        let last = bc.chain.last().map_or(1, |b| b.difficulty);
-        let ts = bc.recent_timestamps.make_contiguous();
-        bc.difficulty = difficulty::expected_difficulty(last, ts);
-        bc.base_fee = base_fee;
         bc.recent_miners = VecDeque::new();
         bc.recent_timestamps = VecDeque::from(recent_ts);
+        let last = bc.chain.last().map_or(1, |b| b.difficulty);
+        let hint = bc.chain.last().map_or(0, |b| b.retune_hint);
+        let ts = bc.recent_timestamps.make_contiguous();
+        let (d, h) =
+            consensus::difficulty_retune::retune(last, ts, hint, &bc.params);
+        bc.difficulty = d;
+        bc.retune_hint = h;
+        bc.base_fee = base_fee;
         for blk in bc.chain.iter().rev().take(RECENT_MINER_WINDOW) {
             if let Some(tx0) = blk.transactions.first() {
                 bc.recent_miners.push_front(tx0.payload.to.clone());
@@ -1576,6 +1623,7 @@ impl Blockchain {
                                         pending_industrial: 0,
                                         pending_nonce: 0,
                                         pending_nonces: HashSet::new(),
+                                        sessions: Vec::new(),
                                     });
                                 r.balance.consumer = r
                                     .balance
@@ -1889,12 +1937,15 @@ impl Blockchain {
     /// # Errors
     /// Returns [`PyValueError`] if the chain state cannot be serialized or persisted.
     pub fn genesis_block(&mut self) -> PyResult<()> {
+        let (diff, hint) =
+            consensus::difficulty_retune::retune(1, &[], 0, &self.params);
         let g = Block {
             index: 0,
             previous_hash: "0".repeat(64),
             timestamp_millis: 0,
             transactions: vec![],
-            difficulty: difficulty::expected_difficulty_from_chain(&self.chain),
+            difficulty: diff,
+            retune_hint: hint,
             nonce: 0,
             // genesis carries zero reward; fields included for stable hashing
             coinbase_consumer: TokenAmount::new(0),
@@ -1945,6 +1996,7 @@ impl Blockchain {
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
+            sessions: Vec::new(),
         };
         self.accounts.insert(address, acc);
         Ok(())
@@ -1960,6 +2012,27 @@ impl Blockchain {
             .remove(address)
             .map(|_| ())
             .ok_or_else(|| PyValueError::new_err("Account not found"))
+    }
+
+    /// Register a session key for an account.
+    pub fn issue_session_key(
+        &mut self,
+        address: String,
+        public_key: Vec<u8>,
+        expires_at: u64,
+    ) -> PyResult<()> {
+        let acc = self
+            .accounts
+            .get_mut(&address)
+            .ok_or_else(|| PyValueError::new_err("Account not found"))?;
+        acc.sessions.push(accounts::SessionPolicy {
+            public_key,
+            expires_at,
+            nonce: acc.nonce,
+        });
+        #[cfg(feature = "telemetry")]
+        telemetry::SESSION_KEY_ISSUED_TOTAL.inc();
+        Ok(())
     }
 
     /// Backdate a mempool entry's timestamp for testing purposes.
@@ -2349,6 +2422,7 @@ impl Blockchain {
                         return Err(TxAdmissionError::UnknownSender);
                     }
                 };
+                mempool::admission::validate_account(sender, &tx)?;
                 let required_consumer = match sender.pending_consumer.checked_add(total_consumer) {
                     Some(v) => v,
                     None => {
@@ -2977,8 +3051,12 @@ impl Blockchain {
             self.recent_timestamps.push_back(b.timestamp_millis);
         }
         let last = self.chain.last().map_or(1, |b| b.difficulty);
+        let hint = self.chain.last().map_or(0, |b| b.retune_hint);
         let ts = self.recent_timestamps.make_contiguous();
-        self.difficulty = difficulty::expected_difficulty(last, ts);
+        let (next, h) =
+            consensus::difficulty_retune::retune(last, ts, hint, &self.params);
+        self.difficulty = next;
+        self.retune_hint = h;
     }
 
     /// Update the timestamp of the block at `index` and resynchronize
@@ -3012,7 +3090,8 @@ impl Blockchain {
         let index = self.chain.len() as u64;
         let last = self.chain.last().map_or(1, |b| b.difficulty);
         let ts = self.recent_timestamps.make_contiguous();
-        let expected = difficulty::expected_difficulty(last, ts);
+        let (expected, _) =
+            consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
         debug_assert_eq!(
             self.difficulty, expected,
             "stale difficulty; call recompute_difficulty after mutating timestamps"
@@ -3262,6 +3341,7 @@ impl Blockchain {
                     pending_industrial: 0,
                     pending_nonce: 0,
                     pending_nonces: HashSet::new(),
+                    sessions: Vec::new(),
                 });
             r.balance.consumer += tx.payload.amount_consumer;
             r.balance.industrial += tx.payload.amount_industrial;
@@ -3279,6 +3359,7 @@ impl Blockchain {
                 pending_industrial: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
             });
         miner_shadow.balance.consumer = miner_shadow
             .balance
@@ -3321,6 +3402,7 @@ impl Blockchain {
             timestamp_millis,
             transactions: txs.clone(),
             difficulty: diff,
+            retune_hint: self.retune_hint,
             nonce: 0,
             hash: String::new(),
             coinbase_consumer: TokenAmount::new(coinbase_consumer),
@@ -3368,6 +3450,7 @@ impl Blockchain {
                 block.vdf_commit,
                 block.vdf_output,
                 &block.vdf_proof,
+                block.retune_hint,
             );
             let bytes = hex_to_bytes(&hash);
             if leading_zero_bits(&bytes) >= diff as u32 {
@@ -3378,6 +3461,11 @@ impl Blockchain {
                     format!("base_fee:{}", block.index).as_bytes(),
                     &block_base_fee.to_le_bytes(),
                 );
+                state::append_difficulty(
+                    &std::path::Path::new(&self.path).join("diff_history"),
+                    block.index,
+                    block.difficulty,
+                );
                 self.reorg.record(&block.hash);
                 self.recent_timestamps.push_back(block.timestamp_millis);
                 if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
@@ -3385,7 +3473,10 @@ impl Blockchain {
                 }
                 let last = self.chain.last().map_or(1, |b| b.difficulty);
                 let ts = self.recent_timestamps.make_contiguous();
-                self.difficulty = difficulty::expected_difficulty(last, ts);
+                let (next, hint) =
+                    consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
+                self.difficulty = next;
+                self.retune_hint = hint;
                 self.recent_miners.push_back(miner_addr.to_owned());
                 if self.recent_miners.len() > RECENT_MINER_WINDOW {
                     self.recent_miners.pop_front();
@@ -3445,15 +3536,14 @@ impl Blockchain {
                     self.epoch_cpu_ms = 0;
                     self.epoch_bytes_out = 0;
                 }
-                self.difficulty = if self.difficulty == 0 {
-                    0
-                } else {
-                    {
-                        let last = self.chain.last().map_or(1, |b| b.difficulty);
-                        let ts = self.recent_timestamps.make_contiguous();
-                        difficulty::expected_difficulty(last, ts)
-                    }
-                };
+                if self.difficulty != 0 {
+                    let last = self.chain.last().map_or(1, |b| b.difficulty);
+                    let ts = self.recent_timestamps.make_contiguous();
+                    let (next, hint) =
+                        consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
+                    self.difficulty = next;
+                    self.retune_hint = hint;
+                }
                 // CONSENSUS.md §10.3: mempool mutations are guarded by mempool_mutex
                 #[cfg(feature = "telemetry")]
                 let _pool_guard = {
@@ -3551,6 +3641,7 @@ impl Blockchain {
                             pending_industrial: 0,
                             pending_nonce: 0,
                             pending_nonces: HashSet::new(),
+                            sessions: Vec::new(),
                         });
                     r.balance.consumer += tx.payload.amount_consumer;
                     r.balance.industrial += tx.payload.amount_industrial;
@@ -3594,6 +3685,7 @@ impl Blockchain {
                         pending_industrial: 0,
                         pending_nonce: 0,
                         pending_nonces: HashSet::new(),
+                        sessions: Vec::new(),
                     });
                 miner.balance.consumer = miner
                     .balance
@@ -3703,6 +3795,7 @@ impl Blockchain {
             block.vdf_commit,
             block.vdf_output,
             &block.vdf_proof,
+            block.retune_hint,
         );
         if calc != block.hash {
             return Ok(false);
@@ -3868,6 +3961,7 @@ impl Blockchain {
                         pending_industrial: 0,
                         pending_nonce: 0,
                         pending_nonces: HashSet::new(),
+                        sessions: Vec::new(),
                     });
                 r.balance.consumer += tx.payload.amount_consumer;
                 r.balance.industrial += tx.payload.amount_industrial;
@@ -3911,6 +4005,7 @@ impl Blockchain {
                 pending_industrial: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
             });
             miner.balance.consumer = miner
                 .balance
@@ -3947,6 +4042,11 @@ impl Blockchain {
             self.emission_consumer += block.coinbase_consumer.0;
             self.emission_industrial += block.coinbase_industrial.0;
             self.chain.push(block.clone());
+            state::append_difficulty(
+                &std::path::Path::new(&self.path).join("diff_history"),
+                block.index,
+                block.difficulty,
+            );
             self.reorg.record(&block.hash);
             self.recent_timestamps.push_back(block.timestamp_millis);
             if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
@@ -3954,13 +4054,19 @@ impl Blockchain {
             }
             let last = self.chain.last().map_or(1, |b| b.difficulty);
             let ts = self.recent_timestamps.make_contiguous();
-            self.difficulty = difficulty::expected_difficulty(last, ts);
+            let (next, hint) =
+                consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
+            self.difficulty = next;
+            self.retune_hint = hint;
             self.block_height += 1;
         }
 
         let last = self.chain.last().map_or(1, |b| b.difficulty);
         let ts = self.recent_timestamps.make_contiguous();
-        self.difficulty = difficulty::expected_difficulty(last, ts);
+        let (next, hint) =
+            consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
+        self.difficulty = next;
+        self.retune_hint = hint;
 
         Ok(())
     }
@@ -4037,6 +4143,7 @@ impl Blockchain {
                 b.vdf_commit,
                 b.vdf_output,
                 &b.vdf_proof,
+                b.retune_hint,
             );
             if calc != b.hash {
                 return false;
@@ -4624,6 +4731,7 @@ fn calculate_hash(
     vdf_commit: [u8; 32],
     vdf_output: [u8; 32],
     vdf_proof: &[u8],
+    retune_hint: i8,
 ) -> String {
     let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();
     let id_refs: Vec<&[u8]> = ids.iter().map(<[u8; 32]>::as_ref).collect();
@@ -4633,6 +4741,7 @@ fn calculate_hash(
         timestamp,
         nonce,
         difficulty,
+        retune_hint,
         base_fee,
         coin_c: coin_c.0,
         coin_i: coin_i.0,
@@ -4739,6 +4848,7 @@ pub const ERR_FEE_TOO_LARGE: u16 = 14;
 pub const ERR_RENT_ESCROW_INSUFFICIENT: u16 = 15;
 pub const ERR_DNS_SIG_INVALID: u16 = 16;
 pub const ERR_PENDING_SIGNATURES: u16 = 17;
+pub const ERR_SESSION_EXPIRED: u16 = 18;
 
 #[pyclass]
 pub struct PyRemoteSigner {
@@ -4836,6 +4946,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "ErrPendingSignatures",
         ErrPendingSignatures::type_object(m.py()),
     )?;
+    m.add("ErrSessionExpired", ErrSessionExpired::type_object(m.py()))?;
     m.add("ERR_OK", ERR_OK)?;
     m.add("ERR_UNKNOWN_SENDER", ERR_UNKNOWN_SENDER)?;
     m.add("ERR_INSUFFICIENT_BALANCE", ERR_INSUFFICIENT_BALANCE)?;
@@ -4848,6 +4959,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ERR_FEE_OVERFLOW", ERR_FEE_OVERFLOW)?;
     m.add("ERR_FEE_TOO_LARGE", ERR_FEE_TOO_LARGE)?;
     m.add("ERR_FEE_TOO_LOW", ERR_FEE_TOO_LOW)?;
+    m.add("ERR_SESSION_EXPIRED", ERR_SESSION_EXPIRED)?;
     m.add("ERR_MEMPOOL_FULL", ERR_MEMPOOL_FULL)?;
     m.add("ERR_LOCK_POISONED", ERR_LOCK_POISONED)?;
     m.add("ERR_PENDING_LIMIT", ERR_PENDING_LIMIT)?;
@@ -4878,6 +4990,7 @@ mod reservation_tests {
                 pending_industrial: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
             };
             let lock = Mutex::new(());
             let guard = lock.lock().unwrap_or_else(|e| e.into_inner());

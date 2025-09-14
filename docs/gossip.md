@@ -2,7 +2,8 @@
 
 The gossip layer relays messages between peers while suppressing duplicates and
 constraining bandwidth.  `node/src/gossip/relay.rs` implements a TTL-based hash
-of serialized messages:
+of serialized messages and stamps outbound traffic with the current partition
+marker from `net::partition_watch` so downstream peers can reconcile forks:
 
 ```rust
 pub fn should_process(&self, msg: &Message) -> bool {

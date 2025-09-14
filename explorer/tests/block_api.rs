@@ -28,6 +28,7 @@ fn index_block_and_search() {
         timestamp_millis: 0,
         transactions: vec![tx],
         difficulty: 0,
+        retune_hint: 0,
         nonce: 0,
         hash: "b1".into(),
         coinbase_consumer: TokenAmount(0),

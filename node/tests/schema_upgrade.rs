@@ -55,6 +55,7 @@ fn migrate_v3_recomputes_supply() {
         timestamp_millis: 0,
         transactions: vec![coinbase.clone(), tx.clone()],
         difficulty: 1,
+        retune_hint: 0,
         nonce: 0,
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),

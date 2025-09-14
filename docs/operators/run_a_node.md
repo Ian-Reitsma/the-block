@@ -138,17 +138,18 @@ Query the current proof-of-work difficulty via JSON-RPC:
 
 ```bash
 curl -s localhost:26658/consensus.difficulty
-# {"difficulty":12345,"timestamp_millis":1700000000000}
+# {"difficulty":12345,"retune_hint":2,"timestamp_millis":1700000000000}
 ```
 
-Prometheus metrics expose retarget activity and clamp events:
+Prometheus metrics expose per-window EMAs for the Kalman retune:
 
 ```bash
-curl -s localhost:9898/metrics | rg '^difficulty_'
+curl -s localhost:9898/metrics | rg '^difficulty_window'
 ```
 
-The `difficulty_retarget_total` and `difficulty_clamp_total` counters should
-advance roughly once per block under normal operation.
+Counters `difficulty_window_short`, `difficulty_window_med`, and
+`difficulty_window_long` track the short, medium, and long EMA windows
+respectively.
 
 ## Example workloads
 

@@ -30,7 +30,14 @@ This guide describes how to restore the distributed hash table (DHT) state when 
    ```bash
    curl -s localhost:9100/metrics | rg '^dht_peers_total'
    ```
-   A steadily increasing peer count after bootstrap indicates healthy gossip.
+A steadily increasing peer count after bootstrap indicates healthy gossip.
+
+## Partition Detection
+
+`net::partition_watch` tracks peer reachability and emits `partition_events_total`
+when split-brain conditions arise. Gossip headers include the active partition
+marker so peers can reconcile divergent histories. Recovery procedures and
+metrics are documented in [network_partitions.md](network_partitions.md).
 
 ## QUIC Configuration
 

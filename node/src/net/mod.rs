@@ -18,6 +18,7 @@ pub mod quic {
     }
 }
 pub mod turbine;
+pub mod partition_watch;
 
 use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
 use anyhow::anyhow;

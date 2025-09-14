@@ -102,6 +102,9 @@ pub struct Params {
     pub badge_revoke_uptime_percent: i64,
     pub jurisdiction_region: i64,
     pub ai_diagnostics_enabled: i64,
+    pub kalman_r_short: i64,
+    pub kalman_r_med: i64,
+    pub kalman_r_long: i64,
 }
 
 impl Default for Params {
@@ -133,6 +136,9 @@ impl Default for Params {
             badge_revoke_uptime_percent: 95,
             jurisdiction_region: 0,
             ai_diagnostics_enabled: 0,
+            kalman_r_short: 1,
+            kalman_r_med: 3,
+            kalman_r_long: 8,
         }
     }
 }
@@ -168,6 +174,21 @@ fn apply_jurisdiction_region(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 fn apply_ai_diagnostics_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
     p.ai_diagnostics_enabled = v;
+    Ok(())
+}
+
+fn apply_kalman_r_short(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.kalman_r_short = v;
+    Ok(())
+}
+
+fn apply_kalman_r_med(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.kalman_r_med = v;
+    Ok(())
+}
+
+fn apply_kalman_r_long(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.kalman_r_long = v;
     Ok(())
 }
 fn apply_fairshare_global_max(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -247,7 +268,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 17] = [
+    static REGS: [ParamSpec; 20] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -480,6 +501,36 @@ pub fn registry() -> &'static [ParamSpec] {
                 rt.set_ai_diagnostics_enabled(v != 0);
                 Ok(())
             },
+        },
+        ParamSpec {
+            key: ParamKey::KalmanRShort,
+            default: 1,
+            min: 1,
+            max: 1_000,
+            unit: "weight",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_kalman_r_short,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::KalmanRMed,
+            default: 3,
+            min: 1,
+            max: 1_000,
+            unit: "weight",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_kalman_r_med,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::KalmanRLong,
+            default: 8,
+            min: 1,
+            max: 1_000,
+            unit: "weight",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_kalman_r_long,
+            apply_runtime: |_v, _rt| Ok(()),
         },
     ];
     &REGS

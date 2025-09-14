@@ -55,6 +55,7 @@ pub mod pos;
 pub mod state_stream;
 pub mod storage;
 pub mod vm;
+pub mod vm_trace;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -390,7 +391,19 @@ pub async fn handle_conn(
         return;
     }
 
-    if method == "GET" && path == "/state_stream" {
+    if method == "GET" && path.starts_with("/vm/trace") {
+        if let Some(key) = ws_key {
+            let code_hex = path
+                .split('?')
+                .nth(1)
+                .and_then(|q| q.strip_prefix("code="))
+                .unwrap_or("");
+            let code = hex::decode(code_hex).unwrap_or_default();
+            let stream = reader.into_inner();
+            vm_trace::serve_vm_trace(stream, key, code).await;
+        }
+        return;
+    } else if method == "GET" && path == "/state_stream" {
         if let Some(key) = ws_key {
             let stream = reader.into_inner();
             state_stream::serve_state_stream(stream, key, Arc::clone(&bc)).await;
@@ -1264,7 +1277,7 @@ fn dispatch(
         }
         "pow.get_template" => {
             // simplistic template: zero prev/merkle
-            let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1);
+            let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1, 0);
             serde_json::json!({
                 "prev_hash": hex::encode(tmpl.prev_hash),
                 "merkle_root": hex::encode(tmpl.merkle_root),
@@ -1309,12 +1322,14 @@ fn dispatch(
                 code: -32602,
                 message: "bad timestamp_millis",
             })?;
+            let retune_hint = header_obj["retune_hint"].as_i64().unwrap_or(0) as i8;
             let hdr = BlockHeader {
                 prev_hash,
                 merkle_root,
                 checkpoint_hash,
                 nonce,
                 difficulty,
+                retune_hint,
                 base_fee: header_obj["base_fee"].as_u64().unwrap_or(1),
                 timestamp_millis: timestamp,
                 l2_roots: Vec::new(),

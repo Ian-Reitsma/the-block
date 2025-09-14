@@ -24,6 +24,7 @@ fn rejects_nonce_gap() {
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
+            sessions: Vec::new(),
         },
     );
 
@@ -63,6 +64,7 @@ fn rejects_nonce_gap() {
         timestamp_millis: 0,
         transactions: vec![tx1, tx2],
         difficulty: 0,
+        retune_hint: 0,
         nonce: 0,
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),
@@ -106,6 +108,7 @@ fn rollback_on_mid_block_panic() {
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
+            sessions: Vec::new(),
         },
     );
 
@@ -130,6 +133,7 @@ fn rollback_on_mid_block_panic() {
         timestamp_millis: 0,
         transactions: vec![tx.clone()],
         difficulty: 0,
+        retune_hint: 0,
         nonce: 0,
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),

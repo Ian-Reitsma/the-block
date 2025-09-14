@@ -408,6 +408,7 @@ fn schema_upgrade_compatibility() {
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
+            sessions: Vec::new(),
         },
     );
     let disk = ChainDisk {

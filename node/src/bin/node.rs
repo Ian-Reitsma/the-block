@@ -165,6 +165,10 @@ enum Commands {
         /// Country code or path to jurisdiction policy pack
         #[arg(long)]
         jurisdiction: Option<String>,
+
+        /// Enable VM debugging features
+        #[arg(long, default_value_t = false)]
+        enable_vm_debug: bool,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
     GenerateKey { key_id: String },
@@ -238,11 +242,13 @@ async fn main() -> std::process::ExitCode {
             quic_cert_ttl_days: _quic_cert_ttl_days,
             profiling,
             jurisdiction,
+            enable_vm_debug,
         } => {
             if auto_tune {
                 the_block::telemetry::auto_tune();
                 return std::process::ExitCode::SUCCESS;
             }
+            the_block::vm::set_vm_debug_enabled(enable_vm_debug);
             let filter = EnvFilter::new(log_level.join(","));
             let (profiler, _chrome) = if profiling {
                 let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()

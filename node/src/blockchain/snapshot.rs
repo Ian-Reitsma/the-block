@@ -247,6 +247,7 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                                             pending_industrial: 0,
                                             pending_nonce: 0,
                                             pending_nonces: HashSet::new(),
+                                            sessions: Vec::new(),
                                         },
                                     )
                                 })
@@ -296,6 +297,7 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                             pending_industrial: 0,
                             pending_nonce: 0,
                             pending_nonces: HashSet::new(),
+                            sessions: Vec::new(),
                         },
                     );
                 }
@@ -339,6 +341,7 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
                 pending_industrial: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
+                sessions: Vec::new(),
             },
         );
     }

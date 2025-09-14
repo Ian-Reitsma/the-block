@@ -56,6 +56,7 @@ pub fn validate_and_apply(
             pending_industrial: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
+            sessions: Vec::new(),
         });
         recv.balance.consumer += tx.payload.amount_consumer;
         recv.balance.industrial += tx.payload.amount_industrial;

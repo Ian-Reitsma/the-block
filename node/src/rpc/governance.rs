@@ -17,6 +17,9 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "MinerRewardLogisticTarget" => Some(ParamKey::MinerRewardLogisticTarget),
         "BadgeExpirySecs" => Some(ParamKey::BadgeExpirySecs),
         "JurisdictionRegion" => Some(ParamKey::JurisdictionRegion),
+        "KalmanRShort" => Some(ParamKey::KalmanRShort),
+        "KalmanRMed" => Some(ParamKey::KalmanRMed),
+        "KalmanRLong" => Some(ParamKey::KalmanRLong),
         _ => None,
     }
 }

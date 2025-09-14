@@ -57,6 +57,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::BadgeRevokeUptime => "badge_revoke_uptime_percent",
         ParamKey::JurisdictionRegion => "jurisdiction_region",
         ParamKey::AiDiagnosticsEnabled => "ai_diagnostics_enabled",
+        ParamKey::KalmanRShort => "kalman_r_short",
+        ParamKey::KalmanRMed => "kalman_r_med",
+        ParamKey::KalmanRLong => "kalman_r_long",
     }
 }
 
@@ -308,6 +311,9 @@ impl GovStore {
                                 ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
                                 ParamKey::JurisdictionRegion => params.jurisdiction_region,
                                 ParamKey::AiDiagnosticsEnabled => params.ai_diagnostics_enabled,
+                                ParamKey::KalmanRShort => params.kalman_r_short,
+                                ParamKey::KalmanRMed => params.kalman_r_med,
+                                ParamKey::KalmanRLong => params.kalman_r_long,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -463,6 +469,9 @@ impl GovStore {
                 ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
                 ParamKey::JurisdictionRegion => params.jurisdiction_region,
                 ParamKey::AiDiagnosticsEnabled => params.ai_diagnostics_enabled,
+                ParamKey::KalmanRShort => params.kalman_r_short,
+                ParamKey::KalmanRMed => params.kalman_r_med,
+                ParamKey::KalmanRLong => params.kalman_r_long,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
