@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-use std::collections::VecDeque;
 use hex::encode;
+use std::collections::VecDeque;
 
 /// Intent to perform a cross-chain swap via HTLC.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +20,9 @@ pub struct HtlcRouter {
 
 impl HtlcRouter {
     pub fn new() -> Self {
-        Self { pending: VecDeque::new() }
+        Self {
+            pending: VecDeque::new(),
+        }
     }
 
     /// Submit a new intent; returns a matched pair if available.

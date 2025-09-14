@@ -7,7 +7,7 @@ use crate::{
     identity::handle_registry::HandleRegistry,
     kyc,
     localnet::{validate_proximity, AssistReceipt},
-    net,
+    net, range_boost,
     simple_db::SimpleDb,
     storage::fs::RentEscrow,
     transaction::FeeLane,
@@ -47,13 +47,13 @@ pub mod consensus;
 pub mod dex;
 pub mod governance;
 pub mod htlc;
-pub mod storage;
 pub mod identity;
 pub mod inflation;
 pub mod jurisdiction;
 pub mod light;
-pub mod state_stream;
 pub mod pos;
+pub mod state_stream;
+pub mod storage;
 pub mod vm;
 
 static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"));
@@ -89,6 +89,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "warrant_canary",
     "le.list_requests",
     "le.record_action",
+    "le.upload_evidence",
+    "service_badge_issue",
+    "service_badge_revoke",
     "dns.publish_record",
     "gateway.policy",
     "gateway.reads_since",
@@ -135,10 +138,12 @@ const PUBLIC_METHODS: &[&str] = &[
     "consensus.pos.unbond",
     "consensus.pos.slash",
     "rent.escrow.balance",
+    "mesh.peers",
     "light.latest_header",
     "light.headers",
     "service_badge_verify",
     "jurisdiction.status",
+    "jurisdiction.policy_diff",
 ];
 
 const ADMIN_METHODS: &[&str] = &[
@@ -162,6 +167,7 @@ const BADGE_METHODS: &[&str] = &[
     "warrant_canary",
     "le.list_requests",
     "le.record_action",
+    "le.upload_evidence",
 ];
 
 const DEBUG_METHODS: &[&str] = &["set_difficulty", "start_mining", "stop_mining"];
@@ -287,14 +293,14 @@ pub async fn handle_conn(
     mining: Arc<AtomicBool>,
     nonces: Arc<Mutex<HashSet<u64>>>,
     handles: Arc<Mutex<HandleRegistry>>,
-    cfg: Arc<RpcRuntimeConfig>,
+    runtime_cfg: Arc<RpcRuntimeConfig>,
 ) {
     let mut reader = BufReader::new(stream);
     let peer_ip = reader.get_ref().peer_addr().ok().map(|a| a.ip());
 
     // Read request line with timeout to avoid hanging connections.
     let mut line = String::new();
-    match timeout(cfg.request_timeout, reader.read_line(&mut line)).await {
+    match timeout(runtime_cfg.request_timeout, reader.read_line(&mut line)).await {
         Ok(Ok(_)) => {}
         _ => return,
     }
@@ -312,7 +318,7 @@ pub async fn handle_conn(
     let mut ws_key: Option<String> = None;
     loop {
         line.clear();
-        let read = match timeout(cfg.request_timeout, reader.read_line(&mut line)).await {
+        let read = match timeout(runtime_cfg.request_timeout, reader.read_line(&mut line)).await {
             Ok(Ok(n)) => n,
             _ => return,
         };
@@ -350,7 +356,7 @@ pub async fn handle_conn(
 
     if method == "OPTIONS" {
         let mut stream = reader.into_inner();
-        if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+        if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
             let resp = format!("HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\n\r\n");
             let _ = stream.write_all(resp.as_bytes()).await;
         } else {
@@ -362,7 +368,7 @@ pub async fn handle_conn(
         return;
     }
 
-    if !cfg
+    if !runtime_cfg
         .allowed_hosts
         .iter()
         .any(|h| h.eq_ignore_ascii_case(host.trim()))
@@ -375,7 +381,7 @@ pub async fn handle_conn(
         return;
     }
 
-    if content_len > cfg.max_body_bytes {
+    if content_len > runtime_cfg.max_body_bytes {
         let mut stream = reader.into_inner();
         let _ = stream
             .write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
@@ -406,7 +412,7 @@ pub async fn handle_conn(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
             body.len()
         );
-        if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+        if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
             headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
         }
         headers.push_str("\r\n");
@@ -422,7 +428,7 @@ pub async fn handle_conn(
             "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n",
             body.len()
         );
-        if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+        if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
             headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
         }
         headers.push_str("\r\n");
@@ -436,10 +442,13 @@ pub async fn handle_conn(
     // Read body (if any) with timeout; default to empty on missing Content-Length.
     let mut body_bytes = vec![0u8; content_len];
     if content_len > 0 {
-        if timeout(cfg.request_timeout, reader.read_exact(&mut body_bytes))
-            .await
-            .ok()
-            .is_none()
+        if timeout(
+            runtime_cfg.request_timeout,
+            reader.read_exact(&mut body_bytes),
+        )
+        .await
+        .ok()
+        .is_none()
         {
             return;
         }
@@ -451,7 +460,7 @@ pub async fn handle_conn(
         Ok(r) => {
             let id = r.id.clone();
             let method_str = r.method.as_str();
-            let authorized = match cfg.admin_token.as_ref() {
+            let authorized = match runtime_cfg.admin_token.as_ref() {
                 Some(t) => {
                     let expected = format!("Bearer {t}");
                     match auth.as_deref() {
@@ -466,7 +475,7 @@ pub async fn handle_conn(
                 None => false,
             };
             if DEBUG_METHODS.contains(&method_str) {
-                if !cfg.enable_debug || !authorized {
+                if !runtime_cfg.enable_debug || !authorized {
                     RpcResponse::Error {
                         jsonrpc: "2.0",
                         error: RpcError {
@@ -648,7 +657,7 @@ pub async fn handle_conn(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
     );
-    if cfg.cors_allow_origins.iter().any(|o| o == &origin) {
+    if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
         headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
     }
     headers.push_str("\r\n");
@@ -721,6 +730,16 @@ fn dispatch(
                 .unwrap_or("");
             let shard = ledger::shard_of(addr);
             serde_json::json!({"shard": shard})
+        }
+        "anomaly.label" => {
+            let _label = req
+                .params
+                .get("label")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::ANOMALY_LABEL_TOTAL.inc();
+            serde_json::json!({"status": "ok"})
         }
         "settlement_status" => {
             let provider = req.params.get("provider").and_then(|v| v.as_str());
@@ -1325,8 +1344,16 @@ fn dispatch(
             serde_json::to_value(light::latest_header(&guard)).unwrap()
         }
         "light.headers" => {
-            let start = req.params.get("start").and_then(|v| v.as_u64()).unwrap_or(0);
-            let limit = req.params.get("limit").and_then(|v| v.as_u64()).unwrap_or(200) as usize;
+            let start = req
+                .params
+                .get("start")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(200) as usize;
             let guard = bc.lock().unwrap();
             serde_json::to_value(light::headers_since(&guard, start, limit)).unwrap()
         }
@@ -1339,6 +1366,9 @@ fn dispatch(
             } else {
                 serde_json::json!({"balance": 0})
             }
+        }
+        "mesh.peers" => {
+            serde_json::json!({"peers": range_boost::peers()})
         }
         "inflation.params" => inflation::params(&bc),
         "compute_market.stats" => {
@@ -1450,7 +1480,13 @@ fn dispatch(
                 Ok(guard) => {
                     let base = guard.path.clone();
                     let jurisdiction = guard.config.jurisdiction.as_deref().unwrap_or("UNSPEC");
-                    match crate::le_portal::record_request(&base, agency, case, jurisdiction) {
+                    let lang = req
+                        .params
+                        .get("lang")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("en");
+                    match crate::le_portal::record_request(&base, agency, case, jurisdiction, lang)
+                    {
                         Ok(_) => serde_json::json!({"status": "ok"}),
                         Err(_) => serde_json::json!({"error": "io"}),
                     }
@@ -1502,7 +1538,13 @@ fn dispatch(
                 Ok(guard) => {
                     let base = guard.path.clone();
                     let jurisdiction = guard.config.jurisdiction.as_deref().unwrap_or("UNSPEC");
-                    match crate::le_portal::record_action(&base, agency, action, jurisdiction) {
+                    let lang = req
+                        .params
+                        .get("lang")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("en");
+                    match crate::le_portal::record_action(&base, agency, action, jurisdiction, lang)
+                    {
                         Ok(hash) => serde_json::json!({"hash": hash}),
                         Err(_) => serde_json::json!({"error": "io"}),
                     }
@@ -1510,6 +1552,65 @@ fn dispatch(
                 Err(_) => serde_json::json!({"error": "lock poisoned"}),
             }
         }
+        "le.upload_evidence" => {
+            check_nonce(&req.params, &nonces)?;
+            let agency = req
+                .params
+                .get("agency")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let case_id = req
+                .params
+                .get("case_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let data_b64 = req
+                .params
+                .get("evidence")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let data = match base64::decode(data_b64) {
+                Ok(d) => d,
+                Err(_) => return Ok(serde_json::json!({"error": "decode"})),
+            };
+            match bc.lock() {
+                Ok(guard) => {
+                    let base = guard.path.clone();
+                    let jurisdiction = guard.config.jurisdiction.as_deref().unwrap_or("UNSPEC");
+                    let lang = req
+                        .params
+                        .get("lang")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("en");
+                    match crate::le_portal::record_evidence(
+                        &base,
+                        agency,
+                        case_id,
+                        jurisdiction,
+                        lang,
+                        &data,
+                    ) {
+                        Ok(hash) => serde_json::json!({"hash": hash}),
+                        Err(_) => serde_json::json!({"error": "io"}),
+                    }
+                }
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
+        "service_badge_issue" => match bc.lock() {
+            Ok(mut guard) => {
+                let token = guard.badge_tracker_mut().force_issue();
+                serde_json::json!({"badge": token})
+            }
+            Err(_) => serde_json::json!({"error": "lock poisoned"}),
+        },
+        "service_badge_revoke" => match bc.lock() {
+            Ok(mut guard) => {
+                guard.badge_tracker_mut().revoke();
+                serde_json::json!({"revoked": true})
+            }
+            Err(_) => serde_json::json!({"error": "lock poisoned"}),
+        },
         "service_badge_verify" => {
             let badge = req
                 .params
@@ -1580,7 +1681,7 @@ fn dispatch(
             serde_json::json!({"status": "ok"})
         }
         "start_mining" => {
-            if cfg.relay_only {
+            if runtime_cfg.relay_only {
                 serde_json::json!({
                     "error": {"code": -32075, "message": "relay_only"}
                 })
@@ -1623,6 +1724,17 @@ fn dispatch(
                     message: "missing path",
                 })?;
             jurisdiction::set(&bc, path)?
+        }
+        "jurisdiction.policy_diff" => {
+            let path = req
+                .params
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32072,
+                    message: "missing path",
+                })?;
+            jurisdiction::policy_diff(&bc, path)?
         }
         "metrics" => {
             #[cfg(feature = "telemetry")]
@@ -1728,13 +1840,43 @@ fn dispatch(
             htlc::refund(id, now)
         }
         "storage_upload" => {
-            let object_id = req.params.get("object_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let provider_id = req.params.get("provider_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let original_bytes = req.params.get("original_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
-            let shares = req.params.get("shares").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-            let price_per_block = req.params.get("price_per_block").and_then(|v| v.as_u64()).unwrap_or(0);
-            let start_block = req.params.get("start_block").and_then(|v| v.as_u64()).unwrap_or(0);
-            let retention_blocks = req.params.get("retention_blocks").and_then(|v| v.as_u64()).unwrap_or(0);
+            let object_id = req
+                .params
+                .get("object_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let provider_id = req
+                .params
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let original_bytes = req
+                .params
+                .get("original_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let shares = req
+                .params
+                .get("shares")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u16;
+            let price_per_block = req
+                .params
+                .get("price_per_block")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let start_block = req
+                .params
+                .get("start_block")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let retention_blocks = req
+                .params
+                .get("retention_blocks")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             let contract = storage::StorageContract {
                 object_id,
                 provider_id,
@@ -1747,8 +1889,16 @@ fn dispatch(
             storage::upload(contract)
         }
         "storage_challenge" => {
-            let object_id = req.params.get("object_id").and_then(|v| v.as_str()).unwrap_or("");
-            let current_block = req.params.get("current_block").and_then(|v| v.as_u64()).unwrap_or(0);
+            let object_id = req
+                .params
+                .get("object_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let current_block = req
+                .params
+                .get("current_block")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             storage::challenge(object_id, current_block)
         }
         "gov_propose" => {
@@ -2044,5 +2194,6 @@ pub fn fuzz_runtime_config() -> Arc<RpcRuntimeConfig> {
         request_timeout: Duration::from_secs(1),
         enable_debug: false,
         admin_token: None,
+        relay_only: false,
     })
 }

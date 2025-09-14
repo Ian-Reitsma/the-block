@@ -1,31 +1,31 @@
-# Explorer
+# Explorer API
 
-The explorer crate exposes a lightweight REST API for inspecting chain data and compute-market receipts.
+The explorer exposes a lightweight REST service for querying on-chain data and analytics.
 
-## API Routes
-- `GET /blocks/:hash` – fetch a block by hash
-- `GET /txs/:hash` – fetch a signed transaction by hash
-- `GET /gov/proposals/:id` – return a governance proposal payload
-- `GET /peers/reputation` – list peer reputation scores
-- `GET /search/memo/:memo` – find transactions containing the given memo substring
-- `GET /search/contract/:contract` – find transactions targeting a contract
-- `GET /receipts/provider/:id` – list compute receipts produced by a provider
-- `GET /receipts/domain/:id` – list compute receipts purchased by a domain
-- `GET /dex/order_book` – view aggregated DEX bids and asks
-- `GET /compute/jobs` – list indexed compute jobs and their status
+## Endpoints
 
-## Examples
+- `GET /blocks/:hash` – fetch a block by hash.
+- `GET /blocks/:hash/proof` – fetch the light-client proof for a block.
+- `GET /txs/:hash` – fetch a transaction by hash.
+- `GET /gov/proposals/:id` – fetch a governance proposal.
+- `GET /peers/reputation` – list peer reputation scores.
+- `GET /peers/handshakes` – return handshake success and failure counts per peer.
+- `GET /dex/order_book` – view the current DEX order book.
+- `GET /dex/trust_lines` – list trust-line edges for visualization.
+- `GET /compute/jobs` – list indexed compute jobs.
+- `GET /subsidy/history` – historic subsidy multipliers.
+- `GET /metrics/:name` – archived metric points for long‑term analysis.
+- `GET /search/memo/:memo` – advanced search by memo.
+- `GET /search/contract/:contract` – advanced search by contract hash.
+- `GET /receipts/provider/:id` – receipts filtered by provider.
+- `GET /receipts/domain/:id` – receipts filtered by domain.
+
+## Running with Docker Compose
+
+`deploy/docker-compose.yml` includes an explorer service wired to a local node. Launch the stack with:
+
 ```bash
-# fetch a block
-curl localhost:3001/blocks/abcd
-
-# lookup transactions by memo
-curl localhost:3001/search/memo/hello
+docker compose -f deploy/docker-compose.yml up
 ```
 
-## Docker
-A simple Dockerfile is provided:
-```bash
-docker build -t explorer ./explorer
-docker run -p 3001:3001 explorer /data/explorer.db /data/receipts
-```
+The explorer will listen on port `8080` and proxy requests to the first node in the stack.

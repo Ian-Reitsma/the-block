@@ -22,7 +22,10 @@ fn main() {
         std::process::exit(1);
     }
     let mut data = String::new();
-    File::open(&args[1]).expect("open input").read_to_string(&mut data).expect("read");
+    File::open(&args[1])
+        .expect("open input")
+        .read_to_string(&mut data)
+        .expect("read");
     let accounts: Vec<LegacyAccount> = serde_json::from_str(&data).expect("parse");
     let mut out_accounts = Vec::new();
     for acc in accounts {
@@ -34,5 +37,8 @@ fn main() {
         });
     }
     let json = serde_json::to_string_pretty(&out_accounts).expect("ser");
-    File::create(&args[2]).expect("out").write_all(json.as_bytes()).expect("write");
+    File::create(&args[2])
+        .expect("out")
+        .write_all(json.as_bytes())
+        .expect("write");
 }

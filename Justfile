@@ -59,3 +59,9 @@ fuzz:promote:
 
 docs:
     mdbook build docs
+
+format:
+    cargo fmt --all
+
+lint:
+    cargo clippy --all-targets --all-features -- -D warnings

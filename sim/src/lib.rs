@@ -11,6 +11,7 @@ pub mod dex;
 pub mod inflation;
 pub mod liquidity;
 pub mod mobile_sync;
+pub mod token_model;
 
 use bridging::BridgeModel;
 use dashboard::Snapshot;

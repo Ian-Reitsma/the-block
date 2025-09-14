@@ -22,12 +22,39 @@ async fn main() -> anyhow::Result<()> {
     let domain_state = explorer.clone();
     let dex_state = explorer.clone();
     let job_state = explorer.clone();
+    let trust_state = explorer.clone();
+    let subsidy_state = explorer.clone();
+    let metric_state = explorer.clone();
+    let proof_state = explorer.clone();
+    let handshake_state = explorer.clone();
+    let token_state = explorer.clone();
+    let bridge_state = explorer.clone();
+    let juris_state = explorer.clone();
     let app = Router::new()
         .route(
             "/blocks/:hash",
             get(move |Path(hash): Path<String>| {
                 let state = block_state.clone();
                 async move { Json(state.get_block(&hash).unwrap_or(None)) }
+            }),
+        )
+        .route(
+            "/blocks/:hash/summary",
+            get(move |Path(hash): Path<String>| {
+                let state = block_state.clone();
+                async move {
+                    if let Some(rec) = state.get_block(&hash).unwrap_or(None) {
+                        if let Ok(block) = bincode::deserialize::<the_block::Block>(&rec.data) {
+                            let s =
+                                explorer::summarize_block(block.index, block.transactions.len());
+                            Json(Some(s))
+                        } else {
+                            Json(None::<String>)
+                        }
+                    } else {
+                        Json(None::<String>)
+                    }
+                }
             }),
         )
         .route(
@@ -50,6 +77,10 @@ async fn main() -> anyhow::Result<()> {
                 let state = rep_state.clone();
                 async move { Json(state.peer_reputations().unwrap_or_default()) }
             }),
+        )
+        .route(
+            "/dkg/validators",
+            get(move || async move { Json(explorer::dkg_view::list_shares()) }),
         )
         .route(
             "/search/memo/:memo",
@@ -91,6 +122,61 @@ async fn main() -> anyhow::Result<()> {
             get(move || {
                 let state = job_state.clone();
                 async move { Json(state.compute_jobs().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/dex/trust_lines",
+            get(move || {
+                let state = trust_state.clone();
+                async move { Json(state.trust_lines().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/subsidy/history",
+            get(move || {
+                let state = subsidy_state.clone();
+                async move { Json(state.subsidy_history().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/metrics/:name",
+            get(move |Path(name): Path<String>| {
+                let state = metric_state.clone();
+                async move { Json(state.metric_points(&name).unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/blocks/:hash/proof",
+            get(move |Path(hash): Path<String>| {
+                let state = proof_state.clone();
+                async move { Json(state.light_proof(&hash).unwrap_or(None)) }
+            }),
+        )
+        .route(
+            "/peers/handshakes",
+            get(move || {
+                let state = handshake_state.clone();
+                async move { Json(state.peer_handshakes().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/tokens/supply/:symbol",
+            get(move |Path(symbol): Path<String>| {
+                let state = token_state.clone();
+                async move { Json(state.token_supply(&symbol).unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/tokens/bridge/:symbol",
+            get(move |Path(symbol): Path<String>| {
+                let state = bridge_state.clone();
+                async move { Json(state.bridge_volume(&symbol).unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/jurisdiction/:region",
+            get(move |Path(region): Path<String>| {
+                explorer::jurisdiction_view::route(juris_state.clone(), Path(region))
             }),
         );
     let listener = TcpListener::bind("0.0.0.0:3001").await?;

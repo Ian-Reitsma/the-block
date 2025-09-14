@@ -16,8 +16,10 @@ members = [
   "tools/installer",
   "tools/debugger",
   "tools/analytics_audit",
+  "tools/auto-profile",
   "tools/gov_graph",
   "tools/dual-key-migrate",
+  "tools/remote-signer",
   "explorer",
   "bridges",
   "cli",
@@ -26,7 +28,9 @@ members = [
   "dex",
   "inflation",
   "metrics-aggregator",
-  "storage"
+  "storage",
+  "privacy",
+  "dkg"
 ]
 default-members = [
   "node",
@@ -35,3 +39,4 @@ default-members = [
   "tools/xtask"
 ]
 resolver = "2"
+

@@ -12,7 +12,7 @@ tokio-tungstenite = "0.20"
 futures = "0.3"
 zstd = "0.12"
 bincode = "1"
-ed25519-dalek = { version = "1", features = ["std"] }
+ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 
 [dev-dependencies]
 rand = "0.8"

@@ -23,9 +23,14 @@ notify = "6"
 sled = "0.34"
 age = "0.9"
 openssl = { version = "0.10", features = ["vendored"] }
+aws-sdk-s3 = { version = "1", optional = true, default-features = false, features = ["rustls"] }
+aws-config = { version = "1", optional = true, default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 tower = "0.5"
 tempfile = "3"
 regex = "1"
 
+
+[features]
+s3 = ["aws-sdk-s3", "aws-config"]

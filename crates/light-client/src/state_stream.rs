@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A chunk of state updates delivered over the stream.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,7 +29,11 @@ pub struct StateStream {
 impl StateStream {
     /// Create a new stream with empty cache and default lag threshold of 8 blocks.
     pub fn new() -> Self {
-        Self { cache: HashMap::new(), next_seq: 0, lag_threshold: 8 }
+        Self {
+            cache: HashMap::new(),
+            next_seq: 0,
+            lag_threshold: 8,
+        }
     }
 
     /// Apply an incremental chunk of updates. Returns `Err(())` if the

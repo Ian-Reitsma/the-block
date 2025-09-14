@@ -3,7 +3,7 @@ use crate::telemetry::{SNAPSHOT_DURATION_SECONDS, SNAPSHOT_FAIL_TOTAL};
 use crate::{Account, TokenBalance};
 use hex;
 use serde::{Deserialize, Serialize};
-use state::MerkleTrie;
+use state::{MerkleTrie, Snapshot};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;

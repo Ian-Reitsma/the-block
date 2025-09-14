@@ -11,13 +11,14 @@ serde = { version = "1.0", features = ["derive"] }
 bincode = "1.3"
 blake3 = "1"
 sha3 = "0.10"
-ripemd160 = "0.10"
+ripemd = "0.1"
 fs2 = "0.4"
 inflation = { path = "../inflation" }
 bellman_ce = "0.8"
 hex = "0.4"
 ed25519-dalek = "2.2.0"
 rand = "0.8"
+dkg = { path = "../dkg" }
 rand_core = "0.6"
 hdrhistogram = "7"
 procfs = "0.15"
@@ -33,6 +34,7 @@ wallet = { path = "../crates/wallet" }
 jurisdiction = { path = "../crates/jurisdiction" }
 # Post-quantum signature support
 pqcrypto-dilithium = { version = "0.5", optional = true }
+privacy = { path = "../privacy", optional = true }
 crc32fast = "1"
 tempfile = "3"
 chacha20poly1305 = "0.10"
@@ -123,6 +125,7 @@ bluetooth = []
 gpu = []
 gateway = []
 quic = ["quinn", "rcgen"]
+privacy = ["dep:privacy"]
 
 [package.metadata.maturin]
 features = ["pyo3/extension-module", "pyo3/auto-initialize", "telemetry"]
@@ -133,6 +136,7 @@ proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 csv = "1"
 serial_test = "3"
+tiny_http = "0.12"
 wait-timeout = "0.2"
 arbitrary = { version = "1", features = ["derive"] }
 env_logger = "0.11"

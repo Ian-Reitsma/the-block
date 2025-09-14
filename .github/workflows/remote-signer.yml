@@ -1,0 +1,28 @@
+name: remote-signer
+
+on:
+  push:
+    paths:
+      - 'crates/wallet/**'
+      - 'tools/remote-signer/**'
+      - 'tests/remote_signer_multisig.rs'
+      - '.github/workflows/remote-signer.yml'
+  pull_request:
+    paths:
+      - 'crates/wallet/**'
+      - 'tools/remote-signer/**'
+      - 'tests/remote_signer_multisig.rs'
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-rust@v1
+        with:
+          toolchain: stable
+      - name: Run remote signer tests
+        run: cargo test --test remote_signer_multisig

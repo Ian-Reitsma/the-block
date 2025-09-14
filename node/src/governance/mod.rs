@@ -6,6 +6,7 @@ mod params;
 mod proposals;
 mod state;
 mod store;
+mod token;
 mod variance;
 
 pub use bicameral::{
@@ -15,9 +16,14 @@ pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utili
 pub use proposals::{validate_dag, Proposal, ProposalStatus, Vote, VoteChoice};
 pub use state::TreasuryState;
 pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS};
+pub use token::{TokenAction, TokenProposal};
 
 /// Simplified address type reused across governance records.
 pub type Address = String;
+
+#[cfg(doctest)]
+#[doc = concat!("```rust\n", include_str!("../../examples/governance.rs"), "\n```")]
+mod governance_example {}
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -38,5 +44,8 @@ pub enum ParamKey {
     MinerHysteresis,
     HeuristicMuMilli,
     BadgeExpirySecs,
+    BadgeIssueUptime,
+    BadgeRevokeUptime,
     JurisdictionRegion,
+    AiDiagnosticsEnabled,
 }

@@ -10,3 +10,7 @@ set -euo pipefail
   cargo tree --manifest-path node/Cargo.toml
   echo '```'
 } > docs/architecture/node.md
+
+if command -v cargo-deps >/dev/null 2>&1 && command -v dot >/dev/null 2>&1; then
+  cargo deps --manifest-path node/Cargo.toml --depth 1 | dot -Tsvg -o docs/architecture/node-deps.svg
+fi

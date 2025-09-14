@@ -1,4 +1,8 @@
 use age::Encryptor;
+#[cfg(feature = "s3")]
+use aws_config;
+#[cfg(feature = "s3")]
+use aws_sdk_s3::{primitives::ByteStream, Client as S3Client};
 use axum::{
     extract::{Path as AxumPath, Query, State},
     http::{header, StatusCode},
@@ -16,6 +20,23 @@ use openssl::{
     symm::{Cipher, Crypter, Mode},
 };
 use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
+
+#[cfg(feature = "s3")]
+fn upload_sync(bucket: String, data: Vec<u8>) {
+    let handle = tokio::runtime::Handle::current();
+    handle.block_on(async move {
+        let config = aws_config::load_from_env().await;
+        let client = S3Client::new(&config);
+        let _ = client
+            .put_object()
+            .bucket(bucket)
+            .key("metrics/latest.zip")
+            .body(ByteStream::from(data))
+            .send()
+            .await;
+    });
+}
+
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
@@ -26,6 +47,18 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tokio_util::io::{ReaderStream, StreamReader};
+
+fn archive_metrics(blob: &str) {
+    if let Ok(path) = std::env::var("TB_METRICS_ARCHIVE") {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{}", blob);
+        }
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerStat {
@@ -137,6 +170,14 @@ impl AppState {
                 state.prune();
             }
         });
+    }
+
+    pub fn weekly_report(&self) -> String {
+        if let Ok(map) = self.data.lock() {
+            format!("active_peers:{}", map.len())
+        } else {
+            "active_peers:0".into()
+        }
     }
 }
 
@@ -250,6 +291,9 @@ async fn ingest(
             let _ = wal.append(&payload);
             REPLICATION_LAG.set(0);
         }
+        if let Ok(blob) = serde_json::to_string(&payload) {
+            archive_metrics(&blob);
+        }
         StatusCode::OK
     } else {
         StatusCode::UNAUTHORIZED
@@ -267,6 +311,10 @@ async fn peer(
         .unwrap_or_default()
         .into_iter()
         .collect();
+    #[cfg(feature = "s3")]
+    if let Some(b) = &_bucket {
+        upload_sync(b.clone(), data.clone());
+    }
     Json(data)
 }
 
@@ -300,8 +348,13 @@ async fn export_all(
 
     let recipient = params.recipient.clone();
     let password = params.password.clone();
+    #[cfg(feature = "s3")]
+    let bucket = std::env::var("S3_BUCKET").ok();
+    #[cfg(not(feature = "s3"))]
+    let bucket: Option<String> = None;
     let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
     tokio::task::spawn_blocking(move || {
+        let _bucket = bucket;
         use zip::write::FileOptions;
         let mut cursor = io::Cursor::new(Vec::new());
         {
@@ -344,6 +397,10 @@ async fn export_all(
         } else {
             bytes
         };
+        #[cfg(feature = "s3")]
+        if let Some(b) = &_bucket {
+            upload_sync(b.clone(), data.clone());
+        }
         for chunk in data.chunks(8192) {
             if tx.blocking_send(chunk.to_vec()).is_err() {
                 return;

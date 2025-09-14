@@ -8,8 +8,8 @@ identifiers or messages in cleartext.
 ## Request Logging
 
 `record_request` hashes the caller-supplied `case_id` with BLAKE3 and appends a
-JSON line containing the timestamp, agency name, jurisdiction, and resulting `case_hash` to
-`le_requests.log`
+JSON line containing the timestamp, agency name, jurisdiction, caller language,
+and resulting `case_hash` to `le_requests.log`
 [`node/src/le_portal.rs#L17-L36`](../node/src/le_portal.rs#L17-L36). The function
 returns the 64‑hex character hash so operators can audit inclusion without
 exposing the original identifier. Requests are retrieved via
@@ -57,7 +57,21 @@ to provide a tamper-evident trail of law-enforcement operations
 service badges. Badges expire after a governance-controlled interval and can be
 renewed without downtime. Metrics `badge_issued_total` and
 `badge_revoked_total` track lifecycle events, while policy updates flow through
-the governance parameter `BadgeExpirySecs`.
+the governance parameters `BadgeExpirySecs`, `BadgeIssueUptime`, and
+`BadgeRevokeUptime`.
+
+## Evidence Submission Workflow
+
+`record_evidence` accepts binary artifacts associated with a hashed case ID and
+stores them under `evidence/<hash>` alongside a JSON log entry in
+`le_evidence.log`. Entries from `record_request`, `record_action`, and
+`record_evidence` are also appended to the chain state's `le_audit.log` for
+on-chain attestation. The RPC method `le.upload_evidence` exposes this
+functionality and is guarded behind service badges.
+
+CLI utilities `service-badge issue` and `service-badge revoke` manage badge
+lifecycle, while `service-badge verify` checks validity. Scripts in
+`examples/badge_workflow/` demonstrate a full issuance and revocation flow.
 
 ## Example
 
@@ -65,7 +79,7 @@ the governance parameter `BadgeExpirySecs`.
 use the_block::le_portal::{record_request, list_requests, record_canary};
 
 let base = "/var/log/the-block";
-let hash = record_request(base, "Agency", "case123", "US")?;
+let hash = record_request(base, "Agency", "case123", "US", "en")?;
 println!("case hash: {hash}");
 let entries = list_requests(base)?;
 assert_eq!(entries[0].case_hash, hash);

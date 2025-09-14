@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use blake3::hash;
@@ -11,6 +11,7 @@ use crate::p2p::handshake::Transport;
 use crate::range_boost;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_TTL_DROP_TOTAL};
+use ledger::address::ShardId;
 
 /// Relay provides TTL-based duplicate suppression and fanout selection.
 pub struct Relay {
@@ -33,7 +34,7 @@ impl Relay {
     /// Returns true if the message has not been seen recently.
     pub fn should_process(&self, msg: &Message) -> bool {
         let h = Self::hash_msg(msg);
-        let mut guard = self.recent.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.recent.lock();
         let now = Instant::now();
         let before = guard.len();
         guard.retain(|_, t| now.duration_since(*t) < self.ttl);
@@ -70,6 +71,21 @@ impl Relay {
         });
     }
 
+    /// Broadcast a message to peers belonging to a specific shard.
+    pub fn broadcast_shard(
+        &self,
+        shard: ShardId,
+        msg: &Message,
+        peers: &[(ShardId, SocketAddr, Transport, Option<Vec<u8>>)],
+    ) {
+        let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = peers
+            .iter()
+            .filter(|p| p.0 == shard)
+            .map(|p| (p.1, p.2, p.3.clone()))
+            .collect();
+        self.broadcast(msg, &targets);
+    }
+
     /// Broadcast using a custom send function (primarily for testing).
     pub fn broadcast_with<F>(
         &self,
@@ -86,7 +102,9 @@ impl Relay {
             .map(|v| v == "all")
             .unwrap_or(false);
         let mut list = peers.to_vec();
-        list.sort_by_key(|(addr, _, _)| range_boost::peer_latency(addr).unwrap_or(u128::MAX));
+        if range_boost::is_enabled() {
+            list.sort_by_key(|(addr, _, _)| range_boost::peer_latency(addr).unwrap_or(u128::MAX));
+        }
         let fanout = if fanout_all {
             list.len()
         } else {

@@ -1,0 +1,5 @@
+image: theblock/node:latest
+service:
+  type: ClusterIP
+  port: 8000
+resources: {}

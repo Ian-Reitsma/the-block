@@ -5,6 +5,8 @@
 //! records a `ReadAck` that gateways later batch and anchor on-chain to claim
 //! CT subsidies.
 
+#![deny(warnings)]
+
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
@@ -14,6 +16,8 @@ use std::{
 mod rate_limit;
 use once_cell::sync::Lazy;
 use rate_limit::RateLimitFilter;
+use signal_hook::consts::signal::SIGHUP;
+use signal_hook::iterator::Signals;
 use std::fs;
 
 use futures::{SinkExt, StreamExt};
@@ -151,6 +155,7 @@ fn check_bucket(
 
 static IP_FILTER: Lazy<Arc<Mutex<RateLimitFilter>>> =
     Lazy::new(|| Arc::new(Mutex::new(RateLimitFilter::new())));
+static BLOCKLIST_PATH: Lazy<Arc<Mutex<Option<String>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
 
 pub fn load_blocklist(path: &str) {
     if let Ok(data) = fs::read_to_string(path) {
@@ -171,6 +176,20 @@ pub fn load_blocklist(path: &str) {
         }
         let mut guard = IP_FILTER.lock().unwrap();
         guard.replace(keys);
+    }
+    *BLOCKLIST_PATH.lock().unwrap() = Some(path.to_string());
+}
+
+/// Install a SIGHUP handler that reloads the blocklist file when triggered.
+pub fn install_blocklist_reload() {
+    let path = BLOCKLIST_PATH.lock().unwrap().clone();
+    if let Some(p) = path {
+        std::thread::spawn(move || {
+            let mut signals = Signals::new([SIGHUP]).expect("signals");
+            for _ in signals.forever() {
+                load_blocklist(&p);
+            }
+        });
     }
 }
 

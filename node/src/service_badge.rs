@@ -11,6 +11,9 @@ use std::time::Duration;
 /// assert!(tracker.uptime_percent() > 0.0);
 /// ```
 static BADGE_TTL_SECS: AtomicU64 = AtomicU64::new(30 * 24 * 60 * 60);
+static BADGE_MIN_EPOCHS: AtomicU64 = AtomicU64::new(90);
+static BADGE_ISSUE_UPTIME: AtomicU64 = AtomicU64::new(99);
+static BADGE_REVOKE_UPTIME: AtomicU64 = AtomicU64::new(95);
 
 /// Tracks uptime and basic performance metrics to determine badge eligibility.
 #[derive(Clone, Default)]
@@ -23,6 +26,7 @@ pub struct ServiceBadgeTracker {
     last_burn: Option<u64>,
     expiry: Option<u64>,
     token: Option<String>,
+    renewals: u64,
 }
 
 impl ServiceBadgeTracker {
@@ -60,19 +64,18 @@ impl ServiceBadgeTracker {
     /// Mint or revoke badges based on recorded metrics.
     pub fn check_badges(&mut self) {
         let now = current_ts();
+        let min_epochs = BADGE_MIN_EPOCHS.load(Ordering::Relaxed);
+        let issue_pct = BADGE_ISSUE_UPTIME.load(Ordering::Relaxed) as f64;
+        let revoke_pct = BADGE_REVOKE_UPTIME.load(Ordering::Relaxed) as f64;
+
         if !self.badge_minted {
-            if self.total_epochs >= 90 && self.uptime_percent() >= 99.0 {
+            if self.total_epochs >= min_epochs && self.uptime_percent() >= issue_pct {
                 self.issue_badge();
             }
         } else {
             let expired = self.expiry.map_or(false, |e| now >= e);
-            if expired || self.uptime_percent() < 95.0 {
-                self.badge_minted = false;
-                self.token = None;
-                self.expiry = None;
-                self.last_burn = Some(now);
-                #[cfg(feature = "telemetry")]
-                crate::telemetry::BADGE_REVOKED_TOTAL.inc();
+            if expired || self.uptime_percent() < revoke_pct {
+                self.revoke_badge();
             }
         }
     }
@@ -95,10 +98,32 @@ impl ServiceBadgeTracker {
     /// Renew an existing badge, extending its expiry.
     pub fn renew(&mut self) -> Option<String> {
         if self.badge_minted {
+            self.renewals = self.renewals.saturating_add(1);
             Some(self.issue_badge())
         } else {
             None
         }
+    }
+
+    fn revoke_badge(&mut self) {
+        self.badge_minted = false;
+        self.token = None;
+        self.expiry = None;
+        self.last_burn = Some(current_ts());
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::BADGE_REVOKED_TOTAL.inc();
+    }
+
+    /// Force revoke a badge.
+    pub fn revoke(&mut self) {
+        if self.badge_minted {
+            self.revoke_badge();
+        }
+    }
+
+    /// Force badge issuance regardless of uptime.
+    pub fn force_issue(&mut self) -> String {
+        self.issue_badge()
     }
 
     /// Whether a badge has been issued.
@@ -117,6 +142,10 @@ impl ServiceBadgeTracker {
 
     pub fn last_burn(&self) -> Option<u64> {
         self.last_burn
+    }
+
+    pub fn renewal_count(&self) -> u64 {
+        self.renewals
     }
 }
 
@@ -141,4 +170,16 @@ pub fn verify(token: &str) -> bool {
 /// Update badge expiry policy (seconds) via governance.
 pub fn set_badge_ttl_secs(v: u64) {
     BADGE_TTL_SECS.store(v, Ordering::Relaxed);
+}
+
+pub fn set_badge_min_epochs(v: u64) {
+    BADGE_MIN_EPOCHS.store(v, Ordering::Relaxed);
+}
+
+pub fn set_badge_issue_uptime(v: u64) {
+    BADGE_ISSUE_UPTIME.store(v, Ordering::Relaxed);
+}
+
+pub fn set_badge_revoke_uptime(v: u64) {
+    BADGE_REVOKE_UPTIME.store(v, Ordering::Relaxed);
 }

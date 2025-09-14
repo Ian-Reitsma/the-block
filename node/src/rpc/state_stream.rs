@@ -22,11 +22,7 @@ struct DiffChunk {
 }
 
 /// Perform a minimal WebSocket handshake and stream state diffs to the client.
-pub async fn serve_state_stream(
-    mut stream: TcpStream,
-    key: String,
-    bc: Arc<Mutex<Blockchain>>,
-) {
+pub async fn serve_state_stream(mut stream: TcpStream, key: String, bc: Arc<Mutex<Blockchain>>) {
     let accept_key = {
         use sha1::{Digest, Sha1};
         let mut h = Sha1::new();
@@ -48,7 +44,14 @@ pub async fn serve_state_stream(
 async fn run_stream(mut ws: WebSocketStream<TcpStream>, bc: Arc<Mutex<Blockchain>>) {
     let mut seq = 0u64;
     loop {
-        let tip = { bc.lock().unwrap().chain.last().map(|b| b.index).unwrap_or(0) };
+        let tip = {
+            bc.lock()
+                .unwrap()
+                .chain
+                .last()
+                .map(|b| b.index)
+                .unwrap_or(0)
+        };
         let chunk = DiffChunk {
             seq,
             tip_height: tip,

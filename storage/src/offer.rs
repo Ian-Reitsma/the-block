@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// StorageOffer advertises available storage capacity
 /// along with pricing and retention policy.
@@ -16,8 +16,18 @@ pub struct StorageOffer {
 
 impl StorageOffer {
     /// Create a new offer.
-    pub fn new(provider_id: String, capacity_bytes: u64, price_per_byte: u64, retention_blocks: u64) -> Self {
-        Self { provider_id, capacity_bytes, price_per_byte, retention_blocks }
+    pub fn new(
+        provider_id: String,
+        capacity_bytes: u64,
+        price_per_byte: u64,
+        retention_blocks: u64,
+    ) -> Self {
+        Self {
+            provider_id,
+            capacity_bytes,
+            price_per_byte,
+            retention_blocks,
+        }
     }
 }
 

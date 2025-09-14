@@ -8,10 +8,7 @@ use the_block::compute_market::snark;
 #[derive(Subcommand)]
 pub enum SnarkCmd {
     /// Compile a WASM task into a SNARK circuit representation
-    Compile {
-        wasm: PathBuf,
-        out: PathBuf,
-    },
+    Compile { wasm: PathBuf, out: PathBuf },
 }
 
 pub fn handle(cmd: SnarkCmd) {

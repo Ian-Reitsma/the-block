@@ -403,7 +403,11 @@ fn apply(cfg: &NodeConfig) {
     crate::net::set_metrics_aggregator(cfg.metrics_aggregator.clone());
     crate::gateway::dns::set_allow_external(cfg.gateway_dns_allow_external);
     crate::gateway::dns::set_disable_verify(cfg.gateway_dns_disable_verify);
-    crate::web::gateway::load_blocklist(&cfg.gateway_blocklist);
+    #[cfg(feature = "gateway")]
+    {
+        crate::web::gateway::load_blocklist(&cfg.gateway_blocklist);
+        crate::web::gateway::install_blocklist_reload();
+    }
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::set_sample_rate(cfg.telemetry.sample_rate);

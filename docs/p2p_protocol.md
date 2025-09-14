@@ -39,12 +39,16 @@ struct HelloAck {
     reason: Option<String>,
     features_accepted: u32,
     min_backoff_ms: u32,
+    supported_version: u16,
 }
 ```
 
 `features_accepted` is the intersection of the sender's feature bits with the
 receiver's `supported_features`. `min_backoff_ms` advises the sender how long to
 wait before retrying after a rejection.
+
+`supported_version` echoes the highest protocol version the node currently
+supports so that newer peers can downgrade gracefully.
 
 ## Version Negotiation and Downgrades
 

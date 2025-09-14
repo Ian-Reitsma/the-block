@@ -1,0 +1,12 @@
+[Unit]
+Description=The-Block Node
+After=network.target
+
+[Service]
+User=block
+ExecStart=/usr/local/bin/node --rpc 0.0.0.0:8545 --p2p 0.0.0.0:8001
+Restart=on-failure
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

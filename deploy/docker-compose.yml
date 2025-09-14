@@ -1,0 +1,41 @@
+version: '3.8'
+services:
+  node1:
+    build:
+      context: ..
+      dockerfile: scripts/docker/Dockerfile
+    volumes:
+      - node1-db:/var/lib/the-block
+    command: ["/usr/local/bin/node", "--rpc", "0.0.0.0:8545", "--p2p", "0.0.0.0:8001"]
+    ports:
+      - "8001:8001"
+      - "8545:8545"
+  node2:
+    build:
+      context: ..
+      dockerfile: scripts/docker/Dockerfile
+    volumes:
+      - node2-db:/var/lib/the-block
+    command: ["/usr/local/bin/node", "--rpc", "0.0.0.0:8546", "--p2p", "0.0.0.0:8002", "--bootnodes", "node1:8001"]
+    ports:
+      - "8002:8002"
+      - "8546:8546"
+  explorer:
+    build:
+      context: ../explorer
+    depends_on:
+      - node1
+    environment:
+      - API_URL=http://node1:8545
+    ports:
+      - "8080:3001"
+  grafana:
+    image: grafana/grafana:9.5.2
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+volumes:
+  node1-db:
+  node2-db:
+  grafana-data:

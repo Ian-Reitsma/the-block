@@ -53,6 +53,10 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::MinerHysteresis => "miner_hysteresis",
         ParamKey::HeuristicMuMilli => "heuristic_mu_milli",
         ParamKey::BadgeExpirySecs => "badge_expiry_secs",
+        ParamKey::BadgeIssueUptime => "badge_issue_uptime_percent",
+        ParamKey::BadgeRevokeUptime => "badge_revoke_uptime_percent",
+        ParamKey::JurisdictionRegion => "jurisdiction_region",
+        ParamKey::AiDiagnosticsEnabled => "ai_diagnostics_enabled",
     }
 }
 
@@ -300,6 +304,10 @@ impl GovStore {
                                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
                                 ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
+                                ParamKey::BadgeIssueUptime => params.badge_issue_uptime_percent,
+                                ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
+                                ParamKey::JurisdictionRegion => params.jurisdiction_region,
+                                ParamKey::AiDiagnosticsEnabled => params.ai_diagnostics_enabled,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -451,6 +459,10 @@ impl GovStore {
                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
                 ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
+                ParamKey::BadgeIssueUptime => params.badge_issue_uptime_percent,
+                ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
+                ParamKey::JurisdictionRegion => params.jurisdiction_region,
+                ParamKey::AiDiagnosticsEnabled => params.ai_diagnostics_enabled,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;

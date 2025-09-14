@@ -17,5 +17,5 @@ dashboard:
 
 doc-ci:
 	@rustc tools/refcheck.rs -O -o /tmp/refcheck
-	@/tmp/refcheck docs
-	cargo test --doc
+	@/tmp/refcheck .
+	cargo test --doc --all-features

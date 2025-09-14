@@ -453,6 +453,27 @@ pub static DEX_TRADE_VOLUME: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static TOKENS_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("tokens_created_total", "Total number of registered tokens")
+        .unwrap_or_else(|e| panic!("counter tokens created: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry tokens created: {e}"));
+    c
+});
+
+pub static TOKEN_BRIDGE_VOLUME_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "token_bridge_volume_total",
+        "Volume bridged via token bridge",
+    )
+    .unwrap_or_else(|e| panic!("counter token bridge volume: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry token bridge volume: {e}"));
+    c
+});
+
 pub static HTLC_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("htlc_created_total", "HTLC contracts created")
         .unwrap_or_else(|e| panic!("counter htlc created: {e}"));
@@ -468,6 +489,21 @@ pub static HTLC_REFUNDED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry htlc refunded: {e}"));
+    c
+});
+
+pub static TX_BY_JURISDICTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "tx_by_jurisdiction_total",
+            "Transactions processed per jurisdiction tag",
+        ),
+        &["jurisdiction"],
+    )
+    .unwrap_or_else(|e| panic!("counter tx jurisdiction: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry tx jurisdiction: {e}"));
     c
 });
 
@@ -554,6 +590,51 @@ pub static BADGE_REVOKED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("registry badge revoked: {e}"));
     c
 });
+
+pub static ANOMALY_LABEL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "anomaly_labels_total",
+        "Anomaly labels submitted for model feedback",
+    )
+    .unwrap_or_else(|e| panic!("counter anomaly labels: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry anomaly labels: {e}"));
+    c
+});
+
+pub static DKG_ROUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("dkg_round_total", "Completed DKG rounds")
+        .unwrap_or_else(|e| panic!("counter dkg round: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry dkg round: {e}"));
+    c
+});
+
+pub static THRESHOLD_SIGNATURE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "threshold_signature_fail_total",
+        "Failed threshold signature verifications",
+    )
+    .unwrap_or_else(|e| panic!("counter threshold sig fail: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry threshold sig fail: {e}"));
+    c
+});
+
+#[cfg(feature = "telemetry")]
+pub fn export_dataset<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<()> {
+    use std::fs::File;
+    let metric_families = REGISTRY.gather();
+    let mut buf = Vec::new();
+    TextEncoder::new()
+        .encode(&metric_families, &mut buf)
+        .unwrap();
+    File::create(path)?.write_all(&buf)?;
+    Ok(())
+}
 
 pub static SUBSIDY_AUTO_REDUCED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
@@ -997,15 +1078,33 @@ pub static SNARK_VERIFICATIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 pub static SNARK_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new(
-        "snark_fail_total",
-        "Failed SNARK proof verifications",
-    )
-    .unwrap_or_else(|e| panic!("counter snark_fail_total: {e}"));
+    let c = IntCounter::new("snark_fail_total", "Failed SNARK proof verifications")
+        .unwrap_or_else(|e| panic!("counter snark_fail_total: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry snark_fail_total: {e}"));
     c
+});
+
+pub static SHIELDED_TX_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("shielded_tx_total", "Total shielded transactions accepted")
+        .unwrap_or_else(|e| panic!("counter shielded_tx_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry shielded_tx_total: {e}"));
+    c
+});
+
+pub static SHIELDED_POOL_SIZE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "shielded_pool_size",
+        "Number of pending shielded nullifiers",
+    )
+    .unwrap_or_else(|e| panic!("gauge shielded_pool_size: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry shielded_pool_size: {e}"));
+    g
 });
 
 pub static SCHEDULER_MATCH_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
@@ -1057,6 +1156,120 @@ pub static SCHEDULER_ACTIVE_JOBS: Lazy<IntGauge> = Lazy::new(|| {
         .unwrap_or_else(|e| panic!("registry scheduler_active_jobs: {e}"));
     g
 });
+
+pub static SCHEDULER_THREAD_COUNT: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "scheduler_thread_count",
+        "Current compute scheduler worker threads",
+    )
+    .unwrap_or_else(|e| panic!("gauge scheduler_thread_count: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler_thread_count: {e}"));
+    g
+});
+
+pub static HASH_OPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "hash_ops_total",
+        "Total number of hash operations measured via perf counters",
+    )
+    .unwrap_or_else(|e| panic!("counter hash_ops_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry hash_ops_total: {e}"));
+    c
+});
+
+pub static SIGVERIFY_OPS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "sigverify_ops_total",
+        "Total number of signature verifications measured via perf counters",
+    )
+    .unwrap_or_else(|e| panic!("counter sigverify_ops_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry sigverify_ops_total: {e}"));
+    c
+});
+
+pub static LIGHT_CLIENT_STREAM_OVERHEAD: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "light_client_stream_overhead_bytes_total",
+        "Bytes of overhead for light-client streaming",
+    )
+    .unwrap_or_else(|e| panic!("counter light_client_stream_overhead_bytes_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry light_client_stream_overhead_bytes_total: {e}"));
+    c
+});
+
+pub static STATE_SYNC_OVERHEAD: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "state_sync_overhead_bytes_total",
+        "Bytes of overhead for state sync streaming",
+    )
+    .unwrap_or_else(|e| panic!("counter state_sync_overhead_bytes_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry state_sync_overhead_bytes_total: {e}"));
+    c
+});
+
+pub static RPC_LATENCY: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = HistogramOpts::new("rpc_latency_seconds", "Latency histogram per RPC module");
+    let hv = HistogramVec::new(opts, &["module"])
+        .unwrap_or_else(|e| panic!("histogram rpc_latency_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(hv.clone()))
+        .unwrap_or_else(|e| panic!("registry rpc_latency_seconds: {e}"));
+    hv
+});
+
+pub static ANOMALY_ALARM_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "anomaly_alarm_total",
+        "Total number of anomaly alarms raised",
+    )
+    .unwrap_or_else(|e| panic!("counter anomaly_alarm_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry anomaly_alarm_total: {e}"));
+    c
+});
+
+pub fn trigger_anomaly(reason: &str) {
+    #[cfg(feature = "telemetry")]
+    {
+        ANOMALY_ALARM_TOTAL.inc();
+        tracing::warn!(reason, "anomaly_alarm");
+    }
+}
+
+pub fn record_rpc_latency(module: &str, secs: f64) {
+    #[cfg(feature = "telemetry")]
+    RPC_LATENCY.with_label_values(&[module]).observe(secs);
+}
+
+pub fn rpc_latency_count(module: &str) -> u64 {
+    #[cfg(feature = "telemetry")]
+    {
+        RPC_LATENCY.with_label_values(&[module]).get_sample_count()
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        0
+    }
+}
+
+pub fn auto_tune() {
+    #[cfg(feature = "telemetry")]
+    {
+        println!("running auto-profile harness");
+        // Placeholder for real benchmarking logic
+    }
+}
 
 pub static SCHEDULER_PRIORITY_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
@@ -1807,10 +2020,7 @@ pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_RATE_LIMIT_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
-        Opts::new(
-            "peer_rate_limit_total",
-            "Rate limit drops per peer",
-        ),
+        Opts::new("peer_rate_limit_total", "Rate limit drops per peer"),
         &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("gauge_vec peer_rate_limit_total: {e}"));
@@ -2236,6 +2446,50 @@ pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
         "Total remote signer requests",
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static REMOTE_SIGNER_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let h = Histogram::with_opts(prometheus::HistogramOpts::new(
+        "remote_signer_latency_seconds",
+        "Remote signer latency",
+    ))
+    .unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static REMOTE_SIGNER_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "remote_signer_success_total",
+        "Successful remote signer responses",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static REMOTE_SIGNER_KEY_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "remote_signer_key_rotation_total",
+        "Remote signer key rotations",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+pub static PRIVACY_SANITIZATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("privacy_sanitization_total", "Total sanitized payloads")
+        .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -2744,4 +2998,3 @@ pub fn verbose() -> bool {
 pub fn verbose() -> bool {
     false
 }
-

@@ -2,8 +2,10 @@ use crate::{WalletError, WalletSigner};
 use ed25519_dalek::{PublicKey, Signature, Verifier};
 use hex;
 use ledger::crypto::remote_tag;
+use metrics::{histogram, increment_counter};
 use native_tls::{Certificate as NativeCertificate, Identity, TlsConnector};
 use once_cell::sync::Lazy;
+use rand::Rng;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -114,6 +116,7 @@ impl RemoteSigner {
             .lock()
             .unwrap()
             .insert(endpoint.to_string(), (pubkey, Instant::now()));
+        increment_counter!("remote_signer_key_rotation_total");
         Ok(pubkey)
     }
 
@@ -285,6 +288,8 @@ impl WalletSigner for RemoteSigner {
     }
 
     fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<Signature>, WalletError> {
+        increment_counter!("remote_signer_request_total");
+        let start = Instant::now();
         let tagged = remote_tag(msg);
         let msg_hex = hex::encode(&tagged);
         let trace_id = Uuid::new_v4();
@@ -324,6 +329,13 @@ impl WalletSigner for RemoteSigner {
         if sigs.len() < self.threshold {
             return Err(WalletError::Failure("threshold not met".into()));
         }
+        let mut lat = start.elapsed().as_secs_f64();
+        if std::env::var("DIFF_PRIV").ok().as_deref() == Some("1") {
+            let mut rng = rand::thread_rng();
+            lat += rng.gen_range(-0.5, 0.5);
+        }
+        histogram!("remote_signer_latency_seconds", lat);
+        increment_counter!("remote_signer_success_total");
         Ok(sigs)
     }
 }

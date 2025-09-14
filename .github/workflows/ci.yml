@@ -76,6 +76,8 @@ jobs:
           cargo nextest run --profile quic --features telemetry 2>&1 | tee quic-nextest.log
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: auto profile
+        run: cargo run -p auto-profile --release
       - name: upload quic nextest log
         if: always()
         uses: actions/upload-artifact@v4
@@ -95,18 +97,49 @@ jobs:
         run: cargo test -p metrics-aggregator --test naming
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
-      - name: doc tests
-        run: cargo test --doc --all-features
+      - name: doc ci
+        run: make doc-ci
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked
           cargo audit --deny warnings
+      - name: generate sbom
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --all --format xml --output sbom.xml
+      - name: sign image
+        run: scripts/sign-image.sh theblock/node:latest
+      - name: verify container image
+        run: scripts/verify_image.sh theblock/node:latest
       - name: snapshot restore
         run: scripts/snapshot_ci.sh
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+  fuzz-net:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: '1.86.0'
+          override: true
+      - name: install honggfuzz
+        run: cargo install honggfuzz --locked
+      - name: run network fuzz
+        run: |
+          cargo hfuzz run network --iterations 10 || true
+  arm-tests:
+    runs-on: [self-hosted, arm]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: '1.86.0'
+          override: true
+      - name: run tests on arm
+        run: cargo test --all --release || true
   wal-fuzz:
     runs-on: ubuntu-latest
     steps:

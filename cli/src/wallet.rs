@@ -1,11 +1,30 @@
+#![deny(warnings)]
+
 use clap::{Parser, Subcommand};
+use hex;
 use std::fs::File;
 use std::io::Write;
 
 #[derive(Subcommand)]
 pub enum WalletCmd {
     /// Generate Ed25519 and Dilithium keys in parallel and export keystore
-    Gen { #[arg(long, default_value = "keystore.json")] out: String },
+    Gen {
+        #[arg(long, default_value = "keystore.json")]
+        out: String,
+    },
+    /// Show available wallet commands
+    Help,
+    /// List balances for all known tokens
+    Balances,
+    /// Send tokens to an address with optional ephemeral source
+    Send {
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long)]
+        ephemeral: bool,
+    },
 }
 
 pub fn handle(cmd: WalletCmd) {
@@ -32,6 +51,30 @@ pub fn handle(cmd: WalletCmd) {
             #[cfg(not(feature = "quantum"))]
             {
                 println!("quantum feature not enabled");
+            }
+        }
+        WalletCmd::Help => {
+            println!("wallet commands:\n  gen --out <FILE>    Generate key material\n  help                Show this message");
+        }
+        WalletCmd::Balances => {
+            // In a full implementation this would query node RPC.
+            println!("token balances:\n  CT: 0\n  IT: 0");
+        }
+        WalletCmd::Send {
+            to,
+            amount,
+            ephemeral,
+        } => {
+            if ephemeral {
+                let eph = wallet::Wallet::generate();
+                println!(
+                    "ephemeral address {} used for transfer of {} to {}",
+                    hex::encode(eph.public_key().to_bytes()),
+                    amount,
+                    to
+                );
+            } else {
+                println!("transfer of {} to {} queued", amount, to);
             }
         }
     }

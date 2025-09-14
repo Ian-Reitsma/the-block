@@ -1,0 +1,8 @@
+policy_module(the_block_node, 1.0)
+
+require {
+  type init_t;
+  class tcp_socket name_connect;
+}
+
+allow init_t self:tcp_socket name_connect;

@@ -21,5 +21,9 @@ GPU-backed hash workloads live under `node/src/compute_market/workloads/gpu.rs`.
 - `BytesMut` serialization in `net/turbine.rs` eliminates temporary allocations when hashing broadcast messages.
 - PoW miner caches computed difficulty targets to skip per-iteration division.
 - Benchmarks (`cargo bench --bench order_book`) measure order-book placement to track heap fragmentation.
+- Replaced `std::sync::Mutex` with `parking_lot::Mutex` in scheduler and peer sets to reduce lock contention.
+- Cache-friendly RocksDB prefix cache reduces repeated disk lookups.
+- `auto-profile` harness (`cargo run -p auto-profile`) produces flamegraphs for critical paths.
+- `--auto-tune` flag runs the profiler suite and suggests thread counts and block limits based on observed hardware.
 
 Progress: 30%

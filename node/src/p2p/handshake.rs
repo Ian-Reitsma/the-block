@@ -45,6 +45,7 @@ pub struct HelloAck {
     pub reason: Option<String>,
     pub features_accepted: u32,
     pub min_backoff_ms: u32,
+    pub supported_version: u16,
 }
 
 pub struct HandshakeCfg {
@@ -76,6 +77,7 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
             reason: Some("bad_network".into()),
             features_accepted: 0,
             min_backoff_ms: 1000,
+            supported_version: SUPPORTED_VERSION,
         };
     }
     if hello.proto_version < cfg.min_proto {
@@ -88,6 +90,7 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
             reason: Some("old_proto".into()),
             features_accepted: 0,
             min_backoff_ms: 1000,
+            supported_version: SUPPORTED_VERSION,
         };
     }
     if hello.proto_version > SUPPORTED_VERSION {
@@ -100,6 +103,7 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
             reason: Some("new_proto".into()),
             features_accepted: 0,
             min_backoff_ms: 1000,
+            supported_version: SUPPORTED_VERSION,
         };
     }
     if hello.feature_bits & cfg.required_features != cfg.required_features {
@@ -135,6 +139,7 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
         reason: None,
         features_accepted: accepted,
         min_backoff_ms: 0,
+        supported_version: SUPPORTED_VERSION,
     }
 }
 

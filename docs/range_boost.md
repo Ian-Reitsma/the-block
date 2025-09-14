@@ -80,3 +80,18 @@ Telemetry records:
 
 `node/tests/mesh_sim.rs` provides a UNIX-domain-socket harness that simulates
 mesh links and validates latency-based scoring.
+
+## Hardware & Setup
+
+- **Bluetooth**: on Linux, install BlueZ utilities (`hcitool`) and ensure the
+  adapter is enabled. Scanning is performed via `hcitool scan` when the node is
+  launched with `--range-boost`.
+- **Wi‑Fi**: the node invokes `iwlist scan` to enumerate nearby access points.
+  Install `wireless-tools` and grant the process permission to query the
+  interface.
+- Mobile devices can experiment with mesh relays using the
+  [`mobile_relay` example](../node/examples/mobile_relay.rs), which broadcasts a
+  payload over a UNIX socket for integration tests.
+
+Set `TB_MESH_STATIC_PEERS` to a comma-separated list of `unix:/path` or IP
+endpoints to probe explicit neighbours.

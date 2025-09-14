@@ -6,7 +6,8 @@ use anyhow::Result;
 /// List HTLC related transactions from the explorer database.
 pub fn list_htlcs(exp: &Explorer) -> Result<Vec<TxRecord>> {
     let conn = exp.conn()?;
-    let mut stmt = conn.prepare("SELECT hash, block_hash, memo, contract, data FROM txs WHERE contract='htlc'")?;
+    let mut stmt = conn
+        .prepare("SELECT hash, block_hash, memo, contract, data FROM txs WHERE contract='htlc'")?;
     let rows = stmt.query_map([], |row| {
         Ok(TxRecord {
             hash: row.get(0)?,

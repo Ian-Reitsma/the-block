@@ -29,7 +29,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{atomic::AtomicBool, Arc, Mutex, MutexGuard};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, MutexGuard,
+};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
@@ -38,6 +41,7 @@ use tracing::info;
 use tracing::warn;
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
 pub mod config;
+pub mod dkg;
 pub mod exec;
 mod read_receipt;
 mod simple_db;
@@ -604,6 +608,16 @@ pub struct Block {
     #[serde(default)]
     /// Pietrzak proof bytes for the VDF evaluation
     pub vdf_proof: Vec<u8>,
+    #[cfg(feature = "quantum")]
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Optional Dilithium public key for the miner.
+    pub dilithium_pubkey: Vec<u8>,
+    #[cfg(feature = "quantum")]
+    #[pyo3(get)]
+    #[serde(default)]
+    /// Optional Dilithium signature over the header hash.
+    pub dilithium_sig: Vec<u8>,
 }
 
 impl Block {
@@ -2606,6 +2620,10 @@ impl Blockchain {
                         );
                     }
                 }
+                #[cfg(feature = "telemetry")]
+                if let Some(j) = self.config.jurisdiction.as_deref() {
+                    telemetry::sampled_inc_vec(&telemetry::TX_BY_JURISDICTION_TOTAL, &[j]);
+                }
                 self.inc_mempool_size(lane);
                 Ok(())
             }
@@ -2930,6 +2948,17 @@ impl Blockchain {
         self.mine_block_with_ts(miner_addr, timestamp_millis)
     }
 
+    fn dynamic_block_limit(&self) -> usize {
+        let pressure = self.mempool_size_consumer.load(Ordering::SeqCst)
+            + self.mempool_size_industrial.load(Ordering::SeqCst);
+        let max = self.max_mempool_size_consumer + self.max_mempool_size_industrial;
+        if pressure > max / 2 {
+            1024
+        } else {
+            256
+        }
+    }
+
     /// Mine a block at an explicit timestamp (milliseconds since UNIX epoch).
     ///
     /// This helper is primarily used by tests to produce deterministic chains.
@@ -3093,10 +3122,16 @@ impl Blockchain {
             .chain(self.mempool_industrial.iter().map(|e| e.value().clone()))
             .collect();
         pending.sort_unstable_by(|a, b| mempool_cmp(a, b, self.tx_ttl));
+        let max_in_block = self.dynamic_block_limit();
         let mut included = Vec::new();
         let mut deferred: HashMap<String, Vec<SignedTransaction>> = HashMap::new();
         let mut expected: HashMap<String, u64> = HashMap::new();
-        for entry in pending {
+        let mut skipped = Vec::new();
+        for (i, entry) in pending.into_iter().enumerate() {
+            if i >= max_in_block {
+                skipped.push(entry.tx);
+                continue;
+            }
             let tx = entry.tx;
             let from = tx.payload.from_.clone();
             let exp = expected
@@ -3120,7 +3155,6 @@ impl Blockchain {
                 deferred.entry(from).or_default().push(tx);
             }
         }
-        let mut skipped = Vec::new();
         for list in deferred.into_values() {
             skipped.extend(list);
         }
@@ -3580,7 +3614,7 @@ impl Blockchain {
                 self.record_block_mined();
                 if self.block_height % 600 == 0 {
                     self.badge_tracker
-                    .record_epoch(miner_addr, true, Duration::from_millis(0));
+                        .record_epoch(miner_addr, true, Duration::from_millis(0));
                     self.check_badges();
                 }
                 if self.block_height % self.snapshot.interval == 0 {
