@@ -8,6 +8,7 @@ fn blank_block(index: u64, ts: u64, diff: u64) -> Block {
         timestamp_millis: ts,
         transactions: Vec::new(),
         difficulty: diff,
+        retune_hint: 0,
         nonce: 0,
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),

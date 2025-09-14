@@ -4,6 +4,8 @@ use clap::{Parser, Subcommand};
 use hex;
 use std::fs::File;
 use std::io::Write;
+use crypto::session::SessionKey;
+use the_block::transaction::{sign_tx, RawTxPayload};
 
 #[derive(Subcommand)]
 pub enum WalletCmd {
@@ -24,6 +26,20 @@ pub enum WalletCmd {
         amount: u64,
         #[arg(long)]
         ephemeral: bool,
+    },
+    /// Generate a session key with specified TTL in seconds
+    Session {
+        #[arg(long, default_value_t = 3600)]
+        ttl: u64,
+    },
+    /// Broadcast a meta-transaction signed by a session key
+    MetaSend {
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        amount: u64,
+        #[arg(long)]
+        session_sk: String,
     },
 }
 
@@ -75,6 +91,44 @@ pub fn handle(cmd: WalletCmd) {
                 );
             } else {
                 println!("transfer of {} to {} queued", amount, to);
+            }
+        }
+        WalletCmd::Session { ttl } => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let sk = SessionKey::generate(now + ttl);
+            println!(
+                "session key issued pk={} expires_at={}",
+                hex::encode(&sk.public_key),
+                sk.expires_at
+            );
+            println!("secret={}", hex::encode(sk.secret.to_bytes()));
+        }
+        WalletCmd::MetaSend {
+            to,
+            amount,
+            session_sk,
+        } => {
+            let sk_bytes = hex::decode(session_sk).expect("hex");
+            let payload = RawTxPayload {
+                from_: "meta".into(),
+                to,
+                amount_consumer: amount,
+                amount_industrial: 0,
+                fee: 0,
+                pct_ct: 100,
+                nonce: 0,
+                memo: Vec::new(),
+            };
+            if let Some(tx) = sign_tx(&sk_bytes, &payload) {
+                println!(
+                    "meta-tx signed {}",
+                    hex::encode(bincode::serialize(&tx).unwrap())
+                );
+            } else {
+                println!("invalid session key");
             }
         }
     }

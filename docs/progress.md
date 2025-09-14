@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99/100** with vision completion **~70/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99/100** with vision completion **~75/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,11 +16,12 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~75 %
+## 1. Consensus & Core Execution — ~82 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
-- Sliding-window difficulty retarget over 120 blocks with clamp [1/4, 4x] and metrics in `node/src/consensus/difficulty.rs` and `docs/difficulty.md`.
+- Kalman-weighted multi-window difficulty retune with `retune_hint` metrics in `node/src/consensus/difficulty_retune.rs` and `docs/difficulty.md`.
+- Rollback checkpoints and partition recovery hooks in `node/src/consensus/fork_choice.rs` and `node/tests/partition_recovery.rs`.
 - EIP‑1559 base fee tracker: `node/src/fees.rs` adjusts per block and `node/tests/base_fee.rs` verifies target fullness tracking.
 - Adversarial rollback tests in `node/tests/finality_rollback.rs` assert ledger state after competing forks.
 - Pietrzak VDF with timed commitment and delayed preimage reveal (`node/src/consensus/vdf.rs`, `node/tests/vdf.rs`) shrinks proofs and blocks speculative computation.
@@ -35,7 +36,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~80 %
+## 2. Networking & Gossip — ~85 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -48,14 +49,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
   - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
-  - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`.
-  - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
+    - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`.
+    - Partition watch detects split-brain conditions and stamps gossip with markers (`node/src/net/partition_watch.rs`, `node/src/gossip/relay.rs`).
+    - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
 
 **Gaps**
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~79 %
+## 3. Governance & Subsidy Economy — ~80 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -67,11 +69,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Legacy third-token ledger fully removed; CT-only subsidies minted each block with migration documented in `docs/system_changes.md`.
 - One‑dial multiplier formula retunes β/γ/κ/λ per epoch using realised utilisation `U_x`, clamped to ±15 % and doubled when `U_x` → 0; see `docs/economics.md`.
 - Demand gauges `industrial_backlog` and `industrial_utilization` feed
-  `Block::industrial_subsidies()` and surface via `inflation.params` and
-  `compute_market.stats`.
+    `Block::industrial_subsidies()` and surface via `inflation.params` and
+    `compute_market.stats`.
 - Arbitrary CT/IT fee splits tracked by `pct_ct`; `reserve_pending` debits
-  balances before coinbase accumulation, documented in `docs/fees.md`.
+    balances before coinbase accumulation, documented in `docs/fees.md`.
 - Logistic base reward `R_0(N) = R_max / (1 + e^{ξ (N - N^*)})` with hysteresis `ΔN ≈ √N*` dampens miner churn and is implemented in `pow/src/reward.rs`.
+ - Kalman filter weights for difficulty retune configurable via governance parameters (`node/src/governance/params.rs`).
 
 **Gaps**
 - No on‑chain treasury or proposal dependency system.
@@ -92,13 +95,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — ~60 %
+## 5. Smart‑Contract VM & UTXO/PoW — ~78 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
 - ABI generation from opcode enum (`node/src/vm/opcodes.rs`).
 - State survives restarts (`node/tests/vm.rs::state_persists_across_restarts`).
 - Planned dynamic gas fee market (`node/src/fees.rs` roadmap) anchors eventual EIP-1559 adaptation.
+- Deterministic WASM runtime with fuel-based metering and ABI helpers (`node/src/vm/wasm/mod.rs`, `node/src/vm/wasm/gas.rs`).
+- Interactive debugger and trace export (`node/src/vm/debugger.rs`, `docs/vm_debugging.md`).
 
 **Gaps**
 - Instruction set remains minimal; no formal VM spec or audits.
@@ -132,7 +137,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~82 %
+## 8. Wallets, Light Clients & KYC — ~85 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -140,6 +145,8 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
 - Optional KYC provider wiring (`docs/kyc.md`).
+- Session-key issuance and meta-transaction tooling (`crypto/src/session.rs`, `cli/src/wallet.rs`, `docs/account_abstraction.md`).
+- Telemetry `session_key_issued_total`/`session_key_expired_total` and simulator churn knob (`sim/src/lib.rs`).
 
 **Gaps**
 - Multisig flows missing.
@@ -157,14 +164,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~71 %
+## 10. Monitoring, Debugging & Profiling — ~75 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
   - Service badge tracker exports uptime metrics and RPC status (`node/src/service_badge.rs`, `node/tests/service_badge.rs`). See `docs/service_badge.md`.
   - Monitoring stack via `make monitor` and docs in `docs/monitoring/README.md`.
-  - Cluster metrics aggregation with disk-backed retention (`metrics-aggregator` crate).
-  - Settlement audit CI job (`.github/workflows/ci.yml`).
+    - Cluster metrics aggregation with disk-backed retention (`metrics-aggregator` crate).
+    - VM trace counters and partition dashboards (`node/src/telemetry.rs`, `monitoring/templates/partition.json`).
+    - Settlement audit CI job (`.github/workflows/ci.yml`).
 
 **Gaps**
 - Bridge and VM metrics are sparse.
@@ -194,4 +202,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑07*
+*Last updated: 2025‑09‑14*

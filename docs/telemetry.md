@@ -38,6 +38,14 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_stats_export_all_total{result}` counts bulk snapshot exports (ok, error)
 - `gateway_dns_lookup_total{status}` counts verified versus rejected DNS entries
 - `peer_reputation_score{peer_id}` gauges the dynamic reputation used for rate limits
+
+Additional subsystem counters include:
+
+- `session_key_issued_total`/`session_key_expired_total` track session key lifecycle events
+- `wasm_contract_executions_total`/`wasm_gas_consumed_total` report WASM runtime usage
+- `difficulty_window_short`/`difficulty_window_med`/`difficulty_window_long` expose EMA windows for the retune algorithm
+- `partition_events_total`/`partition_recover_blocks` monitor network partition detection and recovery
+- `vm_trace_total` counts debugger trace sessions
 - `scheduler_match_total{result}` counts scheduler outcomes (success, capability_mismatch, reputation_failure)
 - `scheduler_match_latency_seconds` records time spent matching jobs
 - `scheduler_provider_reputation` histogram tracks reputation score distribution

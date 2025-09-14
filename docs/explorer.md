@@ -19,6 +19,8 @@ The explorer exposes a lightweight REST service for querying on-chain data and a
 - `GET /search/contract/:contract` – advanced search by contract hash.
 - `GET /receipts/provider/:id` – receipts filtered by provider.
 - `GET /receipts/domain/:id` – receipts filtered by domain.
+- `GET /wasm/disasm?code=<hex>` – disassemble uploaded WASM bytecode.
+- `GET /trace/:tx` – fetch opcode-level execution traces when available.
 
 ## Running with Docker Compose
 

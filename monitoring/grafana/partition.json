@@ -1,0 +1,27 @@
+{
+  "panels": [
+    {
+      "description": "Detected network partitions",
+      "id": 1,
+      "targets": [
+        {
+          "expr": "partition_events_total"
+        }
+      ],
+      "title": "partition_events_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Blocks replayed after recovery",
+      "id": 2,
+      "targets": [
+        {
+          "expr": "partition_recover_blocks"
+        }
+      ],
+      "title": "partition_recover_blocks",
+      "type": "timeseries"
+    }
+  ],
+  "title": "Partition Dashboard"
+}

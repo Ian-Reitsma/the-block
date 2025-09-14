@@ -531,6 +531,15 @@ pub static STATE_STREAM_LAG_ALERT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static VM_TRACE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("vm_trace_total", "Total VM trace sessions")
+        .unwrap_or_else(|e| panic!("counter vm trace: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry vm trace: {e}"));
+    c
+});
+
 pub static SUBSIDY_BYTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("subsidy_bytes_total", "Total subsidized bytes by type"),
@@ -561,6 +570,30 @@ pub static VM_GAS_USED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry vm gas used: {e}"));
+    c
+});
+
+pub static WASM_CONTRACT_EXECUTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "wasm_contract_executions_total",
+        "Total WASM contract executions",
+    )
+    .unwrap_or_else(|e| panic!("counter wasm exec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry wasm exec: {e}"));
+    c
+});
+
+pub static WASM_GAS_CONSUMED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "wasm_gas_consumed_total",
+        "Total gas used by WASM contracts",
+    )
+    .unwrap_or_else(|e| panic!("counter wasm gas: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry wasm gas: {e}"));
     c
 });
 
@@ -696,6 +729,42 @@ pub static DIFFICULTY_CLAMP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static DIFFICULTY_WINDOW_SHORT: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "difficulty_window_short",
+        "Short-term EMA of block intervals in ms",
+    )
+    .unwrap_or_else(|e| panic!("gauge difficulty window short: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry difficulty window short: {e}"));
+    g
+});
+
+pub static DIFFICULTY_WINDOW_MED: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "difficulty_window_med",
+        "Medium-term EMA of block intervals in ms",
+    )
+    .unwrap_or_else(|e| panic!("gauge difficulty window med: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry difficulty window med: {e}"));
+    g
+});
+
+pub static DIFFICULTY_WINDOW_LONG: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "difficulty_window_long",
+        "Long-term EMA of block intervals in ms",
+    )
+    .unwrap_or_else(|e| panic!("gauge difficulty window long: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry difficulty window long: {e}"));
+    g
+});
+
 pub static RENT_ESCROW_LOCKED_CT_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new(
         "rent_escrow_locked_ct_total",
@@ -829,6 +898,30 @@ pub static ACTIVE_BURST_QUOTA: Lazy<IntGaugeVec> = Lazy::new(|| {
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
     g
+});
+
+pub static PARTITION_EVENTS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "partition_events_total",
+        "Number of detected network partitions",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PARTITION_RECOVER_BLOCKS: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "partition_recover_blocks",
+        "Blocks replayed during partition recovery",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
 });
 
 pub static ADMISSION_MODE: Lazy<IntGaugeVec> = Lazy::new(|| {
@@ -1815,6 +1908,30 @@ pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "startup_ttl_drop_total",
         "Expired mempool entries dropped during startup",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static SESSION_KEY_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "session_key_issued_total",
+        "Session keys issued",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static SESSION_KEY_EXPIRED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "session_key_expired_total",
+        "Expired session keys encountered",
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
@@ -2866,6 +2983,8 @@ fn gather() -> String {
         &*ORPHAN_SWEEP_TOTAL,
         &*GOSSIP_DUPLICATE_TOTAL,
         &*GOSSIP_FANOUT_GAUGE,
+        &*PARTITION_EVENTS_TOTAL,
+        &*PARTITION_RECOVER_BLOCKS,
         DEX_ORDERS_TOTAL.with_label_values(&["buy"]),
         DEX_ORDERS_TOTAL.with_label_values(&["sell"]),
         &*DEX_TRADE_VOLUME,

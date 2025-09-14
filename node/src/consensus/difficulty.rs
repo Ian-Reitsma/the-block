@@ -1,52 +1,14 @@
-use super::constants::{DIFFICULTY_CLAMP_FACTOR, DIFFICULTY_WINDOW, TARGET_SPACING_MS};
-#[cfg(feature = "telemetry")]
-use crate::telemetry::{DIFFICULTY_CLAMP_TOTAL, DIFFICULTY_RETARGET_TOTAL};
+use super::constants::{DIFFICULTY_WINDOW, TARGET_SPACING_MS};
+use crate::governance::params::Params;
 use crate::Block;
 
-/// Retarget difficulty using a sliding window of timestamps.
-///
-/// `prev` is the previous difficulty value.
-/// `timestamps` are UNIX **milliseconds** of the most recent blocks,
-/// ordered from oldest to newest. The slice length should not
-/// exceed `DIFFICULTY_WINDOW`. The `target_millis` represents the
-/// desired average block interval in milliseconds.
-pub fn retarget(prev: u64, timestamps: &[u64], target_millis: u64) -> u64 {
-    if timestamps.len() < 2 {
-        return prev.max(1);
-    }
-    #[cfg(feature = "telemetry")]
-    DIFFICULTY_RETARGET_TOTAL.inc();
-    // Span between first and last timestamp gives total time for N-1 intervals.
-    let span = timestamps.last().unwrap().saturating_sub(timestamps[0]);
-    if span == 0 {
-        return prev.max(1);
-    }
-    let blocks = (timestamps.len() - 1) as u64;
-    let expected = blocks.saturating_mul(target_millis.max(1));
-    let mut next = prev.saturating_mul(expected).saturating_div(span);
-    let min = prev / DIFFICULTY_CLAMP_FACTOR;
-    let max = prev.saturating_mul(DIFFICULTY_CLAMP_FACTOR);
-    if next < min {
-        #[cfg(feature = "telemetry")]
-        DIFFICULTY_CLAMP_TOTAL.inc();
-        next = min;
-    }
-    if next > max {
-        #[cfg(feature = "telemetry")]
-        DIFFICULTY_CLAMP_TOTAL.inc();
-        next = max;
-    }
-    next.max(1)
-}
-
-/// Compute the expected difficulty for the next block given the previous
-/// difficulty and a slice of recent block timestamps.
+/// Compatibility shim delegating to [`difficulty_retune::retune`].
 pub fn expected_difficulty(prev: u64, recent_timestamps: &[u64]) -> u64 {
-    retarget(prev.max(1), recent_timestamps, TARGET_SPACING_MS)
+    let params = Params::default();
+    difficulty_retune::retune(prev, recent_timestamps, 0, &params).0
 }
 
-/// Convenience helper to compute expected difficulty from a full chain slice.
-/// This allocates a temporary vector and should be avoided in hot paths.
+/// Compute expected difficulty from a chain slice using stored hints.
 pub fn expected_difficulty_from_chain(chain: &[Block]) -> u64 {
     if let Some(last) = chain.last() {
         let mut ts: Vec<u64> = chain
@@ -56,7 +18,8 @@ pub fn expected_difficulty_from_chain(chain: &[Block]) -> u64 {
             .map(|b| b.timestamp_millis)
             .collect();
         ts.reverse();
-        expected_difficulty(last.difficulty, &ts)
+        let hint = chain.last().map_or(0, |b| b.retune_hint);
+        difficulty_retune::retune(last.difficulty, &ts, hint, &Params::default()).0
     } else {
         1
     }
@@ -94,6 +57,7 @@ mod tests {
                 timestamp_millis: ts,
                 transactions: Vec::new(),
                 difficulty: 1000,
+                retune_hint: 0,
                 nonce: 0,
                 hash: String::new(),
                 coinbase_consumer: TokenAmount::new(0),

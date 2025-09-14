@@ -16,6 +16,7 @@ pub struct BlockHeader {
     pub checkpoint_hash: [u8; 32],
     pub nonce: u64,
     pub difficulty: u64,
+    pub retune_hint: i8,
     /// Global base fee in effect for this header.
     pub base_fee: u64,
     pub timestamp_millis: u64,
@@ -43,6 +44,7 @@ impl BlockHeader {
         h.update(&self.checkpoint_hash);
         h.update(&self.nonce.to_le_bytes());
         h.update(&self.difficulty.to_le_bytes());
+        h.update(&[self.retune_hint as u8]);
         h.update(&self.base_fee.to_le_bytes());
         h.update(&self.timestamp_millis.to_le_bytes());
         h.update(&(self.l2_roots.len() as u32).to_le_bytes());
@@ -154,6 +156,7 @@ pub fn template(
     checkpoint_hash: [u8; 32],
     difficulty: u64,
     base_fee: u64,
+    retune_hint: i8,
 ) -> BlockHeader {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -165,6 +168,7 @@ pub fn template(
         checkpoint_hash,
         nonce: 0,
         difficulty,
+        retune_hint,
         base_fee,
         timestamp_millis: ts,
         #[cfg(feature = "quantum")]
@@ -185,7 +189,7 @@ mod tests {
 
     #[test]
     fn mines_block() {
-        let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000, 1);
+        let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000, 1, 0);
         let mut miner = Miner::new(1_000_000, 1_000);
         let mined = miner.mine(header.clone());
         let hash = mined.hash();

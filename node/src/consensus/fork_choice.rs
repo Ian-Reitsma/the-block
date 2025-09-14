@@ -11,6 +11,8 @@ pub struct TipMeta {
     pub tip_hash: [u8; 32],
     /// Height of the latest finalized PoS checkpoint referenced by this chain.
     pub checkpoint_height: u64,
+    /// Optional rollback checkpoint hash.
+    pub rollback: Option<[u8; 32]>,
 }
 
 /// Deterministically choose the preferred tip between `a` and `b`.
@@ -50,4 +52,9 @@ pub fn choose_tip(a: &TipMeta, b: &TipMeta) -> Ordering {
         tracing::info!(parent: &s, ?res, "fork_choice_end");
     }
     res
+}
+
+/// Return rollback checkpoint for a given tip if partition reconciliation requires it.
+pub fn rollback_checkpoint(tip: &TipMeta) -> Option<[u8; 32]> {
+    tip.rollback
 }

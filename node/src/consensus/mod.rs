@@ -8,6 +8,7 @@ macro_rules! consensus {
 
 pub mod constants;
 pub mod difficulty;
+pub mod difficulty_retune;
 pub mod engine;
 pub mod finality;
 pub mod fork_choice;

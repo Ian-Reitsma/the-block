@@ -49,7 +49,7 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99/100** with vision completion **~70/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. Recent additions such as the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC pushed the project over these milestones. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~99/100** with vision completion **~75/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. Recent additions such as deterministic WASM execution with a stateful debugger, session-key abstraction, Kalman difficulty retune, and network partition recovery extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC to push the project over these milestones. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -301,7 +301,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99/100 · Vision completion: ~70/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99/100 · Vision completion: ~75/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -578,17 +578,17 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - **Governance & Subsidy Economy** ([docs/governance.md](docs/governance.md))
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 79%
+  - Progress: 80%
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
-  - Progress: 75%
+  - Progress: 82%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 80%
+    - Progress: 85%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements and WAL-backed stores
   - [ ] Incentive-backed DHT marketplace
@@ -598,10 +598,10 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
     - [ ] SLA arbitration and heterogeneous payments
     - Progress: 71%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
-  - [ ] Runtime scaffold & gas accounting
+  - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
-  - Progress: 60%
+  - Progress: 78%
 - **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
@@ -615,13 +615,13 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 82%
+    - Progress: 85%
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [ ] Automated anomaly detection
-    - Progress: 71%
+    - Progress: 75%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
-    - Progress: 70%
+    - Progress: 71%

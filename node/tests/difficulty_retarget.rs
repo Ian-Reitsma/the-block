@@ -1,21 +1,22 @@
 use proptest::prelude::*;
 use the_block::consensus::constants::{DIFFICULTY_CLAMP_FACTOR, DIFFICULTY_WINDOW};
-use the_block::consensus::difficulty::{
-    expected_difficulty_from_chain as expected_difficulty, retarget,
-};
+use the_block::consensus::difficulty::{expected_difficulty_from_chain as expected_difficulty};
+use the_block::consensus::difficulty_retune::retune;
 use the_block::{Block, TokenAmount};
 
 #[test]
 fn increases_when_blocks_fast() {
     let prev = 1000;
-    let next = retarget(prev, &[0, 60_000], 120_000);
+    let params = the_block::governance::params::Params::default();
+    let (next, _) = retune(prev, &[0, 60_000], 0, &params);
     assert!(next > prev);
 }
 
 #[test]
 fn decreases_when_blocks_slow() {
     let prev = 1000;
-    let next = retarget(prev, &[0, 240_000], 120_000);
+    let params = the_block::governance::params::Params::default();
+    let (next, _) = retune(prev, &[0, 240_000], 0, &params);
     assert!(next < prev);
 }
 
@@ -26,6 +27,7 @@ fn dummy_block(index: u64, ts: u64, diff: u64) -> Block {
         timestamp_millis: ts,
         transactions: Vec::new(),
         difficulty: diff,
+        retune_hint: 0,
         nonce: 0,
         hash: String::new(),
         coinbase_consumer: TokenAmount::new(0),

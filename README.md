@@ -63,27 +63,30 @@ test real services today.
   and API responses without charging end users; signed `ReadAck` receipts
   anchor activity on-chain and mint the corresponding `READ_SUB_CT` reward.
   See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
-  flow. (77.0% Complete)
+  flow. (76.0% Complete)
  - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
   RPC and `compute cancel <job_id>` CLI, and hashes receipts into blocks before
   conversion to CT through multipliers. (71.0% Complete)
-- Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
-  letting operators run `net stats`, filter by reputation or drop reason, emit
-  JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
-  A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
-  `aggregator_ingest_total` gauges, and metrics are bounded by `max_peer_metrics`
-  so abusive peers cannot exhaust memory. (80.0% Complete)
-- Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
-  resolves forks deterministically, and validates blocks with BLAKE3 hashes and
-  VDF-anchored randomness. (75.0% Complete)
-- Governance and subsidy economics use on-chain proposals to retune `beta`,
-  `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
-  two percent while funding service roles. (79.0% Complete)
-- The smart-contract VM couples a minimal bytecode engine with UTXO and account
-  models, enabling deployable contracts and fee markets alongside traditional
-  PoW headers. (55.0% Complete)
+    - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
+      letting operators run `net stats`, filter by reputation or drop reason, emit
+      JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
+      A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
+      `aggregator_ingest_total` gauges, partition markers flag split-brain events,
+      and metrics are bounded by `max_peer_metrics` so abusive peers cannot exhaust
+      memory. (85.0% Complete)
+    - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
+      resolves forks deterministically, and validates blocks with BLAKE3 hashes,
+      multi-window Kalman retargeting, and VDF-anchored randomness. (82.0%
+      Complete)
+  - Governance and subsidy economics use on-chain proposals to retune `beta`,
+    `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
+    two percent while funding service roles. (80.0% Complete)
+    - The smart-contract VM couples a minimal bytecode engine with UTXO and account
+      models, adds deterministic WASM execution with a debugger, and enables
+      deployable contracts and fee markets alongside traditional PoW headers. (78.0%
+      Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
@@ -93,12 +96,13 @@ test real services today.
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
   Light-client verification guards all transfers. (45.0% Complete)
-- Wallets, light clients, and optional KYC hooks provide desktop and mobile
-  users with secure key management, staking tools, remote signer support, and
-  compliance options as needed. (82.0% Complete)
-- Monitoring, debugging, and profiling tools export Prometheus metrics,
-  structured traces, readiness endpoints, and a cluster-wide `metrics-aggregator`
-  for fleet visibility. (71.0% Complete)
+    - Wallets, light clients, and optional KYC hooks provide desktop and mobile
+      users with secure key management, staking tools, remote signer support,
+      session-key derivation, and compliance options as needed. (85.0% Complete)
+    - Monitoring, debugging, and profiling tools export Prometheus metrics,
+      structured traces, readiness endpoints, VM trace counters, partition dashboards,
+      and a cluster-wide `metrics-aggregator` for fleet visibility. (75.0%
+      Complete)
 - Economic simulation and formal verification suites model inflation scenarios
   and encode consensus invariants, laying groundwork for provable safety. (35.0%
   Complete)
@@ -107,20 +111,24 @@ test real services today.
 
 ## Vision & Current State
 
-Mainnet readiness sits at **~99/100** with vision completion **~70/100**.
+  Mainnet readiness sits at **~99/100** with vision completion **~75/100**.
 
 ### Live now
 
 - Stake-weighted PoS finality with validator registration, bonding/unbonding, and slashing RPCs; stake dictates leader schedule and exits honor delayed unbonding to protect liveness.
 - Proof-of-History tick generator and Turbine-style gossip for deterministic block propagation; packets follow a sqrt-N fanout tree with deterministic seeding for reproducible tests. Duplicate suppression and adaptive fanout are detailed in [docs/gossip.md](docs/gossip.md).
-- Sliding-window difficulty retargeting keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC and `difficulty_*` metrics.
+- Kalman multi-window difficulty retune keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC, `retune_hint` headers, and `difficulty_*` metrics.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently. See [docs/scheduler.md](docs/scheduler.md).
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
 - Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages and jobs can be cancelled gracefully via `compute cancel <job_id>`.
 - Cluster-wide `metrics-aggregator` collects peer snapshots while the `net stats`
   CLI supports JSON output, drop-reason and reputation filtering, pagination, and
   colorized drop-rate warnings.
+- Partition watch tracks peer reachability and stamps gossip with markers so
+  splits can reconcile deterministically once connectivity returns.
 - Modular wallet framework with hardware and remote signer support; command-line tools wrap the wallet crate and expose key management and staking helpers.
+- Pluggable account abstraction with expiring session keys and
+  meta-transaction tooling.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Versioned P2P handshake negotiates feature bits, records peer metadata, and enforces minimum protocol versions. See [docs/p2p_protocol.md](docs/p2p_protocol.md).
 - QUIC gossip transport with certificate reuse, connection pooling, and TCP fallback; fanout selects per-peer transport.
@@ -147,6 +155,8 @@ Mainnet readiness sits at **~99/100** with vision completion **~70/100**.
 - Transaction lifecycle document covers payload fields, memo handling, Python bindings, and lane-tagged admission; see [docs/transaction_lifecycle.md](docs/transaction_lifecycle.md).
 - Bridge primitives with light-client verification, relayer proofs, and a lock/unlock state machine; `blockctl bridge deposit` and `withdraw` commands move funds across chains while verifying relayer attestations.
 - Durable smart-contracts backed by a bincode `ContractStore`; `contract deploy` and `contract call` CLI flows persist code and key/value state under `~/.the_block/state/contracts/` and survive node restarts.
+- Deterministic WASM runtime with fuel-based metering and an interactive
+  debugger for opcode-level traces.
 - Persistent DEX order books and trade logs via `DexStore`; on-ledger escrow and partial-payment proofs lock funds until settlement, and gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track funds and counts. Multi-hop trust-line routing uses cost-based path scoring with fallback routes so payments continue even if a preferred hop disappears mid-flight. See [docs/dex.md](docs/dex.md).
 - WAL-backed `SimpleDb` provides a lightweight key-value store with crash-safe
   replay and optional byte quotas. DNS caches, chunk gossip, and DEX storage

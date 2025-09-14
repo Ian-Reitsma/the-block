@@ -678,6 +678,19 @@ impl Explorer {
         }
         Ok(out)
     }
+
+    /// Load opcode trace for a transaction from `trace/<hash>.json`.
+    pub fn opcode_trace(&self, tx_hash: &str) -> Option<Vec<String>> {
+        let path = PathBuf::from("trace").join(format!("{tx_hash}.json"));
+        std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+    }
+
+    /// Convert WASM bytecode into a human-readable WAT string.
+    pub fn wasm_disasm(&self, bytes: &[u8]) -> Option<String> {
+        wasmprinter::print_bytes(bytes).ok()
+    }
 }
 
 #[cfg(test)]

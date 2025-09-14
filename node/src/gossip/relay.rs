@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use blake3::hash;
 use rand::seq::SliceRandom;
 
-use crate::net::{send_msg, send_quic_msg, Message};
+use crate::net::{partition_watch::PARTITION_WATCH, send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
 use crate::range_boost;
 #[cfg(feature = "telemetry")]
@@ -119,7 +119,9 @@ impl Relay {
         }
         for peer in list.into_iter().take(fanout) {
             let cert = peer.2.as_deref();
-            send((peer.0, peer.1, cert), msg);
+            let mut marked = msg.clone();
+            marked.partition = PARTITION_WATCH.current_marker();
+            send((peer.0, peer.1, cert), &marked);
         }
     }
 }

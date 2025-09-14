@@ -23,6 +23,8 @@ tokio = { version = "1", features = ["rt", "macros", "net"] }
 tokio-tungstenite = "0.20"
 futures = "0.3"
 light-client = { path = "../crates/light-client" }
+crypto = { path = "../crypto" }
+wasmtime = "24"
 
 [features]
 quantum = ["wallet"]

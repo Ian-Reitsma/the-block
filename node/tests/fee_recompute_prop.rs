@@ -78,6 +78,7 @@ proptest! {
                 timestamp_millis: 0,
                 transactions: txs,
                 difficulty: 1,
+                retune_hint: 0,
                 nonce: 0,
                 hash: String::new(),
                 coinbase_consumer: TokenAmount::new(0),

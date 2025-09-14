@@ -17,6 +17,7 @@ fn sample_chain() -> (VecDeque<u64>, Vec<Block>) {
             timestamp_millis: ts,
             transactions: Vec::new(),
             difficulty: 1,
+            retune_hint: 0,
             nonce: 0,
             hash: String::new(),
             coinbase_consumer: TokenAmount::new(0),

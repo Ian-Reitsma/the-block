@@ -1,6 +1,6 @@
 # Status & Roadmap
 
-Mainnet readiness: ~98/100 · Vision completion: ~69/100.
+Mainnet readiness: ~99/100 · Vision completion: ~75/100.
 
 The third-token ledger has been fully retired. Every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase, with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing inflation to ≤ 2 %/year. Fleet-wide peer metrics now feed a dedicated `metrics-aggregator`, and the scheduler supports graceful `compute.job_cancel` rollbacks. Historical context and migration notes are in [`docs/system_changes.md`](system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
 
@@ -31,18 +31,18 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
-| **Governance & Subsidy Economy** | **78 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; governance can seed reward pools for service roles. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
-| **Consensus & Core Execution** | 74 % | Stake-weighted leader rotation, deterministic tie-breaks, sliding-window difficulty retarget, and parallel executor guard against replay collisions. | Formal proofs still absent. |
-| **Smart-Contract VM & UTXO/PoW** | 50 % | Persistent contract store, deployment CLI, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
+| **Governance & Subsidy Economy** | **80 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; governance can seed reward pools for service roles. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
+| **Consensus & Core Execution** | 82 % | Stake-weighted leader rotation, deterministic tie-breaks, multi-window Kalman difficulty retune, and parallel executor guard against replay collisions. | Formal proofs still absent. |
+| **Smart-Contract VM & UTXO/PoW** | 78 % | Persistent contract store, deterministic WASM runtime with debugger, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **76 %** | Receipt-only logging, hourly batching, L1 anchoring, and `gateway.reads_since` analytics keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
-| **Networking & Gossip** | 79 % | QUIC transport with TCP fallback, cluster `metrics-aggregator`, per-peer rate-limit telemetry, and CLI/RPC metrics via `net.peer_stats`. | Large-scale WAN chaos tests outstanding. |
-| **Compute Marketplace & CBM** | 70 % | Capability-aware scheduler weights offers by reputation, matches GPU/CPU requirements, and supports graceful job cancellation. | Escrowed payments and SLA enforcement remain rudimentary. |
-| **Trust Lines & DEX** | 72 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). | Cross-chain settlement proofs and advanced routing features outstanding. |
+| **Networking & Gossip** | 85 % | QUIC transport with TCP fallback, cluster `metrics-aggregator`, partition watch with gossip markers, and CLI/RPC metrics via `net.peer_stats`. | Large-scale WAN chaos tests outstanding. |
+| **Compute Marketplace & CBM** | 71 % | Capability-aware scheduler weights offers by reputation, matches GPU/CPU requirements, and supports graceful job cancellation. | Escrowed payments and SLA enforcement remain rudimentary. |
+| **Trust Lines & DEX** | 74 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). | Cross-chain settlement proofs and advanced routing features outstanding. |
 | **Cross-Chain Bridges** | 45 % | Lock/unlock primitives with light-client verification, persisted headers under `state/bridge_headers/`, and CLI deposit/withdraw flows. | Relayer incentives and incentive safety proofs missing. |
-| **Wallets, Light Clients & KYC** | 80 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, and pluggable KYC hooks. | Multisig and production-grade mobile apps outstanding. |
-| **Monitoring, Debugging & Profiling** | 69 % | Prometheus/Grafana dashboards, cluster metrics aggregation, and CLI debugger/profiling utilities ship with nodes. | Bridge/VM metrics and automated anomaly detection missing. |
+| **Wallets, Light Clients & KYC** | 85 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, and pluggable KYC hooks. | Multisig and production-grade mobile apps outstanding. |
+| **Monitoring, Debugging & Profiling** | 75 % | Prometheus/Grafana dashboards, cluster metrics aggregation, VM trace counters, and CLI debugger/profiling utilities ship with nodes. | Bridge/VM metrics and automated anomaly detection missing. |
 | **Economic Simulation & Formal Verification** | 35 % | Bench harness simulates inflation/demand; chaos tests capture seeds. | Sparse scenario library and no integrated proof pipeline. |
-| **Mobile UX & Contribution Metrics** | 52 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
+| **Mobile UX & Contribution Metrics** | 55 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
 
 ## Immediate
 

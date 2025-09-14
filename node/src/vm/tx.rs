@@ -7,6 +7,10 @@ pub enum ContractTx {
     Deploy {
         code: Vec<u8>,
     },
+    DeployWasm {
+        wasm: Vec<u8>,
+        abi: Vec<u8>,
+    },
     Call {
         id: ContractId,
         input: Vec<u8>,
@@ -21,6 +25,10 @@ impl ContractTx {
         match self {
             ContractTx::Deploy { code } => {
                 vm.deploy(code);
+                Ok(Vec::new())
+            }
+            ContractTx::DeployWasm { wasm, abi } => {
+                vm.deploy_wasm(wasm, abi);
                 Ok(Vec::new())
             }
             ContractTx::Call {

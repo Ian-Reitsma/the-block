@@ -32,6 +32,19 @@ cargo run --bin wallet escrow-balance <account>
 This prints total CT locked for active blobs so operators can gauge exposure
 before pruning storage.
 
+## Session Keys
+
+Ephemeral session keys can authorize meta-transactions without exposing the
+root seed. Issue a key with a time-to-live and use it for delegated sends:
+
+```bash
+cargo run --bin wallet session --ttl 600
+cargo run --bin wallet meta-send --to bob --amount 5 --session-sk <hex>
+```
+
+Session activity surfaces via `session_key_issued_total` and
+`session_key_expired_total` metrics.
+
 ## Delegation and Reward Withdrawal
 
 Delegation transactions transfer voting power to a validator while keeping

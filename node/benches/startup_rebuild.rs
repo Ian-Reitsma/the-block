@@ -44,6 +44,7 @@ fn sample_entries(count: usize) -> (Vec<MempoolEntryDisk>, Account) {
         pending_industrial: 0,
         pending_nonce: 0,
         pending_nonces: HashSet::new(),
+        sessions: Vec::new(),
     };
     (entries, account)
 }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
  
 [dependencies]
-crypto = { path = "../crypto", optional = true }
+crypto = { path = "../crypto" }
 
 pyo3 = { version = "0.24.2", default-features = false, features = ["macros", "auto-initialize"], optional = false }
 serde = { version = "1.0", features = ["derive"] }
@@ -111,9 +111,10 @@ rcgen = { version = "0.12", optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"] }
 regex = "1"
 terminal_size = "0.2"
+wasmtime = "24"
 
 [features]
-quantum = ["pqcrypto-dilithium", "crypto/quantum", "crypto"]
+quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 
 fuzzy = ["proptest"]
 telemetry = ["log", "prometheus", "tracing", "ureq"]
@@ -147,6 +148,7 @@ jurisdiction = { path = "../crates/jurisdiction" }
 insta = { version = "1", features = ["glob"] }
 axum = { version = "0.7", features = ["json"] }
 sha3 = "0.10"
+wat = "1"
 
 [[bench]]
 name = "startup_rebuild"
