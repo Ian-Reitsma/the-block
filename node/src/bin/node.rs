@@ -118,6 +118,10 @@ enum Commands {
         #[arg(long, default_value_t = true)]
         dry_run: bool,
 
+        /// Run auto-tuning benchmarks and exit
+        #[arg(long, default_value_t = false)]
+        auto_tune: bool,
+
         /// Enable QUIC transport for gossip
         #[arg(long, default_value_t = false)]
         quic: bool,
@@ -158,7 +162,7 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         profiling: bool,
 
-        /// Path to jurisdiction policy pack
+        /// Country code or path to jurisdiction policy pack
         #[arg(long)]
         jurisdiction: Option<String>,
     },
@@ -222,6 +226,7 @@ async fn main() -> std::process::ExitCode {
             log_format,
             log_level,
             dry_run,
+            auto_tune,
             quic,
             range_boost,
             relay_only,
@@ -234,6 +239,10 @@ async fn main() -> std::process::ExitCode {
             profiling,
             jurisdiction,
         } => {
+            if auto_tune {
+                the_block::telemetry::auto_tune();
+                return std::process::ExitCode::SUCCESS;
+            }
             let filter = EnvFilter::new(log_level.join(","));
             let (profiler, _chrome) = if profiling {
                 let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
@@ -265,8 +274,15 @@ async fn main() -> std::process::ExitCode {
                     inner.block_height = height;
                 }
             }
-            if let Some(path) = jurisdiction.as_ref() {
-                match jurisdiction::PolicyPack::load(path) {
+            if let Some(arg) = jurisdiction.as_ref() {
+                let pack_res = if std::path::Path::new(arg).exists() {
+                    jurisdiction::PolicyPack::load(arg)
+                } else {
+                    jurisdiction::PolicyPack::template(arg).ok_or_else(|| {
+                        std::io::Error::new(std::io::ErrorKind::NotFound, "template")
+                    })
+                };
+                match pack_res {
                     Ok(pack) => {
                         inner.config.jurisdiction = Some(pack.region.clone());
                         let _ = the_block::le_portal::record_action(
@@ -309,6 +325,7 @@ async fn main() -> std::process::ExitCode {
                 spawn_purge_loop_thread(Arc::clone(&bc), mempool_purge_interval, flag.as_arc());
             }
 
+            the_block::range_boost::set_enabled(range_boost);
             if range_boost {
                 std::thread::spawn(|| loop {
                     the_block::range_boost::discover_peers();

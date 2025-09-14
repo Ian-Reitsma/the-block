@@ -34,6 +34,16 @@ mdbook build docs
 Continuous integration runs this command for every pull request, so ensure it
 passes locally before submitting patches.
 
+## Agent/Codex Workflow
+
+Contributors using AI agents or codex-style tooling must read and honor `AGENTS.md` at the repository root. The file defines coding standards, testing requirements, and commit protocol. Agents should describe changes in the pull request summary and run `cargo test --all --features test-telemetry --release` before submitting.
+
+Install the provided `scripts/pre-commit.sample` as a Git hook to automatically run `just format` and `just lint` prior to every commit:
+
+```bash
+ln -s ../../scripts/pre-commit.sample .git/hooks/pre-commit
+```
+
 ## Branch Strategy
 
 - Fork or create a feature branch off `main` for all changes.

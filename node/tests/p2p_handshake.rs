@@ -1,5 +1,7 @@
 #![cfg(feature = "telemetry")]
-use the_block::p2p::handshake::{handle_handshake, FeatureBit, HandshakeCfg, Hello, Transport};
+use the_block::p2p::handshake::{
+    handle_handshake, FeatureBit, HandshakeCfg, Hello, Transport, SUPPORTED_VERSION,
+};
 use the_block::telemetry;
 
 fn cfg() -> HandshakeCfg {
@@ -29,6 +31,7 @@ fn reject_mismatched_network() {
     let ack = handle_handshake("peer1", hello, &cfg());
     assert!(!ack.ok);
     assert_eq!(ack.reason.as_deref(), Some("bad_network"));
+    assert_eq!(ack.supported_version, SUPPORTED_VERSION);
     assert_eq!(
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
             .with_label_values(&["bad_network"])
@@ -55,6 +58,7 @@ fn reject_old_proto() {
     let ack = handle_handshake("peer2", hello, &cfg());
     assert!(!ack.ok);
     assert_eq!(ack.reason.as_deref(), Some("old_proto"));
+    assert_eq!(ack.supported_version, SUPPORTED_VERSION);
     assert_eq!(
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
             .with_label_values(&["old_proto"])
@@ -81,6 +85,7 @@ fn accept_and_record() {
     let ack = handle_handshake("peer3", hello, &cfg());
     assert!(ack.ok);
     assert_eq!(ack.features_accepted, 0x3);
+    assert_eq!(ack.supported_version, SUPPORTED_VERSION);
     assert_eq!(
         telemetry::P2P_HANDSHAKE_ACCEPT_TOTAL
             .with_label_values(&["0x3"])

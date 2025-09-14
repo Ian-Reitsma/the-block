@@ -1,5 +1,5 @@
-use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 use sha3::{Digest, Sha3_256};
+use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 #[test]
 fn successful_swap_redeem() {

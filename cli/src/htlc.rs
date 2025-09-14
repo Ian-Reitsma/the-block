@@ -29,7 +29,11 @@ pub enum HtlcCmd {
 
 pub fn handle(cmd: HtlcCmd) {
     match cmd {
-        HtlcCmd::Create { preimage, timeout, algo } => {
+        HtlcCmd::Create {
+            preimage,
+            timeout,
+            algo,
+        } => {
             let bytes = preimage.into_bytes();
             let (hash, algo) = match algo.as_str() {
                 "ripemd" => {
@@ -50,7 +54,12 @@ pub fn handle(cmd: HtlcCmd) {
             }
             println!("{}", encode(htlc.hash));
         }
-        HtlcCmd::Redeem { hash, preimage, timeout, algo } => {
+        HtlcCmd::Redeem {
+            hash,
+            preimage,
+            timeout,
+            algo,
+        } => {
             let hash_bytes = decode(hash).expect("invalid hash");
             let algo = match algo.as_str() {
                 "ripemd" => HashAlgo::Ripemd160,

@@ -1,0 +1,8 @@
+[package]
+name = "dkg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+threshold_crypto = "0.4"
+rand = "0.7"

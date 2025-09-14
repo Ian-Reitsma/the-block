@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cargo fmt --all
-cargo clippy --all-targets --all-features -- -D warnings
+just format
+just lint
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+  git verify-commit HEAD || true
+fi

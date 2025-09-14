@@ -1,0 +1,11 @@
+[package]
+name = "privacy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blake3 = "1"
+
+[features]
+# Compile when privacy layer is enabled
+default = []

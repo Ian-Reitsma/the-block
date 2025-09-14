@@ -52,6 +52,8 @@ pub struct Wallet {
     keypair: Keypair,
 }
 
+pub mod hd;
+pub mod psbt;
 pub mod remote_signer;
 pub mod stake;
 

@@ -140,7 +140,12 @@ the_block v0.1.0 (/workspace/the-block/node)
 ├── bridges v0.1.0 (/workspace/the-block/bridges)
 │   ├── blake3 v1.8.2 (*)
 │   ├── hex v0.4.3
-│   └── serde v1.0.219 (*)
+│   ├── serde v1.0.219 (*)
+│   └── serde_json v1.0.143
+│       ├── itoa v1.0.15
+│       ├── memchr v2.7.5
+│       ├── ryu v1.0.20
+│       └── serde v1.0.219 (*)
 ├── bytes v1.10.1
 ├── chacha20poly1305 v0.10.1
 │   ├── aead v0.5.2
@@ -223,6 +228,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       └── smallvec v1.15.1
 ├── dex v0.1.0 (/workspace/the-block/dex)
 │   ├── blake3 v1.8.2 (*)
+│   ├── hex v0.4.3
 │   ├── serde v1.0.219 (*)
 │   ├── sha3 v0.10.8
 │   │   ├── digest v0.10.7
@@ -475,11 +481,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── bellman_ce v0.8.0 (*)
 │   ├── rand v0.4.6 (*)
 │   ├── serde v1.0.219 (*)
-│   └── serde_json v1.0.143
-│       ├── itoa v1.0.15
-│       ├── memchr v2.7.5
-│       ├── ryu v1.0.20
-│       └── serde v1.0.219 (*)
+│   └── serde_json v1.0.143 (*)
 ├── jurisdiction v0.1.0 (/workspace/the-block/crates/jurisdiction)
 │   ├── base64 v0.22.1
 │   ├── log v0.4.28 (*)
@@ -975,6 +977,8 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── tokio-native-tls v0.3.1 (*)
 │   ├── tower-service v0.3.3
 │   └── url v2.5.7 (*)
+├── ripemd v0.1.3
+│   └── digest v0.10.7 (*)
 ├── rocksdb v0.21.0
 │   ├── libc v0.2.175
 │   └── librocksdb-sys v0.11.0+8.1.1
@@ -1066,6 +1070,8 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── half v1.8.3
 │   └── serde v1.0.219 (*)
 ├── serde_json v1.0.143 (*)
+├── sha1 v0.10.6 (*)
+├── sha3 v0.10.8 (*)
 ├── signal-hook v0.3.18
 │   ├── libc v0.2.175
 │   └── signal-hook-registry v1.4.6
@@ -1112,6 +1118,9 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   └── typenum v1.18.0
 │   ├── num-traits v0.2.19 (*)
 │   └── rand v0.8.5 (*)
+├── storage v0.1.0 (/workspace/the-block/storage)
+│   ├── serde v1.0.219 (*)
+│   └── thiserror v1.0.69 (*)
 ├── subtle v2.6.1
 ├── tar v0.4.44
 │   ├── filetime v0.2.26 (*)
@@ -1310,7 +1319,11 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── tungstenite v0.20.1 (*)
 │   ├── url v2.5.7 (*)
 │   └── uuid v1.18.1 (*)
-└── xorfilter-rs v0.5.1
+├── xorfilter-rs v0.5.1
+└── zstd v0.12.4
+    └── zstd-safe v6.0.6
+        ├── libc v0.2.175
+        └── zstd-sys v2.0.16+zstd.1.5.7 (*)
 [build-dependencies]
 └── blake3 v1.8.2 (*)
 [dev-dependencies]
@@ -1498,6 +1511,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       ├── proc-macro2 v1.0.101 (*)
 │       ├── quote v1.0.40 (*)
 │       └── syn v2.0.106 (*)
+├── sha3 v0.10.8 (*)
 ├── tar v0.4.44 (*)
 ├── tracing v0.1.41 (*)
 ├── tracing-test v0.2.5

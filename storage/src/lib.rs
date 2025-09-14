@@ -1,5 +1,5 @@
-pub mod offer;
 pub mod contract;
+pub mod offer;
 
-pub use offer::{StorageOffer, allocate_shards};
 pub use contract::StorageContract;
+pub use offer::{allocate_shards, StorageOffer};

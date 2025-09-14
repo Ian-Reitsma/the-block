@@ -21,3 +21,15 @@ fn badge_expiration_check() {
     let expired = format!("{:x}", current_ts() - 1);
     assert!(!verify(&expired));
 }
+
+#[test]
+fn badge_renewal_updates_count() {
+    let mut tracker = ServiceBadgeTracker::new();
+    for _ in 0..90 {
+        tracker.record_epoch("node", true, Duration::from_millis(1));
+    }
+    let _badge = tracker.current_badge().expect("badge");
+    let renewed = tracker.renew().expect("renewed");
+    assert!(verify(&renewed));
+    assert_eq!(tracker.renewal_count(), 1);
+}

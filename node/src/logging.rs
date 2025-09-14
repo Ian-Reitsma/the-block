@@ -17,4 +17,7 @@ macro_rules! log_context {
     (tx = $hash:expr) => {
         tracing::info_span!("tx", correlation_id = %$crate::logging::corr_id_hash(&$hash))
     };
+    (provider = $id:expr) => {
+        tracing::info_span!("provider", id = %$id)
+    };
 }

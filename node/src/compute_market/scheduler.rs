@@ -1,4 +1,5 @@
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::cmp::Reverse;
@@ -6,8 +7,7 @@ use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{courier, Accelerator};
@@ -114,6 +114,17 @@ struct OfferEntry {
 const RECENT_WINDOW: usize = 100;
 const ACCELERATOR_PREMIUM: f64 = 1.2;
 const PRIORITY_MISS_SECS: u64 = 5;
+
+static ADAPTIVE_THREADS: AtomicUsize = AtomicUsize::new(4);
+
+fn adjust_thread_pool(active_jobs: u64) {
+    let desired = active_jobs.clamp(1, 32) as usize;
+    let prev = ADAPTIVE_THREADS.swap(desired, Ordering::Relaxed);
+    if prev != desired {
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::SCHEDULER_THREAD_COUNT.set(desired as i64);
+    }
+}
 
 #[derive(Clone, Copy)]
 enum MatchOutcome {
@@ -368,6 +379,7 @@ impl SchedulerState {
                 .and_modify(|v| *v += 1)
                 .or_insert(1);
             self.active_jobs += 1;
+            adjust_thread_pool(self.active_jobs);
             outcome = MatchOutcome::Success;
             self.last_effective_price = Some(*eff);
             if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -425,7 +437,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep += 1;
         {
-            let mut store = REPUTATION_STORE.lock().unwrap();
+            let mut store = REPUTATION_STORE.lock();
             store.adjust(provider, 1);
         }
         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -446,7 +458,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep -= 1;
         {
-            let mut store = REPUTATION_STORE.lock().unwrap();
+            let mut store = REPUTATION_STORE.lock();
             store.adjust(provider, -1);
         }
         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -467,7 +479,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep += 1;
         {
-            let mut store = REPUTATION_STORE.lock().unwrap();
+            let mut store = REPUTATION_STORE.lock();
             store.adjust(provider, 1);
         }
         #[cfg(feature = "telemetry")]
@@ -486,7 +498,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep -= 1;
         {
-            let mut store = REPUTATION_STORE.lock().unwrap();
+            let mut store = REPUTATION_STORE.lock();
             store.adjust(provider, -1);
         }
         #[cfg(feature = "telemetry")]
@@ -505,6 +517,7 @@ impl SchedulerState {
         if let Some(a) = self.active.remove(job_id) {
             if self.active_jobs > 0 {
                 self.active_jobs -= 1;
+                adjust_thread_pool(self.active_jobs);
             }
             if a.priority == Priority::Low && self.active_low > 0 {
                 self.active_low -= 1;
@@ -798,7 +811,7 @@ impl SchedulerState {
 
 static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
     let rep = {
-        let mut store = REPUTATION_STORE.lock().unwrap();
+        let mut store = REPUTATION_STORE.lock();
         store.decay(provider_reputation_decay(), provider_reputation_retention());
         store
             .data
@@ -1014,7 +1027,7 @@ fn lookup_cancellation(job_id: &str) -> Option<String> {
 }
 
 pub fn job_status(job_id: &str) -> serde_json::Value {
-    let sched = SCHEDULER.lock().unwrap();
+    let sched = SCHEDULER.lock();
     if sched.active.contains_key(job_id) {
         serde_json::json!({"status": "active"})
     } else if sched.pending.iter().any(|j| j.job_id == job_id) {
@@ -1292,16 +1305,16 @@ pub fn metrics() -> serde_json::Value {
 }
 
 pub fn stats() -> SchedulerStats {
-    SCHEDULER.lock().unwrap_or_else(|e| e.into_inner()).stats()
+    SCHEDULER.lock().stats()
 }
 
 pub fn reputation_get(provider: &str) -> i64 {
-    REPUTATION_STORE.lock().unwrap().get(provider)
+    REPUTATION_STORE.lock().get(provider)
 }
 
 pub fn reset_for_test() {
     {
-        let mut s = SCHEDULER.lock().unwrap();
+        let mut s = SCHEDULER.lock();
         s.offers.clear();
         s.utilization.clear();
         s.reputation.clear();
@@ -1315,7 +1328,7 @@ pub fn reset_for_test() {
             telemetry::SCHEDULER_ACTIVE_JOBS.set(0);
         }
     }
-    REPUTATION_STORE.lock().unwrap().data.clear();
+    REPUTATION_STORE.lock().data.clear();
     PREEMPT_ENABLED.store(false, Ordering::Relaxed);
     PREEMPT_MIN_DELTA.store(10, Ordering::Relaxed);
     REPUTATION_MULT_MIN.store((0.5f64).to_bits(), Ordering::Relaxed);

@@ -1,0 +1,5 @@
+image: theblock/gateway:latest
+service:
+  type: ClusterIP
+  port: 9000
+resources: {}

@@ -1,18 +1,21 @@
 //! RocksDB-backed key-value store with a SimpleDb-compatible API.
 #![forbid(unsafe_code)]
 
+use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 
-use rocksdb::{DBWithTTL, Options};
+use rocksdb::{DBWithThreadMode, MultiThreaded, Options};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{STORAGE_COMPACTION_TOTAL, STORAGE_DISK_FULL_TOTAL};
 
 /// Minimal RocksDB wrapper preserving the legacy `SimpleDb` API.
 pub struct SimpleDb {
-    db: DBWithTTL,
+    db: DBWithThreadMode<MultiThreaded>,
     byte_limit: Option<usize>,
+    prefix_cache: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
 }
 
 /// Record of a mutated key for rollback purposes.
@@ -24,10 +27,12 @@ impl SimpleDb {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         // Enable compaction and TTL pruning (1 day by default).
-        let db = DBWithTTL::open(&opts, Path::new(path), 24 * 60 * 60).expect("open rocksdb");
+        let db = DBWithThreadMode::open_with_ttl(&opts, Path::new(path), 24 * 60 * 60)
+            .expect("open rocksdb");
         Self {
             db,
             byte_limit: None,
+            prefix_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -37,7 +42,16 @@ impl SimpleDb {
     }
 
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
-        self.db.get(key.as_bytes()).ok().flatten()
+        if let Some(v) = self.prefix_cache.lock().get(key.as_bytes()) {
+            return Some(v.clone());
+        }
+        let val = self.db.get(key.as_bytes()).ok().flatten();
+        if let Some(ref v) = val {
+            self.prefix_cache
+                .lock()
+                .insert(key.as_bytes().to_vec(), v.clone());
+        }
+        val
     }
 
     pub fn try_insert(&mut self, key: &str, value: Vec<u8>) -> io::Result<Option<Vec<u8>>> {
@@ -48,6 +62,9 @@ impl SimpleDb {
         }
         let prev = self.db.get(key.as_bytes()).ok().flatten();
         self.db.put(key.as_bytes(), &value).map_err(to_io_err)?;
+        self.prefix_cache
+            .lock()
+            .insert(key.as_bytes().to_vec(), value.clone());
         Ok(prev)
     }
 
@@ -71,6 +88,7 @@ impl SimpleDb {
     pub fn try_remove(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
         let prev = self.db.get(key.as_bytes()).ok().flatten();
         self.db.delete(key.as_bytes()).map_err(to_io_err)?;
+        self.prefix_cache.lock().remove(key.as_bytes());
         Ok(prev)
     }
 

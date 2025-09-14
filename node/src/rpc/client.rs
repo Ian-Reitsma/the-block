@@ -1,6 +1,6 @@
 use rand::Rng;
 use reqwest::blocking::{Client, Response};
-use reqwest::error::ErrorKind;
+use reqwest::error::Kind as ReqwestKind;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::thread::sleep;
@@ -62,7 +62,7 @@ impl RpcClient {
     fn maybe_inject_fault(&self) -> Result<(), reqwest::Error> {
         if self.fault_rate > 0.0 && rand::thread_rng().gen_bool(self.fault_rate) {
             return Err(reqwest::Error::new(
-                ErrorKind::Request,
+                ReqwestKind::Request,
                 io::Error::new(io::ErrorKind::Other, "injected fault"),
             ));
         }

@@ -1,9 +1,12 @@
 use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(target_os = "linux")]
+use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Mutex,
@@ -13,12 +16,12 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{MESH_PEER_CONNECTED_TOTAL, MESH_PEER_LATENCY_MS};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HopProof {
     pub relay: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Bundle {
     pub payload: Vec<u8>,
     pub proofs: Vec<HopProof>,
@@ -28,7 +31,7 @@ pub struct RangeBoost {
     queue: VecDeque<Bundle>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MeshPeer {
     pub addr: String,
     pub latency_ms: u128,
@@ -36,9 +39,18 @@ pub struct MeshPeer {
 
 static PEER_LATENCY: Lazy<Mutex<HashMap<String, u128>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 static MESH_TASK_ACTIVE: AtomicBool = AtomicBool::new(false);
+static RANGE_BOOST_ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub fn mesh_active() -> bool {
     MESH_TASK_ACTIVE.load(Ordering::SeqCst)
+}
+
+pub fn set_enabled(v: bool) {
+    RANGE_BOOST_ENABLED.store(v, Ordering::SeqCst);
+}
+
+pub fn is_enabled() -> bool {
+    RANGE_BOOST_ENABLED.load(Ordering::SeqCst)
 }
 
 fn record_latency(addr: String, latency: u128) {
@@ -69,6 +81,19 @@ pub fn best_peer() -> Option<MeshPeer> {
         addr: a.clone(),
         latency_ms: *l,
     })
+}
+
+pub fn peers() -> Vec<MeshPeer> {
+    let map = PEER_LATENCY.lock().unwrap();
+    let mut peers: Vec<MeshPeer> = map
+        .iter()
+        .map(|(a, l)| MeshPeer {
+            addr: a.clone(),
+            latency_ms: *l,
+        })
+        .collect();
+    peers.sort_by_key(|p| p.latency_ms);
+    peers
 }
 
 pub fn discover_peers() -> Vec<MeshPeer> {
@@ -118,9 +143,73 @@ pub fn discover_peers() -> Vec<MeshPeer> {
             }
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        peers.extend(discover_wifi_peers());
+        peers.extend(discover_bt_peers());
+    }
     peers.sort_by_key(|p| p.latency_ms);
     MESH_TASK_ACTIVE.store(false, Ordering::SeqCst);
     peers
+}
+
+#[cfg(target_os = "linux")]
+fn discover_bt_peers() -> Vec<MeshPeer> {
+    let mut out = Vec::new();
+    if let Ok(res) = Command::new("hcitool").arg("scan").output() {
+        let text = String::from_utf8_lossy(&res.stdout);
+        for line in text.lines().skip(1) {
+            if let Some(addr) = line.split_whitespace().next() {
+                let peer = format!("bt:{}", addr);
+                record_latency(peer.clone(), 0);
+                out.push(MeshPeer {
+                    addr: peer,
+                    latency_ms: 0,
+                });
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "linux"))]
+fn discover_bt_peers() -> Vec<MeshPeer> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn discover_wifi_peers() -> Vec<MeshPeer> {
+    let mut out = Vec::new();
+    if let Ok(res) = Command::new("iwlist").arg("scan").output() {
+        let text = String::from_utf8_lossy(&res.stdout);
+        for line in text.lines() {
+            let l = line.trim();
+            if l.starts_with("Cell") {
+                if let Some(addr) = l.split_whitespace().nth(4) {
+                    let peer = format!("wifi:{}", addr);
+                    record_latency(peer.clone(), 0);
+                    out.push(MeshPeer {
+                        addr: peer,
+                        latency_ms: 0,
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "linux"))]
+fn discover_wifi_peers() -> Vec<MeshPeer> {
+    Vec::new()
+}
+
+pub fn parse_discovery_packet(data: &[u8]) -> Option<MeshPeer> {
+    let s = std::str::from_utf8(data).ok()?;
+    let mut parts = s.split(',');
+    let addr = parts.next()?.to_string();
+    let latency_ms = parts.next()?.parse().ok()?;
+    Some(MeshPeer { addr, latency_ms })
 }
 
 impl RangeBoost {

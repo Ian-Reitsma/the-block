@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use blake3::Hasher;
-use ed25519_dalek::{PublicKey, Signature};
+use ed25519_dalek::{Signature, VerifyingKey};
 use flate2::{write::GzEncoder, Compression};
 
 mod state_stream;
@@ -19,7 +19,7 @@ pub struct SyncOptions {
 }
 
 /// Block header for light-client verification.
-#[derive(Clone, Default, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 pub struct Header {
     pub height: u64,
     pub prev_hash: [u8; 32],
@@ -115,16 +115,13 @@ pub fn verify_checkpoint(h: &Header, checkpoints: &HashMap<u64, [u8; 32]>) -> bo
         if sig_bytes.len() != 64 {
             return false;
         }
-        let vk = match PublicKey::from_bytes(&pk_bytes) {
+        let vk = match VerifyingKey::from_bytes(&pk_bytes) {
             Ok(v) => v,
             Err(_) => return false,
         };
-        let mut arr = [0u8;64];
+        let mut arr = [0u8; 64];
         arr.copy_from_slice(sig_bytes);
-        let sig = match Signature::from_bytes(&arr) {
-            Ok(s) => s,
-            Err(_) => return false,
-        };
+        let sig = Signature::from_bytes(&arr);
         vk.verify_strict(&h.checkpoint_hash, &sig).is_ok()
     } else if let Some(expected) = checkpoints.get(&h.height) {
         expected == &h.checkpoint_hash
@@ -263,21 +260,36 @@ mod tests {
 
     #[test]
     fn verifies_pos_signature() {
-        use ed25519_dalek::{Keypair, Signer};
+        use ed25519_dalek::{Signer, SigningKey};
         use rand::rngs::OsRng;
-        let genesis = Header { height: 0, prev_hash: [0;32], merkle_root: [0;32], checkpoint_hash: [0;32], validator_key: None, checkpoint_sig: None, nonce:0, difficulty:1, timestamp_millis:0, l2_roots:vec![], l2_sizes:vec![], vdf_commit:[0;32], vdf_output:[0;32], vdf_proof:vec![] };
+        let genesis = Header {
+            height: 0,
+            prev_hash: [0; 32],
+            merkle_root: [0; 32],
+            checkpoint_hash: [0; 32],
+            validator_key: None,
+            checkpoint_sig: None,
+            nonce: 0,
+            difficulty: 1,
+            timestamp_millis: 0,
+            l2_roots: vec![],
+            l2_sizes: vec![],
+            vdf_commit: [0; 32],
+            vdf_output: [0; 32],
+            vdf_proof: vec![],
+        };
         let mut lc = LightClient::new(genesis.clone());
         let mut rng = OsRng;
-        let kp = Keypair::generate(&mut rng);
-        let pk = kp.public.to_bytes();
+        let sk = SigningKey::generate(&mut rng);
+        let pk = sk.verifying_key().to_bytes();
         let mut h1 = make_header(&genesis, 1);
-        h1.checkpoint_hash = [3u8;32];
-        let sig = kp.sign(&h1.checkpoint_hash);
+        h1.checkpoint_hash = [3u8; 32];
+        let sig = sk.sign(&h1.checkpoint_hash);
         h1.validator_key = Some(pk);
         h1.checkpoint_sig = Some(sig.to_bytes().to_vec());
         assert!(lc.verify_and_append(h1.clone()).is_ok());
         let mut bad = h1.clone();
-        bad.checkpoint_hash = [4u8;32];
+        bad.checkpoint_hash = [4u8; 32];
         assert!(lc.verify_and_append(bad).is_err());
     }
 }

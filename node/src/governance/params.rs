@@ -34,6 +34,12 @@ impl<'a> Runtime<'a> {
     pub fn set_badge_expiry(&mut self, v: u64) {
         crate::service_badge::set_badge_ttl_secs(v);
     }
+    pub fn set_badge_issue_uptime(&mut self, v: u64) {
+        crate::service_badge::set_badge_issue_uptime(v);
+    }
+    pub fn set_badge_revoke_uptime(&mut self, v: u64) {
+        crate::service_badge::set_badge_revoke_uptime(v);
+    }
     pub fn set_jurisdiction_region(&mut self, v: i64) {
         let region = match v {
             1 => "US",
@@ -48,6 +54,9 @@ impl<'a> Runtime<'a> {
             &format!("set_jurisdiction_{region}"),
             region,
         );
+    }
+    pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
+        self.bc.params.ai_diagnostics_enabled = v as i64;
     }
 }
 
@@ -89,7 +98,10 @@ pub struct Params {
     pub heuristic_mu_milli: i64,
     pub industrial_multiplier: i64,
     pub badge_expiry_secs: i64,
+    pub badge_issue_uptime_percent: i64,
+    pub badge_revoke_uptime_percent: i64,
     pub jurisdiction_region: i64,
+    pub ai_diagnostics_enabled: i64,
 }
 
 impl Default for Params {
@@ -117,7 +129,10 @@ impl Default for Params {
             heuristic_mu_milli: 500,
             industrial_multiplier: 100,
             badge_expiry_secs: 30 * 24 * 60 * 60,
+            badge_issue_uptime_percent: 99,
+            badge_revoke_uptime_percent: 95,
             jurisdiction_region: 0,
+            ai_diagnostics_enabled: 0,
         }
     }
 }
@@ -139,8 +154,20 @@ fn apply_badge_expiry(v: i64, p: &mut Params) -> Result<(), ()> {
     p.badge_expiry_secs = v;
     Ok(())
 }
+fn apply_badge_issue_uptime(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.badge_issue_uptime_percent = v;
+    Ok(())
+}
+fn apply_badge_revoke_uptime(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.badge_revoke_uptime_percent = v;
+    Ok(())
+}
 fn apply_jurisdiction_region(v: i64, p: &mut Params) -> Result<(), ()> {
     p.jurisdiction_region = v;
+    Ok(())
+}
+fn apply_ai_diagnostics_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ai_diagnostics_enabled = v;
     Ok(())
 }
 fn apply_fairshare_global_max(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -403,6 +430,32 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
+            key: ParamKey::BadgeIssueUptime,
+            default: 99,
+            min: 50,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_badge_issue_uptime,
+            apply_runtime: |v, rt| {
+                rt.set_badge_issue_uptime(v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::BadgeRevokeUptime,
+            default: 95,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_badge_revoke_uptime,
+            apply_runtime: |v, rt| {
+                rt.set_badge_revoke_uptime(v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
             key: ParamKey::JurisdictionRegion,
             default: 0,
             min: 0,
@@ -412,6 +465,19 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_jurisdiction_region,
             apply_runtime: |v, rt| {
                 rt.set_jurisdiction_region(v);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AiDiagnosticsEnabled,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ai_diagnostics_enabled,
+            apply_runtime: |v, rt| {
+                rt.set_ai_diagnostics_enabled(v != 0);
                 Ok(())
             },
         },

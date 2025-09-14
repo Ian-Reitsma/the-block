@@ -10,7 +10,7 @@ use blake3::Hasher;
 use crypto::dilithium;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
-use ledger::address::ShardId;
+use ledger::address::{self, ShardId};
 use lru::LruCache;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -227,6 +227,16 @@ impl Default for SignedTransaction {
             lane: FeeLane::Consumer,
             version: TxVersion::Ed25519Only,
         }
+    }
+}
+
+/// Helper methods for cross-shard envelopes carrying signed transactions.
+impl CrossShardEnvelope<SignedTransaction> {
+    /// Wrap a transaction with its source and destination shard identifiers.
+    pub fn route(tx: SignedTransaction) -> Self {
+        let from_shard = address::shard_id(&tx.payload.from_);
+        let to_shard = address::shard_id(&tx.payload.to);
+        Self::new(from_shard, to_shard, tx)
     }
 }
 
@@ -564,7 +574,12 @@ pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
         }
     }
     let msg_refs: Vec<&[u8]> = msgs.iter().map(|m| m.as_slice()).collect();
-    let res = if ed25519_dalek::verify_batch(&msg_refs, &sigs, &vks).is_ok() {
+    let batch_ok = msg_refs
+        .iter()
+        .zip(sigs.iter())
+        .zip(vks.iter())
+        .all(|((msg, sig), vk)| vk.verify_strict(msg, sig).is_ok());
+    if batch_ok {
         let mut out = vec![false; txs.len()];
         for &i in &indices {
             out[i] = true;
@@ -572,8 +587,7 @@ pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
         out
     } else {
         txs.iter().map(verify_signed_tx).collect()
-    };
-    res
+    }
 }
 
 /// Python wrapper for [`sign_tx`]. Raises `ValueError` on invalid key length.

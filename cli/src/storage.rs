@@ -13,10 +13,7 @@ pub enum StorageCmd {
         retention: u64,
     },
     /// Challenge a storage provider
-    Challenge {
-        object_id: String,
-        block: u64,
-    },
+    Challenge { object_id: String, block: u64 },
 }
 
 pub fn handle(cmd: StorageCmd) {

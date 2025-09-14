@@ -39,3 +39,8 @@ test = false
 name = "localnet_proximity"
 path = "fuzz_targets/localnet_proximity.rs"
 test = false
+
+[[bin]]
+name = "range_boost_parse"
+path = "fuzz_targets/range_boost_parse.rs"
+test = false

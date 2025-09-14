@@ -10,9 +10,15 @@ use the_block::{
     Block,
 };
 
+mod ai_summary;
+pub mod compute_view;
+pub mod dex_view;
 pub mod htlc_view;
-pub mod storage_view;
 pub mod snark_view;
+pub mod storage_view;
+pub use ai_summary::summarize_block;
+pub mod dkg_view;
+pub mod jurisdiction_view;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptRecord {
     pub key: String,
@@ -51,6 +57,13 @@ pub struct PeerReputation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerHandshake {
+    pub peer_id: String,
+    pub success: i64,
+    pub failure: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrderRecord {
     pub side: String,
     pub price: u64,
@@ -63,6 +76,49 @@ pub struct ComputeJobRecord {
     pub buyer: String,
     pub provider: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustLineRecord {
+    pub from: String,
+    pub to: String,
+    pub limit: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubsidyRecord {
+    pub epoch: u64,
+    pub beta: u64,
+    pub gamma: u64,
+    pub kappa: u64,
+    pub lambda: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenSupplyRecord {
+    pub symbol: String,
+    pub height: u64,
+    pub supply: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeVolumeRecord {
+    pub symbol: String,
+    pub amount: u64,
+    pub ts: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricPoint {
+    pub name: String,
+    pub ts: i64,
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LightProof {
+    pub block_hash: String,
+    pub proof: Vec<u8>,
 }
 
 pub struct Explorer {
@@ -94,6 +150,10 @@ impl Explorer {
             [],
         )?;
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS peer_handshakes (peer_id TEXT PRIMARY KEY, success INTEGER, failure INTEGER)",
+            [],
+        )?;
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS dex_orders (id INTEGER PRIMARY KEY AUTOINCREMENT, side TEXT, price INTEGER, amount INTEGER)",
             [],
         )?;
@@ -103,6 +163,30 @@ impl Explorer {
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS snark_proofs (job_id TEXT PRIMARY KEY, verified INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS trust_lines (from_id TEXT, to_id TEXT, limit INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS subsidy_history (epoch INTEGER PRIMARY KEY, beta INTEGER, gamma INTEGER, kappa INTEGER, lambda INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS metrics_archive (name TEXT, ts INTEGER, value REAL)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS light_proofs (block_hash TEXT PRIMARY KEY, proof BLOB)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS token_supply (symbol TEXT, height INTEGER, supply INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS bridge_volume (symbol TEXT, amount INTEGER, ts INTEGER)",
             [],
         )?;
         Ok(Self { path: p })
@@ -320,6 +404,197 @@ impl Explorer {
                 buyer: row.get(1)?,
                 provider: row.get(2)?,
                 status: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn index_trust_line(&self, from: &str, to: &str, limit: u64) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO trust_lines (from_id, to_id, limit) VALUES (?1, ?2, ?3)",
+            params![from, to, limit],
+        )?;
+        Ok(())
+    }
+
+    pub fn trust_lines(&self) -> Result<Vec<TrustLineRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT from_id, to_id, limit FROM trust_lines")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(TrustLineRecord {
+                from: row.get(0)?,
+                to: row.get(1)?,
+                limit: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn index_subsidy(&self, rec: &SubsidyRecord) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO subsidy_history (epoch, beta, gamma, kappa, lambda) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![rec.epoch, rec.beta, rec.gamma, rec.kappa, rec.lambda],
+        )?;
+        Ok(())
+    }
+
+    pub fn subsidy_history(&self) -> Result<Vec<SubsidyRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT epoch, beta, gamma, kappa, lambda FROM subsidy_history ORDER BY epoch",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SubsidyRecord {
+                epoch: row.get(0)?,
+                beta: row.get(1)?,
+                gamma: row.get(2)?,
+                kappa: row.get(3)?,
+                lambda: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn archive_metric(&self, point: &MetricPoint) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO metrics_archive (name, ts, value) VALUES (?1, ?2, ?3)",
+            params![point.name, point.ts, point.value],
+        )?;
+        Ok(())
+    }
+
+    pub fn metric_points(&self, name: &str) -> Result<Vec<MetricPoint>> {
+        let conn = self.conn()?;
+        let mut stmt =
+            conn.prepare("SELECT name, ts, value FROM metrics_archive WHERE name=?1 ORDER BY ts")?;
+        let rows = stmt.query_map(params![name], |row| {
+            Ok(MetricPoint {
+                name: row.get(0)?,
+                ts: row.get(1)?,
+                value: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn index_light_proof(&self, proof: &LightProof) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO light_proofs (block_hash, proof) VALUES (?1, ?2)",
+            params![proof.block_hash, proof.proof],
+        )?;
+        Ok(())
+    }
+
+    pub fn light_proof(&self, hash: &str) -> Result<Option<LightProof>> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT block_hash, proof FROM light_proofs WHERE block_hash=?1",
+            params![hash],
+            |row| {
+                Ok(LightProof {
+                    block_hash: row.get(0)?,
+                    proof: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn record_handshake(&self, peer_id: &str, success: bool) -> Result<()> {
+        let conn = self.conn()?;
+        let (succ, fail) = if success { (1, 0) } else { (0, 1) };
+        conn.execute(
+            "INSERT INTO peer_handshakes (peer_id, success, failure) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(peer_id) DO UPDATE SET success = success + excluded.success, failure = failure + excluded.failure",
+            params![peer_id, succ, fail],
+        )?;
+        Ok(())
+    }
+
+    pub fn peer_handshakes(&self) -> Result<Vec<PeerHandshake>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT peer_id, success, failure FROM peer_handshakes")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(PeerHandshake {
+                peer_id: row.get(0)?,
+                success: row.get(1)?,
+                failure: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn record_token_supply(&self, symbol: &str, height: u64, supply: u64) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO token_supply (symbol, height, supply) VALUES (?1, ?2, ?3)",
+            params![symbol, height, supply],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_bridge_volume(&self, symbol: &str, amount: u64, ts: i64) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO bridge_volume (symbol, amount, ts) VALUES (?1, ?2, ?3)",
+            params![symbol, amount, ts],
+        )?;
+        Ok(())
+    }
+
+    pub fn token_supply(&self, symbol: &str) -> Result<Vec<TokenSupplyRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT symbol, height, supply FROM token_supply WHERE symbol = ?1 ORDER BY height",
+        )?;
+        let rows = stmt.query_map(params![symbol], |row| {
+            Ok(TokenSupplyRecord {
+                symbol: row.get(0)?,
+                height: row.get(1)?,
+                supply: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn bridge_volume(&self, symbol: &str) -> Result<Vec<BridgeVolumeRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT symbol, amount, ts FROM bridge_volume WHERE symbol = ?1 ORDER BY ts",
+        )?;
+        let rows = stmt.query_map(params![symbol], |row| {
+            Ok(BridgeVolumeRecord {
+                symbol: row.get(0)?,
+                amount: row.get(1)?,
+                ts: row.get(2)?,
             })
         })?;
         let mut out = Vec::new();

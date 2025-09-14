@@ -4,7 +4,6 @@
 /// In production this module would wrap Groth16/Plonk engines
 /// from `bellman` and `halo2` crates. For now we emulate
 /// verification by hashing the workload and output.
-
 use blake3::Hasher;
 
 /// Generate a deterministic pseudo-proof for a workload and output hash.

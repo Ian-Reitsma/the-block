@@ -1,0 +1,4 @@
+apiVersion: v2
+name: the-block-node
+version: 0.1.0
+description: Helm chart for The-Block node

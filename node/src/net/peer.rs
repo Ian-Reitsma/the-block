@@ -13,6 +13,7 @@ use indexmap::IndexMap;
 #[cfg(unix)]
 use nix::libc;
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,7 +24,7 @@ use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -99,48 +100,38 @@ impl PeerSet {
 
     /// Add a peer to the set.
     pub fn add(&self, addr: SocketAddr) {
-        if let Ok(mut guard) = self.addrs.lock() {
-            guard.insert(addr);
-            persist_peers(&guard);
-        }
-        if let Ok(mut map) = self.transports.lock() {
-            map.entry(addr).or_insert(Transport::Tcp);
-        }
-        if let Ok(q) = self.quic.lock() {
-            if !q.contains_key(&addr) {
-                persist_quic_peers(&q);
-            }
+        let mut guard = self.addrs.lock();
+        guard.insert(addr);
+        persist_peers(&guard);
+        let mut map = self.transports.lock();
+        map.entry(addr).or_insert(Transport::Tcp);
+        let q = self.quic.lock();
+        if !q.contains_key(&addr) {
+            persist_quic_peers(&q);
         }
     }
 
     /// Remove a peer from the set.
     pub fn remove(&self, addr: SocketAddr) {
-        if let Ok(mut guard) = self.addrs.lock() {
-            guard.remove(&addr);
-            persist_peers(&guard);
-        }
-        if let Ok(mut map) = self.transports.lock() {
-            map.remove(&addr);
-        }
+        let mut guard = self.addrs.lock();
+        guard.remove(&addr);
+        persist_peers(&guard);
+        let mut map = self.transports.lock();
+        map.remove(&addr);
     }
 
     /// Clear all peers from the set.
     pub fn clear(&self) {
-        if let Ok(mut guard) = self.addrs.lock() {
-            guard.clear();
-            persist_peers(&guard);
-        }
-        if let Ok(mut map) = self.transports.lock() {
-            map.clear();
-        }
+        let mut guard = self.addrs.lock();
+        guard.clear();
+        persist_peers(&guard);
+        let mut map = self.transports.lock();
+        map.clear();
     }
 
     /// Return a snapshot of known peers.
     pub fn list(&self) -> Vec<SocketAddr> {
-        self.addrs
-            .lock()
-            .map(|g| g.iter().copied().collect())
-            .unwrap_or_default()
+        self.addrs.lock().iter().copied().collect()
     }
 
     /// Snapshot peers with their advertised transport.
@@ -153,9 +144,9 @@ impl PeerSet {
 
     /// Snapshot peers with transport and optional QUIC certificate.
     pub fn list_with_info(&self) -> Vec<(SocketAddr, Transport, Option<Vec<u8>>)> {
-        let addrs = self.addrs.lock().unwrap_or_else(|e| e.into_inner());
-        let transports = self.transports.lock().unwrap_or_else(|e| e.into_inner());
-        let quic = self.quic.lock().unwrap_or_else(|e| e.into_inner());
+        let addrs = self.addrs.lock();
+        let transports = self.transports.lock();
+        let quic = self.quic.lock();
         addrs
             .iter()
             .map(|a| {
@@ -170,10 +161,11 @@ impl PeerSet {
 
     /// Record the mapping from address to peer id and allocate metrics entry.
     fn map_addr(&self, addr: SocketAddr, pk: [u8; 32]) {
-        if let Ok(mut m) = ADDR_MAP.lock() {
+        {
+            let mut m = ADDR_MAP.lock();
             m.insert(addr, pk);
         }
-        let mut metrics = PEER_METRICS.lock().unwrap();
+        let mut metrics = PEER_METRICS.lock();
         if let Some(val) = metrics.swap_remove(&pk) {
             metrics.insert(pk, val);
             update_active_gauge(metrics.len());
@@ -200,23 +192,21 @@ impl PeerSet {
 
     /// Record the preferred transport for `addr`.
     pub fn set_transport(&self, addr: SocketAddr, transport: Transport) {
-        if let Ok(mut map) = self.transports.lock() {
-            map.insert(addr, transport);
-        }
+        let mut map = self.transports.lock();
+        map.insert(addr, transport);
     }
 
     /// Record QUIC endpoint info for `addr`.
     pub fn set_quic(&self, addr: SocketAddr, quic_addr: SocketAddr, cert: Vec<u8>) {
-        if let Ok(mut map) = self.quic.lock() {
-            map.insert(
-                addr,
-                QuicEndpoint {
-                    addr: quic_addr,
-                    cert,
-                },
-            );
-            persist_quic_peers(&map);
-        }
+        let mut map = self.quic.lock();
+        map.insert(
+            addr,
+            QuicEndpoint {
+                addr: quic_addr,
+                cert,
+            },
+        );
+        persist_quic_peers(&map);
     }
 
     /// Return a randomized list of peers for bootstrapping.
@@ -236,10 +226,8 @@ impl PeerSet {
     }
 
     fn authorize(&self, pk: [u8; 32]) {
-        if let Ok(mut set) = self.authorized.lock() {
-            set.insert(pk);
-        }
-        let mut ids = PEER_IDENTITIES.lock().unwrap();
+        self.authorized.lock().insert(pk);
+        let mut ids = PEER_IDENTITIES.lock();
         ids.entry(pk).or_insert(PeerIdentity {
             peer_id: pk,
             public_key: pk,
@@ -249,21 +237,14 @@ impl PeerSet {
     }
 
     fn is_authorized(&self, pk: &[u8; 32]) -> bool {
-        self.authorized
-            .lock()
-            .map(|s| s.contains(pk))
-            .unwrap_or(false)
+        self.authorized.lock().contains(pk)
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
-        if ban_store::store()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_banned(pk)
-        {
+        if ban_store::store().lock().is_banned(pk) {
             return Err(PeerErrorCode::Banned);
         }
-        let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = self.states.lock();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
             last: Instant::now(),
@@ -285,7 +266,7 @@ impl PeerSet {
         }
         entry.count += 1;
         let allowed = {
-            let mut metrics = PEER_METRICS.lock().unwrap();
+            let mut metrics = PEER_METRICS.lock();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
             pm.reputation.decay(peer_reputation_decay());
             pm.last_updated = now_secs();
@@ -308,10 +289,7 @@ impl PeerSet {
                 .unwrap_or_else(|e| panic!("time error: {e}"))
                 .as_secs()
                 + *P2P_BAN_SECS as u64;
-            ban_store::store()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .ban(pk, ts);
+            ban_store::store().lock().ban(pk, ts);
             #[cfg(feature = "telemetry")]
             {
                 let id = hex::encode(pk);
@@ -325,7 +303,7 @@ impl PeerSet {
     }
 
     fn check_shard_rate(&self, pk: &[u8; 32], size: usize) -> Result<(), PeerErrorCode> {
-        let mut map = self.states.lock().unwrap_or_else(|e| e.into_inner());
+        let mut map = self.states.lock();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
             last: Instant::now(),
@@ -334,7 +312,7 @@ impl PeerSet {
             shard_last: Instant::now(),
         });
         let score = {
-            let mut metrics = PEER_METRICS.lock().unwrap();
+            let mut metrics = PEER_METRICS.lock();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
             pm.reputation.decay(peer_reputation_decay());
             pm.last_updated = now_secs();
@@ -366,10 +344,7 @@ impl PeerSet {
             .unwrap_or_else(|e| panic!("time error: {e}"))
             .as_secs()
             + *P2P_BAN_SECS as u64;
-        ban_store::store()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .ban(pk, ts);
+        ban_store::store().lock().ban(pk, ts);
         #[cfg(feature = "telemetry")]
         {
             let id = hex::encode(pk);
@@ -404,7 +379,7 @@ impl PeerSet {
         }
 
         let mut peer_key = msg.pubkey;
-        if let Some((new, revoke)) = ROTATED_KEYS.lock().unwrap().get(&peer_key).copied() {
+        if let Some((new, revoke)) = ROTATED_KEYS.lock().get(&peer_key).copied() {
             if now_secs() > revoke {
                 return;
             }
@@ -436,13 +411,10 @@ impl PeerSet {
             record_drop(&peer_key, reason);
             if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
                 if let Some(peer_addr) = addr {
-                    if let Ok(mut a) = self.addrs.lock() {
-                        a.remove(&peer_addr);
-                    }
+                    let mut a = self.addrs.lock();
+                    a.remove(&peer_addr);
                 }
-                if let Ok(mut auth) = self.authorized.lock() {
-                    auth.remove(&peer_key);
-                }
+                self.authorized.lock().remove(&peer_key);
             }
             return;
         }
@@ -500,36 +472,33 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                if let Ok(mut bc) = chain.lock() {
-                    let _ = bc.submit_transaction(tx);
-                }
+                let mut bc = chain.lock();
+                let _ = bc.submit_transaction(tx);
             }
             Payload::BlobTx(tx) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                if let Ok(mut bc) = chain.lock() {
-                    let _ = bc.submit_blob_tx(tx);
-                }
+                let mut bc = chain.lock();
+                let _ = bc.submit_blob_tx(tx);
             }
             Payload::Block(block) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                if let Ok(mut bc) = chain.lock() {
-                    if (block.index as usize) == bc.chain.len() {
-                        let prev = bc.chain.last().map(|b| b.hash.clone()).unwrap_or_default();
-                        if block.index == 0 || block.previous_hash == prev {
-                            let mut new_chain = bc.chain.clone();
-                            new_chain.push(block.clone());
-                            if bc.import_chain(new_chain.clone()).is_ok() {
-                                drop(bc);
-                                let msg = Message::new(Payload::Chain(new_chain), &load_net_key());
-                                for p in self.list() {
-                                    let _ = send_msg(p, &msg);
-                                }
-                                return;
+                let mut bc = chain.lock();
+                if (block.index as usize) == bc.chain.len() {
+                    let prev = bc.chain.last().map(|b| b.hash.clone()).unwrap_or_default();
+                    if block.index == 0 || block.previous_hash == prev {
+                        let mut new_chain = bc.chain.clone();
+                        new_chain.push(block.clone());
+                        if bc.import_chain(new_chain.clone()).is_ok() {
+                            drop(bc);
+                            let msg = Message::new(Payload::Chain(new_chain), &load_net_key());
+                            for p in self.list() {
+                                let _ = send_msg(p, &msg);
                             }
+                            return;
                         }
                     }
                 }
@@ -538,14 +507,13 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                if let Ok(mut bc) = chain.lock() {
-                    if new_chain.len() > bc.chain.len() {
-                        #[cfg(feature = "telemetry")]
-                        let start = Instant::now();
-                        let _ = bc.import_chain(new_chain);
-                        #[cfg(feature = "telemetry")]
-                        observer::observe_convergence(start);
-                    }
+                let mut bc = chain.lock();
+                if new_chain.len() > bc.chain.len() {
+                    #[cfg(feature = "telemetry")]
+                    let start = Instant::now();
+                    let _ = bc.import_chain(new_chain);
+                    #[cfg(feature = "telemetry")]
+                    observer::observe_convergence(start);
                 }
             }
             Payload::BlobChunk(chunk) => {
@@ -562,13 +530,10 @@ impl PeerSet {
                     record_drop(&peer_key, reason);
                     if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
                         if let Some(peer_addr) = addr {
-                            if let Ok(mut a) = self.addrs.lock() {
-                                a.remove(&peer_addr);
-                            }
+                            let mut a = self.addrs.lock();
+                            a.remove(&peer_addr);
                         }
-                        if let Ok(mut auth) = self.authorized.lock() {
-                            auth.remove(&peer_key);
-                        }
+                        self.authorized.lock().remove(&peer_key);
                     }
                     return;
                 }
@@ -844,7 +809,7 @@ fn update_peer_rates(pk: &[u8; 32], entry: &mut PeerMetrics, bytes: u64, reqs: u
 }
 
 pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
-    if let Some(pk) = ADDR_MAP.lock().unwrap().get(&addr).copied() {
+    if let Some(pk) = ADDR_MAP.lock().get(&addr).copied() {
         let mut map = PEER_METRICS.lock().unwrap();
         maybe_consolidate(&mut map);
         let now = now_secs();
@@ -1160,7 +1125,7 @@ pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
 }
 
 pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
-    ADDR_MAP.lock().unwrap().get(addr).copied()
+    ADDR_MAP.lock().get(addr).copied()
 }
 
 #[cfg(all(feature = "telemetry", feature = "quic"))]
@@ -1175,7 +1140,7 @@ pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeErro
         }
         last.insert(addr, ts);
     }
-    if let Some(pk) = ADDR_MAP.lock().unwrap().get(&addr).copied() {
+    if let Some(pk) = ADDR_MAP.lock().get(&addr).copied() {
         record_handshake_fail(&pk, reason);
     }
 }
@@ -1235,7 +1200,7 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
         update_active_gauge(map.len());
         update_memory_usage(map.len());
         drop(map);
-        let mut addr_map = ADDR_MAP.lock().unwrap();
+        let mut addr_map = ADDR_MAP.lock();
         for val in addr_map.values_mut() {
             if *val == *old {
                 *val = new;
@@ -1260,8 +1225,8 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
             let _ = writeln!(file, "{}", entry.to_string());
         }
         let revoke = now_secs() + KEY_GRACE_SECS;
-        ROTATED_KEYS.lock().unwrap().insert(*old, (new, revoke));
-        let mut ids = PEER_IDENTITIES.lock().unwrap();
+        ROTATED_KEYS.lock().insert(*old, (new, revoke));
+        let mut ids = PEER_IDENTITIES.lock();
         if let Some(mut ident) = ids.remove(old) {
             ident.old_key = Some(*old);
             ident.public_key = new;
@@ -2152,7 +2117,7 @@ fn is_throttled(pk: &[u8; 32]) -> bool {
 }
 
 pub(crate) fn is_throttled_addr(addr: &SocketAddr) -> bool {
-    if let Some(pk) = ADDR_MAP.lock().unwrap().get(addr) {
+    if let Some(pk) = ADDR_MAP.lock().get(addr) {
         is_throttled(pk)
     } else {
         false

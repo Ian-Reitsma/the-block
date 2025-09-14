@@ -1,0 +1,15 @@
+[package]
+name = "remote-signer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wallet = { path = "../../crates/wallet", features = ["hid"] }
+hidapi = { version = "2", optional = true }
+qrcode = "0.12"
+
+[features]
+hid = ["hidapi"]

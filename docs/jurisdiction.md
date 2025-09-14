@@ -41,11 +41,11 @@ the law‑enforcement portal so auditors have a tamper‑evident trail of policy
 changes.  See [`node/src/governance/params.rs`](../node/src/governance/params.rs)
 for the runtime hook.
 
-To run a node with a specific jurisdiction pack pass the file path via
-`--jurisdiction`:
+To run a node with a specific jurisdiction pack pass the country code or file
+path via `--jurisdiction`:
 
 ```
-the-block-node run --jurisdiction examples/jurisdiction/us.json
+the-block-node run --jurisdiction US
 ```
 
 The active jurisdiction is exposed over RPC through `jurisdiction.status` and
@@ -59,6 +59,12 @@ appropriate pack per region.
 
 Example packs live under [`examples/jurisdiction/`](../examples/jurisdiction/)
 for quick testing.
+
+Validate a custom pack before deployment with `tools/jurisdiction_check.rs`:
+
+```
+rustc tools/jurisdiction_check.rs && ./jurisdiction_check examples/jurisdiction/us.json
+```
 
 ## Law-Enforcement Request Log
 

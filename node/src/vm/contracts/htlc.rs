@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
+use ripemd::{Digest as RipemdDigest, Ripemd160};
 use sha3::{Digest, Sha3_256};
-use ripemd160::Ripemd160;
 
 /// Hash algorithms supported by the HTLC contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +21,12 @@ pub struct Htlc {
 
 impl Htlc {
     pub fn new(hash: Vec<u8>, algo: HashAlgo, timeout: u64) -> Self {
-        Self { hash, algo, timeout, redeemed: false }
+        Self {
+            hash,
+            algo,
+            timeout,
+            redeemed: false,
+        }
     }
 
     /// Attempts to redeem the HTLC with a preimage at a given time.

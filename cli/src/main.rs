@@ -1,6 +1,9 @@
+#![deny(warnings)]
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+mod ai;
 mod bridge;
 mod compute;
 mod config;
@@ -8,26 +11,27 @@ mod dex;
 mod fee_estimator;
 mod gov;
 mod htlc;
-mod storage;
-mod snark;
+mod light_sync;
 mod net;
 mod service_badge;
+mod snark;
+mod storage;
 mod telemetry;
-mod light_sync;
 #[cfg(feature = "quantum")]
 mod wallet;
+use ai::AiCmd;
 use bridge::BridgeCmd;
 use compute::ComputeCmd;
 use config::ConfigCmd;
 use dex::DexCmd;
 use gov::GovCmd;
 use htlc::HtlcCmd;
-use storage::StorageCmd;
-use snark::SnarkCmd;
+use light_sync::LightSyncCmd;
 use net::NetCmd;
 use service_badge::ServiceBadgeCmd;
+use snark::SnarkCmd;
+use storage::StorageCmd;
 use telemetry::TelemetryCmd;
-use light_sync::LightSyncCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 #[cfg(feature = "quantum")]
 use wallet::WalletCmd;
@@ -124,6 +128,11 @@ enum Commands {
         #[command(subcommand)]
         action: LightSyncCmd,
     },
+    /// AI diagnostics
+    Ai {
+        #[command(subcommand)]
+        action: AiCmd,
+    },
     /// Fee estimation utilities
     Fees {
         /// Recent observed tip samples
@@ -185,6 +194,7 @@ fn main() {
         Commands::Storage { action } => storage::handle(action),
         Commands::Snark { action } => snark::handle(action),
         Commands::LightSync { action } => light_sync::handle(action),
+        Commands::Ai { action } => ai::handle(action),
         Commands::Fees { samples } => {
             let mut est = fee_estimator::RollingMedianEstimator::new(21);
             for s in samples {

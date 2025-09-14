@@ -15,7 +15,7 @@ macro block k
 
 ## Cross‑Shard Transactions
 
-Transactions carry a source and destination shard identifier.  A routing envelope directs the transaction to the source shard for execution and forwards any outbound messages to the destination shard through the inter‑shard queue.
+Transactions carry a source and destination shard identifier.  A `CrossShardEnvelope` directs the transaction to the source shard for execution and forwards any outbound messages to the destination shard through the inter‑shard queue.
 
 ## Macro Blocks
 

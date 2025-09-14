@@ -429,16 +429,34 @@ def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
 def fee_split_demo() -> None:
     """Show fee splitting between CT and IT."""
     explain("Demonstrating fee splitting via pct_ct")
+    payload = the_block.RawTxPayload(
+        from_="alice",
+        to="bob",
+        amount_consumer=0,
+        amount_industrial=0,
+        nonce=0,
+        pct_ct=50,
+        fee=1,
+    )
+    raw = the_block.canonical_payload(payload)
+    decoded = the_block.decode_payload(raw)
+    explain(f"encoded pct_ct=50, decoded pct_ct={decoded.pct_ct}")
 
 
 def escrow_demo() -> None:
     """Show basic escrow flow on the DEX."""
-    explain("Escrow example: blockctl dex escrow <order_id>")
+    explain("Escrow example: lock funds and release a payment")
+    escrow = {"locked": 100, "released": 0}
+    escrow["released"] += 40
+    explain(f"released 40, remaining {escrow['locked'] - escrow['released']}")
 
 
 def compute_job_demo() -> None:
     """Submit a sample compute job."""
-    explain("Compute job submission: blockctl compute submit <spec>")
+    explain("Compute job submission: estimate workload units")
+    data = b"demo workload"
+    units = (len(data) + 1_048_575) // 1_048_576
+    explain(f"{len(data)} bytes -> {units} compute unit")
 
 
 def restart_purge_demo(priv: bytes) -> None:

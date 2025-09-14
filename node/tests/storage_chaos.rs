@@ -1,5 +1,5 @@
 use node::simple_db::SimpleDb;
-use rand::{seq::SliceRandom, thread_rng};
+use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tempfile::tempdir;
 
 #[test]
@@ -15,7 +15,8 @@ fn wal_survives_random_deletes() {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().ends_with(".log"))
         .collect();
-    logs.shuffle(&mut thread_rng());
+    let mut rng = StdRng::seed_from_u64(7);
+    logs.shuffle(&mut rng);
     if let Some(log) = logs.pop() {
         let _ = std::fs::remove_file(log.path());
     }

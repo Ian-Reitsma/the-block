@@ -1,10 +1,11 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub mod admission;
 pub mod cbm;
@@ -17,8 +18,12 @@ pub mod receipt;
 pub mod scheduler;
 pub mod settlement;
 pub mod workload;
-pub mod workloads;
+
+#[cfg(doctest)]
+#[doc = concat!("```rust\n", include_str!("../../examples/compute_market.rs"), "\n```")]
+mod compute_market_example {}
 pub mod snark;
+pub mod workloads;
 
 pub use errors::MarketError;
 pub use scheduler::job_status;
@@ -150,22 +155,20 @@ impl Workload {
             Workload::Transcode(data)
             | Workload::Inference(data)
             | Workload::GpuHash(data)
-            | Workload::Snark(data) => {
-                workload::compute_units(data)
-            }
+            | Workload::Snark(data) => workload::compute_units(data),
         }
     }
 }
 
 /// Execute workloads and produce proof hashes with per-slice caching.
 pub struct WorkloadRunner {
-    cache: std::sync::Arc<std::sync::Mutex<HashMap<usize, [u8; 32]>>>,
+    cache: std::sync::Arc<parking_lot::Mutex<HashMap<usize, [u8; 32]>>>,
 }
 
 impl WorkloadRunner {
     pub fn new() -> Self {
         Self {
-            cache: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            cache: std::sync::Arc::new(parking_lot::Mutex::new(HashMap::new())),
         }
     }
 
@@ -193,12 +196,7 @@ impl WorkloadRunner {
     /// Run the workload for a given slice ID asynchronously. Results are cached so
     /// repeated executions avoid recomputation.
     pub async fn run(&self, slice_id: usize, w: Workload) -> [u8; 32] {
-        if let Some(cached) = self
-            .cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&slice_id)
-        {
+        if let Some(cached) = self.cache.lock().get(&slice_id) {
             return *cached;
         }
         let res = tokio::task::spawn_blocking(move || match w {
@@ -209,10 +207,7 @@ impl WorkloadRunner {
         })
         .await
         .unwrap_or_else(|e| panic!("workload failed: {e}"));
-        self.cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(slice_id, res);
+        self.cache.lock().insert(slice_id, res);
         res
     }
 }
@@ -432,7 +427,11 @@ impl Market {
     }
 
     /// Verify a slice proof and record the payout.
-    pub fn submit_slice(&mut self, job_id: &str, proof: ExecutionReceipt) -> Result<u64, &'static str> {
+    pub fn submit_slice(
+        &mut self,
+        job_id: &str,
+        proof: ExecutionReceipt,
+    ) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
         let state = self.jobs.get_mut(job_id).ok_or("unknown job")?;
         let now = SystemTime::now()

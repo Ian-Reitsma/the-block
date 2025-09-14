@@ -2,17 +2,26 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn check_file(path: &Path, root: &Path, bad: &mut Vec<String>) {
+fn check_file(path: &Path, root: &Path, bad: &mut Vec<String>, is_code: bool) {
     if let Ok(content) = fs::read_to_string(path) {
         for line in content.lines() {
+            let line = if is_code {
+                let trimmed = line.trim_start();
+                if !trimmed.starts_with("//") {
+                    continue;
+                }
+                trimmed.trim_start_matches('/').trim_start()
+            } else {
+                line
+            };
             let mut rest = line;
             while let Some(pos) = rest.find("](") {
-                if let Some(end) = rest[pos+2..].find(')') {
-                    let link = &rest[pos+2..pos+2+end];
+                if let Some(end) = rest[pos + 2..].find(')') {
+                    let link = &rest[pos + 2..pos + 2 + end];
                     if !link.starts_with("http") && !link.starts_with('#') && link.contains('/') {
                         let path_part = link.split('#').next().unwrap();
                         let target = if path_part.starts_with("docs/") {
-                            root.join(&path_part[5..])
+                            root.join(path_part)
                         } else {
                             path.parent().unwrap_or(root).join(path_part)
                         };
@@ -20,7 +29,7 @@ fn check_file(path: &Path, root: &Path, bad: &mut Vec<String>) {
                             bad.push(format!("{} -> {}", path.display(), link));
                         }
                     }
-                    rest = &rest[pos+2+end+1..];
+                    rest = &rest[pos + 2 + end + 1..];
                 } else {
                     break;
                 }
@@ -30,7 +39,7 @@ fn check_file(path: &Path, root: &Path, bad: &mut Vec<String>) {
 }
 
 fn main() {
-    let root = env::args().nth(1).unwrap_or_else(|| "docs".into());
+    let root = env::args().nth(1).unwrap_or_else(|| ".".into());
     let root_path = PathBuf::from(&root);
     let mut bad = Vec::new();
     let mut stack = vec![root_path.clone()];
@@ -41,7 +50,9 @@ fn main() {
                 if e.is_dir() {
                     stack.push(e);
                 } else if e.extension().map(|s| s == "md").unwrap_or(false) {
-                    check_file(&e, &root_path, &mut bad);
+                    check_file(&e, &root_path, &mut bad, false);
+                } else if e.extension().map(|s| s == "rs").unwrap_or(false) {
+                    check_file(&e, &root_path, &mut bad, true);
                 }
             }
         }

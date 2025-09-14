@@ -8,6 +8,7 @@ pub mod header;
 pub mod light_client;
 pub mod lock;
 pub mod relayer;
+pub mod token_bridge;
 pub mod unlock;
 
 use header::PowHeader;
@@ -16,6 +17,7 @@ use relayer::RelayerSet;
 
 pub use header::PowHeader as BridgeHeader;
 pub use relayer::{Relayer, RelayerSet as Relayers};
+pub use token_bridge::TokenBridge;
 
 #[cfg(feature = "telemetry")]
 use once_cell::sync::Lazy;
