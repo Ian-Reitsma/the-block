@@ -1,5 +1,5 @@
 use super::constants::{DIFFICULTY_CLAMP_FACTOR, TARGET_SPACING_MS};
-use crate::governance::params::Params;
+use crate::governance::Params;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     DIFFICULTY_WINDOW_LONG, DIFFICULTY_WINDOW_MED, DIFFICULTY_WINDOW_SHORT,

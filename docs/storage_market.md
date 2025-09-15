@@ -9,13 +9,16 @@ and retention period.
 
 ## Contracts
 Clients split files into erasure-coded shards and allocate them across
-providers. Each `StorageContract` tracks the provider, shard count, pricing,
-and retention window. Contracts are funded from CT balances and only pay for
-successful storage.
+providers using reputation-weighted Lagrange coding. Each `StorageContract`
+tracks the provider, shard count, pricing, retention window, and next payment
+block. Contracts are funded from CT/IT balances via the wallet CLI
+(`blockctl storage upload`), reserving `price_per_block * retention` upfront and
+only paying for successful storage.
 
 ## Proof of Retrievability
-Clients may issue challenges to providers. Failure to respond results in a
-slashing event and is tracked via the `retrieval_failure_total` metric.
+Clients may issue random chunk challenges to providers. Successful proofs
+increment `retrieval_success_total`; failures result in slashing, removal from
+allocation sets, and bump `retrieval_failure_total`.
 
 ## RPC Endpoints
 - `storage_upload` registers a new contract.
@@ -23,4 +26,9 @@ slashing event and is tracked via the `retrieval_failure_total` metric.
 
 ## Metrics
 - `storage_contract_created_total` counts new contracts.
+- `retrieval_success_total` counts successful challenges.
 - `retrieval_failure_total` counts failed challenges.
+
+## Explorer
+The explorer exposes `/storage/providers` with aggregated provider capacity
+and reputation statistics, joining contract data with registered offers.

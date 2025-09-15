@@ -51,6 +51,7 @@ toml = "0.8"
 tar = "0.4"
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"] }
+jsonrpc-core = "18"
 flate2 = "1"
 indexmap = "2"
 clap = { version = "4", features = ["derive"] }
@@ -164,6 +165,14 @@ harness = false
 
 [[bench]]
 name = "order_book"
+harness = false
+
+[[bench]]
+name = "dilithium"
+harness = false
+
+[[bench]]
+name = "ed25519_verify"
 harness = false
 
 [[test]]

@@ -25,6 +25,14 @@ futures = "0.3"
 light-client = { path = "../crates/light-client" }
 crypto = { path = "../crypto" }
 wasmtime = "24"
+blake3 = "1"
 
 [features]
 quantum = ["wallet"]
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "fee_estimator"
+harness = false

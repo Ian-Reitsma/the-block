@@ -59,6 +59,15 @@ raise multipliers or admission targets. Cross-reference
 [docs/inflation.md](inflation.md) for how these gauges feed the retuning
 mechanics.
 
+## SNARK Receipts
+
+Workloads may include Groth16/Plonk proofs for their output hashes. The
+`ExecutionReceipt` carries an optional `proof` field; when present the scheduler
+verifies it with `compute_market::snark::verify` before crediting payment.
+Successful checks increment `snark_verifications_total` and failures bump
+`snark_fail_total`. Receipts without proofs follow the legacy trust-based path
+and remain compatible with existing workloads.
+
 ## Workload Formats
 
 - **Transcode** – Accepts raw bytes representing media to be transcoded. For the
@@ -455,7 +464,7 @@ split.
 ### Querying Admission Parameters
 
 Governance proposals of type `Admission` can retune the budgets at runtime.
-Parameter keys map to fields in `governance::params::Params` and apply via
+Parameter keys map to fields in `governance::Params` and apply via
 `Runtime::set_min_capacity`, `set_fair_share_cap`, and `set_burst_refill_rate`.
 Operators can inspect current values through the CLI:
 

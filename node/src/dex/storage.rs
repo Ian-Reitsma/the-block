@@ -3,6 +3,7 @@
 use super::order_book::{Order, OrderBook};
 use crate::simple_db::SimpleDb;
 use dex::escrow::{Escrow, EscrowId, PaymentProof};
+use dex::amm::Pool;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -76,6 +77,24 @@ impl DexStore {
     pub fn load_escrow_state(&self) -> EscrowState {
         self.db
             .get("escrow")
+            .and_then(|b| bincode::deserialize(&b).ok())
+            .unwrap_or_default()
+    }
+
+    /// Persist an AMM pool under `amm/<id>`.
+    pub fn save_pool(&mut self, id: &str, pool: &Pool) {
+        if let Ok(bytes) = bincode::serialize(pool) {
+            let key = format!("amm/{}", id);
+            let _ = self.db.insert(&key, bytes);
+            self.db.flush();
+        }
+    }
+
+    /// Load an AMM pool, returning default if missing.
+    pub fn load_pool(&self, id: &str) -> Pool {
+        let key = format!("amm/{}", id);
+        self.db
+            .get(&key)
             .and_then(|b| bincode::deserialize(&b).ok())
             .unwrap_or_default()
     }

@@ -219,6 +219,8 @@ enum CourierCmd {
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
+    // Verify build provenance at startup.
+    let _ = the_block::provenance::verify_self();
     let code = match cli.command {
         Commands::Run {
             rpc_addr,

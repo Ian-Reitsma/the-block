@@ -23,10 +23,12 @@ pub fn recent(path: &Path, limit: usize) -> Vec<(u64, u64)> {
             let mut out = Vec::new();
             let mut iter = db.iterator_cf(h, rocksdb::IteratorMode::End);
             while let Some(Ok((k, v))) = iter.next() {
-                if out.len() >= limit { break; }
+                if out.len() >= limit {
+                    break;
+                }
                 if k.len() == 8 && v.len() == 8 {
-                    let height = u64::from_le_bytes(k.try_into().unwrap());
-                    let diff = u64::from_le_bytes(v.try_into().unwrap());
+                    let height = u64::from_le_bytes(k.as_ref().try_into().unwrap());
+                    let diff = u64::from_le_bytes(v.as_ref().try_into().unwrap());
                     out.push((height, diff));
                 }
             }

@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99/100** with vision completion **~75/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99/100** with vision completion **~80/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,7 +16,7 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~82 %
+## 1. Consensus & Core Execution — ~85 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -31,12 +31,13 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Heisenberg + VDF fuse (`node/src/consensus/vdf.rs`) enforces a ≥2-block delay before randomness-dependent transactions execute.
 - Parallel executor and transaction scheduler document concurrency guarantees (`docs/scheduler.md`, `node/src/parallel.rs`, `node/src/scheduler.rs`).
 - Transaction lifecycle, memo handling, and dual fee lanes documented in `docs/transaction_lifecycle.md`.
+- Macro-block checkpointing and per-shard fork choice preserve cross-shard ordering (`node/src/blockchain/macro_block.rs`, `node/src/blockchain/shard_fork_choice.rs`).
 
 **Gaps**
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~85 %
+## 2. Networking & Gossip — ~88 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -50,14 +51,16 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
   - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
     - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`.
-    - Partition watch detects split-brain conditions and stamps gossip with markers (`node/src/net/partition_watch.rs`, `node/src/gossip/relay.rs`).
-    - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
+     - Partition watch detects split-brain conditions and stamps gossip with markers (`node/src/net/partition_watch.rs`, `node/src/gossip/relay.rs`).
+     - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
+    - Shard-aware peer maps and gossip routing limit block broadcasts to interested shards (`node/src/gossip/relay.rs`).
+    - Uptime-based fee rebates tracked in `node/src/net/uptime.rs` with `peer.rebate_status` RPC (`docs/fee_rebates.md`).
 
 **Gaps**
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~80 %
+## 3. Governance & Subsidy Economy — ~82 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -80,7 +83,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — ~76 %
+## 4. Storage & Free‑Read Hosting — ~80 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -90,12 +93,13 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Thread-safe `ReadStats` telemetry and analytics RPC (`node/src/telemetry.rs`, `node/tests/analytics.rs`).
 - WAL-backed `SimpleDb` design in `docs/simple_db.md` underpins DNS cache, chunk gossip, and DEX storage.
 - Rent escrow metrics (`rent_escrow_locked_ct_total`, etc.) exposed in `docs/monitoring.md` with alert thresholds.
+- Reputation-weighted Lagrange allocation and proof-of-retrievability challenges secure storage contracts (`node/src/gateway/storage_alloc.rs`, `storage/src/contract.rs`).
 
 **Gaps**
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — ~78 %
+## 5. Smart‑Contract VM & UTXO/PoW — ~79 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -109,7 +113,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~71 %
+## 6. Compute Marketplace & CBM — ~74 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -118,11 +122,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Price board persistence with metrics (`docs/compute_market.md`).
 - Economic simulator outputs KPIs to CSV (`sim/src`).
 - Durable courier receipts with exponential backoff documented in `docs/compute_market_courier.md` and implemented in `node/src/compute_market/courier.rs`.
+- Groth16/Plonk SNARK verification for compute receipts (`node/src/compute_market/snark.rs`).
 
 **Gaps**
 - Escrowed payments and SLA enforcement remain rudimentary.
 
-## 7. Trust Lines & DEX — ~74 %
+## 7. Trust Lines & DEX — ~77 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -133,17 +138,19 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   `dex escrow release` commands and `dex.escrow_proof` RPC. Telemetry gauges
   `dex_escrow_locked`, `dex_escrow_pending`, and `dex_escrow_total` monitor
   utilisation; `dex_escrow_total` aggregates locked funds across all escrows.
+- Constant-product AMM pools and liquidity mining incentives (`dex/src/amm.rs`, `docs/dex_amm.md`).
 
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~85 %
+## 8. Wallets, Light Clients & KYC — ~86 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
 - Remote signer workflows (`crates/wallet/src/remote_signer.rs`, `docs/wallets.md`).
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
+- Real-time state streaming over WebSockets with zstd snapshots (`docs/light_client_stream.md`, `node/src/rpc/state_stream.rs`).
 - Optional KYC provider wiring (`docs/kyc.md`).
 - Session-key issuance and meta-transaction tooling (`crypto/src/session.rs`, `cli/src/wallet.rs`, `docs/account_abstraction.md`).
 - Telemetry `session_key_issued_total`/`session_key_expired_total` and simulator churn knob (`sim/src/lib.rs`).
@@ -152,19 +159,20 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Multisig flows missing.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — ~45 %
+## 9. Bridges & Cross‑Chain Routing — ~47 %
 
 **Evidence**
 - Lock/unlock bridge contract with relayer proofs (`bridges/src/lib.rs`).
 - Light-client verification checks foreign headers (`docs/bridges.md`).
 - CLI deposit/withdraw flows (`cli/src/main.rs` subcommands).
+- Hardened HTLC script parsing supports SHA3 and RIPEMD encodings (`bridges/src/lib.rs`).
 - Bridge walkthrough in `docs/bridges.md`.
 
 **Gaps**
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~75 %
+## 10. Monitoring, Debugging & Profiling — ~77 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -178,7 +186,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Bridge and VM metrics are sparse.
 - Automated anomaly detection not in place.
 
-## 11. Economic Simulation & Formal Verification — ~35 %
+## 11. Economic Simulation & Formal Verification — ~37 %
 
 **Evidence**
 - Simulation scenarios for inflation/demand/backlog (`sim/src`).
@@ -189,7 +197,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 12. Mobile UX & Contribution Metrics — ~55 %
+## 12. Mobile UX & Contribution Metrics — ~56 %
 
 **Evidence**
 - Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).
@@ -202,4 +210,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑14*
+*Last updated: 2025‑09‑15*

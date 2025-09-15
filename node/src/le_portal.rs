@@ -3,6 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(feature = "telemetry")]
 use crate::telemetry::PRIVACY_SANITIZATION_TOTAL;
 #[cfg(feature = "privacy")]
 use privacy::redaction;
@@ -219,6 +220,7 @@ pub fn sanitize_payload(memo: &mut String, jurisdiction: &str) -> bool {
     #[cfg(not(feature = "privacy"))]
     let changed = false;
     if changed {
+        #[cfg(feature = "telemetry")]
         PRIVACY_SANITIZATION_TOTAL.inc();
     }
     changed

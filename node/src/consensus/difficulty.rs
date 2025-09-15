@@ -1,5 +1,5 @@
 use super::constants::{DIFFICULTY_WINDOW, TARGET_SPACING_MS};
-use crate::governance::params::Params;
+use crate::governance::Params;
 use crate::Block;
 
 /// Compatibility shim delegating to [`difficulty_retune::retune`].

@@ -1,10 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     simple_db::DbDelta, transaction::verify_stateless, Account, Block, Blockchain, TokenBalance,
     TxAdmissionError,
 };
-use ledger::address;
+use ledger::{address, shard::ShardState};
+use state::MerkleTrie;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::BLOCK_APPLY_FAIL_TOTAL;
@@ -83,6 +84,10 @@ pub struct ExecutionContext<'a> {
     account_deltas: Vec<(String, Option<Account>)>,
     /// Database mutations for rollback.
     db_deltas: Vec<DbDelta>,
+    /// Prior shard roots for rollback.
+    shard_root_deltas: Vec<(address::ShardId, Option<[u8; 32]>)>,
+    /// Prior shard heights for rollback.
+    shard_height_deltas: Vec<(address::ShardId, Option<u64>)>,
     committed: bool,
 }
 
@@ -92,6 +97,8 @@ impl<'a> ExecutionContext<'a> {
             chain,
             account_deltas: Vec::new(),
             db_deltas: Vec::new(),
+            shard_root_deltas: Vec::new(),
+            shard_height_deltas: Vec::new(),
             committed: false,
         }
     }
@@ -99,6 +106,7 @@ impl<'a> ExecutionContext<'a> {
     /// Apply state deltas and persist them to the database. Any I/O failure
     /// triggers an automatic rollback when the context drops.
     pub fn apply(&mut self, deltas: Vec<StateDelta>) -> std::io::Result<()> {
+        let mut touched_shards: HashSet<address::ShardId> = HashSet::new();
         for delta in deltas {
             let prev = self
                 .chain
@@ -109,8 +117,22 @@ impl<'a> ExecutionContext<'a> {
             let bytes = bincode::serialize(&delta.account)
                 .unwrap_or_else(|e| panic!("serialize account: {e}"));
             self.chain
-                .db
-                .insert_with_delta(&key, bytes, &mut self.db_deltas)?;
+                .write_shard_state(delta.shard, &key, bytes, &mut self.db_deltas)?;
+            touched_shards.insert(delta.shard);
+        }
+        for shard in touched_shards {
+            let root = shard_state_root(&self.chain.accounts, shard);
+            let prev_root = self.chain.shard_roots.insert(shard, root);
+            self.shard_root_deltas.push((shard, prev_root));
+            let prev_height = self.chain.shard_heights.get(&shard).copied();
+            self.chain
+                .shard_heights
+                .insert(shard, prev_height.unwrap_or(0) + 1);
+            self.shard_height_deltas.push((shard, prev_height));
+            let key = ShardState::db_key();
+            let bytes = ShardState::new(shard, root).to_bytes();
+            self.chain
+                .write_shard_state(shard, key, bytes, &mut self.db_deltas)?;
         }
         Ok(())
     }
@@ -137,6 +159,26 @@ impl Drop for ExecutionContext<'_> {
                     }
                 }
             }
+            for (shard, prev) in self.shard_root_deltas.drain(..).rev() {
+                match prev {
+                    Some(root) => {
+                        self.chain.shard_roots.insert(shard, root);
+                    }
+                    None => {
+                        self.chain.shard_roots.remove(&shard);
+                    }
+                }
+            }
+            for (shard, prev) in self.shard_height_deltas.drain(..).rev() {
+                match prev {
+                    Some(h) => {
+                        self.chain.shard_heights.insert(shard, h);
+                    }
+                    None => {
+                        self.chain.shard_heights.remove(&shard);
+                    }
+                }
+            }
         }
     }
 }
@@ -146,4 +188,22 @@ pub fn commit(chain: &mut Blockchain, deltas: Vec<StateDelta>) -> std::io::Resul
     let mut ctx = ExecutionContext::new(chain);
     ctx.apply(deltas)?;
     ctx.commit()
+}
+
+pub(crate) fn shard_state_root(
+    accounts: &HashMap<String, Account>,
+    shard: address::ShardId,
+) -> [u8; 32] {
+    let mut trie = MerkleTrie::new();
+    for (addr, acc) in accounts
+        .iter()
+        .filter(|(addr, _)| address::shard_id(addr) == shard)
+    {
+        let mut data = Vec::new();
+        data.extend_from_slice(&acc.balance.consumer.to_le_bytes());
+        data.extend_from_slice(&acc.balance.industrial.to_le_bytes());
+        data.extend_from_slice(&acc.nonce.to_le_bytes());
+        trie.insert(addr.as_bytes(), &data);
+    }
+    trie.root_hash()
 }

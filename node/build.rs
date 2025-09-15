@@ -49,4 +49,13 @@ fn main() {
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR missing");
     let dest = Path::new(&out_dir).join("genesis_hash.txt");
     fs::write(dest, digest).expect("write genesis hash");
+
+    // Embed the current git commit hash for runtime provenance checks.
+    if let Ok(out) = Command::new("git").args(["rev-parse", "HEAD"]).output() {
+        if out.status.success() {
+            if let Ok(s) = String::from_utf8(out.stdout) {
+                println!("cargo:rustc-env=BUILD_BIN_HASH={}", s.trim());
+            }
+        }
+    }
 }

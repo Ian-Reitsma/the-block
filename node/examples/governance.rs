@@ -1,4 +1,4 @@
-use the_block::governance::params::Params;
+use the_block::governance::Params;
 
 fn main() {
     let params = Params::default();
