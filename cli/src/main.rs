@@ -11,11 +11,15 @@ mod debug_cli;
 mod dex;
 mod difficulty;
 mod fee_estimator;
+mod gateway;
 mod gov;
 mod htlc;
+mod light_client;
 mod light_sync;
 mod net;
+mod logs;
 mod service_badge;
+mod scheduler;
 mod snark;
 mod storage;
 mod telemetry;
@@ -28,16 +32,20 @@ use compute::ComputeCmd;
 use config::ConfigCmd;
 use dex::DexCmd;
 use difficulty::DifficultyCmd;
+use gateway::GatewayCmd;
 use gov::GovCmd;
 use htlc::HtlcCmd;
+use light_client::LightClientCmd;
 use light_sync::LightSyncCmd;
 use net::NetCmd;
+use logs::LogCmd;
 use service_badge::ServiceBadgeCmd;
+use scheduler::SchedulerCmd;
 use snark::SnarkCmd;
 use storage::StorageCmd;
 use telemetry::TelemetryCmd;
-use version::VersionCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
+use version::VersionCmd;
 #[cfg(feature = "quantum")]
 use wallet::WalletCmd;
 
@@ -106,6 +114,16 @@ enum Commands {
         #[command(subcommand)]
         action: NetCmd,
     },
+    /// Gateway operations
+    Gateway {
+        #[command(subcommand)]
+        action: GatewayCmd,
+    },
+    /// Log search utilities
+    Logs {
+        #[command(subcommand)]
+        action: LogCmd,
+    },
     /// Difficulty utilities
     Difficulty {
         #[command(subcommand)]
@@ -148,6 +166,11 @@ enum Commands {
         #[command(subcommand)]
         action: StorageCmd,
     },
+    /// Scheduler diagnostics
+    Scheduler {
+        #[command(subcommand)]
+        action: SchedulerCmd,
+    },
     /// SNARK tooling
     Snark {
         #[command(subcommand)]
@@ -157,6 +180,11 @@ enum Commands {
     LightSync {
         #[command(subcommand)]
         action: LightSyncCmd,
+    },
+    /// Light client utilities
+    LightClient {
+        #[command(subcommand)]
+        action: LightClientCmd,
     },
     /// AI diagnostics
     Ai {
@@ -225,6 +253,8 @@ fn main() {
         Commands::Dex { action } => dex::handle(action),
         Commands::Compute { action } => compute::handle(action),
         Commands::Net { action } => net::handle(action),
+        Commands::Gateway { action } => gateway::handle(action),
+        Commands::Logs { action } => logs::handle(action),
         Commands::Difficulty { action } => difficulty::handle(action),
         Commands::Gov { action } => gov::handle(action),
         Commands::Config { action } => config::handle(action),
@@ -234,8 +264,10 @@ fn main() {
         Commands::ServiceBadge { action } => service_badge::handle(action),
         Commands::Htlc { action } => htlc::handle(action),
         Commands::Storage { action } => storage::handle(action),
+        Commands::Scheduler { action } => scheduler::handle(action),
         Commands::Snark { action } => snark::handle(action),
         Commands::LightSync { action } => light_sync::handle(action),
+        Commands::LightClient { action } => light_client::handle(action),
         Commands::Ai { action } => ai::handle(action),
         Commands::Fees { samples } => {
             let mut est = fee_estimator::RollingMedianEstimator::new(21);

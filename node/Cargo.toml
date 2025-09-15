@@ -107,9 +107,10 @@ bytes = "1"
 lru = "0.11"
 parking_lot = "0.12"
 tracing-chrome = "0.6"
-quinn = { version = "0.10", features = ["rustls"], optional = true }
-rcgen = { version = "0.12", optional = true }
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
+ quinn = { version = "0.10", features = ["rustls"], optional = true }
+ rcgen = { version = "0.12", optional = true }
+ rustls = { version = "0.21", features = ["dangerous_configuration"] }
+ s2n-quic = { version = "1", optional = true }
 regex = "1"
 terminal_size = "0.2"
 wasmtime = "24"
@@ -126,8 +127,9 @@ pq-crypto = ["pqcrypto-dilithium"]
 bluetooth = []
 gpu = []
 gateway = []
-quic = ["quinn", "rcgen"]
+ quic = ["quinn", "rcgen", "s2n-quic"]
 privacy = ["dep:privacy"]
+reentrant_scheduler = []
 
 [package.metadata.maturin]
 features = ["pyo3/extension-module", "pyo3/auto-initialize", "telemetry"]
@@ -150,6 +152,7 @@ insta = { version = "1", features = ["glob"] }
 axum = { version = "0.7", features = ["json"] }
 sha3 = "0.10"
 wat = "1"
+rusqlite = { version = "0.30", features = ["bundled"] }
 
 [[bench]]
 name = "startup_rebuild"

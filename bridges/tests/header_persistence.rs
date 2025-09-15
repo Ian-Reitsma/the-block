@@ -2,7 +2,7 @@ use bridges::{
     header::PowHeader,
     light_client::{header_hash, Header, Proof},
     relayer::RelayerSet,
-    Bridge, BridgeConfig, RelayerProof,
+    Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
 use tempfile::tempdir;
 
@@ -40,11 +40,31 @@ fn persists_and_loads_headers() {
     let mut bridge = Bridge::new(cfg.clone());
     let mut relayers = RelayerSet::default();
     relayers.stake("r1", 10);
+    relayers.stake("r2", 10);
     let (hdr, pf) = sample();
-    let rp = RelayerProof::new("r1", "alice", 5);
-    assert!(bridge.deposit_with_relayer(&mut relayers, "r1", "alice", 5, &hdr, &pf, &rp));
+    let bundle = RelayerBundle::new(vec![
+        RelayerProof::new("r1", "alice", 5),
+        RelayerProof::new("r2", "alice", 5),
+    ]);
+    assert!(bridge.deposit_with_relayer(
+        &mut relayers,
+        "r1",
+        "alice",
+        5,
+        &hdr,
+        &pf,
+        &bundle
+    ));
     drop(bridge);
     let mut bridge2 = Bridge::new(cfg);
     // second deposit with same header should fail due to persisted header
-    assert!(!bridge2.deposit_with_relayer(&mut relayers, "r1", "alice", 5, &hdr, &pf, &rp));
+    assert!(!bridge2.deposit_with_relayer(
+        &mut relayers,
+        "r1",
+        "alice",
+        5,
+        &hdr,
+        &pf,
+        &bundle
+    ));
 }

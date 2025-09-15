@@ -221,6 +221,10 @@ async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     // Verify build provenance at startup.
     let _ = the_block::provenance::verify_self();
+    if let Err(err) = the_block::governance::ensure_release_authorized(env!("BUILD_BIN_HASH")) {
+        eprintln!("startup aborted: {err}");
+        return std::process::ExitCode::FAILURE;
+    }
     let code = match cli.command {
         Commands::Run {
             rpc_addr,

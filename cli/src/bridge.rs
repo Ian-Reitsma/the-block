@@ -1,11 +1,11 @@
-use clap::Subcommand;
-use std::fs;
-use std::path::PathBuf;
-
 use bridges::{
     light_client::{header_hash, Header, Proof},
-    Bridge, RelayerProof,
+    Bridge, RelayerBundle, RelayerProof, RelayerSet,
 };
+use clap::Subcommand;
+use hex;
+use std::fs;
+use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum BridgeCmd {
@@ -13,6 +13,8 @@ pub enum BridgeCmd {
     Deposit {
         user: String,
         amount: u64,
+        #[arg(long, value_delimiter = ',', required = true)]
+        relayers: Vec<String>,
         #[arg(long, default_value = "header.json")]
         header: String,
         #[arg(long, default_value = "proof.json")]
@@ -20,14 +22,43 @@ pub enum BridgeCmd {
         #[arg(long, default_value = "bridge.bin")]
         state: String,
     },
-    /// Withdraw using relayer proof
+    /// Withdraw using relayer bundle
     Withdraw {
         user: String,
         amount: u64,
-        relayer: String,
+        #[arg(long, value_delimiter = ',', required = true)]
+        relayers: Vec<String>,
         #[arg(long, default_value = "bridge.bin")]
         state: String,
     },
+    /// Challenge a pending withdrawal commitment
+    Challenge {
+        commitment: String,
+        #[arg(long, default_value = "bridge.bin")]
+        state: String,
+    },
+}
+
+fn load_state(path: &PathBuf) -> Bridge {
+    if path.exists() {
+        let bytes = fs::read(path).expect("read bridge state");
+        bincode::deserialize(&bytes).unwrap_or_default()
+    } else {
+        Bridge::default()
+    }
+}
+
+fn save_state(path: &PathBuf, bridge: &Bridge) {
+    let bytes = bincode::serialize(bridge).expect("serialize bridge state");
+    fs::write(path, bytes).expect("write bridge state");
+}
+
+fn make_bundle(user: &str, amount: u64, relayers: &[String]) -> RelayerBundle {
+    let proofs = relayers
+        .iter()
+        .map(|id| RelayerProof::new(id, user, amount))
+        .collect();
+    RelayerBundle::new(proofs)
 }
 
 pub fn handle(action: BridgeCmd) {
@@ -35,24 +66,26 @@ pub fn handle(action: BridgeCmd) {
         BridgeCmd::Deposit {
             user,
             amount,
+            relayers,
             header,
             proof,
             state,
         } => {
+            if relayers.is_empty() {
+                eprintln!("at least one relayer must be provided");
+                return;
+            }
             let path = PathBuf::from(&state);
-            let mut bridge = if path.exists() {
-                let bytes = fs::read(&path).expect("read bridge state");
-                bincode::deserialize(&bytes).unwrap_or_default()
-            } else {
-                Bridge::default()
-            };
+            let mut bridge = load_state(&path);
             let header_str = fs::read_to_string(&header).expect("read header");
             let header: Header = serde_json::from_str(&header_str).expect("parse header");
             let proof_str = fs::read_to_string(&proof).expect("read proof");
             let proof: Proof = serde_json::from_str(&proof_str).expect("parse proof");
-            if bridge.deposit_verified(&user, amount, &header, &proof) {
-                let bytes = bincode::serialize(&bridge).expect("serialize");
-                fs::write(&path, bytes).expect("write bridge state");
+            let mut relayer_set = RelayerSet::default();
+            let bundle = make_bundle(&user, amount, &relayers);
+            let primary = relayers.first().cloned().unwrap();
+            if bridge.deposit_with_relayer(&mut relayer_set, &primary, &user, amount, &header, &proof, &bundle) {
+                save_state(&path, &bridge);
                 let dir = PathBuf::from("state/bridge_headers");
                 fs::create_dir_all(&dir).expect("make header dir");
                 let record = serde_json::to_string(&serde_json::json!({
@@ -64,30 +97,50 @@ pub fn handle(action: BridgeCmd) {
                 fs::write(dir.join(name), record).expect("store header");
                 println!("locked");
             } else {
-                eprintln!("invalid proof");
+                eprintln!("invalid proof bundle");
             }
         }
         BridgeCmd::Withdraw {
             user,
             amount,
-            relayer,
+            relayers,
             state,
         } => {
-            let path = PathBuf::from(&state);
-            let mut bridge = if path.exists() {
-                let bytes = fs::read(&path).expect("read bridge state");
-                bincode::deserialize(&bytes).unwrap_or_default()
-            } else {
-                Bridge::default()
-            };
-            let proof = RelayerProof::new(&relayer, &user, amount);
-            if bridge.unlock(&user, amount, &proof) {
-                let bytes = bincode::serialize(&bridge).expect("serialize");
-                fs::write(&path, bytes).expect("write bridge state");
-                println!("unlocked");
-            } else {
-                eprintln!("invalid proof or balance");
+            if relayers.is_empty() {
+                eprintln!("at least one relayer must be provided");
+                return;
             }
+            let path = PathBuf::from(&state);
+            let mut bridge = load_state(&path);
+            let mut relayer_set = RelayerSet::default();
+            let bundle = make_bundle(&user, amount, &relayers);
+            let primary = relayers.first().cloned().unwrap();
+            if bridge.unlock_with_relayer(&mut relayer_set, &primary, &user, amount, &bundle) {
+                let commitment = bundle.aggregate_commitment(&user, amount);
+                save_state(&path, &bridge);
+                println!("withdrawal pending: {}", hex::encode(commitment));
+            } else {
+                eprintln!("withdrawal request rejected");
+            }
+        }
+        BridgeCmd::Challenge { commitment, state } => {
+            let path = PathBuf::from(&state);
+            let mut bridge = load_state(&path);
+            let mut relayer_set = RelayerSet::default();
+            if let Ok(bytes) = hex::decode(&commitment) {
+                if bytes.len() == 32 {
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(&bytes);
+                    if bridge.challenge_withdrawal(&mut relayer_set, key) {
+                        save_state(&path, &bridge);
+                        println!("challenge recorded");
+                    } else {
+                        eprintln!("no matching pending withdrawal or already challenged");
+                    }
+                    return;
+                }
+            }
+            eprintln!("invalid commitment hex");
         }
     }
 }

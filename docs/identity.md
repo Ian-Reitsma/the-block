@@ -21,3 +21,9 @@ signature when binding a handle to the public key's hex address.
 | `E_BAD_SIG`    | signature verification failed |
 | `E_LOW_NONCE`  | nonce not greater than previous |
 | `E_RESERVED`   | handle uses a reserved prefix |
+
+## Decentralized Identifier Anchors
+
+DID documents may be anchored on-chain by submitting the document hash via `did anchor`. The registry records the latest hash per identity, preventing replay of older documents.
+
+`did resolve` returns the currently anchored document for verification. Each successful anchor increments the `did_anchor_total` counter and is visible in explorer views for auditing.

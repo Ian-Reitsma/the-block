@@ -1,4 +1,5 @@
 use super::ParamKey;
+use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
 use bincode;
 use serde::{Deserialize, Serialize};
@@ -58,6 +59,9 @@ impl<'a> Runtime<'a> {
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
         self.bc.params.ai_diagnostics_enabled = v as i64;
     }
+    pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
+        scheduler::set_weight(class, weight as u32);
+    }
 }
 
 pub struct ParamSpec {
@@ -105,6 +109,9 @@ pub struct Params {
     pub kalman_r_short: i64,
     pub kalman_r_med: i64,
     pub kalman_r_long: i64,
+    pub scheduler_weight_gossip: i64,
+    pub scheduler_weight_compute: i64,
+    pub scheduler_weight_storage: i64,
 }
 
 impl Default for Params {
@@ -139,6 +146,9 @@ impl Default for Params {
             kalman_r_short: 1,
             kalman_r_med: 3,
             kalman_r_long: 8,
+            scheduler_weight_gossip: 3,
+            scheduler_weight_compute: 2,
+            scheduler_weight_storage: 1,
         }
     }
 }
@@ -189,6 +199,30 @@ fn apply_kalman_r_med(v: i64, p: &mut Params) -> Result<(), ()> {
 
 fn apply_kalman_r_long(v: i64, p: &mut Params) -> Result<(), ()> {
     p.kalman_r_long = v;
+    Ok(())
+}
+
+fn apply_scheduler_weight_gossip(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.scheduler_weight_gossip = v;
+    Ok(())
+}
+
+fn apply_scheduler_weight_compute(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.scheduler_weight_compute = v;
+    Ok(())
+}
+
+fn apply_scheduler_weight_storage(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.scheduler_weight_storage = v;
     Ok(())
 }
 fn apply_fairshare_global_max(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -268,7 +302,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 20] = [
+    static REGS: [ParamSpec; 23] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -531,6 +565,45 @@ pub fn registry() -> &'static [ParamSpec] {
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_kalman_r_long,
             apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::SchedulerWeightGossip,
+            default: 3,
+            min: 0,
+            max: 16,
+            unit: "tickets",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_scheduler_weight_gossip,
+            apply_runtime: |v, rt| {
+                rt.set_scheduler_weight(ServiceClass::Gossip, v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::SchedulerWeightCompute,
+            default: 2,
+            min: 0,
+            max: 16,
+            unit: "tickets",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_scheduler_weight_compute,
+            apply_runtime: |v, rt| {
+                rt.set_scheduler_weight(ServiceClass::Compute, v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::SchedulerWeightStorage,
+            default: 1,
+            min: 0,
+            max: 16,
+            unit: "tickets",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_scheduler_weight_storage,
+            apply_runtime: |v, rt| {
+                rt.set_scheduler_weight(ServiceClass::Storage, v as u64);
+                Ok(())
+            },
         },
     ];
     &REGS

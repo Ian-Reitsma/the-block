@@ -281,6 +281,99 @@ pub static MEMPOOL_SIZE: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
+pub static MEMPOOL_EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "mempool_evictions_total",
+        "Total transactions evicted from the mempool",
+    )
+    .unwrap_or_else(|e| panic!("counter mempool evictions: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mempool evictions: {e}"));
+    c
+});
+
+pub static FEE_FLOOR_CURRENT: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "fee_floor_current",
+        "Current dynamically computed fee floor",
+    )
+    .unwrap_or_else(|e| panic!("gauge fee floor current: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry fee floor current: {e}"));
+    g
+});
+
+pub static DID_ANCHOR_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("did_anchor_total", "Total number of anchored DID documents")
+        .unwrap_or_else(|e| panic!("counter did anchor: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry did anchor: {e}"));
+    c
+});
+
+pub static PROOF_REBATES_CLAIMED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("proof_rebates_claimed_total", "Total proof rebate claims")
+        .unwrap_or_else(|e| panic!("counter proof rebates claimed: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry proof rebates claimed: {e}"));
+    c
+});
+
+pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "proof_rebates_amount_total",
+        "Total CT awarded via proof rebates",
+    )
+    .unwrap_or_else(|e| panic!("counter proof rebates amount: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry proof rebates amount: {e}"));
+    c
+});
+
+pub static MOBILE_CACHE_HIT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("mobile_cache_hit_total", "Total mobile cache hits")
+        .unwrap_or_else(|e| panic!("counter mobile cache hit: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache hit: {e}"));
+    c
+});
+
+pub static MOBILE_TX_QUEUE_DEPTH: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "mobile_tx_queue_depth",
+        "Queued mobile transactions awaiting send",
+    )
+    .unwrap_or_else(|e| panic!("gauge mobile tx queue depth: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile tx queue depth: {e}"));
+    g
+});
+
+pub static SNAPSHOT_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("snapshot_created_total", "Total snapshots created")
+        .unwrap_or_else(|e| panic!("counter snapshot created: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry snapshot created: {e}"));
+    c
+});
+
+pub static SNAPSHOT_RESTORE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("snapshot_restore_fail_total", "Failed snapshot restores")
+        .unwrap_or_else(|e| panic!("counter snapshot restore fail: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry snapshot restore fail: {e}"));
+    c
+});
+
 pub static SNAPSHOT_INTERVAL: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new("snapshot_interval", "Snapshot interval in blocks")
         .unwrap_or_else(|e| panic!("gauge snapshot interval: {e}"));
@@ -1261,6 +1354,19 @@ pub static SCHEDULER_MATCH_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     h
 });
 
+pub static SCHEDULER_CLASS_WAIT_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "scheduler_class_wait_seconds",
+        "Wait time per service class before execution",
+    );
+    let h = HistogramVec::new(opts, &["class"])
+        .unwrap_or_else(|e| panic!("histogram vec scheduler class wait: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry scheduler class wait: {e}"));
+    h
+});
+
 pub static SCHEDULER_REPUTATION_SCORE: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "scheduler_provider_reputation",
@@ -1677,6 +1783,30 @@ pub static GOV_VOTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry gov_votes_total: {e}"));
+    c
+});
+
+pub static RELEASE_VOTES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new("release_votes_total", "Release votes by choice"),
+        &["choice"],
+    )
+    .unwrap_or_else(|e| panic!("counter release_votes_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry release_votes_total: {e}"));
+    c
+});
+
+pub static RELEASE_INSTALLS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "release_installs_total",
+        "Nodes booted with governance-approved releases",
+    )
+    .unwrap_or_else(|e| panic!("counter release_installs_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry release_installs_total: {e}"));
     c
 });
 
@@ -2841,6 +2971,15 @@ pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static QUIC_RETRANSMIT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("quic_retransmit_total", "Total QUIC packet retransmissions")
+        .unwrap_or_else(|e| panic!("counter quic retransmit: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic retransmit: {e}"));
+    c
+});
+
 pub static QUIC_DISCONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("quic_disconnect_total", "QUIC disconnects by error code"),
@@ -2951,6 +3090,18 @@ pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static LOG_ENTRIES_INDEXED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "log_entries_indexed_total",
+        "Total JSON log entries processed by the offline indexer",
+    )
+    .unwrap_or_else(|e| panic!("counter log_entries_indexed_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry log_entries_indexed_total: {e}"));
     c
 });
 

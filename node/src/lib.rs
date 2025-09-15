@@ -10,8 +10,8 @@
 //! through dual Consumer/Industrial tokens and inflation-funded subsidies. See
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
-use crate::consensus::constants::DIFFICULTY_WINDOW;
 use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, process};
+use crate::consensus::constants::DIFFICULTY_WINDOW;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use blake3;
@@ -81,6 +81,7 @@ pub mod gateway;
 pub mod gossip;
 pub mod identity;
 pub mod kyc;
+pub mod light_client;
 pub mod localnet;
 pub mod net;
 pub mod partition_recover;
@@ -97,9 +98,9 @@ pub mod tx;
 pub mod web;
 
 pub mod logging;
+pub mod provenance;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
-pub mod provenance;
 #[cfg(feature = "telemetry")]
 pub use telemetry::{
     gather_metrics, redact_at_rest, serve_metrics, serve_metrics_with_shutdown, MetricsServer,

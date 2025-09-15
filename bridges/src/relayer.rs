@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use once_cell::sync::Lazy;
 #[cfg(feature = "telemetry")]
 use prometheus::{IntCounter, Opts, Registry};
+#[cfg(feature = "telemetry")]
+use crate::BRIDGE_SLASHES_TOTAL;
 
 #[cfg(feature = "telemetry")]
 static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
@@ -50,7 +52,10 @@ impl RelayerSet {
             }
             r.slashes += 1;
             #[cfg(feature = "telemetry")]
-            RELAYER_SLASH_TOTAL.inc();
+            {
+                RELAYER_SLASH_TOTAL.inc();
+                BRIDGE_SLASHES_TOTAL.inc();
+            }
         }
     }
 }

@@ -4,9 +4,11 @@ pub mod discovery;
 mod message;
 pub mod peer;
 pub mod peer_metrics_store;
-pub mod uptime;
 #[cfg(feature = "quic")]
 pub mod quic;
+#[cfg(feature = "quic")]
+pub mod transport_quic;
+pub mod uptime;
 #[cfg(not(feature = "quic"))]
 pub mod quic {
     use super::peer::HandshakeError;

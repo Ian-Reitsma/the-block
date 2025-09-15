@@ -1,5 +1,7 @@
 use clap::Subcommand;
-use the_block::governance::{GovStore, Proposal, ProposalStatus, Vote, VoteChoice};
+use the_block::governance::{
+    controller, GovStore, Proposal, ProposalStatus, ReleaseBallot, ReleaseVote, Vote, VoteChoice,
+};
 
 #[derive(Subcommand)]
 pub enum GovCmd {
@@ -20,6 +22,24 @@ pub enum GovCmd {
         id: u64,
         #[arg(long, default_value = "gov.db")]
         state: String,
+    },
+    /// Submit a release vote referencing a signed hash
+    ProposeRelease {
+        hash: String,
+        #[arg(long)]
+        signature: Option<String>,
+        #[arg(long, default_value = "gov.db")]
+        state: String,
+        #[arg(long, default_value_t = 32)]
+        deadline: u64,
+    },
+    /// Cast a vote in favour of a release proposal
+    ApproveRelease {
+        id: u64,
+        #[arg(long, default_value = "gov.db")]
+        state: String,
+        #[arg(long, default_value_t = 1)]
+        weight: u64,
     },
 }
 
@@ -60,6 +80,35 @@ pub fn handle(cmd: GovCmd) {
                 if let Ok(p) = bincode::deserialize::<Proposal>(&raw) {
                     println!("{:?}", p.status);
                 }
+            }
+        }
+        GovCmd::ProposeRelease {
+            hash,
+            signature,
+            state,
+            deadline,
+        } => {
+            let store = GovStore::open(state);
+            let proposal = ReleaseVote::new(hash, signature, "cli".into(), 0, deadline);
+            match controller::submit_release(&store, proposal) {
+                Ok(id) => println!("release proposal {id} submitted"),
+                Err(e) => eprintln!("submit failed: {e}"),
+            }
+        }
+        GovCmd::ApproveRelease { id, state, weight } => {
+            let store = GovStore::open(state);
+            let ballot = ReleaseBallot {
+                proposal_id: id,
+                voter: "cli".into(),
+                choice: VoteChoice::Yes,
+                weight,
+                received_at: 0,
+            };
+            if let Err(e) = controller::vote_release(&store, ballot) {
+                eprintln!("vote failed: {e}");
+            }
+            if let Ok(status) = controller::tally_release(&store, id, 0) {
+                println!("release status: {:?}", status);
             }
         }
     }
