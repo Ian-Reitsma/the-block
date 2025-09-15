@@ -1,4 +1,7 @@
-use super::{registry, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice};
+use super::{
+    registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
+    ReleaseVote, Runtime, Vote, VoteChoice,
+};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_PROPOSALS_PENDING, GOV_ROLLBACK_TOTAL,
@@ -111,6 +114,36 @@ impl GovStore {
             .unwrap_or_else(|e| panic!("open last_activation tree: {e}"))
     }
 
+    fn release_proposals(&self) -> sled::Tree {
+        self.db
+            .open_tree("release_proposals")
+            .unwrap_or_else(|e| panic!("open release_proposals tree: {e}"))
+    }
+
+    fn release_votes(&self, id: u64) -> sled::Tree {
+        self.db
+            .open_tree(format!("release_votes/{id}"))
+            .unwrap_or_else(|e| panic!("open release_votes tree: {e}"))
+    }
+
+    fn release_next_id(&self) -> sled::Tree {
+        self.db
+            .open_tree("release_next_id")
+            .unwrap_or_else(|e| panic!("open release_next_id tree: {e}"))
+    }
+
+    fn approved_releases(&self) -> sled::Tree {
+        self.db
+            .open_tree("approved_releases")
+            .unwrap_or_else(|e| panic!("open approved_releases tree: {e}"))
+    }
+
+    fn release_installs(&self) -> sled::Tree {
+        self.db
+            .open_tree("release_installs")
+            .unwrap_or_else(|e| panic!("open release_installs tree: {e}"))
+    }
+
     pub fn submit(&self, mut p: Proposal) -> sled::Result<u64> {
         if p.new_value < p.min || p.new_value > p.max {
             return Err(sled::Error::Unsupported("out of bounds".into()));
@@ -144,6 +177,41 @@ impl GovStore {
         #[cfg(feature = "telemetry")]
         self.update_pending_gauge()?;
         Ok(next)
+    }
+
+    pub fn submit_release(&self, mut r: ReleaseVote) -> sled::Result<u64> {
+        if r.build_hash.len() != 64 || !r.build_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(sled::Error::Unsupported("invalid release hash".into()));
+        }
+        if self.is_release_hash_known(&r.build_hash)? {
+            return Err(sled::Error::Unsupported(
+                "release hash already known".into(),
+            ));
+        }
+        let next = self
+            .release_next_id()
+            .get("id")?
+            .map(|v| de::<u64>(&v))
+            .transpose()?
+            .unwrap_or(0);
+        self.release_next_id().insert("id", ser(&(next + 1))?)?;
+        r.id = next;
+        self.release_proposals().insert(ser(&r.id)?, ser(&r)?)?;
+        Ok(next)
+    }
+
+    fn is_release_hash_known(&self, hash: &str) -> sled::Result<bool> {
+        if self.approved_releases().get(hash.as_bytes())?.is_some() {
+            return Ok(true);
+        }
+        for item in self.release_proposals().iter() {
+            let (_, v) = item?;
+            let prop: ReleaseVote = de(&v)?;
+            if prop.build_hash == hash {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     #[cfg(feature = "telemetry")]
@@ -181,6 +249,34 @@ impl GovStore {
             };
             GOV_VOTES_TOTAL.with_label_values(&[choice]).inc();
             governance_webhook("vote", proposal_id);
+        }
+        Ok(())
+    }
+
+    pub fn vote_release(&self, proposal_id: u64, mut v: ReleaseBallot) -> sled::Result<()> {
+        let prop_key = ser(&proposal_id)?;
+        let prop_raw = self
+            .release_proposals()
+            .get(&prop_key)?
+            .ok_or_else(|| sled::Error::Unsupported("missing release proposal".into()))?;
+        let prop: ReleaseVote = de(&prop_raw)?;
+        if v.received_at > prop.vote_deadline_epoch {
+            return Err(sled::Error::Unsupported("deadline".into()));
+        }
+        v.proposal_id = proposal_id;
+        self.release_votes(proposal_id)
+            .insert(v.voter.as_bytes(), ser(&v)?)?;
+        #[cfg(feature = "telemetry")]
+        {
+            use crate::telemetry::RELEASE_VOTES_TOTAL;
+            let label = match v.choice {
+                VoteChoice::Yes => "yes",
+                VoteChoice::No => "no",
+                VoteChoice::Abstain => "abstain",
+            };
+            RELEASE_VOTES_TOTAL
+                .with_label_values(&[label])
+                .inc_by(v.weight);
         }
         Ok(())
     }
@@ -254,6 +350,94 @@ impl GovStore {
         #[cfg(feature = "telemetry")]
         self.update_pending_gauge()?;
         Ok(prop.status)
+    }
+
+    pub fn tally_release(
+        &self,
+        proposal_id: u64,
+        current_epoch: u64,
+    ) -> sled::Result<ProposalStatus> {
+        let key = ser(&proposal_id)?;
+        let mut prop: ReleaseVote = de(&self
+            .release_proposals()
+            .get(&key)?
+            .ok_or_else(|| sled::Error::Unsupported("missing release proposal".into()))?)?;
+        if !prop.is_open() {
+            return Ok(prop.status);
+        }
+        if current_epoch < prop.vote_deadline_epoch {
+            return Ok(prop.status);
+        }
+        let mut yes = 0u64;
+        let mut no = 0u64;
+        for item in self.release_votes(proposal_id).iter() {
+            let (_, raw) = item?;
+            let vote: ReleaseBallot = de(&raw)?;
+            match vote.choice {
+                VoteChoice::Yes => yes += vote.weight,
+                VoteChoice::No => no += vote.weight,
+                VoteChoice::Abstain => {}
+            }
+        }
+        if ReleaseVote::quorum_met(yes) && yes >= no {
+            prop.mark_passed(current_epoch);
+            prop.mark_activated(current_epoch);
+            self.release_proposals().insert(&key, ser(&prop)?)?;
+            let record = ApprovedRelease {
+                build_hash: prop.build_hash.clone(),
+                activated_epoch: current_epoch,
+                proposer: prop.proposer.clone(),
+            };
+            self.approved_releases()
+                .insert(prop.build_hash.as_bytes(), ser(&record)?)?;
+            Ok(ProposalStatus::Activated)
+        } else if ReleaseVote::quorum_met(no) && no > yes {
+            prop.mark_rejected();
+            self.release_proposals().insert(&key, ser(&prop)?)?;
+            Ok(ProposalStatus::Rejected)
+        } else {
+            Ok(prop.status)
+        }
+    }
+
+    pub fn approved_release_hashes(&self) -> sled::Result<Vec<ApprovedRelease>> {
+        let mut out = Vec::new();
+        for item in self.approved_releases().iter() {
+            let (_, raw) = item?;
+            out.push(de::<ApprovedRelease>(&raw)?);
+        }
+        Ok(out)
+    }
+
+    pub fn is_release_hash_approved(&self, hash: &str) -> sled::Result<bool> {
+        Ok(self.approved_releases().get(hash.as_bytes())?.is_some())
+    }
+
+    pub fn record_release_install(&self, hash: &str) -> sled::Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.release_installs()
+            .insert(hash.as_bytes(), ser(&now)?)?;
+        #[cfg(feature = "telemetry")]
+        {
+            use crate::telemetry::RELEASE_INSTALLS_TOTAL;
+            RELEASE_INSTALLS_TOTAL.inc();
+        }
+        Ok(())
+    }
+
+    pub fn release_installations(&self) -> sled::Result<Vec<(String, u64)>> {
+        let mut installs = Vec::new();
+        for item in self.release_installs().iter() {
+            let (hash_bytes, ts_bytes) = item?;
+            let hash = String::from_utf8(hash_bytes.to_vec())
+                .map_err(|e| sled::Error::Unsupported(format!("utf8: {e}").into()))?;
+            let ts: u64 = de(&ts_bytes)?;
+            installs.push((hash, ts));
+        }
+        Ok(installs)
     }
 
     pub fn activate_ready(

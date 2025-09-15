@@ -1,5 +1,12 @@
 use bridges::light_client::{header_hash, Header, Proof};
-use bridges::{header::PowHeader, relayer::RelayerSet, Bridge, BridgeConfig, RelayerProof};
+use bridges::{
+    header::PowHeader,
+    relayer::RelayerSet,
+    Bridge,
+    BridgeConfig,
+    RelayerBundle,
+    RelayerProof,
+};
 use tempfile::tempdir;
 
 #[cfg(feature = "telemetry")]
@@ -60,13 +67,25 @@ fn deposit_valid_proof() {
     let proof = sample_proof_valid();
     let mut relayers = RelayerSet::default();
     relayers.stake("r1", 100);
-    let rp = RelayerProof::new("r1", "alice", 50);
+    relayers.stake("r2", 100);
+    let bundle = RelayerBundle::new(vec![
+        RelayerProof::new("r1", "alice", 50),
+        RelayerProof::new("r2", "alice", 50),
+    ]);
     #[cfg(feature = "telemetry")]
     {
         PROOF_VERIFY_SUCCESS_TOTAL.reset();
         PROOF_VERIFY_FAILURE_TOTAL.reset();
     }
-    assert!(bridge.deposit_with_relayer(&mut relayers, "r1", "alice", 50, &header, &proof, &rp));
+    assert!(bridge.deposit_with_relayer(
+        &mut relayers,
+        "r1",
+        "alice",
+        50,
+        &header,
+        &proof,
+        &bundle
+    ));
     assert_eq!(bridge.locked("alice"), 50);
     #[cfg(feature = "telemetry")]
     {
@@ -88,13 +107,25 @@ fn deposit_invalid_proof() {
     bad.path[0][0] ^= 0xff;
     let mut relayers = RelayerSet::default();
     relayers.stake("r1", 100);
-    let rp = RelayerProof::new("r1", "alice", 50);
+    relayers.stake("r2", 100);
+    let bundle = RelayerBundle::new(vec![
+        RelayerProof::new("r1", "alice", 50),
+        RelayerProof::new("r2", "alice", 50),
+    ]);
     #[cfg(feature = "telemetry")]
     {
         PROOF_VERIFY_SUCCESS_TOTAL.reset();
         PROOF_VERIFY_FAILURE_TOTAL.reset();
     }
-    assert!(!bridge.deposit_with_relayer(&mut relayers, "r1", "alice", 50, &header, &bad, &rp));
+    assert!(!bridge.deposit_with_relayer(
+        &mut relayers,
+        "r1",
+        "alice",
+        50,
+        &header,
+        &bad,
+        &bundle
+    ));
     assert_eq!(bridge.locked("alice"), 0);
     #[cfg(feature = "telemetry")]
     {
@@ -115,14 +146,34 @@ fn deposit_replay_fails() {
     let proof = sample_proof_valid();
     let mut relayers = RelayerSet::default();
     relayers.stake("r1", 100);
-    let rp = RelayerProof::new("r1", "alice", 50);
+    relayers.stake("r2", 100);
+    let bundle = RelayerBundle::new(vec![
+        RelayerProof::new("r1", "alice", 50),
+        RelayerProof::new("r2", "alice", 50),
+    ]);
     #[cfg(feature = "telemetry")]
     {
         PROOF_VERIFY_SUCCESS_TOTAL.reset();
         PROOF_VERIFY_FAILURE_TOTAL.reset();
     }
-    assert!(bridge.deposit_with_relayer(&mut relayers, "r1", "alice", 50, &header, &proof, &rp));
-    assert!(!bridge.deposit_with_relayer(&mut relayers, "r1", "alice", 50, &header, &proof, &rp));
+    assert!(bridge.deposit_with_relayer(
+        &mut relayers,
+        "r1",
+        "alice",
+        50,
+        &header,
+        &proof,
+        &bundle
+    ));
+    assert!(!bridge.deposit_with_relayer(
+        &mut relayers,
+        "r1",
+        "alice",
+        50,
+        &header,
+        &proof,
+        &bundle
+    ));
     assert_eq!(bridge.locked("alice"), 50);
     #[cfg(feature = "telemetry")]
     {

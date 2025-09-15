@@ -74,6 +74,8 @@ pub struct NodeConfig {
     pub telemetry: TelemetryConfig,
     #[serde(default)]
     pub jurisdiction: Option<String>,
+    #[serde(default = "default_proof_rebate_rate")]
+    pub proof_rebate_rate: u64,
 }
 
 impl Default for NodeConfig {
@@ -112,6 +114,7 @@ impl Default for NodeConfig {
             quic: None,
             telemetry: TelemetryConfig::default(),
             jurisdiction: None,
+            proof_rebate_rate: default_proof_rebate_rate(),
         }
     }
 }
@@ -198,6 +201,10 @@ fn default_peer_reputation_decay() -> f64 {
 
 fn default_gateway_blocklist() -> String {
     "gateway-blocklist.txt".into()
+}
+
+fn default_proof_rebate_rate() -> u64 {
+    1
 }
 
 fn default_p2p_max_per_sec() -> u32 {

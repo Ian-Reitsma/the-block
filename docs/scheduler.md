@@ -75,3 +75,23 @@ UTXO spends.
 Concurrency is a cross‑cutting concern; new modules should expose their
 read/write requirements explicitly so they can integrate with these
 primitives rather than reinventing bespoke locks.
+
+## 5. Reentrant proof-of-service classes
+
+The runtime now routes gossip, compute, and storage tasks through a reentrant
+scheduler that enforces weighted fairness. Each class receives a configurable
+weight (governed via `scheduler_weight_{gossip,compute,storage}` parameters)
+representing the number of consecutive tasks it may execute before yielding.
+When the optional `reentrant_scheduler` feature flag is disabled the scheduler
+falls back to a simple FIFO queue, ensuring compatibility for lightweight
+builds.
+
+Every queued task records its enqueue instant. When the scheduler dispatches the
+workload it emits `scheduler_class_wait_seconds{class="..."}` so operators can
+verify latency budgets. The CLI exposes the aggregated view via
+`blockctl scheduler stats`, and the RPC endpoint `scheduler.stats` mirrors the
+same payload for dashboards.
+
+For deterministic execution, callers may convert the drained tasks directly into
+`ParallelExecutor` groups via `ServiceScheduler::execute_ready`, enabling
+parallel execution without sacrificing fairness between classes.

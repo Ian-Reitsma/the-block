@@ -34,6 +34,7 @@ use tokio::time::{timeout, Duration};
 
 pub mod ledger;
 pub mod limiter;
+pub mod scheduler;
 use limiter::{ClientState, RpcClientErrorCode};
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -825,9 +826,9 @@ fn dispatch(
                         message: "invalid params",
                     })
                 })?;
-            let rproof = req
+            let proofs = req
                 .params
-                .get("relayer_proof")
+                .get("relayer_proofs")
                 .ok_or(RpcError {
                     code: -32602,
                     message: "invalid params",
@@ -838,7 +839,54 @@ fn dispatch(
                         message: "invalid params",
                     })
                 })?;
-            bridge::verify_deposit(relayer, user, amount, header, proof, rproof)?
+            bridge::verify_deposit(relayer, user, amount, header, proof, proofs)?
+        }
+        "bridge.request_withdrawal" => {
+            let relayer = req
+                .params
+                .get("relayer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let user = req
+                .params
+                .get("user")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let amount = req
+                .params
+                .get("amount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let proofs = req
+                .params
+                .get("relayer_proofs")
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })
+                .and_then(|v| {
+                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                        code: -32602,
+                        message: "invalid params",
+                    })
+                })?;
+            bridge::request_withdrawal(relayer, user, amount, proofs)?
+        }
+        "bridge.challenge_withdrawal" => {
+            let commitment = req
+                .params
+                .get("commitment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            bridge::challenge_withdrawal(commitment)?
+        }
+        "bridge.finalize_withdrawal" => {
+            let commitment = req
+                .params
+                .get("commitment")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            bridge::finalize_withdrawal(commitment)?
         }
         "localnet.submit_receipt" => {
             let hex = req
@@ -1458,6 +1506,7 @@ fn dispatch(
         }
         "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
         "compute_market.scheduler_stats" => compute_market::scheduler_stats(),
+        "scheduler.stats" => scheduler::stats(),
         "compute.job_status" => {
             let job_id = req
                 .params

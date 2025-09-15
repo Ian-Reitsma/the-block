@@ -76,13 +76,13 @@ Relayers must sign the serialized `LockProof` with their Ed25519 key. The contra
 
 ## Relayer Workflow & Incentives
 
-Relayers stake native tokens to participate in bridge operations. Each `Relayer` maintains a bonded `stake` and a `slashes` counter. When a deposit is submitted via the `bridge.verify_deposit` RPC, the relayer's proof is checked:
+Relayers stake native tokens to participate in bridge operations. Each `Relayer` maintains a bonded `stake` and a `slashes` counter. Deposits now require a quorum of approvals: the `bridge.verify_deposit` RPC accepts a `RelayerBundle` containing multiple proofs and validates that at least `BridgeConfig::relayer_quorum` entries check out.
 
-1. The relayer commitment is recomputed and compared against the supplied `RelayerProof`.
+1. Each proof in the bundle is recomputed; invalid signers are slashed immediately and surfaced in `bridge_slashes_total`.
 2. `PowHeader` encapsulates an external header and lightweight PoW target; `verify_deposit` rejects headers that fail the `verify_pow` check.
 3. The Merkle path is validated and the header JSON recorded to prevent replays.
 
-Invalid submissions increment `bridge_invalid_proof_total`, slash one unit of stake, and bump the `relayer_slash_total` counter. Operators can query current collateral via `bridge.relayer_status`.
+Invalid submissions increment `bridge_invalid_proof_total`, slash one unit of stake, and bump both the `relayer_slash_total` and `bridge_slashes_total` counters. Operators can query current collateral via `bridge.relayer_status` and inspect pending withdrawals through the explorer's `bridge_challenges` view.
 
 `BridgeConfig` exposes per-chain settings such as `confirm_depth` and `fee_per_byte`, allowing runtime tuning without recompilation.
 
@@ -98,13 +98,19 @@ blockctl bridge deposit \
   --proof proof.json
 ```
 
-After the lock is observed and proven on Ethereum, unlock back on The‑Block using a relayer proof:
+After the lock is observed and proven on Ethereum, unlock back on The‑Block using a multi-relayer proof bundle. Withdrawals enter a challenge window; provide the relayer list up front and monitor the returned commitment:
 
 ```bash
 blockctl bridge withdraw \
   --user alice \
   --amount 50 \
-  --relayer bob
+  --relayers r1,r2
+```
+
+If a challenge is required, submit it with the commitment hash returned by the CLI:
+
+```bash
+blockctl bridge challenge --commitment <hex>
 ```
 
 `header.json` and `proof.json` follow the formats above and are consumed directly by the CLI.

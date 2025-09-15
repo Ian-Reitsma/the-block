@@ -62,13 +62,25 @@ impl Relay {
 
     /// Broadcast a message to a random subset of peers using default sender.
     pub fn broadcast(&self, msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {
-        self.broadcast_with(msg, peers, |(addr, transport, cert), m| match transport {
-            Transport::Tcp => {
-                let _ = send_msg(addr, m);
-            }
-            Transport::Quic => {
+        let serialized = bincode::serialize(msg).unwrap_or_default();
+        let large = serialized.len() > 1024;
+        self.broadcast_with(msg, peers, |(addr, transport, cert), m| {
+            if large {
                 if let Some(c) = cert {
                     let _ = send_quic_msg(addr, &c, m);
+                } else {
+                    let _ = send_msg(addr, m);
+                }
+            } else {
+                match transport {
+                    Transport::Tcp => {
+                        let _ = send_msg(addr, m);
+                    }
+                    Transport::Quic => {
+                        if let Some(c) = cert {
+                            let _ = send_quic_msg(addr, &c, m);
+                        }
+                    }
                 }
             }
         });

@@ -3,7 +3,7 @@ use crate::light_client::{header_hash, verify, Header};
 use crate::Bridge;
 #[cfg(feature = "telemetry")]
 use crate::BRIDGE_INVALID_PROOF_TOTAL;
-use crate::{light_client::Proof, relayer::RelayerSet, RelayerProof};
+use crate::{light_client::Proof, relayer::RelayerSet, RelayerBundle};
 
 pub fn lock(
     bridge: &mut Bridge,
@@ -13,9 +13,19 @@ pub fn lock(
     amount: u64,
     header: &PowHeader,
     proof: &Proof,
-    rproof: &RelayerProof,
+    bundle: &RelayerBundle,
 ) -> bool {
-    if !rproof.verify(user, amount) || !verify_pow(header) {
+    let (valid, invalid) = bundle.verify(user, amount);
+    for rel in invalid {
+        relayers.slash(&rel, 1);
+    }
+    if valid < bridge.cfg.relayer_quorum
+        || !bundle
+            .relayer_ids()
+            .iter()
+            .any(|id| id == relayer)
+        || !verify_pow(header)
+    {
         #[cfg(feature = "telemetry")]
         {
             BRIDGE_INVALID_PROOF_TOTAL.inc();

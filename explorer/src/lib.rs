@@ -12,13 +12,20 @@ use the_block::{
 };
 
 mod ai_summary;
+pub mod bridge_view;
 pub mod compute_view;
 pub mod dex_view;
 pub mod htlc_view;
+pub mod release_view;
 pub mod snark_view;
 pub mod storage_view;
-pub fn amm_stats() -> Vec<(String, u128, u128)> { Vec::new() }
-pub fn qos_tiers() -> Vec<(String, u64)> { Vec::new() }
+pub use release_view::{release_history, ReleaseHistoryEntry};
+pub fn amm_stats() -> Vec<(String, u128, u128)> {
+    Vec::new()
+}
+pub fn qos_tiers() -> Vec<(String, u64)> {
+    Vec::new()
+}
 pub use ai_summary::summarize_block;
 pub mod dkg_view;
 pub mod jurisdiction_view;
@@ -112,6 +119,15 @@ pub struct BridgeVolumeRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BridgeChallengeRecord {
+    pub commitment: String,
+    pub user: String,
+    pub amount: u64,
+    pub challenged: bool,
+    pub initiated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderStorageStat {
     pub provider_id: String,
     pub capacity_bytes: u64,
@@ -201,6 +217,10 @@ impl Explorer {
             [],
         )?;
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS bridge_challenges (commitment TEXT PRIMARY KEY, user TEXT, amount INTEGER, challenged INTEGER, initiated_at INTEGER)",
+            [],
+        )?;
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS storage_contracts (object_id TEXT PRIMARY KEY, provider_id TEXT, price_per_block INTEGER)",
             [],
         )?;
@@ -209,6 +229,42 @@ impl Explorer {
             [],
         )?;
         Ok(Self { path: p })
+    }
+
+    pub fn record_bridge_challenge(&self, rec: &BridgeChallengeRecord) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO bridge_challenges (commitment, user, amount, challenged, initiated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                &rec.commitment,
+                &rec.user,
+                rec.amount as i64,
+                if rec.challenged { 1 } else { 0 },
+                rec.initiated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn active_bridge_challenges(&self) -> Result<Vec<BridgeChallengeRecord>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT commitment, user, amount, challenged, initiated_at FROM bridge_challenges WHERE challenged = 0",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(BridgeChallengeRecord {
+                commitment: row.get(0)?,
+                user: row.get(1)?,
+                amount: row.get::<_, i64>(2)? as u64,
+                challenged: row.get::<_, i64>(3)? != 0,
+                initiated_at: row.get(4)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     fn conn(&self) -> Result<Connection> {
