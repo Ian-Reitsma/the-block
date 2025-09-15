@@ -19,6 +19,7 @@ mod service_badge;
 mod snark;
 mod storage;
 mod telemetry;
+mod version;
 #[cfg(feature = "quantum")]
 mod wallet;
 use ai::AiCmd;
@@ -35,6 +36,7 @@ use service_badge::ServiceBadgeCmd;
 use snark::SnarkCmd;
 use storage::StorageCmd;
 use telemetry::TelemetryCmd;
+use version::VersionCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 #[cfg(feature = "quantum")]
 use wallet::WalletCmd;
@@ -113,6 +115,11 @@ enum Commands {
     Gov {
         #[command(subcommand)]
         action: GovCmd,
+    },
+    /// Version and build info
+    Version {
+        #[command(subcommand)]
+        action: VersionCmd,
     },
     /// Config utilities
     Config {
@@ -221,6 +228,7 @@ fn main() {
         Commands::Difficulty { action } => difficulty::handle(action),
         Commands::Gov { action } => gov::handle(action),
         Commands::Config { action } => config::handle(action),
+        Commands::Version { action } => version::handle(action),
         Commands::Telemetry { action } => telemetry::handle(action),
         Commands::Debug { code } => debug_cli::run(code),
         Commands::ServiceBadge { action } => service_badge::handle(action),

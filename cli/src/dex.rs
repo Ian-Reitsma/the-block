@@ -1,6 +1,7 @@
 use clap::Subcommand;
 use hex;
 use the_block::dex::{check_liquidity_rules, storage::EscrowState, DexStore};
+use the_block::dex::amm::Pool;
 
 #[derive(Subcommand)]
 pub enum DexCmd {
@@ -8,6 +9,11 @@ pub enum DexCmd {
     Escrow {
         #[command(subcommand)]
         action: EscrowCmd,
+    },
+    /// Liquidity pool operations
+    Liquidity {
+        #[command(subcommand)]
+        action: LiquidityCmd,
     },
 }
 
@@ -23,6 +29,25 @@ pub enum EscrowCmd {
     Release {
         id: u64,
         amount: u64,
+        #[arg(long, default_value = "dex.bin")]
+        state: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum LiquidityCmd {
+    /// Add liquidity to a pool
+    Add {
+        pool: String,
+        ct: u64,
+        it: u64,
+        #[arg(long, default_value = "dex.bin")]
+        state: String,
+    },
+    /// Remove liquidity from a pool
+    Remove {
+        pool: String,
+        shares: u64,
         #[arg(long, default_value = "dex.bin")]
         state: String,
     },
@@ -64,6 +89,22 @@ pub fn handle(cmd: DexCmd) {
                     }
                     None => eprintln!("release failed"),
                 }
+            }
+        },
+        DexCmd::Liquidity { action } => match action {
+            LiquidityCmd::Add { pool, ct, it, state } => {
+                let mut store = DexStore::open(&state);
+                let mut p: Pool = store.load_pool(&pool);
+                let minted = p.add_liquidity(ct as u128, it as u128);
+                store.save_pool(&pool, &p);
+                println!("minted shares: {}", minted);
+            }
+            LiquidityCmd::Remove { pool, shares, state } => {
+                let mut store = DexStore::open(&state);
+                let mut p: Pool = store.load_pool(&pool);
+                let (ct, it) = p.remove_liquidity(shares as u128);
+                store.save_pool(&pool, &p);
+                println!("withdrawn ct:{} it:{}", ct, it);
             }
         },
     }

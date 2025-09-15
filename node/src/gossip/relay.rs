@@ -6,17 +6,19 @@ use std::time::{Duration, Instant};
 use blake3::hash;
 use rand::seq::SliceRandom;
 
-use crate::net::{partition_watch::PARTITION_WATCH, send_msg, send_quic_msg, Message};
-use crate::p2p::handshake::Transport;
+use crate::net::{partition_watch::PARTITION_WATCH, send_msg, send_quic_msg, Message, Transport};
 use crate::range_boost;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_TTL_DROP_TOTAL};
 use ledger::address::ShardId;
 
+type PeerId = [u8; 32];
+
 /// Relay provides TTL-based duplicate suppression and fanout selection.
 pub struct Relay {
     recent: Mutex<HashMap<[u8; 32], Instant>>,
     ttl: Duration,
+    shard_peers: Mutex<HashMap<ShardId, Vec<PeerId>>>,
 }
 
 impl Relay {
@@ -24,6 +26,7 @@ impl Relay {
         Self {
             recent: Mutex::new(HashMap::new()),
             ttl,
+            shard_peers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -72,17 +75,22 @@ impl Relay {
     }
 
     /// Broadcast a message to peers belonging to a specific shard.
+    pub fn register_peer(&self, shard: ShardId, peer: PeerId) {
+        self.shard_peers.lock().entry(shard).or_default().push(peer);
+    }
+
     pub fn broadcast_shard(
         &self,
         shard: ShardId,
         msg: &Message,
-        peers: &[(ShardId, SocketAddr, Transport, Option<Vec<u8>>)],
+        peers: &HashMap<PeerId, (SocketAddr, Transport, Option<Vec<u8>>)>,
     ) {
-        let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = peers
-            .iter()
-            .filter(|p| p.0 == shard)
-            .map(|p| (p.1, p.2, p.3.clone()))
-            .collect();
+        let ids = self.shard_peers.lock().get(&shard).cloned();
+        let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = if let Some(ids) = ids {
+            ids.iter().filter_map(|id| peers.get(id).cloned()).collect()
+        } else {
+            peers.values().cloned().collect()
+        };
         self.broadcast(msg, &targets);
     }
 

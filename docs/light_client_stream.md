@@ -1,28 +1,20 @@
-# Real-Time Light Client State Stream
+# Light Client State Streaming Protocol
 
-This document outlines the websocket-based protocol used by mobile light
-clients to maintain a rolling account cache with minimal bandwidth.
+Light clients can maintain an up-to-date account view by subscribing to the
+state stream exposed over WebSockets. Each `StateChunk` carries:
 
-## Protocol Overview
+- `seq` – monotonically increasing sequence number
+- `tip_height` – latest observed chain height
+- `accounts` – list of `(address, balance)` updates
+- `root` – Blake3 Merkle root of the accounts in the chunk
+- `proof` – placeholder availability proof bytes
+- `compressed` – flag indicating whether this chunk is a zstd-compressed snapshot
 
-Nodes expose a `/state_stream` websocket endpoint. After a standard
-WebSocket handshake, the server pushes JSON-encoded `StateChunk` messages
-containing incremental account updates, Merkle roots, and sequence
-numbers. Clients apply these diffs to a local cache while verifying the
-provided Merkle proofs.
+Clients apply chunks using `StateStream::apply_chunk`, verifying sequence numbers
+and Merkle roots. If packets are dropped, a compressed snapshot may be requested
+and applied with `StateStream::apply_snapshot` to resynchronise.
 
-Each chunk carries a `tip_height` field so clients can detect if they are
-lagging. When the difference between the advertised tip and the local
-sequence exceeds a threshold, a telemetry alert is emitted.
-
-### Snapshots and Compression
-
-New clients may request a compressed snapshot to bootstrap. Snapshots are
-zstd-compressed bincode maps of account balances which can be applied via
-`StateStream::apply_snapshot`.
-
-## Reliability
-
-Chunks are numbered sequentially. Missing sequence numbers indicate
-packet loss and should trigger a snapshot request to re-sync. Tests cover
-this flow in `tests/state_stream.rs`.
+Telemetry metrics include `state_stream_subscribers_total` and
+`state_stream_lag_blocks` to alert when clients fall more than the configured
+threshold behind. The CLI `light-sync` command bootstraps from the stream by
+requesting an initial zstd-compressed snapshot and applying subsequent diffs.

@@ -41,15 +41,9 @@ impl Default for TxSignature {
     }
 }
 
-use std::cell::RefCell;
-
 use crate::{fee, fee::FeeError, TxAdmissionError};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-
-thread_local! {
-    static MSG_BUF: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-}
 
 static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> =
     Lazy::new(|| Mutex::new(LruCache::new(1024)));
@@ -433,6 +427,9 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
 
     let payload_bytes = canonical_payload_bytes(&tx.payload);
     let domain = domain_tag();
+    let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());
+    msg.extend_from_slice(domain);
+    msg.extend_from_slice(&payload_bytes);
     let res = if !tx.signer_pubkeys.is_empty()
         && !tx.aggregate_signature.is_empty()
         && tx.threshold > 0
@@ -447,14 +444,8 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
                     (to_array_32(pk_bytes), to_array_64(sig_bytes))
                 {
                     if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-                        MSG_BUF.with(|buf| {
-                            let mut buf = buf.borrow_mut();
-                            buf.clear();
-                            buf.extend_from_slice(domain);
-                            buf.extend_from_slice(&payload_bytes);
-                            let sig = Signature::from_bytes(&sig_arr);
-                            vk.verify(&buf, &sig).is_ok()
-                        })
+                        let sig = Signature::from_bytes(&sig_arr);
+                        vk.verify(&msg, &sig).is_ok()
                     } else {
                         false
                     }
@@ -476,14 +467,8 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
                     to_array_64(&tx.signature.ed25519),
                 ) {
                     if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-                        MSG_BUF.with(|buf| {
-                            let mut buf = buf.borrow_mut();
-                            buf.clear();
-                            buf.extend_from_slice(domain);
-                            buf.extend_from_slice(&payload_bytes);
-                            let sig = Signature::from_bytes(&sig_bytes);
-                            vk.verify(&buf, &sig).is_ok()
-                        })
+                        let sig = Signature::from_bytes(&sig_bytes);
+                        vk.verify(&msg, &sig).is_ok()
                     } else {
                         false
                     }
@@ -497,14 +482,8 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
                     to_array_64(&tx.signature.ed25519),
                 ) {
                     if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
-                        MSG_BUF.with(|buf| {
-                            let mut buf = buf.borrow_mut();
-                            buf.clear();
-                            buf.extend_from_slice(domain);
-                            buf.extend_from_slice(&payload_bytes);
-                            let sig = Signature::from_bytes(&sig_bytes);
-                            vk.verify(&buf, &sig).is_ok()
-                        })
+                        let sig = Signature::from_bytes(&sig_bytes);
+                        vk.verify(&msg, &sig).is_ok()
                     } else {
                         false
                     }
@@ -512,14 +491,11 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
                     false
                 };
                 #[cfg(feature = "quantum")]
-                let pq_ok =
-                    if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
-                        let mut msg = domain.to_vec();
-                        msg.extend_from_slice(&payload_bytes);
-                        dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
-                    } else {
-                        false
-                    };
+                let pq_ok = if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
+                    dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
+                } else {
+                    false
+                };
                 #[cfg(not(feature = "quantum"))]
                 let pq_ok = false;
                 ed_ok && pq_ok
@@ -528,8 +504,6 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
                 #[cfg(feature = "quantum")]
                 {
                     if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
-                        let mut msg = domain.to_vec();
-                        msg.extend_from_slice(&payload_bytes);
                         dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
                     } else {
                         false

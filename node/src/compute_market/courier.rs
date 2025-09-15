@@ -199,11 +199,7 @@ pub fn handoff_job(job_id: &str, new_provider: &str) -> Result<(), &'static str>
     if HANDOFF_FAIL.load(Ordering::Relaxed) {
         return Err("handoff failed");
     }
-    if CANCELED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(job_id)
-    {
+    if CANCELED.lock().remove(job_id) {
         return Err("job cancelled");
     }
     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
@@ -218,43 +214,25 @@ pub fn set_handoff_fail(val: bool) {
 }
 
 pub fn cancel_job(job_id: &str) {
-    CANCELED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(job_id.to_owned());
+    CANCELED.lock().insert(job_id.to_owned());
 }
 
 pub fn halt_job(job_id: &str) {
-    HALTED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(job_id.to_owned());
+    HALTED.lock().insert(job_id.to_owned());
 }
 
 pub fn was_halted(job_id: &str) -> bool {
-    HALTED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .contains(job_id)
+    HALTED.lock().contains(job_id)
 }
 
 pub fn reserve_resources(job_id: &str) {
-    RESERVED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(job_id.to_owned());
+    RESERVED.lock().insert(job_id.to_owned());
 }
 
 pub fn release_resources(job_id: &str) -> bool {
-    RESERVED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(job_id)
+    RESERVED.lock().remove(job_id)
 }
 
 pub fn is_reserved(job_id: &str) -> bool {
-    RESERVED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .contains(job_id)
+    RESERVED.lock().contains(job_id)
 }

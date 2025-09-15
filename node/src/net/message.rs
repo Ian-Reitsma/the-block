@@ -1,6 +1,7 @@
 use crate::net::peer::ReputationUpdate;
 use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
 use ed25519_dalek::{Signer, SigningKey};
+use ledger::address::ShardId;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
@@ -44,8 +45,8 @@ pub enum Payload {
     Tx(SignedTransaction),
     /// Broadcast a blob transaction for inclusion in L2 blobspace.
     BlobTx(BlobTx),
-    /// Broadcast a newly mined block.
-    Block(Block),
+    /// Broadcast a newly mined block for a given shard.
+    Block(ShardId, Block),
     /// Share an entire chain snapshot for fork resolution.
     Chain(Vec<Block>),
     /// Disseminate a single erasure-coded shard of a blob.

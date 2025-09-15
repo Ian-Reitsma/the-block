@@ -334,7 +334,7 @@ fn invalid_gossip_block_rejected() {
         vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     };
-    send(addr, &kp, Payload::Block(block));
+    send(addr, &kp, Payload::Block(0, block));
 
     assert!(node.blockchain().chain.is_empty());
     flag.trigger();
@@ -383,7 +383,7 @@ fn forged_identity_rejected() {
         vdf_output: [0u8; 32],
         vdf_proof: Vec::new(),
     };
-    send(addr, &kp, Payload::Block(block));
+    send(addr, &kp, Payload::Block(0, block));
 
     assert!(node.blockchain().chain.is_empty());
     flag.trigger();

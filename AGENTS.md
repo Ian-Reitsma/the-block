@@ -11,6 +11,7 @@ Quick Index
 - QUIC handshake & fallback rules: see `docs/quic.md`
 - Economic formulas: see `docs/economics.md`
 - Blob root scheduling: see `docs/blob_chain.md`
+- Macro-block checkpoints: see `docs/macro_block.md`
 - Law-enforcement portal & canary runbook: see `docs/le_portal.md`
 - Range-boost queue semantics: see `docs/range_boost.md`
 - Read acknowledgement batching and audit workflow: see `docs/read_receipts.md`
@@ -20,16 +21,20 @@ Quick Index
 - Commit–reveal scheme: see `docs/commit_reveal.md`
 - Service badge tracker: see `docs/service_badge.md`
 - Fee market reference: see `docs/fees.md`
+- Network fee rebates: see `docs/fee_rebates.md`
 - Transaction lifecycle and fee lanes: see `docs/transaction_lifecycle.md`
 - Compute-market courier retry logic: see `docs/compute_market_courier.md`
 - Compute-market admission quotas: see `docs/compute_market.md`
 - Compute-unit calibration: see `docs/compute_market.md`
+- Compute-market SNARK receipts: see `docs/compute_snarks.md`
 - Multi-hop trust-line routing: see `docs/dex.md`
 - DEX escrow and partial-payment proofs: see `docs/dex.md`
+- AMM pools and liquidity mining: see `docs/dex_amm.md`
 - Gateway DNS publishing and policy records (`.block` TLD or externally verified): see `docs/gateway_dns.md`
 - Gossip relay dedup and adaptive fanout: see `docs/gossip.md`
 - P2P handshake and capability negotiation: see `docs/p2p_protocol.md`
 - Light-client synchronization and security model: see `docs/light_client.md`
+- Light-client state streaming: see `docs/light_client_stream.md`
 - Bridge light-client verification: see `docs/bridges.md`
 - Jurisdiction policy packs and LE logging: see `docs/jurisdiction.md`
 - Probe CLI and metrics: see `docs/probe.md`
@@ -40,16 +45,18 @@ Quick Index
 - Wallet staking lifecycle: see `docs/wallets.md`
 - Remote signer workflows: see `docs/wallets.md`
 - Storage erasure coding and reconstruction: see `docs/storage_erasure.md`
+- Storage market incentives and proofs-of-retrievability: see `docs/storage_market.md`
 - KYC provider workflow: see `docs/kyc.md`
 - A* latency routing: see `docs/net_a_star.md`
 - Mempool architecture and tuning: see `docs/mempool.md`
 - Hash layout & genesis seeding: see `docs/hashlayout.md`
 - State pruning and RocksDB compaction: see `docs/state_pruning.md`
 - Cross-platform deployment methods: see `docs/deployment_guide.md`
+- Build provenance and attestation: see `docs/provenance.md`
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99/100** with vision completion **~75/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. Recent additions such as deterministic WASM execution with a stateful debugger, session-key abstraction, Kalman difficulty retune, and network partition recovery extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC to push the project over these milestones. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~99/100** with vision completion **~80/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. Recent additions such as macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -301,7 +308,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99/100 · Vision completion: ~75/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99/100 · Vision completion: ~76/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -578,50 +585,62 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - **Governance & Subsidy Economy** ([docs/governance.md](docs/governance.md))
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 80%
+  - Progress: 82%
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
-  - Progress: 82%
+  - Progress: 85%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 85%
+    - Progress: 88%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements and WAL-backed stores
   - [ ] Incentive-backed DHT marketplace
-  - Progress: 76%
+  - Progress: 80%
   - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
     - [ ] SLA arbitration and heterogeneous payments
-    - Progress: 71%
+    - Progress: 76%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
-  - Progress: 78%
+  - Progress: 79%
 - **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
-  - Progress: 74%
+  - Progress: 79%
 - **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 45%
+  - Progress: 47%
   - **Wallets** ([docs/wallets.md](docs/wallets.md))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 85%
+    - Progress: 87%
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [ ] Automated anomaly detection
-    - Progress: 75%
+    - Progress: 78%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
-    - Progress: 71%
+    - Progress: 72%
+
+### Troubleshooting: Missing Tests & Dependencies
+
+- If `cargo test --test <name>` reports *no test target*, the file likely sits at the
+  workspace root. Move the test under the crate that owns the code (e.g.
+  `node/tests/<name>.rs`) and invoke `cargo test -p node --test <name>`.
+- `libp2p_core` and `jsonrpc_core` imports must resolve to crates declared in
+  `node/Cargo.toml`. Prefer `libp2p::PeerId` over `libp2p_core::PeerId` and add
+  `jsonrpc-core` when RPC modules depend on it.
+- Metrics modules are behind the optional `telemetry` feature. Guard any
+  `crate::telemetry::*` imports and counters with `#[cfg(feature = "telemetry")]`
+  so builds without telemetry succeed.

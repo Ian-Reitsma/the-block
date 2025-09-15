@@ -62,6 +62,7 @@ impl StateStream {
         };
         let map: HashMap<String, u64> = bincode::deserialize(&bytes).unwrap_or_default();
         self.cache = map;
+        self.next_seq = 0;
         Ok(())
     }
 

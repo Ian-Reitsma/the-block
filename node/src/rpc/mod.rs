@@ -16,6 +16,7 @@ use crate::{
 use bincode;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
+use libp2p::PeerId;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -26,6 +27,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use ::storage::{contract::StorageContract, offer::StorageOffer};
 use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
@@ -51,6 +53,7 @@ pub mod identity;
 pub mod inflation;
 pub mod jurisdiction;
 pub mod light;
+pub mod peer;
 pub mod pos;
 pub mod state_stream;
 pub mod storage;
@@ -1248,6 +1251,61 @@ fn dispatch(
             let entries = net::recent_handshake_failures();
             serde_json::json!({"failures": entries})
         }
+        "peer.rebate_status" => {
+            let peer = req
+                .params
+                .get("peer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let threshold = req
+                .params
+                .get("threshold")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let pk = PeerId::from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(|_| {
+                RpcError {
+                    code: -32602,
+                    message: "bad peer",
+                }
+            })?;
+            let eligible = net::uptime::eligible(&pk, threshold, epoch);
+            serde_json::json!({"eligible": eligible})
+        }
+        "peer.rebate_claim" => {
+            let peer = req
+                .params
+                .get("peer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let threshold = req
+                .params
+                .get("threshold")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let epoch = req
+                .params
+                .get("epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let reward = req
+                .params
+                .get("reward")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let pk = PeerId::from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(|_| {
+                RpcError {
+                    code: -32602,
+                    message: "bad peer",
+                }
+            })?;
+            let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
+            serde_json::json!({"voucher": voucher})
+        }
         "net.config_reload" => {
             if crate::config::reload() {
                 serde_json::json!({"status": "ok"})
@@ -1892,16 +1950,24 @@ fn dispatch(
                 .get("retention_blocks")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let contract = storage::StorageContract {
-                object_id,
-                provider_id,
+            let contract = StorageContract {
+                object_id: object_id.clone(),
+                provider_id: provider_id.clone(),
                 original_bytes,
                 shares,
                 price_per_block,
                 start_block,
                 retention_blocks,
+                next_payment_block: start_block + 1,
+                accrued: 0,
             };
-            storage::upload(contract)
+            let offer = StorageOffer::new(
+                provider_id,
+                original_bytes,
+                price_per_block,
+                retention_blocks,
+            );
+            storage::upload(contract, vec![offer])
         }
         "storage_challenge" => {
             let object_id = req
@@ -1909,12 +1975,28 @@ fn dispatch(
                 .get("object_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
+            let chunk_idx = req
+                .params
+                .get("chunk_idx")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let proof = req
+                .params
+                .get("proof")
+                .and_then(|v| v.as_str())
+                .map(|s| {
+                    let bytes = hex::decode(s).unwrap_or_default();
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes[..32.min(bytes.len())]);
+                    arr
+                })
+                .unwrap_or([0u8; 32]);
             let current_block = req
                 .params
                 .get("current_block")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            storage::challenge(object_id, current_block)
+            storage::challenge(object_id, chunk_idx, proof, current_block)
         }
         "gov_propose" => {
             let proposer = req

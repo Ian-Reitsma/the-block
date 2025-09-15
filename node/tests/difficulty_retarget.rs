@@ -7,7 +7,7 @@ use the_block::{Block, TokenAmount};
 #[test]
 fn increases_when_blocks_fast() {
     let prev = 1000;
-    let params = the_block::governance::params::Params::default();
+    let params = the_block::governance::Params::default();
     let (next, _) = retune(prev, &[0, 60_000], 0, &params);
     assert!(next > prev);
 }
@@ -15,7 +15,7 @@ fn increases_when_blocks_fast() {
 #[test]
 fn decreases_when_blocks_slow() {
     let prev = 1000;
-    let params = the_block::governance::params::Params::default();
+    let params = the_block::governance::Params::default();
     let (next, _) = retune(prev, &[0, 240_000], 0, &params);
     assert!(next < prev);
 }

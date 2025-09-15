@@ -20,6 +20,7 @@ members = [
   "tools/gov_graph",
   "tools/dual-key-migrate",
   "tools/remote-signer",
+  "tools/provenance_verify",
   "explorer",
   "bridges",
   "cli",

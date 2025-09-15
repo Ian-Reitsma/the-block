@@ -3,6 +3,7 @@ use hex::encode as hex_encode;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use storage;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::{OrderBook, Side},
@@ -16,6 +17,8 @@ pub mod dex_view;
 pub mod htlc_view;
 pub mod snark_view;
 pub mod storage_view;
+pub fn amm_stats() -> Vec<(String, u128, u128)> { Vec::new() }
+pub fn qos_tiers() -> Vec<(String, u64)> { Vec::new() }
 pub use ai_summary::summarize_block;
 pub mod dkg_view;
 pub mod jurisdiction_view;
@@ -109,6 +112,14 @@ pub struct BridgeVolumeRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderStorageStat {
+    pub provider_id: String,
+    pub capacity_bytes: u64,
+    pub reputation: i64,
+    pub contracts: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricPoint {
     pub name: String,
     pub ts: i64,
@@ -187,6 +198,14 @@ impl Explorer {
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS bridge_volume (symbol TEXT, amount INTEGER, ts INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS storage_contracts (object_id TEXT PRIMARY KEY, provider_id TEXT, price_per_block INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS provider_stats (provider_id TEXT PRIMARY KEY, capacity_bytes INTEGER, reputation INTEGER)",
             [],
         )?;
         Ok(Self { path: p })
@@ -487,6 +506,51 @@ impl Explorer {
                 name: row.get(0)?,
                 ts: row.get(1)?,
                 value: row.get(2)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn index_storage_contract(&self, contract: &storage::StorageContract) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO storage_contracts (object_id, provider_id, price_per_block) VALUES (?1, ?2, ?3)",
+            params![contract.object_id, contract.provider_id, contract.price_per_block],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_provider_stats(
+        &self,
+        provider_id: &str,
+        capacity_bytes: u64,
+        reputation: i64,
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO provider_stats (provider_id, capacity_bytes, reputation) VALUES (?1, ?2, ?3)",
+            params![provider_id, capacity_bytes, reputation],
+        )?;
+        Ok(())
+    }
+
+    pub fn provider_storage_stats(&self) -> Result<Vec<ProviderStorageStat>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT ps.provider_id, ps.capacity_bytes, ps.reputation, COUNT(sc.object_id) as contracts \
+             FROM provider_stats ps LEFT JOIN storage_contracts sc ON sc.provider_id = ps.provider_id \
+             GROUP BY ps.provider_id, ps.capacity_bytes, ps.reputation",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ProviderStorageStat {
+                provider_id: row.get(0)?,
+                capacity_bytes: row.get(1)?,
+                reputation: row.get(2)?,
+                contracts: row.get(3)?,
             })
         })?;
         let mut out = Vec::new();

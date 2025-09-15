@@ -62,56 +62,61 @@ test real services today.
 - On-chain storage and free-read hosting let gateways serve files, websites,
   and API responses without charging end users; signed `ReadAck` receipts
   anchor activity on-chain and mint the corresponding `READ_SUB_CT` reward.
+  Reputation-weighted Lagrange coding distributes shards while
+  proof-of-retrievability challenges penalize missing data.
   See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
-  flow. (76.0% Complete)
+  flow. (80.0% Complete)
  - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
-  RPC and `compute cancel <job_id>` CLI, and hashes receipts into blocks before
-  conversion to CT through multipliers. (71.0% Complete)
+  RPC and `compute cancel <job_id>` CLI, hashes receipts into blocks before
+conversion to CT through multipliers, and verifies optional SNARK receipts
+prior to crediting payment. (74.0% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
       A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
       `aggregator_ingest_total` gauges, partition markers flag split-brain events,
       and metrics are bounded by `max_peer_metrics` so abusive peers cannot exhaust
-      memory. (85.0% Complete)
+    memory. Shard-aware peer maps route block gossip only to interested peers and
+    uptime-based fee rebates reward high-availability peers. (88.0% Complete)
     - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
       resolves forks deterministically, and validates blocks with BLAKE3 hashes,
-      multi-window Kalman retargeting, and VDF-anchored randomness. (82.0%
-      Complete)
+        multi-window Kalman retargeting, VDF-anchored randomness, macro-block checkpointing, and per-shard fork choice. (85.0%
+        Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
-    two percent while funding service roles. (80.0% Complete)
+  two percent while funding service roles. (82.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
-      deployable contracts and fee markets alongside traditional PoW headers. (78.0%
+      deployable contracts and fee markets alongside traditional PoW headers. (79.0%
       Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
-  settlements complete, and telemetry gauges `dex_escrow_locked`,
-  `dex_escrow_pending`, and `dex_escrow_total` track utilisation. (74.0%
-  Complete)
+  settlements complete, telemetry gauges `dex_escrow_locked`,
+    `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (77.0%
+    Complete)
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
-  Light-client verification guards all transfers. (45.0% Complete)
+Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (47.0% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
-      session-key derivation, and compliance options as needed. (85.0% Complete)
+      session-key derivation, and compliance options as needed. (86.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
-      and a cluster-wide `metrics-aggregator` for fleet visibility. (75.0%
-      Complete)
-- Economic simulation and formal verification suites model inflation scenarios
-  and encode consensus invariants, laying groundwork for provable safety. (35.0%
-  Complete)
+        and a cluster-wide `metrics-aggregator` for fleet visibility. (77.0%
+        Complete)
+  - Economic simulation and formal verification suites model inflation scenarios
+    and encode consensus invariants, laying groundwork for provable safety. (37.0%
+    Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
-  subsidy events to make participation feasible on phones. (55.0% Complete)
+  subsidy events to make participation feasible on phones. (56.0% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99/100** with vision completion **~75/100**.
+  Mainnet readiness sits at **~99/100** with vision completion **~80/100**.
 
 ### Live now
 
@@ -165,6 +170,13 @@ test real services today.
   chain-specific `.block` TLD require a matching TXT record in the public zone
   before clients honor them. See [docs/gateway_dns.md](docs/gateway_dns.md).
 - Durable compute courier records bundles with exponential backoff retries; see [docs/compute_market_courier.md](docs/compute_market_courier.md).
+- Macro-block checkpoints capture per-shard roots and inter-shard queue proofs for cross-shard ordering; see [docs/macro_block.md](docs/macro_block.md).
+- Real-time state streaming over WebSockets keeps light clients current with zstd-compressed snapshots; see [docs/light_client_stream.md](docs/light_client_stream.md).
+- SNARK-verified compute receipts tie payments to Groth16 proofs generated from small WASM tasks; see [docs/compute_snarks.md](docs/compute_snarks.md).
+- Reputation-weighted, Lagrange-coded storage allocation with proof-of-retrievability challenges; see [docs/storage_market.md](docs/storage_market.md).
+- Constant-product AMM pools with epoch-based liquidity mining incentives; see [docs/dex_amm.md](docs/dex_amm.md).
+- Network fee rebates reward high-uptime peers via `peer.rebate_status` RPC and `net rebate claim`; see [docs/fee_rebates.md](docs/fee_rebates.md).
+- Build provenance checks hash the running binary, verify SBOM signatures, and expose `version provenance` and offline `provenance-verify` tooling; see [docs/provenance.md](docs/provenance.md).
 - CT balance and rate-limit push notifications: wallet hooks expose web push/Firebase endpoints and trigger alerts whenever balances change or throttles engage.
 - Jittered JSON-RPC client with exponential backoff to avoid thundering herds; timeouts and retry windows are configurable via environment variables.
 - Settlement audit task in CI replays recent receipts and fails the build on mismatched anchors to guarantee explorer and ledger consistency.

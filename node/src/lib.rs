@@ -11,12 +11,16 @@
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
 use crate::consensus::constants::DIFFICULTY_WINDOW;
+use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, process};
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use blake3;
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
+use ledger::address::{self, ShardId};
+use ledger::shard::ShardState;
+use lru::LruCache;
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -28,6 +32,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "telemetry-json")]
 use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::num::NonZeroUsize;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
     Arc, Mutex, MutexGuard,
@@ -47,7 +52,7 @@ mod simple_db;
 use config::NodeConfig;
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use simple_db::SimpleDb;
-use simple_db::SimpleDb as Db;
+use simple_db::{DbDelta, SimpleDb as Db};
 use std::any::Any;
 use std::convert::TryInto;
 use thiserror::Error;
@@ -94,6 +99,7 @@ pub mod web;
 pub mod logging;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
+pub mod provenance;
 #[cfg(feature = "telemetry")]
 pub use telemetry::{
     gather_metrics, redact_at_rest, serve_metrics, serve_metrics_with_shutdown, MetricsServer,
@@ -269,10 +275,9 @@ impl From<TxAdmissionError> for PyErr {
                     py.get_type::<ErrPendingSignatures>(),
                     "additional signatures required",
                 ),
-                TxAdmissionError::SessionExpired => (
-                    py.get_type::<ErrSessionExpired>(),
-                    "session expired",
-                ),
+                TxAdmissionError::SessionExpired => {
+                    (py.get_type::<ErrSessionExpired>(), "session expired")
+                }
             };
             let err = match ty.call1((msg,)) {
                 Ok(e) => e,
@@ -711,6 +716,12 @@ pub struct Blockchain {
     pub chain: Vec<Block>,
     #[pyo3(get)]
     pub accounts: HashMap<String, Account>,
+    /// Latest state root per shard.
+    pub shard_roots: HashMap<ShardId, [u8; 32]>,
+    /// Latest height per shard.
+    pub shard_heights: HashMap<ShardId, u64>,
+    /// LRU cache for recent shard state entries keyed by `(ShardId, key)`.
+    pub shard_cache: Mutex<lru::LruCache<(ShardId, Vec<u8>), Vec<u8>>>,
     #[pyo3(get, set)]
     pub difficulty: u64,
     /// Hint from previous retune summarizing hash-rate trend
@@ -759,6 +770,16 @@ pub struct Blockchain {
     pub block_reward_industrial: TokenAmount,
     #[pyo3(get, set)]
     pub block_height: u64,
+    /// Pending messages across shards.
+    pub inter_shard: MessageQueue,
+    /// Accumulated rewards since last macro block.
+    macro_acc_consumer: u64,
+    macro_acc_industrial: u64,
+    /// Stored macro blocks.
+    pub macro_blocks: Vec<MacroBlock>,
+    /// Interval in blocks between macro block emissions.
+    #[pyo3(get, set)]
+    pub macro_interval: u64,
     pub snapshot: SnapshotManager,
     #[pyo3(get)]
     pub skipped: Vec<SignedTransaction>,
@@ -862,6 +883,9 @@ impl Default for Blockchain {
         Self {
             chain: Vec::new(),
             accounts: HashMap::new(),
+            shard_roots: HashMap::new(),
+            shard_heights: HashMap::new(),
+            shard_cache: Mutex::new(LruCache::new(NonZeroUsize::new(1024).unwrap())),
             difficulty: difficulty::expected_difficulty_from_chain(&[] as &[Block]),
             retune_hint: 0,
             mempool_consumer: DashMap::new(),
@@ -891,6 +915,11 @@ impl Default for Blockchain {
             block_reward_consumer: TokenAmount::new(INITIAL_BLOCK_REWARD_CONSUMER),
             block_reward_industrial: TokenAmount::new(INITIAL_BLOCK_REWARD_INDUSTRIAL),
             block_height: 0,
+            inter_shard: MessageQueue::new(1024),
+            macro_acc_consumer: 0,
+            macro_acc_industrial: 0,
+            macro_blocks: Vec::new(),
+            macro_interval: 100,
             snapshot: SnapshotManager::new(String::new(), snapshot_interval_from_env()),
             skipped: Vec::new(),
             skipped_nonce_gap: 0,
@@ -935,6 +964,46 @@ impl Drop for Blockchain {
 impl Blockchain {
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+    /// Return the latest state root for a shard if available.
+    pub fn get_shard_root(&self, shard: ShardId) -> Option<[u8; 32]> {
+        self.shard_roots.get(&shard).copied()
+    }
+
+    pub(crate) fn read_shard_state(&self, shard: ShardId, key: &str) -> Option<Vec<u8>> {
+        if let Some(v) = self
+            .shard_cache
+            .lock()
+            .get(&(shard, key.as_bytes().to_vec()))
+            .cloned()
+        {
+            return Some(v);
+        }
+        let val = self.db.get_shard(shard, key);
+        if let Some(ref v) = val {
+            self.shard_cache
+                .lock()
+                .put((shard, key.as_bytes().to_vec()), v.clone());
+        }
+        val
+    }
+
+    pub(crate) fn write_shard_state(
+        &mut self,
+        shard: ShardId,
+        key: &str,
+        value: Vec<u8>,
+        deltas: &mut Vec<DbDelta>,
+    ) -> std::io::Result<()> {
+        let evicted = self
+            .shard_cache
+            .lock()
+            .put((shard, key.as_bytes().to_vec()), value.clone());
+        #[cfg(feature = "telemetry")]
+        if evicted.is_some() {
+            crate::telemetry::SHARD_CACHE_EVICT_TOTAL.inc();
+        }
+        self.db.insert_shard_with_delta(shard, key, value, deltas)
     }
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
         self.comfort_threshold_p90 = v;
@@ -1534,6 +1603,18 @@ impl Blockchain {
                 Vec::new(),
             )
         };
+
+        // Load any persisted shard state roots.
+        let shard_roots: HashMap<ShardId, [u8; 32]> = db
+            .shard_ids()
+            .into_iter()
+            .filter_map(|id| {
+                let bytes = db.get_shard(id, ShardState::db_key())?;
+                ShardState::from_bytes(&bytes)
+                    .ok()
+                    .map(|s| (id, s.state_root))
+            })
+            .collect();
         for b in &mut chain {
             let mut fee_consumer: u128 = 0;
             let mut fee_industrial: u128 = 0;
@@ -1559,6 +1640,7 @@ impl Blockchain {
         bc.path = path.to_string();
         bc.chain = chain;
         bc.accounts = accounts;
+        bc.shard_roots = shard_roots;
         bc.db = db;
         bc.emission_consumer = em_c;
         bc.emission_industrial = em_i;
@@ -1567,11 +1649,18 @@ impl Blockchain {
         bc.block_height = bh;
         bc.recent_miners = VecDeque::new();
         bc.recent_timestamps = VecDeque::from(recent_ts);
+        // Load any previously emitted macro blocks.
+        let mut h = bc.macro_interval;
+        while let Some(bytes) = bc.db.get(&MacroBlock::db_key(h)) {
+            if let Ok(m) = MacroBlock::from_bytes(&bytes) {
+                bc.macro_blocks.push(m);
+            }
+            h += bc.macro_interval;
+        }
         let last = bc.chain.last().map_or(1, |b| b.difficulty);
         let hint = bc.chain.last().map_or(0, |b| b.retune_hint);
         let ts = bc.recent_timestamps.make_contiguous();
-        let (d, h) =
-            consensus::difficulty_retune::retune(last, ts, hint, &bc.params);
+        let (d, h) = consensus::difficulty_retune::retune(last, ts, hint, &bc.params);
         bc.difficulty = d;
         bc.retune_hint = h;
         bc.base_fee = base_fee;
@@ -1876,6 +1965,11 @@ impl Blockchain {
         Ok(bc)
     }
 
+    /// Expose the latest shard state root to Python callers.
+    pub fn shard_root(&self, shard: u16) -> Option<[u8; 32]> {
+        self.get_shard_root(shard)
+    }
+
     /// Return the on-disk schema version
     #[getter]
     pub fn schema_version(&self) -> usize {
@@ -1937,8 +2031,7 @@ impl Blockchain {
     /// # Errors
     /// Returns [`PyValueError`] if the chain state cannot be serialized or persisted.
     pub fn genesis_block(&mut self) -> PyResult<()> {
-        let (diff, hint) =
-            consensus::difficulty_retune::retune(1, &[], 0, &self.params);
+        let (diff, hint) = consensus::difficulty_retune::retune(1, &[], 0, &self.params);
         let g = Block {
             index: 0,
             previous_hash: "0".repeat(64),
@@ -3053,8 +3146,7 @@ impl Blockchain {
         let last = self.chain.last().map_or(1, |b| b.difficulty);
         let hint = self.chain.last().map_or(0, |b| b.retune_hint);
         let ts = self.recent_timestamps.make_contiguous();
-        let (next, h) =
-            consensus::difficulty_retune::retune(last, ts, hint, &self.params);
+        let (next, h) = consensus::difficulty_retune::retune(last, ts, hint, &self.params);
         self.difficulty = next;
         self.retune_hint = h;
     }
@@ -3539,8 +3631,12 @@ impl Blockchain {
                 if self.difficulty != 0 {
                     let last = self.chain.last().map_or(1, |b| b.difficulty);
                     let ts = self.recent_timestamps.make_contiguous();
-                    let (next, hint) =
-                        consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
+                    let (next, hint) = consensus::difficulty_retune::retune(
+                        last,
+                        ts,
+                        self.retune_hint,
+                        &self.params,
+                    );
                     self.difficulty = next;
                     self.retune_hint = hint;
                 }
@@ -3698,10 +3794,43 @@ impl Blockchain {
                     .checked_add(coinbase_industrial)
                     .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
                 changed.insert(miner_addr.to_owned());
+                let mut touched_shards: HashSet<ShardId> = HashSet::new();
+                for addr in &changed {
+                    touched_shards.insert(address::shard_id(addr));
+                }
+                for shard in touched_shards {
+                    let root = process::shard_state_root(&self.accounts, shard);
+                    self.shard_roots.insert(shard, root);
+                    let prev = self.shard_heights.get(&shard).copied().unwrap_or(0);
+                    self.shard_heights.insert(shard, prev + 1);
+                    let key = ShardState::db_key();
+                    let bytes = ShardState::new(shard, root).to_bytes();
+                    let mut deltas = Vec::new();
+                    self.write_shard_state(shard, key, bytes, &mut deltas)
+                        .map_err(|e| PyValueError::new_err(format!("shard state write: {e}")))?;
+                }
 
                 self.emission_consumer += reward_consumer.0;
                 self.emission_industrial += reward_industrial.0;
+                self.macro_acc_consumer += reward_consumer.0;
+                self.macro_acc_industrial += reward_industrial.0;
                 self.block_height += 1;
+                if self.block_height % self.macro_interval == 0 {
+                    let mb = MacroBlock {
+                        height: self.block_height,
+                        shard_heights: self.shard_heights.clone(),
+                        shard_roots: self.shard_roots.clone(),
+                        reward_consumer: self.macro_acc_consumer,
+                        reward_industrial: self.macro_acc_industrial,
+                        queue_root: self.inter_shard.root(),
+                    };
+                    let _ = self
+                        .db
+                        .insert(&MacroBlock::db_key(self.block_height), mb.to_bytes());
+                    self.macro_blocks.push(mb);
+                    self.macro_acc_consumer = 0;
+                    self.macro_acc_industrial = 0;
+                }
                 #[cfg(feature = "telemetry")]
                 self.record_block_mined();
                 if self.block_height % 600 == 0 {

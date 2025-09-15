@@ -22,6 +22,11 @@ pub enum NetCmd {
         #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
+    /// Rebate operations
+    Rebate {
+        #[command(subcommand)]
+        action: RebateCmd,
+    },
     /// QUIC diagnostics
     Quic {
         #[command(subcommand)]
@@ -53,6 +58,19 @@ pub enum DnsCmd {
 pub enum QuicCmd {
     /// Show recent handshake failures
     Failures {
+        #[arg(long, default_value = "http://localhost:26658")]
+        url: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum RebateCmd {
+    /// Claim rebate voucher for a peer
+    Claim {
+        peer: String,
+        threshold: u64,
+        epoch: u64,
+        reward: u64,
         #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
@@ -165,6 +183,32 @@ pub fn handle(cmd: NetCmd) {
                     id: 1,
                     method: "net.handshake_failures",
                     params: serde_json::Value::Null,
+                    auth: None,
+                };
+                if let Ok(resp) = client.call(&url, &payload) {
+                    if let Ok(text) = resp.text() {
+                        println!("{}", text);
+                    }
+                }
+            }
+        },
+        NetCmd::Rebate { action } => match action {
+            RebateCmd::Claim { peer, threshold, epoch, reward, url } => {
+                let client = RpcClient::from_env();
+                #[derive(serde::Serialize)]
+                struct Payload<'a> {
+                    jsonrpc: &'static str,
+                    id: u32,
+                    method: &'static str,
+                    params: serde_json::Value,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    auth: Option<&'a str>,
+                }
+                let payload = Payload {
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "peer.rebate_claim",
+                    params: json!({"peer": peer, "threshold": threshold, "epoch": epoch, "reward": reward}),
                     auth: None,
                 };
                 if let Ok(resp) = client.call(&url, &payload) {

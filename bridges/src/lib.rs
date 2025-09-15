@@ -174,8 +174,28 @@ impl Bridge {
     }
 }
 
-/// Detects whether a given output script represents an HTLC.
-/// Currently this is a simple prefix check for illustrative purposes.
+/// Detect whether a given output script encodes an HTLC.
+///
+/// Scripts follow the format `htlc:<hexhash>:<timeout>` where `<hexhash>`
+/// may be either 20-byte (RIPEMD) or 32-byte (SHA3) and `<timeout>` is a
+/// decimal integer.
 pub fn is_htlc_output(script: &[u8]) -> bool {
-    script.starts_with(b"htlc:")
+    let s = match std::str::from_utf8(script) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let mut parts = s.split(':');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("htlc"), Some(hash_hex), Some(timeout), None) => {
+            let hash_bytes = match hex::decode(hash_hex) {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
+            if hash_bytes.len() != 20 && hash_bytes.len() != 32 {
+                return false;
+            }
+            timeout.parse::<u64>().is_ok()
+        }
+        _ => false,
+    }
 }

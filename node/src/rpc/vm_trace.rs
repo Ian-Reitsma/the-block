@@ -4,6 +4,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{protocol::Role, Message};
 use tokio_tungstenite::WebSocketStream;
 
+#[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::vm::{vm_debug_enabled, Debugger};
 

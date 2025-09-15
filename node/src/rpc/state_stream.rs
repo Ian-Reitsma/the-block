@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use blake3::Hasher;
 use futures::{SinkExt, StreamExt};
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
@@ -8,6 +9,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{protocol::Role, Message};
 use tokio_tungstenite::WebSocketStream;
 
+#[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::Blockchain;
 
@@ -37,6 +39,7 @@ pub async fn serve_state_stream(mut stream: TcpStream, key: String, bc: Arc<Mute
         return;
     }
     let ws_stream = WebSocketStream::from_raw_socket(stream, Role::Server, None).await;
+    #[cfg(feature = "telemetry")]
     telemetry::STATE_STREAM_SUBSCRIBERS_TOTAL.inc();
     run_stream(ws_stream, bc).await;
 }
@@ -52,12 +55,21 @@ async fn run_stream(mut ws: WebSocketStream<TcpStream>, bc: Arc<Mutex<Blockchain
                 .map(|b| b.index)
                 .unwrap_or(0)
         };
+        let accounts: Vec<(String, u64)> = Vec::new();
+        let root = {
+            let mut h = Hasher::new();
+            for (addr, bal) in accounts.iter() {
+                h.update(addr.as_bytes());
+                h.update(&bal.to_le_bytes());
+            }
+            h.finalize().into()
+        };
         let chunk = DiffChunk {
             seq,
             tip_height: tip,
-            accounts: Vec::new(),
-            root: [0u8; 32],
-            proof: Vec::new(),
+            accounts,
+            root,
+            proof: root.to_vec(),
             compressed: false,
         };
         let msg = serde_json::to_string(&chunk).unwrap();

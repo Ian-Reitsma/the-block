@@ -822,6 +822,27 @@ pub static EVICTIONS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static SHARD_CACHE_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("shard_cache_evict_total", "Total shard cache evictions")
+        .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static INTER_SHARD_REPLAY_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "inter_shard_replay_evict_total",
+        "Total inter-shard replay cache evictions",
+    )
+    .unwrap_or_else(|e| panic!("counter inter_shard_replay_evict_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry inter_shard_replay_evict_total: {e}"));
+    c
+});
+
 pub static FEE_FLOOR_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "fee_floor_reject_total",
@@ -1143,6 +1164,18 @@ pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry retrieval_failure_total: {e}"));
+    c
+});
+
+pub static RETRIEVAL_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "retrieval_success_total",
+        "Total successful proof-of-retrievability challenges",
+    )
+    .unwrap_or_else(|e| panic!("counter retrieval_success_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry retrieval_success_total: {e}"));
     c
 });
 
@@ -1917,11 +1950,8 @@ pub static STARTUP_TTL_DROP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 pub static SESSION_KEY_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new(
-        "session_key_issued_total",
-        "Session keys issued",
-    )
-    .unwrap_or_else(|e| panic!("counter: {e}"));
+    let c = IntCounter::new("session_key_issued_total", "Session keys issued")
+        .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -2219,6 +2249,66 @@ pub static REPUTATION_GOSSIP_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry reputation_gossip_fail_total: {e}"));
+    c
+});
+
+pub static AMM_SWAP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("amm_swap_total", "Total AMM swaps executed").unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry amm_swap_total: {e}"));
+    c
+});
+
+pub static LIQUIDITY_REWARDS_DISBURSED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "liquidity_rewards_disbursed_total",
+        "Liquidity mining rewards distributed",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry liquidity_rewards_disbursed_total: {e}"));
+    c
+});
+
+pub static REBATE_CLAIMS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("rebate_claims_total", "Peer rebate claims submitted").unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry rebate_claims_total: {e}"));
+    c
+});
+
+pub static REBATE_ISSUED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("rebate_issued_total", "Rebate vouchers issued").unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry rebate_issued_total: {e}"));
+    c
+});
+
+pub static BUILD_PROVENANCE_VALID_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "build_provenance_valid_total",
+        "Build provenance checks that succeeded",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry build_provenance_valid_total: {e}"));
+    c
+});
+
+pub static BUILD_PROVENANCE_INVALID_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "build_provenance_invalid_total",
+        "Build provenance checks that failed",
+    )
+    .unwrap();
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry build_provenance_invalid_total: {e}"));
     c
 });
 
@@ -2983,6 +3073,7 @@ fn gather() -> String {
         &*ORPHAN_SWEEP_TOTAL,
         &*GOSSIP_DUPLICATE_TOTAL,
         &*GOSSIP_FANOUT_GAUGE,
+        &*SHARD_CACHE_EVICT_TOTAL,
         &*PARTITION_EVENTS_TOTAL,
         &*PARTITION_RECOVER_BLOCKS,
         DEX_ORDERS_TOTAL.with_label_values(&["buy"]),

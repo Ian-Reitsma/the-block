@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let contract_state = explorer.clone();
     let provider_state = explorer.clone();
     let domain_state = explorer.clone();
+    let storage_provider_state = explorer.clone();
     let dex_state = explorer.clone();
     let job_state = explorer.clone();
     let trust_state = explorer.clone();
@@ -108,6 +109,13 @@ async fn main() -> anyhow::Result<()> {
             get(move |Path(id): Path<String>| {
                 let state = domain_state.clone();
                 async move { Json(state.receipts_by_domain(&id).unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/storage/providers",
+            get(move || {
+                let state = storage_provider_state.clone();
+                async move { Json(state.provider_storage_stats().unwrap_or_default()) }
             }),
         )
         .route(

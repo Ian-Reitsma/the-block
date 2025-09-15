@@ -4,6 +4,7 @@ pub mod discovery;
 mod message;
 pub mod peer;
 pub mod peer_metrics_store;
+pub mod uptime;
 #[cfg(feature = "quic")]
 pub mod quic;
 #[cfg(not(feature = "quic"))]
@@ -17,15 +18,18 @@ pub mod quic {
         Other(Error),
     }
 }
-pub mod turbine;
 pub mod partition_watch;
+pub mod turbine;
 
+use crate::net::peer::pk_from_addr;
 use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
 use anyhow::anyhow;
 use blake3;
 use ed25519_dalek::SigningKey;
+use ledger::address::ShardId;
 use rand::Rng;
 use rand_core::{OsRng, RngCore};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -302,7 +306,7 @@ impl Node {
     }
 
     fn broadcast_payload(&self, body: Payload) {
-        let msg = Message::new(body, &self.key);
+        let msg = Message::new(body.clone(), &self.key);
         self.broadcast(&msg);
     }
 
@@ -310,6 +314,17 @@ impl Node {
         let peers = self.peers.list_with_info();
         if std::env::var("TB_GOSSIP_ALGO").ok().as_deref() == Some("turbine") {
             turbine::broadcast(msg, &peers);
+            return;
+        }
+        if let Payload::Block(shard, _) = &msg.body {
+            let mut map: HashMap<[u8; 32], (SocketAddr, Transport, Option<Vec<u8>>)> =
+                HashMap::new();
+            for (addr, t, c) in peers {
+                if let Some(pk) = pk_from_addr(&addr) {
+                    map.insert(pk, (addr, t, c));
+                }
+            }
+            self.relay.broadcast_shard(*shard as ShardId, msg, &map);
         } else {
             self.relay.broadcast(msg, &peers);
         }

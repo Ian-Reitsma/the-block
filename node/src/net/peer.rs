@@ -482,7 +482,7 @@ impl PeerSet {
                 let mut bc = chain.lock();
                 let _ = bc.submit_blob_tx(tx);
             }
-            Payload::Block(block) => {
+            Payload::Block(_shard, block) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
