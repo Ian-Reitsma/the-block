@@ -20,7 +20,9 @@ pub use release::{
     ReleaseBallot, ReleaseVote,
 };
 pub use state::TreasuryState;
-pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS};
+pub use store::{
+    DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
+};
 pub use token::{TokenAction, TokenProposal};
 
 /// Simplified address type reused across governance records.
@@ -48,6 +50,8 @@ pub enum ParamKey {
     LogisticSlope,
     MinerHysteresis,
     HeuristicMuMilli,
+    FeeFloorWindow,
+    FeeFloorPercentile,
     BadgeExpirySecs,
     BadgeIssueUptime,
     BadgeRevokeUptime,

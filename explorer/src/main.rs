@@ -1,5 +1,5 @@
 use axum::{extract::Path, extract::Query, routing::get, Json, Router};
-use explorer::Explorer;
+use explorer::{gov_param_view, Explorer};
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -34,6 +34,9 @@ async fn main() -> anyhow::Result<()> {
     let bridge_state = explorer.clone();
     let juris_state = explorer.clone();
     let releases_query_state = explorer.clone();
+    let identity_state = explorer.clone();
+    let did_listing_state = explorer.clone();
+    let did_rate_state = explorer.clone();
 
     #[derive(Deserialize, Default)]
     struct ReleaseQuery {
@@ -43,6 +46,15 @@ async fn main() -> anyhow::Result<()> {
         start_epoch: Option<u64>,
         end_epoch: Option<u64>,
         store: Option<String>,
+    }
+    #[derive(Deserialize, Default)]
+    struct GovHistoryQuery {
+        store: Option<String>,
+    }
+    #[derive(Deserialize, Default)]
+    struct DidQuery {
+        address: Option<String>,
+        limit: Option<usize>,
     }
     let app = Router::new()
         .route(
@@ -161,6 +173,46 @@ async fn main() -> anyhow::Result<()> {
             }),
         )
         .route(
+            "/identity/dids/:address",
+            get(move |Path(address): Path<String>| {
+                let state = identity_state.clone();
+                async move { Json(state.did_document(&address)) }
+            }),
+        )
+        .route(
+            "/dids",
+            get(move |Query(query): Query<DidQuery>| {
+                let state = did_listing_state.clone();
+                async move {
+                    if let Some(address) = query.address {
+                        match explorer::did_view::by_address(&state, &address) {
+                            Ok(rows) => Json(rows),
+                            Err(err) => {
+                                eprintln!("did history query failed: {err}");
+                                Json(Vec::<explorer::DidRecordRow>::new())
+                            }
+                        }
+                    } else {
+                        let limit = query.limit.unwrap_or(25);
+                        match explorer::did_view::recent(&state, limit) {
+                            Ok(rows) => Json(rows),
+                            Err(err) => {
+                                eprintln!("recent did query failed: {err}");
+                                Json(Vec::<explorer::DidRecordRow>::new())
+                            }
+                        }
+                    }
+                }
+            }),
+        )
+        .route(
+            "/dids/metrics/anchor_rate",
+            get(move || {
+                let state = did_rate_state.clone();
+                async move { Json(explorer::did_view::anchor_rate(&state).unwrap_or_default()) }
+            }),
+        )
+        .route(
             "/storage/providers",
             get(move || {
                 let state = storage_provider_state.clone();
@@ -207,6 +259,23 @@ async fn main() -> anyhow::Result<()> {
             get(move || {
                 let state = fee_floor_state.clone();
                 async move { Json(state.fee_floor_history().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/mempool/fee_floor_policy",
+            get(move |Query(query): Query<GovHistoryQuery>| {
+                let store_path = query.store.unwrap_or_else(|| {
+                    std::env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into())
+                });
+                async move {
+                    match gov_param_view::fee_floor_policy_history(&store_path) {
+                        Ok(records) => Json(records),
+                        Err(err) => {
+                            eprintln!("fee floor policy history failed: {err}");
+                            Json(Vec::<gov_param_view::FeeFloorPolicyRecord>::new())
+                        }
+                    }
+                }
             }),
         )
         .route(

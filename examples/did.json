@@ -1,0 +1,24 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1"
+  ],
+  "id": "did:tb:sample",
+  "controller": [
+    "did:tb:operator"
+  ],
+  "verificationMethod": [
+    {
+      "id": "#owner",
+      "type": "Ed25519VerificationKey2018",
+      "controller": "did:tb:operator",
+      "publicKeyMultibase": "zExampleMultibaseKey"
+    }
+  ],
+  "service": [
+    {
+      "id": "#resolver",
+      "type": "AgentService",
+      "serviceEndpoint": "https://resolver.example.com"
+    }
+  ]
+}

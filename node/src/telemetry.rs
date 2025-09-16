@@ -305,6 +305,52 @@ pub static FEE_FLOOR_CURRENT: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static FEE_FLOOR_WINDOW_CHANGED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "fee_floor_window_changed_total",
+        "Total governance-triggered fee floor policy reconfigurations",
+    )
+    .unwrap_or_else(|e| panic!("counter fee floor window changed: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry fee floor window changed: {e}"));
+    c
+});
+
+pub static FEE_FLOOR_WARNING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "fee_floor_warning_total",
+            "Wallet fee floor warnings surfaced to users",
+        ),
+        &["lane"],
+    )
+    .unwrap_or_else(|e| panic!("counter fee floor warning: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry fee floor warning: {e}"));
+    c.with_label_values(&["consumer"]).inc_by(0);
+    c.with_label_values(&["industrial"]).inc_by(0);
+    c
+});
+
+pub static FEE_FLOOR_OVERRIDE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "fee_floor_override_total",
+            "Wallet transactions forced below the advertised fee floor",
+        ),
+        &["lane"],
+    )
+    .unwrap_or_else(|e| panic!("counter fee floor override: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry fee floor override: {e}"));
+    c.with_label_values(&["consumer"]).inc_by(0);
+    c.with_label_values(&["industrial"]).inc_by(0);
+    c
+});
+
 pub static DID_ANCHOR_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new("did_anchor_total", "Total number of anchored DID documents")
         .unwrap_or_else(|e| panic!("counter did anchor: {e}"));

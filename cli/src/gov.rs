@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use the_block::governance::{
-    controller, GovStore, Proposal, ProposalStatus, ReleaseAttestation, ReleaseBallot, ReleaseVote,
-    Vote, VoteChoice,
+    controller, registry, GovStore, ParamKey, Proposal, ProposalStatus, ReleaseAttestation,
+    ReleaseBallot, ReleaseVote, Vote, VoteChoice,
 };
 
 #[derive(Subcommand)]
@@ -58,6 +58,38 @@ pub enum GovCmd {
         #[arg(long)]
         install: bool,
     },
+    /// Parameter management helpers
+    Param {
+        #[command(subcommand)]
+        action: GovParamCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum GovParamCmd {
+    /// Submit a governance proposal to update a parameter
+    Update {
+        /// Parameter key (e.g. `mempool.fee_floor_window`)
+        key: String,
+        /// Proposed new value
+        value: i64,
+        #[arg(long, default_value = "gov.db")]
+        state: String,
+        #[arg(long, default_value_t = 0)]
+        epoch: u64,
+        #[arg(long)]
+        vote_deadline: Option<u64>,
+        #[arg(long)]
+        proposer: Option<String>,
+    },
+}
+
+fn parse_param_key(name: &str) -> Option<ParamKey> {
+    match name {
+        "mempool.fee_floor_window" | "FeeFloorWindow" => Some(ParamKey::FeeFloorWindow),
+        "mempool.fee_floor_percentile" | "FeeFloorPercentile" => Some(ParamKey::FeeFloorPercentile),
+        _ => None,
+    }
 }
 
 pub fn handle(cmd: GovCmd) {
@@ -200,5 +232,49 @@ pub fn handle(cmd: GovCmd) {
                 Err(err) => eprintln!("fetch failed: {err}"),
             }
         }
+        GovCmd::Param { action } => match action {
+            GovParamCmd::Update {
+                key,
+                value,
+                state,
+                epoch,
+                vote_deadline,
+                proposer,
+            } => {
+                let Some(param_key) = parse_param_key(&key) else {
+                    eprintln!("unknown parameter key: {key}");
+                    return;
+                };
+                let Some(spec) = registry().iter().find(|s| s.key == param_key) else {
+                    eprintln!("parameter not governable: {key}");
+                    return;
+                };
+                if value < spec.min || value > spec.max {
+                    eprintln!(
+                        "value {} out of bounds (min {} max {})",
+                        value, spec.min, spec.max
+                    );
+                    return;
+                }
+                let store = GovStore::open(&state);
+                let proposal = Proposal {
+                    id: 0,
+                    key: param_key,
+                    new_value: value,
+                    min: spec.min,
+                    max: spec.max,
+                    proposer: proposer.unwrap_or_else(|| "cli".into()),
+                    created_epoch: epoch,
+                    vote_deadline_epoch: vote_deadline.unwrap_or(epoch),
+                    activation_epoch: None,
+                    status: ProposalStatus::Open,
+                    deps: Vec::new(),
+                };
+                match controller::submit_proposal(&store, proposal) {
+                    Ok(id) => println!("parameter proposal {id} submitted"),
+                    Err(e) => eprintln!("submit failed: {e}"),
+                }
+            }
+        },
     }
 }

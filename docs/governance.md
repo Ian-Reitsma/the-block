@@ -12,18 +12,18 @@ Two chambers participate in ratifying upgrades:
 ## Proposal lifecycle
 
 1. Draft a JSON proposal (see `examples/governance/`).
-2. Submit with `gov submit <file>` to receive an id.
-3. Cast votes via `gov vote <id> --house ops|builders`.
-4. After both houses reach quorum and the timelock elapses, execute with `gov exec <id>`.
-5. Inspect progress at any time with `gov status <id>` which reports vote totals,
-   execution state and remaining timelock. Use `gov list` to view all proposals
+2. Submit with `contract gov submit <file>` to receive an id.
+3. Cast votes via `contract gov vote <id> --house ops|builders`.
+4. After both houses reach quorum and the timelock elapses, execute with `contract gov exec <id>`.
+5. Inspect progress at any time with `contract gov status <id>` which reports vote totals,
+   execution state and remaining timelock. Use `contract gov list` to view all proposals
    and their dependencies in a single summary.
 
 Both houses must reach quorum before a proposal enters a timelock period,
 after which it may be executed on-chain.
 
 Rollback semantics and CLI usage are documented in
-[governance_rollback.md](governance_rollback.md). The `gov status` command
+[governance_rollback.md](governance_rollback.md). The `contract gov status` command
 exposes rollback-related metrics so operators can verify that gauges reset after
 reverts.
 
@@ -55,16 +55,30 @@ Governance can adjust several runtime knobs without code changes:
 | `burst.refill_rate_per_s` | rate at which burst buckets replenish | `industrial_rejected_total{reason="burst"}` |
 | `inflation.beta_storage_sub_ct` | µCT per byte of storage subsidy | `subsidy_bytes_total{type="storage"}` |
 | `kill_switch_subsidy_reduction` | emergency % cut across all subsidies (12 h timelock) | `subsidy_multiplier{type}` |
+| `mempool.fee_floor_window` | number of recent fees sampled when computing the floor | `fee_floor_window_changed_total`, `fee_floor_current` |
+| `mempool.fee_floor_percentile` | percentile used for the dynamic fee floor | `fee_floor_window_changed_total`, `fee_floor_current` |
 
-The `gov` helper CLI provides shortcuts for crafting proposals:
+The `contract` CLI provides shortcuts for parameter management and proposal
+crafting:
 
 ```bash
-cargo run --bin gov -- SetFairshare 50000 1000
-cargo run --bin gov -- SetKillSwitchSubsidyReduction 50
+contract gov param update mempool.fee_floor_window 512 --state gov.db --epoch 1024
+contract gov param update mempool.fee_floor_percentile 70
+contract gov submit examples/governance/enable_feature.json
 ```
 
-See [`node/src/bin/gov.rs`](../node/src/bin/gov.rs)
-for additional subcommands that submit, vote, and execute proposals.
+Use `contract gov rollback <key>` within the rollback window to revert a change
+and restore the previous value. Every activation or rollback appends a record to
+`governance/history/fee_floor_policy.json`, increments
+`fee_floor_window_changed_total`, and is exposed via the explorer endpoint
+`/mempool/fee_floor_policy` for auditing.
+
+See [`cli/src/gov.rs`](../cli/src/gov.rs) for additional subcommands that
+submit, vote, execute, and roll back proposals. The parameter helper currently
+targets the fee-floor keys; other parameters require submitting JSON proposals
+manually. DID revocations share the same `GovStore` history; once governance
+revokes an address, `identity.anchor` rejects further updates until the entry is
+cleared, and the explorer surfaces the state via `/identity/dids/:address`.
 
 ## Handshake Signaling
 

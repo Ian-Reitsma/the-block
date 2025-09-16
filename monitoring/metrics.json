@@ -204,6 +204,18 @@
     },
     {
       "deprecated": false,
+      "description": "Wallet fee floor warnings surfaced to users",
+      "labels": ["lane"],
+      "name": "fee_floor_warning_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Wallet sends that override fee floor guidance",
+      "labels": ["lane"],
+      "name": "fee_floor_override_total"
+    },
+    {
+      "deprecated": false,
       "description": "base seconds for Fibonacci smoothing",
       "labels": [],
       "name": "fib_window_base_secs"

@@ -17,6 +17,12 @@ impl<'a> Runtime<'a> {
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
         self.bc.set_consumer_p90_comfort(v);
     }
+    pub fn set_fee_floor_policy(&mut self, window: u64, percentile: u64) {
+        self.bc.params.fee_floor_window = window as i64;
+        self.bc.params.fee_floor_percentile = percentile as i64;
+        self.bc
+            .set_fee_floor_policy(window as usize, percentile as u32);
+    }
     pub fn set_min_capacity(&mut self, v: u64) {
         crate::compute_market::admission::set_min_capacity(v);
     }
@@ -82,6 +88,8 @@ const KILL_SWITCH_TIMELOCK_EPOCHS: u64 = 10800; // ≈12h at 4s epochs
 pub struct Params {
     pub snapshot_interval_secs: i64,
     pub consumer_fee_comfort_p90_microunits: i64,
+    pub fee_floor_window: i64,
+    pub fee_floor_percentile: i64,
     pub industrial_admission_min_capacity: i64,
     pub fairshare_global_max_ppm: i64,
     pub burst_refill_rate_per_s_ppm: i64,
@@ -119,6 +127,8 @@ impl Default for Params {
         Self {
             snapshot_interval_secs: 30,
             consumer_fee_comfort_p90_microunits: 2_500,
+            fee_floor_window: 256,
+            fee_floor_percentile: 75,
             industrial_admission_min_capacity: 10,
             fairshare_global_max_ppm: 250_000,
             burst_refill_rate_per_s_ppm: ((30.0 / 60.0) * 1_000_000.0) as i64,
@@ -159,6 +169,20 @@ fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 fn apply_consumer_fee_p90(v: i64, p: &mut Params) -> Result<(), ()> {
     p.consumer_fee_comfort_p90_microunits = v;
+    Ok(())
+}
+fn apply_fee_floor_window(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 1 {
+        return Err(());
+    }
+    p.fee_floor_window = v;
+    Ok(())
+}
+fn apply_fee_floor_percentile(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 100 {
+        return Err(());
+    }
+    p.fee_floor_percentile = v;
     Ok(())
 }
 fn apply_industrial_capacity(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -302,7 +326,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 23] = [
+    static REGS: [ParamSpec; 25] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -326,6 +350,34 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_consumer_fee_p90,
             apply_runtime: |v, rt| {
                 rt.set_consumer_p90_comfort(v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::FeeFloorWindow,
+            default: 256,
+            min: 1,
+            max: 4_096,
+            unit: "samples",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_fee_floor_window,
+            apply_runtime: |v, rt| {
+                let percentile = rt.bc.params.fee_floor_percentile as u64;
+                rt.set_fee_floor_policy(v as u64, percentile);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::FeeFloorPercentile,
+            default: 75,
+            min: 0,
+            max: 100,
+            unit: "percent",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_fee_floor_percentile,
+            apply_runtime: |v, rt| {
+                let window = rt.bc.params.fee_floor_window as u64;
+                rt.set_fee_floor_policy(window, v as u64);
                 Ok(())
             },
         },

@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99.3/100** with vision completion **~82.4/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99.6/100** with vision completion **~84.2/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -62,7 +62,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~87 %
+## 3. Governance & Subsidy Economy — ~90 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -74,6 +74,8 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Legacy third-token ledger fully removed; CT-only subsidies minted each block with migration documented in `docs/system_changes.md`.
 - Multi-signature release approvals persist signer sets and thresholds (`node/src/governance/release.rs`), gated fetch/install flows (`node/src/update.rs`, `cli/src/gov.rs`), and explorer/CLI timelines (`explorer/src/release_view.rs`, `contract explorer release-history`).
 - Telemetry counters `release_quorum_fail_total` and `release_installs_total` expose quorum health and rollout adoption for dashboards.
+- Fee-floor window and percentile parameters (`node/src/governance/params.rs`) stream through `GovStore` history with rollback support (`node/src/governance/store.rs`), governance CLI updates (`cli/src/gov.rs`), explorer timelines (`explorer/src/lib.rs`), and regression coverage (`governance/tests/mempool_params.rs`).
+- DID revocations share the same `GovStore` history and prevent further anchors until governance clears the entry; the history is available to explorer and wallet tooling so revocation state can be surfaced alongside DID records (`node/src/governance/store.rs`, `node/src/identity/did.rs`, `docs/identity.md`).
 - Simulations `sim/release_signers.rs` and `sim/lagging_release.rs` model signer churn and staggered downloads to validate quorum durability and rollback safeguards before production deployment.
 - One‑dial multiplier formula retunes β/γ/κ/λ per epoch using realised utilisation `U_x`, clamped to ±15 % and doubled when `U_x` → 0; see `docs/economics.md`.
 - Demand gauges `industrial_backlog` and `industrial_utilization` feed
@@ -118,14 +120,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~79 %
+## 6. Compute Marketplace & CBM — ~80 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
 - `compute.job_cancel` RPC releases resources and refunds bonds (`node/src/rpc/compute_market.rs`).
 - Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
-- Admission enforces dynamic fee floors with per-sender slot caps, eviction audit trails, explorer charts, and `mempool.stats` exposure (`node/src/mempool/admission.rs`, `docs/mempool_qos.md`, `node/tests/mempool_eviction.rs`).
+- Admission enforces dynamic fee floors with per-sender slot caps, eviction audit trails, explorer charts, and `mempool.stats` exposure (`node/src/mempool/admission.rs`, `node/src/mempool/scoring.rs`, `docs/mempool_qos.md`, `node/tests/mempool_eviction.rs`). Governance parameters for the floor window and percentile stream through telemetry (`fee_floor_window_changed_total`, `fee_floor_warning_total`, `fee_floor_override_total`) and wallet guidance.
 - Economic simulator outputs KPIs to CSV (`sim/src`).
 - Durable courier receipts with exponential backoff documented in `docs/compute_market_courier.md` and implemented in `node/src/compute_market/courier.rs`.
 - Groth16/Plonk SNARK verification for compute receipts (`node/src/compute_market/snark.rs`).
@@ -149,7 +151,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~89 %
+## 8. Wallets, Light Clients & KYC — ~91 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -161,6 +163,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Session-key issuance and meta-transaction tooling (`crypto/src/session.rs`, `cli/src/wallet.rs`, `docs/account_abstraction.md`).
 - Telemetry `session_key_issued_total`/`session_key_expired_total` and simulator churn knob (`sim/src/lib.rs`).
 - Release fetch/install tooling verifies provenance, records timestamps, and exposes explorer/CLI history for operator audits (`node/src/update.rs`, `cli/src/gov.rs`, `explorer/src/release_view.rs`).
+- Wallet send flow caches fee-floor lookups, emits localized warnings with auto-bump or `--force` overrides, streams telemetry events back to the node, and exposes JSON mode for automation (`cli/src/wallet.rs`, `docs/mempool_qos.md`).
 
 **Gaps**
 - Multisig flows missing.
@@ -179,7 +182,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~83 %
+## 10. Monitoring, Debugging & Profiling — ~85 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -189,13 +192,27 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - Metrics-to-logs correlation links Prometheus anomalies to targeted log dumps and exposes `log_correlation_fail_total` for missed lookups (`metrics-aggregator/src/lib.rs`, `node/src/rpc/logs.rs`, `cli/src/logs.rs`).
     - VM trace counters and partition dashboards (`node/src/telemetry.rs`, `monitoring/templates/partition.json`).
     - Settlement audit CI job (`.github/workflows/ci.yml`).
+    - Fee-floor policy changes and wallet overrides surface via `fee_floor_window_changed_total`, `fee_floor_warning_total`, and `fee_floor_override_total`, while DID anchors increment `did_anchor_total` for explorer dashboards (`node/src/telemetry.rs`, `monitoring/metrics.json`, `docs/mempool_qos.md`, `docs/identity.md`).
     - Incremental log indexer resumes from offsets, rotates encryption keys, streams over WebSocket, and exposes REST filters (`tools/log_indexer.rs`, `docs/logging.md`).
 
 **Gaps**
 - Bridge and VM metrics are sparse.
 - Automated anomaly detection not in place.
 
-## 11. Economic Simulation & Formal Verification — ~38 %
+## 11. Identity & Explorer — ~78 %
+
+**Evidence**
+- DID registry persists anchors with replay protection, governance revocation checks, and optional provenance attestations (`node/src/identity/did.rs`, `state/src/did.rs`).
+- Light-client commands anchor and resolve DIDs with remote signer support, sign-only payload export, and JSON output for automation (`cli/src/light_client.rs`, `examples/did.json`).
+- Explorer ingests DID updates into `did_records`, serves `/dids`, `/identity/dids/:address`, and anchor-rate metrics for dashboards (`explorer/src/did_view.rs`, `explorer/src/main.rs`).
+- Explorer caches DID lookups in-memory to avoid redundant RocksDB reads and drives anchor-rate dashboards from `/dids/metrics/anchor_rate` (`explorer/src/did_view.rs`, `explorer/src/main.rs`).
+- Governance history captures fee-floor and DID revocations for auditing alongside wallet telemetry (`node/src/governance/store.rs`, `docs/identity.md`).
+
+**Gaps**
+- Revocation alerting and recovery runbooks need explorer/CLI integration.
+- Mobile wallet identity UX and bulk export tooling remain outstanding.
+
+## 12. Economic Simulation & Formal Verification — ~38 %
 
 **Evidence**
 - Simulation scenarios for inflation/demand/backlog (`sim/src`).
@@ -206,7 +223,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 12. Mobile UX & Contribution Metrics — ~56 %
+## 13. Mobile UX & Contribution Metrics — ~56 %
 
 **Evidence**
 - Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).
@@ -219,4 +236,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑15*
+*Last updated: 2025‑09‑19*

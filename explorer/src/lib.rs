@@ -1,13 +1,17 @@
 use anyhow::Result as AnyhowResult;
 use blake3::Hasher;
 use hex::encode as hex_encode;
+use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use storage;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::{OrderBook, Side},
+    identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
     Block,
 };
@@ -16,6 +20,8 @@ mod ai_summary;
 pub mod bridge_view;
 pub mod compute_view;
 pub mod dex_view;
+pub mod did_view;
+pub mod gov_param_view;
 pub mod htlc_view;
 pub mod net_view;
 pub mod release_view;
@@ -159,8 +165,54 @@ pub struct LightProof {
     pub proof: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DidDocumentView {
+    pub address: String,
+    pub document: String,
+    pub hash: String,
+    pub nonce: u64,
+    pub updated_at: u64,
+    pub public_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_signer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_signature: Option<String>,
+}
+
+impl From<DidRecord> for DidDocumentView {
+    fn from(record: DidRecord) -> Self {
+        Self {
+            address: record.address,
+            document: record.document,
+            hash: hex_encode(record.hash),
+            nonce: record.nonce,
+            updated_at: record.updated_at,
+            public_key: hex_encode(record.public_key),
+            remote_signer: record
+                .remote_attestation
+                .as_ref()
+                .map(|att| att.signer.clone()),
+            remote_signature: record
+                .remote_attestation
+                .as_ref()
+                .map(|att| att.signature.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DidRecordRow {
+    pub address: String,
+    pub hash: String,
+    pub anchored_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wallet_url: Option<String>,
+}
+
 pub struct Explorer {
     path: PathBuf,
+    did: Mutex<DidRegistry>,
+    did_cache: Mutex<LruCache<String, DidDocumentView>>,
 }
 
 impl Explorer {
@@ -243,7 +295,40 @@ impl Explorer {
             "CREATE TABLE IF NOT EXISTS release_history (hash TEXT PRIMARY KEY, proposer TEXT, activation_epoch INTEGER, install_count INTEGER)",
             [],
         )?;
-        Ok(Self { path: p })
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS did_records (address TEXT NOT NULL, hash TEXT NOT NULL, anchored_at INTEGER NOT NULL, PRIMARY KEY(address, anchored_at))",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_did_records_address ON did_records(address)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_did_records_time ON did_records(anchored_at DESC)",
+            [],
+        )?;
+        let did_registry = DidRegistry::open(DidRegistry::default_path());
+        let mut cache = LruCache::new(NonZeroUsize::new(256).unwrap());
+        {
+            let mut seed_tx = conn.transaction()?;
+            for view in did_registry
+                .records()
+                .into_iter()
+                .map(DidDocumentView::from)
+            {
+                seed_tx.execute(
+                    "INSERT OR REPLACE INTO did_records (address, hash, anchored_at) VALUES (?1, ?2, ?3)",
+                    params![&view.address, &view.hash, view.updated_at as i64],
+                )?;
+                cache.put(view.address.clone(), view);
+            }
+            seed_tx.commit()?;
+        }
+        Ok(Self {
+            path: p,
+            did: Mutex::new(did_registry),
+            did_cache: Mutex::new(cache),
+        })
     }
 
     pub fn record_bridge_challenge(&self, rec: &BridgeChallengeRecord) -> Result<()> {
@@ -391,6 +476,121 @@ impl Explorer {
             }
         }
         Ok(out)
+    }
+
+    fn cache_hit(&self, address: &str) -> Option<DidDocumentView> {
+        self.did_cache
+            .lock()
+            .ok()
+            .and_then(|mut cache| cache.get(address).cloned())
+    }
+
+    fn wallet_link(address: &str) -> String {
+        format!("/wallets/{address}")
+    }
+
+    fn upsert_did_record(&self, view: &DidDocumentView) -> Result<()> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT OR REPLACE INTO did_records (address, hash, anchored_at) VALUES (?1, ?2, ?3)",
+            params![&view.address, &view.hash, view.updated_at as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn did_document(&self, address: &str) -> Option<DidDocumentView> {
+        if let Some(hit) = self.cache_hit(address) {
+            return Some(hit);
+        }
+        let record = {
+            let guard = self.did.lock().ok()?;
+            guard.resolve(address)
+        }?;
+        let view = DidDocumentView::from(record);
+        if let Err(err) = self.upsert_did_record(&view) {
+            eprintln!("persist DID record failed: {err}");
+        }
+        if let Ok(mut cache) = self.did_cache.lock() {
+            cache.put(address.to_string(), view.clone());
+        }
+        Some(view)
+    }
+
+    pub fn record_did_anchor(&self, view: &DidDocumentView) -> Result<()> {
+        self.upsert_did_record(view)?;
+        if let Ok(mut cache) = self.did_cache.lock() {
+            cache.put(view.address.clone(), view.clone());
+        }
+        Ok(())
+    }
+
+    pub fn recent_did_records(&self, limit: usize) -> Result<Vec<DidRecordRow>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT address, hash, anchored_at FROM did_records ORDER BY anchored_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok(DidRecordRow {
+                address: row.get(0)?,
+                hash: row.get(1)?,
+                anchored_at: row.get::<_, i64>(2)?,
+                wallet_url: None,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let mut rec = r?;
+            rec.wallet_url = Some(Self::wallet_link(&rec.address));
+            out.push(rec);
+        }
+        Ok(out)
+    }
+
+    pub fn did_records_for_address(&self, address: &str) -> Result<Vec<DidRecordRow>> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT address, hash, anchored_at FROM did_records WHERE address=?1 ORDER BY anchored_at DESC",
+        )?;
+        let rows = stmt.query_map(params![address], |row| {
+            Ok(DidRecordRow {
+                address: row.get(0)?,
+                hash: row.get(1)?,
+                anchored_at: row.get::<_, i64>(2)?,
+                wallet_url: None,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            let mut rec = r?;
+            rec.wallet_url = Some(Self::wallet_link(&rec.address));
+            out.push(rec);
+        }
+        Ok(out)
+    }
+
+    pub fn did_anchor_rate(&self) -> Result<Vec<MetricPoint>> {
+        let mut points = self.metric_points("did_anchor_total")?;
+        if points.len() < 2 {
+            return Ok(Vec::new());
+        }
+        points.sort_by_key(|p| p.ts);
+        let mut rates = Vec::new();
+        for window in points.windows(2) {
+            if let [prev, next] = window {
+                let dt = (next.ts - prev.ts) as f64;
+                if dt <= 0.0 {
+                    continue;
+                }
+                let delta = next.value - prev.value;
+                let rate = if delta <= 0.0 { 0.0 } else { delta / dt };
+                rates.push(MetricPoint {
+                    name: "did_anchor_rate".to_string(),
+                    ts: next.ts,
+                    value: rate,
+                });
+            }
+        }
+        Ok(rates)
     }
 
     pub fn index_gov_proposal(&self, prop: &GovProposal) -> Result<()> {

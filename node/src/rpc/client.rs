@@ -5,6 +5,8 @@ use std::io;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use crate::transaction::FeeLane;
+
 /// Simple JSON-RPC client with jittered timeouts and retry backoff.
 #[derive(Clone)]
 pub struct RpcClient {
@@ -105,6 +107,70 @@ pub struct InflationParams {
 }
 
 impl RpcClient {
+    pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, reqwest::Error> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            jsonrpc: &'static str,
+            id: u32,
+            method: &'static str,
+            params: serde_json::Value,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            auth: Option<&'a str>,
+        }
+        #[derive(Deserialize)]
+        struct Envelope<T> {
+            result: T,
+        }
+
+        let params = serde_json::json!({ "lane": lane.as_str() });
+        let payload = Payload {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "mempool.stats",
+            params,
+            auth: None,
+        };
+        let res = self.call(url, &payload)?.json::<Envelope<MempoolStats>>()?;
+        Ok(res.result)
+    }
+
+    pub fn record_wallet_qos_event(
+        &self,
+        url: &str,
+        event: WalletQosEvent<'_>,
+    ) -> Result<(), reqwest::Error> {
+        #[derive(Serialize)]
+        struct Payload<'a> {
+            jsonrpc: &'static str,
+            id: u32,
+            method: &'static str,
+            params: WalletQosParams<'a>,
+        }
+
+        #[derive(Serialize)]
+        struct WalletQosParams<'a> {
+            event: &'a str,
+            lane: &'a str,
+            fee: u64,
+            floor: u64,
+        }
+
+        let params = WalletQosParams {
+            event: event.event,
+            lane: event.lane,
+            fee: event.fee,
+            floor: event.floor,
+        };
+        let payload = Payload {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "mempool.qos_event",
+            params,
+        };
+        let _ = self.call(url, &payload)?;
+        Ok(())
+    }
+
     pub fn inflation_params(&self, url: &str) -> Result<InflationParams, reqwest::Error> {
         #[derive(Serialize)]
         struct Payload<'a> {
@@ -152,6 +218,30 @@ impl RpcClient {
         let res = self.call(url, &payload)?.json::<Envelope>()?;
         Ok(res.result["stake"].as_u64().unwrap_or(0))
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MempoolStats {
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub age_p50: u64,
+    #[serde(default)]
+    pub age_p95: u64,
+    #[serde(default)]
+    pub fee_p50: u64,
+    #[serde(default)]
+    pub fee_p90: u64,
+    #[serde(default)]
+    pub fee_floor: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WalletQosEvent<'a> {
+    pub event: &'a str,
+    pub lane: &'a str,
+    pub fee: u64,
+    pub floor: u64,
 }
 
 #[cfg(test)]

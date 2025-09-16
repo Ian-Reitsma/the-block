@@ -10,10 +10,13 @@ use crate::telemetry::{
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const ACTIVATION_DELAY: u64 = 2;
 pub const ROLLBACK_WINDOW_EPOCHS: u64 = 1;
 pub const QUORUM: u64 = 1;
+const PARAM_HISTORY_LIMIT: usize = 512;
+const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LastActivation {
@@ -22,6 +25,39 @@ pub struct LastActivation {
     pub old_value: i64,
     pub new_value: i64,
     pub activated_epoch: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ParamChangeRecord {
+    key: ParamKey,
+    proposal_id: u64,
+    epoch: u64,
+    old_value: i64,
+    new_value: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fee_floor: Option<FeeFloorPolicySnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FeeFloorPolicySnapshot {
+    window: i64,
+    percentile: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FeeFloorPolicyRecord {
+    epoch: u64,
+    proposal_id: u64,
+    window: i64,
+    percentile: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DidRevocationRecord {
+    pub address: String,
+    pub reason: String,
+    pub epoch: u64,
+    pub revoked_at: u64,
 }
 
 pub struct GovStore {
@@ -62,6 +98,8 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::LogisticSlope => "logistic_slope_milli",
         ParamKey::MinerHysteresis => "miner_hysteresis",
         ParamKey::HeuristicMuMilli => "heuristic_mu_milli",
+        ParamKey::FeeFloorWindow => "fee_floor_window",
+        ParamKey::FeeFloorPercentile => "fee_floor_percentile",
         ParamKey::BadgeExpirySecs => "badge_expiry_secs",
         ParamKey::BadgeIssueUptime => "badge_issue_uptime_percent",
         ParamKey::BadgeRevokeUptime => "badge_revoke_uptime_percent",
@@ -74,6 +112,102 @@ fn key_name(k: ParamKey) -> &'static str {
 }
 
 impl GovStore {
+    fn did_revocations(&self) -> sled::Tree {
+        self.db
+            .open_tree("did_revocations")
+            .unwrap_or_else(|e| panic!("open did revocation tree: {e}"))
+    }
+
+    fn persist_did_revocation(&self, record: &DidRevocationRecord) {
+        let hist_dir = self.base_path.join("governance/history");
+        let _ = std::fs::create_dir_all(&hist_dir);
+        let path = hist_dir.join("did_revocations.json");
+        let mut history: Vec<DidRevocationRecord> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        history.push(record.clone());
+        if history.len() > DID_REVOCATION_HISTORY_LIMIT {
+            history.drain(0..history.len() - DID_REVOCATION_HISTORY_LIMIT);
+        }
+        if let Ok(bytes) = serde_json::to_vec(&history) {
+            let _ = std::fs::write(&path, bytes);
+        }
+    }
+
+    fn persist_fee_floor_policy(
+        &self,
+        hist_dir: &Path,
+        epoch: u64,
+        proposal_id: u64,
+        snapshot: FeeFloorPolicySnapshot,
+    ) {
+        let path = hist_dir.join("fee_floor_policy.json");
+        let mut history: Vec<FeeFloorPolicyRecord> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        history.push(FeeFloorPolicyRecord {
+            epoch,
+            proposal_id,
+            window: snapshot.window,
+            percentile: snapshot.percentile,
+        });
+        if history.len() > PARAM_HISTORY_LIMIT {
+            history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
+        }
+        if let Ok(bytes) = serde_json::to_vec(&history) {
+            let _ = std::fs::write(&path, bytes);
+        }
+    }
+
+    fn persist_param_change(
+        &self,
+        hist_dir: &Path,
+        key: ParamKey,
+        proposal_id: u64,
+        old_value: i64,
+        new_value: i64,
+        epoch: u64,
+        params: &Params,
+    ) {
+        let fee_snapshot = if matches!(key, ParamKey::FeeFloorWindow | ParamKey::FeeFloorPercentile)
+        {
+            Some(FeeFloorPolicySnapshot {
+                window: params.fee_floor_window,
+                percentile: params.fee_floor_percentile,
+            })
+        } else {
+            None
+        };
+
+        let record = ParamChangeRecord {
+            key,
+            proposal_id,
+            epoch,
+            old_value,
+            new_value,
+            fee_floor: fee_snapshot.clone(),
+        };
+
+        let path = hist_dir.join("param_changes.json");
+        let mut history: Vec<ParamChangeRecord> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        history.push(record);
+        if history.len() > PARAM_HISTORY_LIMIT {
+            history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
+        }
+        if let Ok(bytes) = serde_json::to_vec(&history) {
+            let _ = std::fs::write(&path, bytes);
+        }
+
+        if let Some(snapshot) = fee_snapshot {
+            self.persist_fee_floor_policy(hist_dir, epoch, proposal_id, snapshot);
+        }
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Self {
         let db_path = path.as_ref();
         let db = Config::new()
@@ -87,6 +221,52 @@ impl GovStore {
         Self {
             db,
             base_path: base,
+        }
+    }
+
+    /// Record a DID revocation enforced by governance.
+    pub fn revoke_did(&self, address: &str, reason: &str, epoch: u64) -> sled::Result<()> {
+        let mut rec = DidRevocationRecord {
+            address: address.to_string(),
+            reason: reason.to_string(),
+            epoch,
+            revoked_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        let bytes = ser(&rec)?;
+        self.did_revocations().insert(address.as_bytes(), bytes)?;
+        self.persist_did_revocation(&rec);
+        rec.reason.shrink_to_fit();
+        Ok(())
+    }
+
+    /// Clear a previously recorded DID revocation.
+    pub fn clear_did_revocation(&self, address: &str) -> sled::Result<()> {
+        self.did_revocations().remove(address.as_bytes())?;
+        Ok(())
+    }
+
+    /// Determine whether a DID is currently revoked.
+    pub fn is_did_revoked(&self, address: &str) -> bool {
+        self.did_revocations()
+            .get(address.as_bytes())
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    /// Retrieve recorded DID revocation history for monitoring and explorer use.
+    pub fn did_revocation_history(&self) -> sled::Result<Vec<DidRevocationRecord>> {
+        let hist_dir = self.base_path.join("governance/history");
+        let path = hist_dir.join("did_revocations.json");
+        if let Ok(bytes) = std::fs::read(&path) {
+            serde_json::from_slice(&bytes).map_err(|e| {
+                sled::Error::Unsupported(format!("de did revocation history: {e}").into())
+            })
+        } else {
+            Ok(Vec::new())
         }
     }
 
@@ -550,6 +730,8 @@ impl GovStore {
                                 ParamKey::LogisticSlope => params.logistic_slope_milli,
                                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
+                                ParamKey::FeeFloorWindow => params.fee_floor_window,
+                                ParamKey::FeeFloorPercentile => params.fee_floor_percentile,
                                 ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
                                 ParamKey::BadgeIssueUptime => params.badge_issue_uptime_percent,
                                 ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
@@ -577,6 +759,15 @@ impl GovStore {
                             self.proposals().insert(&key, ser(&prop)?)?;
                             self.active_params()
                                 .insert(ser(&prop.key)?, ser(&prop.new_value)?)?;
+                            self.persist_param_change(
+                                &hist_dir,
+                                prop.key,
+                                prop.id,
+                                old,
+                                prop.new_value,
+                                current_epoch,
+                                params,
+                            );
                             #[cfg(feature = "telemetry")]
                             {
                                 PARAM_CHANGE_PENDING
@@ -624,6 +815,8 @@ impl GovStore {
         params: &mut Params,
     ) -> sled::Result<()> {
         if let Some(raw) = self.last_activation().get("last")? {
+            let hist_dir = self.base_path.join("governance/history");
+            let _ = std::fs::create_dir_all(&hist_dir);
             let last: LastActivation = de(&raw)?;
             if current_epoch > last.activated_epoch + ROLLBACK_WINDOW_EPOCHS {
                 return Err(sled::Error::Unsupported("expired".into()));
@@ -636,6 +829,15 @@ impl GovStore {
             }
             self.active_params()
                 .insert(ser(&last.key)?, ser(&last.old_value)?)?;
+            self.persist_param_change(
+                &hist_dir,
+                last.key,
+                last.proposal_id,
+                last.new_value,
+                last.old_value,
+                current_epoch,
+                params,
+            );
             if let Some(prop_raw) = self.proposals().get(ser(&last.proposal_id)?)? {
                 let mut prop: Proposal = de(&prop_raw)?;
                 prop.status = ProposalStatus::RolledBack;
@@ -682,6 +884,8 @@ impl GovStore {
             .base_path
             .join("governance/history")
             .join(format!("{}.json", act_epoch));
+        let hist_dir = self.base_path.join("governance/history");
+        let _ = std::fs::create_dir_all(&hist_dir);
         let bytes =
             std::fs::read(&snap_path).map_err(|_| sled::Error::Unsupported("snapshot".into()))?;
         let prev: Params =
@@ -708,6 +912,8 @@ impl GovStore {
                 ParamKey::LogisticSlope => params.logistic_slope_milli,
                 ParamKey::MinerHysteresis => params.miner_hysteresis,
                 ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
+                ParamKey::FeeFloorWindow => params.fee_floor_window,
+                ParamKey::FeeFloorPercentile => params.fee_floor_percentile,
                 ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
                 ParamKey::BadgeIssueUptime => params.badge_issue_uptime_percent,
                 ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
@@ -721,6 +927,42 @@ impl GovStore {
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
             self.active_params().insert(ser(&spec.key)?, ser(&val)?)?;
         }
+        let reverted_val = match prop.key {
+            ParamKey::SnapshotIntervalSecs => params.snapshot_interval_secs,
+            ParamKey::ConsumerFeeComfortP90Microunits => params.consumer_fee_comfort_p90_microunits,
+            ParamKey::IndustrialAdmissionMinCapacity => params.industrial_admission_min_capacity,
+            ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
+            ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
+            ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
+            ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
+            ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
+            ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+            ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
+            ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
+            ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
+            ParamKey::LogisticSlope => params.logistic_slope_milli,
+            ParamKey::MinerHysteresis => params.miner_hysteresis,
+            ParamKey::HeuristicMuMilli => params.heuristic_mu_milli,
+            ParamKey::FeeFloorWindow => params.fee_floor_window,
+            ParamKey::FeeFloorPercentile => params.fee_floor_percentile,
+            ParamKey::BadgeExpirySecs => params.badge_expiry_secs,
+            ParamKey::BadgeIssueUptime => params.badge_issue_uptime_percent,
+            ParamKey::BadgeRevokeUptime => params.badge_revoke_uptime_percent,
+            ParamKey::JurisdictionRegion => params.jurisdiction_region,
+            ParamKey::AiDiagnosticsEnabled => params.ai_diagnostics_enabled,
+            ParamKey::KalmanRShort => params.kalman_r_short,
+            ParamKey::KalmanRMed => params.kalman_r_med,
+            ParamKey::KalmanRLong => params.kalman_r_long,
+        };
+        self.persist_param_change(
+            &hist_dir,
+            prop.key,
+            prop.id,
+            prop.new_value,
+            reverted_val,
+            current_epoch,
+            params,
+        );
         prop.status = ProposalStatus::RolledBack;
         self.proposals().insert(key, ser(&prop)?)?;
         #[cfg(feature = "telemetry")]

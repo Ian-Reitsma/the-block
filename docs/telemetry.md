@@ -56,6 +56,8 @@ Additional subsystem counters include:
 - `price_weight_applied_total` tracks how often reputation weighting adjusted a quoted price
 - `scheduler_priority_miss_total` counts high-priority jobs that waited past the
   scheduler's aging threshold
+- `fee_floor_warning_total{lane}` and `fee_floor_override_total{lane}` capture wallet guidance decisions, while `fee_floor_window_changed_total` increments whenever governance retunes the mempool fee-floor window or percentile.
+- `did_anchor_total` tracks anchored DID documents; explorers derive `/dids/metrics/anchor_rate` from this counter.
 
 The `scheduler_cancel_total{reason}` counter ties into the compute-market
 `compute.job_cancel` RPC, exposing whether cancellations were triggered by the

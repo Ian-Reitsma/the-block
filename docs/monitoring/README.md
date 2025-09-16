@@ -6,8 +6,14 @@ ready to import once the Prometheus stack is running.
 
 - `compute_market_dashboard.json` visualises backlog factors, fee-floor
   enforcement, courier retry behaviour, and the SLA violation counters alongside
-  the rolling `fee_floor_current` gauge so operators can compare pricing policy
-  with realised demand.
+  the rolling `fee_floor_current` gauge and the companion
+  `fee_floor_warning_total{lane}`/`fee_floor_override_total{lane}` counters so
+  operators can compare pricing policy with realised demand. Governance changes
+  to `mempool.fee_floor_window` and `mempool.fee_floor_percentile` increment
+  `fee_floor_window_changed_total` and surface in the same dashboard.
+- Extend dashboards with `did_anchor_total` to monitor identifier churn; the
+  explorer exposes `/dids/metrics/anchor_rate` and `/dids` for recent history so
+  panels can link directly to the underlying records.
 
 The consolidated cluster dashboard that ships with the repo lives at
 `monitoring/grafana/telemetry.json`. It already exposes governance rollout

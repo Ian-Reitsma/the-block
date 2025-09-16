@@ -60,7 +60,6 @@ use thiserror::Error;
 const EPOCH_BLOCKS: u64 = 120;
 const EPOCHS_PER_YEAR: u64 = 365 * 24 * 60 * 60 / EPOCH_BLOCKS;
 const RECENT_MINER_WINDOW: usize = 120;
-const FEE_FLOOR_WINDOW: usize = 256;
 
 const HBAR: f64 = 1.054_571_817e-34; // J·s
 const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
@@ -136,6 +135,7 @@ pub use transaction::{
     canonical_payload_bytes, canonical_payload_py as canonical_payload,
     decode_payload_py as decode_payload, sign_tx_py as sign_tx,
     verify_signed_tx_py as verify_signed_tx, BlobTx, FeeLane, RawTxPayload, SignedTransaction,
+    TxDidAnchor, TxDidAnchorAttestation,
 };
 // Python helper re-exported at the crate root
 pub use self::mine_block_py as mine_block;
@@ -894,6 +894,9 @@ pub struct MempoolEntryDisk {
 
 impl Default for Blockchain {
     fn default() -> Self {
+        let params = Params::default();
+        let fee_floor_window = params.fee_floor_window.max(1) as usize;
+        let fee_floor_percentile = params.fee_floor_percentile.clamp(0, 100) as u32;
         Self {
             chain: Vec::new(),
             accounts: HashMap::new(),
@@ -908,11 +911,13 @@ impl Default for Blockchain {
             mempool_size_industrial: std::sync::atomic::AtomicUsize::new(0),
             mempool_mutex: Mutex::new(()),
             admission_consumer: Mutex::new(mempool::admission::AdmissionState::new(
-                FEE_FLOOR_WINDOW,
+                fee_floor_window,
+                fee_floor_percentile,
                 "consumer",
             )),
             admission_industrial: Mutex::new(mempool::admission::AdmissionState::new(
-                FEE_FLOOR_WINDOW,
+                fee_floor_window,
+                fee_floor_percentile,
                 "industrial",
             )),
             pending_multisig: DashMap::new(),
@@ -948,7 +953,7 @@ impl Default for Blockchain {
             badge_tracker: ServiceBadgeTracker::new(),
             config: NodeConfig::default(),
             base_fee: 1,
-            params: Params::default(),
+            params,
             beta_storage_sub_ct_raw: 50,
             gamma_read_sub_ct_raw: 20,
             kappa_cpu_sub_ct_raw: 10,
@@ -1030,6 +1035,29 @@ impl Blockchain {
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
         self.comfort_threshold_p90 = v;
     }
+
+    pub fn set_fee_floor_policy(&mut self, window: usize, percentile: u32) {
+        let window = window.max(1);
+        let percentile = percentile.min(100);
+        self.params.fee_floor_window = window as i64;
+        self.params.fee_floor_percentile = percentile as i64;
+        let mut consumer = self
+            .admission_consumer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let changed_consumer = consumer.configure_fee_floor(window, percentile);
+        drop(consumer);
+        let mut industrial = self
+            .admission_industrial
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let changed_industrial = industrial.configure_fee_floor(window, percentile);
+        drop(industrial);
+        #[cfg(feature = "telemetry")]
+        if changed_consumer || changed_industrial {
+            crate::telemetry::FEE_FLOOR_WINDOW_CHANGED_TOTAL.inc();
+        }
+    }
     fn adjust_mempool_size(&self, lane: FeeLane, delta: isize) -> usize {
         use std::sync::atomic::Ordering::SeqCst;
         let size = match lane {
@@ -1073,6 +1101,11 @@ impl Blockchain {
     #[inline]
     fn dec_mempool_size(&self, lane: FeeLane) -> usize {
         self.adjust_mempool_size(lane, -1)
+    }
+
+    pub fn fee_floor_policy(&self) -> (usize, u32) {
+        let guard = self.admission_guard(FeeLane::Consumer);
+        guard.policy()
     }
 
     fn admission_guard(&self, lane: FeeLane) -> MutexGuard<'_, mempool::admission::AdmissionState> {
