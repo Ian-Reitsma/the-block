@@ -4,7 +4,7 @@ use crate::{
     consensus::pow::{self, BlockHeader},
     gateway,
     governance::{GovStore, Params},
-    identity::handle_registry::HandleRegistry,
+    identity::{handle_registry::HandleRegistry, DidRegistry},
     kyc,
     localnet::{validate_proximity, AssistReceipt},
     net, range_boost,
@@ -84,6 +84,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "register_handle",
     "resolve_handle",
     "whoami",
+    "identity.anchor",
+    "identity.resolve",
     "submit_tx",
     "tx_status",
     "price_board_get",
@@ -301,6 +303,7 @@ pub async fn handle_conn(
     mining: Arc<AtomicBool>,
     nonces: Arc<Mutex<HashSet<u64>>>,
     handles: Arc<Mutex<HandleRegistry>>,
+    dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
 ) {
     let mut reader = BufReader::new(stream);
@@ -990,6 +993,42 @@ fn dispatch(
                 "fee_floor": stats.fee_floor,
             })
         }
+        "mempool.qos_event" => {
+            let lane = req
+                .params
+                .get("lane")
+                .and_then(|v| v.as_str())
+                .unwrap_or("consumer");
+            let event = req
+                .params
+                .get("event")
+                .and_then(|v| v.as_str())
+                .unwrap_or("warning");
+            let fee = req.params.get("fee").and_then(|v| v.as_u64()).unwrap_or(0);
+            let floor = req
+                .params
+                .get("floor")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            #[cfg(feature = "telemetry")]
+            {
+                use crate::telemetry::{FEE_FLOOR_OVERRIDE_TOTAL, FEE_FLOOR_WARNING_TOTAL};
+                let labels = [lane];
+                FEE_FLOOR_WARNING_TOTAL.with_label_values(&labels).inc();
+                if event == "override" {
+                    FEE_FLOOR_OVERRIDE_TOTAL.with_label_values(&labels).inc();
+                }
+                tracing::info!(
+                    target: "mempool",
+                    lane,
+                    event,
+                    fee,
+                    floor,
+                    "wallet fee floor event",
+                );
+            }
+            serde_json::json!({"status": "ok"})
+        }
         "net.peer_stats" => {
             let id = req
                 .params
@@ -1631,9 +1670,29 @@ fn dispatch(
                 Err(_) => serde_json::json!({"error": "lock poisoned"}),
             }
         }
+        "identity.anchor" => {
+            check_nonce(&req.params, &nonces)?;
+            match dids.lock() {
+                Ok(mut reg) => match identity::anchor_did(&req.params, &mut reg, &GOV_STORE) {
+                    Ok(v) => v,
+                    Err(e) => serde_json::json!({"error": e.code()}),
+                },
+                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            }
+        }
         "resolve_handle" => match handles.lock() {
             Ok(reg) => identity::resolve_handle(&req.params, &reg),
             Err(_) => serde_json::json!({"address": null}),
+        },
+        "identity.resolve" => match dids.lock() {
+            Ok(reg) => identity::resolve_did(&req.params, &reg),
+            Err(_) => serde_json::json!({
+                "address": Value::Null,
+                "document": Value::Null,
+                "hash": Value::Null,
+                "nonce": Value::Null,
+                "updated_at": Value::Null,
+            }),
         },
         "whoami" => match handles.lock() {
             Ok(reg) => identity::whoami(&req.params, &reg),
@@ -2312,6 +2371,8 @@ pub async fn run_rpc_server(
     let _ = ready.send(local);
     let nonces = Arc::new(Mutex::new(HashSet::new()));
     let handles = Arc::new(Mutex::new(HandleRegistry::open("identity_db")));
+    let did_path = DidRegistry::default_path();
+    let dids = Arc::new(Mutex::new(DidRegistry::open(&did_path)));
     let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
     let tokens_per_sec = std::env::var("TB_RPC_TOKENS_PER_SEC")
         .ok()
@@ -2377,10 +2438,11 @@ pub async fn run_rpc_server(
         let mining = Arc::clone(&mining);
         let nonces = Arc::clone(&nonces);
         let handles_cl = Arc::clone(&handles);
+        let dids_cl = Arc::clone(&dids);
         let cfg_cl = Arc::clone(&runtime_cfg);
         tokio::spawn(async move {
             let _p = permit;
-            handle_conn(stream, bc, mining, nonces, handles_cl, cfg_cl).await;
+            handle_conn(stream, bc, mining, nonces, handles_cl, dids_cl, cfg_cl).await;
         });
     }
 }

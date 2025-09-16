@@ -1,7 +1,8 @@
 #![deny(warnings)]
 
-use clap::{Parser, Subcommand};
-use std::{fs, path::PathBuf};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
+use std::{fs, io, path::PathBuf};
 
 mod ai;
 mod bridge;
@@ -25,7 +26,6 @@ mod snark;
 mod storage;
 mod telemetry;
 mod version;
-#[cfg(feature = "quantum")]
 mod wallet;
 use ai::AiCmd;
 use bridge::BridgeCmd;
@@ -198,6 +198,12 @@ enum Commands {
         #[command(subcommand)]
         action: AiCmd,
     },
+    /// Generate shell completion scripts for the CLI
+    Completions {
+        /// Target shell for the completion script
+        #[arg(value_enum)]
+        shell: Shell,
+    },
     /// Fee estimation utilities
     Fees {
         /// Recent observed tip samples
@@ -283,6 +289,11 @@ fn main() {
                 est.record(s);
             }
             println!("{}", est.suggest());
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, bin_name, &mut io::stdout());
         }
         #[cfg(feature = "quantum")]
         Commands::Wallet { action } => wallet::handle(action),

@@ -1,4 +1,9 @@
-use crate::identity::handle_registry::{HandleError, HandleRegistry};
+use crate::governance::GovStore;
+use crate::identity::{
+    handle_registry::{HandleError, HandleRegistry},
+    DidError, DidRecord, DidRegistry,
+};
+use crate::transaction::TxDidAnchor;
 use serde_json::Value;
 
 pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value, HandleError> {
@@ -41,4 +46,43 @@ pub fn whoami(params: &Value, reg: &HandleRegistry) -> Value {
     let addr = params.get("address").and_then(|v| v.as_str()).unwrap_or("");
     let handle = reg.handle_of(addr);
     serde_json::json!({"address": addr, "handle": handle})
+}
+
+fn did_record_json(record: DidRecord) -> Value {
+    serde_json::json!({
+        "address": record.address,
+        "document": record.document,
+        "hash": hex::encode(record.hash),
+        "nonce": record.nonce,
+        "updated_at": record.updated_at,
+        "public_key": hex::encode(record.public_key),
+        "remote_attestation": record.remote_attestation.map(|att| {
+            serde_json::json!({"signer": att.signer, "signature": att.signature})
+        }),
+    })
+}
+
+pub fn anchor_did(
+    params: &Value,
+    reg: &mut DidRegistry,
+    gov: &GovStore,
+) -> Result<Value, DidError> {
+    let tx: TxDidAnchor =
+        serde_json::from_value(params.clone()).map_err(|_| DidError::InvalidRequest)?;
+    let record = reg.anchor(&tx, Some(gov))?;
+    Ok(did_record_json(record))
+}
+
+pub fn resolve_did(params: &Value, reg: &DidRegistry) -> Value {
+    let address = params.get("address").and_then(|v| v.as_str()).unwrap_or("");
+    match reg.resolve(address) {
+        Some(record) => did_record_json(record),
+        None => serde_json::json!({
+            "address": address,
+            "document": Value::Null,
+            "hash": Value::Null,
+            "nonce": Value::Null,
+            "updated_at": Value::Null,
+        }),
+    }
 }

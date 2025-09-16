@@ -16,6 +16,9 @@ dex = { path = "../dex" }
 the_block = { path = "../node" }
 ledger = { path = "../ledger" }
 dkg = { path = "../dkg" }
+explorer = { path = "../explorer" }
+ed25519-dalek = { version = "1", features = ["std"] }
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
@@ -32,4 +35,12 @@ path = "snark_overhead.rs"
 [[bin]]
 name = "dkg_latency"
 path = "dkg_latency.rs"
+
+[[bin]]
+name = "mempool_spam"
+path = "mempool_spam.rs"
+
+[[bin]]
+name = "did"
+path = "did.rs"
 

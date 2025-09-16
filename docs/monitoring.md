@@ -39,10 +39,14 @@ Panels include per-lane mempool size, banned peers, gossip duplicate counts,
 per-peer request/drop panels from `peer_request_total`/`peer_drop_total{reason}`,
 scheduler match histograms (`scheduler_match_total{result}`,
 `scheduler_provider_reputation`) and average log size derived from the
-`log_size_bytes` histogram. Additional gauges expose `subsidy_auto_reduced_total`
-and `kill_switch_trigger_total` so operators can correlate reward shifts with
-governance interventions. After running a monitor command, open Grafana and
-import `monitoring/grafana/dashboard.json` to explore the live panels.
+`log_size_bytes` histogram. Fee-floor charts combine `fee_floor_current` with
+`fee_floor_warning_total{lane}`/`fee_floor_override_total{lane}` so operators can
+trace wallet guidance, and DID anchor panels plot `did_anchor_total` alongside
+recent `/dids` history for cross-navigation. Additional gauges expose
+`subsidy_auto_reduced_total` and `kill_switch_trigger_total` so operators can
+correlate reward shifts with governance interventions. After running a monitor
+command, open Grafana and import `monitoring/grafana/dashboard.json` to explore
+the live panels.
 
 ### Cluster-wide peer metrics
 

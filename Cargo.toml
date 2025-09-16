@@ -31,7 +31,8 @@ members = [
   "metrics-aggregator",
   "storage",
   "privacy",
-  "dkg"
+  "dkg",
+  "governance"
 ]
 default-members = [
   "node",

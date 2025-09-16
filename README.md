@@ -73,8 +73,10 @@ test real services today.
   conversion to CT through multipliers, and verifies optional SNARK receipts
   prior to crediting payment. Admission now enforces a dynamic fee floor with
   per-sender slot limits, records evictions for audit, and exposes the active
-  floor through `mempool.stats` so operators can reason about QoS. (79.0%
-  Complete)
+  floor through `mempool.stats` so operators can reason about QoS. Governance can
+  retune the fee-floor window and percentile, and wallet sends surface localized
+  warnings with auto-bump or `--force` overrides plus JSON output for tooling.
+  (80.0% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -98,7 +100,10 @@ test real services today.
     two percent while funding service roles. Release upgrades now require
     multi-signature attestation with persisted signer sets, explorer history,
     and CLI tooling, while the fetcher verifies provenance before installs and
-    records rollout timestamps. (87.0% Complete)
+    records rollout timestamps. Fee-floor policy updates persist into
+    `GovStore` history with rollback support, telemetry counters, and explorer
+    timelines so operators can audit parameter changes while governance history
+    archives DID revocations for audit. (90.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
       deployable contracts and fee markets alongside traditional PoW headers. (79.0%
@@ -113,16 +118,29 @@ test real services today.
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
 Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (48.0% Complete)
+- The decentralized identifier registry anchors DID documents with replay
+  protection, optional provenance attestations, and telemetry (`did_anchor_total`).
+  Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
+  surface history and anchor velocity, while the `contract light-client did`
+  subcommands handle anchoring, resolving, remote signing, and sign-only payload
+  export with localized messaging. Governance revocations block misused
+  identifiers and are archived alongside anchor history for audit. (78.0% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
       session-key derivation, auto-update orchestration, and compliance options as
       needed. Explorer and CLI tooling now surface release history and per-node
-      installs for operators. (89.0% Complete)
+      installs for operators, while the wallet caches fee-floor queries, warns
+      when sends fall below the floor, and supports localized prompts, JSON
+      output, and remote signer attestations. Wallet QoS events feed telemetry so
+      dashboards track warning/override deltas. (91.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
       and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
       now link metrics anomalies to log searches, automated QUIC dumps, and Grafana
-      drill-downs for rapid mitigation. (83.0% Complete)
+      drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
+      anchor totals land in telemetry so dashboards can trace user choices,
+      anchor velocity, and governance parameter rollbacks from a single pane.
+      (85.0% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
     and encode consensus invariants, laying groundwork for provable safety. (38.0%
     Complete)
@@ -131,7 +149,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99.3/100** with vision completion **~82.4/100**.
+  Mainnet readiness sits at **~99.6/100** with vision completion **~84.2/100**.
 
 ### Live now
 
@@ -148,7 +166,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
   automated QUIC dumps, and Grafana deep links for rapid mitigation.
 - Partition watch tracks peer reachability and stamps gossip with markers so
   splits can reconcile deterministically once connectivity returns.
-- Modular wallet framework with hardware and remote signer support; command-line tools wrap the wallet crate and expose key management and staking helpers.
+- Modular wallet framework with hardware and remote signer support; command-line tools wrap the wallet crate and expose key management and staking helpers. The `contract wallet send` flow caches fee-floor lookups, emits localized warnings when the user fee is below governance policy, offers `--auto-bump` and `--force` paths, and streams telemetry for overrides.
 - Pluggable account abstraction with expiring session keys and
   meta-transaction tooling.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
@@ -157,7 +175,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
   cached diagnostics via `net.quic_stats`/`contract-cli net quic-stats`, and TCP fallback; fanout selects
   per-peer transport while chaos tooling surfaces retransmit spikes and the metrics-to-logs pipeline dumps offending sessions automatically.
 - Light-client crate with mobile example and FFI helpers; mobile demos showcase header sync, background polling, and optional KYC flows. The synchronization model and security trade-offs are described in [docs/light_client.md](docs/light_client.md).
-- SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST.
+- SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST. DID anchors feed a dedicated `did_records` table, REST endpoints (`/dids`, `/identity/dids/:address`, `/dids/metrics/anchor_rate`), and an explorer view for cross-navigation with wallet addresses.
 - Incremental log indexer tracks ingest offsets, supports encrypted key rotation,
   serves REST/WebSocket searches, and ships with CLI tooling for live correlation.
 - Explorer release timeline API, schema, and CLI surfacing proposer addresses,

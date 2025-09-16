@@ -1,6 +1,6 @@
 # Explorer API
 
-The explorer exposes a lightweight REST service for querying on-chain data and analytics.
+The explorer exposes a lightweight REST service for querying on-chain data and analytics. DID anchors are cached in-process so repeated resolves hit memory rather than RocksDB, and the dedicated `did_view` page links anchors to wallet details for faster operator workflows.
 
 ## Endpoints
 
@@ -13,7 +13,12 @@ The explorer exposes a lightweight REST service for querying on-chain data and a
 - `GET /dex/order_book` – view the current DEX order book.
 - `GET /dex/trust_lines` – list trust-line edges for visualization.
 - `GET /compute/jobs` – list indexed compute jobs.
+- `GET /dids` – list recent DID anchors or pass `address=<hex>` to fetch history for a specific account.
+- `GET /identity/dids/:address` – return the latest DID document, hash, nonce, and optional remote attestation.
+- `GET /dids/metrics/anchor_rate` – derive a per-second anchor rate series for dashboards.
 - `GET /subsidy/history` – historic subsidy multipliers.
+- `GET /mempool/fee_floor` – current dynamic fee floor, percentile, and window metadata.
+- `GET /mempool/fee_floor_policy` – chronological fee-floor parameter updates captured from governance history.
 - `GET /metrics/:name` – archived metric points for long‑term analysis.
 - `GET /search/memo/:memo` – advanced search by memo.
 - `GET /search/contract/:contract` – advanced search by contract hash.

@@ -48,6 +48,70 @@ use pyo3::prelude::*;
 static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> =
     Lazy::new(|| Mutex::new(LruCache::new(1024)));
 
+/// Remote attestation accompanying a DID anchor transaction.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
+pub struct TxDidAnchorAttestation {
+    /// Hex-encoded verifying key for the remote signer.
+    #[serde(default)]
+    pub signer: String,
+    /// Hex-encoded signature over the attestation message.
+    #[serde(default)]
+    pub signature: String,
+}
+
+/// Specialized transaction anchoring a DID document hash on-chain.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
+pub struct TxDidAnchor {
+    /// Account address owning the DID document.
+    #[serde(default)]
+    pub address: String,
+    /// Public key authorizing the update.
+    #[serde(default)]
+    pub public_key: Vec<u8>,
+    /// Canonical DID document body.
+    #[serde(default)]
+    pub document: String,
+    /// Monotonic nonce protecting against replay.
+    #[serde(default)]
+    pub nonce: u64,
+    /// Ed25519 signature from the owner over the anchor digest.
+    #[serde(default)]
+    pub signature: Vec<u8>,
+    /// Optional remote attestation signed by a provenance-configured key.
+    #[serde(default)]
+    pub remote_attestation: Option<TxDidAnchorAttestation>,
+}
+
+impl TxDidAnchor {
+    /// Compute the BLAKE3 hash of the DID document.
+    #[must_use]
+    pub fn document_hash(&self) -> [u8; 32] {
+        blake3::hash(self.document.as_bytes()).into()
+    }
+
+    /// Canonical digest used for owner signatures.
+    #[must_use]
+    pub fn owner_digest(&self) -> [u8; 32] {
+        let mut hasher = Hasher::new();
+        hasher.update(b"did-anchor:");
+        hasher.update(self.address.as_bytes());
+        hasher.update(&self.document_hash());
+        hasher.update(&self.nonce.to_le_bytes());
+        hasher.finalize().into()
+    }
+
+    /// Canonical digest used for remote attestations.
+    #[must_use]
+    pub fn remote_digest(&self) -> [u8; 32] {
+        let mut hasher = Hasher::new();
+        hasher.update(b"did-anchor-remote:");
+        hasher.update(self.address.as_bytes());
+        hasher.update(&self.document_hash());
+        hasher.update(&self.nonce.to_le_bytes());
+        hasher.finalize().into()
+    }
+}
+
 /// Distinct fee lanes for transaction scheduling.
 #[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -491,11 +555,12 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
                     false
                 };
                 #[cfg(feature = "quantum")]
-                let pq_ok = if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
-                    dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
-                } else {
-                    false
-                };
+                let pq_ok =
+                    if !tx.dilithium_public_key.is_empty() && !tx.signature.dilithium.is_empty() {
+                        dilithium::verify(&tx.dilithium_public_key, &msg, &tx.signature.dilithium)
+                    } else {
+                        false
+                    };
                 #[cfg(not(feature = "quantum"))]
                 let pq_ok = false;
                 ed_ok && pq_ok

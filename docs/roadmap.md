@@ -1,8 +1,8 @@
 # Status & Roadmap
 
-Mainnet readiness: ~99.3/100 · Vision completion: ~82.4/100.
+Mainnet readiness: ~99.6/100 · Vision completion: ~84.2/100.
 
-The third-token ledger has been fully retired. Every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase, with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing inflation to ≤ 2 %/year. Fleet-wide peer metrics now feed a dedicated `metrics-aggregator`, and the scheduler supports graceful `compute.job_cancel` rollbacks. Historical context and migration notes are in [`docs/system_changes.md`](system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
+The third-token ledger has been fully retired. Every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase, with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing inflation to ≤ 2 %/year. Fleet-wide peer metrics feed a dedicated `metrics-aggregator`, the scheduler supports graceful `compute.job_cancel` rollbacks, fee-floor policy changes persist into `GovStore` history with rollback hooks and telemetry, and DID anchors flow through explorer APIs for cross-navigation with wallet addresses. Historical context and migration notes are in [`docs/system_changes.md`](system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition).
 
 ## Economic Model Snapshot
 
@@ -31,16 +31,17 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
-| **Governance & Subsidy Economy** | **87 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, and explorer release history harden upgrades. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
+| **Governance & Subsidy Economy** | **90 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. | No on-chain treasury or proposal dependencies; grants and multi-stage rollouts remain open. |
 | **Consensus & Core Execution** | 86 % | Stake-weighted leader rotation, deterministic tie-breaks, multi-window Kalman difficulty retune, release rollback helpers, and parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 79 % | Persistent contract store, deterministic WASM runtime with debugger, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **79 %** | Receipt-only logging, hourly batching, L1 anchoring, and `gateway.reads_since` analytics keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
 | **Networking & Gossip** | 93 % | QUIC mutual-TLS rotation with diagnostics/chaos harnesses, cluster `metrics-aggregator`, partition watch with gossip markers, and CLI/RPC metrics via `net.peer_stats`. | Large-scale WAN chaos tests outstanding. |
-| **Compute Marketplace & CBM** | 79 % | Capability-aware scheduler weights offers by reputation, matches GPU/CPU requirements, enforces fee floors with per-sender slots, and supports graceful job cancellation. | Escrowed payments and SLA enforcement remain rudimentary. |
+| **Compute Marketplace & CBM** | 80 % | Capability-aware scheduler weights offers by reputation, matches GPU/CPU requirements, enforces fee floors with per-sender slots, and surfaces governance-tuned fee-floor windows/percentiles to wallets and telemetry. | Escrowed payments and SLA enforcement remain rudimentary. |
 | **Trust Lines & DEX** | 78 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). | Cross-chain settlement proofs and advanced routing features outstanding. |
 | **Cross-Chain Bridges** | 48 % | Lock/unlock primitives with light-client verification, persisted headers under `state/bridge_headers/`, and CLI deposit/withdraw flows. | Relayer incentives and incentive safety proofs missing. |
-| **Wallets, Light Clients & KYC** | 89 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, and pluggable KYC hooks. | Multisig wallet UX and production-grade mobile apps outstanding. |
-| **Monitoring, Debugging & Profiling** | 83 % | Prometheus/Grafana dashboards, metrics-to-logs correlation with automated QUIC dumps, VM trace counters, and CLI debugger/profiling utilities ship with nodes. | Bridge/VM anomaly detection still pending. |
+| **Wallets, Light Clients & KYC** | 91 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, fee-floor caching with localized warnings/JSON output, telemetry-backed QoS overrides, and pluggable KYC hooks. | Multisig wallet UX and production-grade mobile apps outstanding. |
+| **Monitoring, Debugging & Profiling** | 85 % | Prometheus/Grafana dashboards, metrics-to-logs correlation with automated QUIC dumps, VM trace counters, DID anchor gauges, and CLI debugger/profiling utilities ship with nodes; wallet QoS events and fee-floor rollbacks now plot alongside DID timelines. | Bridge/VM anomaly detection still pending. |
+| **Identity & Explorer** | 78 % | DID registry anchors with replay protection and optional provenance attestations, wallet and light-client commands support anchoring/resolving with sign-only/remote signer flows, explorer `/dids` endpoints expose history/anchor-rate charts with LRU caching, and governance archives revocation history alongside anchor data for audit. | Governance-driven revocation playbooks and mobile identity UX remain to ship. |
 | **Economic Simulation & Formal Verification** | 38 % | Bench harness simulates inflation/demand; chaos tests capture seeds. | Sparse scenario library and no integrated proof pipeline. |
 | **Mobile UX & Contribution Metrics** | 56 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
 
@@ -51,6 +52,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 - **Automate release rollout alerting** – add explorer jobs that reconcile `release_history` installs against the signer threshold, publish Grafana panels for stale nodes, and raise alerts when `release_quorum_fail_total` moves without a corresponding signer update.
 - **Stand up anomaly heuristics in the aggregator** – feed correlation caches into preliminary anomaly scoring, auto-request log dumps on clustered `quic_handshake_fail_total{peer}` spikes, and document the response workflow in `docs/monitoring.md`.
 - **Ship operator rollback drills** – expand `docs/governance_release.md` with staged rollback exercises that rehearse `update::rollback_failed_startup`, including guidance for restoring prior binaries and verifying provenance signatures after a revert.
+- **Operationalize DID anchors** – wire revocation alerts into explorer dashboards, expand `docs/identity.md` with recovery guidance, and ensure wallet/light-client flows surface governance revocations before submitting new anchors.
 
 ## Near Term
 

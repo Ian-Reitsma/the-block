@@ -16,9 +16,9 @@ pub struct AdmissionState {
 }
 
 impl AdmissionState {
-    pub fn new(window: usize, lane: &'static str) -> Self {
+    pub fn new(window: usize, percentile: u32, lane: &'static str) -> Self {
         Self {
-            fee_floor: FeeFloor::new(window),
+            fee_floor: FeeFloor::new(window, percentile),
             per_sender: HashMap::new(),
             eviction_log: VecDeque::with_capacity(EVICTION_LOG_LEN),
             lane,
@@ -29,6 +29,28 @@ impl AdmissionState {
     #[inline]
     pub fn floor(&self) -> u64 {
         self.current_floor
+    }
+
+    pub fn configure_fee_floor(&mut self, window: usize, percentile: u32) -> bool {
+        let changed = self.fee_floor.configure(window, percentile);
+        if changed {
+            let previous = self.current_floor;
+            self.current_floor = self.fee_floor.current();
+            tracing::info!(
+                target: "mempool",
+                lane = self.lane,
+                window,
+                percentile,
+                previous,
+                current = self.current_floor,
+                "fee floor policy updated"
+            );
+        }
+        changed
+    }
+
+    pub fn policy(&self) -> (usize, u32) {
+        self.fee_floor.policy()
     }
 
     pub fn reserve_sender<'a>(
