@@ -132,3 +132,61 @@ pub fn verify_release_signature(build_hash: &str, signature_hex: &str) -> bool {
         .iter()
         .any(|vk| vk.verify(message.as_bytes(), &signature).is_ok())
 }
+
+/// Return the configured release signer keys.
+pub fn release_signer_keys() -> Vec<VerifyingKey> {
+    signer_list().iter().cloned().collect()
+}
+
+/// Return the configured release signer keys as lowercase hex.
+pub fn release_signer_hexes() -> Vec<String> {
+    signer_list()
+        .iter()
+        .map(|vk| hex::encode(vk.to_bytes()))
+        .collect()
+}
+
+/// Parse a verifying key from a lowercase hex string.
+pub fn parse_signer_hex(input: &str) -> Option<VerifyingKey> {
+    let bytes = hex::decode(input).ok()?;
+    if bytes.len() != PUBLIC_KEY_LENGTH {
+        return None;
+    }
+    let mut arr = [0u8; PUBLIC_KEY_LENGTH];
+    arr.copy_from_slice(&bytes);
+    VerifyingKey::from_bytes(&arr).ok()
+}
+
+/// Verify a release attestation for a specific signer key.
+pub fn verify_release_attestation(
+    build_hash: &str,
+    signer: &VerifyingKey,
+    signature_hex: &str,
+) -> bool {
+    let normalized = build_hash.trim().to_lowercase();
+    if normalized.len() != 64 || !normalized.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
+    let signature = match decode_signature(signature_hex) {
+        Some(sig) => sig,
+        None => return false,
+    };
+    let message = format!("release:{normalized}");
+    signer.verify(message.as_bytes(), &signature).is_ok()
+}
+
+/// Verify an artifact download matches a trusted release signature.
+pub fn verify_artifact_signature(bytes: &[u8], signature_hex: &str) -> bool {
+    let hash_hex = hash(bytes).to_hex().to_string();
+    verify_release_signature(&hash_hex, signature_hex)
+}
+
+/// Verify an artifact attestation for a specific signer key.
+pub fn verify_artifact_attestation(
+    bytes: &[u8],
+    signer: &VerifyingKey,
+    signature_hex: &str,
+) -> bool {
+    let hash_hex = hash(bytes).to_hex().to_string();
+    verify_release_attestation(&hash_hex, signer, signature_hex)
+}

@@ -1,5 +1,6 @@
-use axum::{extract::Path, routing::get, Json, Router};
+use axum::{extract::Path, extract::Query, routing::get, Json, Router};
 use explorer::Explorer;
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -26,11 +27,23 @@ async fn main() -> anyhow::Result<()> {
     let trust_state = explorer.clone();
     let subsidy_state = explorer.clone();
     let metric_state = explorer.clone();
+    let fee_floor_state = explorer.clone();
     let proof_state = explorer.clone();
     let handshake_state = explorer.clone();
     let token_state = explorer.clone();
     let bridge_state = explorer.clone();
     let juris_state = explorer.clone();
+    let releases_query_state = explorer.clone();
+
+    #[derive(Deserialize, Default)]
+    struct ReleaseQuery {
+        page: Option<usize>,
+        page_size: Option<usize>,
+        proposer: Option<String>,
+        start_epoch: Option<u64>,
+        end_epoch: Option<u64>,
+        store: Option<String>,
+    }
     let app = Router::new()
         .route(
             "/blocks/:hash",
@@ -70,6 +83,42 @@ async fn main() -> anyhow::Result<()> {
             get(move |Path(id): Path<u64>| {
                 let state = gov_state.clone();
                 async move { Json(state.get_gov_proposal(id).unwrap_or(None)) }
+            }),
+        )
+        .route(
+            "/releases",
+            get(move |Query(query): Query<ReleaseQuery>| {
+                let cache = releases_query_state.clone();
+                async move {
+                    let gov_path = query.store.clone().unwrap_or_else(|| {
+                        std::env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into())
+                    });
+                    let filter = explorer::ReleaseHistoryFilter {
+                        proposer: query.proposer.clone(),
+                        start_epoch: query.start_epoch,
+                        end_epoch: query.end_epoch,
+                    };
+                    match explorer::paginated_release_history(
+                        &gov_path,
+                        query.page.unwrap_or(0),
+                        query.page_size.unwrap_or(25),
+                        filter,
+                    ) {
+                        Ok(page) => {
+                            let _ = cache.record_release_entries(&page.entries);
+                            Json(page)
+                        }
+                        Err(err) => {
+                            eprintln!("release history query failed: {err}");
+                            Json(explorer::ReleaseHistoryPage {
+                                total: 0,
+                                page: 0,
+                                page_size: 0,
+                                entries: Vec::new(),
+                            })
+                        }
+                    }
+                }
             }),
         )
         .route(
@@ -152,6 +201,17 @@ async fn main() -> anyhow::Result<()> {
                 let state = metric_state.clone();
                 async move { Json(state.metric_points(&name).unwrap_or_default()) }
             }),
+        )
+        .route(
+            "/mempool/fee_floor",
+            get(move || {
+                let state = fee_floor_state.clone();
+                async move { Json(state.fee_floor_history().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/network/certs",
+            get(move || async move { Json(explorer::net_view::list_peer_certs()) }),
         )
         .route(
             "/blocks/:hash/proof",

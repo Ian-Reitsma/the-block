@@ -1,6 +1,7 @@
 use clap::Subcommand;
 use the_block::governance::{
-    controller, GovStore, Proposal, ProposalStatus, ReleaseBallot, ReleaseVote, Vote, VoteChoice,
+    controller, GovStore, Proposal, ProposalStatus, ReleaseAttestation, ReleaseBallot, ReleaseVote,
+    Vote, VoteChoice,
 };
 
 #[derive(Subcommand)]
@@ -26,8 +27,12 @@ pub enum GovCmd {
     /// Submit a release vote referencing a signed hash
     ProposeRelease {
         hash: String,
+        #[arg(long = "signature")]
+        signatures: Vec<String>,
+        #[arg(long = "signer")]
+        signers: Vec<String>,
         #[arg(long)]
-        signature: Option<String>,
+        threshold: Option<u32>,
         #[arg(long, default_value = "gov.db")]
         state: String,
         #[arg(long, default_value_t = 32)]
@@ -40,6 +45,18 @@ pub enum GovCmd {
         state: String,
         #[arg(long, default_value_t = 1)]
         weight: u64,
+    },
+    /// Download and verify an approved release artifact
+    FetchRelease {
+        hash: String,
+        #[arg(long = "signature")]
+        signatures: Vec<String>,
+        #[arg(long = "signer")]
+        signers: Vec<String>,
+        #[arg(long)]
+        dest: Option<String>,
+        #[arg(long)]
+        install: bool,
     },
 }
 
@@ -84,12 +101,40 @@ pub fn handle(cmd: GovCmd) {
         }
         GovCmd::ProposeRelease {
             hash,
-            signature,
+            mut signatures,
+            mut signers,
+            threshold,
             state,
             deadline,
         } => {
             let store = GovStore::open(state);
-            let proposal = ReleaseVote::new(hash, signature, "cli".into(), 0, deadline);
+            if !signatures.is_empty() && !signers.is_empty() && signers.len() != signatures.len() {
+                eprintln!("--signer count must match --signature count");
+                return;
+            }
+            if signers.is_empty() && !signatures.is_empty() {
+                let configured = the_block::provenance::release_signer_hexes();
+                if signatures.len() == 1 && configured.len() == 1 {
+                    signers = configured;
+                } else {
+                    eprintln!("--signer must be supplied for each signature");
+                    return;
+                }
+            }
+            let attestations: Vec<ReleaseAttestation> = signatures
+                .drain(..)
+                .zip(signers.drain(..))
+                .map(|(signature, signer)| ReleaseAttestation { signer, signature })
+                .collect();
+            let threshold_value = threshold.unwrap_or_default();
+            let proposal = ReleaseVote::new(
+                hash,
+                attestations,
+                threshold_value,
+                "cli".into(),
+                0,
+                deadline,
+            );
             match controller::submit_release(&store, proposal) {
                 Ok(id) => println!("release proposal {id} submitted"),
                 Err(e) => eprintln!("submit failed: {e}"),
@@ -109,6 +154,50 @@ pub fn handle(cmd: GovCmd) {
             }
             if let Ok(status) = controller::tally_release(&store, id, 0) {
                 println!("release status: {:?}", status);
+            }
+        }
+        GovCmd::FetchRelease {
+            hash,
+            mut signatures,
+            mut signers,
+            dest,
+            install,
+        } => {
+            if !signatures.is_empty() && !signers.is_empty() && signatures.len() != signers.len() {
+                eprintln!("--signer count must match --signature count");
+                return;
+            }
+            if signers.is_empty() && !signatures.is_empty() {
+                let configured = the_block::provenance::release_signer_hexes();
+                if signatures.len() == 1 && configured.len() == 1 {
+                    signers = configured;
+                } else {
+                    eprintln!("--signer must be supplied for each signature");
+                    return;
+                }
+            }
+            let attestations: Vec<ReleaseAttestation> = signatures
+                .drain(..)
+                .zip(signers.drain(..))
+                .map(|(signature, signer)| ReleaseAttestation { signer, signature })
+                .collect();
+            let dest_path = dest.as_deref().map(std::path::Path::new);
+            match the_block::update::fetch_release(&hash, &attestations, dest_path) {
+                Ok(download) => {
+                    println!(
+                        "downloaded {} to {}",
+                        download.hash,
+                        download.path.display()
+                    );
+                    if install {
+                        if let Err(err) = the_block::update::install_release(&download.hash) {
+                            eprintln!("install guard failed: {err}");
+                        } else {
+                            println!("install recorded for {}", download.hash);
+                        }
+                    }
+                }
+                Err(err) => eprintln!("fetch failed: {err}"),
             }
         }
     }

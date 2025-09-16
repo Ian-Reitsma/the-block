@@ -56,7 +56,8 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99/100** with vision completion **~80/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`. Recent additions such as macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~99.3/100** with vision completion **~82.4/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
+Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, and end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
 
 ---
 
@@ -308,7 +309,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99/100 · Vision completion: ~76/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99.3/100 · Vision completion: ~82.4/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -568,8 +569,12 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   `startup_ttl_drop_total`, `orphan_sweep_total`, `tx_rejected_total{reason=*}`,
   `difficulty_retarget_total`, `difficulty_clamp_total`,
   `quic_conn_latency_seconds`, `quic_bytes_sent_total`,
-  `quic_bytes_recv_total`, `quic_handshake_fail_total`,
-  `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`; spans for mempool
+  `quic_bytes_recv_total`, `quic_handshake_fail_total{peer}`,
+  `quic_retransmit_total{peer}`, `quic_cert_rotation_total`,
+  `quic_disconnect_total{code}`, `quic_endpoint_reuse_total`;
+  release metrics `release_quorum_fail_total` and
+  `release_installs_total`; aggregator misses
+  `log_correlation_fail_total` feed ops alerts; spans for mempool
   and rebuild flows; Prometheus exporter via `serve_metrics`. Snapshot operations
   export `snapshot_duration_seconds`, `snapshot_fail_total`, and the
   `snapshot_interval`/`snapshot_interval_changed` gauges.
@@ -584,26 +589,30 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 
 - **Governance & Subsidy Economy** ([docs/governance.md](docs/governance.md))
   - [x] Inflation governors tune β/γ/κ/λ multipliers
+  - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 82%
+  - Progress: 87%
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
-  - Progress: 85%
+  - [x] Release rollback helper ensures binaries revert when provenance validation fails
+  - Progress: 86%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
+    - [x] Mutual TLS certificate rotation, diagnostics RPC/CLI, and chaos testing harness
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 88%
+    - Progress: 93%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements and WAL-backed stores
   - [ ] Incentive-backed DHT marketplace
-  - Progress: 80%
+  - Progress: 79%
   - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
+    - [x] Fee floor enforcement with per-sender slot limits and eviction telemetry
     - [ ] SLA arbitration and heterogeneous payments
-    - Progress: 76%
+    - Progress: 79%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
@@ -612,26 +621,28 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
-  - Progress: 79%
+  - Progress: 78%
 - **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 47%
+  - Progress: 48%
   - **Wallets** ([docs/wallets.md](docs/wallets.md))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 87%
+    - Progress: 89%
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
+    - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
-    - Progress: 78%
+    - Progress: 83%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
-    - Progress: 72%
+    - [x] QUIC loss benchmark comparing TCP vs QUIC under chaos
+    - Progress: 73%
 
 ### Troubleshooting: Missing Tests & Dependencies
 

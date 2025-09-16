@@ -3,8 +3,8 @@ pub mod controller;
 pub mod inflation_cap;
 mod kalman;
 mod params;
-pub mod release;
 mod proposals;
+pub mod release;
 mod state;
 mod store;
 mod token;
@@ -16,7 +16,8 @@ pub use bicameral::{
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
 pub use proposals::{validate_dag, Proposal, ProposalStatus, Vote, VoteChoice};
 pub use release::{
-    approved_releases, ensure_release_authorized, ApprovedRelease, ReleaseBallot, ReleaseVote,
+    approved_releases, ensure_release_authorized, ApprovedRelease, ReleaseAttestation,
+    ReleaseBallot, ReleaseVote,
 };
 pub use state::TreasuryState;
 pub use store::{GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS};

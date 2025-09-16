@@ -60,6 +60,7 @@ use thiserror::Error;
 const EPOCH_BLOCKS: u64 = 120;
 const EPOCHS_PER_YEAR: u64 = 365 * 24 * 60 * 60 / EPOCH_BLOCKS;
 const RECENT_MINER_WINDOW: usize = 120;
+const FEE_FLOOR_WINDOW: usize = 256;
 
 const HBAR: f64 = 1.054_571_817e-34; // J·s
 const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
@@ -105,6 +106,7 @@ pub mod telemetry;
 pub use telemetry::{
     gather_metrics, redact_at_rest, serve_metrics, serve_metrics_with_shutdown, MetricsServer,
 };
+pub mod update;
 
 pub mod blockchain;
 use crate::consensus::difficulty;
@@ -694,6 +696,15 @@ impl MempoolEntry {
     }
 }
 
+pub struct MempoolStats {
+    pub size: usize,
+    pub age_p50: u64,
+    pub age_p95: u64,
+    pub fee_p50: u64,
+    pub fee_p90: u64,
+    pub fee_floor: u64,
+}
+
 /// Comparator for mempool eviction ordering.
 ///
 /// Orders by `fee_per_byte` (descending), then `expires_at` (ascending),
@@ -734,6 +745,8 @@ pub struct Blockchain {
     mempool_size_consumer: std::sync::atomic::AtomicUsize,
     mempool_size_industrial: std::sync::atomic::AtomicUsize,
     mempool_mutex: Mutex<()>,
+    admission_consumer: Mutex<mempool::admission::AdmissionState>,
+    admission_industrial: Mutex<mempool::admission::AdmissionState>,
     /// Transactions waiting on additional signatures.
     pub pending_multisig: DashMap<Vec<u8>, SignedTransaction>,
     orphan_counter: std::sync::atomic::AtomicUsize,
@@ -894,6 +907,14 @@ impl Default for Blockchain {
             mempool_size_consumer: std::sync::atomic::AtomicUsize::new(0),
             mempool_size_industrial: std::sync::atomic::AtomicUsize::new(0),
             mempool_mutex: Mutex::new(()),
+            admission_consumer: Mutex::new(mempool::admission::AdmissionState::new(
+                FEE_FLOOR_WINDOW,
+                "consumer",
+            )),
+            admission_industrial: Mutex::new(mempool::admission::AdmissionState::new(
+                FEE_FLOOR_WINDOW,
+                "industrial",
+            )),
             pending_multisig: DashMap::new(),
             orphan_counter: std::sync::atomic::AtomicUsize::new(0),
             panic_on_evict: std::sync::atomic::AtomicBool::new(false),
@@ -1054,7 +1075,31 @@ impl Blockchain {
         self.adjust_mempool_size(lane, -1)
     }
 
-    pub fn mempool_stats(&self, lane: FeeLane) -> (usize, u64, u64, u64, u64) {
+    fn admission_guard(&self, lane: FeeLane) -> MutexGuard<'_, mempool::admission::AdmissionState> {
+        match lane {
+            FeeLane::Consumer => self
+                .admission_consumer
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+            FeeLane::Industrial => self
+                .admission_industrial
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        }
+    }
+
+    fn release_sender_slot(&self, lane: FeeLane, sender: &str) {
+        let mut guard = self.admission_guard(lane);
+        guard.release_sender(sender);
+    }
+
+    #[doc(hidden)]
+    pub fn mempool_recent_evictions(&self, lane: FeeLane) -> Vec<[u8; 32]> {
+        let guard = self.admission_guard(lane);
+        guard.eviction_hashes()
+    }
+
+    pub fn mempool_stats(&self, lane: FeeLane) -> MempoolStats {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -1080,13 +1125,18 @@ impl Blockchain {
                 v[idx]
             }
         };
-        (
+        let floor = {
+            let guard = self.admission_guard(lane);
+            guard.floor()
+        };
+        MempoolStats {
             size,
-            q(&ages, 0.50),
-            q(&ages, 0.95),
-            q(&fees, 0.50),
-            q(&fees, 0.90),
-        )
+            age_p50: q(&ages, 0.50),
+            age_p95: q(&ages, 0.95),
+            fee_p50: q(&fees, 0.50),
+            fee_p90: q(&fees, 0.90),
+            fee_floor: floor,
+        }
     }
 
     #[cfg(feature = "telemetry")]
@@ -1913,6 +1963,11 @@ impl Blockchain {
                         },
                     );
                     bc.inc_mempool_size(e.tx.lane);
+                    {
+                        let mut admission = bc.admission_guard(e.tx.lane);
+                        admission.restore_sender(&e.sender);
+                        admission.record_admission(fpb);
+                    }
                     if let Some(acc) = bc.accounts.get_mut(&e.sender) {
                         if let Ok((fee_consumer, fee_industrial)) =
                             crate::fee::decompose(e.tx.payload.pct_ct, bc.base_fee + e.tx.tip)
@@ -2178,6 +2233,7 @@ impl Blockchain {
             })?
             .len() as u64;
         let fee_per_byte = if size == 0 { 0 } else { tx.tip / size };
+        let lane = tx.lane;
         #[cfg(feature = "telemetry")]
         let _pool_guard = {
             let span = tracing::span!(
@@ -2204,6 +2260,41 @@ impl Blockchain {
             }
             TxAdmissionError::LockPoisoned
         })?;
+        let mut admission_state = self.admission_guard(lane);
+        let lane_min = match lane {
+            FeeLane::Consumer => self.min_fee_per_byte_consumer,
+            FeeLane::Industrial => self.min_fee_per_byte_industrial,
+        };
+        let floor = lane_min.max(admission_state.floor());
+        if fee_per_byte < floor {
+            #[cfg(feature = "telemetry")]
+            {
+                let tx_hash = tx.id();
+                #[cfg(feature = "telemetry-json")]
+                log_event(
+                    "mempool",
+                    log::Level::Warn,
+                    "reject",
+                    &sender_addr,
+                    nonce,
+                    "fee_too_low",
+                    TxAdmissionError::FeeTooLow.code(),
+                    Some(fee_per_byte),
+                    Some(&hex::encode(tx_hash)),
+                );
+                #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                if telemetry::should_log("mempool") {
+                    let span = crate::log_context!(tx = tx_hash);
+                    tracing::warn!(
+                        parent: &span,
+                        "tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low"
+                    );
+                }
+                telemetry::FEE_FLOOR_REJECT_TOTAL.inc();
+                self.record_reject("fee_too_low");
+            }
+            return Err(TxAdmissionError::FeeTooLow);
+        }
         let lock = self
             .admission_locks
             .entry(sender_addr.clone())
@@ -2349,6 +2440,7 @@ impl Blockchain {
                 };
             }
             if let Some(((ev_sender, ev_nonce), ev_entry)) = victim {
+                let ev_hash = ev_entry.tx.id();
                 if ev_sender != sender_addr {
                     let lock = self
                         .admission_locks
@@ -2381,6 +2473,9 @@ impl Blockchain {
                 }
                 mempool.remove(&(ev_sender.clone(), ev_nonce));
                 self.dec_mempool_size(lane);
+                admission_state.release_sender(&ev_sender);
+                admission_state.record_eviction(ev_hash);
+                mempool::scoring::evict_on_overflow(1);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
                     if let Ok((c, i)) = crate::fee::decompose(
                         ev_entry.tx.payload.pct_ct,
@@ -2516,6 +2611,40 @@ impl Blockchain {
                         return Err(TxAdmissionError::UnknownSender);
                     }
                 };
+                let sender_slot = match admission_state
+                    .reserve_sender(&sender_addr, self.max_pending_per_account)
+                {
+                    Ok(slot) => slot,
+                    Err(TxAdmissionError::PendingLimitReached) => {
+                        #[cfg(feature = "telemetry")]
+                        {
+                            let tx_hash = tx.id();
+                            #[cfg(feature = "telemetry-json")]
+                            log_event(
+                                "mempool",
+                                log::Level::Warn,
+                                "reject",
+                                &sender_addr,
+                                nonce,
+                                "pending_limit",
+                                TxAdmissionError::PendingLimitReached.code(),
+                                None,
+                                Some(&hex::encode(tx_hash)),
+                            );
+                            #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+                            if telemetry::should_log("mempool") {
+                                let span = crate::log_context!(tx = tx_hash);
+                                tracing::warn!(
+                                    parent: &span,
+                                    "tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit"
+                                );
+                            }
+                            self.record_reject("pending_limit");
+                        }
+                        return Err(TxAdmissionError::PendingLimitReached);
+                    }
+                    Err(e) => return Err(e),
+                };
                 mempool::admission::validate_account(sender, &tx)?;
                 let required_consumer = match sender.pending_consumer.checked_add(total_consumer) {
                     Some(v) => v,
@@ -2649,38 +2778,6 @@ impl Blockchain {
                         return Err(TxAdmissionError::FeeTooLow);
                     }
                 }
-                // fee per byte check with lane-specific floor
-                let lane_min = match lane {
-                    FeeLane::Consumer => self.min_fee_per_byte_consumer,
-                    FeeLane::Industrial => self.min_fee_per_byte_industrial,
-                };
-                let floor = lane_min;
-                if fee_per_byte < floor {
-                    #[cfg(feature = "telemetry")]
-                    {
-                        let tx_hash = tx.id();
-                        #[cfg(feature = "telemetry-json")]
-                        log_event(
-                            "mempool",
-                            log::Level::Warn,
-                            "reject",
-                            &sender_addr,
-                            nonce,
-                            "fee_too_low",
-                            TxAdmissionError::FeeTooLow.code(),
-                            Some(fee_per_byte),
-                            Some(&hex::encode(tx_hash)),
-                        );
-                        #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-                        if telemetry::should_log("mempool") {
-                            let span = crate::log_context!(tx = tx_hash);
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low");
-                        }
-                        telemetry::FEE_FLOOR_REJECT_TOTAL.inc();
-                        self.record_reject("fee_too_low");
-                    }
-                    return Err(TxAdmissionError::FeeTooLow);
-                }
                 if !verify_signed_tx(tx.clone()) {
                     #[cfg(feature = "telemetry")]
                     {
@@ -2756,6 +2853,7 @@ impl Blockchain {
                         serialized_size: size,
                     });
                     guard.commit();
+                    sender_slot.commit(fee_per_byte);
                     #[cfg(feature = "telemetry")]
                     {
                         self.record_admit();
@@ -2859,6 +2957,7 @@ impl Blockchain {
         })?;
         if let Some((_, entry)) = self.mempool_consumer.remove(&(sender.to_string(), nonce)) {
             self.dec_mempool_size(entry.tx.lane);
+            self.release_sender_slot(entry.tx.lane, sender);
             let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
@@ -2917,6 +3016,7 @@ impl Blockchain {
             self.mempool_industrial.remove(&(sender.to_string(), nonce))
         {
             self.dec_mempool_size(entry.tx.lane);
+            self.release_sender_slot(entry.tx.lane, sender);
             let tx = entry.tx;
             #[cfg(feature = "telemetry")]
             let tx_hash = tx.id();
@@ -3755,6 +3855,7 @@ impl Blockchain {
                         }
                     }
                     self.dec_mempool_size(tx.lane);
+                    self.release_sender_slot(tx.lane, &tx.payload.from_);
                 }
                 drop(_pool_guard);
 

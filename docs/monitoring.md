@@ -1,6 +1,8 @@
 # Monitoring
 
 The default dashboard bundles Prometheus and Grafana to visualize subsystem metrics.
+Operational alert handling and correlation procedures live in the
+[`Telemetry Operations Runbook`](telemetry_ops.md).
 
 ## Quick start
 
@@ -95,6 +97,17 @@ counters `aggregator_ingest_total`. Recommended scrape targets are both
 the aggregator itself and the node exporters. Alert when
 `cluster_peer_active_total` drops unexpectedly or when
 `aggregator_ingest_total` stops increasing.
+
+### Metrics-to-logs correlation
+
+The aggregator ingests Prometheus labels that include `correlation_id` and caches the most recent values per metric. When a counter such as `quic_handshake_fail_total{peer="…"}` spikes, the service issues a REST query against the node's `/logs/search` endpoint, saves the matching payload under `$TB_LOG_DUMP_DIR`, and increments `log_correlation_fail_total` when no records are found. Operators can retrieve cached mappings via `GET /correlations/<metric>` or the CLI:
+
+```bash
+contract logs correlate-metric --metric quic_handshake_fail_total \
+    --aggregator http://localhost:9300 --rows 20 --max-correlations 5
+```
+
+The log indexer records ingest offsets in SQLite, batches inserts with prepared statements, supports encryption key rotation with passphrase prompts, and exposes both REST (`/logs/search`) and WebSocket (`/logs/tail`) streaming APIs for dashboards. `scripts/log_indexer_load.sh` stress-tests one million log lines, while integration tests under `node/tests/log_api.rs` validate the filters end-to-end.
 
 #### Threat model
 

@@ -29,6 +29,8 @@ proptest! {
             transport: Transport::Tcp,
             quic_addr: None,
             quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello), &sample_sk());
         // Should never panic regardless of contents

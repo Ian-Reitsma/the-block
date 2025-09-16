@@ -11,7 +11,7 @@
 
 ## Endpoints
 
-- `mempool.stats?lane=` – returns `{size, age_p50, age_p95, fee_p50, fee_p90}`
+- `mempool.stats?lane=` – returns `{size, age_p50, age_p95, fee_p50, fee_p90, fee_floor}`
   for the requested lane.
 - `localnet.submit_receipt` – accepts a hex‑encoded assist receipt, verifies
   signature and proximity, and stores the receipt hash to

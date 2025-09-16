@@ -1810,6 +1810,18 @@ pub static RELEASE_INSTALLS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static RELEASE_QUORUM_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "release_quorum_fail_total",
+        "Release submissions rejected due to insufficient provenance signatures",
+    )
+    .unwrap_or_else(|e| panic!("counter release_quorum_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry release_quorum_fail_total: {e}"));
+    c
+});
+
 pub static GOV_ACTIVATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("gov_activation_total", "Governance activations"),
@@ -2960,14 +2972,26 @@ pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
             "quic_handshake_fail_total",
-            "Total QUIC handshake failures by reason",
+            "Total QUIC handshake failures by peer and reason",
         ),
-        &["reason"],
+        &["peer", "reason"],
     )
     .unwrap_or_else(|e| panic!("counter vec quic handshake fail: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic handshake fail: {e}"));
+    c
+});
+
+pub static QUIC_CERT_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "quic_cert_rotation_total",
+        "Total QUIC certificate rotations",
+    )
+    .unwrap_or_else(|e| panic!("counter quic cert rotate: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic cert rotate: {e}"));
     c
 });
 
@@ -3102,6 +3126,33 @@ pub static LOG_ENTRIES_INDEXED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry log_entries_indexed_total: {e}"));
+    c
+});
+
+pub static LOG_CORRELATION_INDEX_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "log_correlation_index_total",
+            "Indexed log entries grouped by correlation id",
+        ),
+        &["correlation_id"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec log_correlation_index_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry log_correlation_index_total: {e}"));
+    c
+});
+
+pub static LOG_CORRELATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "log_correlation_fail_total",
+        "Correlation lookups that returned no matching log entries",
+    )
+    .unwrap_or_else(|e| panic!("counter log_correlation_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry log_correlation_fail_total: {e}"));
     c
 });
 

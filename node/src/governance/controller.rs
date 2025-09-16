@@ -1,4 +1,8 @@
-use super::{GovStore, Params, Proposal, ProposalStatus, ReleaseBallot, ReleaseVote, Runtime};
+use super::{
+    GovStore, Params, Proposal, ProposalStatus, ReleaseAttestation, ReleaseBallot, ReleaseVote,
+    Runtime,
+};
+use std::collections::HashSet;
 
 /// Submit a proposal to the store and return its id.
 pub fn submit_proposal(store: &GovStore, prop: Proposal) -> sled::Result<u64> {
@@ -12,17 +16,55 @@ pub fn tally(store: &GovStore, id: u64, epoch: u64) -> sled::Result<super::Propo
 
 /// Submit a release vote proposal and return its id.
 pub fn submit_release(store: &GovStore, mut prop: ReleaseVote) -> sled::Result<u64> {
-    let requires_signature = crate::provenance::release_signature_required();
     prop.build_hash = prop.build_hash.to_lowercase();
-    if let Some(sig) = prop.signature.as_ref() {
-        if !crate::provenance::verify_release_signature(&prop.build_hash, sig) {
+    let configured_signers = crate::provenance::release_signer_keys();
+    if prop.signature_threshold == 0 && !configured_signers.is_empty() {
+        prop.signature_threshold = configured_signers.len() as u32;
+    }
+    if !configured_signers.is_empty() {
+        let configured_lookup: HashSet<[u8; 32]> =
+            configured_signers.iter().map(|vk| vk.to_bytes()).collect();
+        let mut seen: HashSet<[u8; 32]> = HashSet::new();
+        let mut valid = 0usize;
+        for ReleaseAttestation { signer, signature } in &prop.signatures {
+            let Some(vk) = crate::provenance::parse_signer_hex(signer) else {
+                return Err(sled::Error::Unsupported(
+                    "invalid provenance attestation".into(),
+                ));
+            };
+            let signer_bytes = vk.to_bytes();
+            if !configured_lookup.contains(&signer_bytes) {
+                return Err(sled::Error::Unsupported(
+                    "invalid provenance attestation".into(),
+                ));
+            }
+            if crate::provenance::verify_release_attestation(
+                &prop.build_hash,
+                &vk,
+                signature,
+            ) {
+                if seen.insert(signer_bytes) {
+                    valid += 1;
+                }
+            } else {
+                return Err(sled::Error::Unsupported(
+                    "invalid provenance attestation".into(),
+                ));
+            }
+        }
+        if valid < prop.signature_threshold as usize {
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::RELEASE_QUORUM_FAIL_TOTAL.inc();
+            }
             return Err(sled::Error::Unsupported(
-                "invalid provenance signature".into(),
+                "insufficient release signers".into(),
             ));
         }
-    } else if requires_signature {
+    } else if prop.signature_threshold > 0 {
+        // No configured signers, but caller requested a threshold; reject.
         return Err(sled::Error::Unsupported(
-            "missing provenance signature".into(),
+            "no release signers configured".into(),
         ));
     }
     store.submit_release(prop)
@@ -49,7 +91,7 @@ pub fn record_release_install(store: &GovStore, hash: &str) -> sled::Result<()> 
 }
 
 /// Return timestamps for local release installations keyed by hash.
-pub fn release_installations(store: &GovStore) -> sled::Result<Vec<(String, u64)>> {
+pub fn release_installations(store: &GovStore) -> sled::Result<Vec<(String, Vec<u64>)>> {
     store.release_installations()
 }
 

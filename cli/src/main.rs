@@ -10,16 +10,17 @@ mod config;
 mod debug_cli;
 mod dex;
 mod difficulty;
+mod explorer;
 mod fee_estimator;
 mod gateway;
 mod gov;
 mod htlc;
 mod light_client;
 mod light_sync;
-mod net;
 mod logs;
-mod service_badge;
+mod net;
 mod scheduler;
+mod service_badge;
 mod snark;
 mod storage;
 mod telemetry;
@@ -32,15 +33,16 @@ use compute::ComputeCmd;
 use config::ConfigCmd;
 use dex::DexCmd;
 use difficulty::DifficultyCmd;
+use explorer::ExplorerCmd;
 use gateway::GatewayCmd;
 use gov::GovCmd;
 use htlc::HtlcCmd;
 use light_client::LightClientCmd;
 use light_sync::LightSyncCmd;
-use net::NetCmd;
 use logs::LogCmd;
-use service_badge::ServiceBadgeCmd;
+use net::NetCmd;
 use scheduler::SchedulerCmd;
+use service_badge::ServiceBadgeCmd;
 use snark::SnarkCmd;
 use storage::StorageCmd;
 use telemetry::TelemetryCmd;
@@ -133,6 +135,11 @@ enum Commands {
     Gov {
         #[command(subcommand)]
         action: GovCmd,
+    },
+    /// Explorer utilities
+    Explorer {
+        #[command(subcommand)]
+        action: ExplorerCmd,
     },
     /// Version and build info
     Version {
@@ -257,6 +264,7 @@ fn main() {
         Commands::Logs { action } => logs::handle(action),
         Commands::Difficulty { action } => difficulty::handle(action),
         Commands::Gov { action } => gov::handle(action),
+        Commands::Explorer { action } => explorer::handle(action),
         Commands::Config { action } => config::handle(action),
         Commands::Version { action } => version::handle(action),
         Commands::Telemetry { action } => telemetry::handle(action),

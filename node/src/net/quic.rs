@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use quinn::{Connection, Endpoint};
+use quinn::{Connection, ConnectionStats, Endpoint};
 use rand::Rng;
 use rcgen::generate_simple_self_signed;
 #[cfg(any(test, debug_assertions))]
@@ -15,6 +15,9 @@ use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
 #[cfg(any(test, debug_assertions))]
 use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
 use tokio::time::Instant;
+
+#[cfg(feature = "telemetry")]
+use hex;
 
 use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
@@ -125,12 +128,15 @@ pub async fn connect(
             #[cfg(feature = "telemetry")]
             {
                 if super::peer::track_handshake_fail_enabled() {
+                    let peer_label =
+                        super::quic_stats::peer_label(super::peer::pk_from_addr(&addr));
                     QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[err.as_str()])
+                        .with_label_values(&[peer_label.as_str(), err.as_str()])
                         .inc();
                 }
-                super::peer::record_handshake_fail_addr(addr, err);
             }
+            #[cfg(feature = "quic")]
+            super::peer::record_handshake_fail_addr(addr, err);
             tracing::error!(error = ?e, reason = err.as_str(), "quic_connect_fail");
             Err(ConnectError::Handshake(err))
         }
@@ -139,12 +145,15 @@ pub async fn connect(
             #[cfg(feature = "telemetry")]
             {
                 if super::peer::track_handshake_fail_enabled() {
+                    let peer_label =
+                        super::quic_stats::peer_label(super::peer::pk_from_addr(&addr));
                     QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[err.as_str()])
+                        .with_label_values(&[peer_label.as_str(), err.as_str()])
                         .inc();
                 }
-                super::peer::record_handshake_fail_addr(addr, err);
             }
+            #[cfg(feature = "quic")]
+            super::peer::record_handshake_fail_addr(addr, err);
             tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake(err))
         }
@@ -163,6 +172,10 @@ pub async fn get_connection(
         if existing.close_reason().is_none() {
             #[cfg(feature = "telemetry")]
             QUIC_ENDPOINT_REUSE_TOTAL.inc();
+            #[cfg(feature = "quic")]
+            if let Some(pk) = super::peer::pk_from_addr(&addr) {
+                super::quic_stats::record_endpoint_reuse(&pk);
+            }
             return Ok(existing.clone());
         } else {
             CONNECTIONS.remove(&addr);
@@ -176,6 +189,14 @@ pub async fn get_connection(
 /// Drop a pooled connection for `addr` if present.
 pub fn drop_connection(addr: &SocketAddr) {
     CONNECTIONS.remove(addr);
+}
+
+#[cfg(feature = "quic")]
+pub(crate) fn connection_stats() -> Vec<(SocketAddr, ConnectionStats)> {
+    CONNECTIONS
+        .iter()
+        .map(|entry| (*entry.key(), entry.value().stats()))
+        .collect()
 }
 
 /// Connect to `addr` without verifying the remote certificate.

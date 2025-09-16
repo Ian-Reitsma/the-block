@@ -20,6 +20,9 @@ use openssl::{
     symm::{Cipher, Crypter, Mode},
 };
 use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
+use reqwest::Client;
+use tracing::{info, warn};
+use urlencoding::encode;
 
 #[cfg(feature = "s3")]
 fn upload_sync(bucket: String, data: Vec<u8>) {
@@ -43,6 +46,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -60,10 +64,28 @@ fn archive_metrics(blob: &str) {
     }
 }
 
+const MAX_CORRELATIONS_PER_METRIC: usize = 64;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerStat {
     pub peer_id: String,
     pub metrics: serde_json::Value,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub struct CorrelationRecord {
+    pub metric: String,
+    pub correlation_id: String,
+    pub peer_id: String,
+    pub value: Option<f64>,
+    pub timestamp: u64,
+}
+
+#[derive(Clone, Debug)]
+struct RawCorrelation {
+    metric: String,
+    correlation_id: String,
+    value: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -75,6 +97,8 @@ pub struct AppState {
     retention_secs: u64,
     max_export_peers: usize,
     wal: Option<Arc<Wal>>,
+    correlations: Arc<Mutex<HashMap<String, VecDeque<CorrelationRecord>>>>,
+    last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
 }
 
 impl AppState {
@@ -109,6 +133,8 @@ impl AppState {
             retention_secs,
             max_export_peers: 1000,
             wal,
+            correlations: Arc::new(Mutex::new(HashMap::new())),
+            last_metric_values: Arc::new(Mutex::new(HashMap::new())),
         };
         state.prune();
         state
@@ -179,6 +205,60 @@ impl AppState {
             "active_peers:0".into()
         }
     }
+
+    fn record_correlation(&self, metric: &str, record: CorrelationRecord) {
+        if record.correlation_id.is_empty() {
+            return;
+        }
+        let mut map = self.correlations.lock().unwrap();
+        let entry = map.entry(metric.to_string()).or_insert_with(VecDeque::new);
+        entry.push_back(record.clone());
+        while entry.len() > MAX_CORRELATIONS_PER_METRIC {
+            entry.pop_front();
+        }
+        info!(
+            target: "aggregator",
+            metric,
+            peer = %record.peer_id,
+            correlation = %record.correlation_id,
+            "indexed metric/log correlation"
+        );
+    }
+
+    fn correlations_for(&self, metric: &str) -> Vec<CorrelationRecord> {
+        self.correlations
+            .lock()
+            .unwrap()
+            .get(metric)
+            .map(|deque| deque.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn handle_quic_failure(&self, record: &CorrelationRecord) {
+        if record.correlation_id.is_empty() {
+            return;
+        }
+        let Some(value) = record.value else {
+            return;
+        };
+        let mut cache = self.last_metric_values.lock().unwrap();
+        let key = (record.peer_id.clone(), record.metric.clone());
+        let previous = cache.insert(key, value);
+        if let Some(prev) = previous {
+            if value <= prev {
+                return;
+            }
+        }
+        drop(cache);
+        info!(
+            target: "aggregator",
+            metric = %record.metric,
+            peer = %record.peer_id,
+            correlation = %record.correlation_id,
+            "quic handshake failures increased"
+        );
+        spawn_log_dump(record.clone());
+    }
 }
 
 static INGEST_TOTAL: Lazy<IntCounter> =
@@ -244,6 +324,146 @@ fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
     }
 }
 
+fn collect_correlations(value: &serde_json::Value) -> Vec<RawCorrelation> {
+    fn walk(value: &serde_json::Value, metric: Option<&str>, out: &mut Vec<RawCorrelation>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(correlation) = map
+                    .get("correlation_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    let metric_name = metric.unwrap_or("unknown").to_string();
+                    let val = map.get("value").and_then(|v| v.as_f64());
+                    out.push(RawCorrelation {
+                        metric: metric_name,
+                        correlation_id: correlation.to_string(),
+                        value: val,
+                    });
+                }
+                if let Some(labels) = map.get("labels").and_then(|v| v.as_object()) {
+                    if let Some(correlation) = labels
+                        .get("correlation_id")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                    {
+                        let metric_name = metric.unwrap_or("unknown").to_string();
+                        let val = map.get("value").and_then(|v| v.as_f64());
+                        out.push(RawCorrelation {
+                            metric: metric_name,
+                            correlation_id: correlation.to_string(),
+                            value: val,
+                        });
+                    }
+                }
+                for (k, v) in map {
+                    let next_metric = metric.or_else(|| Some(k.as_str()));
+                    walk(v, next_metric, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, metric, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(value, None, &mut out);
+    out
+}
+
+fn spawn_log_dump(record: CorrelationRecord) {
+    let api = std::env::var("TB_LOG_API_URL").ok();
+    let db = std::env::var("TB_LOG_DB_PATH").ok();
+    let dump_dir = std::env::var("TB_LOG_DUMP_DIR").unwrap_or_else(|_| "log_dumps".into());
+    if let (Some(api), Some(db)) = (api, db) {
+        tokio::spawn(async move {
+            if let Err(err) = fetch_and_dump_logs(api, db, dump_dir.clone(), record.clone()).await {
+                warn!(
+                    target: "aggregator",
+                    error = %err,
+                    correlation = %record.correlation_id,
+                    "log dump failed"
+                );
+            }
+        });
+    } else {
+        warn!(
+            target: "aggregator",
+            correlation = %record.correlation_id,
+            "log dump skipped; log API configuration missing"
+        );
+    }
+}
+
+async fn fetch_and_dump_logs(
+    api: String,
+    db: String,
+    dump_dir: String,
+    record: CorrelationRecord,
+) -> Result<(), String> {
+    let client = Client::new();
+    let base = api.trim_end_matches('/');
+    let url = format!(
+        "{}/logs/search?db={}&correlation={}&limit=50",
+        base,
+        encode(&db),
+        encode(&record.correlation_id)
+    );
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("request error: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("http status {}", response.status()));
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("body read failed: {e}"))?;
+    let path = persist_log_dump(&dump_dir, &record, &body)
+        .await
+        .map_err(|e| format!("persist failed: {e}"))?;
+    info!(
+        target: "aggregator",
+        correlation = %record.correlation_id,
+        metric = %record.metric,
+        path = %path.display(),
+        "wrote correlated log dump"
+    );
+    Ok(())
+}
+
+async fn persist_log_dump(
+    dump_dir: &str,
+    record: &CorrelationRecord,
+    body: &str,
+) -> io::Result<PathBuf> {
+    let dir = Path::new(dump_dir);
+    fs::create_dir_all(dir).await?;
+    let file_name = format!(
+        "{}_{}_{}_{}.json",
+        sanitize_fragment(&record.metric),
+        sanitize_fragment(&record.peer_id),
+        sanitize_fragment(&record.correlation_id),
+        record.timestamp
+    );
+    let path = dir.join(file_name);
+    fs::write(&path, body).await?;
+    Ok(path)
+}
+
+fn sanitize_fragment(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
 async fn ingest(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -271,6 +491,20 @@ async fn ingest(
                     let _ = state
                         .db
                         .insert(&stat.peer_id, serde_json::to_vec(entry).unwrap());
+                    let correlations = collect_correlations(&stat.metrics);
+                    for raw in correlations {
+                        let record = CorrelationRecord {
+                            metric: raw.metric.clone(),
+                            correlation_id: raw.correlation_id.clone(),
+                            peer_id: stat.peer_id.clone(),
+                            value: raw.value,
+                            timestamp: now,
+                        };
+                        state.record_correlation(&raw.metric, record.clone());
+                        if raw.metric == "quic_handshake_fail_total" {
+                            state.handle_quic_failure(&record);
+                        }
+                    }
                     continue;
                 }
             }
@@ -281,6 +515,22 @@ async fn ingest(
             let _ = state
                 .db
                 .insert(&stat.peer_id, serde_json::to_vec(entry).unwrap());
+            if let Some((_, metrics_value)) = entry.back() {
+                let correlations = collect_correlations(metrics_value);
+                for raw in correlations {
+                    let record = CorrelationRecord {
+                        metric: raw.metric.clone(),
+                        correlation_id: raw.correlation_id.clone(),
+                        peer_id: stat.peer_id.clone(),
+                        value: raw.value,
+                        timestamp: now,
+                    };
+                    state.record_correlation(&raw.metric, record.clone());
+                    if raw.metric == "quic_handshake_fail_total" {
+                        state.handle_quic_failure(&record);
+                    }
+                }
+            }
         }
         ACTIVE_PEERS.set(map.len() as i64);
         INGEST_TOTAL.inc();
@@ -316,6 +566,13 @@ async fn peer(
         upload_sync(b.clone(), data.clone());
     }
     Json(data)
+}
+
+async fn correlations(
+    AxumPath(metric): AxumPath<String>,
+    State(state): State<AppState>,
+) -> Json<Vec<CorrelationRecord>> {
+    Json(state.correlations_for(&metric))
 }
 
 async fn cluster(State(state): State<AppState>) -> Json<usize> {
@@ -444,6 +701,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/ingest", post(ingest))
         .route("/peer/:id", get(peer))
+        .route("/correlations/:metric", get(correlations))
         .route("/cluster", get(cluster))
         .route("/export/all", get(export_all))
         .route("/healthz", get(health))

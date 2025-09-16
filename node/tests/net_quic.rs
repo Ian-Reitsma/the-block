@@ -40,7 +40,7 @@ async fn quic_handshake_roundtrip() {
     });
     #[cfg(feature = "telemetry")]
     let before = QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["certificate"])
+        .with_label_values(&["unknown", "certificate"])
         .get();
     let conn = quic::connect(listen_addr, cert).await.unwrap();
     let hello = Hello {
@@ -52,6 +52,8 @@ async fn quic_handshake_roundtrip() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
     let bytes = bincode::serialize(&msg).unwrap();
@@ -64,7 +66,7 @@ async fn quic_handshake_roundtrip() {
     #[cfg(feature = "telemetry")]
     assert_eq!(
         QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["certificate"])
+            .with_label_values(&["unknown", "certificate"])
             .get(),
         before
     );
@@ -95,7 +97,7 @@ async fn quic_gossip_roundtrip() {
     });
     #[cfg(feature = "telemetry")]
     let before = QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["certificate"])
+        .with_label_values(&["unknown", "certificate"])
         .get();
     let conn = quic::connect(listen_addr, cert).await.unwrap();
     let hello = Hello {
@@ -107,6 +109,8 @@ async fn quic_gossip_roundtrip() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())
@@ -127,7 +131,7 @@ async fn quic_gossip_roundtrip() {
     #[cfg(feature = "telemetry")]
     assert_eq!(
         QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["certificate"])
+            .with_label_values(&["unknown", "certificate"])
             .get(),
         before
     );
@@ -162,6 +166,8 @@ async fn quic_disconnect() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())
@@ -202,6 +208,8 @@ async fn quic_fallback_to_tcp() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     let msg_clone = msg.clone();
@@ -250,7 +258,7 @@ async fn quic_handshake_failure_metric() {
     let bad = generate_simple_self_signed(["bad".into()]).unwrap();
     let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
     let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["certificate"])
+        .with_label_values(&["unknown", "certificate"])
         .get();
     let res = quic::connect(listen_addr, bad_cert).await;
     assert!(res.is_err());
@@ -258,7 +266,7 @@ async fn quic_handshake_failure_metric() {
     #[cfg(feature = "telemetry")]
     assert!(
         the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["certificate"])
+            .with_label_values(&["unknown", "certificate"])
             .get()
             >= before + 1
     );
@@ -278,14 +286,14 @@ async fn quic_handshake_timeout() {
     let cert = rustls::Certificate(cert);
     #[cfg(feature = "telemetry")]
     let before = QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["timeout"])
+        .with_label_values(&["unknown", "timeout"])
         .get();
     let res = quic::connect(addr, cert).await;
     assert!(res.is_err());
     #[cfg(feature = "telemetry")]
     assert!(
         QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["timeout"])
+            .with_label_values(&["unknown", "timeout"])
             .get()
             >= before + 1
     );
@@ -320,6 +328,8 @@ async fn quic_version_mismatch() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())
@@ -374,6 +384,8 @@ async fn quic_packet_loss_env() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())

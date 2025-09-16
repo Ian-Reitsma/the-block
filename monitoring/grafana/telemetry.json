@@ -1147,6 +1147,18 @@
     {
       "description": "Total QUIC handshake failures by reason",
       "id": 105,
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "title": "Correlated logs",
+              "url": "http://localhost:9000/correlations/quic_handshake_fail_total",
+              "targetBlank": true
+            }
+          ]
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "expr": "quic_handshake_fail_total"

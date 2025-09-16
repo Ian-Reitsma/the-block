@@ -190,6 +190,30 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
     }))
 }
 
+pub fn release_signers(store: &GovStore) -> Result<serde_json::Value, RpcError> {
+    let signers = crate::provenance::release_signer_hexes();
+    let threshold = store
+        .approved_release_hashes()
+        .map_err(|_| RpcError {
+            code: -32080,
+            message: "release read failed",
+        })?
+        .into_iter()
+        .max_by_key(|r| r.activated_epoch)
+        .map(|r| r.signature_threshold)
+        .unwrap_or_else(|| {
+            if signers.is_empty() {
+                0
+            } else {
+                signers.len() as u32
+            }
+        });
+    Ok(json!({
+        "signers": signers,
+        "threshold": threshold,
+    }))
+}
+
 pub fn inflation_params(params: &Params) -> serde_json::Value {
     json!({
         "beta_storage_sub_ct": params.beta_storage_sub_ct,

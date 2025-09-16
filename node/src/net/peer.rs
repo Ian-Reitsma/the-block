@@ -4,6 +4,8 @@ use crate::config::AggregatorConfig;
 use crate::consensus::observer;
 use crate::net::message::{Message, Payload};
 use crate::p2p::handshake::Transport;
+#[cfg(feature = "quic")]
+use crate::p2p::handshake::{validate_quic_certificate, ValidatedCert};
 use crate::simple_db::SimpleDb;
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -34,7 +36,7 @@ use tar::Builder;
 use tempfile::NamedTempFile;
 use trust_dns_resolver::Resolver;
 
-use super::{ban_store, peer_metrics_store};
+use super::{ban_store, peer_metrics_store, record_peer_certificate, verify_peer_fingerprint};
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -165,6 +167,8 @@ impl PeerSet {
             let mut m = ADDR_MAP.lock();
             m.insert(addr, pk);
         }
+        #[cfg(feature = "quic")]
+        super::quic_stats::record_address(&pk, addr);
         let mut metrics = PEER_METRICS.lock();
         if let Some(val) = metrics.swap_remove(&pk) {
             metrics.insert(pk, val);
@@ -386,6 +390,24 @@ impl PeerSet {
             peer_key = new;
         }
 
+        #[cfg(feature = "quic")]
+        let msg_fingerprint = msg.cert_fingerprint.as_ref().and_then(|fp| {
+            if fp.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(fp);
+                Some(arr)
+            } else {
+                None
+            }
+        });
+        #[cfg(feature = "quic")]
+        if !matches!(msg.body, Payload::Handshake(_))
+            && !verify_peer_fingerprint(&peer_key, msg_fingerprint.as_ref().map(|fp| fp))
+        {
+            record_drop(&peer_key, DropReason::Malformed);
+            return;
+        }
+
         record_request(&peer_key);
 
         if is_throttled(&peer_key) {
@@ -452,6 +474,21 @@ impl PeerSet {
                     telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                     return;
                 }
+                #[cfg(feature = "quic")]
+                let validated_cert = match validate_quic_certificate(&peer_key, &hs) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        telemetry_peer_error(PeerErrorCode::HandshakeFeature);
+                        #[cfg(feature = "telemetry")]
+                        {
+                            crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                                .with_label_values(&["certificate"])
+                                .inc();
+                        }
+                        record_handshake_fail(&peer_key, HandshakeError::Certificate);
+                        return;
+                    }
+                };
                 self.authorize(peer_key);
                 record_handshake_success(&peer_key);
                 if let Some(peer_addr) = addr {
@@ -459,7 +496,16 @@ impl PeerSet {
                     self.map_addr(peer_addr, peer_key);
                     self.set_transport(peer_addr, hs.transport);
                     if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
-                        self.set_quic(peer_addr, qaddr, cert);
+                        self.set_quic(peer_addr, qaddr, cert.clone());
+                        #[cfg(feature = "quic")]
+                        if let Some(vc) = &validated_cert {
+                            record_peer_certificate(
+                                &peer_key,
+                                cert,
+                                vc.fingerprint,
+                                vc.previous.clone(),
+                            );
+                        }
                     }
                 }
             }
@@ -1008,6 +1054,8 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
                 .inc();
         }
     }
+    #[cfg(feature = "quic")]
+    super::quic_stats::record_handshake_failure(pk);
 }
 
 fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
@@ -1122,13 +1170,15 @@ pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
         update_active_gauge(map.len());
         update_memory_usage(map.len());
     }
+    #[cfg(feature = "quic")]
+    super::quic_stats::record_latency(pk, ms);
 }
 
 pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
     ADDR_MAP.lock().get(addr).copied()
 }
 
-#[cfg(all(feature = "telemetry", feature = "quic"))]
+#[cfg(feature = "quic")]
 pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeError) {
     let ts = now_secs();
     {
@@ -1836,10 +1886,10 @@ const KEY_GRACE_SECS: u64 = 60 * 5;
 static HANDSHAKE_LOG: Lazy<Mutex<VecDeque<(u64, String, HandshakeError)>>> =
     Lazy::new(|| Mutex::new(VecDeque::new()));
 const HANDSHAKE_LOG_CAP: usize = 128;
-#[cfg(all(feature = "telemetry", feature = "quic"))]
+#[cfg(feature = "quic")]
 static LAST_HANDSHAKE_ADDR: Lazy<Mutex<HashMap<SocketAddr, u64>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-#[cfg(all(feature = "telemetry", feature = "quic"))]
+#[cfg(feature = "quic")]
 const HANDSHAKE_DEBOUNCE_SECS: u64 = 1;
 #[allow(dead_code)]
 const PEER_METRICS_VERSION: u32 = 1;

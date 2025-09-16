@@ -44,3 +44,8 @@ test = false
 name = "range_boost_parse"
 path = "fuzz_targets/range_boost_parse.rs"
 test = false
+
+[[bin]]
+name = "quic_frame"
+path = "fuzz_targets/quic_frame.rs"
+test = false

@@ -29,6 +29,9 @@ blake3 = "1"
 base64 = "0.22"
 rusqlite = { version = "0.30", features = ["bundled"] }
 chacha20poly1305 = "0.10"
+rpassword = "7"
+rand = "0.8"
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
 
 [features]
 quantum = ["wallet"]

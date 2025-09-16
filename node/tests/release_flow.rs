@@ -1,7 +1,8 @@
 use tempfile::tempdir;
 
 use the_block::governance::{
-    controller, GovStore, ProposalStatus, ReleaseBallot, ReleaseVote, VoteChoice,
+    controller, GovStore, ProposalStatus, ReleaseAttestation, ReleaseBallot, ReleaseVote,
+    VoteChoice,
 };
 use the_block::provenance;
 
@@ -13,7 +14,7 @@ fn release_flow_approves_hash() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
-    let proposal = ReleaseVote::new(hash.clone(), None, "tester".into(), 0, 0);
+    let proposal = ReleaseVote::new(hash.clone(), vec![], 0, "tester".into(), 0, 0);
     let id = controller::submit_release(&store, proposal).unwrap();
     let ballot = ReleaseBallot {
         proposal_id: id,
@@ -33,15 +34,31 @@ fn release_flow_requires_signature_when_signers_configured() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut rng = OsRng;
-    let sk = ed25519_dalek::SigningKey::generate(&mut rng);
-    let signer_hex = hex::encode(sk.verifying_key().to_bytes());
+    let sk1 = ed25519_dalek::SigningKey::generate(&mut rng);
+    let sk2 = ed25519_dalek::SigningKey::generate(&mut rng);
+    let signer_hex = format!(
+        "{},{}",
+        hex::encode(sk1.verifying_key().to_bytes()),
+        hex::encode(sk2.verifying_key().to_bytes())
+    );
     std::env::set_var("TB_RELEASE_SIGNERS", &signer_hex);
     provenance::refresh_release_signers();
 
     let hash = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd".to_string();
     let msg = format!("release:{hash}");
-    let sig = hex::encode(sk.sign(msg.as_bytes()).to_bytes());
-    let proposal = ReleaseVote::new(hash.clone(), Some(sig), "tester".into(), 0, 0);
+    let sig1 = hex::encode(sk1.sign(msg.as_bytes()).to_bytes());
+    let sig2 = hex::encode(sk2.sign(msg.as_bytes()).to_bytes());
+    let attestations = vec![
+        ReleaseAttestation {
+            signer: hex::encode(sk1.verifying_key().to_bytes()),
+            signature: sig1,
+        },
+        ReleaseAttestation {
+            signer: hex::encode(sk2.verifying_key().to_bytes()),
+            signature: sig2,
+        },
+    ];
+    let proposal = ReleaseVote::new(hash.clone(), attestations, 2, "tester".into(), 0, 0);
     let id = controller::submit_release(&store, proposal).unwrap();
     controller::tally_release(&store, id, 0).unwrap();
     assert!(store.is_release_hash_approved(&hash).unwrap());
@@ -55,13 +72,24 @@ fn release_flow_rejects_missing_signature() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut rng = OsRng;
-    let sk = ed25519_dalek::SigningKey::generate(&mut rng);
-    let signer_hex = hex::encode(sk.verifying_key().to_bytes());
+    let sk1 = ed25519_dalek::SigningKey::generate(&mut rng);
+    let sk2 = ed25519_dalek::SigningKey::generate(&mut rng);
+    let signer_hex = format!(
+        "{},{}",
+        hex::encode(sk1.verifying_key().to_bytes()),
+        hex::encode(sk2.verifying_key().to_bytes())
+    );
     std::env::set_var("TB_RELEASE_SIGNERS", &signer_hex);
     provenance::refresh_release_signers();
 
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd".to_string();
-    let proposal = ReleaseVote::new(hash, None, "tester".into(), 0, 0);
+    let msg = format!("release:{hash}");
+    let sig = hex::encode(sk1.sign(msg.as_bytes()).to_bytes());
+    let attestation = ReleaseAttestation {
+        signer: hex::encode(sk1.verifying_key().to_bytes()),
+        signature: sig,
+    };
+    let proposal = ReleaseVote::new(hash, vec![attestation], 2, "tester".into(), 0, 0);
     assert!(controller::submit_release(&store, proposal).is_err());
 
     std::env::remove_var("TB_RELEASE_SIGNERS");

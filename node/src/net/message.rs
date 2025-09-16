@@ -17,6 +17,9 @@ pub struct Message {
     /// Optional partition marker propagated in gossip headers.
     #[serde(default)]
     pub partition: Option<u64>,
+    /// Optional certificate fingerprint for QUIC trust validation.
+    #[serde(default)]
+    pub cert_fingerprint: Option<Vec<u8>>,
 }
 
 impl Message {
@@ -30,6 +33,17 @@ impl Message {
             signature: sig.to_bytes().to_vec(),
             body,
             partition: None,
+            cert_fingerprint: {
+                #[cfg(feature = "quic")]
+                {
+                    crate::net::transport_quic::current_advertisement()
+                        .map(|ad| ad.fingerprint.to_vec())
+                }
+                #[cfg(not(feature = "quic"))]
+                {
+                    None
+                }
+            },
         }
     }
 }

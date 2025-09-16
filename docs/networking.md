@@ -41,26 +41,34 @@ metrics are documented in [network_partitions.md](network_partitions.md).
 
 ## QUIC Configuration
 
-Nodes may optionally accept gossip over QUIC for reduced handshake latency.
-Enable the transport with the `--quic` flag and expose a UDP port. On first
-startup a self-signed certificate and private key are generated and written to
-`<data_dir>/quic.cert` and `<data_dir>/quic.key`. Subsequent restarts reuse these
-files and advertise the QUIC address and certificate during the TCP handshake so
-peers can cache and validate the endpoint without manual distribution. Metrics
-`quic_conn_latency_seconds`, `quic_bytes_sent_total`, and
-`quic_bytes_recv_total` track session performance. Additional counters
-`quic_handshake_fail_total{reason}`, `net_peer_handshake_fail_total{peer_id,reason}`,
-`handshake_fail_total{reason}`, and `quic_disconnect_total{code}` record failed
-handshakes and disconnect error codes for troubleshooting. `net.quic failures`
-exposes recent failure reasons via RPC, and the CLI `net quic failures` prints
-the current buffer. `quic_endpoint_reuse_total`
-counts how often the client connection pool reused an existing endpoint.
+Enable QUIC with the `--quic` flag and expose a UDP port. During startup the
+node derives an ephemeral X.509 certificate from its Ed25519 network key via
+`transport_quic::initialize`, rotates out any certificate older than the
+configured TTL, and persists the previous chain so peers can migrate without
+drops. Gossip messages include the active fingerprint, and `p2p::handshake`
+verifies that the presented certificate matches both the gossiped fingerprint
+and the signer identity. A per-peer cache stored at
+`~/.the_block/quic_peer_certs.json` lets the node reject stale or spoofed
+fingerprints; the same cache backs the explorer endpoint at
+`/network/certs`.
 
-Certificates are stored with `0600` permissions and checked for ownership at
-startup. The node will regenerate the pair if the files are missing, have
-incorrect permissions, or exceed the age specified by
-`--quic-cert-ttl-days` (default 30). This allows periodic rotation without
-manual intervention.
+Manual rotations are available via `contract-cli net rotate-cert` (or the
+equivalent RPC), which returns the new fingerprint along with the previous
+chain for audit logging. Every successful rotation increments
+`quic_cert_rotation_total` for dashboards. Session health is exposed through the
+`net.quic_stats` RPC: operators receive cached latency, retransmit totals,
+endpoint reuse counts, and per-peer `quic_handshake_fail_total{peer}` values.
+The CLI wrapper `contract-cli net quic-stats --json --token <AUTH>` renders the
+same data for scripting, while the aggregator can trigger automated log dumps
+whenever a peer’s failure counter spikes.
+
+Metrics `quic_conn_latency_seconds`, `quic_bytes_sent_total`,
+`quic_bytes_recv_total`, `quic_retransmit_total`, and
+`quic_endpoint_reuse_total` capture transport-level behaviour. Handshake issues
+are split across `quic_handshake_fail_total{peer}` (peer-visible failures) and
+`handshake_fail_total{reason}` (local reasons). The node regenerates its
+certificate chain automatically when files are missing, ownership is incorrect,
+or the TTL elapses, ensuring rotation without manual cleanup.
 
 ### QUIC Test Suite
 
@@ -77,11 +85,14 @@ suite to avoid spurious handshake failures.
 ### QUIC Handshake Failures and TCP Fallback
 
 If a QUIC handshake fails, the node automatically retries the connection over
-TCP. Each failure increments `quic_handshake_fail_total{reason}`. A spike in this
-counter usually indicates certificate mismatches or blocked UDP traffic. Use
-`net quic failures` or `net stats failures <peer>` to inspect reason-coded counts. When fallback occurs
-the gossip message proceeds over the established TCP channel,
-so functionality is preserved while operators investigate the root cause.
+TCP. Each failure increments `quic_handshake_fail_total{peer}` and is reflected
+in the cached diagnostics surfaced by `contract-cli net quic-stats`. A spike in
+these counters usually signals certificate drift, UDP filtering, or exhausted
+token buckets. Pair the CLI output with the metrics-to-logs correlation tool to
+pull the associated log dumps automatically; the aggregator requests dumps when
+`quic_handshake_fail_total{peer}` climbs faster than expected. When fallback
+occurs the gossip message continues over the established TCP channel, so
+functionality is preserved while operators investigate the root cause.
 
 ## Recovery After Corruption
 If the peer file was truncated or contained invalid IDs, the discovery layer may misbehave.  After deleting the file and supplying fresh peers as above, restart the node.  The DHT will rebuild automatically and persist the updated peer list on clean shutdown.

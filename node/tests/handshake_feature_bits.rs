@@ -33,6 +33,8 @@ fn handshake_requires_compute_market_bit() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, Some(addr), &bc);
@@ -48,6 +50,8 @@ fn handshake_requires_compute_market_bit() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg_ok = Message::new(Payload::Handshake(hello_ok), &sk);
     peers.handle_message(msg_ok, Some(addr), &bc);
