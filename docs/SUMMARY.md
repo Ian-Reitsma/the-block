@@ -3,6 +3,7 @@
 - [Progress Snapshot](progress.md)
 - [Status & Roadmap](roadmap.md)
 - [Telemetry](telemetry.md)
+- [Telemetry Operations Runbook](telemetry_ops.md)
 - [Networking](networking.md)
 - [Gossip](gossip.md)
 - [Sharding](sharding.md)

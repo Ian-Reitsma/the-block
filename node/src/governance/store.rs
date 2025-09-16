@@ -1,6 +1,6 @@
 use super::{
-    registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
-    ReleaseVote, Runtime, Vote, VoteChoice,
+    registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseAttestation,
+    ReleaseBallot, ReleaseVote, Runtime, Vote, VoteChoice,
 };
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -35,6 +35,13 @@ fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
 
 fn de<T: DeserializeOwned>(bytes: &[u8]) -> sled::Result<T> {
     bincode::deserialize(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
+}
+
+fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
+    match de::<Vec<u64>>(bytes) {
+        Ok(list) => Ok(list),
+        Err(_) => de::<u64>(bytes).map(|single| vec![single]),
+    }
 }
 
 #[cfg(feature = "telemetry")]
@@ -186,6 +193,17 @@ impl GovStore {
         if self.is_release_hash_known(&r.build_hash)? {
             return Err(sled::Error::Unsupported(
                 "release hash already known".into(),
+            ));
+        }
+        if r.signer_set.is_empty() {
+            r.signer_set = crate::provenance::release_signer_hexes();
+        }
+        if r.signature_threshold == 0 && !r.signer_set.is_empty() {
+            r.signature_threshold = r.signer_set.len() as u32;
+        }
+        if !r.signer_set.is_empty() && r.signature_threshold as usize > r.signer_set.len() {
+            return Err(sled::Error::Unsupported(
+                "threshold exceeds signer set".into(),
             ));
         }
         let next = self
@@ -383,10 +401,20 @@ impl GovStore {
             prop.mark_passed(current_epoch);
             prop.mark_activated(current_epoch);
             self.release_proposals().insert(&key, ser(&prop)?)?;
+            let installs: Vec<u64> = self
+                .release_installs()
+                .get(prop.build_hash.as_bytes())?
+                .map(|raw| decode_install_times(&raw))
+                .transpose()?
+                .unwrap_or_default();
             let record = ApprovedRelease {
                 build_hash: prop.build_hash.clone(),
                 activated_epoch: current_epoch,
                 proposer: prop.proposer.clone(),
+                signatures: prop.signatures.clone(),
+                signature_threshold: prop.signature_threshold,
+                signer_set: prop.signer_set.clone(),
+                install_times: installs,
             };
             self.approved_releases()
                 .insert(prop.build_hash.as_bytes(), ser(&record)?)?;
@@ -401,10 +429,23 @@ impl GovStore {
     }
 
     pub fn approved_release_hashes(&self) -> sled::Result<Vec<ApprovedRelease>> {
+        let mut installs: std::collections::HashMap<String, Vec<u64>> =
+            std::collections::HashMap::new();
+        for item in self.release_installs().iter() {
+            let (hash_bytes, ts_bytes) = item?;
+            let hash = String::from_utf8(hash_bytes.to_vec())
+                .map_err(|e| sled::Error::Unsupported(format!("utf8: {e}").into()))?;
+            let times: Vec<u64> = decode_install_times(&ts_bytes)?;
+            installs.insert(hash, times);
+        }
         let mut out = Vec::new();
         for item in self.approved_releases().iter() {
             let (_, raw) = item?;
-            out.push(de::<ApprovedRelease>(&raw)?);
+            let mut record: ApprovedRelease = de(&raw)?;
+            if let Some(times) = installs.get(&record.build_hash) {
+                record.install_times = times.clone();
+            }
+            out.push(record);
         }
         Ok(out)
     }
@@ -418,8 +459,27 @@ impl GovStore {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        let mut installs: Vec<u64> = self
+            .release_installs()
+            .get(hash.as_bytes())?
+            .map(|raw| decode_install_times(&raw))
+            .transpose()?
+            .unwrap_or_default();
+        installs.push(now);
+        installs.sort_unstable();
         self.release_installs()
-            .insert(hash.as_bytes(), ser(&now)?)?;
+            .insert(hash.as_bytes(), ser(&installs)?)?;
+        if let Some(existing) = self
+            .approved_releases()
+            .get(hash.as_bytes())?
+            .map(|raw| de::<ApprovedRelease>(&raw))
+            .transpose()?
+        {
+            let mut updated = existing;
+            updated.install_times = installs.clone();
+            self.approved_releases()
+                .insert(hash.as_bytes(), ser(&updated)?)?;
+        }
         #[cfg(feature = "telemetry")]
         {
             use crate::telemetry::RELEASE_INSTALLS_TOTAL;
@@ -428,13 +488,13 @@ impl GovStore {
         Ok(())
     }
 
-    pub fn release_installations(&self) -> sled::Result<Vec<(String, u64)>> {
+    pub fn release_installations(&self) -> sled::Result<Vec<(String, Vec<u64>)>> {
         let mut installs = Vec::new();
         for item in self.release_installs().iter() {
             let (hash_bytes, ts_bytes) = item?;
             let hash = String::from_utf8(hash_bytes.to_vec())
                 .map_err(|e| sled::Error::Unsupported(format!("utf8: {e}").into()))?;
-            let ts: u64 = de(&ts_bytes)?;
+            let ts: Vec<u64> = decode_install_times(&ts_bytes)?;
             installs.push((hash, ts));
         }
         Ok(installs)

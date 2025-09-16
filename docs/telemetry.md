@@ -81,7 +81,8 @@ client, provider, or preemption logic.
     pending escrows, total locked liquidity, submitted orders, and matched
     quantity across all pairs.
  - `difficulty_retarget_total`, `difficulty_clamp_total` track retarget executions and clamp events.
- - `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total` capture QUIC session metrics.
+- `quic_conn_latency_seconds`, `quic_bytes_sent_total`, `quic_bytes_recv_total`, `quic_handshake_fail_total{peer}`, `quic_retransmit_total{peer}`, `quic_cert_rotation_total`, `quic_disconnect_total{code}`, `quic_endpoint_reuse_total` capture QUIC session metrics.
+- `release_quorum_fail_total` and `release_installs_total` monitor governance release approvals and installs for dashboards.
 
 ### Cluster Aggregator
 
@@ -91,6 +92,7 @@ cluster-wide gauges when compiled with `--features telemetry`:
 
 - `cluster_peer_active_total{node_id}` – number of active peers per reporting node (cardinality ≈ node count).
 - `aggregator_ingest_total{node_id,result}` – ingestion attempts by node and result (`ok` or `error`), cardinality ≤ node count × 2.
+- `log_correlation_fail_total{metric}` – correlation lookups that returned no rows; paired automation triggers `metrics-aggregator` log dumps into `$TB_LOG_DUMP_DIR` when counts spike.
 
 Prometheus query examples:
 

@@ -216,14 +216,25 @@ enum CourierCmd {
     Flush,
 }
 
+fn rollback_and_exit(reason: &str) -> std::process::ExitCode {
+    eprintln!("startup aborted: {reason}");
+    if let Err(rb) = the_block::update::rollback_failed_startup() {
+        eprintln!("rollback attempt failed: {rb}");
+    } else {
+        eprintln!("previous binary restored from TB_PREVIOUS_BINARY");
+    }
+    std::process::ExitCode::FAILURE
+}
+
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
     let cli = Cli::parse();
     // Verify build provenance at startup.
-    let _ = the_block::provenance::verify_self();
+    if !the_block::provenance::verify_self() {
+        return rollback_and_exit("binary provenance verification failed");
+    }
     if let Err(err) = the_block::governance::ensure_release_authorized(env!("BUILD_BIN_HASH")) {
-        eprintln!("startup aborted: {err}");
-        return std::process::ExitCode::FAILURE;
+        return rollback_and_exit(err.as_str());
     }
     let code = match cli.command {
         Commands::Run {

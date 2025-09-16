@@ -1,12 +1,21 @@
 # Monitoring Dashboards
 
-This directory contains Grafana dashboards for core subsystems.
+This directory contains subsystem-specific Grafana dashboards that complement
+the primary telemetry bundle under `monitoring/grafana/`. Each JSON file is
+ready to import once the Prometheus stack is running.
 
-- `compute_market_dashboard.json` visualizes backlog factors and courier metrics.
-- `governance_dashboard.json` graphs proposal votes, rollbacks, and activation delays.
-- `network_dashboard.json` tracks PoH ticks, turbine fanout, gossip convergence, `read_denied_total{reason}` counters, and `subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`, and `rent_escrow_locked_ct_total` metrics.
-- `settlement_dashboard.json` surfaces receipt indexing lag and `settle_audit_mismatch_total` from the CI audit job.
-- `storage_dashboard.json` records disk-full events via `storage_disk_full_total` and recovery durations.
+- `compute_market_dashboard.json` visualises backlog factors, fee-floor
+  enforcement, courier retry behaviour, and the SLA violation counters alongside
+  the rolling `fee_floor_current` gauge so operators can compare pricing policy
+  with realised demand.
 
-Import dashboards into Grafana after running `make monitor` and ensure the node is started with `--metrics-addr` and `--features telemetry`.
-Dashboards expect Prometheus running on `localhost:9090`; edit the `datasource` section if your topology differs.
+The consolidated cluster dashboard that ships with the repo lives at
+`monitoring/grafana/telemetry.json`. It already exposes governance rollout
+metrics (`release_quorum_fail_total`, `release_installs_total`), QUIC diagnostics
+with per-peer retransmit and handshake panels, and log-correlation alerts fed by
+the metrics aggregator.
+
+Import any of these dashboards after running `make monitor` (or the native
+equivalent) and ensure nodes start with `--metrics-addr` and
+`--features telemetry`. Dashboards assume Prometheus on `localhost:9090`; edit the
+embedded `datasource` block if your deployment differs.

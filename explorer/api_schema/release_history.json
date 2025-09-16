@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReleaseHistoryPage",
+  "type": "object",
+  "properties": {
+    "total": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of releases matching the query."
+    },
+    "page": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based page index for the current response."
+    },
+    "page_size": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of entries included in the page payload."
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "build_hash": {
+            "type": "string",
+            "description": "Hex encoded release hash."
+          },
+          "proposer": {
+            "type": "string",
+            "description": "Address that proposed the release."
+          },
+          "activated_epoch": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Epoch when the release was activated."
+          },
+          "last_install_ts": {
+            "type": ["integer", "null"],
+            "description": "Most recent install timestamp recorded by the node."
+          },
+          "install_count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of install events captured for this node."
+          },
+          "signature_threshold": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Required number of attestors at submission time."
+          },
+          "signer_set": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Snapshot of trusted release signers when the proposal was submitted."
+          },
+          "attested_signers": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Signers that provided attestations for the proposal."
+          },
+          "quorum_met": {
+            "type": "boolean",
+            "description": "Whether attestation quorum was met at submission time."
+          },
+          "install_times": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "All install timestamps recorded by this node."
+          }
+        },
+        "required": [
+          "build_hash",
+          "proposer",
+          "activated_epoch",
+          "install_count",
+          "signature_threshold",
+          "signer_set",
+          "attested_signers",
+          "quorum_met",
+          "install_times"
+        ]
+      }
+    }
+  },
+  "required": ["total", "page", "page_size", "entries"]
+}

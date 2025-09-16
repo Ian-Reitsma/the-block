@@ -65,28 +65,40 @@ test real services today.
   Reputation-weighted Lagrange coding distributes shards while
   proof-of-retrievability challenges penalize missing data.
   See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
-  flow. (80.0% Complete)
- - The compute marketplace pays nodes for deterministic CPU and GPU work
+  flow. (79.0% Complete)
+- The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
   RPC and `compute cancel <job_id>` CLI, hashes receipts into blocks before
-conversion to CT through multipliers, and verifies optional SNARK receipts
-prior to crediting payment. (74.0% Complete)
+  conversion to CT through multipliers, and verifies optional SNARK receipts
+  prior to crediting payment. Admission now enforces a dynamic fee floor with
+  per-sender slot limits, records evictions for audit, and exposes the active
+  floor through `mempool.stats` so operators can reason about QoS. (79.0%
+  Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
       A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
       `aggregator_ingest_total` gauges, partition markers flag split-brain events,
       and metrics are bounded by `max_peer_metrics` so abusive peers cannot exhaust
-    memory. Shard-aware peer maps route block gossip only to interested peers and
-    uptime-based fee rebates reward high-availability peers. (88.0% Complete)
+      memory. QUIC now derives mutual-TLS certificates from node keys, gossips
+      fingerprints, exposes cached diagnostics over the `net.quic_stats` RPC / CLI,
+      and leverages a chaos harness to publish retransmit counters, keeping
+      operators ahead of packet loss. Shard-aware peer maps route block gossip only
+      to interested peers and uptime-based fee rebates reward high-availability
+      peers. (93.0% Complete)
     - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
       resolves forks deterministically, and validates blocks with BLAKE3 hashes,
-        multi-window Kalman retargeting, VDF-anchored randomness, macro-block checkpointing, and per-shard fork choice. (85.0%
-        Complete)
+      multi-window Kalman retargeting, VDF-anchored randomness, macro-block
+      checkpointing, and per-shard fork choice. Release installs now gate on
+      provenance verification with automated rollback if hashes drift, keeping
+      consensus nodes in lockstep. (86.0% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
-  two percent while funding service roles. (82.0% Complete)
+    two percent while funding service roles. Release upgrades now require
+    multi-signature attestation with persisted signer sets, explorer history,
+    and CLI tooling, while the fetcher verifies provenance before installs and
+    records rollout timestamps. (87.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
       deployable contracts and fee markets alongside traditional PoW headers. (79.0%
@@ -96,27 +108,30 @@ prior to crediting payment. (74.0% Complete)
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, telemetry gauges `dex_escrow_locked`,
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
-    constant-product AMM pools provide fallback liquidity with programmable incentives. (77.0%
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (78.0%
     Complete)
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
-Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (47.0% Complete)
+Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (48.0% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
-      session-key derivation, and compliance options as needed. (86.0% Complete)
+      session-key derivation, auto-update orchestration, and compliance options as
+      needed. Explorer and CLI tooling now surface release history and per-node
+      installs for operators. (89.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
-        and a cluster-wide `metrics-aggregator` for fleet visibility. (77.0%
-        Complete)
+      and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
+      now link metrics anomalies to log searches, automated QUIC dumps, and Grafana
+      drill-downs for rapid mitigation. (83.0% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
-    and encode consensus invariants, laying groundwork for provable safety. (37.0%
+    and encode consensus invariants, laying groundwork for provable safety. (38.0%
     Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
   subsidy events to make participation feasible on phones. (56.0% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99/100** with vision completion **~80/100**.
+  Mainnet readiness sits at **~99.3/100** with vision completion **~82.4/100**.
 
 ### Live now
 
@@ -129,6 +144,8 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 - Cluster-wide `metrics-aggregator` collects peer snapshots while the `net stats`
   CLI supports JSON output, drop-reason and reputation filtering, pagination, and
   colorized drop-rate warnings.
+- Metrics-to-logs correlation links Prometheus anomalies to targeted log searches,
+  automated QUIC dumps, and Grafana deep links for rapid mitigation.
 - Partition watch tracks peer reachability and stamps gossip with markers so
   splits can reconcile deterministically once connectivity returns.
 - Modular wallet framework with hardware and remote signer support; command-line tools wrap the wallet crate and expose key management and staking helpers.
@@ -136,11 +153,19 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
   meta-transaction tooling.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Versioned P2P handshake negotiates feature bits, records peer metadata, and enforces minimum protocol versions. See [docs/p2p_protocol.md](docs/p2p_protocol.md).
-- QUIC gossip transport with certificate reuse, connection pooling, and TCP fallback; fanout selects per-peer transport.
+- QUIC gossip transport with mutual-TLS certificate rotation, fingerprint gossip,
+  cached diagnostics via `net.quic_stats`/`contract-cli net quic-stats`, and TCP fallback; fanout selects
+  per-peer transport while chaos tooling surfaces retransmit spikes and the metrics-to-logs pipeline dumps offending sessions automatically.
 - Light-client crate with mobile example and FFI helpers; mobile demos showcase header sync, background polling, and optional KYC flows. The synchronization model and security trade-offs are described in [docs/light_client.md](docs/light_client.md).
 - SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST.
+- Incremental log indexer tracks ingest offsets, supports encrypted key rotation,
+  serves REST/WebSocket searches, and ships with CLI tooling for live correlation.
+- Explorer release timeline API, schema, and CLI surfacing proposer addresses,
+  signer sets, thresholds, and install counts for governance audits.
 - Distributed benchmark harness and economic simulation modules; harness spawns multi-node topologies while simulators model inflation, fees, and demand curves.
-- Installer CLI for signed packages and auto-update stubs; release artifacts include reproducible build metadata and updater hooks.
+- Installer CLI for signed packages and attested auto-updates; the fetcher
+  verifies multi-sig provenance, records install timestamps, and rolls back on
+  hash drift while release artifacts include reproducible build metadata.
 - Jurisdiction policy packs, governance metrics, and webhook alerts; nodes can load region-specific policies and push governance events to external services.
 - Law-enforcement portal with hashed case logs and warrant canaries; operators export requests or verify canary freshness without revealing identifiers. See [docs/le_portal.md](docs/le_portal.md).
 - Free-read architecture: receipt-only read logging, execution receipts for
@@ -157,6 +182,8 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 - Blob root scheduler separates ≤4 GiB L2 blobs from larger L3 blobs, flushing roots on 4 s and 16 s cadences to bound anchoring latency. Storage pipelines enqueue roots via `BlobScheduler`; see [docs/blob_chain.md](docs/blob_chain.md).
 - Range-boost store-and-forward queue tracks bundles with hop proofs so offline relays can ferry data until connectivity returns. See [docs/range_boost.md](docs/range_boost.md).
 - Fee-aware mempool with deterministic priority and EIP-1559 style base fee tracking; low-fee transactions are evicted when capacity is exceeded and each block adjusts the base fee toward a fullness target.
+- Admission pipeline enforces per-sender slot limits, records evictions for audit,
+  and surfaces the dynamic fee floor via `mempool.stats`.
 - Transaction lifecycle document covers payload fields, memo handling, Python bindings, and lane-tagged admission; see [docs/transaction_lifecycle.md](docs/transaction_lifecycle.md).
 - Bridge primitives with light-client verification, relayer proofs, and a lock/unlock state machine; `blockctl bridge deposit` and `withdraw` commands move funds across chains while verifying relayer attestations.
 - Durable smart-contracts backed by a bincode `ContractStore`; `contract deploy` and `contract call` CLI flows persist code and key/value state under `~/.the_block/state/contracts/` and survive node restarts.

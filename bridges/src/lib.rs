@@ -19,7 +19,6 @@ use relayer::RelayerSet;
 pub use header::PowHeader as BridgeHeader;
 pub use relayer::{Relayer, RelayerSet as Relayers};
 pub use token_bridge::TokenBridge;
-pub use RelayerBundle;
 
 #[cfg(feature = "telemetry")]
 use once_cell::sync::Lazy;

@@ -77,6 +77,8 @@ async fn peer_stats_rpc() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -134,6 +136,8 @@ async fn peer_stats_all_rpc() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg1 = Message::new(Payload::Handshake(hello.clone()), &sk1);
     let msg2 = Message::new(Payload::Handshake(hello), &sk2);
@@ -187,6 +191,8 @@ async fn peer_stats_reset_rpc() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -247,6 +253,8 @@ async fn peer_stats_export_rpc() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -300,6 +308,8 @@ fn peer_stats_export_invalid_path() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -330,6 +340,8 @@ fn peer_stats_export_concurrent() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -374,6 +386,8 @@ async fn peer_stats_export_all_rpc_map() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -418,6 +432,8 @@ async fn peer_stats_export_all_rpc_dir() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -472,6 +488,8 @@ fn peer_stats_export_all_quota() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -507,6 +525,8 @@ fn peer_stats_export_all_filter_reputation() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello1), &sk1);
     peers.handle_message(msg, None, &bc);
@@ -523,6 +543,8 @@ fn peer_stats_export_all_filter_reputation() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
     peers.handle_message(msg2, None, &bc);
@@ -561,6 +583,8 @@ fn peer_stats_export_all_filter_activity() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello1), &sk1);
     peers.handle_message(msg, None, &bc);
@@ -578,6 +602,8 @@ fn peer_stats_export_all_filter_activity() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
     peers.handle_message(msg2, None, &bc);
@@ -629,6 +655,8 @@ async fn peer_stats_cli_show_and_reputation() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
@@ -715,6 +743,8 @@ async fn peer_stats_cli_show_table_snapshot() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
@@ -777,6 +807,8 @@ async fn peer_stats_cli_show_json_snapshot() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     let addr_map: SocketAddr = "127.0.0.1:1".parse().unwrap();
@@ -845,6 +877,8 @@ async fn peer_stats_cli_sort_filter_snapshot() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg1 = Message::new(Payload::Handshake(hello1), &sk1);
     peers.handle_message(msg1, None, &bc);
@@ -862,6 +896,8 @@ async fn peer_stats_cli_sort_filter_snapshot() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg2 = Message::new(Payload::Handshake(hello2), &sk2);
     peers.handle_message(msg2, None, &bc);
@@ -1034,6 +1070,8 @@ async fn peer_stats_drop_counter_rpc() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
     the_block::net::set_p2p_max_per_sec(10);
@@ -1094,6 +1132,8 @@ async fn peer_stats_cli_reset() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);
@@ -1148,6 +1188,8 @@ async fn peer_stats_all_pagination_rpc() {
             transport: Transport::Tcp,
             quic_addr: None,
             quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello), &sk);
         peers.handle_message(msg, None, &bc);
@@ -1201,6 +1243,8 @@ async fn peer_stats_persist_restart() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);

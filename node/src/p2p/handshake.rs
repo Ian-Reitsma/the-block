@@ -37,6 +37,10 @@ pub struct Hello {
     pub quic_addr: Option<std::net::SocketAddr>,
     #[serde(default)]
     pub quic_cert: Option<Vec<u8>>,
+    #[serde(default)]
+    pub quic_fingerprint: Option<Vec<u8>>,
+    #[serde(default)]
+    pub quic_fingerprint_previous: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +66,60 @@ pub struct PeerInfo {
     pub transport: Transport,
     pub quic_addr: Option<std::net::SocketAddr>,
     pub quic_cert: Option<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidatedCert {
+    pub fingerprint: [u8; 32],
+    pub previous: Vec<[u8; 32]>,
+}
+
+#[cfg(feature = "quic")]
+use crate::net::transport_quic;
+
+#[cfg(feature = "quic")]
+pub fn validate_quic_certificate(
+    peer_key: &[u8; 32],
+    hello: &Hello,
+) -> Result<Option<ValidatedCert>, HandshakeError> {
+    if let Some(cert) = hello.quic_cert.as_ref() {
+        let fingerprint = transport_quic::verify_remote_certificate(peer_key, cert)
+            .map_err(|_| HandshakeError::Certificate)?;
+        if let Some(expected) = hello.quic_fingerprint.as_ref() {
+            if expected.len() != 32 || expected.as_slice() != fingerprint.as_slice() {
+                return Err(HandshakeError::Certificate);
+            }
+        }
+        let mut previous = Vec::new();
+        for fp in &hello.quic_fingerprint_previous {
+            if fp.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(fp);
+                previous.push(arr);
+            }
+        }
+        Ok(Some(ValidatedCert {
+            fingerprint,
+            previous,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(not(feature = "quic"))]
+pub fn validate_quic_certificate(
+    _peer_key: &[u8; 32],
+    hello: &Hello,
+) -> Result<Option<ValidatedCert>, HandshakeError> {
+    if hello.quic_cert.is_some() {
+        Ok(Some(ValidatedCert {
+            fingerprint: [0u8; 32],
+            previous: Vec::new(),
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 static PEERS: Lazy<Mutex<HashMap<String, PeerInfo>>> = Lazy::new(|| Mutex::new(HashMap::new()));

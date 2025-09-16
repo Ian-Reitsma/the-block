@@ -13,6 +13,7 @@ use crate::{
     transaction::FeeLane,
     Blockchain, SignedTransaction,
 };
+use ::storage::{contract::StorageContract, offer::StorageOffer};
 use bincode;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
@@ -27,7 +28,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use ::storage::{contract::StorageContract, offer::StorageOffer};
 use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
@@ -54,6 +54,7 @@ pub mod identity;
 pub mod inflation;
 pub mod jurisdiction;
 pub mod light;
+pub mod logs;
 pub mod peer;
 pub mod pos;
 pub mod state_stream;
@@ -100,6 +101,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "dns.publish_record",
     "gateway.policy",
     "gateway.reads_since",
+    "gov.release_signers",
     #[cfg(feature = "telemetry")]
     "analytics",
     "microshard.roots.last",
@@ -117,6 +119,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.dns_verify",
     "net.key_rotate",
     "net.handshake_failures",
+    "net.quic_stats",
     "kyc.verify",
     "pow.get_template",
     "dex_escrow_status",
@@ -405,6 +408,16 @@ pub async fn handle_conn(
             let code = hex::decode(code_hex).unwrap_or_default();
             let stream = reader.into_inner();
             vm_trace::serve_vm_trace(stream, key, code).await;
+        }
+        return;
+    } else if method == "GET" && path.starts_with("/logs/search") {
+        let stream = reader.into_inner();
+        let _ = logs::serve_search(stream, &origin, &runtime_cfg, &path).await;
+        return;
+    } else if method == "GET" && path.starts_with("/logs/tail") {
+        if let Some(key) = ws_key {
+            let stream = reader.into_inner();
+            logs::serve_tail(stream, key, &path).await;
         }
         return;
     } else if method == "GET" && path == "/state_stream" {
@@ -967,13 +980,14 @@ fn dispatch(
                 _ => FeeLane::Consumer,
             };
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
-            let (size, age_p50, age_p95, fee_p50, fee_p90) = guard.mempool_stats(lane);
+            let stats = guard.mempool_stats(lane);
             serde_json::json!({
-                "size": size,
-                "age_p50": age_p50,
-                "age_p95": age_p95,
-                "fee_p50": fee_p50,
-                "fee_p90": fee_p90,
+                "size": stats.size,
+                "age_p50": stats.age_p50,
+                "age_p95": stats.age_p95,
+                "fee_p50": stats.fee_p50,
+                "fee_p90": stats.fee_p90,
+                "fee_floor": stats.fee_floor,
             })
         }
         "net.peer_stats" => {
@@ -1214,6 +1228,36 @@ fn dispatch(
             net::reputation_sync();
             serde_json::json!({"status": "ok"})
         }
+        "net.rotate_cert" => {
+            #[cfg(feature = "quic")]
+            {
+                let key = crate::net::load_net_key();
+                match crate::net::transport_quic::rotate(&key) {
+                    Ok(advert) => {
+                        let previous: Vec<String> =
+                            advert.previous.iter().map(|fp| hex::encode(fp)).collect();
+                        serde_json::json!({
+                            "status": "ok",
+                            "fingerprint": hex::encode(advert.fingerprint),
+                            "previous": previous,
+                        })
+                    }
+                    Err(err) => {
+                        return Err(RpcError {
+                            code: -32603,
+                            message: format!("rotation failed: {err}"),
+                        });
+                    }
+                }
+            }
+            #[cfg(not(feature = "quic"))]
+            {
+                return Err(RpcError {
+                    code: -32601,
+                    message: "quic feature not enabled",
+                });
+            }
+        }
         "net.key_rotate" => {
             let id = req
                 .params
@@ -1299,6 +1343,15 @@ fn dispatch(
             let entries = net::recent_handshake_failures();
             serde_json::json!({"failures": entries})
         }
+        "net.quic_stats" => match serde_json::to_value(net::quic_stats()) {
+            Ok(val) => val,
+            Err(e) => {
+                return Err(RpcError {
+                    code: -32603,
+                    message: format!("serialization error: {e}"),
+                });
+            }
+        },
         "peer.rebate_status" => {
             let peer = req
                 .params
@@ -2159,6 +2212,7 @@ fn dispatch(
                 .unwrap_or(0);
             governance::vote_proposal(&GOV_STORE, voter, pid, choice, epoch)?
         }
+        "gov.release_signers" => governance::release_signers(&GOV_STORE)?,
         "gov_list" => governance::gov_list(&GOV_STORE)?,
         "gov_params" => {
             let epoch = req

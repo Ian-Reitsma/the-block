@@ -664,11 +664,18 @@
     },
     {
       "deprecated": false,
-      "description": "Total QUIC handshake failures by reason",
+      "description": "Total QUIC handshake failures by peer and reason",
       "labels": [
+        "peer",
         "reason"
       ],
       "name": "quic_handshake_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Total QUIC packet retransmissions",
+      "labels": [],
+      "name": "quic_retransmit_total"
     },
     {
       "deprecated": false,

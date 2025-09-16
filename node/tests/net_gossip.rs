@@ -261,6 +261,8 @@ fn invalid_gossip_tx_rejected() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     send(addr, &kp, Payload::Handshake(hello));
     let (sk, _pk) = generate_keypair();
@@ -304,6 +306,8 @@ fn invalid_gossip_block_rejected() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     send(addr, &kp, Payload::Handshake(hello));
 
@@ -413,6 +417,8 @@ fn handshake_version_mismatch_rejected() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     send(addr, &kp, Payload::Handshake(bad));
 
@@ -457,6 +463,8 @@ fn handshake_feature_mismatch_rejected() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     send(addr, &kp, Payload::Handshake(bad));
 
@@ -526,6 +534,8 @@ fn peer_rate_limit_and_ban() {
             transport: Transport::Tcp,
             quic_addr: None,
             quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
         }),
     );
     for _ in 0..4 {

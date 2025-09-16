@@ -27,6 +27,10 @@ fn reject_mismatched_network() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let ack = handle_handshake("peer1", hello, &cfg());
     assert!(!ack.ok);
@@ -54,6 +58,10 @@ fn reject_old_proto() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let ack = handle_handshake("peer2", hello, &cfg());
     assert!(!ack.ok);
@@ -81,6 +89,10 @@ fn accept_and_record() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let ack = handle_handshake("peer3", hello, &cfg());
     assert!(ack.ok);

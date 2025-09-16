@@ -198,6 +198,8 @@ jobs:
         run: cargo +nightly fuzz run network -- -max_total_time=120 -artifact_prefix=fuzz/network/artifacts/ -runs=0 || true
       - name: run localnet proximity fuzz
         run: cargo +nightly fuzz run localnet_proximity -- -max_total_time=120 -artifact_prefix=fuzz/localnet_proximity/ -runs=0 || true
+      - name: run quic frame fuzz
+        run: cargo +nightly fuzz run quic_frame -- -max_total_time=120 -artifact_prefix=fuzz/quic/ -runs=0 || true
       - name: run peer id fuzz
         working-directory: net/fuzz
         run: cargo +nightly fuzz run peer_id -- -max_total_time=120 -artifact_prefix=artifacts/ -runs=0 || true
@@ -218,6 +220,12 @@ jobs:
         with:
           name: network-fuzz
           path: fuzz/network/artifacts/
+      - name: upload quic frame artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quic-frame-fuzz
+          path: fuzz/quic/
       - name: upload peer-id artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -257,6 +265,12 @@ jobs:
       - name: verify no gateway artifacts
         run: |
           if ls gateway/fuzz/artifacts/* 1> /dev/null 2>&1; then
+            echo "Artifacts found";
+            exit 1;
+          fi
+      - name: verify no quic fuzz artifacts
+        run: |
+          if ls fuzz/quic/* 1> /dev/null 2>&1; then
             echo "Artifacts found";
             exit 1;
           fi

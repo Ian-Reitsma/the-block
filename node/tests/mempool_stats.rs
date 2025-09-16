@@ -36,9 +36,11 @@ async fn mempool_stats_rpc() {
     let dir = tempdir().unwrap();
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    let expected_floor;
     {
         let mut guard = bc.lock().unwrap();
         guard.add_account("alice".into(), 1000, 0).unwrap();
+        guard.add_account("bob".into(), 0, 0).unwrap();
         let (sk, _) = generate_keypair();
         for i in 0..2 {
             let payload = RawTxPayload {
@@ -52,16 +54,9 @@ async fn mempool_stats_rpc() {
                 memo: Vec::new(),
             };
             let tx = sign_tx(sk.to_vec(), payload).unwrap();
-            let entry = the_block::MempoolEntry {
-                tx,
-                timestamp_millis: 0,
-                timestamp_ticks: 0,
-                serialized_size: 100,
-            };
-            guard
-                .mempool_consumer
-                .insert(("alice".into(), i + 1), entry);
+            guard.submit_transaction(tx).unwrap();
         }
+        expected_floor = guard.mempool_stats(the_block::FeeLane::Consumer).fee_floor;
     }
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -80,6 +75,7 @@ async fn mempool_stats_rpc() {
     .await;
     assert_eq!(val["result"]["size"].as_u64().unwrap(), 2);
     assert_eq!(val["result"]["fee_p90"].as_u64().unwrap(), 20);
+    assert_eq!(val["result"]["fee_floor"].as_u64().unwrap(), expected_floor);
     handle.abort();
     Settlement::shutdown();
 }

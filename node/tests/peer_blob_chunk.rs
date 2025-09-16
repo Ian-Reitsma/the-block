@@ -31,6 +31,8 @@ fn shard_rate_limiting() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let chain = Arc::new(Mutex::new(Blockchain::default()));
     peers.handle_message(

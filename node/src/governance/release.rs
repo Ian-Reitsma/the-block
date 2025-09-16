@@ -1,14 +1,27 @@
 use super::{Address, GovStore, ProposalStatus, VoteChoice, QUORUM};
 use serde::{Deserialize, Serialize};
 
+/// Provenance attestation over a release artifact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReleaseAttestation {
+    /// Hex-encoded Ed25519 verifying key that produced the signature.
+    pub signer: String,
+    /// Hex-encoded signature over the release hash payload.
+    pub signature: String,
+}
+
 /// Governance proposal representing a release hash endorsement.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseVote {
     pub id: u64,
     /// Hex-encoded BLAKE3 hash of the release artifact.
     pub build_hash: String,
-    /// Optional detached signature attesting to the build provenance.
-    pub signature: Option<String>,
+    /// Set of provenance attestations collected for the build.
+    pub signatures: Vec<ReleaseAttestation>,
+    /// Number of unique signer approvals required for submission.
+    pub signature_threshold: u32,
+    /// Snapshot of the configured signer set at submission time.
+    pub signer_set: Vec<String>,
     pub proposer: Address,
     pub created_epoch: u64,
     pub vote_deadline_epoch: u64,
@@ -19,16 +32,28 @@ pub struct ReleaseVote {
 impl ReleaseVote {
     pub fn new(
         build_hash: String,
-        signature: Option<String>,
+        signatures: Vec<ReleaseAttestation>,
+        signature_threshold: u32,
         proposer: Address,
         created_epoch: u64,
         vote_deadline_epoch: u64,
     ) -> Self {
         let normalized = build_hash.to_lowercase();
+        let mut seen = std::collections::HashSet::new();
+        let mut attestations = Vec::new();
+        for mut att in signatures {
+            let signer_norm = att.signer.to_lowercase();
+            if seen.insert(signer_norm.clone()) {
+                att.signer = signer_norm;
+                attestations.push(att);
+            }
+        }
         Self {
             id: 0,
             build_hash: normalized,
-            signature,
+            signatures: attestations,
+            signature_threshold,
+            signer_set: Vec::new(),
             proposer,
             created_epoch,
             vote_deadline_epoch,
@@ -88,6 +113,11 @@ pub struct ApprovedRelease {
     pub build_hash: String,
     pub activated_epoch: u64,
     pub proposer: Address,
+    pub signatures: Vec<ReleaseAttestation>,
+    pub signature_threshold: u32,
+    pub signer_set: Vec<String>,
+    /// Local install timestamps recorded for this release.
+    pub install_times: Vec<u64>,
 }
 
 /// Resolve the on-disk path for the governance database.

@@ -53,6 +53,8 @@ fn rate_limit_drop_records_reason() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &key);
     peers.handle_message(msg, Some(addr), &chain);
@@ -115,6 +117,8 @@ fn evicts_least_recently_used_peer() {
             transport: Transport::Tcp,
             quic_addr: None,
             quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello), &key);
         peers.handle_message(msg, Some(addr), chain);
@@ -154,6 +158,8 @@ fn reputation_decreases_on_rate_limit() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &key);
     peers.handle_message(msg, Some(addr), &chain);

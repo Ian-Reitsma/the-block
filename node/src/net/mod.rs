@@ -7,6 +7,8 @@ pub mod peer_metrics_store;
 #[cfg(feature = "quic")]
 pub mod quic;
 #[cfg(feature = "quic")]
+pub mod quic_stats;
+#[cfg(feature = "quic")]
 pub mod transport_quic;
 pub mod uptime;
 #[cfg(not(feature = "quic"))]
@@ -26,17 +28,22 @@ pub mod turbine;
 use crate::net::peer::pk_from_addr;
 use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
 use anyhow::anyhow;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 use blake3;
 use ed25519_dalek::SigningKey;
+use hex;
 use ledger::address::ShardId;
+use once_cell::sync::{Lazy, OnceCell};
 use rand::Rng;
 use rand_core::{OsRng, RngCore};
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{atomic::Ordering, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -56,6 +63,250 @@ pub use peer::{
 };
 
 pub use peer::simulate_handshake_fail;
+
+#[cfg(feature = "quic")]
+pub fn quic_stats() -> Vec<QuicStatsEntry> {
+    quic_stats::snapshot()
+}
+
+#[cfg(not(feature = "quic"))]
+pub fn quic_stats() -> Vec<QuicStatsEntry> {
+    Vec::new()
+}
+
+const PEER_CERT_STORE_FILE: &str = "quic_peer_certs.json";
+const MAX_PEER_CERT_HISTORY: usize = 4;
+
+#[derive(Clone)]
+struct CertSnapshot {
+    fingerprint: [u8; 32],
+    cert: Vec<u8>,
+    updated_at: u64,
+}
+
+#[derive(Clone)]
+struct PeerCertStore {
+    current: CertSnapshot,
+    history: VecDeque<CertSnapshot>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct CertDiskRecord {
+    fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cert: Option<String>,
+    updated_at: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PeerCertDiskEntry {
+    peer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<CertDiskRecord>,
+    history: Vec<CertDiskRecord>,
+}
+
+static PEER_CERTS: Lazy<RwLock<HashMap<[u8; 32], PeerCertStore>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+static PEER_CERTS_LOADED: OnceCell<()> = OnceCell::new();
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct QuicStatsEntry {
+    pub peer_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    pub retransmits: u64,
+    pub endpoint_reuse: u64,
+    pub handshake_failures: u64,
+    pub last_updated: u64,
+}
+
+#[derive(Clone, Serialize)]
+pub struct PeerCertSnapshot {
+    pub peer: [u8; 32],
+    pub fingerprint: [u8; 32],
+    pub updated_at: u64,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn peer_cert_store_path() -> PathBuf {
+    if let Ok(path) = std::env::var("TB_PEER_CERT_CACHE_PATH") {
+        return PathBuf::from(path);
+    }
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".the_block")
+        .join(PEER_CERT_STORE_FILE)
+}
+
+fn ensure_peer_cert_store_loaded() {
+    if PEER_CERTS_LOADED.get().is_some() {
+        return;
+    }
+    let mut map = PEER_CERTS.write().unwrap();
+    if let Ok(data) = fs::read(peer_cert_store_path()) {
+        if let Ok(entries) = serde_json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
+            for entry in entries {
+                if let Ok(bytes) = hex::decode(&entry.peer) {
+                    if bytes.len() != 32 {
+                        continue;
+                    }
+                    let mut peer = [0u8; 32];
+                    peer.copy_from_slice(&bytes);
+                    if let Some(current) =
+                        entry.current.as_ref().and_then(|rec| disk_to_snapshot(rec))
+                    {
+                        let mut history = VecDeque::new();
+                        for rec in &entry.history {
+                            if let Some(snapshot) = disk_to_snapshot(rec) {
+                                history.push_back(snapshot);
+                            }
+                        }
+                        map.insert(peer, PeerCertStore { current, history });
+                    }
+                }
+            }
+        }
+    }
+    PEER_CERTS_LOADED.set(()).ok();
+}
+
+fn persist_peer_cert_store(map: &HashMap<[u8; 32], PeerCertStore>) {
+    let path = peer_cert_store_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let entries: Vec<PeerCertDiskEntry> = map
+        .iter()
+        .map(|(peer, store)| PeerCertDiskEntry {
+            peer: hex::encode(peer),
+            current: Some(snapshot_to_disk(&store.current)),
+            history: store.history.iter().map(snapshot_to_disk).collect(),
+        })
+        .collect();
+    if let Ok(json) = serde_json::to_vec_pretty(&entries) {
+        let _ = fs::write(path, json);
+    }
+}
+
+fn disk_to_snapshot(record: &CertDiskRecord) -> Option<CertSnapshot> {
+    let fingerprint_bytes = hex::decode(&record.fingerprint).ok()?;
+    if fingerprint_bytes.len() != 32 {
+        return None;
+    }
+    let mut fingerprint = [0u8; 32];
+    fingerprint.copy_from_slice(&fingerprint_bytes);
+    let cert = record
+        .cert
+        .as_ref()
+        .and_then(|c| B64.decode(c.as_bytes()).ok())
+        .unwrap_or_default();
+    Some(CertSnapshot {
+        fingerprint,
+        cert,
+        updated_at: record.updated_at,
+    })
+}
+
+fn snapshot_to_disk(snapshot: &CertSnapshot) -> CertDiskRecord {
+    CertDiskRecord {
+        fingerprint: hex::encode(snapshot.fingerprint),
+        cert: if snapshot.cert.is_empty() {
+            None
+        } else {
+            Some(B64.encode(&snapshot.cert))
+        },
+        updated_at: snapshot.updated_at,
+    }
+}
+
+pub fn record_peer_certificate(
+    peer: &[u8; 32],
+    cert: Vec<u8>,
+    fingerprint: [u8; 32],
+    previous: Vec<[u8; 32]>,
+) {
+    ensure_peer_cert_store_loaded();
+    let mut map = PEER_CERTS.write().unwrap();
+    let now = unix_now();
+    let entry = map.entry(*peer).or_insert_with(|| PeerCertStore {
+        current: CertSnapshot {
+            fingerprint,
+            cert: cert.clone(),
+            updated_at: now,
+        },
+        history: VecDeque::new(),
+    });
+    if entry.current.fingerprint != fingerprint {
+        let prev = CertSnapshot {
+            fingerprint: entry.current.fingerprint,
+            cert: std::mem::take(&mut entry.current.cert),
+            updated_at: entry.current.updated_at,
+        };
+        entry.history.push_front(prev);
+        entry.current = CertSnapshot {
+            fingerprint,
+            cert: cert.clone(),
+            updated_at: now,
+        };
+    } else {
+        entry.current.cert = cert.clone();
+        entry.current.updated_at = now;
+    }
+    for fp in previous {
+        if entry.current.fingerprint == fp || entry.history.iter().any(|h| h.fingerprint == fp) {
+            continue;
+        }
+        entry.history.push_back(CertSnapshot {
+            fingerprint: fp,
+            cert: Vec::new(),
+            updated_at: now,
+        });
+    }
+    while entry.history.len() > MAX_PEER_CERT_HISTORY {
+        entry.history.pop_back();
+    }
+    persist_peer_cert_store(&map);
+}
+
+pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) -> bool {
+    ensure_peer_cert_store_loaded();
+    let map = PEER_CERTS.read().unwrap();
+    match map.get(peer) {
+        Some(store) => {
+            if let Some(fp) = fingerprint {
+                if fp == &store.current.fingerprint {
+                    true
+                } else {
+                    store.history.iter().any(|h| &h.fingerprint == fp)
+                }
+            } else {
+                false
+            }
+        }
+        None => fingerprint.is_none(),
+    }
+}
+
+pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
+    ensure_peer_cert_store_loaded();
+    let map = PEER_CERTS.read().unwrap();
+    map.iter()
+        .map(|(peer, store)| PeerCertSnapshot {
+            peer: *peer,
+            fingerprint: store.current.fingerprint,
+            updated_at: store.current.updated_at,
+        })
+        .collect()
+}
 
 /// Manually verify DNS TXT record for `domain`.
 pub fn dns_verify(domain: &str) -> serde_json::Value {
@@ -132,6 +383,9 @@ pub struct Node {
     chain: Arc<Mutex<Blockchain>>,
     key: SigningKey,
     quic_addr: Option<SocketAddr>,
+    #[cfg(feature = "quic")]
+    quic_advert: Option<transport_quic::CertAdvertisement>,
+    #[cfg(not(feature = "quic"))]
     quic_cert: Option<Vec<u8>>,
 }
 
@@ -148,6 +402,29 @@ impl Node {
         quic: Option<(SocketAddr, Vec<u8>)>,
     ) -> Self {
         let key = load_net_key();
+        #[cfg(feature = "quic")]
+        let (quic_addr, quic_advert) = match quic {
+            Some((addr, cert)) => {
+                let fingerprint = transport_quic::fingerprint(&cert);
+                (
+                    Some(addr),
+                    Some(transport_quic::CertAdvertisement {
+                        cert,
+                        fingerprint,
+                        previous: Vec::new(),
+                    }),
+                )
+            }
+            None => {
+                let _ = transport_quic::initialize(&key);
+                (None, transport_quic::current_advertisement())
+            }
+        };
+        #[cfg(not(feature = "quic"))]
+        let (quic_addr, quic_cert) = match quic {
+            Some((addr, cert)) => (Some(addr), Some(cert)),
+            None => (None, None),
+        };
         ban_store::store()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -159,8 +436,11 @@ impl Node {
             chain: Arc::new(Mutex::new(bc)),
             key,
             relay,
-            quic_addr: quic.as_ref().map(|(a, _)| *a),
-            quic_cert: quic.map(|(_, c)| c),
+            quic_addr,
+            #[cfg(feature = "quic")]
+            quic_advert,
+            #[cfg(not(feature = "quic"))]
+            quic_cert,
         }
     }
 
@@ -242,6 +522,19 @@ impl Node {
         } else {
             Transport::Tcp
         };
+        #[cfg(feature = "quic")]
+        let (quic_cert, quic_fp, quic_prev) = match &self.quic_advert {
+            Some(advert) => (
+                Some(advert.cert.clone()),
+                Some(advert.fingerprint.to_vec()),
+                advert
+                    .previous
+                    .iter()
+                    .map(|fp| fp.to_vec())
+                    .collect::<Vec<Vec<u8>>>(),
+            ),
+            None => (None, None, Vec::new()),
+        };
         let hello = Hello {
             network_id: [0u8; 4],
             proto_version: PROTOCOL_VERSION,
@@ -250,7 +543,18 @@ impl Node {
             nonce,
             transport,
             quic_addr: self.quic_addr,
+            #[cfg(feature = "quic")]
+            quic_cert,
+            #[cfg(not(feature = "quic"))]
             quic_cert: self.quic_cert.clone(),
+            #[cfg(feature = "quic")]
+            quic_fingerprint: quic_fp,
+            #[cfg(feature = "quic")]
+            quic_fingerprint_previous: quic_prev,
+            #[cfg(not(feature = "quic"))]
+            quic_fingerprint: None,
+            #[cfg(not(feature = "quic"))]
+            quic_fingerprint_previous: Vec::new(),
         };
         let hs_msg = Message::new(Payload::Handshake(hello), &self.key);
         for p in &peers {

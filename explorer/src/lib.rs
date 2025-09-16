@@ -1,3 +1,4 @@
+use anyhow::Result as AnyhowResult;
 use blake3::Hasher;
 use hex::encode as hex_encode;
 use rusqlite::{params, Connection, OptionalExtension, Result};
@@ -16,10 +17,14 @@ pub mod bridge_view;
 pub mod compute_view;
 pub mod dex_view;
 pub mod htlc_view;
+pub mod net_view;
 pub mod release_view;
 pub mod snark_view;
 pub mod storage_view;
-pub use release_view::{release_history, ReleaseHistoryEntry};
+pub use release_view::{
+    paginated_release_history, release_history, ReleaseHistoryEntry, ReleaseHistoryFilter,
+    ReleaseHistoryPage,
+};
 pub fn amm_stats() -> Vec<(String, u128, u128)> {
     Vec::new()
 }
@@ -143,6 +148,12 @@ pub struct MetricPoint {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeeFloorPoint {
+    pub ts: i64,
+    pub floor: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LightProof {
     pub block_hash: String,
     pub proof: Vec<u8>,
@@ -226,6 +237,10 @@ impl Explorer {
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS provider_stats (provider_id TEXT PRIMARY KEY, capacity_bytes INTEGER, reputation INTEGER)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS release_history (hash TEXT PRIMARY KEY, proposer TEXT, activation_epoch INTEGER, install_count INTEGER)",
             [],
         )?;
         Ok(Self { path: p })
@@ -571,6 +586,17 @@ impl Explorer {
         Ok(out)
     }
 
+    pub fn fee_floor_history(&self) -> Result<Vec<FeeFloorPoint>> {
+        let points = self.metric_points("fee_floor_current")?;
+        Ok(points
+            .into_iter()
+            .map(|p| FeeFloorPoint {
+                ts: p.ts,
+                floor: p.value,
+            })
+            .collect())
+    }
+
     pub fn index_storage_contract(&self, contract: &storage::StorageContract) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
@@ -722,6 +748,35 @@ impl Explorer {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    pub fn record_release_entries(
+        &self,
+        entries: &[release_view::ReleaseHistoryEntry],
+    ) -> Result<()> {
+        let conn = self.conn()?;
+        let tx = conn.transaction()?;
+        for entry in entries {
+            tx.execute(
+                "INSERT OR REPLACE INTO release_history (hash, proposer, activation_epoch, install_count) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    &entry.build_hash,
+                    &entry.proposer,
+                    entry.activated_epoch as i64,
+                    entry.install_count as i64
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn release_timeline(&self, gov_path: impl AsRef<Path>) -> AnyhowResult<Vec<(u64, usize)>> {
+        let entries = release_view::release_history(gov_path)?;
+        Ok(entries
+            .into_iter()
+            .map(|entry| (entry.activated_epoch, entry.install_count))
+            .collect())
     }
 
     pub fn ingest_dir(&self, dir: &Path) -> Result<()> {

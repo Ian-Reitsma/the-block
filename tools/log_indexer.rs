@@ -1,6 +1,7 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
 use blake3::derive_key;
@@ -9,14 +10,17 @@ use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use clap::{Parser, Subcommand};
 use rand::rngs::OsRng;
 use rand::RngCore;
-use rusqlite::{params, params_from_iter, Connection, Result, Row};
-use serde::Deserialize;
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result, Row};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct LogEntry {
+    #[serde(default)]
+    pub id: Option<u64>,
     pub timestamp: u64,
     pub level: String,
     pub message: String,
+    #[serde(default)]
     pub correlation_id: String,
     #[serde(default)]
     pub peer: Option<String>,
@@ -37,6 +41,10 @@ pub struct LogFilter {
     pub tx: Option<String>,
     pub block: Option<u64>,
     pub correlation: Option<String>,
+    pub level: Option<String>,
+    pub since: Option<u64>,
+    pub until: Option<u64>,
+    pub after_id: Option<u64>,
     pub limit: Option<usize>,
     pub passphrase: Option<String>,
 }
@@ -48,49 +56,64 @@ pub fn index_logs(log_path: &Path, db_path: &Path) -> Result<()> {
 
 /// Index JSON log lines with explicit options such as encryption.
 pub fn index_logs_with_options(log_path: &Path, db_path: &Path, opts: IndexOptions) -> Result<()> {
-    let conn = Connection::open(db_path)?;
+    let mut conn = Connection::open(db_path)?;
     ensure_schema(&conn)?;
-    let file = File::open(log_path)?;
-    let reader = BufReader::new(file);
+    let mut file = File::open(log_path)?;
+    let source = canonical_source_key(log_path);
+    let mut offset = last_ingested_offset(&conn, &source)?;
+    if offset > 0 {
+        file.seek(SeekFrom::Start(offset))?;
+    }
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
     let key = opts.passphrase.as_ref().map(|p| derive_encryption_key(p));
-    for line in reader.lines() {
-        let line = line?;
+    let mut tx = conn.transaction()?;
+    let mut insert = tx.prepare(
+        "INSERT INTO logs (
+            timestamp,
+            level,
+            message,
+            correlation_id,
+            peer,
+            tx,
+            block,
+            encrypted,
+            nonce
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?;
+    loop {
+        line.clear();
+        let bytes = reader.read_line(&mut line)?;
+        if bytes == 0 {
+            break;
+        }
+        offset += bytes as u64;
         if line.trim().is_empty() {
             continue;
         }
-        let entry: LogEntry = serde_json::from_str(&line)?;
+        let entry: LogEntry = serde_json::from_str(line.trim_end())?;
         let (message, encrypted, nonce) = if let Some(key) = key.as_ref() {
             let (cipher, nonce) = encrypt_message(key, &entry.message)?;
             (cipher, 1i64, Some(nonce))
         } else {
             (entry.message.clone(), 0i64, None)
         };
-        conn.execute(
-            "INSERT INTO logs (
-                timestamp,
-                level,
-                message,
-                correlation_id,
-                peer,
-                tx,
-                block,
-                encrypted,
-                nonce
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                entry.timestamp,
-                entry.level,
-                message,
-                entry.correlation_id,
-                entry.peer,
-                entry.tx,
-                entry.block.map(|b| b as i64),
-                encrypted,
-                nonce,
-            ],
-        )?;
-        increment_indexed_metric();
+        insert.execute(params![
+            entry.timestamp,
+            entry.level,
+            message,
+            entry.correlation_id,
+            entry.peer,
+            entry.tx,
+            entry.block.map(|b| b as i64),
+            encrypted,
+            nonce,
+        ])?;
+        increment_indexed_metric(&entry.correlation_id);
     }
+    drop(insert);
+    update_ingest_offset(&tx, &source, offset)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -109,6 +132,44 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
             nonce BLOB
         )",
         [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ingest_state (
+            source TEXT PRIMARY KEY,
+            offset INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn canonical_source_key(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .to_string_lossy()
+        .to_string()
+}
+
+fn last_ingested_offset(conn: &Connection, source: &str) -> Result<u64> {
+    conn.query_row(
+        "SELECT offset FROM ingest_state WHERE source = ?1",
+        params![source],
+        |row| row.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|opt| opt.unwrap_or(0).max(0) as u64)
+}
+
+fn update_ingest_offset(tx: &rusqlite::Transaction<'_>, source: &str, offset: u64) -> Result<()> {
+    let updated_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    tx.execute(
+        "INSERT INTO ingest_state (source, offset, updated_at) VALUES (?1, ?2, ?3)
+        ON CONFLICT(source) DO UPDATE SET offset = excluded.offset, updated_at = excluded.updated_at",
+        params![source, offset as i64, updated_at],
     )?;
     Ok(())
 }
@@ -148,12 +209,29 @@ fn derive_encryption_key(passphrase: &str) -> Key<XChaCha20Poly1305> {
 }
 
 #[cfg(feature = "telemetry")]
-fn increment_indexed_metric() {
+fn increment_indexed_metric(correlation_id: &str) {
     crate::telemetry::LOG_ENTRIES_INDEXED_TOTAL.inc();
+    use std::borrow::Cow;
+    let label: Cow<'_, str> = if correlation_id.is_empty() {
+        Cow::Borrowed("unknown")
+    } else {
+        let shortened: String = correlation_id.chars().take(64).collect();
+        let trimmed = shortened.trim();
+        if trimmed.is_empty() {
+            Cow::Borrowed("unknown")
+        } else if trimmed.len() == shortened.len() {
+            Cow::Owned(shortened)
+        } else {
+            Cow::Owned(trimmed.to_string())
+        }
+    };
+    crate::telemetry::LOG_CORRELATION_INDEX_TOTAL
+        .with_label_values(&[label.as_ref()])
+        .inc();
 }
 
 #[cfg(not(feature = "telemetry"))]
-fn increment_indexed_metric() {}
+fn increment_indexed_metric(_correlation_id: &str) {}
 
 fn row_to_entry(row: &Row<'_>, key: Option<&Key<XChaCha20Poly1305>>) -> Result<LogEntry> {
     let encrypted: i64 = row.get("encrypted")?;
@@ -169,6 +247,7 @@ fn row_to_entry(row: &Row<'_>, key: Option<&Key<XChaCha20Poly1305>>) -> Result<L
         stored_msg
     };
     Ok(LogEntry {
+        id: row.get::<_, Option<i64>>("id")?.map(|v| v.max(0) as u64),
         timestamp: row.get("timestamp")?,
         level: row.get("level")?,
         message,
@@ -185,6 +264,10 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
     ensure_schema(&conn)?;
     let mut clauses = Vec::new();
     let mut values: Vec<rusqlite::types::Value> = Vec::new();
+    if let Some(after) = filter.after_id {
+        clauses.push("id > ?".to_string());
+        values.push((after as i64).into());
+    }
     if let Some(peer) = &filter.peer {
         clauses.push("peer = ?".to_string());
         values.push(peer.clone().into());
@@ -201,8 +284,20 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
         clauses.push("correlation_id = ?".to_string());
         values.push(corr.clone().into());
     }
+    if let Some(level) = &filter.level {
+        clauses.push("level = ?".to_string());
+        values.push(level.clone().into());
+    }
+    if let Some(since) = filter.since {
+        clauses.push("timestamp >= ?".to_string());
+        values.push((since as i64).into());
+    }
+    if let Some(until) = filter.until {
+        clauses.push("timestamp <= ?".to_string());
+        values.push((until as i64).into());
+    }
     let mut sql = String::from(
-        "SELECT timestamp, level, message, correlation_id, peer, tx, block, encrypted, nonce FROM logs",
+        "SELECT id, timestamp, level, message, correlation_id, peer, tx, block, encrypted, nonce FROM logs",
     );
     if !clauses.is_empty() {
         sql.push_str(" WHERE ");
@@ -220,6 +315,18 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
         out.push(row_to_entry(row, key_ref)?);
+    }
+    #[cfg(feature = "telemetry")]
+    {
+        if filter
+            .correlation
+            .as_ref()
+            .map(|c| !c.is_empty())
+            .unwrap_or(false)
+            && out.is_empty()
+        {
+            crate::telemetry::LOG_CORRELATION_FAIL_TOTAL.inc();
+        }
     }
     Ok(out)
 }
@@ -255,6 +362,14 @@ enum Command {
         block: Option<u64>,
         #[arg(long)]
         correlation: Option<String>,
+        #[arg(long)]
+        level: Option<String>,
+        #[arg(long)]
+        since: Option<u64>,
+        #[arg(long)]
+        until: Option<u64>,
+        #[arg(long = "after-id")]
+        after_id: Option<u64>,
         /// Passphrase required to decrypt encrypted log messages
         #[arg(long)]
         passphrase: Option<String>,
@@ -285,6 +400,10 @@ fn main() {
             tx,
             block,
             correlation,
+            level,
+            since,
+            until,
+            after_id,
             passphrase,
             limit,
         } => {
@@ -293,6 +412,10 @@ fn main() {
                 tx,
                 block,
                 correlation,
+                level,
+                since,
+                until,
+                after_id,
                 limit,
                 passphrase,
             };

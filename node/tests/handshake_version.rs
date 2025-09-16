@@ -23,6 +23,8 @@ fn rejects_wrong_version() {
         transport: Transport::Tcp,
         quic_addr: None,
         quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &kp);
     let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
