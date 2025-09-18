@@ -118,6 +118,11 @@ timestamp skew. `consensus::difficulty_retune` implements the algorithm and
 exposes per-window metrics `difficulty_window_short`, `difficulty_window_med`,
 and `difficulty_window_long`.
 
+Tooling that forges candidate headers should call
+`consensus::pow::template(prev_hash, merkle_root, checkpoint_hash, difficulty,
+base_fee, retune_hint)` so the produced header carries both the fee schedule in
+effect and the signed retune hint expected by the validator set.
+
 `Blockchain::mine_block` encodes the computed difficulty in the new block, and
 `validate_block`/`is_valid_chain` recompute `expected_difficulty` to reject
 blocks that advertise an easier target.

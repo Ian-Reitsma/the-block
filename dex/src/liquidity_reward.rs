@@ -34,7 +34,10 @@ mod tests {
 
     #[test]
     fn proportional_rewards() {
-        let mut lr = LiquidityReward { epoch: 0, reward_per_epoch: 100 };
+        let mut lr = LiquidityReward {
+            epoch: 0,
+            reward_per_epoch: 100,
+        };
         let mut shares = BTreeMap::new();
         shares.insert("a".into(), 50u128);
         shares.insert("b".into(), 50u128);
@@ -43,4 +46,3 @@ mod tests {
         assert_eq!(dist.get("b"), Some(&50));
     }
 }
-

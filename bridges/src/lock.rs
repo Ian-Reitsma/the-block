@@ -20,10 +20,7 @@ pub fn lock(
         relayers.slash(&rel, 1);
     }
     if valid < bridge.cfg.relayer_quorum
-        || !bundle
-            .relayer_ids()
-            .iter()
-            .any(|id| id == relayer)
+        || !bundle.relayer_ids().iter().any(|id| id == relayer)
         || !verify_pow(header)
     {
         #[cfg(feature = "telemetry")]

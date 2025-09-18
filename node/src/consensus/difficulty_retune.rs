@@ -1,9 +1,7 @@
 use super::constants::{DIFFICULTY_CLAMP_FACTOR, TARGET_SPACING_MS};
 use crate::governance::Params;
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{
-    DIFFICULTY_WINDOW_LONG, DIFFICULTY_WINDOW_MED, DIFFICULTY_WINDOW_SHORT,
-};
+use crate::telemetry::{DIFFICULTY_WINDOW_LONG, DIFFICULTY_WINDOW_MED, DIFFICULTY_WINDOW_SHORT};
 
 fn ema(intervals: &[f64], window: usize) -> f64 {
     if intervals.is_empty() {

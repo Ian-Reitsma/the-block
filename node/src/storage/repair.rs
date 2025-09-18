@@ -4,22 +4,27 @@ use crate::simple_db::SimpleDb;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL};
 use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
+use std::thread;
 use std::time::Duration;
+use tokio::task;
 
 /// RaptorQ overlay constants tuned for BLE repair
 const SYMBOL_SIZE: u16 = 1024; // 1 KiB symbols
 const RATE: f32 = 1.2; // 20% overhead
 
 pub fn spawn(path: String, period: Duration) {
-    tokio::spawn(async move {
+    task::spawn_blocking(move || {
         let mut db = SimpleDb::open(&path);
-        let mut tick = tokio::time::interval(period);
         loop {
-            tick.tick().await;
             if let Err(_) = run_once(&mut db) {
                 #[cfg(feature = "telemetry")]
                 STORAGE_REPAIR_FAILURES_TOTAL.inc();
             }
+            notify_iteration();
+            if should_stop() {
+                break;
+            }
+            thread::sleep(period);
         }
     });
 }
@@ -72,4 +77,91 @@ pub fn raptorq_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
         decoder.decode(p);
     }
     decoder.get_result().ok_or_else(|| "decode".to_string())
+}
+
+#[cfg(test)]
+use once_cell::sync::Lazy;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::Mutex;
+#[cfg(test)]
+use tokio::sync::mpsc::UnboundedSender;
+
+#[cfg(test)]
+static ITERATION_HOOK: Lazy<Mutex<Option<UnboundedSender<()>>>> = Lazy::new(|| Mutex::new(None));
+#[cfg(test)]
+static STOP_FLAG: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+
+#[cfg(test)]
+pub(crate) fn install_iteration_hook(sender: UnboundedSender<()>) {
+    *ITERATION_HOOK.lock().unwrap() = Some(sender);
+}
+
+#[cfg(test)]
+pub(crate) fn clear_iteration_hook() {
+    ITERATION_HOOK.lock().unwrap().take();
+    STOP_FLAG.store(false, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn request_stop() {
+    STOP_FLAG.store(true, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn notify_iteration() {
+    if let Some(tx) = ITERATION_HOOK.lock().unwrap().as_ref() {
+        let _ = tx.send(());
+    }
+}
+
+#[cfg(not(test))]
+fn notify_iteration() {}
+
+#[cfg(test)]
+fn should_stop() -> bool {
+    STOP_FLAG.load(Ordering::SeqCst)
+}
+
+#[cfg(not(test))]
+fn should_stop() -> bool {
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use tokio::runtime::Builder;
+
+    #[test]
+    fn spawn_runs_loop_and_signals_iterations() {
+        let tempdir = tempdir().expect("temp dir");
+        let path = tempdir.path().join("repair-db");
+        let path_str = path.to_str().expect("path").to_string();
+        let rt = Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        rt.block_on(async move {
+            let _guard = tempdir; // keep directory alive for the background task
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            install_iteration_hook(tx);
+            spawn(path_str, Duration::from_millis(10));
+
+            for _ in 0..2 {
+                tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                    .await
+                    .expect("timer")
+                    .expect("iteration");
+            }
+
+            request_stop();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            clear_iteration_hook();
+        });
+    }
 }

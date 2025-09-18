@@ -3,7 +3,18 @@
 State persistence uses a RocksDB key-value store located under the path
 supplied to the node via `--db-path` (default `~/.block/db`). Keys are stored
 under a single column family and rely on RocksDB's write-ahead log for crash
-recovery.
+recovery. When additional column families are created (for shard-specific
+state, receipts, etc.), `SimpleDb` caches the underlying RocksDB handles as
+`ColumnFamily` values so callers pass lightweight references to
+`get_cf`/`put_cf`/`delete_cf`. `ColumnFamily` implements `Send`/`Sync`, which
+lets the wrapper remain thread-safe without leaking `BoundColumnFamily` pointers
+that fail PyO3's thread-checks.
+
+The periodic storage repair task (`storage::repair::spawn`) now runs inside
+Tokio's blocking pool and opens `SimpleDb` on that worker thread, avoiding the
+need to hold a database handle across `.await` points. A test hook exercises the
+loop to ensure it continues to fire on schedule without leaking the background
+worker between test runs.
 
 Crash recovery is verified by tests under `state/tests/crash_recovery.rs`,
 which reopen the database after an abrupt drop to ensure committed writes are

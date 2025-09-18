@@ -52,7 +52,10 @@ fn challenge_reverts_pending_withdrawal() {
     assert!(bridge.unlock_with_relayer(&mut relayers, "r1", "alice", 5, &bundle));
     let commitment = bundle.aggregate_commitment("alice", 5);
     assert!(bridge.challenge_withdrawal(&mut relayers, commitment));
-    assert!(bridge.pending_withdrawals().iter().any(|(k, v)| *k == commitment && v.challenged));
+    assert!(bridge
+        .pending_withdrawals()
+        .iter()
+        .any(|(k, v)| *k == commitment && v.challenged));
     assert!(!bridge.finalize_withdrawal(commitment));
     assert_eq!(relayers.status("r1").unwrap().stake, 10);
     assert_eq!(relayers.status("r2").unwrap().stake, 9);

@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[cfg(feature = "telemetry")]
+use crate::BRIDGE_SLASHES_TOTAL;
+#[cfg(feature = "telemetry")]
 use once_cell::sync::Lazy;
 #[cfg(feature = "telemetry")]
 use prometheus::{IntCounter, Opts, Registry};
-#[cfg(feature = "telemetry")]
-use crate::BRIDGE_SLASHES_TOTAL;
 
 #[cfg(feature = "telemetry")]
 static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);

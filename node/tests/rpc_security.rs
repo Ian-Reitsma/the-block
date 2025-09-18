@@ -85,3 +85,40 @@ async fn rpc_auth_and_host_filters() {
     handle.abort();
     let _ = handle.await;
 }
+
+#[tokio::test]
+async fn relay_only_rejects_start_mining() {
+    let dir = util::temp::temp_dir("rpc_relay_only");
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let token_file = dir.path().join("token");
+    std::fs::write(&token_file, "relaytoken").unwrap();
+    let rpc_cfg = RpcConfig {
+        admin_token_file: Some(token_file.to_str().unwrap().to_string()),
+        enable_debug: true,
+        relay_only: true,
+        ..Default::default()
+    };
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        rpc_cfg,
+        tx,
+    ));
+    let addr = expect_timeout(rx).await.unwrap();
+
+    let val = expect_timeout(rpc(
+        &addr,
+        r#"{"method":"start_mining","params":{"miner":"a","nonce":1}}"#,
+        Some("relaytoken"),
+    ))
+    .await;
+    assert_eq!(val["result"]["error"]["code"], -32075);
+    assert_eq!(val["result"]["error"]["message"], "relay_only");
+    assert!(!mining.load(std::sync::atomic::Ordering::SeqCst));
+
+    handle.abort();
+    let _ = handle.await;
+}

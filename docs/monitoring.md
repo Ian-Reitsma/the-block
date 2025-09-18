@@ -111,7 +111,9 @@ contract logs correlate-metric --metric quic_handshake_fail_total \
     --aggregator http://localhost:9300 --rows 20 --max-correlations 5
 ```
 
-The log indexer records ingest offsets in SQLite, batches inserts with prepared statements, supports encryption key rotation with passphrase prompts, and exposes both REST (`/logs/search`) and WebSocket (`/logs/tail`) streaming APIs for dashboards. `scripts/log_indexer_load.sh` stress-tests one million log lines, while integration tests under `node/tests/log_api.rs` validate the filters end-to-end.
+The log indexer records ingest offsets in SQLite, batches inserts with prepared statements, supports encryption key rotation with passphrase prompts, and exposes both REST (`/logs/search`) and WebSocket (`/logs/tail`) streaming APIs for dashboards. `scripts/log_indexer_load.sh` stress-tests one million log lines, while integration tests under `node/tests/log_api.rs` validate the filters end-to-end. The node crate now depends on `rusqlite` (built with the bundled SQLite engine) at runtime so operators do not need a system SQLite installation. Set the `passphrase` option when invoking `index` (either through the CLI or RPC) to encrypt message bodies at rest; supply the same passphrase via the query string when using `/logs/search` or `/logs/tail` to decrypt results on the fly.
+
+When the node runs without the `telemetry` feature the `tracing` crate is not linked, so subsystems that normally emit structured spans fall back to plain stderr diagnostics. RPC log streaming, mempool admission, and QUIC handshake validation all degrade gracefully: warnings appear in the system journal, counters remain untouched, and the RPC surface continues to return JSON errors. Enable `--features telemetry` whenever Prometheus metrics and structured spans are required.
 
 #### Threat model
 

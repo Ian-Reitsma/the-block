@@ -29,6 +29,8 @@ allocation sets, and bump `retrieval_failure_total`.
 - `retrieval_success_total` counts successful challenges.
 - `retrieval_failure_total` counts failed challenges.
 
+These counters are emitted directly from the RPC helpers in `node/src/rpc/storage.rs` whenever uploads or challenges complete, and they are only available when the `telemetry` feature flag is enabled. Operators relying on contract or challenge telemetry should ensure telemetry is compiled in and that Prometheus scrapes the node endpoint.
+
 ## Explorer
 The explorer exposes `/storage/providers` with aggregated provider capacity
 and reputation statistics, joining contract data with registered offers.

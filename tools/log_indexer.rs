@@ -1,5 +1,7 @@
+use std::error::Error as StdError;
+use std::fmt;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,7 +12,7 @@ use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use clap::{Parser, Subcommand};
 use rand::rngs::OsRng;
 use rand::RngCore;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Result, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -47,6 +49,56 @@ pub struct LogFilter {
     pub after_id: Option<u64>,
     pub limit: Option<usize>,
     pub passphrase: Option<String>,
+}
+
+pub type Result<T> = std::result::Result<T, LogIndexerError>;
+
+#[derive(Debug)]
+pub enum LogIndexerError {
+    Io(io::Error),
+    Sqlite(rusqlite::Error),
+    Json(serde_json::Error),
+    Encryption(String),
+}
+
+impl fmt::Display for LogIndexerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogIndexerError::Io(err) => write!(f, "io error: {err}"),
+            LogIndexerError::Sqlite(err) => write!(f, "sqlite error: {err}"),
+            LogIndexerError::Json(err) => write!(f, "json error: {err}"),
+            LogIndexerError::Encryption(msg) => write!(f, "encryption error: {msg}"),
+        }
+    }
+}
+
+impl StdError for LogIndexerError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            LogIndexerError::Io(err) => Some(err),
+            LogIndexerError::Sqlite(err) => Some(err),
+            LogIndexerError::Json(err) => Some(err),
+            LogIndexerError::Encryption(_) => None,
+        }
+    }
+}
+
+impl From<rusqlite::Error> for LogIndexerError {
+    fn from(err: rusqlite::Error) -> Self {
+        LogIndexerError::Sqlite(err)
+    }
+}
+
+impl From<io::Error> for LogIndexerError {
+    fn from(err: io::Error) -> Self {
+        LogIndexerError::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for LogIndexerError {
+    fn from(err: serde_json::Error) -> Self {
+        LogIndexerError::Json(err)
+    }
 }
 
 /// Index JSON log lines into a SQLite database using default options.
@@ -181,7 +233,7 @@ fn encrypt_message(key: &Key<XChaCha20Poly1305>, message: &str) -> Result<(Strin
     let nonce = XNonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, message.as_bytes())
-        .map_err(|e| rusqlite::Error::ExecuteReturnedError(format!("encrypt: {e}").into()))?;
+        .map_err(|e| LogIndexerError::Encryption(format!("encrypt: {e}")))?;
     Ok((
         general_purpose::STANDARD.encode(ciphertext),
         nonce_bytes.to_vec(),

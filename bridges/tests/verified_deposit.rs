@@ -1,11 +1,6 @@
 use bridges::light_client::{header_hash, Header, Proof};
 use bridges::{
-    header::PowHeader,
-    relayer::RelayerSet,
-    Bridge,
-    BridgeConfig,
-    RelayerBundle,
-    RelayerProof,
+    header::PowHeader, relayer::RelayerSet, Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
 use tempfile::tempdir;
 
@@ -117,15 +112,7 @@ fn deposit_invalid_proof() {
         PROOF_VERIFY_SUCCESS_TOTAL.reset();
         PROOF_VERIFY_FAILURE_TOTAL.reset();
     }
-    assert!(!bridge.deposit_with_relayer(
-        &mut relayers,
-        "r1",
-        "alice",
-        50,
-        &header,
-        &bad,
-        &bundle
-    ));
+    assert!(!bridge.deposit_with_relayer(&mut relayers, "r1", "alice", 50, &header, &bad, &bundle));
     assert_eq!(bridge.locked("alice"), 0);
     #[cfg(feature = "telemetry")]
     {

@@ -3,8 +3,10 @@
 use ed25519_dalek::SigningKey;
 use tempfile::tempdir;
 use the_block::net::{
-    record_peer_certificate, transport_quic, verify_peer_fingerprint,
+    record_peer_certificate, transport_quic, verify_peer_fingerprint, HandshakeError, Hello,
+    Transport, SUPPORTED_VERSION,
 };
+use the_block::p2p::handshake::validate_quic_certificate;
 
 #[test]
 fn rotates_and_tracks_fingerprints() {
@@ -35,4 +37,39 @@ fn rotates_and_tracks_fingerprints() {
         rotated.previous.clone(),
     );
     assert!(verify_peer_fingerprint(&peer, Some(&rotated.fingerprint)));
+}
+
+#[test]
+fn fingerprint_mismatch_rejects_certificate() {
+    let dir = tempdir().expect("tempdir");
+    let cert_store = dir.path().join("certs.json");
+    let peer_store = dir.path().join("peers.json");
+    std::env::set_var("TB_NET_CERT_STORE_PATH", &cert_store);
+    std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
+
+    let peer_key = [9u8; 32];
+    let signing_key = SigningKey::from_bytes(&peer_key);
+    let advert = transport_quic::initialize(&signing_key).expect("init cert");
+
+    let mut forged_fp = advert.fingerprint;
+    forged_fp[0] ^= 0xFF;
+
+    let hello = Hello {
+        network_id: [0; 4],
+        proto_version: SUPPORTED_VERSION,
+        feature_bits: 0,
+        agent: "test/1.0".into(),
+        nonce: 0,
+        transport: Transport::Quic,
+        quic_addr: None,
+        quic_cert: Some(advert.cert.clone()),
+        quic_fingerprint: Some(forged_fp.to_vec()),
+        quic_fingerprint_previous: Vec::new(),
+    };
+
+    let result = validate_quic_certificate(&peer_key, &hello);
+    match result {
+        Err(HandshakeError::Certificate) => {}
+        other => panic!("unexpected result: {:?}", other),
+    }
 }

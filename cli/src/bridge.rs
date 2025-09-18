@@ -84,7 +84,15 @@ pub fn handle(action: BridgeCmd) {
             let mut relayer_set = RelayerSet::default();
             let bundle = make_bundle(&user, amount, &relayers);
             let primary = relayers.first().cloned().unwrap();
-            if bridge.deposit_with_relayer(&mut relayer_set, &primary, &user, amount, &header, &proof, &bundle) {
+            if bridge.deposit_with_relayer(
+                &mut relayer_set,
+                &primary,
+                &user,
+                amount,
+                &header,
+                &proof,
+                &bundle,
+            ) {
                 save_state(&path, &bridge);
                 let dir = PathBuf::from("state/bridge_headers");
                 fs::create_dir_all(&dir).expect("make header dir");

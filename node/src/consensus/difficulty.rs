@@ -1,6 +1,29 @@
 use super::constants::{DIFFICULTY_WINDOW, TARGET_SPACING_MS};
+use crate::consensus::difficulty_retune;
 use crate::governance::Params;
 use crate::Block;
+
+/// Retarget helper maintained for legacy callers.
+///
+/// `timestamps` should contain monotonically increasing millisecond values. The
+/// optional `target_spacing_ms` parameter allows historical tests to exercise
+/// alternative spacing without re-deriving the Kalman schedule. When a
+/// different spacing is provided we scale the result proportionally to the
+/// canonical `TARGET_SPACING_MS` so callers continue to receive sensible
+/// adjustments.
+pub fn retarget(prev: u64, timestamps: &[u64], target_spacing_ms: u64) -> u64 {
+    if timestamps.len() < 2 {
+        return prev.max(1);
+    }
+    let params = Params::default();
+    let (next, _) = difficulty_retune::retune(prev, timestamps, 0, &params);
+    if target_spacing_ms == TARGET_SPACING_MS || target_spacing_ms == 0 {
+        next
+    } else {
+        let scale = TARGET_SPACING_MS as f64 / target_spacing_ms as f64;
+        ((next as f64) * scale).round().max(1.0) as u64
+    }
+}
 
 /// Compatibility shim delegating to [`difficulty_retune::retune`].
 pub fn expected_difficulty(prev: u64, recent_timestamps: &[u64]) -> u64 {

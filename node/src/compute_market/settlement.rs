@@ -21,7 +21,7 @@ pub struct Settlement;
 
 impl Settlement {
     pub fn init(_path: &str, mode: SettleMode) {
-        *MODE.lock().unwrap_or_else(|e| e.into_inner()) = mode;
+        *MODE.lock() = mode;
     }
 
     pub fn shutdown() {}
@@ -29,10 +29,8 @@ impl Settlement {
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
         #[cfg(feature = "telemetry")]
         let _span = crate::log_context!(provider = provider);
-        let res = ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .debit(provider, amount);
+        let mut accounts = ACCOUNTS.lock();
+        let res = accounts.debit(provider, amount);
         if res.is_ok() {
             #[cfg(feature = "telemetry")]
             {
@@ -46,48 +44,26 @@ impl Settlement {
     }
 
     pub fn accrue(provider: &str, _event: &str, amount: u64) {
-        ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .deposit(provider, amount);
+        ACCOUNTS.lock().deposit(provider, amount);
     }
 
     /// Credit a provider with a split CT/IT payout.
     pub fn accrue_split(provider: &str, ct: u64, it: u64) {
-        ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .deposit(provider, ct);
-        ACCOUNTS_IT
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .deposit(provider, it);
+        ACCOUNTS.lock().deposit(provider, ct);
+        ACCOUNTS_IT.lock().deposit(provider, it);
     }
 
     pub fn submit_anchor(_anchor: &[u8]) {}
 
     pub fn balance(provider: &str) -> u64 {
-        ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .balances
-            .get(provider)
-            .copied()
-            .unwrap_or(0)
+        ACCOUNTS.lock().balances.get(provider).copied().unwrap_or(0)
     }
 
     /// Return the CT/IT balances for a provider.
     pub fn balance_split(provider: &str) -> (u64, u64) {
-        let ct = ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .balances
-            .get(provider)
-            .copied()
-            .unwrap_or(0);
+        let ct = ACCOUNTS.lock().balances.get(provider).copied().unwrap_or(0);
         let it = ACCOUNTS_IT
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
             .balances
             .get(provider)
             .copied()
@@ -96,27 +72,17 @@ impl Settlement {
     }
 
     pub fn spend(provider: &str, _event: &str, amount: u64) -> Result<(), ()> {
-        ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .debit(provider, amount)
-            .map_err(|_| ())
+        ACCOUNTS.lock().debit(provider, amount).map_err(|_| ())
     }
 
     /// Refund a buyer's escrowed CT/IT amounts.
     pub fn refund_split(buyer: &str, ct: u64, it: u64) {
-        ACCOUNTS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .deposit(buyer, ct);
-        ACCOUNTS_IT
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .deposit(buyer, it);
+        ACCOUNTS.lock().deposit(buyer, ct);
+        ACCOUNTS_IT.lock().deposit(buyer, it);
     }
 
     pub fn mode() -> SettleMode {
-        *MODE.lock().unwrap_or_else(|e| e.into_inner())
+        *MODE.lock()
     }
 
     pub fn arm(_delay: u64, _current_height: u64) {}

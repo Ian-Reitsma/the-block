@@ -36,14 +36,12 @@ impl AdmissionState {
         if changed {
             let previous = self.current_floor;
             self.current_floor = self.fee_floor.current();
-            tracing::info!(
-                target: "mempool",
-                lane = self.lane,
+            log_fee_floor_policy_change(
+                self.lane,
                 window,
                 percentile,
                 previous,
-                current = self.current_floor,
-                "fee floor policy updated"
+                self.current_floor,
             );
         }
         changed
@@ -89,13 +87,7 @@ impl AdmissionState {
         let updated = self.fee_floor.update(fee_per_byte);
         self.current_floor = updated;
         if updated != prev {
-            tracing::info!(
-                target: "mempool",
-                lane = self.lane,
-                old = prev,
-                new = updated,
-                "fee floor updated"
-            );
+            log_fee_floor_movement(self.lane, prev, updated);
         }
         updated
     }
@@ -137,3 +129,46 @@ impl Drop for AdmissionReservation<'_> {
 pub fn validate_account(acc: &mut Account, tx: &SignedTransaction) -> Result<(), TxAdmissionError> {
     acc.validate_tx(tx)
 }
+
+#[cfg(feature = "telemetry")]
+fn log_fee_floor_policy_change(
+    lane: &str,
+    window: usize,
+    percentile: u32,
+    previous: u64,
+    current: u64,
+) {
+    tracing::info!(
+        target: "mempool",
+        lane,
+        window,
+        percentile,
+        previous,
+        current,
+        "fee floor policy updated"
+    );
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn log_fee_floor_policy_change(
+    _lane: &str,
+    _window: usize,
+    _percentile: u32,
+    _previous: u64,
+    _current: u64,
+) {
+}
+
+#[cfg(feature = "telemetry")]
+fn log_fee_floor_movement(lane: &str, old: u64, new: u64) {
+    tracing::info!(
+        target: "mempool",
+        lane,
+        old,
+        new,
+        "fee floor updated"
+    );
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn log_fee_floor_movement(_lane: &str, _old: u64, _new: u64) {}

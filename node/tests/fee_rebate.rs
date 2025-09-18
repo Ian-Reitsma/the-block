@@ -1,5 +1,5 @@
-use the_block::net::uptime;
 use libp2p::PeerId;
+use the_block::net::uptime;
 
 #[test]
 fn rebate_claim_once_per_epoch() {

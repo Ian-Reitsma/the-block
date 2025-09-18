@@ -1,5 +1,5 @@
-use criterion::{criterion_group, criterion_main, Criterion};
 use contract_cli::fee_estimator::RollingMedianEstimator as NewEstimator;
+use criterion::{criterion_group, criterion_main, Criterion};
 use std::collections::VecDeque;
 
 struct OldEstimator {
@@ -9,7 +9,10 @@ struct OldEstimator {
 
 impl OldEstimator {
     fn new(max: usize) -> Self {
-        Self { window: VecDeque::with_capacity(max), max }
+        Self {
+            window: VecDeque::with_capacity(max),
+            max,
+        }
     }
     fn record(&mut self, fee: u64) {
         if self.window.len() == self.max {

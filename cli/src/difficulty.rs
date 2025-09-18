@@ -6,7 +6,7 @@ use the_block::state::difficulty_history;
 pub enum DifficultyCmd {
     /// Inspect recent difficulty retarget calculations
     Inspect {
-        #[arg(long, default_value = "./difficulty" )]
+        #[arg(long, default_value = "./difficulty")]
         path: String,
         #[arg(long, default_value_t = 10)]
         last: usize,

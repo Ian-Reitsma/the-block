@@ -38,12 +38,29 @@ fn main() {
     let mut h = Hasher::new();
     h.update(&0u64.to_le_bytes()); // index
     h.update(ZERO_HASH.as_bytes()); // prev
+    h.update(&0u64.to_le_bytes()); // timestamp
     h.update(&0u64.to_le_bytes()); // nonce
     h.update(&8u64.to_le_bytes()); // difficulty
+    h.update(&[0u8]); // retune_hint
+    h.update(&0u64.to_le_bytes()); // base_fee
     h.update(&0u64.to_le_bytes()); // coin_c
     h.update(&0u64.to_le_bytes()); // coin_i
+    h.update(&0u64.to_le_bytes()); // storage_sub
+    h.update(&0u64.to_le_bytes()); // read_sub
+    h.update(&0u64.to_le_bytes()); // compute_sub
+    h.update(&0u64.to_le_bytes()); // storage_sub_it
+    h.update(&0u64.to_le_bytes()); // read_sub_it
+    h.update(&0u64.to_le_bytes()); // compute_sub_it
+    h.update(&[0u8; 32]); // read_root
     h.update(ZERO_HASH.as_bytes()); // fee checksum
-                                    // no tx ids in genesis
+    h.update(ZERO_HASH.as_bytes()); // state_root
+                                    // l2_roots: none
+                                    // l2_sizes: none
+    h.update(&[0u8; 32]); // vdf_commit
+    h.update(&[0u8; 32]); // vdf_output
+    h.update(&0u32.to_le_bytes()); // vdf_proof length
+                                   // vdf_proof bytes: none
+                                   // tx_ids: none
     let digest = h.finalize().to_hex().to_string();
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR missing");

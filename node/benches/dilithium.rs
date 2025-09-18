@@ -1,5 +1,7 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use the_block::transaction::{verify_signed_tx, RawTxPayload, SignedTransaction, TxSignature, TxVersion, FeeLane};
+use the_block::transaction::{
+    verify_signed_tx, FeeLane, RawTxPayload, SignedTransaction, TxSignature, TxVersion,
+};
 
 #[cfg(feature = "quantum")]
 fn verify_bench(c: &mut Criterion) {
@@ -23,7 +25,10 @@ fn verify_bench(c: &mut Criterion) {
         payload,
         public_key: Vec::new(),
         dilithium_public_key: pk.clone(),
-        signature: TxSignature { ed25519: Vec::new(), dilithium: sig },
+        signature: TxSignature {
+            ed25519: Vec::new(),
+            dilithium: sig,
+        },
         tip: 0,
         signer_pubkeys: Vec::new(),
         aggregate_signature: Vec::new(),

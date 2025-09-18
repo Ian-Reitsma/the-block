@@ -1,6 +1,9 @@
-use crate::{blockchain::process::{validate_and_apply, ExecutionContext}, Block, Blockchain};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::PARTITION_RECOVER_BLOCKS;
+use crate::{
+    blockchain::process::{validate_and_apply, ExecutionContext},
+    Block, Blockchain,
+};
 
 /// Replay `blocks` against `chain` after a partition heals.
 pub fn replay_blocks(chain: &mut Blockchain, blocks: &[Block]) {

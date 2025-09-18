@@ -113,4 +113,3 @@ mod tests {
         assert_eq!(it, 500);
     }
 }
-

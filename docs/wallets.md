@@ -47,7 +47,7 @@ Every decision is reported back to the node through the `mempool.qos_event` RPC 
 
 ## Remote signer support
 
-The wallet crate ships a reusable remote signer client in [`crates/wallet/src/remote_signer.rs`](../crates/wallet/src/remote_signer.rs). It discovers signers over UDP, supports HTTPS and mutually authenticated WebSockets, and exposes metrics such as `remote_signer_request_total`, `remote_signer_success_total`, and `remote_signer_error_total{reason}`. Integrations can combine the remote signer with the CLI by building transactions via `wallet::build_tx` and forwarding the digest to the signer.
+The wallet crate ships a reusable remote signer client in [`crates/wallet/src/remote_signer.rs`](../crates/wallet/src/remote_signer.rs). It discovers signers over UDP, supports HTTPS and mutually authenticated WebSockets, and exposes metrics such as `remote_signer_request_total`, `remote_signer_success_total`, and `remote_signer_error_total{reason}`. These counters are only exported when the node or Python bindings are built with the `telemetry` feature flag enabled; feature-off builds skip instrumentation but retain identical signing behaviour. Integrations can combine the remote signer with the CLI by building transactions via `wallet::build_tx` and forwarding the digest to the signer.
 
 ## Telemetry & monitoring
 

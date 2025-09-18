@@ -5,6 +5,7 @@
 - [Telemetry](telemetry.md)
 - [Telemetry Operations Runbook](telemetry_ops.md)
 - [Networking](networking.md)
+- [Concurrency](concurrency.md)
 - [Gossip](gossip.md)
 - [Sharding](sharding.md)
 - [Compute Market](compute_market.md)

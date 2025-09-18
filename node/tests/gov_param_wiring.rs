@@ -9,6 +9,7 @@ use the_block::{
         GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
         ACTIVATION_DELAY,
     },
+    scheduler::{self, current_default_weights, ServiceClass},
     sign_tx, Blockchain, FeeLane, RawTxPayload, TxAdmissionError,
 };
 #[cfg(feature = "telemetry")]
@@ -195,6 +196,111 @@ fn industrial_min_capacity_param_wires_and_rollback() {
             .with_label_values(&["industrial_admission_min_capacity"])
             .get(),
         10
+    );
+}
+
+#[test]
+#[serial]
+fn scheduler_weights_apply_and_record_activation() {
+    let dir = tempdir().unwrap();
+    let store = GovStore::open(dir.path());
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    let mut rt = Runtime { bc: &mut bc };
+    let mut params = Params::default();
+    let initial_weights = current_default_weights();
+    let mut expected_old = initial_weights.clone();
+
+    let updates = [
+        (ParamKey::SchedulerWeightGossip, 5_i64, ServiceClass::Gossip),
+        (
+            ParamKey::SchedulerWeightCompute,
+            7_i64,
+            ServiceClass::Compute,
+        ),
+        (
+            ParamKey::SchedulerWeightStorage,
+            4_i64,
+            ServiceClass::Storage,
+        ),
+    ];
+
+    for (idx, (key, new_value, class)) in updates.iter().enumerate() {
+        let proposal = Proposal {
+            id: idx as u64,
+            key: *key,
+            new_value: *new_value,
+            min: 0,
+            max: 16,
+            proposer: "gov".into(),
+            created_epoch: 0,
+            vote_deadline_epoch: 1,
+            activation_epoch: None,
+            status: ProposalStatus::Open,
+        };
+        let pid = store.submit(proposal).unwrap();
+        store
+            .vote(
+                pid,
+                Vote {
+                    proposal_id: pid,
+                    voter: "validator".into(),
+                    choice: VoteChoice::Yes,
+                    weight: 1,
+                    received_at: 0,
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(
+            store.tally_and_queue(pid, 1).unwrap(),
+            ProposalStatus::Passed
+        );
+        store
+            .activate_ready(1, &mut rt, &mut params)
+            .expect("stage activation");
+        store
+            .activate_ready(1 + ACTIVATION_DELAY, &mut rt, &mut params)
+            .expect("activate after delay");
+
+        let weights = current_default_weights();
+        assert_eq!(weights.weight(*class), *new_value as u32);
+        match key {
+            ParamKey::SchedulerWeightGossip => {
+                assert_eq!(params.scheduler_weight_gossip, *new_value);
+            }
+            ParamKey::SchedulerWeightCompute => {
+                assert_eq!(params.scheduler_weight_compute, *new_value);
+            }
+            ParamKey::SchedulerWeightStorage => {
+                assert_eq!(params.scheduler_weight_storage, *new_value);
+            }
+            _ => unreachable!(),
+        }
+
+        let record = store
+            .last_activation_record()
+            .unwrap()
+            .expect("recorded activation");
+        assert_eq!(record.key, *key);
+        assert_eq!(record.new_value, *new_value);
+        let expected_previous = match class {
+            ServiceClass::Gossip => expected_old.gossip,
+            ServiceClass::Compute => expected_old.compute,
+            ServiceClass::Storage => expected_old.storage,
+        } as i64;
+        assert_eq!(record.old_value, expected_previous);
+
+        match class {
+            ServiceClass::Gossip => expected_old.gossip = *new_value as u32,
+            ServiceClass::Compute => expected_old.compute = *new_value as u32,
+            ServiceClass::Storage => expected_old.storage = *new_value as u32,
+        }
+    }
+
+    scheduler::set_default_weights(
+        initial_weights.gossip,
+        initial_weights.compute,
+        initial_weights.storage,
     );
 }
 

@@ -1,11 +1,14 @@
 #![deny(warnings)]
 
+use crate::net::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+#[cfg(feature = "telemetry")]
+use tracing::warn;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -83,10 +86,39 @@ pub fn validate_quic_certificate(
     hello: &Hello,
 ) -> Result<Option<ValidatedCert>, HandshakeError> {
     if let Some(cert) = hello.quic_cert.as_ref() {
-        let fingerprint = transport_quic::verify_remote_certificate(peer_key, cert)
-            .map_err(|_| HandshakeError::Certificate)?;
+        let fingerprint =
+            transport_quic::verify_remote_certificate(peer_key, cert).map_err(|err| {
+                #[cfg(feature = "telemetry")]
+                {
+                    let peer = hex::encode(peer_key);
+                    telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[&peer, "certificate"])
+                        .inc();
+                    warn!(
+                        target: "p2p",
+                        peer = %hex::encode(peer_key),
+                        error = %err,
+                        "QUIC certificate validation failed"
+                    );
+                }
+                HandshakeError::Certificate
+            })?;
         if let Some(expected) = hello.quic_fingerprint.as_ref() {
             if expected.len() != 32 || expected.as_slice() != fingerprint.as_slice() {
+                #[cfg(feature = "telemetry")]
+                {
+                    let peer = hex::encode(peer_key);
+                    telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[&peer, "fingerprint_mismatch"])
+                        .inc();
+                    warn!(
+                        target: "p2p",
+                        peer = %hex::encode(peer_key),
+                        expected = %hex::encode(expected),
+                        actual = %hex::encode(fingerprint),
+                        "QUIC fingerprint mismatch"
+                    );
+                }
                 return Err(HandshakeError::Certificate);
             }
         }
@@ -204,4 +236,60 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
 pub fn list_peers() -> Vec<(String, PeerInfo)> {
     let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
     peers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+#[cfg(all(test, feature = "quic"))]
+mod tests {
+    use super::*;
+    use rcgen::{Certificate, CertificateParams, KeyPair, PKCS_ED25519};
+
+    fn sample_quic_certificate() -> ([u8; 32], Vec<u8>, [u8; 32]) {
+        let key_pair = KeyPair::generate_for(&PKCS_ED25519).expect("ed25519 keypair");
+        let pk_raw = key_pair.public_key_raw();
+        let mut peer_key = [0u8; 32];
+        peer_key.copy_from_slice(&pk_raw);
+        let mut params =
+            CertificateParams::new(vec!["the-block.test".into()]).expect("certificate params");
+        params.alg = &PKCS_ED25519;
+        params.key_pair = Some(key_pair);
+        let cert = Certificate::from_params(params).expect("certificate");
+        let cert_der = cert.serialize_der().expect("serialize cert");
+        let fingerprint = transport_quic::fingerprint(&cert_der);
+        (peer_key, cert_der, fingerprint)
+    }
+
+    fn base_hello(cert: Vec<u8>, fingerprint: Option<Vec<u8>>) -> Hello {
+        Hello {
+            network_id: [0u8; 4],
+            proto_version: SUPPORTED_VERSION,
+            feature_bits: 0,
+            agent: "test-node".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: Some(cert),
+            quic_fingerprint: fingerprint,
+            quic_fingerprint_previous: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rejects_certificate_with_peer_key_mismatch() {
+        let (peer_key, cert, fingerprint) = sample_quic_certificate();
+        let mut wrong_key = peer_key;
+        wrong_key[0] ^= 0x01;
+        let hello = base_hello(cert, Some(fingerprint.to_vec()));
+        let err = validate_quic_certificate(&wrong_key, &hello).unwrap_err();
+        assert_eq!(err, HandshakeError::Certificate);
+    }
+
+    #[test]
+    fn rejects_certificate_with_unexpected_fingerprint() {
+        let (peer_key, cert, fingerprint) = sample_quic_certificate();
+        let mut mismatched = fingerprint.to_vec();
+        mismatched[0] ^= 0x01;
+        let hello = base_hello(cert, Some(mismatched));
+        let err = validate_quic_certificate(&peer_key, &hello).unwrap_err();
+        assert_eq!(err, HandshakeError::Certificate);
+    }
 }

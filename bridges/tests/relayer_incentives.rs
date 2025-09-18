@@ -52,24 +52,8 @@ fn slashes_invalid_relayer() {
             commitment: [0u8; 32],
         },
     ]);
-    assert!(b.deposit_with_relayer(
-        &mut relayers,
-        "r1",
-        "alice",
-        5,
-        &hdr,
-        &pf,
-        &good_bundle
-    ));
+    assert!(b.deposit_with_relayer(&mut relayers, "r1", "alice", 5, &hdr, &pf, &good_bundle));
     assert_eq!(relayers.status("r1").unwrap().stake, 10);
-    assert!(!b.deposit_with_relayer(
-        &mut relayers,
-        "r1",
-        "alice",
-        5,
-        &hdr,
-        &pf,
-        &bad_bundle
-    ));
+    assert!(!b.deposit_with_relayer(&mut relayers, "r1", "alice", 5, &hdr, &pf, &bad_bundle));
     assert_eq!(relayers.status("r2").unwrap().stake, 9);
 }

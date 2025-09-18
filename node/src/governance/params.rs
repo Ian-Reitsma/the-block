@@ -53,6 +53,7 @@ impl<'a> Runtime<'a> {
             2 => "EU",
             _ => "UNSPEC",
         };
+        let language = default_language_for_region(region);
         self.bc.config.jurisdiction = Some(region.to_string());
         self.bc.save_config();
         let _ = crate::le_portal::record_action(
@@ -60,6 +61,7 @@ impl<'a> Runtime<'a> {
             "governance",
             &format!("set_jurisdiction_{region}"),
             region,
+            language,
         );
     }
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
@@ -67,6 +69,15 @@ impl<'a> Runtime<'a> {
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
         scheduler::set_weight(class, weight as u32);
+    }
+}
+
+fn default_language_for_region(region: &str) -> &'static str {
+    match region {
+        "US" => "en-US",
+        "EU" => "en-GB",
+        "UNSPEC" => "en",
+        _ => "en",
     }
 }
 

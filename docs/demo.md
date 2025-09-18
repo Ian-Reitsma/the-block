@@ -26,3 +26,8 @@ peer upgraded from TCP during the handshake.
 
 For a step‑by‑step narrative of each phase in the script, including key
 generation, transactions, and persistence, see [docs/explain.md](explain.md).
+
+> **Python tip:** When importing `the_block` from Python, call
+> `Blockchain.open(path)` as a static constructor. The method is annotated with
+> `@staticmethod` in PyO3 so the first argument is always treated as the path
+> rather than an implicit instance.

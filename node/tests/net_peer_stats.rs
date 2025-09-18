@@ -1188,8 +1188,8 @@ async fn peer_stats_all_pagination_rpc() {
             transport: Transport::Tcp,
             quic_addr: None,
             quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello), &sk);
         peers.handle_message(msg, None, &bc);
