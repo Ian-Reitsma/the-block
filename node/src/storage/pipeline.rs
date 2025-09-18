@@ -1,7 +1,9 @@
 use super::erasure;
 use super::fs::RentEscrow;
 use super::placement::NodeCatalog;
-use super::types::{ChunkRef, ObjectManifest, Redundancy, StoreReceipt};
+use super::types::{
+    ChunkRef, ObjectManifest, Redundancy, StoreReceipt, CHACHA20_POLY1305_NONCE_LEN,
+};
 use crate::compute_market::settlement::Settlement;
 use crate::simple_db::SimpleDb;
 #[cfg(feature = "telemetry")]
@@ -18,6 +20,7 @@ use chacha20poly1305::{
 };
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -265,12 +268,19 @@ impl StoragePipeline {
         }
         self.save_profile(providers[0].id(), &profile);
 
+        let (rs_data, rs_parity) = erasure::reed_solomon_counts();
+        let rs_data_u8 = u8::try_from(rs_data).map_err(|_| "invalid data shard count")?;
+        let rs_parity_u8 = u8::try_from(rs_parity).map_err(|_| "invalid parity shard count")?;
+
         let mut manifest = ObjectManifest {
             version: VERSION,
             total_len: data.len() as u64,
             chunk_len: chunk_len as u32,
             chunks,
-            redundancy: Redundancy::ReedSolomon { data: 1, parity: 1 },
+            redundancy: Redundancy::ReedSolomon {
+                data: rs_data_u8,
+                parity: rs_parity_u8,
+            },
             content_key_enc: key_bytes.to_vec(),
             blake3: [0u8; 32],
         };
@@ -286,10 +296,15 @@ impl StoragePipeline {
                 manifest_bytes,
             )
             .map_err(|e| e.to_string())?;
+        let chunk_count = u32::try_from(manifest.chunk_count())
+            .map_err(|_| "chunk count overflow".to_string())?;
         let receipt = StoreReceipt {
             manifest_hash: man_hash,
-            chunk_count: manifest.chunks.len() as u32,
-            redundancy: Redundancy::ReedSolomon { data: 1, parity: 1 },
+            chunk_count,
+            redundancy: Redundancy::ReedSolomon {
+                data: rs_data_u8,
+                parity: rs_parity_u8,
+            },
             lane: lane.to_string(),
         };
         let rec_bytes = bincode::serialize(&receipt).map_err(|e| e.to_string())?;
@@ -330,39 +345,56 @@ impl StoragePipeline {
         let mut out = Vec::with_capacity(manifest.total_len as usize);
         match manifest.redundancy {
             Redundancy::None => {
-                for ch in manifest.chunks.iter() {
+                for (idx, ch) in manifest.chunks.iter().enumerate() {
                     let blob = self
                         .db
                         .get(&format!("chunk/{}", hex::encode(ch.id)))
                         .ok_or("missing chunk")?;
-                    if blob.len() < 12 {
+                    if blob.len() < CHACHA20_POLY1305_NONCE_LEN {
                         return Err("corrupt chunk".into());
                     }
-                    let (nonce_bytes, ct) = blob.split_at(12);
+                    let (nonce_bytes, ct) = blob.split_at(CHACHA20_POLY1305_NONCE_LEN);
                     let nonce = Nonce::from_slice(nonce_bytes);
-                    let plain = cipher
+                    let mut plain = cipher
                         .decrypt(nonce, ct)
                         .map_err(|_| "decrypt fail".to_string())?;
+                    let expected = manifest.chunk_plain_len(idx);
+                    if plain.len() < expected {
+                        return Err("corrupt chunk".into());
+                    }
+                    plain.truncate(expected);
                     out.extend_from_slice(&plain);
                 }
             }
-            Redundancy::ReedSolomon { data: d, parity: p } => {
-                let step = (d + p) as usize;
-                for group in manifest.chunks.chunks(step) {
-                    let mut shards: Vec<Option<Vec<u8>>> = Vec::new();
-                    for r in group {
+            Redundancy::ReedSolomon { .. } => {
+                let shards_per_chunk = erasure::total_shards_per_chunk();
+                if shards_per_chunk == 0 {
+                    return Err("invalid shard layout".into());
+                }
+                if manifest.chunks.len() % shards_per_chunk != 0 {
+                    return Err("corrupt manifest".into());
+                }
+                for (chunk_idx, group) in manifest.chunks.chunks(shards_per_chunk).enumerate() {
+                    let mut shards = vec![None; shards_per_chunk];
+                    for (slot, r) in group.iter().enumerate() {
                         let blob = self.db.get(&format!("chunk/{}", hex::encode(r.id)));
-                        shards.push(blob);
+                        shards[slot] = blob;
                     }
-                    let blob = erasure::reconstruct(shards)?;
-                    if blob.len() < 12 {
+                    let expected_cipher = manifest.chunk_cipher_len(chunk_idx);
+                    let blob = erasure::reconstruct(shards, expected_cipher)?;
+                    if blob.len() < CHACHA20_POLY1305_NONCE_LEN {
                         return Err("corrupt chunk".into());
                     }
-                    let (nonce_bytes, ct) = blob.split_at(12);
+                    let (nonce_bytes, ct) = blob.split_at(CHACHA20_POLY1305_NONCE_LEN);
                     let nonce = Nonce::from_slice(nonce_bytes);
-                    let plain = cipher
+                    let mut plain = cipher
                         .decrypt(nonce, ct)
                         .map_err(|_| "decrypt fail".to_string())?;
+                    let expected = manifest.chunk_plain_len(chunk_idx);
+                    if plain.len() < expected {
+                        return Err("corrupt chunk".into());
+                    }
+                    plain.truncate(expected);
                     out.extend_from_slice(&plain);
                 }
             }
@@ -402,6 +434,124 @@ impl StoragePipeline {
 
     pub fn db_mut(&mut self) -> &mut SimpleDb {
         &mut self.db
+    }
+}
+
+#[cfg(test)]
+impl StoragePipeline {
+    pub(crate) fn db(&self) -> &SimpleDb {
+        &self.db
+    }
+
+    pub(crate) fn db_mut(&mut self) -> &mut SimpleDb {
+        &mut self.db
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::{erasure, NodeCatalog};
+    use crate::storage::repair;
+    use crate::storage::types::ObjectManifest;
+    use tempfile::tempdir;
+
+    struct StubProvider {
+        id: String,
+    }
+
+    impl Provider for StubProvider {
+        fn id(&self) -> &str {
+            &self.id
+        }
+    }
+
+    fn catalog_with_stub() -> NodeCatalog {
+        let mut catalog = NodeCatalog::new();
+        catalog.register(StubProvider {
+            id: "provider-1".to_string(),
+        });
+        catalog
+    }
+
+    fn load_manifest(pipeline: &StoragePipeline, hash: &[u8; 32]) -> ObjectManifest {
+        let key = format!("manifest/{}", hex::encode(hash));
+        let bytes = {
+            let db = pipeline.db();
+            db.get(&key).expect("manifest present")
+        };
+        bincode::deserialize(&bytes).expect("manifest decode")
+    }
+
+    fn sample_blob(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i % 251) as u8).collect()
+    }
+
+    #[test]
+    fn get_object_round_trips_with_missing_shards() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("pipeline-db");
+        let path_str = path.to_str().expect("path str");
+        let mut pipeline = StoragePipeline::open(path_str);
+        let catalog = catalog_with_stub();
+
+        let data = sample_blob(1_200_000);
+        let (receipt, _) = pipeline
+            .put_object(&data, "lane", &catalog)
+            .expect("store object");
+
+        let manifest = load_manifest(&pipeline, &receipt.manifest_hash);
+        let shards_per_chunk = erasure::total_shards_per_chunk();
+        assert!(manifest.chunks.len() >= shards_per_chunk);
+        let first_chunk = &manifest.chunks[..shards_per_chunk];
+        for idx in [0usize, 3, 17] {
+            let shard_id = first_chunk[idx].id;
+            let key = format!("chunk/{}", hex::encode(shard_id));
+            pipeline.db_mut().remove(&key);
+            assert!(pipeline.db().get(&key).is_none());
+        }
+
+        let restored = pipeline
+            .get_object(&receipt.manifest_hash)
+            .expect("reconstruct");
+        assert_eq!(restored, data);
+    }
+
+    #[test]
+    fn repair_rebuilds_missing_shards() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("repair-db");
+        let path_str = path.to_str().expect("path str");
+        let mut pipeline = StoragePipeline::open(path_str);
+        let catalog = catalog_with_stub();
+
+        let data = sample_blob(1_000_000);
+        let (receipt, _) = pipeline
+            .put_object(&data, "lane", &catalog)
+            .expect("store object");
+
+        let manifest = load_manifest(&pipeline, &receipt.manifest_hash);
+        let shards_per_chunk = erasure::total_shards_per_chunk();
+        assert!(manifest.chunks.len() >= shards_per_chunk);
+        let first_chunk = &manifest.chunks[..shards_per_chunk];
+        let mut removed_keys = Vec::new();
+        for idx in [0usize, 2, 5, 21] {
+            let shard_id = first_chunk[idx].id;
+            let key = format!("chunk/{}", hex::encode(shard_id));
+            pipeline.db_mut().remove(&key);
+            removed_keys.push(key);
+        }
+
+        repair::run_once(pipeline.db_mut()).expect("repair");
+
+        for key in &removed_keys {
+            assert!(pipeline.db().get(key).is_some());
+        }
+
+        let restored = pipeline
+            .get_object(&receipt.manifest_hash)
+            .expect("reconstruct");
+        assert_eq!(restored, data);
     }
 }
 

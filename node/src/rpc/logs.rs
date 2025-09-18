@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose;
 use base64::Engine;
+use futures::SinkExt;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -232,9 +233,12 @@ async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
             Ok(rows) => rows,
             Err(e) => {
                 log_query_failure(&e);
-                let _ = ws
+                if let Err(err) = ws
                     .send(Message::Text(json!({"error": "query failed"}).to_string()))
-                    .await;
+                    .await
+                {
+                    log_tail_send_failure(&err);
+                }
                 break;
             }
         };
@@ -242,18 +246,40 @@ async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
             if let Some(max_id) = rows.iter().filter_map(|row| row.id).max() {
                 last_id = max_id;
             }
-            if ws
-                .send(Message::Text(
-                    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".into()),
-                ))
-                .await
-                .is_err()
-            {
+            let payload = match serde_json::to_string(&rows) {
+                Ok(json) => json,
+                Err(err) => {
+                    log_serialization_failure(&err);
+                    "[]".to_string()
+                }
+            };
+            if let Err(err) = ws.send(Message::Text(payload)).await {
+                log_tail_send_failure(&err);
                 break;
             }
         }
         sleep(cfg.interval).await;
     }
+}
+
+#[cfg(feature = "telemetry")]
+fn log_serialization_failure(err: &serde_json::Error) {
+    warn!(target: "rpc.logs", error = %err, "failed to serialize log tail payload");
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn log_serialization_failure(err: &serde_json::Error) {
+    eprintln!("rpc.logs: failed to serialize log tail payload: {err}");
+}
+
+#[cfg(feature = "telemetry")]
+fn log_tail_send_failure(err: &tokio_tungstenite::tungstenite::Error) {
+    warn!(target: "rpc.logs", error = %err, "websocket send failed");
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn log_tail_send_failure(err: &tokio_tungstenite::tungstenite::Error) {
+    eprintln!("rpc.logs: websocket send failed: {err}");
 }
 
 /// Convenience helper for integration tests.

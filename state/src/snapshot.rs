@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -72,16 +73,38 @@ impl SnapshotManager {
     }
 
     fn prune(&self) -> Result<(), SnapshotError> {
-        let mut entries: Vec<_> = fs::read_dir(&self.dir)?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .collect();
-        entries.sort();
-        while entries.len() > self.keep {
-            if let Some(path) = entries.first() {
-                let _ = fs::remove_file(path);
+        let read_dir = match fs::read_dir(&self.dir) {
+            Ok(read_dir) => read_dir,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(err.into()),
+        };
+
+        let mut entries = Vec::new();
+        for res in read_dir {
+            let entry = res?;
+            let metadata = entry.metadata()?;
+            if !metadata.is_file() {
+                continue;
             }
-            entries.remove(0);
+            let modified = metadata.modified().or_else(|_| metadata.created())?;
+            let timestamp = modified
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO);
+            entries.push((entry.path(), timestamp));
         }
+
+        // Sort newest-to-oldest using filesystem modification times, falling back to the
+        // filename when timestamps collide so pruning remains deterministic.
+        entries.sort_by(|(path_a, time_a), (path_b, time_b)| {
+            time_b.cmp(time_a).then_with(|| path_a.cmp(path_b))
+        });
+
+        for (idx, (path, _)) in entries.iter().enumerate() {
+            if idx >= self.keep {
+                fs::remove_file(path)?;
+            }
+        }
+
         Ok(())
     }
 }

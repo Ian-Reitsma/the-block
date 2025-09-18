@@ -2,7 +2,9 @@ use rusqlite::Connection;
 use std::fs::File;
 use std::io::Write;
 use tempfile::tempdir;
-use the_block::log_indexer::{index_logs, search_logs, LogFilter, LogIndexerError};
+use the_block::log_indexer::{
+    index_logs, index_logs_with_options, search_logs, IndexOptions, LogFilter, LogIndexerError,
+};
 
 #[test]
 fn parse_and_index() {
@@ -55,4 +57,35 @@ fn surfaces_decryption_errors() {
         LogIndexerError::Sqlite(_) => {}
         other => panic!("unexpected error variant: {:?}", other),
     }
+}
+
+#[test]
+fn encrypts_and_decrypts_round_trip() {
+    let dir = tempdir().unwrap();
+    let log_path = dir.path().join("secure.json");
+    let mut f = File::create(&log_path).unwrap();
+    writeln!(
+        f,
+        "{\"timestamp\":5,\"level\":\"INFO\",\"message\":\"secret\",\"correlation_id\":\"c\"}"
+    )
+    .unwrap();
+    let db_path = dir.path().join("logs.db");
+    index_logs_with_options(
+        &log_path,
+        &db_path,
+        IndexOptions {
+            passphrase: Some("hunter2".into()),
+        },
+    )
+    .unwrap();
+
+    let mut filter = LogFilter::default();
+    let rows = search_logs(&db_path, &filter).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].message, "<encrypted>");
+
+    filter.passphrase = Some("hunter2".into());
+    let decrypted = search_logs(&db_path, &filter).unwrap();
+    assert_eq!(decrypted.len(), 1);
+    assert_eq!(decrypted[0].message, "secret");
 }

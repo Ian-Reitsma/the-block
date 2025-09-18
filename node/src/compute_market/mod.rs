@@ -4,6 +4,7 @@ use crate::transaction::FeeLane;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -27,6 +28,24 @@ pub mod workloads;
 
 pub use errors::MarketError;
 pub use scheduler::job_status;
+
+static TOTAL_UNITS_PROCESSED: AtomicU64 = AtomicU64::new(0);
+
+/// Return the total number of compute units settled since startup.
+pub fn total_units_processed() -> u64 {
+    TOTAL_UNITS_PROCESSED.load(Ordering::Relaxed)
+}
+
+/// Reset the processed-unit counter. Intended for tests.
+pub fn reset_units_processed_for_test() {
+    TOTAL_UNITS_PROCESSED.store(0, Ordering::Relaxed);
+}
+
+fn record_units_processed(units: u64) {
+    TOTAL_UNITS_PROCESSED.fetch_add(units, Ordering::Relaxed);
+    #[cfg(feature = "telemetry")]
+    telemetry::INDUSTRIAL_UNITS_TOTAL.inc_by(units);
+}
 
 /// Supported specialised accelerators.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -494,8 +513,7 @@ impl Market {
             }
             return Err("payout mismatch");
         }
-        #[cfg(feature = "telemetry")]
-        telemetry::INDUSTRIAL_UNITS_TOTAL.inc_by(slice_units as u64);
+        record_units_processed(slice_units);
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
@@ -709,6 +727,7 @@ mod tests {
     #[test]
     fn job_lifecycle_and_finalize() {
         scheduler::reset_for_test();
+        reset_units_processed_for_test();
         let mut market = Market::new();
         let job_id = "job1".to_string();
         let offer = Offer {
@@ -755,6 +774,7 @@ mod tests {
                 .unwrap_or_else(|e| panic!("submit slice: {e}")),
             5
         );
+        assert_eq!(total_units_processed(), 1);
         let bonds = market
             .finalize_job(&job_id)
             .unwrap_or_else(|| panic!("finalize job"));

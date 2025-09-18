@@ -105,15 +105,34 @@ pub fn handle(cmd: ComputeCmd) {
                 if let Ok(text) = resp.text() {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
                         if let Some(res) = val.get("result") {
-                            let base = res
-                                .get("industrial_price_base")
+                            let backlog = res
+                                .get("industrial_backlog")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or_default();
-                            let weighted = res
-                                .get("industrial_price_weighted")
+                            let util = res
+                                .get("industrial_utilization")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or_default();
-                            println!("base: {base} weighted: {weighted}");
+                            let units = res
+                                .get("industrial_units_total")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or_default();
+                            let price = res
+                                .get("industrial_price_per_unit")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or_default();
+                            println!(
+                                "backlog: {backlog} util: {util}% units: {units} price: {price}"
+                            );
+                            if let Some(base) =
+                                res.get("industrial_price_base").and_then(|v| v.as_u64())
+                            {
+                                let weighted = res
+                                    .get("industrial_price_weighted")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(base);
+                                println!("median base: {base} weighted: {weighted}");
+                            }
                         } else {
                             println!("{}", text);
                         }

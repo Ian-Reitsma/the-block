@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::compute_market::{price_board, scheduler};
+use crate::compute_market::{price_board, scheduler, total_units_processed};
 use crate::transaction::FeeLane;
 
 /// Return compute market backlog and utilisation metrics.
@@ -8,10 +8,16 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
     let (backlog, util) = price_board::backlog_utilization();
     let weighted = price_board::bands(FeeLane::Industrial).map(|(_, m, _)| m);
     let raw = price_board::raw_bands(FeeLane::Industrial).map(|(_, m, _)| m);
+    let spot = price_board::spot_price_per_unit(FeeLane::Industrial)
+        .or(weighted)
+        .or(raw)
+        .unwrap_or_default();
     let sched = scheduler::stats();
     json!({
         "industrial_backlog": backlog,
         "industrial_utilization": util,
+        "industrial_units_total": total_units_processed(),
+        "industrial_price_per_unit": spot,
         "industrial_price_weighted": weighted,
         "industrial_price_base": raw,
         "pending": sched.pending,

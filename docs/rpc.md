@@ -40,11 +40,15 @@
   ```
 
 - `compute_market.stats` – exposes current compute backlog, utilisation,
-  provisioned units, and spot price metrics.
+  cumulative processed units, and spot price metrics. Weighted and raw median
+  prices remain in the payload for operators who rely on the historic bands,
+  and the pending queue snapshot is returned for CLI introspection.
 
   ```bash
   curl -s localhost:26658/compute_market.stats | jq
-  # {"industrial_backlog":0,"industrial_utilization":0,"industrial_units_total":0,"industrial_price_per_unit":0}
+  # {"industrial_backlog":0,"industrial_utilization":0,"industrial_units_total":0,
+  #  "industrial_price_per_unit":0,"industrial_price_weighted":null,
+  #  "industrial_price_base":null,"pending":[]}
   ```
 
 - `compute.job_cancel` – cancels an active job and rolls back resources.
