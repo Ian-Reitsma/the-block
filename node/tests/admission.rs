@@ -6,7 +6,7 @@ use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 use the_block::telemetry;
 use the_block::{
     generate_keypair, sign_tx, Blockchain, FeeLane, MempoolEntry, RawTxPayload, SignedTransaction,
-    TokenAmount, TxAdmissionError,
+    TokenAmount, TxAdmissionError, TxSignature, TxVersion,
 };
 
 mod util;
@@ -120,8 +120,19 @@ fn validate_block_rejects_nonce_gap() {
             memo: Vec::new(),
         },
         public_key: vec![],
-        signature: vec![],
+        #[cfg(feature = "quantum")]
+        dilithium_public_key: Vec::new(),
+        signature: TxSignature {
+            ed25519: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium: Vec::new(),
+        },
+        tip: 0,
+        signer_pubkeys: Vec::new(),
+        aggregate_signature: Vec::new(),
+        threshold: 0,
         lane: FeeLane::Consumer,
+        version: TxVersion::Ed25519Only,
     };
     let txs = vec![coinbase, tx1.clone(), tx3.clone()];
     let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();

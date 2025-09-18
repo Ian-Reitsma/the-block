@@ -5,6 +5,7 @@ use super::{
     state::{ContractId, State},
     wasm,
 };
+use std::cell::Cell;
 
 /// Supported VM types. Extend when additional runtimes are added.
 #[derive(Clone, Copy)]
@@ -69,24 +70,33 @@ impl Vm {
                     exec_code.extend_from_slice(&buf);
                 }
                 exec_code.push(opcodes::OpCode::Halt as u8);
-                let mut load = || {
+                let storage_value = self
+                    .state
+                    .storage(id)
+                    .and_then(|b| {
+                        if b.len() >= 8 {
+                            let mut arr = [0u8; 8];
+                            arr.copy_from_slice(&b[..8]);
+                            Some(u64::from_le_bytes(arr))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or(0);
+                let storage_cell = Cell::new(storage_value);
+                let storage_dirty = Cell::new(false);
+                let stack = {
+                    let mut load = || storage_cell.get();
+                    let mut store = |v: u64| {
+                        storage_cell.set(v);
+                        storage_dirty.set(true);
+                    };
+                    exec::execute(&exec_code, &mut meter, &mut load, &mut store)?
+                };
+                if storage_dirty.get() {
                     self.state
-                        .storage(id)
-                        .and_then(|b| {
-                            if b.len() >= 8 {
-                                let mut arr = [0u8; 8];
-                                arr.copy_from_slice(&b[..8]);
-                                Some(u64::from_le_bytes(arr))
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(0)
-                };
-                let mut store = |v: u64| {
-                    self.state.set_storage(id, v.to_le_bytes().to_vec());
-                };
-                let stack = exec::execute(&exec_code, &mut meter, &mut load, &mut store)?;
+                        .set_storage(id, storage_cell.get().to_le_bytes().to_vec());
+                }
                 let used = meter.used();
                 let fee = used.checked_mul(gas_price).ok_or("fee overflow")?;
                 if *balance < fee {

@@ -4,7 +4,7 @@ use proptest::prelude::*;
 use rand::{Rng, SeedableRng};
 use the_block::{
     fee, Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction,
-    TokenAmount,
+    TokenAmount, TxSignature, TxVersion,
 };
 
 mod util;
@@ -47,8 +47,19 @@ proptest! {
                     memo: Vec::new(),
                 },
                 public_key: vec![],
-                signature: vec![],
+                #[cfg(feature = "quantum")]
+                dilithium_public_key: Vec::new(),
+                signature: TxSignature {
+                    ed25519: Vec::new(),
+                    #[cfg(feature = "quantum")]
+                    dilithium: Vec::new(),
+                },
+                tip: 0,
+                signer_pubkeys: Vec::new(),
+                aggregate_signature: Vec::new(),
+                threshold: 0,
                 lane: FeeLane::Consumer,
+                version: TxVersion::Ed25519Only,
             };
             let tx_count = rng.gen_range(0..5);
             let mut txs = vec![coinbase.clone()];
@@ -67,8 +78,19 @@ proptest! {
                         memo: Vec::new(),
                     },
                     public_key: vec![],
-                    signature: vec![],
+                    #[cfg(feature = "quantum")]
+                    dilithium_public_key: Vec::new(),
+                    signature: TxSignature {
+                        ed25519: Vec::new(),
+                        #[cfg(feature = "quantum")]
+                        dilithium: Vec::new(),
+                    },
+                    tip: 0,
+                    signer_pubkeys: Vec::new(),
+                    aggregate_signature: Vec::new(),
+                    threshold: 0,
                     lane: FeeLane::Consumer,
+                    version: TxVersion::Ed25519Only,
                 };
                 txs.push(tx);
             }

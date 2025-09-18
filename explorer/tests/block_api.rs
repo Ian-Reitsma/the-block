@@ -21,7 +21,7 @@ fn index_block_and_search() {
         1,
         b"memo".to_vec(),
     );
-    let tx = SignedTransaction::new(payload, vec![], vec![], FeeLane::Consumer);
+    let tx = SignedTransaction::new(payload, vec![], vec![], FeeLane::Consumer, None);
     let block = Block {
         index: 1,
         previous_hash: String::new(),

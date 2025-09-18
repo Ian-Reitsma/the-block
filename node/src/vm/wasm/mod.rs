@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, ensure, Context, Result};
 use wasmtime::{Config, Engine, Linker, Module, Store};
 
 use super::{abi_wasm, gas::GasMeter};
@@ -15,23 +15,27 @@ pub fn execute(code: &[u8], input: &[u8], meter: &mut GasMeter) -> Result<Vec<u8
     let mut store = Store::new(&engine, ());
     let remaining = meter.remaining();
     if remaining == 0 {
-        return Err(anyhow::anyhow!("out of gas"));
+        return Err(anyhow!("out of gas"));
     }
     let fuel = gas::to_fuel(remaining);
-    if fuel > 0 {
-        store.add_fuel(fuel)?;
-    }
+    ensure!(fuel > 0, "wasm execution requires positive fuel");
+    store.set_fuel(fuel).with_context(|| {
+        "wasmtime engine compiled without fuel support; enable Config::consume_fuel"
+    })?;
     let instance = Linker::new(&engine).instantiate(&mut store, &module)?;
     let memory = instance
         .get_memory(&mut store, "memory")
-        .ok_or_else(|| anyhow::anyhow!("missing memory"))?;
+        .ok_or_else(|| anyhow!("missing memory"))?;
     let ptr = abi_wasm::write(&mut store, &memory, input);
     let func = instance.get_typed_func::<(i32, i32), i32>(&mut store, "entry")?;
     let len = func.call(&mut store, (ptr, input.len() as i32))?;
     let out = abi_wasm::read(&store, &memory, ptr, len).unwrap_or_default();
-    let fuel = store.fuel_consumed().unwrap_or(0);
-    let gas_used = gas::from_fuel(fuel);
-    meter.charge(gas_used)?;
+    let remaining_fuel = store.get_fuel().with_context(|| {
+        "wasmtime engine compiled without fuel support; enable Config::consume_fuel"
+    })?;
+    let fuel_used = fuel.saturating_sub(remaining_fuel);
+    let gas_used = gas::from_fuel(fuel_used);
+    meter.charge(gas_used).map_err(anyhow::Error::msg)?;
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::WASM_CONTRACT_EXECUTIONS_TOTAL.inc();

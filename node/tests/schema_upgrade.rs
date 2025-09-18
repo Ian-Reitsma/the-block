@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs};
 use the_block::{
     Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction, TokenAmount,
+    TxSignature, TxVersion,
 };
 
 mod util;
@@ -31,8 +32,19 @@ fn migrate_v3_recomputes_supply() {
             memo: Vec::new(),
         },
         public_key: vec![],
-        signature: vec![],
+        #[cfg(feature = "quantum")]
+        dilithium_public_key: Vec::new(),
+        signature: TxSignature {
+            ed25519: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium: Vec::new(),
+        },
+        tip: 0,
+        signer_pubkeys: Vec::new(),
+        aggregate_signature: Vec::new(),
+        threshold: 0,
         lane: FeeLane::Consumer,
+        version: TxVersion::Ed25519Only,
     };
     let tx = SignedTransaction {
         payload: RawTxPayload {
@@ -46,8 +58,19 @@ fn migrate_v3_recomputes_supply() {
             memo: Vec::new(),
         },
         public_key: vec![],
-        signature: vec![],
+        #[cfg(feature = "quantum")]
+        dilithium_public_key: Vec::new(),
+        signature: TxSignature {
+            ed25519: Vec::new(),
+            #[cfg(feature = "quantum")]
+            dilithium: Vec::new(),
+        },
+        tip: 0,
+        signer_pubkeys: Vec::new(),
+        aggregate_signature: Vec::new(),
+        threshold: 0,
         lane: FeeLane::Consumer,
+        version: TxVersion::Ed25519Only,
     };
     let block = Block {
         index: 0,

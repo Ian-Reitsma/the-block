@@ -147,6 +147,30 @@ impl SimpleDb {
         self.try_insert(key, value).ok().flatten()
     }
 
+    fn put_cf_raw(&mut self, cf: &str, key: &[u8], value: &[u8]) -> io::Result<()> {
+        if let Some(limit) = self.byte_limit {
+            if value.len() > limit {
+                return Err(io::Error::new(io::ErrorKind::Other, "byte limit exceeded"));
+            }
+        }
+
+        let handle = self.ensure_cf(cf);
+        self.db.put_cf(&handle, key, value).map_err(to_io_err)?;
+
+        if cf == "default" {
+            self.prefix_cache
+                .lock()
+                .insert(key.to_vec(), value.to_vec());
+        }
+
+        Ok(())
+    }
+
+    /// Insert or update a key using raw byte slices, mirroring RocksDB's `put` API.
+    pub fn put(&mut self, key: &[u8], value: &[u8]) -> io::Result<()> {
+        self.put_cf_raw("default", key, value)
+    }
+
     fn insert_cf_with_delta(
         &mut self,
         cf: &str,
@@ -332,5 +356,22 @@ mod tests {
         db.insert_shard_with_delta(1, "alpha", b"new".to_vec(), &mut new_deltas)
             .expect("reinsert shard");
         assert_eq!(db.get_shard(1, "alpha"), Some(b"new".to_vec()));
+    }
+
+    #[test]
+    fn put_writes_values_and_updates_cache() {
+        let dir = tempdir().expect("temp dir");
+        let mut db = SimpleDb::open(dir.path().to_str().expect("path"));
+
+        db.put(b"foo", b"bar").expect("put initial");
+        assert_eq!(db.get("foo"), Some(b"bar".to_vec()));
+
+        db.put(b"foo", b"baz").expect("put overwrite");
+        assert_eq!(db.get("foo"), Some(b"baz".to_vec()));
+
+        db.set_byte_limit(2);
+        let err = db.put(b"alpha", b"toolong").expect_err("limit enforcement");
+        assert_eq!(err.kind(), io::ErrorKind::Other);
+        assert!(db.get("alpha").is_none());
     }
 }

@@ -37,8 +37,10 @@ Transactions are signed after serialising the payload. `SignedTransaction` bundl
 pub struct SignedTransaction {
     pub payload: RawTxPayload,
     pub public_key: Vec<u8>,
-    pub signature: Vec<u8>,
+    pub signature: TxSignature,
+    pub tip: u64,
     pub lane: FeeLane,
+    pub version: TxVersion,
 }
 ```
 
@@ -62,7 +64,14 @@ payload = RawTxPayload(
     fee=1, pct_ct=100, nonce=42, memo=b"hello"
 )
 
-signed = SignedTransaction(payload, pubkey_bytes, sig_bytes, FeeLane.Consumer)
+# tip is optional and defaults to zero when omitted
+signed = SignedTransaction(
+    payload,
+    pubkey_bytes,
+    sig_bytes,
+    FeeLane.Consumer,
+    tip=2,
+)
 ```
 
 Helpers in `node/src/transaction.rs` expose `__repr__` and alias properties so Python users can inspect and mutate fields naturally.

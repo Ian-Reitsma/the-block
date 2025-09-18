@@ -93,28 +93,28 @@ impl Debugger {
                 self.meter.charge(gas::cost(op)).ok()?;
                 self.meter.charge(gas::GAS_IMMEDIATE).ok()?;
                 self.stack.push(u64::from_le_bytes(buf));
-                Ok(())
+                Some(())
             }
             OpCode::Add => {
                 self.meter.charge(gas::cost(op)).ok()?;
                 let b = self.stack.pop()?;
                 let a = self.stack.pop()?;
                 self.stack.push(a.wrapping_add(b));
-                Ok(())
+                Some(())
             }
             OpCode::Sub => {
                 self.meter.charge(gas::cost(op)).ok()?;
                 let b = self.stack.pop()?;
                 let a = self.stack.pop()?;
                 self.stack.push(a.wrapping_sub(b));
-                Ok(())
+                Some(())
             }
             OpCode::Mul => {
                 self.meter.charge(gas::cost(op)).ok()?;
                 let b = self.stack.pop()?;
                 let a = self.stack.pop()?;
                 self.stack.push(a.wrapping_mul(b));
-                Ok(())
+                Some(())
             }
             OpCode::Div => {
                 self.meter.charge(gas::cost(op)).ok()?;
@@ -124,7 +124,7 @@ impl Debugger {
                 }
                 let a = self.stack.pop()?;
                 self.stack.push(a / b);
-                Ok(())
+                Some(())
             }
             OpCode::Mod => {
                 self.meter.charge(gas::cost(op)).ok()?;
@@ -134,28 +134,28 @@ impl Debugger {
                 }
                 let a = self.stack.pop()?;
                 self.stack.push(a % b);
-                Ok(())
+                Some(())
             }
             OpCode::And => {
                 self.meter.charge(gas::cost(op)).ok()?;
                 let b = self.stack.pop()?;
                 let a = self.stack.pop()?;
                 self.stack.push(a & b);
-                Ok(())
+                Some(())
             }
             OpCode::Or => {
                 self.meter.charge(gas::cost(op)).ok()?;
                 let b = self.stack.pop()?;
                 let a = self.stack.pop()?;
                 self.stack.push(a | b);
-                Ok(())
+                Some(())
             }
             OpCode::Xor => {
                 self.meter.charge(gas::cost(op)).ok()?;
                 let b = self.stack.pop()?;
                 let a = self.stack.pop()?;
                 self.stack.push(a ^ b);
-                Ok(())
+                Some(())
             }
             OpCode::Load => {
                 self.meter.charge(gas::cost(op)).ok()?;
@@ -174,7 +174,7 @@ impl Debugger {
                     })
                     .unwrap_or(0);
                 self.stack.push(val);
-                Ok(())
+                Some(())
             }
             OpCode::Store => {
                 self.meter.charge(gas::cost(op)).ok()?;
@@ -182,7 +182,7 @@ impl Debugger {
                 self.meter.charge(gas::GAS_STORAGE_WRITE).ok()?;
                 self.state
                     .set_storage(self.contract_id, v.to_le_bytes().to_vec());
-                Ok(())
+                Some(())
             }
             OpCode::Hash => {
                 self.meter.charge(gas::cost(op)).ok()?;
@@ -192,7 +192,7 @@ impl Debugger {
                 let mut out = [0u8; 8];
                 out.copy_from_slice(&hash.as_bytes()[..8]);
                 self.stack.push(u64::from_le_bytes(out));
-                Ok(())
+                Some(())
             }
         };
         if res.is_none() {
