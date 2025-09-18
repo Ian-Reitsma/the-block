@@ -41,9 +41,127 @@ impl Default for TxSignature {
     }
 }
 
+impl IntoPy<PyObject> for TxSignature {
+    fn into_py(self, py: Python<'_>) -> PyObject {
+        let dict = PyDict::new(py);
+        dict.set_item("ed25519", PyBytes::new(py, &self.ed25519))
+            .expect("ed25519 key set");
+        #[cfg(feature = "quantum")]
+        {
+            dict.set_item("dilithium", PyBytes::new(py, &self.dilithium))
+                .expect("dilithium key set");
+        }
+        dict.into()
+    }
+}
+
+impl<'py> FromPyObject<'py> for TxSignature {
+    fn extract(obj: &'py PyAny) -> PyResult<Self> {
+        if let Ok(dict) = obj.downcast::<PyDict>() {
+            let ed25519 = dict
+                .get_item("ed25519")
+                .map(|value| value.extract::<Vec<u8>>())
+                .transpose()?
+                .unwrap_or_default();
+            #[cfg(feature = "quantum")]
+            {
+                let dilithium = dict
+                    .get_item("dilithium")
+                    .map(|value| value.extract::<Vec<u8>>())
+                    .transpose()?
+                    .unwrap_or_default();
+                return Ok(TxSignature { ed25519, dilithium });
+            }
+            #[cfg(not(feature = "quantum"))]
+            {
+                return Ok(TxSignature { ed25519 });
+            }
+        }
+
+        if let Ok(ed25519) = obj.extract::<Vec<u8>>() {
+            #[cfg(feature = "quantum")]
+            {
+                return Ok(TxSignature {
+                    ed25519,
+                    dilithium: Vec::new(),
+                });
+            }
+            #[cfg(not(feature = "quantum"))]
+            {
+                return Ok(TxSignature { ed25519 });
+            }
+        }
+
+        if let Ok(ed_attr) = obj.getattr("ed25519") {
+            let ed25519 = ed_attr.extract::<Vec<u8>>()?;
+            #[cfg(feature = "quantum")]
+            {
+                let dilithium = obj
+                    .getattr("dilithium")
+                    .ok()
+                    .map(|value| value.extract::<Vec<u8>>())
+                    .transpose()?
+                    .unwrap_or_default();
+                return Ok(TxSignature { ed25519, dilithium });
+            }
+            #[cfg(not(feature = "quantum"))]
+            {
+                return Ok(TxSignature { ed25519 });
+            }
+        }
+
+        Err(PyTypeError::new_err(
+            "TxSignature must be bytes or a mapping/object with an 'ed25519' attribute",
+        ))
+    }
+}
+
+impl IntoPy<PyObject> for TxVersion {
+    fn into_py(self, py: Python<'_>) -> PyObject {
+        match self {
+            TxVersion::Ed25519Only => "ed25519_only",
+            TxVersion::Dual => "dual",
+            TxVersion::DilithiumOnly => "dilithium_only",
+        }
+        .into_py(py)
+    }
+}
+
+impl<'py> FromPyObject<'py> for TxVersion {
+    fn extract(obj: &'py PyAny) -> PyResult<Self> {
+        if let Ok(name) = obj.extract::<&str>() {
+            let normalized = name.replace('-', "_").to_ascii_lowercase();
+            return match normalized.as_str() {
+                "ed25519_only" | "ed25519" | "ed25519only" => Ok(TxVersion::Ed25519Only),
+                "dual" => Ok(TxVersion::Dual),
+                "dilithium_only" | "dilithium" | "dilithiumonly" => Ok(TxVersion::DilithiumOnly),
+                other => Err(PyValueError::new_err(format!(
+                    "invalid TxVersion string: {other}"
+                ))),
+            };
+        }
+
+        if let Ok(value) = obj.extract::<u8>() {
+            return match value {
+                0 => Ok(TxVersion::Ed25519Only),
+                1 => Ok(TxVersion::Dual),
+                2 => Ok(TxVersion::DilithiumOnly),
+                other => Err(PyValueError::new_err(format!(
+                    "invalid TxVersion value: {other}"
+                ))),
+            };
+        }
+
+        Err(PyTypeError::new_err(
+            "TxVersion must be specified as a string (e.g. 'dual') or integer (0, 1, 2)",
+        ))
+    }
+}
+
 use crate::{fee, fee::FeeError, TxAdmissionError};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::{PyAny, PyBytes, PyDict};
 
 static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> =
     Lazy::new(|| Mutex::new(LruCache::new(1024)));
@@ -323,11 +441,13 @@ pub fn verify_stateless(tx: &SignedTransaction) -> Result<(), TxAdmissionError> 
 #[pymethods]
 impl SignedTransaction {
     #[new]
+    #[pyo3(signature = (payload, public_key, signature, lane, tip=None))]
     pub fn new(
         payload: RawTxPayload,
         public_key: Vec<u8>,
         signature: Vec<u8>,
         lane: FeeLane,
+        tip: Option<u64>,
     ) -> Self {
         SignedTransaction {
             payload,
@@ -339,6 +459,7 @@ impl SignedTransaction {
                 #[cfg(feature = "quantum")]
                 dilithium: Vec::new(),
             },
+            tip: tip.unwrap_or_default(),
             signer_pubkeys: Vec::new(),
             aggregate_signature: Vec::new(),
             threshold: 0,
@@ -354,12 +475,13 @@ impl SignedTransaction {
         #[cfg(not(feature = "quantum"))]
         let pq_len = 0;
         format!(
-            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{}|{} bytes>, lane={:?})",
+            "SignedTransaction(payload={}, public_key=<{} bytes>, signature=<{}|{} bytes>, lane={:?}, tip={})",
             self.payload.__repr__(),
             self.public_key.len(),
             ed_len,
             pq_len,
             self.lane,
+            self.tip,
         )
     }
 }
@@ -666,4 +788,88 @@ pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
     bincode_config()
         .deserialize(&bytes)
         .map_err(|e| PyValueError::new_err(format!("decode: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::{types::IntoPyDict, IntoPy, Py};
+
+    fn sample_payload() -> RawTxPayload {
+        RawTxPayload {
+            from_: "alice".to_string(),
+            to: "bob".to_string(),
+            amount_consumer: 1,
+            amount_industrial: 0,
+            fee: 100,
+            pct_ct: 100,
+            nonce: 1,
+            memo: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn signed_transaction_new_handles_optional_tip() {
+        let payload = sample_payload();
+        let public_key = vec![1u8; 32];
+        let signature = vec![2u8; 64];
+        let tx = SignedTransaction::new(
+            payload.clone(),
+            public_key.clone(),
+            signature.clone(),
+            FeeLane::Consumer,
+            None,
+        );
+        assert_eq!(tx.tip, 0);
+        assert_eq!(tx.public_key, public_key);
+        assert_eq!(tx.signature.ed25519, signature);
+
+        let tx_with_tip =
+            SignedTransaction::new(payload, public_key, signature, FeeLane::Consumer, Some(42));
+        assert_eq!(tx_with_tip.tip, 42);
+    }
+
+    #[test]
+    fn python_constructor_supports_tip_keyword() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let payload = Py::new(py, sample_payload()).expect("payload object");
+            let lane = Py::new(py, FeeLane::Consumer).expect("lane object");
+            let tx_type = py.get_type::<SignedTransaction>();
+            let tx_default = tx_type
+                .call1((
+                    payload.clone_ref(py),
+                    Vec::<u8>::new(),
+                    vec![1u8; 16],
+                    lane.clone_ref(py),
+                ))
+                .expect("default constructor call");
+            assert_eq!(
+                tx_default
+                    .getattr("tip")
+                    .expect("tip attr")
+                    .extract::<u64>()
+                    .expect("tip extract"),
+                0
+            );
+
+            let payload_kw = Py::new(py, sample_payload()).expect("payload kw");
+            let lane_kw = Py::new(py, FeeLane::Consumer).expect("lane kw");
+            let kwargs = [("tip", 99u64.into_py(py))].into_py_dict(py);
+            let tx_kw = tx_type
+                .call(
+                    (payload_kw, Vec::<u8>::new(), vec![1u8; 16], lane_kw),
+                    Some(kwargs),
+                )
+                .expect("keyword constructor call");
+            assert_eq!(
+                tx_kw
+                    .getattr("tip")
+                    .expect("tip attr")
+                    .extract::<u64>()
+                    .expect("tip extract"),
+                99
+            );
+        });
+    }
 }

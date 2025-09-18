@@ -442,10 +442,6 @@ impl StoragePipeline {
     pub(crate) fn db(&self) -> &SimpleDb {
         &self.db
     }
-
-    pub(crate) fn db_mut(&mut self) -> &mut SimpleDb {
-        &mut self.db
-    }
 }
 
 #[cfg(test)]

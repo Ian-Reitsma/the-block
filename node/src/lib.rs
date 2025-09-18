@@ -163,7 +163,7 @@ pub mod vm;
 // === Transaction admission errors ===
 
 #[repr(u16)]
-#[derive(Debug, Error, PartialEq, Clone, Copy)]
+#[derive(Debug, Error, PartialEq, Eq, Clone, Copy)]
 pub enum TxAdmissionError {
     #[error("unknown sender")]
     UnknownSender = ERR_UNKNOWN_SENDER,
@@ -990,6 +990,12 @@ impl Drop for Blockchain {
 }
 
 impl Blockchain {
+    fn shard_cache_guard(&self) -> MutexGuard<'_, LruCache<(ShardId, Vec<u8>), Vec<u8>>> {
+        self.shard_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
     }
@@ -999,19 +1005,17 @@ impl Blockchain {
     }
 
     pub(crate) fn read_shard_state(&self, shard: ShardId, key: &str) -> Option<Vec<u8>> {
-        if let Some(v) = self
-            .shard_cache
-            .lock()
-            .get(&(shard, key.as_bytes().to_vec()))
-            .cloned()
-        {
-            return Some(v);
+        let cache_key = (shard, key.as_bytes().to_vec());
+        if let Some(value) = {
+            let mut cache = self.shard_cache_guard();
+            cache.get(&cache_key).cloned()
+        } {
+            return Some(value);
         }
         let val = self.db.get_shard(shard, key);
         if let Some(ref v) = val {
-            self.shard_cache
-                .lock()
-                .put((shard, key.as_bytes().to_vec()), v.clone());
+            let mut cache = self.shard_cache_guard();
+            cache.put(cache_key, v.clone());
         }
         val
     }
@@ -1023,10 +1027,12 @@ impl Blockchain {
         value: Vec<u8>,
         deltas: &mut Vec<DbDelta>,
     ) -> std::io::Result<()> {
-        let evicted = self
-            .shard_cache
-            .lock()
-            .put((shard, key.as_bytes().to_vec()), value.clone());
+        let cache_key = (shard, key.as_bytes().to_vec());
+        #[cfg_attr(not(feature = "telemetry"), allow(unused_variables))]
+        let evicted = {
+            let mut cache = self.shard_cache_guard();
+            cache.put(cache_key, value.clone())
+        };
         #[cfg(feature = "telemetry")]
         if evicted.is_some() {
             crate::telemetry::SHARD_CACHE_EVICT_TOTAL.inc();
@@ -3529,6 +3535,7 @@ impl Blockchain {
                 #[cfg(feature = "quantum")]
                 dilithium: Vec::new(),
             },
+            tip: 0,
             signer_pubkeys: Vec::new(),
             aggregate_signature: Vec::new(),
             threshold: 0,
@@ -3685,10 +3692,9 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
-                let _ = self.db.put(
-                    format!("base_fee:{}", block.index).as_bytes(),
-                    &block_base_fee.to_le_bytes(),
-                );
+                let key = format!("base_fee:{}", block.index);
+                let fee_bytes = block_base_fee.to_le_bytes();
+                let _ = self.db.put(key.as_bytes(), &fee_bytes);
                 state::append_difficulty(
                     &std::path::Path::new(&self.path).join("diff_history"),
                     block.index,
@@ -5250,6 +5256,80 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(serve_metrics, m)?)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod shard_cache_tests {
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use tempfile::tempdir;
+
+    #[test]
+    fn shard_cache_round_trip_populates_and_updates_entries() {
+        let dir = tempdir().unwrap();
+        let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+        let shard: ShardId = 42;
+        let key = "cache-key";
+        let initial = b"initial".to_vec();
+
+        let mut deltas = Vec::new();
+        bc.db
+            .insert_shard_with_delta(shard, key, initial.clone(), &mut deltas)
+            .unwrap();
+
+        assert_eq!(bc.read_shard_state(shard, key), Some(initial.clone()));
+
+        let cache_key = (shard, key.as_bytes().to_vec());
+        {
+            let cache = bc.shard_cache_guard();
+            assert_eq!(cache.peek(&cache_key).cloned(), Some(initial.clone()));
+        }
+
+        let updated = b"updated".to_vec();
+        let mut deltas = Vec::new();
+        bc.write_shard_state(shard, key, updated.clone(), &mut deltas)
+            .unwrap();
+
+        let cache_key = (shard, key.as_bytes().to_vec());
+        {
+            let cache = bc.shard_cache_guard();
+            assert_eq!(cache.peek(&cache_key).cloned(), Some(updated.clone()));
+        }
+
+        assert_eq!(bc.read_shard_state(shard, key), Some(updated));
+    }
+
+    #[test]
+    fn shard_cache_poison_recovery() {
+        let dir = tempdir().unwrap();
+        let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+        let shard: ShardId = 7;
+        let key = "poison";
+        let initial = b"poison-initial".to_vec();
+
+        let mut deltas = Vec::new();
+        bc.db
+            .insert_shard_with_delta(shard, key, initial.clone(), &mut deltas)
+            .unwrap();
+
+        let hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = bc.shard_cache.lock().unwrap();
+            panic!("poison shard cache");
+        }));
+        std::panic::set_hook(hook);
+        assert!(result.is_err());
+
+        assert_eq!(bc.read_shard_state(shard, key), Some(initial.clone()));
+
+        let updated = b"poison-updated".to_vec();
+        let mut deltas = Vec::new();
+        bc.write_shard_state(shard, key, updated.clone(), &mut deltas)
+            .unwrap();
+
+        assert_eq!(bc.read_shard_state(shard, key), Some(updated));
+    }
 }
 
 #[cfg(test)]
