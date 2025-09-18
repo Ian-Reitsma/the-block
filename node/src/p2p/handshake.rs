@@ -206,6 +206,7 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
             reason: Some("missing_features".into()),
             features_accepted: 0,
             min_backoff_ms: 1000,
+            supported_version: SUPPORTED_VERSION,
         };
     }
     let accepted = hello.feature_bits & cfg.supported_features;
@@ -238,12 +239,70 @@ pub fn list_peers() -> Vec<(String, PeerInfo)> {
     peers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-#[cfg(all(test, feature = "quic"))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use rcgen::{Certificate, CertificateParams, KeyPair, PKCS_ED25519};
 
+    fn base_cfg() -> HandshakeCfg {
+        HandshakeCfg {
+            network_id: [0u8; 4],
+            min_proto: SUPPORTED_VERSION,
+            required_features: FeatureBit::StorageV1 as u32,
+            supported_features: (FeatureBit::StorageV1 as u32)
+                | (FeatureBit::ComputeMarketV1 as u32),
+        }
+    }
+
+    fn base_hello() -> Hello {
+        Hello {
+            network_id: [0u8; 4],
+            proto_version: SUPPORTED_VERSION,
+            feature_bits: FeatureBit::StorageV1 as u32,
+            agent: "test-node".into(),
+            nonce: 0,
+            transport: Transport::Tcp,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn missing_features_rejection_reports_supported_version() {
+        let cfg = base_cfg();
+        let mut hello = base_hello();
+        hello.feature_bits = 0;
+        let ack = handle_handshake("peer", hello, &cfg);
+        assert!(!ack.ok);
+        assert_eq!(ack.reason.as_deref(), Some("missing_features"));
+        assert_eq!(ack.supported_version, SUPPORTED_VERSION);
+    }
+
+    #[test]
+    fn network_mismatch_is_rejected() {
+        let cfg = base_cfg();
+        let mut hello = base_hello();
+        hello.network_id = [1, 2, 3, 4];
+        let ack = handle_handshake("peer", hello, &cfg);
+        assert!(!ack.ok);
+        assert_eq!(ack.reason.as_deref(), Some("bad_network"));
+        assert_eq!(ack.supported_version, SUPPORTED_VERSION);
+    }
+
+    #[cfg(feature = "quic")]
+    fn quic_hello(cert: Vec<u8>, fingerprint: Option<Vec<u8>>) -> Hello {
+        let mut hello = base_hello();
+        hello.transport = Transport::Quic;
+        hello.quic_cert = Some(cert);
+        hello.quic_fingerprint = fingerprint;
+        hello
+    }
+
+    #[cfg(feature = "quic")]
     fn sample_quic_certificate() -> ([u8; 32], Vec<u8>, [u8; 32]) {
+        use rcgen::{Certificate, CertificateParams, KeyPair, PKCS_ED25519};
+
         let key_pair = KeyPair::generate_for(&PKCS_ED25519).expect("ed25519 keypair");
         let pk_raw = key_pair.public_key_raw();
         let mut peer_key = [0u8; 32];
@@ -258,37 +317,24 @@ mod tests {
         (peer_key, cert_der, fingerprint)
     }
 
-    fn base_hello(cert: Vec<u8>, fingerprint: Option<Vec<u8>>) -> Hello {
-        Hello {
-            network_id: [0u8; 4],
-            proto_version: SUPPORTED_VERSION,
-            feature_bits: 0,
-            agent: "test-node".into(),
-            nonce: 0,
-            transport: Transport::Quic,
-            quic_addr: None,
-            quic_cert: Some(cert),
-            quic_fingerprint: fingerprint,
-            quic_fingerprint_previous: Vec::new(),
-        }
-    }
-
+    #[cfg(feature = "quic")]
     #[test]
     fn rejects_certificate_with_peer_key_mismatch() {
         let (peer_key, cert, fingerprint) = sample_quic_certificate();
         let mut wrong_key = peer_key;
         wrong_key[0] ^= 0x01;
-        let hello = base_hello(cert, Some(fingerprint.to_vec()));
+        let hello = quic_hello(cert, Some(fingerprint.to_vec()));
         let err = validate_quic_certificate(&wrong_key, &hello).unwrap_err();
         assert_eq!(err, HandshakeError::Certificate);
     }
 
+    #[cfg(feature = "quic")]
     #[test]
     fn rejects_certificate_with_unexpected_fingerprint() {
         let (peer_key, cert, fingerprint) = sample_quic_certificate();
         let mut mismatched = fingerprint.to_vec();
         mismatched[0] ^= 0x01;
-        let hello = base_hello(cert, Some(mismatched));
+        let hello = quic_hello(cert, Some(mismatched));
         let err = validate_quic_certificate(&peer_key, &hello).unwrap_err();
         assert_eq!(err, HandshakeError::Certificate);
     }

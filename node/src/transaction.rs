@@ -15,12 +15,19 @@ use lru::LruCache;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::num::NonZeroUsize;
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum TxVersion {
     Ed25519Only,
     Dual,
     DilithiumOnly,
+}
+
+impl Default for TxVersion {
+    fn default() -> Self {
+        TxVersion::Ed25519Only
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -41,32 +48,34 @@ impl Default for TxSignature {
     }
 }
 
-impl IntoPy<PyObject> for TxSignature {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'py> IntoPyObject<'py> for TxSignature {
+    type Target = PyDict;
+    type Output = Bound<'py, PyDict>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
         let dict = PyDict::new(py);
-        dict.set_item("ed25519", PyBytes::new(py, &self.ed25519))
-            .expect("ed25519 key set");
+        dict.set_item("ed25519", PyBytes::new(py, &self.ed25519))?;
         #[cfg(feature = "quantum")]
         {
-            dict.set_item("dilithium", PyBytes::new(py, &self.dilithium))
-                .expect("dilithium key set");
+            dict.set_item("dilithium", PyBytes::new(py, &self.dilithium))?;
         }
-        dict.into()
+        Ok(dict)
     }
 }
 
 impl<'py> FromPyObject<'py> for TxSignature {
-    fn extract(obj: &'py PyAny) -> PyResult<Self> {
+    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
         if let Ok(dict) = obj.downcast::<PyDict>() {
             let ed25519 = dict
-                .get_item("ed25519")
+                .get_item("ed25519")?
                 .map(|value| value.extract::<Vec<u8>>())
                 .transpose()?
                 .unwrap_or_default();
             #[cfg(feature = "quantum")]
             {
                 let dilithium = dict
-                    .get_item("dilithium")
+                    .get_item("dilithium")?
                     .map(|value| value.extract::<Vec<u8>>())
                     .transpose()?
                     .unwrap_or_default();
@@ -97,8 +106,7 @@ impl<'py> FromPyObject<'py> for TxSignature {
             #[cfg(feature = "quantum")]
             {
                 let dilithium = obj
-                    .getattr("dilithium")
-                    .ok()
+                    .getattr_opt("dilithium")?
                     .map(|value| value.extract::<Vec<u8>>())
                     .transpose()?
                     .unwrap_or_default();
@@ -116,19 +124,23 @@ impl<'py> FromPyObject<'py> for TxSignature {
     }
 }
 
-impl IntoPy<PyObject> for TxVersion {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        match self {
+impl<'py> IntoPyObject<'py> for TxVersion {
+    type Target = PyString;
+    type Output = Bound<'py, PyString>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
+        let value = match self {
             TxVersion::Ed25519Only => "ed25519_only",
             TxVersion::Dual => "dual",
             TxVersion::DilithiumOnly => "dilithium_only",
-        }
-        .into_py(py)
+        };
+        Ok(PyString::new(py, value))
     }
 }
 
 impl<'py> FromPyObject<'py> for TxVersion {
-    fn extract(obj: &'py PyAny) -> PyResult<Self> {
+    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
         if let Ok(name) = obj.extract::<&str>() {
             let normalized = name.replace('-', "_").to_ascii_lowercase();
             return match normalized.as_str() {
@@ -161,10 +173,15 @@ impl<'py> FromPyObject<'py> for TxVersion {
 use crate::{fee, fee::FeeError, TxAdmissionError};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyBytes, PyDict};
+use pyo3::types::{PyAny, PyAnyMethods, PyBytes, PyDict, PyDictMethods, PyString};
+use pyo3::Bound;
+use pyo3::PyErr;
 
-static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> =
-    Lazy::new(|| Mutex::new(LruCache::new(1024)));
+static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> = Lazy::new(|| {
+    Mutex::new(LruCache::new(
+        NonZeroUsize::new(1024).expect("cache size non-zero"),
+    ))
+});
 
 /// Remote attestation accompanying a DID anchor transaction.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
@@ -793,7 +810,11 @@ pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyo3::{types::IntoPyDict, IntoPy, Py};
+    use pyo3::{
+        types::{IntoPyDict, PyBytes, PyDict, PyModule},
+        Py,
+    };
+    use std::ffi::CString;
 
     fn sample_payload() -> RawTxPayload {
         RawTxPayload {
@@ -855,11 +876,11 @@ mod tests {
 
             let payload_kw = Py::new(py, sample_payload()).expect("payload kw");
             let lane_kw = Py::new(py, FeeLane::Consumer).expect("lane kw");
-            let kwargs = [("tip", 99u64.into_py(py))].into_py_dict(py);
+            let kwargs = [("tip", 99u64)].into_py_dict(py).expect("kwargs dict");
             let tx_kw = tx_type
                 .call(
                     (payload_kw, Vec::<u8>::new(), vec![1u8; 16], lane_kw),
-                    Some(kwargs),
+                    Some(&kwargs),
                 )
                 .expect("keyword constructor call");
             assert_eq!(
@@ -870,6 +891,113 @@ mod tests {
                     .expect("tip extract"),
                 99
             );
+        });
+    }
+
+    #[test]
+    fn tx_signature_extracts_from_dict() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("ed25519", PyBytes::new(py, &[1, 2, 3]))
+                .expect("set ed25519");
+            #[cfg(feature = "quantum")]
+            dict.set_item("dilithium", PyBytes::new(py, &[4, 5, 6]))
+                .expect("set dilithium");
+
+            let sig: TxSignature = dict.extract().expect("dict extract");
+            assert_eq!(sig.ed25519, vec![1, 2, 3]);
+            #[cfg(feature = "quantum")]
+            assert_eq!(sig.dilithium, vec![4, 5, 6]);
+        });
+    }
+
+    #[test]
+    fn tx_signature_extracts_from_bytes() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let bytes = PyBytes::new(py, &[9, 8, 7]);
+            let sig: TxSignature = bytes.extract().expect("bytes extract");
+            assert_eq!(sig.ed25519, vec![9, 8, 7]);
+            #[cfg(feature = "quantum")]
+            assert!(sig.dilithium.is_empty());
+        });
+    }
+
+    #[test]
+    fn tx_signature_extracts_from_attributes() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            #[cfg(feature = "quantum")]
+            let module = {
+                let code = CString::new(
+                    "class Holder:\n    def __init__(self):\n        self.ed25519 = b'abc'\n        self.dilithium = b'def'\nholder = Holder()\n",
+                )
+                .expect("code CString");
+                PyModule::from_code(
+                    py,
+                    code.as_c_str(),
+                    pyo3::ffi::c_str!(""),
+                    pyo3::ffi::c_str!("holder_module"),
+                )
+                .expect("module")
+            };
+            #[cfg(not(feature = "quantum"))]
+            let module = {
+                let code = CString::new(
+                    "class Holder:\n    def __init__(self):\n        self.ed25519 = b'abc'\nholder = Holder()\n",
+                )
+                .expect("code CString");
+                PyModule::from_code(
+                    py,
+                    code.as_c_str(),
+                    pyo3::ffi::c_str!(""),
+                    pyo3::ffi::c_str!("holder_module"),
+                )
+                .expect("module")
+            };
+
+            let holder = module.getattr("holder").expect("holder attr");
+            let sig: TxSignature = holder.extract().expect("attr extract");
+            assert_eq!(sig.ed25519, b"abc".to_vec());
+            #[cfg(feature = "quantum")]
+            assert_eq!(sig.dilithium, b"def".to_vec());
+        });
+    }
+
+    #[test]
+    fn tx_version_extracts_from_strings() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let py_str = py
+                .eval(pyo3::ffi::c_str!("'Dual'"), None, None)
+                .expect("eval dual");
+            let version: TxVersion = py_str.extract().expect("string extract");
+            assert_eq!(version, TxVersion::Dual);
+
+            let ed = py
+                .eval(pyo3::ffi::c_str!("'ed25519-only'"), None, None)
+                .expect("eval ed25519");
+            let version: TxVersion = ed.extract().expect("normalize ed");
+            assert_eq!(version, TxVersion::Ed25519Only);
+        });
+    }
+
+    #[test]
+    fn tx_version_extracts_from_integers() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let zero = py
+                .eval(pyo3::ffi::c_str!("0"), None, None)
+                .expect("zero eval");
+            let version: TxVersion = zero.extract().expect("zero extract");
+            assert_eq!(version, TxVersion::Ed25519Only);
+
+            let two = py
+                .eval(pyo3::ffi::c_str!("2"), None, None)
+                .expect("two eval");
+            let version: TxVersion = two.extract().expect("two extract");
+            assert_eq!(version, TxVersion::DilithiumOnly);
         });
     }
 }

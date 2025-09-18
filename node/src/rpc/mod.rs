@@ -220,6 +220,16 @@ pub struct RpcError {
     message: &'static str,
 }
 
+impl RpcError {
+    pub fn code(&self) -> i32 {
+        self.code
+    }
+
+    pub fn message(&self) -> &'static str {
+        self.message
+    }
+}
+
 fn io_err_msg(e: &std::io::Error) -> &'static str {
     if e.to_string().contains("peer list changed") {
         "peer list changed"
@@ -1401,9 +1411,13 @@ fn dispatch(
         "net.quic_stats" => match serde_json::to_value(net::quic_stats()) {
             Ok(val) => val,
             Err(e) => {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!(target: "rpc", error = %e, "failed to serialize quic stats");
+                #[cfg(not(feature = "telemetry"))]
+                let _ = e;
                 return Err(RpcError {
                     code: -32603,
-                    message: format!("serialization error: {e}"),
+                    message: "serialization error",
                 });
             }
         },

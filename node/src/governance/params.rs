@@ -337,7 +337,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 25] = [
+    static REGS: [ParamSpec; 28] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,

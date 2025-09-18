@@ -26,7 +26,7 @@ use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex as StdMutex,
 };
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,7 +36,9 @@ use tar::Builder;
 use tempfile::NamedTempFile;
 use trust_dns_resolver::Resolver;
 
-use super::{ban_store, peer_metrics_store, record_peer_certificate, verify_peer_fingerprint};
+use super::{ban_store, peer_metrics_store};
+#[cfg(feature = "quic")]
+use super::{record_peer_certificate, verify_peer_fingerprint};
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -364,7 +366,7 @@ impl PeerSet {
         &self,
         msg: Message,
         addr: Option<SocketAddr>,
-        chain: &Arc<Mutex<Blockchain>>,
+        chain: &Arc<StdMutex<Blockchain>>,
     ) {
         let bytes = match bincode::serialize(&msg.body) {
             Ok(b) => b,
@@ -518,21 +520,21 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock();
+                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = bc.submit_transaction(tx);
             }
             Payload::BlobTx(tx) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock();
+                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = bc.submit_blob_tx(tx);
             }
             Payload::Block(_shard, block) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock();
+                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
                 if (block.index as usize) == bc.chain.len() {
                     let prev = bc.chain.last().map(|b| b.hash.clone()).unwrap_or_default();
                     if block.index == 0 || block.previous_hash == prev {
@@ -553,7 +555,7 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock();
+                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
                 if new_chain.len() > bc.chain.len() {
                     #[cfg(feature = "telemetry")]
                     let start = Instant::now();
@@ -1639,9 +1641,8 @@ pub struct PeerStat {
 }
 
 pub fn peer_stats_all(offset: usize, limit: usize) -> Vec<PeerStat> {
-    PEER_METRICS
-        .lock()
-        .unwrap()
+    let metrics = PEER_METRICS.lock();
+    metrics
         .iter()
         .skip(offset)
         .take(limit)
@@ -1657,9 +1658,8 @@ pub fn peer_stats_map(
     active_within: Option<u64>,
 ) -> HashMap<String, PeerMetrics> {
     let now = now_secs();
-    PEER_METRICS
-        .lock()
-        .unwrap()
+    let metrics = PEER_METRICS.lock();
+    metrics
         .iter()
         .filter(|(_, m)| min_rep.map_or(true, |r| m.reputation.score >= r))
         .filter(|(_, m)| active_within.map_or(true, |s| now.saturating_sub(m.last_updated) <= s))
@@ -1687,6 +1687,14 @@ fn remove_peer_metrics(pk: &[u8; 32]) {
 #[allow(dead_code)]
 fn remove_peer_metrics(_pk: &[u8; 32]) {}
 
+#[cfg(test)]
+static RECORDED_DROPS: Lazy<Mutex<Vec<SocketAddr>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+#[cfg(test)]
+pub(crate) fn take_recorded_drops() -> Vec<SocketAddr> {
+    RECORDED_DROPS.lock().drain(..).collect()
+}
+
 pub fn record_ip_drop(ip: &SocketAddr) {
     #[cfg(not(feature = "telemetry"))]
     let _ = ip;
@@ -1698,6 +1706,10 @@ pub fn record_ip_drop(ip: &SocketAddr) {
                 .with_label_values(&[id.as_str(), DropReason::Duplicate.as_ref()])
                 .inc();
         }
+    }
+    #[cfg(test)]
+    {
+        RECORDED_DROPS.lock().push(*ip);
     }
 }
 
@@ -1721,6 +1733,10 @@ struct QuicEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
+    use axum::{routing::post, Router};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     struct EnvGuard {
@@ -1785,6 +1801,42 @@ mod tests {
 
         let next = set.check_rate(&pk).expect_err("peer should remain banned");
         assert!(matches!(next, PeerErrorCode::Banned));
+    }
+
+    #[tokio::test]
+    async fn aggregator_failover_selects_next_url() {
+        let received = Arc::new(AtomicBool::new(false));
+        let flag = received.clone();
+        let handler = move || {
+            let flag = flag.clone();
+            async move {
+                flag.store(true, Ordering::SeqCst);
+                StatusCode::OK
+            }
+        };
+        let app = Router::new().route("/ingest", post(handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app.into_make_service())
+                .await
+                .unwrap();
+        });
+        let bad = "http://127.0.0.1:59999".to_string();
+        let good = format!("http://{}", addr);
+        let client = AggregatorClient {
+            urls: vec![bad, good],
+            token: "t".into(),
+            client: reqwest::Client::new(),
+            idx: Arc::new(AtomicUsize::new(0)),
+        };
+        aggregator_guard().replace(client.clone());
+        let snap = PeerSnapshot {
+            peer_id: "p".into(),
+            metrics: PeerMetrics::default(),
+        };
+        client.ingest(vec![snap]).await;
+        assert!(received.load(Ordering::SeqCst));
     }
 }
 
@@ -2358,51 +2410,6 @@ fn persist_snapshot(pk: &[u8; 32], m: &PeerMetrics) {
     if let Some(store) = peer_metrics_store::store() {
         let ttl = PEER_METRICS_RETENTION.load(Ordering::Relaxed);
         store.insert(pk, m, ttl);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::http::StatusCode;
-    use axum::{routing::post, Router};
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    #[tokio::test]
-    async fn aggregator_failover_selects_next_url() {
-        let received = Arc::new(AtomicBool::new(false));
-        let flag = received.clone();
-        let flag_clone = flag.clone();
-        let handler = move || {
-            let flag = flag_clone.clone();
-            async move {
-                flag.store(true, Ordering::SeqCst);
-                StatusCode::OK
-            }
-        };
-        let app = Router::new().route("/ingest", post(handler));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            axum::serve(listener, app.into_make_service())
-                .await
-                .unwrap();
-        });
-        let bad = "http://127.0.0.1:59999".to_string();
-        let good = format!("http://{}", addr);
-        let client = AggregatorClient {
-            urls: vec![bad, good],
-            token: "t".into(),
-            client: reqwest::Client::new(),
-            idx: Arc::new(AtomicUsize::new(0)),
-        };
-        aggregator_guard().replace(client.clone());
-        let snap = PeerSnapshot {
-            peer_id: "p".into(),
-            metrics: PeerMetrics::default(),
-        };
-        client.ingest(vec![snap]).await;
-        assert!(received.load(Ordering::SeqCst));
     }
 }
 

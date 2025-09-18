@@ -1,7 +1,7 @@
 use serde::Serialize;
 
 /// Core VM opcodes.
-#[derive(Clone, Copy, Serialize, Debug)]
+#[derive(Clone, Copy, Serialize, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum OpCode {
     Halt = 0x00,

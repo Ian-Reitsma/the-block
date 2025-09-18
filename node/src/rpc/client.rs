@@ -2,7 +2,6 @@ use rand::Rng;
 use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::io;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -61,27 +60,32 @@ impl RpcClient {
         base + Duration::from_millis(extra)
     }
 
-    fn maybe_inject_fault(&self) -> Result<(), reqwest::Error> {
+    fn maybe_inject_fault(&self) -> Result<(), RpcClientError> {
         if self.fault_rate > 0.0 && rand::thread_rng().gen_bool(self.fault_rate) {
-            return Err(reqwest::Error::from(io::Error::new(
-                io::ErrorKind::Other,
-                "injected fault",
-            )));
+            return Err(RpcClientError::InjectedFault);
         }
         Ok(())
     }
 
     /// Perform a JSON-RPC call to `url` with `payload`, retrying on timeout.
-    pub fn call<T: Serialize>(&self, url: &str, payload: &T) -> Result<Response, reqwest::Error> {
+    pub fn call<T: Serialize>(&self, url: &str, payload: &T) -> Result<Response, RpcClientError> {
         let mut attempt = 0;
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
             self.maybe_inject_fault()?;
-            let res = self.http.post(url).json(payload).timeout(timeout).send();
+            let res = self
+                .http
+                .post(url)
+                .json(payload)
+                .timeout(timeout)
+                .send()
+                .map_err(RpcClientError::from);
             match res {
                 Ok(r) => return Ok(r),
-                Err(e) if attempt < self.max_retries && e.is_timeout() => {
+                Err(RpcClientError::Transport(e))
+                    if attempt < self.max_retries && e.is_timeout() =>
+                {
                     attempt += 1;
                     let delay = self.backoff_with_jitter(attempt);
                     // ensure we don't spin too fast if server responds immediately
@@ -89,9 +93,39 @@ impl RpcClient {
                         sleep(delay - start.elapsed());
                     }
                 }
-                Err(e) => return Err(e),
+                Err(err) => return Err(err),
             }
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum RpcClientError {
+    Transport(reqwest::Error),
+    InjectedFault,
+}
+
+impl fmt::Display for RpcClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RpcClientError::Transport(err) => write!(f, "transport error: {err}"),
+            RpcClientError::InjectedFault => f.write_str("fault injection triggered"),
+        }
+    }
+}
+
+impl std::error::Error for RpcClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            RpcClientError::Transport(err) => Some(err),
+            RpcClientError::InjectedFault => None,
+        }
+    }
+}
+
+impl From<reqwest::Error> for RpcClientError {
+    fn from(err: reqwest::Error) -> Self {
+        RpcClientError::Transport(err)
     }
 }
 
@@ -108,7 +142,7 @@ pub struct InflationParams {
 }
 
 impl RpcClient {
-    pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, reqwest::Error> {
+    pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             jsonrpc: &'static str,
@@ -131,7 +165,10 @@ impl RpcClient {
             params,
             auth: None,
         };
-        let res = self.call(url, &payload)?.json::<Envelope<MempoolStats>>()?;
+        let res = self
+            .call(url, &payload)?
+            .json::<Envelope<MempoolStats>>()
+            .map_err(RpcClientError::from)?;
         Ok(res.result)
     }
 
@@ -158,7 +195,6 @@ impl RpcClient {
 
         #[derive(Deserialize)]
         struct WalletQosAck {
-            #[serde(default)]
             status: Option<String>,
         }
 
@@ -178,6 +214,7 @@ impl RpcClient {
             .call(url, &payload)
             .map_err(WalletQosError::from)?
             .json::<RpcEnvelope<WalletQosAck>>()
+            .map_err(RpcClientError::from)
             .map_err(WalletQosError::from)?;
 
         if let Some(error) = envelope.error {
@@ -199,7 +236,7 @@ impl RpcClient {
         Ok(())
     }
 
-    pub fn inflation_params(&self, url: &str) -> Result<InflationParams, reqwest::Error> {
+    pub fn inflation_params(&self, url: &str) -> Result<InflationParams, RpcClientError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             jsonrpc: &'static str,
@@ -220,11 +257,12 @@ impl RpcClient {
         };
         let res = self
             .call(url, &payload)?
-            .json::<Envelope<InflationParams>>()?;
+            .json::<Envelope<InflationParams>>()
+            .map_err(RpcClientError::from)?;
         Ok(res.result)
     }
 
-    pub fn stake_role(&self, url: &str, id: &str, role: &str) -> Result<u64, reqwest::Error> {
+    pub fn stake_role(&self, url: &str, id: &str, role: &str) -> Result<u64, RpcClientError> {
         #[derive(Serialize)]
         struct Payload {
             jsonrpc: &'static str,
@@ -243,7 +281,10 @@ impl RpcClient {
             method: "stake.role",
             params,
         };
-        let res = self.call(url, &payload)?.json::<Envelope>()?;
+        let res = self
+            .call(url, &payload)?
+            .json::<Envelope>()
+            .map_err(RpcClientError::from)?;
         Ok(res.result["stake"].as_u64().unwrap_or(0))
     }
 }
@@ -255,10 +296,9 @@ struct RpcErrorBody {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 struct RpcEnvelope<T> {
-    #[serde(default)]
     result: Option<T>,
-    #[serde(default)]
     error: Option<RpcErrorBody>,
 }
 
@@ -288,7 +328,7 @@ pub struct WalletQosEvent<'a> {
 
 #[derive(Debug)]
 pub enum WalletQosError {
-    Transport(reqwest::Error),
+    Transport(RpcClientError),
     Rpc { code: i64, message: String },
     MissingStatus,
     InvalidStatus(String),
@@ -318,8 +358,8 @@ impl std::error::Error for WalletQosError {
     }
 }
 
-impl From<reqwest::Error> for WalletQosError {
-    fn from(err: reqwest::Error) -> Self {
+impl From<RpcClientError> for WalletQosError {
+    fn from(err: RpcClientError) -> Self {
         Self::Transport(err)
     }
 }
@@ -327,6 +367,7 @@ impl From<reqwest::Error> for WalletQosError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn consume_http_request(stream: &mut std::net::TcpStream) {
         use std::io::Read;
@@ -440,5 +481,24 @@ mod tests {
         }
 
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn call_returns_fault_injection_error() {
+        let client = RpcClient {
+            http: Client::new(),
+            base_timeout: Duration::from_millis(10),
+            jitter: Duration::from_millis(0),
+            max_retries: 0,
+            fault_rate: 1.0,
+        };
+        let payload = json!({ "jsonrpc": "2.0", "method": "noop" });
+        let err = client
+            .call("http://127.0.0.1:0", &payload)
+            .expect_err("fault injection should abort the request");
+        match err {
+            RpcClientError::InjectedFault => (),
+            other => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }

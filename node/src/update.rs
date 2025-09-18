@@ -1,6 +1,5 @@
 use crate::governance::{self, ReleaseAttestation};
 use crate::provenance;
-use blake3::hash;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
 use std::fs;
@@ -79,7 +78,7 @@ pub fn fetch_release(
         .bytes()
         .map_err(|e| UpdateError::Network(e.to_string()))?
         .to_vec();
-    let actual = hash(&bytes).to_hex().to_string();
+    let actual = blake3::hash(&bytes).to_hex().to_string();
     if actual != normalized {
         return Err(UpdateError::HashMismatch {
             expected: normalized,
@@ -114,19 +113,48 @@ pub fn fetch_release(
     }
     let mut file = NamedTempFile::new()?;
     file.write_all(&bytes)?;
-    let path = if let Some(dest) = destination {
-        file.persist(dest)?;
-        dest.to_path_buf()
-    } else {
-        let dest = std::env::temp_dir().join(format!("the-block-{}.bin", normalized));
-        file.persist(&dest)?;
-        dest
-    };
+    let dest_path = destination
+        .map(|dest| dest.to_path_buf())
+        .unwrap_or_else(|| std::env::temp_dir().join(format!("the-block-{}.bin", normalized)));
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let path = persist_temp_file(file, &dest_path)?;
     Ok(DownloadedRelease {
         hash: normalized,
         path,
         bytes,
     })
+}
+
+fn persist_temp_file(file: NamedTempFile, dest: &Path) -> Result<PathBuf, UpdateError> {
+    file.persist(dest)
+        .map_err(|err| UpdateError::Io(err.error))?;
+    Ok(dest.to_path_buf())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn persist_temp_file_converts_permission_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let readonly = dir.path().join("readonly");
+        fs::create_dir(&readonly).unwrap();
+        let mut perms = fs::metadata(&readonly).unwrap().permissions();
+        perms.set_mode(0o555);
+        fs::set_permissions(&readonly, perms).unwrap();
+        let file = NamedTempFile::new().unwrap();
+        let result = persist_temp_file(file, &readonly.join("release.bin"));
+        match result {
+            Err(UpdateError::Io(err)) => {
+                assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+            other => panic!("unexpected persist result: {other:?}"),
+        }
+    }
 }
 
 pub fn install_release(hash: &str) -> Result<(), UpdateError> {

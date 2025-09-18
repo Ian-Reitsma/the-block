@@ -252,12 +252,7 @@ fn decrypt_message(key: &Key, data: &str, nonce: &[u8]) -> Option<String> {
 }
 
 fn derive_encryption_key(passphrase: &str) -> Key {
-    let mut key_bytes = [0u8; 32];
-    derive_key(
-        "the-block-log-indexer",
-        passphrase.as_bytes(),
-        &mut key_bytes,
-    );
+    let key_bytes = derive_key("the-block-log-indexer", passphrase.as_bytes());
     Key::clone_from_slice(&key_bytes)
 }
 
