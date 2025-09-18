@@ -7,9 +7,11 @@ Implementation lives in `node/src/storage/erasure.rs`.
 ## Parameters
 
 The encoder splits each chunk into **K = 16** data shards and adds **R = 5**
-local parities plus **H = 3** global parities for a total of **24** shards.  The
+local parities plus **H = 3** global parities for a total of **24** Reed–Solomon
+shards. A fountain overlay then contributes **3** additional XOR shards derived
+from the first two data shards, bringing the per-chunk total to **27**. The
 constants are defined at the top of the module:
-[`node/src/storage/erasure.rs`](../node/src/storage/erasure.rs#L3-L7).
+[`node/src/storage/erasure.rs`](../node/src/storage/erasure.rs#L3-L32).
 
 ```text
 K (data) = 16
@@ -19,8 +21,10 @@ PARITY = R + H = 8
 ```
 
 After Reed–Solomon encoding, a lightweight fountain overlay combines the first
-two shards to produce additional XOR-based shards. These appended shards help
-long-range repairs by providing extra combinations beyond the RS parity set.
+two shards to produce three additional XOR-based shards. These appended shards
+help long-range repairs by providing extra combinations beyond the RS parity
+set and can substitute for either of the first two data shards during
+reconstruction.
 
 ## Encoding
 
@@ -35,20 +39,25 @@ let shards = erasure::encode(&blob)?; // Vec<Vec<u8>> of length 24+
 
 ## Reconstruction
 
-`reconstruct` accepts a vector of optional shards where missing entries are
-`None`. Reed–Solomon fills in the gaps and the first data shard is returned as
-the reassembled chunk.  The helper is used by the repair logic when peers supply
-subset shards.
+`reconstruct` accepts a vector of optional shards (including fountain shards)
+and the expected ciphertext length of the chunk. Reed–Solomon fills in missing
+entries, optionally using the fountain overlay to recover either of the first
+two data shards. All recovered data shards are concatenated and trimmed to the
+requested length, yielding the original encrypted chunk.
 
 ```rust
-let original = erasure::reconstruct(shards)?;
+let original = erasure::reconstruct(shards, chunk_cipher_len)?;
 ```
 
 ## Integration
 
 - `pipeline.rs` calls `encode` when ingesting blobs and `reconstruct` when peers
-  supply partial data during repair cycles.
-- `repair.rs` performs on-demand reconstruction to heal missing shards.
+  supply partial data during repair cycles. `get_object` now assembles all
+  required shards per chunk (data, parity, and fountain overlay) and trims the
+  decrypted plaintext to the manifest’s recorded length.
+- `repair.rs` performs on-demand reconstruction to heal missing shards, then
+  re-encodes the chunk so each missing shard (data, parity, and overlay) is
+  rewritten with the correct bytes.
 - Network messages carry individual shards via the `Shard` variant so gossip
   traffic can rebalance storage.
 
@@ -57,14 +66,15 @@ let original = erasure::reconstruct(shards)?;
 1. **Shard Counts** – Adjusting `K`, `R`, or `H` requires network-wide
    coordination because shard indices are baked into manifests. The current
    16/5/3 split balances overhead (~50%) with recovery capability.
-2. **Fountain Overlay** – The `overlay_fountain` helper adds five extra XOR
+2. **Fountain Overlay** – The `overlay_fountain` helper adds three extra XOR
    shards from the first two data shards, providing cheap diversity for
-   opportunistic repairs.
+   opportunistic repairs and a limited ability to recover the first or second
+   shard directly from the overlay.
 3. **Verification** – Reconstruction failures bubble up as `Err(String)`; the
    caller should treat them as potential corruption and re-fetch the blob.
-4. **Testing** – `node/tests/storage_erasure.rs` simulates random shard loss and
-   ensures the original data is recoverable when at least `K` shards are
-   present.
+4. **Testing** – `StoragePipeline` unit tests simulate random shard loss and
+   ensure the original data is recoverable when at least `K` shards are present
+   and that the repair loop rewrites missing shards with fresh encodings.
 5. **Metrics** – `storage_repair_bytes_total` and `storage_chunk_put_seconds`
    expose encoding and repair costs; monitor these to spot hotspots.
 

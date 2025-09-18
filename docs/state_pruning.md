@@ -15,16 +15,20 @@ window of the most recent checkpoints. The window length is controlled by the
 keep = 4            # number of recent snapshots to retain
 ```
 
-Setting `keep = 0` disables automatic pruning. Archival operators should either
-set a large window or pass the `--no-prune` CLI flag to opt out entirely.
+Setting `keep = 0` keeps no historical snapshots—the pruning pass will delete
+every file after each checkpoint. Operators that need to retain everything
+should configure a large window or pass the `--no-prune` CLI flag to disable the
+pruner entirely.
 
 ## Snapshot Creation and Prune Cycle
 
 `state/src/snapshot.rs` defines `SnapshotManager`, which serializes the Merkle
 trie to disk after each block or on a configured interval. During `snapshot()`
 execution the manager invokes `prune()` to remove snapshots older than the
-retention window. Pruned files are deleted from disk and removed from the
-checkpoint index.
+retention window. The pruning pass sorts candidate files by their filesystem
+modification time (newest first) and, when timestamps collide, falls back to the
+filename for a deterministic order. Files beyond the configured `keep` count are
+deleted from disk and removed from the checkpoint index.
 
 Every snapshot filename is the BLAKE3 hash of its root state. Restoring a node
 is as simple as reading the snapshot and replaying blocks higher than the

@@ -351,6 +351,15 @@ pub fn raw_bands(lane: FeeLane) -> Option<(u64, u64, u64)> {
     BOARD.read().ok().and_then(|b| b.raw_bands(lane))
 }
 
+/// Return the most recent spot price (weighted median if available).
+pub fn spot_price_per_unit(lane: FeeLane) -> Option<u64> {
+    BOARD.read().ok().and_then(|b| {
+        b.bands(lane)
+            .map(|(_, median, _)| median)
+            .or_else(|| b.raw_bands(lane).map(|(_, median, _)| median))
+    })
+}
+
 /// Compute backlog adjusted bid using current bands for a lane.
 pub fn backlog_adjusted_bid(lane: FeeLane, backlog: usize) -> Option<u64> {
     BOARD

@@ -35,7 +35,7 @@ units per second.
 The marketplace exposes `industrial_backlog` and `industrial_utilization`
 gauges. `industrial_backlog` counts queued compute units awaiting execution,
 while `industrial_utilization` reports realised throughput over the current
-window. The subsidy governor samples these metrics through
+window as an integer percentage. The subsidy governor samples these metrics through
 `Block::industrial_subsidies()` when retuning multipliers, tying pricing to
 actual demand.
 
@@ -48,9 +48,12 @@ curl localhost:26658/compute_market.stats
 ```json
 {
   "industrial_backlog": 12,
-  "industrial_utilization": 0.83,
+  "industrial_utilization": 83,
   "industrial_units_total": 240,
-  "industrial_price_per_unit": 5
+  "industrial_price_per_unit": 5,
+  "industrial_price_weighted": 6,
+  "industrial_price_base": 4,
+  "pending": []
 }
 ```
 
@@ -203,7 +206,8 @@ effective_price = base_price * w
 ```
 
 Weighted and raw median prices surface via `compute_market.stats` under
-`industrial_price_weighted` and `industrial_price_base`. Each adjusted entry
+`industrial_price_weighted` and `industrial_price_base`, while the canonical
+spot price is exposed through `industrial_price_per_unit`. Each adjusted entry
 increments the `price_weight_applied_total` counter.
 
 Exit code `0` indicates success; non-zero codes map to `not_found` or

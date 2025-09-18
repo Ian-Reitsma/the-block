@@ -34,24 +34,49 @@ pub fn run_once(db: &mut SimpleDb) -> Result<(), String> {
     for key in keys {
         let bytes = db.get(&key).ok_or("missing manifest")?;
         let manifest: ObjectManifest = bincode::deserialize(&bytes).map_err(|e| e.to_string())?;
-        if let Redundancy::ReedSolomon { data: d, parity: p } = manifest.redundancy {
-            let step = (d + p) as usize;
-            for group in manifest.chunks.chunks(step) {
-                let mut shards = Vec::new();
-                let mut missing_idx = None;
-                for (i, ch) in group.iter().enumerate() {
-                    let blob = db.get(&format!("chunk/{}", hex::encode(ch.id)));
+        if let Redundancy::ReedSolomon { .. } = manifest.redundancy {
+            let shards_per_chunk = erasure::total_shards_per_chunk();
+            if shards_per_chunk == 0 {
+                continue;
+            }
+            if manifest.chunks.len() % shards_per_chunk != 0 {
+                return Err("corrupt manifest".into());
+            }
+            for (chunk_idx, group) in manifest.chunks.chunks(shards_per_chunk).enumerate() {
+                let mut shards = vec![None; shards_per_chunk];
+                let mut missing = Vec::new();
+                for (slot, ch) in group.iter().enumerate() {
+                    let key = format!("chunk/{}", hex::encode(ch.id));
+                    let blob = db.get(&key);
                     if blob.is_none() {
-                        missing_idx = Some(i);
+                        missing.push(slot);
                     }
-                    shards.push(blob);
+                    shards[slot] = blob;
                 }
-                if let Some(idx) = missing_idx {
-                    let rebuilt = erasure::reconstruct(shards)?;
+                if missing.is_empty() {
+                    continue;
+                }
+                let expected_cipher = manifest.chunk_cipher_len(chunk_idx);
+                let rebuilt_chunk = erasure::reconstruct(shards, expected_cipher)?;
+                let encoded = erasure::encode(&rebuilt_chunk)?;
+                if encoded.len() != shards_per_chunk {
+                    return Err("encoded shard count mismatch".into());
+                }
+                let mut repaired_bytes = 0u64;
+                for idx in missing {
+                    let shard = encoded
+                        .get(idx)
+                        .cloned()
+                        .ok_or_else(|| "missing encoded shard".to_string())?;
                     let key = format!("chunk/{}", hex::encode(group[idx].id));
-                    db.insert(&key, rebuilt.clone());
-                    #[cfg(feature = "telemetry")]
-                    STORAGE_REPAIR_BYTES_TOTAL.inc_by(rebuilt.len() as u64);
+                    db.insert(&key, shard.clone());
+                    repaired_bytes = repaired_bytes.saturating_add(shard.len() as u64);
+                }
+                #[cfg(feature = "telemetry")]
+                {
+                    if repaired_bytes > 0 {
+                        STORAGE_REPAIR_BYTES_TOTAL.inc_by(repaired_bytes);
+                    }
                 }
             }
         }

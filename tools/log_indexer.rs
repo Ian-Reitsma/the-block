@@ -204,13 +204,14 @@ fn canonical_source_key(path: &Path) -> String {
 }
 
 fn last_ingested_offset(conn: &Connection, source: &str) -> Result<u64> {
-    conn.query_row(
-        "SELECT offset FROM ingest_state WHERE source = ?1",
-        params![source],
-        |row| row.get::<_, i64>(0),
-    )
-    .optional()
-    .map(|opt| opt.unwrap_or(0).max(0) as u64)
+    let value = conn
+        .query_row(
+            "SELECT offset FROM ingest_state WHERE source = ?1",
+            params![source],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    Ok(value.unwrap_or(0).max(0) as u64)
 }
 
 fn update_ingest_offset(tx: &rusqlite::Transaction<'_>, source: &str, offset: u64) -> Result<()> {
@@ -226,7 +227,7 @@ fn update_ingest_offset(tx: &rusqlite::Transaction<'_>, source: &str, offset: u6
     Ok(())
 }
 
-fn encrypt_message(key: &Key<XChaCha20Poly1305>, message: &str) -> Result<(String, Vec<u8>)> {
+fn encrypt_message(key: &Key, message: &str) -> Result<(String, Vec<u8>)> {
     let cipher = XChaCha20Poly1305::new(key);
     let mut nonce_bytes = [0u8; 24];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -240,7 +241,7 @@ fn encrypt_message(key: &Key<XChaCha20Poly1305>, message: &str) -> Result<(Strin
     ))
 }
 
-fn decrypt_message(key: &Key<XChaCha20Poly1305>, data: &str, nonce: &[u8]) -> Option<String> {
+fn decrypt_message(key: &Key, data: &str, nonce: &[u8]) -> Option<String> {
     let cipher = XChaCha20Poly1305::new(key);
     let nonce = XNonce::from_slice(nonce);
     let bytes = general_purpose::STANDARD.decode(data).ok()?;
@@ -250,14 +251,14 @@ fn decrypt_message(key: &Key<XChaCha20Poly1305>, data: &str, nonce: &[u8]) -> Op
         .and_then(|plain| String::from_utf8(plain).ok())
 }
 
-fn derive_encryption_key(passphrase: &str) -> Key<XChaCha20Poly1305> {
+fn derive_encryption_key(passphrase: &str) -> Key {
     let mut key_bytes = [0u8; 32];
     derive_key(
         "the-block-log-indexer",
         passphrase.as_bytes(),
         &mut key_bytes,
     );
-    Key::from_slice(&key_bytes).to_owned()
+    Key::clone_from_slice(&key_bytes)
 }
 
 #[cfg(feature = "telemetry")]
@@ -285,7 +286,7 @@ fn increment_indexed_metric(correlation_id: &str) {
 #[cfg(not(feature = "telemetry"))]
 fn increment_indexed_metric(_correlation_id: &str) {}
 
-fn row_to_entry(row: &Row<'_>, key: Option<&Key<XChaCha20Poly1305>>) -> Result<LogEntry> {
+fn row_to_entry(row: &Row<'_>, key: Option<&Key>) -> Result<LogEntry> {
     let encrypted: i64 = row.get("encrypted")?;
     let nonce: Option<Vec<u8>> = row.get("nonce")?;
     let stored_msg: String = row.get("message")?;

@@ -16,5 +16,6 @@ pub fn params(bc: &Arc<Mutex<Blockchain>>) -> serde_json::Value {
         "industrial_multiplier": guard.params.industrial_multiplier,
         "industrial_backlog": backlog,
         "industrial_utilization": util,
+        "rent_rate_ct_per_byte": guard.params.rent_rate_ct_per_byte,
     })
 }

@@ -50,7 +50,10 @@ async fn rpc_inflation_reports_industrial() {
 
     let val = rpc(&addr, r#"{"method":"inflation.params"}"#).await;
     assert!(val["result"]["industrial_multiplier"].is_number());
+    assert!(val["result"]["rent_rate_ct_per_byte"].is_number());
 
     let val2 = rpc(&addr, r#"{"method":"compute_market.stats"}"#).await;
     assert!(val2["result"]["industrial_backlog"].is_number());
+    assert!(val2["result"]["industrial_units_total"].is_number());
+    assert!(val2["result"]["industrial_price_per_unit"].is_number());
 }
