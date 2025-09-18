@@ -95,7 +95,7 @@ fn decode_signature(sig_hex: &str) -> Option<Signature> {
     }
     let mut arr = [0u8; SIGNATURE_LENGTH];
     arr.copy_from_slice(&bytes);
-    Signature::from_bytes(&arr).ok()
+    Some(Signature::from_bytes(&arr))
 }
 
 /// Refresh the cached release signer list from the configured sources.

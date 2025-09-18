@@ -65,12 +65,30 @@ pub fn policy_diff(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json
             })
             .resolve()
     };
+    let load_error = || RpcError {
+        code: -32070,
+        message: "load failed",
+    };
     let new_pack = if std::path::Path::new(path).exists() {
-        jurisdiction::PolicyPack::load(path)
+        jurisdiction::PolicyPack::load(path).map_err(|_| load_error())
     } else {
-        jurisdiction::PolicyPack::template(path)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "template"))
+        jurisdiction::PolicyPack::template(path).ok_or_else(load_error)
     }?
     .resolve();
     Ok(jurisdiction::PolicyPack::diff(&current, &new_pack))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn policy_diff_reports_missing_pack() {
+        let dir = tempdir().unwrap();
+        let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+        let err = policy_diff(&bc, "definitely-missing-template").unwrap_err();
+        assert_eq!(err.code(), -32070);
+        assert_eq!(err.message(), "load failed");
+    }
 }

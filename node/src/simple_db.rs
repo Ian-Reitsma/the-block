@@ -2,13 +2,16 @@
 #![forbid(unsafe_code)]
 
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ledger::address::ShardId;
-use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options};
+use rocksdb::{
+    BoundColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options,
+};
 use static_assertions::assert_impl_all;
 use tempfile;
 
@@ -20,7 +23,7 @@ pub struct SimpleDb {
     db: DBWithThreadMode<MultiThreaded>,
     byte_limit: Option<usize>,
     prefix_cache: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
-    cf_handles: Mutex<HashMap<String, ColumnFamily>>,
+    cf_handles: Mutex<HashSet<String>>,
 }
 
 assert_impl_all!(SimpleDb: Send, Sync);
@@ -57,14 +60,7 @@ impl SimpleDb {
             Duration::from_secs(24 * 60 * 60),
         )
         .expect("open rocksdb");
-        let mut handles = HashMap::new();
-        for name in descriptor_names {
-            let handle = db
-                .cf_handle(&name)
-                .copied()
-                .unwrap_or_else(|| panic!("cf handle: {name}"));
-            handles.insert(name, handle);
-        }
+        let handles = descriptor_names.into_iter().collect();
         Self {
             db,
             byte_limit: None,
@@ -77,20 +73,18 @@ impl SimpleDb {
     pub fn flush_wal(&self) {
         let _ = self.db.flush_wal(true);
     }
-    fn ensure_cf(&self, name: &str) -> ColumnFamily {
-        if let Some(&cf) = self.cf_handles.lock().get(name) {
-            return cf;
+    fn ensure_cf(&self, name: &str) -> Arc<BoundColumnFamily> {
+        let mut handles = self.cf_handles.lock();
+        if !handles.contains(name) {
+            self.db
+                .create_cf(name, &Options::default())
+                .expect("create cf");
+            handles.insert(name.to_string());
         }
+        drop(handles);
         self.db
-            .create_cf(name, &Options::default())
-            .expect("create cf");
-        let handle = self
-            .db
             .cf_handle(name)
-            .copied()
-            .unwrap_or_else(|| panic!("cf handle: {name}"));
-        self.cf_handles.lock().insert(name.to_string(), handle);
-        handle
+            .unwrap_or_else(|| panic!("cf handle: {name}"))
     }
 
     fn get_cf(&self, cf: &str, key: &str) -> Option<Vec<u8>> {
@@ -211,7 +205,7 @@ impl SimpleDb {
         deltas: &mut Vec<DbDelta>,
     ) -> io::Result<()> {
         let cf = format!("shard:{shard}");
-        self.insert_cf_with_delta(&cf, key, value, deltas)
+        self.insert_cf_with_delta(cf.as_str(), key, value, deltas)
     }
 
     pub fn try_remove(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
@@ -235,7 +229,7 @@ impl SimpleDb {
                 .split_once('|')
                 .map(|(c, k)| (c.to_string(), k.to_string()))
                 .unwrap_or_else(|| ("default".to_string(), full.clone()));
-            let handle = self.ensure_cf(&cf_name);
+            let handle = self.ensure_cf(cf_name.as_str());
             match prev {
                 Some(v) => {
                     let _ = self.db.put_cf(&handle, key.as_bytes(), &v);
@@ -263,16 +257,16 @@ impl SimpleDb {
 
     /// Enumerate existing shard column families.
     pub fn shard_ids(&self) -> Vec<ShardId> {
-        self.cf_handles
-            .lock()
-            .keys()
+        let handles = self.cf_handles.lock();
+        handles
+            .iter()
             .filter_map(|k| k.strip_prefix("shard:")?.parse::<ShardId>().ok())
             .collect()
     }
 
     pub fn get_shard(&self, shard: ShardId, key: &str) -> Option<Vec<u8>> {
         let cf = format!("shard:{shard}");
-        self.get_cf(&cf, key)
+        self.get_cf(cf.as_str(), key)
     }
 
     pub fn try_flush(&self) -> io::Result<()> {
@@ -373,5 +367,20 @@ mod tests {
         let err = db.put(b"alpha", b"toolong").expect_err("limit enforcement");
         assert_eq!(err.kind(), io::ErrorKind::Other);
         assert!(db.get("alpha").is_none());
+    }
+
+    #[test]
+    fn reopen_recovers_existing_column_families() {
+        let dir = tempdir().expect("temp dir");
+        {
+            let mut db = SimpleDb::open(dir.path().to_str().expect("path"));
+            let mut deltas = Vec::new();
+            db.insert_shard_with_delta(7, "alpha", b"beta".to_vec(), &mut deltas)
+                .expect("insert shard");
+            db.flush();
+        }
+
+        let db = SimpleDb::open(dir.path().to_str().expect("path"));
+        assert_eq!(db.get_shard(7, "alpha"), Some(b"beta".to_vec()));
     }
 }

@@ -5,6 +5,7 @@ use hex;
 use serde::{Deserialize, Serialize};
 use state::{MerkleTrie, Snapshot};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::fs;
 use std::path::Path;
 
@@ -327,16 +328,34 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
     let snap: Snapshot = bincode::deserialize(&data)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let mut accounts = HashMap::new();
-    for s in snap.accounts {
+    for (key, value) in snap.entries {
+        let address = String::from_utf8(key)
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid address"))?;
+        if value.len() < 24 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "snapshot entry too short",
+            ));
+        }
+        let consumer = u64::from_le_bytes(value[0..8].try_into().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "consumer decode")
+        })?);
+        let industrial = u64::from_le_bytes(value[8..16].try_into().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "industrial decode")
+        })?);
+        let nonce =
+            u64::from_le_bytes(value[16..24].try_into().map_err(|_| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "nonce decode")
+            })?);
         accounts.insert(
-            s.address,
+            address.clone(),
             Account {
-                address: String::new(),
+                address,
                 balance: crate::TokenBalance {
-                    consumer: s.consumer,
-                    industrial: s.industrial,
+                    consumer,
+                    industrial,
                 },
-                nonce: s.nonce,
+                nonce,
                 pending_consumer: 0,
                 pending_industrial: 0,
                 pending_nonce: 0,
@@ -345,7 +364,18 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
             },
         );
     }
-    Ok((snap.height, accounts, snap.root))
+    let height = std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "snapshot filename missing height",
+            )
+        })?
+        .parse::<u64>()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok((height, accounts, hex::encode(snap.root)))
 }
 
 pub fn account_proof(
@@ -368,4 +398,44 @@ pub fn account_proof(
             .map(|(h, is_left)| (hex::encode(h), is_left))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn load_file_rebuilds_accounts_from_entries() {
+        let dir = tempdir().expect("temp dir");
+        let path = dir.path().join("0000000042.bin");
+
+        let mut value = Vec::new();
+        value.extend_from_slice(&11u64.to_le_bytes());
+        value.extend_from_slice(&7u64.to_le_bytes());
+        value.extend_from_slice(&3u64.to_le_bytes());
+
+        let mut trie = MerkleTrie::new();
+        trie.insert(b"alice", &value);
+        let root = trie.root_hash();
+
+        let snapshot = Snapshot {
+            root,
+            entries: vec![(b"alice".to_vec(), value)],
+        };
+        let bytes = bincode::serialize(&snapshot).expect("serialize snapshot");
+        fs::write(&path, bytes).expect("write snapshot");
+
+        let (height, accounts, root_hex) = load_file(path.to_str().unwrap()).expect("load");
+        assert_eq!(height, 42);
+        assert_eq!(root_hex, hex::encode(root));
+        let alice = accounts.get("alice").expect("alice present");
+        assert_eq!(alice.address, "alice");
+        assert_eq!(alice.balance.consumer, 11);
+        assert_eq!(alice.balance.industrial, 7);
+        assert_eq!(alice.nonce, 3);
+        assert_eq!(alice.pending_consumer, 0);
+        assert_eq!(alice.pending_industrial, 0);
+        assert_eq!(alice.pending_nonce, 0);
+    }
 }

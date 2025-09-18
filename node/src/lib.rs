@@ -14,6 +14,7 @@ use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, proc
 use crate::consensus::constants::DIFFICULTY_WINDOW;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
+use crate::transaction::{TxSignature, TxVersion};
 use blake3;
 use dashmap::DashMap;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
@@ -31,6 +32,7 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "telemetry-json")]
 use serde_json::json;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::{
@@ -1066,7 +1068,7 @@ impl Blockchain {
         }
     }
     fn adjust_mempool_size(&self, lane: FeeLane, delta: isize) -> usize {
-        use std::sync::atomic::Ordering::SeqCst;
+        use AtomicOrdering::SeqCst;
         let size = match lane {
             FeeLane::Consumer => {
                 if delta > 0 {
@@ -1286,12 +1288,18 @@ impl Blockchain {
         // See `docs/detailed_updates.md` for layout history.
         let mut db = Db::open(db_path);
         db.flush_wal();
-        state::migrate(
-            |k| db.get(k),
-            |k, v| {
-                let _ = db.insert(k, v);
-            },
-        );
+        {
+            const SCHEMA_KEY: &str = "__schema_version";
+            let current_version = db
+                .get(SCHEMA_KEY)
+                .and_then(|b| bincode::deserialize::<u32>(&b).ok())
+                .unwrap_or(0);
+            if current_version < state::schema::SCHEMA_VERSION {
+                if let Ok(bytes) = bincode::serialize(&state::schema::SCHEMA_VERSION) {
+                    let _ = db.insert(SCHEMA_KEY, bytes);
+                }
+            }
+        }
         let (
             mut chain,
             mut accounts,
@@ -1979,8 +1987,8 @@ impl Blockchain {
                     sender = %scrub(&e.sender),
                     nonce = e.nonce,
                     fpb,
-                    mempool_size = bc.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-                        + bc.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
+                    mempool_size = bc.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+                        + bc.mempool_size_industrial.load(AtomicOrdering::SeqCst)
                 )
                 .entered();
                 #[cfg(not(feature = "telemetry"))]
@@ -2283,8 +2291,8 @@ impl Blockchain {
                 sender = %scrub(&sender_addr),
                 nonce,
                 fpb = fee_per_byte,
-                mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-                    + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
+                mempool_size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+                    + self.mempool_size_industrial.load(AtomicOrdering::SeqCst)
             );
             span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
@@ -2301,12 +2309,14 @@ impl Blockchain {
             }
             TxAdmissionError::LockPoisoned
         })?;
-        let mut admission_state = self.admission_guard(lane);
         let lane_min = match lane {
             FeeLane::Consumer => self.min_fee_per_byte_consumer,
             FeeLane::Industrial => self.min_fee_per_byte_industrial,
         };
-        let floor = lane_min.max(admission_state.floor());
+        let floor = {
+            let guard = self.admission_guard(lane);
+            lane_min.max(guard.floor())
+        };
         if fee_per_byte < floor {
             #[cfg(feature = "telemetry")]
             {
@@ -2341,9 +2351,7 @@ impl Blockchain {
             .entry(sender_addr.clone())
             .or_insert_with(|| Arc::new(Mutex::new(())))
             .clone();
-        let panic_step = self
-            .panic_on_admit
-            .swap(-1, std::sync::atomic::Ordering::SeqCst);
+        let panic_step = self.panic_on_admit.swap(-1, AtomicOrdering::SeqCst);
 
         #[cfg(feature = "telemetry")]
         let lock_guard = {
@@ -2451,14 +2459,12 @@ impl Blockchain {
             FeeLane::Consumer => (
                 &self.mempool_consumer,
                 self.max_mempool_size_consumer,
-                self.mempool_size_consumer
-                    .load(std::sync::atomic::Ordering::SeqCst),
+                self.mempool_size_consumer.load(AtomicOrdering::SeqCst),
             ),
             FeeLane::Industrial => (
                 &self.mempool_industrial,
                 self.max_mempool_size_industrial,
-                self.mempool_size_industrial
-                    .load(std::sync::atomic::Ordering::SeqCst),
+                self.mempool_size_industrial.load(AtomicOrdering::SeqCst),
             ),
         };
         if pool_size >= max_size {
@@ -2471,7 +2477,7 @@ impl Blockchain {
                 let val = entry.value().clone();
                 victim = match victim {
                     Some((ref k, ref v)) => {
-                        if mempool_cmp(&val, v, self.tx_ttl) == std::cmp::Ordering::Greater {
+                        if mempool_cmp(&val, v, self.tx_ttl) == Ordering::Greater {
                             Some((key, val))
                         } else {
                             Some((k.clone(), v.clone()))
@@ -2514,8 +2520,11 @@ impl Blockchain {
                 }
                 mempool.remove(&(ev_sender.clone(), ev_nonce));
                 self.dec_mempool_size(lane);
-                admission_state.release_sender(&ev_sender);
-                admission_state.record_eviction(ev_hash);
+                {
+                    let mut guard = self.admission_guard(lane);
+                    guard.release_sender(&ev_sender);
+                    guard.record_eviction(ev_hash);
+                }
                 mempool::scoring::evict_on_overflow(1);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
                     if let Ok((c, i)) = crate::fee::decompose(
@@ -2536,8 +2545,7 @@ impl Blockchain {
                         acc.pending_nonces.remove(&ev_nonce);
                     }
                 } else {
-                    self.orphan_counter
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    self.orphan_counter.fetch_sub(1, AtomicOrdering::SeqCst);
                 }
                 #[cfg(feature = "telemetry-json")]
                 {
@@ -2559,10 +2567,7 @@ impl Blockchain {
                     let span = crate::log_context!(tx = ev_entry.tx.id());
                     tracing::info!(parent: &span, "tx evicted sender={} nonce={} reason=priority", scrub(&ev_sender), ev_nonce);
                 }
-                if self
-                    .panic_on_evict
-                    .swap(false, std::sync::atomic::Ordering::SeqCst)
-                {
+                if self.panic_on_evict.swap(false, AtomicOrdering::SeqCst) {
                     panic!("evict panic");
                 }
             } else {
@@ -2623,7 +2628,8 @@ impl Blockchain {
                 Err(TxAdmissionError::Duplicate)
             }
             dashmap::mapref::entry::Entry::Vacant(vacant) => {
-                let sender = match self.accounts.get_mut(&sender_addr) {
+                let accounts = &mut self.accounts;
+                let sender = match accounts.get_mut(&sender_addr) {
                     Some(s) => s,
                     None => {
                         #[cfg(feature = "telemetry")]
@@ -2651,6 +2657,16 @@ impl Blockchain {
                         self.record_reject("unknown_sender");
                         return Err(TxAdmissionError::UnknownSender);
                     }
+                };
+                let mut admission_state = match lane {
+                    FeeLane::Consumer => self
+                        .admission_consumer
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()),
+                    FeeLane::Industrial => self
+                        .admission_industrial
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()),
                 };
                 let sender_slot = match admission_state
                     .reserve_sender(&sender_addr, self.max_pending_per_account)
@@ -2944,12 +2960,8 @@ impl Blockchain {
     pub fn drop_transaction(&mut self, sender: &str, nonce: u64) -> Result<(), TxAdmissionError> {
         #[cfg(feature = "telemetry")]
         let _pool_guard = {
-            let size = self
-                .mempool_size_consumer
-                .load(std::sync::atomic::Ordering::SeqCst)
-                + self
-                    .mempool_size_industrial
-                    .load(std::sync::atomic::Ordering::SeqCst);
+            let size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+                + self.mempool_size_industrial.load(AtomicOrdering::SeqCst);
             let span = tracing::span!(
                 tracing::Level::TRACE,
                 "mempool_mutex",
@@ -3019,13 +3031,8 @@ impl Blockchain {
                 }
             }
             if !self.accounts.contains_key(sender) {
-                if self
-                    .orphan_counter
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                    > 0
-                {
-                    self.orphan_counter
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                if self.orphan_counter.load(AtomicOrdering::SeqCst) > 0 {
+                    self.orphan_counter.fetch_sub(1, AtomicOrdering::SeqCst);
                 }
             }
             #[cfg(feature = "telemetry")]
@@ -3080,13 +3087,8 @@ impl Blockchain {
                 }
             }
             if !self.accounts.contains_key(sender) {
-                if self
-                    .orphan_counter
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                    > 0
-                {
-                    self.orphan_counter
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                if self.orphan_counter.load(AtomicOrdering::SeqCst) > 0 {
+                    self.orphan_counter.fetch_sub(1, AtomicOrdering::SeqCst);
                 }
             }
             #[cfg(feature = "telemetry-json")]
@@ -3137,10 +3139,7 @@ impl Blockchain {
     }
 
     pub fn purge_expired(&mut self) -> u64 {
-        if self
-            .panic_on_purge
-            .swap(false, std::sync::atomic::Ordering::SeqCst)
-        {
+        if self.panic_on_purge.swap(false, AtomicOrdering::SeqCst) {
             panic!("purge panic");
         }
         let ttl_ms = self.tx_ttl * 1000;
@@ -3187,8 +3186,8 @@ impl Blockchain {
                 sender = %scrub(&sender),
                 nonce,
                 fpb,
-                mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-                    + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
+                mempool_size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+                    + self.mempool_size_industrial.load(AtomicOrdering::SeqCst)
             )
             .entered();
             #[cfg(not(feature = "telemetry"))]
@@ -3197,13 +3196,9 @@ impl Blockchain {
         }
         // track current orphan count after removing expired entries
         self.orphan_counter
-            .store(orphaned.len(), std::sync::atomic::Ordering::SeqCst);
-        let size = self
-            .mempool_size_consumer
-            .load(std::sync::atomic::Ordering::SeqCst)
-            + self
-                .mempool_size_industrial
-                .load(std::sync::atomic::Ordering::SeqCst);
+            .store(orphaned.len(), AtomicOrdering::SeqCst);
+        let size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+            + self.mempool_size_industrial.load(AtomicOrdering::SeqCst);
         let orphans = orphaned.len();
         if size > 0 && orphans * 2 > size {
             #[cfg(feature = "telemetry")]
@@ -3218,16 +3213,15 @@ impl Blockchain {
                     sender = %scrub(&sender),
                     nonce,
                     fpb,
-                    mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-                        + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
+                    mempool_size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+                        + self.mempool_size_industrial.load(AtomicOrdering::SeqCst)
                 )
                 .entered();
                 #[cfg(not(feature = "telemetry"))]
                 let _ = fpb;
                 let _ = self.drop_transaction(&sender, nonce);
             }
-            self.orphan_counter
-                .store(0, std::sync::atomic::Ordering::SeqCst);
+            self.orphan_counter.store(0, AtomicOrdering::SeqCst);
         }
         expired_count
     }
@@ -3258,8 +3252,8 @@ impl Blockchain {
     }
 
     fn dynamic_block_limit(&self) -> usize {
-        let pressure = self.mempool_size_consumer.load(Ordering::SeqCst)
-            + self.mempool_size_industrial.load(Ordering::SeqCst);
+        let pressure = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+            + self.mempool_size_industrial.load(AtomicOrdering::SeqCst);
         let max = self.max_mempool_size_consumer + self.max_mempool_size_industrial;
         if pressure > max / 2 {
             1024
@@ -3545,6 +3539,8 @@ impl Blockchain {
         let mut txs = vec![coinbase.clone()];
         txs.extend(included.clone());
 
+        let block_base_fee = self.base_fee;
+
         // Pre-compute state root using a shadow copy of accounts
         let mut shadow_accounts = self.accounts.clone();
         for tx in txs.iter().skip(1) {
@@ -3610,7 +3606,6 @@ impl Blockchain {
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
-        let block_base_fee = self.base_fee;
         let ready_roots = {
             let mut r = self.blob_scheduler.pop_l2_ready();
             r.extend(self.blob_scheduler.pop_l3_ready());
@@ -3791,8 +3786,8 @@ impl Blockchain {
                         sender = %scrub(&miner_addr),
                         nonce = 0u64,
                         fpb = 0u64,
-                        mempool_size = self.mempool_size_consumer.load(std::sync::atomic::Ordering::SeqCst)
-                            + self.mempool_size_industrial.load(std::sync::atomic::Ordering::SeqCst)
+                        mempool_size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
+                            + self.mempool_size_industrial.load(AtomicOrdering::SeqCst)
                     );
                     span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                         telemetry::LOCK_POISON_TOTAL.inc();
@@ -4518,7 +4513,7 @@ pub fn spawn_purge_loop_thread(
     shutdown: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        while !shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+        while !shutdown.load(AtomicOrdering::SeqCst) {
             {
                 let mut guard = bc.lock().unwrap_or_else(|e| e.into_inner());
                 #[cfg(feature = "telemetry")]
@@ -4600,7 +4595,7 @@ pub fn spawn_purge_loop(
     let thread_flag = shutdown.clone();
     let handle_shutdown = shutdown.clone();
     let handle = thread::spawn(move || {
-        while !thread_flag.0.load(std::sync::atomic::Ordering::SeqCst) {
+        while !thread_flag.0.load(AtomicOrdering::SeqCst) {
             Python::with_gil(|py| {
                 let mut bc = bc_py.borrow_mut(py);
                 #[cfg(feature = "telemetry")]
@@ -4730,7 +4725,7 @@ impl ShutdownFlag {
     /// Once triggered the flag remains set.
     #[pyo3(text_signature = "()")]
     pub fn trigger(&self) {
-        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.0.store(true, AtomicOrdering::SeqCst);
     }
 }
 
@@ -4935,32 +4930,27 @@ impl Blockchain {
 
     #[doc(hidden)]
     pub fn orphan_count(&self) -> usize {
-        self.orphan_counter
-            .load(std::sync::atomic::Ordering::SeqCst)
+        self.orphan_counter.load(AtomicOrdering::SeqCst)
     }
 
     #[doc(hidden)]
     pub fn panic_next_evict(&self) {
-        self.panic_on_evict
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.panic_on_evict.store(true, AtomicOrdering::SeqCst);
     }
 
     #[doc(hidden)]
     pub fn trigger_panic_next_purge(&self) {
-        self.panic_on_purge
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.panic_on_purge.store(true, AtomicOrdering::SeqCst);
     }
 
     #[doc(hidden)]
     pub fn panic_in_admission_after(&self, step: i32) {
-        self.panic_on_admit
-            .store(step, std::sync::atomic::Ordering::SeqCst);
+        self.panic_on_admit.store(step, AtomicOrdering::SeqCst);
     }
 
     #[doc(hidden)]
     pub fn heal_admission(&self) {
-        self.panic_on_admit
-            .store(-1, std::sync::atomic::Ordering::SeqCst);
+        self.panic_on_admit.store(-1, AtomicOrdering::SeqCst);
     }
 }
 

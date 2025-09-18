@@ -5,6 +5,7 @@ use std::time::Duration;
 use base64::engine::general_purpose;
 use base64::Engine;
 use futures::SinkExt;
+use serde::Serialize;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -86,8 +87,14 @@ pub async fn serve_tail(mut stream: TcpStream, key: String, path: &str) {
 
 fn build_search_response(path: &str) -> Result<(String, String), SearchError> {
     let rows = run_query(path)?;
-    let body = serde_json::to_string(&rows).map_err(|e| SearchError::QueryFailed(e.to_string()))?;
+    let body = encode_rows(&rows)?;
     Ok(("200 OK".into(), body))
+}
+
+fn encode_rows<T: Serialize>(rows: &T) -> Result<String, SearchError> {
+    serde_json::to_string(rows)
+        .map_err(LogIndexerError::from)
+        .map_err(SearchError::QueryFailed)
 }
 
 fn run_query(path: &str) -> Result<Vec<LogEntry>, SearchError> {
@@ -197,6 +204,42 @@ fn log_query_failure(err: &LogIndexerError) {
 #[cfg(not(feature = "telemetry"))]
 fn log_query_failure(err: &LogIndexerError) {
     eprintln!("rpc.logs: log query failed: {err}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::ser::Error as _;
+    use serde::{Serialize, Serializer};
+
+    struct FailSerialize;
+
+    impl Serialize for FailSerialize {
+        fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Err(S::Error::custom("serialization failed"))
+        }
+    }
+
+    #[test]
+    fn encode_rows_reports_json_error() {
+        match encode_rows(&FailSerialize) {
+            Err(SearchError::QueryFailed(LogIndexerError::Json(err))) => {
+                assert!(err.to_string().contains("serialization failed"));
+            }
+            other => panic!("unexpected encode result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_search_error_handles_json_failure() {
+        let err = LogIndexerError::Json(serde_json::Error::custom("forced"));
+        let (status, body) = map_search_error(SearchError::QueryFailed(err));
+        assert_eq!(status, "500 Internal Server Error");
+        assert!(body.contains("log query failed"));
+    }
 }
 
 #[cfg(feature = "telemetry")]

@@ -1,4 +1,3 @@
-use bytes::{BufMut, BytesMut};
 use parking_lot::Mutex;
 use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
@@ -65,8 +64,8 @@ pub fn broadcast_with<F>(
     const MAX_SEEN: usize = 1024;
     let hash = {
         let size = bincode::serialized_size(msg).unwrap_or(0) as usize;
-        let mut buf = BytesMut::with_capacity(size);
-        bincode::serialize_into(&mut buf.writer(), msg).unwrap_or_default();
+        let mut buf = Vec::with_capacity(size);
+        bincode::serialize_into(&mut buf, msg).unwrap_or_default();
         let mut h = Hasher::new();
         h.update(&buf);
         *h.finalize().as_bytes()
@@ -74,7 +73,7 @@ pub fn broadcast_with<F>(
     let mut guard = SEEN.lock();
     if guard.0.contains(&hash) {
         for p in peers {
-            record_ip_drop(p);
+            record_ip_drop(&p.0);
         }
         return;
     }
@@ -110,4 +109,42 @@ pub fn broadcast_with<F>(
 
 fn compute_fanout(num_peers: usize) -> usize {
     ((num_peers as f64).sqrt().ceil() as usize).max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::message::Payload;
+    use crate::net::peer::take_recorded_drops;
+    use crate::p2p::handshake::{Hello, SUPPORTED_VERSION};
+
+    fn sample_message() -> Message {
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: SUPPORTED_VERSION,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 42,
+            transport: Transport::Tcp,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+        };
+        Message::new(Payload::Handshake(hello), &sk)
+    }
+
+    #[test]
+    fn duplicate_broadcast_records_drop() {
+        let peers = vec![("127.0.0.1:9000".parse().unwrap(), Transport::Tcp, None)];
+        let _ = take_recorded_drops();
+
+        let msg = sample_message();
+        broadcast(&msg, &peers);
+        broadcast(&msg, &peers);
+
+        let drops = take_recorded_drops();
+        assert_eq!(drops, vec![peers[0].0]);
+    }
 }

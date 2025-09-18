@@ -550,6 +550,8 @@ impl SchedulerState {
                                 reputation: new_rep,
                                 capability: current.capability.clone(),
                                 priority: current.priority,
+                                start_ts: current_ts(),
+                                expected_secs: current.expected_secs,
                             },
                         );
                         self.active_by_rep.push(Reverse(ActiveRepEntry {
@@ -1096,6 +1098,7 @@ mod tests {
             priority: Priority::Low,
             enqueue_ts: current_ts() - 10,
             effective_priority: 0,
+            expected_secs: 0,
         };
         let mut q2 = QueuedJob {
             job_id: "high".into(),
@@ -1104,6 +1107,7 @@ mod tests {
             priority: Priority::High,
             enqueue_ts: current_ts(),
             effective_priority: 0,
+            expected_secs: 0,
         };
         set_aging_rate(1.0);
         set_max_priority_boost(5.0);
