@@ -9,6 +9,7 @@ pub const fn calculate_genesis_hash() -> &'static str {
         nonce: 0,
         difficulty: 8,
         retune_hint: 0,
+        base_fee: 0,
         coin_c: 0,
         coin_i: 0,
         storage_sub: 0,
@@ -40,6 +41,7 @@ pub fn calculate_genesis_hash_runtime() -> String {
         nonce: 0,
         difficulty: 8,
         retune_hint: 0,
+        base_fee: 0,
         coin_c: 0,
         coin_i: 0,
         storage_sub: 0,
@@ -59,4 +61,17 @@ pub fn calculate_genesis_hash_runtime() -> String {
         vdf_proof: &[],
     }
     .hash()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_matches_consensus_constant() {
+        assert_eq!(
+            calculate_genesis_hash_runtime(),
+            crate::consensus::GENESIS_HASH
+        );
+    }
 }

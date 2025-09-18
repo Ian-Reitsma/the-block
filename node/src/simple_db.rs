@@ -5,9 +5,11 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io;
 use std::path::Path;
+use std::time::Duration;
 
 use ledger::address::ShardId;
 use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, DBWithThreadMode, MultiThreaded, Options};
+use static_assertions::assert_impl_all;
 use tempfile;
 
 #[cfg(feature = "telemetry")]
@@ -20,6 +22,8 @@ pub struct SimpleDb {
     prefix_cache: Mutex<HashMap<Vec<u8>, Vec<u8>>>,
     cf_handles: Mutex<HashMap<String, ColumnFamily>>,
 }
+
+assert_impl_all!(SimpleDb: Send, Sync);
 
 /// Record of a mutated key for rollback purposes.
 pub type DbDelta = (String, Option<Vec<u8>>);
@@ -42,17 +46,24 @@ impl SimpleDb {
             ));
         }
         // Enable compaction and TTL pruning (1 day by default).
+        let descriptor_names: Vec<String> = descriptors
+            .iter()
+            .map(|desc| desc.name().to_string())
+            .collect();
         let db = DBWithThreadMode::open_cf_descriptors_with_ttl(
             &opts,
             Path::new(path),
-            descriptors.clone(),
-            24 * 60 * 60,
+            descriptors,
+            Duration::from_secs(24 * 60 * 60),
         )
         .expect("open rocksdb");
         let mut handles = HashMap::new();
-        for desc in descriptors {
-            let h = db.cf_handle(&desc.name).expect("cf handle");
-            handles.insert(desc.name, h);
+        for name in descriptor_names {
+            let handle = db
+                .cf_handle(&name)
+                .copied()
+                .unwrap_or_else(|| panic!("cf handle: {name}"));
+            handles.insert(name, handle);
         }
         Self {
             db,
@@ -67,13 +78,17 @@ impl SimpleDb {
         let _ = self.db.flush_wal(true);
     }
     fn ensure_cf(&self, name: &str) -> ColumnFamily {
-        if let Some(cf) = self.cf_handles.lock().get(name) {
-            return *cf;
+        if let Some(&cf) = self.cf_handles.lock().get(name) {
+            return cf;
         }
         self.db
             .create_cf(name, &Options::default())
             .expect("create cf");
-        let handle = self.db.cf_handle(name).expect("cf handle");
+        let handle = self
+            .db
+            .cf_handle(name)
+            .copied()
+            .unwrap_or_else(|| panic!("cf handle: {name}"));
         self.cf_handles.lock().insert(name.to_string(), handle);
         handle
     }
@@ -85,7 +100,7 @@ impl SimpleDb {
             }
         }
         let handle = self.ensure_cf(cf);
-        let val = self.db.get_cf(handle, key.as_bytes()).ok().flatten();
+        let val = self.db.get_cf(&handle, key.as_bytes()).ok().flatten();
         if cf == "default" {
             if let Some(ref v) = val {
                 self.prefix_cache
@@ -112,9 +127,9 @@ impl SimpleDb {
             }
         }
         let handle = self.ensure_cf(cf);
-        let prev = self.db.get_cf(handle, key.as_bytes()).ok().flatten();
+        let prev = self.db.get_cf(&handle, key.as_bytes()).ok().flatten();
         self.db
-            .put_cf(handle, key.as_bytes(), &value)
+            .put_cf(&handle, key.as_bytes(), &value)
             .map_err(to_io_err)?;
         if cf == "default" {
             self.prefix_cache
@@ -140,9 +155,9 @@ impl SimpleDb {
         deltas: &mut Vec<DbDelta>,
     ) -> io::Result<()> {
         let handle = self.ensure_cf(cf);
-        let prev = self.db.get_cf(handle, key.as_bytes()).ok().flatten();
+        let prev = self.db.get_cf(&handle, key.as_bytes()).ok().flatten();
         self.db
-            .put_cf(handle, key.as_bytes(), &value)
+            .put_cf(&handle, key.as_bytes(), &value)
             .map_err(to_io_err)?;
         if cf == "default" {
             self.prefix_cache
@@ -177,9 +192,9 @@ impl SimpleDb {
 
     pub fn try_remove(&mut self, key: &str) -> io::Result<Option<Vec<u8>>> {
         let handle = self.ensure_cf("default");
-        let prev = self.db.get_cf(handle, key.as_bytes()).ok().flatten();
+        let prev = self.db.get_cf(&handle, key.as_bytes()).ok().flatten();
         self.db
-            .delete_cf(handle, key.as_bytes())
+            .delete_cf(&handle, key.as_bytes())
             .map_err(to_io_err)?;
         self.prefix_cache.lock().remove(key.as_bytes());
         Ok(prev)
@@ -199,13 +214,13 @@ impl SimpleDb {
             let handle = self.ensure_cf(&cf_name);
             match prev {
                 Some(v) => {
-                    let _ = self.db.put_cf(handle, key.as_bytes(), &v);
+                    let _ = self.db.put_cf(&handle, key.as_bytes(), &v);
                     if cf_name == "default" {
                         self.prefix_cache.lock().insert(key.as_bytes().to_vec(), v);
                     }
                 }
                 None => {
-                    let _ = self.db.delete_cf(handle, key.as_bytes());
+                    let _ = self.db.delete_cf(&handle, key.as_bytes());
                     if cf_name == "default" {
                         self.prefix_cache.lock().remove(key.as_bytes());
                     }
@@ -273,4 +288,49 @@ impl Default for SimpleDb {
 
 fn to_io_err(e: rocksdb::Error) -> io::Error {
     io::Error::new(io::ErrorKind::Other, e)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocksdb::AsColumnFamilyRef;
+    use tempfile::tempdir;
+
+    #[test]
+    fn reuses_cached_column_family_handles() {
+        let dir = tempdir().expect("temp dir");
+        let db = SimpleDb::open(dir.path().to_str().expect("path"));
+
+        let first = db.ensure_cf("shard:test");
+        let second = db.ensure_cf("shard:test");
+
+        let first_ptr = first.inner();
+        let second_ptr = second.inner();
+        assert_eq!(first_ptr, second_ptr);
+    }
+
+    #[test]
+    fn rollback_restores_values_across_families() {
+        let dir = tempdir().expect("temp dir");
+        let mut db = SimpleDb::open(dir.path().to_str().expect("path"));
+
+        let mut deltas = Vec::new();
+        db.insert_with_delta("foo", b"bar".to_vec(), &mut deltas)
+            .expect("insert default");
+        db.insert_shard_with_delta(1, "alpha", b"beta".to_vec(), &mut deltas)
+            .expect("insert shard");
+
+        assert_eq!(db.get("foo"), Some(b"bar".to_vec()));
+        assert_eq!(db.get_shard(1, "alpha"), Some(b"beta".to_vec()));
+
+        db.rollback(deltas);
+
+        assert!(db.get("foo").is_none());
+        assert!(db.get_shard(1, "alpha").is_none());
+
+        let mut new_deltas = Vec::new();
+        db.insert_shard_with_delta(1, "alpha", b"new".to_vec(), &mut new_deltas)
+            .expect("reinsert shard");
+        assert_eq!(db.get_shard(1, "alpha"), Some(b"new".to_vec()));
+    }
 }

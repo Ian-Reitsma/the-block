@@ -97,6 +97,7 @@ pub mod tx;
 #[cfg(feature = "gateway")]
 pub mod web;
 
+pub mod log_indexer;
 pub mod logging;
 pub mod provenance;
 #[cfg(feature = "telemetry")]
@@ -2043,6 +2044,7 @@ impl Blockchain {
         Ok(bc)
     }
 
+    #[staticmethod]
     pub fn open(path: &str) -> PyResult<Self> {
         Self::open_with_db(path, path)
     }
@@ -5133,18 +5135,30 @@ impl PyRemoteSigner {
     }
 
     pub fn sign(&self, msg: &[u8]) -> PyResult<Vec<u8>> {
-        crate::telemetry::sampled_inc(&crate::telemetry::REMOTE_SIGNER_REQUEST_TOTAL);
-        match self.inner.sign(msg) {
-            Ok(s) => Ok(s.to_bytes().to_vec()),
-            Err(e) => {
-                let reason = e.to_string();
-                crate::telemetry::sampled_inc_vec(
-                    &crate::telemetry::REMOTE_SIGNER_ERROR_TOTAL,
-                    &[&reason],
-                );
-                Err(PyRuntimeError::new_err(reason))
-            }
-        }
+        let result = self.inner.sign(msg);
+        let telemetry_outcome = result.as_ref().map(|_| ()).map_err(|e| e.to_string());
+        record_remote_signer_result(&telemetry_outcome);
+        result
+            .map(|s| s.to_bytes().to_vec())
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn record_remote_signer_result(outcome: &Result<(), String>) {
+    crate::telemetry::sampled_inc(&crate::telemetry::REMOTE_SIGNER_REQUEST_TOTAL);
+    if let Err(reason) = outcome {
+        crate::telemetry::sampled_inc_vec(
+            &crate::telemetry::REMOTE_SIGNER_ERROR_TOTAL,
+            &[reason.as_str()],
+        );
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn record_remote_signer_result(outcome: &Result<(), String>) {
+    if let Err(reason) = outcome {
+        let _ = reason;
     }
 }
 

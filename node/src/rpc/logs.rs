@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use base64;
+use base64::engine::general_purpose;
+use base64::Engine;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -13,17 +14,16 @@ use url::form_urlencoded;
 
 use super::RpcRuntimeConfig;
 
-#[allow(dead_code)]
-#[path = "../../../tools/log_indexer.rs"]
-mod log_indexer_impl;
+use crate::log_indexer::{search_logs, LogEntry, LogFilter, LogIndexerError};
 
-use log_indexer_impl::{search_logs, LogEntry, LogFilter};
+#[cfg(feature = "telemetry")]
+use tracing::warn;
 
 #[derive(Debug)]
 enum SearchError {
     MissingDatabase,
     InvalidQuery(String),
-    QueryFailed(String),
+    QueryFailed(LogIndexerError),
 }
 
 struct TailConfig {
@@ -64,7 +64,7 @@ pub async fn serve_tail(mut stream: TcpStream, key: String, path: &str) {
     match build_tail_config(path) {
         Ok(cfg) => {
             if let Err(e) = handshake(&mut stream, &key).await {
-                tracing::warn!(target = "rpc.logs", "tail handshake failed: {e}");
+                log_tail_handshake_failure(&e);
                 return;
             }
             let ws_stream = WebSocketStream::from_raw_socket(stream, Role::Server, None).await;
@@ -98,8 +98,7 @@ fn run_query(path: &str) -> Result<Vec<LogEntry>, SearchError> {
     let db_path = resolve_db_path(&params).ok_or(SearchError::MissingDatabase)?;
     let mut filter = build_filter(&params);
     filter.limit = params.get("limit").and_then(|v| v.parse::<usize>().ok());
-    let rows =
-        search_logs(&db_path, &filter).map_err(|e| SearchError::QueryFailed(e.to_string()))?;
+    let rows = search_logs(&db_path, &filter).map_err(SearchError::QueryFailed)?;
     Ok(rows)
 }
 
@@ -179,11 +178,34 @@ fn map_search_error(err: SearchError) -> (String, String) {
         SearchError::InvalidQuery(msg) => {
             ("400 Bad Request".into(), json!({"error": msg}).to_string())
         }
-        SearchError::QueryFailed(msg) => (
-            "500 Internal Server Error".into(),
-            json!({"error": msg}).to_string(),
-        ),
+        SearchError::QueryFailed(err) => {
+            log_query_failure(&err);
+            (
+                "500 Internal Server Error".into(),
+                json!({"error": "log query failed"}).to_string(),
+            )
+        }
     }
+}
+
+#[cfg(feature = "telemetry")]
+fn log_query_failure(err: &LogIndexerError) {
+    warn!(target: "rpc.logs", error = %err, "log query failed");
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn log_query_failure(err: &LogIndexerError) {
+    eprintln!("rpc.logs: log query failed: {err}");
+}
+
+#[cfg(feature = "telemetry")]
+fn log_tail_handshake_failure(err: &std::io::Error) {
+    warn!(target: "rpc.logs", "tail handshake failed: {err}");
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn log_tail_handshake_failure(err: &std::io::Error) {
+    eprintln!("rpc.logs: tail handshake failed: {err}");
 }
 
 async fn handshake(stream: &mut TcpStream, key: &str) -> std::io::Result<()> {
@@ -191,7 +213,7 @@ async fn handshake(stream: &mut TcpStream, key: &str) -> std::io::Result<()> {
     let mut h = Sha1::new();
     h.update(key.as_bytes());
     h.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    let accept_key = base64::encode(h.finalize());
+    let accept_key = general_purpose::STANDARD.encode(h.finalize());
     let resp = format!(
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
         accept_key
@@ -209,10 +231,9 @@ async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
         let rows = match search_logs(&cfg.db, &filter) {
             Ok(rows) => rows,
             Err(e) => {
+                log_query_failure(&e);
                 let _ = ws
-                    .send(Message::Text(
-                        json!({"error": format!("query failed: {e}")}).to_string(),
-                    ))
+                    .send(Message::Text(json!({"error": "query failed"}).to_string()))
                     .await;
                 break;
             }
@@ -240,6 +261,9 @@ pub fn run_search_for_path(path: &str) -> Result<Vec<LogEntry>, String> {
     run_query(path).map_err(|e| match e {
         SearchError::MissingDatabase => "log database unavailable".to_string(),
         SearchError::InvalidQuery(msg) => msg,
-        SearchError::QueryFailed(msg) => msg,
+        SearchError::QueryFailed(err) => {
+            log_query_failure(&err);
+            "log query failed".to_string()
+        }
     })
 }

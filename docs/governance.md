@@ -57,6 +57,9 @@ Governance can adjust several runtime knobs without code changes:
 | `kill_switch_subsidy_reduction` | emergency % cut across all subsidies (12 h timelock) | `subsidy_multiplier{type}` |
 | `mempool.fee_floor_window` | number of recent fees sampled when computing the floor | `fee_floor_window_changed_total`, `fee_floor_current` |
 | `mempool.fee_floor_percentile` | percentile used for the dynamic fee floor | `fee_floor_window_changed_total`, `fee_floor_current` |
+| `scheduler.weight_gossip` | relative ticket weight for gossip scheduler tasks | `scheduler_class_wait_seconds{class="gossip"}` |
+| `scheduler.weight_compute` | relative ticket weight for compute scheduler tasks | `scheduler_class_wait_seconds{class="compute"}` |
+| `scheduler.weight_storage` | relative ticket weight for storage scheduler tasks | `scheduler_class_wait_seconds{class="storage"}` |
 
 The `contract` CLI provides shortcuts for parameter management and proposal
 crafting:
@@ -71,7 +74,9 @@ Use `contract gov rollback <key>` within the rollback window to revert a change
 and restore the previous value. Every activation or rollback appends a record to
 `governance/history/fee_floor_policy.json`, increments
 `fee_floor_window_changed_total`, and is exposed via the explorer endpoint
-`/mempool/fee_floor_policy` for auditing.
+`/mempool/fee_floor_policy` for auditing. History entries also capture the
+jurisdiction language recorded in the law-enforcement audit trail so operators
+can confirm localized notifications.
 
 See [`cli/src/gov.rs`](../cli/src/gov.rs) for additional subcommands that
 submit, vote, execute, and roll back proposals. The parameter helper currently

@@ -5,9 +5,9 @@ use bridges::{
     relayer::RelayerSet,
     Bridge, RelayerBundle, RelayerProof,
 };
+use hex;
 use once_cell::sync::Lazy;
 use serde_json::json;
-use hex;
 use std::sync::Mutex;
 
 static BRIDGE: Lazy<Mutex<Bridge>> = Lazy::new(|| Mutex::new(Bridge::default()));

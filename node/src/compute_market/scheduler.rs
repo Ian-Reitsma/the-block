@@ -1005,10 +1005,7 @@ pub fn reputation_gossip_enabled() -> bool {
 }
 
 pub fn reputation_snapshot() -> Vec<crate::net::ReputationUpdate> {
-    REPUTATION_STORE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .snapshot()
+    REPUTATION_STORE.lock().snapshot()
 }
 
 fn lookup_cancellation(job_id: &str) -> Option<String> {
@@ -1083,10 +1080,7 @@ fn load_pending() -> BinaryHeap<QueuedJob> {
 }
 
 pub fn merge_reputation(provider: &str, score: i64, epoch: u64) -> bool {
-    REPUTATION_STORE
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .merge(provider, score, epoch)
+    REPUTATION_STORE.lock().merge(provider, score, epoch)
 }
 
 #[cfg(test)]
@@ -1177,17 +1171,13 @@ pub fn register_offer(
 ) {
     SCHEDULER
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
         .register_offer(provider, capability, reputation, price_per_unit, multiplier);
 }
 
 pub fn match_offer(need: &Capability) -> Option<String> {
     #[cfg(feature = "telemetry")]
     let start = std::time::Instant::now();
-    let res = SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .match_job(need);
+    let res = SCHEDULER.lock().match_job(need);
     if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
         #[cfg(feature = "telemetry")]
         telemetry::SCHEDULER_MATCH_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
@@ -1204,7 +1194,6 @@ pub fn start_job_with_expected(
 ) {
     SCHEDULER
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
         .enqueue_job(job_id, provider, cap, priority, expected_secs);
 }
 
@@ -1221,87 +1210,51 @@ pub fn start_job_expected(job_id: &str, provider: &str, cap: Capability, expecte
 }
 
 pub fn end_job(job_id: &str) {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .end_job(job_id);
+    SCHEDULER.lock().end_job(job_id);
 }
 
 pub fn cancel_job(job_id: &str, provider: &str, reason: CancelReason) -> bool {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .cancel_job(job_id, provider, reason)
+    SCHEDULER.lock().cancel_job(job_id, provider, reason)
 }
 
 pub fn try_preempt(job_id: &str, new_provider: &str, new_rep: i64) -> bool {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .preempt(job_id, new_provider, new_rep)
+    SCHEDULER.lock().preempt(job_id, new_provider, new_rep)
 }
 
 pub fn active_provider(job_id: &str) -> Option<String> {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .active_provider(job_id)
+    SCHEDULER.lock().active_provider(job_id)
 }
 
 pub fn job_requirements(job_id: &str) -> Option<Capability> {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .job_requirements(job_id)
+    SCHEDULER.lock().job_requirements(job_id)
 }
 
 pub fn provider_capability(provider: &str) -> Option<Capability> {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .provider_capability(provider)
+    SCHEDULER.lock().provider_capability(provider)
 }
 
 pub fn job_duration(job_id: &str) -> Option<(u64, u64)> {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .job_duration(job_id)
+    SCHEDULER.lock().job_duration(job_id)
 }
 
 pub fn record_success(provider: &str) {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .record_success(provider);
+    SCHEDULER.lock().record_success(provider);
 }
 
 pub fn record_accelerator_success(provider: &str) {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .record_accelerator_success(provider);
+    SCHEDULER.lock().record_accelerator_success(provider);
 }
 
 pub fn record_accelerator_failure(provider: &str) {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .record_accelerator_failure(provider);
+    SCHEDULER.lock().record_accelerator_failure(provider);
 }
 
 pub fn record_failure(provider: &str) {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .record_failure(provider);
+    SCHEDULER.lock().record_failure(provider);
 }
 
 pub fn metrics() -> serde_json::Value {
-    SCHEDULER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .metrics()
+    SCHEDULER.lock().metrics()
 }
 
 pub fn stats() -> SchedulerStats {

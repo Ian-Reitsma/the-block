@@ -15,12 +15,7 @@ pub fn unlock(
     for rel in invalid {
         relayers.slash(&rel, 1);
     }
-    if valid < bridge.cfg.relayer_quorum
-        || !bundle
-            .relayer_ids()
-            .iter()
-            .any(|id| id == relayer)
-    {
+    if valid < bridge.cfg.relayer_quorum || !bundle.relayer_ids().iter().any(|id| id == relayer) {
         #[cfg(feature = "telemetry")]
         {
             BRIDGE_INVALID_PROOF_TOTAL.inc();

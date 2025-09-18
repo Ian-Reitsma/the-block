@@ -48,6 +48,8 @@ encoder = BlockEncoder{
   timestamp: 0,
   nonce: 0,
   difficulty: 8,
+  retune_hint: 0,
+  base_fee: 0,
   coin_c: 0,
   coin_i: 0,
   storage_sub: 0,

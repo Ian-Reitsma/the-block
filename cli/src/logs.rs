@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result as AnyResult};
 use clap::Subcommand;
 use reqwest::blocking::Client as HttpClient;
 use rusqlite::{params, params_from_iter, Connection, Row};
@@ -336,7 +337,7 @@ fn decode_row(row: &Row<'_>, key: Option<&Key<XChaCha20Poly1305>>) -> rusqlite::
     })
 }
 
-fn rotate_key(db: String, current: Option<String>, new_pass: String) -> rusqlite::Result<()> {
+fn rotate_key(db: String, current: Option<String>, new_pass: String) -> AnyResult<()> {
     let conn = Connection::open(db)?;
     let old_key = current.as_deref().map(derive_key_bytes);
     let new_key = derive_key_bytes(&new_pass);
@@ -351,14 +352,11 @@ fn rotate_key(db: String, current: Option<String>, new_pass: String) -> rusqlite
         let message: String = row.get("message")?;
         let encrypted_flag: i64 = row.get("encrypted")?;
         let plain = if encrypted_flag == 1 {
-            let key = old_key.as_ref().ok_or_else(|| {
-                rusqlite::Error::ExecuteReturnedError("missing current passphrase".into())
-            })?;
-            let nonce_bytes = nonce
-                .as_deref()
-                .ok_or_else(|| rusqlite::Error::ExecuteReturnedError("missing nonce".into()))?;
-            decrypt_message(key, &message, nonce_bytes)
-                .ok_or_else(|| rusqlite::Error::ExecuteReturnedError("decrypt failed".into()))?
+            let key = old_key
+                .as_ref()
+                .ok_or_else(|| anyhow!("missing current passphrase"))?;
+            let nonce_bytes = nonce.as_deref().ok_or_else(|| anyhow!("missing nonce"))?;
+            decrypt_message(key, &message, nonce_bytes).ok_or_else(|| anyhow!("decrypt failed"))?
         } else {
             message.clone()
         };
@@ -385,17 +383,14 @@ fn derive_key_bytes(passphrase: &str) -> Key<XChaCha20Poly1305> {
     Key::from_slice(&key_bytes).to_owned()
 }
 
-fn encrypt_message(
-    key: &Key<XChaCha20Poly1305>,
-    message: &str,
-) -> rusqlite::Result<(String, Vec<u8>)> {
+fn encrypt_message(key: &Key<XChaCha20Poly1305>, message: &str) -> AnyResult<(String, Vec<u8>)> {
     let cipher = XChaCha20Poly1305::new(key);
     let mut nonce_bytes = [0u8; 24];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
         .encrypt(nonce, message.as_bytes())
-        .map_err(|e| rusqlite::Error::ExecuteReturnedError(format!("encrypt: {e}").into()))?;
+        .map_err(|e| anyhow!("encrypt: {e}"))?;
     Ok((
         general_purpose::STANDARD.encode(ciphertext),
         nonce_bytes.to_vec(),

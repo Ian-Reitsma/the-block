@@ -1,6 +1,7 @@
 use rand::Rng;
 use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::io;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -138,7 +139,7 @@ impl RpcClient {
         &self,
         url: &str,
         event: WalletQosEvent<'_>,
-    ) -> Result<(), reqwest::Error> {
+    ) -> Result<(), WalletQosError> {
         #[derive(Serialize)]
         struct Payload<'a> {
             jsonrpc: &'static str,
@@ -155,6 +156,12 @@ impl RpcClient {
             floor: u64,
         }
 
+        #[derive(Deserialize)]
+        struct WalletQosAck {
+            #[serde(default)]
+            status: Option<String>,
+        }
+
         let params = WalletQosParams {
             event: event.event,
             lane: event.lane,
@@ -167,7 +174,28 @@ impl RpcClient {
             method: "mempool.qos_event",
             params,
         };
-        let _ = self.call(url, &payload)?;
+        let envelope = self
+            .call(url, &payload)
+            .map_err(WalletQosError::from)?
+            .json::<RpcEnvelope<WalletQosAck>>()
+            .map_err(WalletQosError::from)?;
+
+        if let Some(error) = envelope.error {
+            return Err(WalletQosError::Rpc {
+                code: error.code,
+                message: error.message,
+            });
+        }
+
+        let status = envelope
+            .result
+            .and_then(|ack| ack.status)
+            .ok_or(WalletQosError::MissingStatus)?;
+
+        if status != "ok" {
+            return Err(WalletQosError::InvalidStatus(status));
+        }
+
         Ok(())
     }
 
@@ -221,6 +249,20 @@ impl RpcClient {
 }
 
 #[derive(Debug, Deserialize)]
+struct RpcErrorBody {
+    code: i64,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RpcEnvelope<T> {
+    #[serde(default)]
+    result: Option<T>,
+    #[serde(default)]
+    error: Option<RpcErrorBody>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct MempoolStats {
     #[serde(default)]
     pub size: u64,
@@ -244,9 +286,96 @@ pub struct WalletQosEvent<'a> {
     pub floor: u64,
 }
 
+#[derive(Debug)]
+pub enum WalletQosError {
+    Transport(reqwest::Error),
+    Rpc { code: i64, message: String },
+    MissingStatus,
+    InvalidStatus(String),
+}
+
+impl fmt::Display for WalletQosError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Transport(err) => write!(f, "transport error: {err}"),
+            Self::Rpc { code, message } => {
+                write!(f, "rpc error {code}: {message}")
+            }
+            Self::MissingStatus => write!(f, "rpc response missing status field"),
+            Self::InvalidStatus(status) => {
+                write!(f, "rpc response returned unexpected status '{status}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for WalletQosError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<reqwest::Error> for WalletQosError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::Transport(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn consume_http_request(stream: &mut std::net::TcpStream) {
+        use std::io::Read;
+
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 512];
+
+        loop {
+            let n = stream.read(&mut tmp).unwrap();
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if let Some(pos) = find_header_end(&buf) {
+                let content_len = parse_content_length(&buf[..pos]);
+                let mut remaining = content_len.saturating_sub(buf.len() - pos);
+                while remaining > 0 {
+                    let n = stream.read(&mut tmp).unwrap();
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    remaining = remaining.saturating_sub(n);
+                }
+                break;
+            }
+        }
+    }
+
+    fn find_header_end(buf: &[u8]) -> Option<usize> {
+        buf.windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .map(|idx| idx + 4)
+    }
+
+    fn parse_content_length(headers: &[u8]) -> usize {
+        let text = String::from_utf8_lossy(headers);
+        for line in text.lines() {
+            let mut parts = line.splitn(2, ':');
+            if let (Some(name), Some(value)) = (parts.next(), parts.next()) {
+                if name.trim().eq_ignore_ascii_case("content-length") {
+                    if let Ok(len) = value.trim().parse::<usize>() {
+                        return len;
+                    }
+                }
+            }
+        }
+        0
+    }
 
     #[test]
     fn timeout_jitter_within_bounds() {
@@ -262,5 +391,54 @@ mod tests {
             assert!(t >= Duration::from_millis(100));
             assert!(t <= Duration::from_millis(150));
         }
+    }
+
+    #[test]
+    fn record_wallet_qos_event_propagates_rpc_error() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            consume_http_request(&mut stream);
+            let body = r#"{"jsonrpc":"2.0","error":{"code":-32000,"message":"rejected"},"id":1}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+
+        let client = RpcClient {
+            http: Client::new(),
+            base_timeout: Duration::from_millis(100),
+            jitter: Duration::from_millis(0),
+            max_retries: 0,
+            fault_rate: 0.0,
+        };
+        let url = format!("http://{}", addr);
+        let event = WalletQosEvent {
+            event: "warning",
+            lane: "consumer",
+            fee: 1,
+            floor: 0,
+        };
+
+        let err = client
+            .record_wallet_qos_event(&url, event)
+            .expect_err("rpc error should propagate to caller");
+        match err {
+            WalletQosError::Rpc { code, message } => {
+                assert_eq!(code, -32000);
+                assert_eq!(message, "rejected");
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+
+        handle.join().unwrap();
     }
 }

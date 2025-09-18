@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Mutex,
+};
 
 use once_cell::sync::Lazy;
 
@@ -63,4 +66,3 @@ impl PartitionWatch {
 
 /// Global partition watcher used by networking components.
 pub static PARTITION_WATCH: Lazy<PartitionWatch> = Lazy::new(|| PartitionWatch::new(8));
-

@@ -268,10 +268,7 @@ impl Bridge {
                 return false;
             }
             pending.challenged = true;
-            *self
-                .locked
-                .entry(pending.user.clone())
-                .or_insert(0) += pending.amount;
+            *self.locked.entry(pending.user.clone()).or_insert(0) += pending.amount;
             for rel in &pending.relayers {
                 relayers.slash(rel, 1);
             }

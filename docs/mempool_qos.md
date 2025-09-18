@@ -29,3 +29,5 @@ The `contract wallet send` flow consumes the same `mempool.stats` endpoint to re
 ```
 
 Every warning or override is reported back to the node through the `mempool.qos_event` RPC, ensuring telemetry tracks wallet-side pressure. The counters `fee_floor_warning_total{lane}` and `fee_floor_override_total{lane}` distinguish between simple guidance and forced sends, complementing the existing `fee_floor_current` gauge. Operators can therefore correlate spikes in overrides with subsequent rejection rates and governance discussions.
+
+The wallet RPC client now inspects the JSON-RPC envelope returned by `mempool.qos_event`, surfacing transport failures, server-side errors, and acknowledgements whose `status` field is not `"ok"`. CLI users see explicit error messages when telemetry is rejected, and JSON-mode consumers can rely on the exit status to detect failures programmatically.

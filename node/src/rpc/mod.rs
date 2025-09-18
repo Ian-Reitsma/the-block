@@ -14,12 +14,15 @@ use crate::{
     Blockchain, SignedTransaction,
 };
 use ::storage::{contract::StorageContract, offer::StorageOffer};
+use base64::engine::general_purpose;
+use base64::Engine;
 use bincode;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
 use libp2p::PeerId;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs;
@@ -108,6 +111,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "analytics",
     "microshard.roots.last",
     "mempool.stats",
+    "mempool.qos_event",
     "net.peer_stats",
     "net.peer_stats_all",
     "net.peer_stats_reset",
@@ -274,8 +278,9 @@ fn telemetry_rpc_error(code: RpcClientErrorCode) {
 }
 
 fn check_nonce(
+    scope: impl Into<String>,
     params: &serde_json::Value,
-    nonces: &Arc<Mutex<HashSet<u64>>>,
+    nonces: &Arc<Mutex<HashSet<(String, u64)>>>,
 ) -> Result<(), RpcError> {
     let nonce = params
         .get("nonce")
@@ -284,11 +289,12 @@ fn check_nonce(
             code: -32602,
             message: "missing nonce",
         })?;
+    let key = scope.into();
     let mut guard = nonces.lock().map_err(|_| RpcError {
         code: -32603,
         message: "internal error",
     })?;
-    if !guard.insert(nonce) {
+    if !guard.insert((key, nonce)) {
         return Err(RpcError {
             code: -32000,
             message: "replayed nonce",
@@ -301,7 +307,7 @@ pub async fn handle_conn(
     stream: TcpStream,
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
-    nonces: Arc<Mutex<HashSet<u64>>>,
+    nonces: Arc<Mutex<HashSet<(String, u64)>>>,
     handles: Arc<Mutex<HandleRegistry>>,
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
@@ -524,6 +530,8 @@ pub async fn handle_conn(
                         Arc::clone(&mining),
                         Arc::clone(&nonces),
                         Arc::clone(&handles),
+                        Arc::clone(&dids),
+                        Arc::clone(&runtime_cfg),
                     ) {
                         Ok(v) => RpcResponse::Result {
                             jsonrpc: "2.0",
@@ -554,6 +562,8 @@ pub async fn handle_conn(
                         Arc::clone(&mining),
                         Arc::clone(&nonces),
                         Arc::clone(&handles),
+                        Arc::clone(&dids),
+                        Arc::clone(&runtime_cfg),
                     ) {
                         Ok(v) => RpcResponse::Result {
                             jsonrpc: "2.0",
@@ -623,6 +633,8 @@ pub async fn handle_conn(
                             Arc::clone(&mining),
                             Arc::clone(&nonces),
                             Arc::clone(&handles),
+                            Arc::clone(&dids),
+                            Arc::clone(&runtime_cfg),
                         ) {
                             Ok(v) => RpcResponse::Result {
                                 jsonrpc: "2.0",
@@ -643,6 +655,8 @@ pub async fn handle_conn(
                         Arc::clone(&mining),
                         Arc::clone(&nonces),
                         Arc::clone(&handles),
+                        Arc::clone(&dids),
+                        Arc::clone(&runtime_cfg),
                     ) {
                         Ok(v) => RpcResponse::Result {
                             jsonrpc: "2.0",
@@ -703,8 +717,10 @@ fn dispatch(
     req: &RpcRequest,
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
-    nonces: Arc<Mutex<HashSet<u64>>>,
+    nonces: Arc<Mutex<HashSet<(String, u64)>>>,
     handles: Arc<Mutex<HandleRegistry>>,
+    dids: Arc<Mutex<DidRegistry>>,
+    runtime_cfg: Arc<RpcRuntimeConfig>,
 ) -> Result<serde_json::Value, RpcError> {
     if BADGE_METHODS.contains(&req.method.as_str()) {
         let badge = req
@@ -1661,7 +1677,7 @@ fn dispatch(
             serde_json::json!({"reloaded": ok})
         }
         "register_handle" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             match handles.lock() {
                 Ok(mut reg) => match identity::register_handle(&req.params, &mut reg) {
                     Ok(v) => v,
@@ -1671,7 +1687,13 @@ fn dispatch(
             }
         }
         "identity.anchor" => {
-            check_nonce(&req.params, &nonces)?;
+            let scope = req
+                .params
+                .get("address")
+                .and_then(|v| v.as_str())
+                .map(|addr| format!("{}:{}", req.method, addr))
+                .unwrap_or_else(|| req.method.clone());
+            check_nonce(scope, &req.params, &nonces)?;
             match dids.lock() {
                 Ok(mut reg) => match identity::anchor_did(&req.params, &mut reg, &GOV_STORE) {
                     Ok(v) => v,
@@ -1699,7 +1721,7 @@ fn dispatch(
             Err(_) => serde_json::json!({"address": null, "handle": null}),
         },
         "record_le_request" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let agency = req
                 .params
                 .get("agency")
@@ -1729,7 +1751,7 @@ fn dispatch(
             }
         }
         "warrant_canary" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let msg = req
                 .params
                 .get("message")
@@ -1757,7 +1779,7 @@ fn dispatch(
             Err(_) => serde_json::json!({"error": "lock poisoned"}),
         },
         "le.record_action" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let agency = req
                 .params
                 .get("agency")
@@ -1787,7 +1809,7 @@ fn dispatch(
             }
         }
         "le.upload_evidence" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let agency = req
                 .params
                 .get("agency")
@@ -1803,7 +1825,7 @@ fn dispatch(
                 .get("evidence")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let data = match base64::decode(data_b64) {
+            let data = match general_purpose::STANDARD.decode(data_b64) {
                 Ok(d) => d,
                 Err(_) => return Ok(serde_json::json!({"error": "decode"})),
             };
@@ -1854,7 +1876,7 @@ fn dispatch(
             serde_json::json!({"valid": crate::service_badge::verify(badge)})
         }
         "submit_tx" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let tx_hex = req.params.get("tx").and_then(|v| v.as_str()).unwrap_or("");
             match hex::decode(tx_hex)
                 .ok()
@@ -1920,7 +1942,7 @@ fn dispatch(
                     "error": {"code": -32075, "message": "relay_only"}
                 })
             } else {
-                check_nonce(&req.params, &nonces)?;
+                check_nonce(req.method.as_str(), &req.params, &nonces)?;
                 let miner = req
                     .params
                     .get("miner")
@@ -1942,13 +1964,13 @@ fn dispatch(
             }
         }
         "stop_mining" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             mining.store(false, Ordering::SeqCst);
             serde_json::json!({"status": "ok"})
         }
         "jurisdiction.status" => jurisdiction::status(&bc)?,
         "jurisdiction.set" => {
-            check_nonce(&req.params, &nonces)?;
+            check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let path = req
                 .params
                 .get("path")
@@ -2369,7 +2391,7 @@ pub async fn run_rpc_server(
     let listener = TcpListener::bind(&addr).await?;
     let local = listener.local_addr()?.to_string();
     let _ = ready.send(local);
-    let nonces = Arc::new(Mutex::new(HashSet::new()));
+    let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
     let handles = Arc::new(Mutex::new(HandleRegistry::open("identity_db")));
     let did_path = DidRegistry::default_path();
     let dids = Arc::new(Mutex::new(DidRegistry::open(&did_path)));

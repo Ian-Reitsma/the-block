@@ -169,7 +169,7 @@ impl PeerSet {
         }
         #[cfg(feature = "quic")]
         super::quic_stats::record_address(&pk, addr);
-        let mut metrics = PEER_METRICS.lock();
+        let mut metrics = peer_metrics_guard();
         if let Some(val) = metrics.swap_remove(&pk) {
             metrics.insert(pk, val);
             update_active_gauge(metrics.len());
@@ -245,7 +245,7 @@ impl PeerSet {
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
-        if ban_store::store().lock().is_banned(pk) {
+        if ban_store_guard().is_banned(pk) {
             return Err(PeerErrorCode::Banned);
         }
         let mut map = self.states.lock();
@@ -270,7 +270,7 @@ impl PeerSet {
         }
         entry.count += 1;
         let allowed = {
-            let mut metrics = PEER_METRICS.lock();
+            let mut metrics = peer_metrics_guard();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
             pm.reputation.decay(peer_reputation_decay());
             pm.last_updated = now_secs();
@@ -280,7 +280,7 @@ impl PeerSet {
         };
         if entry.count > allowed {
             {
-                let mut metrics = PEER_METRICS.lock().unwrap();
+                let mut metrics = peer_metrics_guard();
                 if let Some(pm) = metrics.get_mut(pk) {
                     pm.reputation.penalize(0.9);
                     update_reputation_metric(pk, pm.reputation.score);
@@ -293,7 +293,7 @@ impl PeerSet {
                 .unwrap_or_else(|e| panic!("time error: {e}"))
                 .as_secs()
                 + *P2P_BAN_SECS as u64;
-            ban_store::store().lock().ban(pk, ts);
+            ban_store_guard().ban(pk, ts);
             #[cfg(feature = "telemetry")]
             {
                 let id = hex::encode(pk);
@@ -316,7 +316,7 @@ impl PeerSet {
             shard_last: Instant::now(),
         });
         let score = {
-            let mut metrics = PEER_METRICS.lock();
+            let mut metrics = peer_metrics_guard();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
             pm.reputation.decay(peer_reputation_decay());
             pm.last_updated = now_secs();
@@ -335,7 +335,7 @@ impl PeerSet {
             return Ok(());
         }
         {
-            let mut metrics = PEER_METRICS.lock().unwrap();
+            let mut metrics = peer_metrics_guard();
             if let Some(pm) = metrics.get_mut(pk) {
                 pm.reputation.penalize(0.9);
                 update_reputation_metric(pk, pm.reputation.score);
@@ -348,7 +348,7 @@ impl PeerSet {
             .unwrap_or_else(|e| panic!("time error: {e}"))
             .as_secs()
             + *P2P_BAN_SECS as u64;
-        ban_store::store().lock().ban(pk, ts);
+        ban_store_guard().ban(pk, ts);
         #[cfg(feature = "telemetry")]
         {
             let id = hex::encode(pk);
@@ -584,7 +584,7 @@ impl PeerSet {
                     return;
                 }
                 let key = format!("chunk/{}/{}", hex::encode(chunk.root), chunk.index);
-                let _ = CHUNK_DB.lock().unwrap().try_insert(&key, chunk.data);
+                let _ = CHUNK_DB.lock().try_insert(&key, chunk.data);
             }
             Payload::Reputation(entries) => {
                 if crate::compute_market::scheduler::reputation_gossip_enabled() {
@@ -856,7 +856,7 @@ fn update_peer_rates(pk: &[u8; 32], entry: &mut PeerMetrics, bytes: u64, reqs: u
 
 pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
     if let Some(pk) = ADDR_MAP.lock().get(&addr).copied() {
-        let mut map = PEER_METRICS.lock().unwrap();
+        let mut map = peer_metrics_guard();
         maybe_consolidate(&mut map);
         let now = now_secs();
         if let Some(mut entry) = map.swap_remove(&pk) {
@@ -926,7 +926,7 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
 }
 
 pub fn record_request(pk: &[u8; 32]) {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     maybe_consolidate(&mut map);
     let now = now_secs();
     if let Some(mut entry) = map.swap_remove(pk) {
@@ -1001,7 +1001,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     } else {
         DropReason::Other
     };
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.drops.entry(reason).or_default() += 1;
@@ -1062,7 +1062,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     if !TRACK_HANDSHAKE_FAIL.load(Ordering::Relaxed) {
         return;
     }
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.handshake_fail.entry(reason).or_default() += 1;
@@ -1118,7 +1118,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         }
     }
     let ts = now_secs();
-    let mut log = HANDSHAKE_LOG.lock().unwrap();
+    let mut log = HANDSHAKE_LOG.lock();
     log.push_back((ts, hex::encode(pk), reason));
     if log.len() > HANDSHAKE_LOG_CAP {
         log.pop_front();
@@ -1126,7 +1126,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
 }
 
 fn record_handshake_success(pk: &[u8; 32]) {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         entry.handshake_success += 1;
@@ -1153,7 +1153,7 @@ fn record_handshake_success(pk: &[u8; 32]) {
 }
 
 pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         entry.last_handshake_ms = ms;
@@ -1182,7 +1182,7 @@ pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
 pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeError) {
     let ts = now_secs();
     {
-        let mut last = LAST_HANDSHAKE_ADDR.lock().unwrap();
+        let mut last = LAST_HANDSHAKE_ADDR.lock();
         if let Some(prev) = last.get(&addr) {
             if ts.saturating_sub(*prev) < HANDSHAKE_DEBOUNCE_SECS {
                 return;
@@ -1200,7 +1200,7 @@ pub fn simulate_handshake_fail(pk: [u8; 32], reason: HandshakeError) {
 }
 
 pub fn recent_handshake_failures() -> Vec<(u64, String, HandshakeError)> {
-    HANDSHAKE_LOG.lock().unwrap().iter().cloned().collect()
+    HANDSHAKE_LOG.lock().iter().cloned().collect()
 }
 
 fn update_reputation_metric(pk: &[u8; 32], score: f64) {
@@ -1218,7 +1218,7 @@ fn update_reputation_metric(pk: &[u8; 32], score: f64) {
 }
 
 pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     if let Some(entry) = map.get_mut(pk) {
         *entry = PeerMetrics::default();
         entry.last_updated = now_secs();
@@ -1244,7 +1244,7 @@ pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
 }
 
 pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     if let Some((_, metrics)) = map.shift_remove_entry(old) {
         map.insert(new, metrics);
         update_active_gauge(map.len());
@@ -1258,7 +1258,7 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
         }
         drop(addr_map);
         {
-            let path = KEY_HISTORY_PATH.lock().unwrap().clone();
+            let path = KEY_HISTORY_PATH.lock().clone();
             if let Some(parent) = std::path::Path::new(&path).parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -1294,7 +1294,7 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
 }
 
 pub fn peer_stats(pk: &[u8; 32]) -> Option<PeerMetrics> {
-    let res = PEER_METRICS.lock().unwrap().get(pk).cloned();
+    let res = peer_metrics_guard().get(pk).cloned();
     #[cfg(feature = "telemetry")]
     if res.is_some() && EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
         let id = hex::encode(pk);
@@ -1332,7 +1332,7 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
                 "invalid extension",
             ));
         }
-        let dir = METRICS_EXPORT_DIR.lock().unwrap().clone();
+        let dir = METRICS_EXPORT_DIR.lock().clone();
         std::fs::create_dir_all(&dir)?;
         let path = Path::new(&dir).join(rel);
         if path
@@ -1348,7 +1348,7 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
             ));
         }
         let metrics = {
-            let map = PEER_METRICS.lock().unwrap();
+            let map = peer_metrics_guard();
             map.get(pk).cloned()
         };
         let metrics =
@@ -1432,7 +1432,7 @@ pub fn export_all_peer_stats(
                 "invalid extension",
             ));
         }
-        let base = METRICS_EXPORT_DIR.lock().unwrap().clone();
+        let base = METRICS_EXPORT_DIR.lock().clone();
         std::fs::create_dir_all(&base)?;
         let quota = PEER_METRICS_EXPORT_QUOTA.load(Ordering::Relaxed);
         let path = Path::new(&base).join(rel);
@@ -1450,7 +1450,7 @@ pub fn export_all_peer_stats(
         }
 
         let keys: Vec<[u8; 32]> = {
-            let map = PEER_METRICS.lock().unwrap();
+            let map = peer_metrics_guard();
             map.keys().cloned().collect()
         };
         let initial_len = keys.len();
@@ -1468,7 +1468,7 @@ pub fn export_all_peer_stats(
                 let mut tar = Builder::new(enc);
                 for pk in &keys {
                     let m = {
-                        let map = PEER_METRICS.lock().unwrap();
+                        let map = peer_metrics_guard();
                         match map.get(pk) {
                             Some(v) => v.clone(),
                             None => {
@@ -1506,7 +1506,7 @@ pub fn export_all_peer_stats(
                 }
                 tar.finish()?;
             }
-            if PEER_METRICS.lock().unwrap().len() != initial_len {
+            if peer_metrics_guard().len() != initial_len {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "peer list changed",
@@ -1546,7 +1546,7 @@ pub fn export_all_peer_stats(
                 .tempdir_in(&base)?;
             for pk in &keys {
                 let m = {
-                    let map = PEER_METRICS.lock().unwrap();
+                    let map = peer_metrics_guard();
                     match map.get(pk) {
                         Some(v) => v.clone(),
                         None => {
@@ -1579,7 +1579,7 @@ pub fn export_all_peer_stats(
                 }
                 std::fs::write(tmp_dir.path().join(format!("{id}.json")), &data)?;
             }
-            if PEER_METRICS.lock().unwrap().len() != initial_len {
+            if peer_metrics_guard().len() != initial_len {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "peer list changed",
@@ -1718,6 +1718,76 @@ struct QuicEndpoint {
     cert: Vec<u8>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    struct EnvGuard {
+        prev_limit: u32,
+        prev_peer: Option<String>,
+        prev_quic: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn new(prev_limit: u32, prev_peer: Option<String>, prev_quic: Option<String>) -> Self {
+            Self {
+                prev_limit,
+                prev_peer,
+                prev_quic,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            set_p2p_max_per_sec(self.prev_limit);
+            match &self.prev_peer {
+                Some(v) => std::env::set_var("TB_PEER_DB_PATH", v),
+                None => std::env::remove_var("TB_PEER_DB_PATH"),
+            }
+            match &self.prev_quic {
+                Some(v) => std::env::set_var("TB_QUIC_PEER_DB_PATH", v),
+                None => std::env::remove_var("TB_QUIC_PEER_DB_PATH"),
+            }
+        }
+    }
+
+    #[test]
+    fn rate_limiting_penalizes_and_bans_peer() {
+        let dir = tempdir().expect("temp dir");
+        let peers_path = dir.path().join("peers.txt");
+        let quic_path = dir.path().join("quic_peers.txt");
+        let prev_peer = std::env::var("TB_PEER_DB_PATH").ok();
+        let prev_quic = std::env::var("TB_QUIC_PEER_DB_PATH").ok();
+        std::env::set_var("TB_PEER_DB_PATH", &peers_path);
+        std::env::set_var("TB_QUIC_PEER_DB_PATH", &quic_path);
+        ban_store::init(dir.path().join("bans").to_str().expect("path"));
+
+        let previous_limit = p2p_max_per_sec();
+        set_p2p_max_per_sec(1);
+        let _guard = EnvGuard::new(previous_limit, prev_peer, prev_quic);
+
+        let set = PeerSet::new(Vec::new());
+        let pk = [7u8; 32];
+
+        assert!(set.check_rate(&pk).is_ok());
+        let err = set
+            .check_rate(&pk)
+            .expect_err("should rate limit on second request");
+        assert!(matches!(err, PeerErrorCode::RateLimit));
+
+        {
+            let metrics = peer_metrics_guard();
+            let entry = metrics.get(&pk).expect("metrics entry");
+            assert!(entry.reputation.score < 1.0);
+        }
+
+        let next = set.check_rate(&pk).expect_err("peer should remain banned");
+        assert!(matches!(next, PeerErrorCode::Banned));
+    }
+}
+
 fn quic_peer_db_path() -> PathBuf {
     std::env::var("TB_QUIC_PEER_DB_PATH")
         .map(PathBuf::from)
@@ -1851,6 +1921,10 @@ static P2P_SHARD_BURST: Lazy<u64> = Lazy::new(|| {
 static PEER_METRICS: Lazy<Mutex<IndexMap<[u8; 32], PeerMetrics>>> =
     Lazy::new(|| Mutex::new(IndexMap::new()));
 
+fn peer_metrics_guard() -> parking_lot::MutexGuard<'static, IndexMap<[u8; 32], PeerMetrics>> {
+    PEER_METRICS.lock()
+}
+
 static ADDR_MAP: Lazy<Mutex<HashMap<SocketAddr, [u8; 32]>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 static MAX_PEER_METRICS: AtomicUsize = AtomicUsize::new(1024);
@@ -1940,6 +2014,14 @@ impl AggregatorClient {
 
 static AGGREGATOR: Lazy<Mutex<Option<AggregatorClient>>> = Lazy::new(|| Mutex::new(None));
 
+fn aggregator_guard() -> parking_lot::MutexGuard<'static, Option<AggregatorClient>> {
+    AGGREGATOR.lock()
+}
+
+fn ban_store_guard() -> std::sync::MutexGuard<'static, ban_store::BanStore> {
+    ban_store::store().lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub struct MetricsReceiver {
     inner: broadcast::Receiver<PeerSnapshot>,
 }
@@ -1986,7 +2068,10 @@ pub fn broadcast_metrics(pk: &[u8; 32], m: &PeerMetrics) {
         #[cfg(feature = "telemetry")]
         crate::telemetry::PEER_METRICS_DROPPED.inc();
     }
-    if let Some(client) = AGGREGATOR.lock().unwrap().clone() {
+    if let Some(client) = {
+        let guard = aggregator_guard();
+        guard.clone()
+    } {
         tokio::spawn(async move {
             client.ingest(vec![snap]).await;
         });
@@ -1994,7 +2079,10 @@ pub fn broadcast_metrics(pk: &[u8; 32], m: &PeerMetrics) {
 }
 
 fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
-    if let Some(client) = AGGREGATOR.lock().unwrap().clone() {
+    if let Some(client) = {
+        let guard = aggregator_guard();
+        guard.clone()
+    } {
         #[derive(Serialize)]
         struct RotationEvent {
             peer_id: String,
@@ -2055,7 +2143,7 @@ pub fn set_peer_reputation_decay(rate: f64) {
 }
 
 pub fn set_metrics_aggregator(cfg: Option<AggregatorConfig>) {
-    let mut guard = AGGREGATOR.lock().unwrap();
+    let mut guard = aggregator_guard();
     if let Some(cfg) = cfg {
         let mut urls = vec![cfg.url];
         if let Some(srv) = cfg.srv_record {
@@ -2087,7 +2175,7 @@ pub fn set_peer_metrics_sample_rate(rate: u64) {
 }
 
 pub fn set_peer_metrics_path(path: String) {
-    *PEER_METRICS_PATH.lock().unwrap() = path;
+    *PEER_METRICS_PATH.lock() = path;
 }
 
 pub fn set_peer_metrics_retention(ttl: u64) {
@@ -2095,7 +2183,7 @@ pub fn set_peer_metrics_retention(ttl: u64) {
 }
 
 pub fn set_metrics_export_dir(dir: String) {
-    *METRICS_EXPORT_DIR.lock().unwrap() = dir;
+    *METRICS_EXPORT_DIR.lock() = dir;
 }
 
 pub fn set_peer_metrics_compress(val: bool) {
@@ -2123,7 +2211,7 @@ pub fn p2p_max_bytes_per_sec() -> u64 {
 }
 
 pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     let entry = map.entry(*pk).or_insert_with(PeerMetrics::default);
     let now = now_secs();
     let dur = *P2P_THROTTLE_SECS << entry.backoff_level.min(5);
@@ -2147,7 +2235,7 @@ pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
 }
 
 pub fn clear_throttle(pk: &[u8; 32]) -> bool {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     if let Some(e) = map.get_mut(pk) {
         e.throttled_until = 0;
         e.throttle_reason = None;
@@ -2160,7 +2248,7 @@ pub fn clear_throttle(pk: &[u8; 32]) -> bool {
 }
 
 fn is_throttled(pk: &[u8; 32]) -> bool {
-    let map = PEER_METRICS.lock().unwrap();
+    let map = peer_metrics_guard();
     map.get(pk)
         .map(|e| e.throttled_until > now_secs())
         .unwrap_or(false)
@@ -2308,7 +2396,7 @@ mod tests {
             client: reqwest::Client::new(),
             idx: Arc::new(AtomicUsize::new(0)),
         };
-        AGGREGATOR.lock().unwrap().replace(client.clone());
+        aggregator_guard().replace(client.clone());
         let snap = PeerSnapshot {
             peer_id: "p".into(),
             metrics: PeerMetrics::default(),
@@ -2331,7 +2419,7 @@ pub fn load_peer_metrics() {
     let ttl = PEER_METRICS_RETENTION.load(Ordering::Relaxed);
     if let Some(store) = peer_metrics_store::store() {
         let entries = store.load(ttl);
-        let mut map = PEER_METRICS.lock().unwrap();
+        let mut map = peer_metrics_guard();
         #[cfg(feature = "telemetry")]
         let export = EXPORT_PEER_METRICS.load(Ordering::Relaxed);
         #[cfg(not(feature = "telemetry"))]
@@ -2349,7 +2437,7 @@ pub fn load_peer_metrics() {
 }
 
 pub fn clear_peer_metrics() {
-    let mut map = PEER_METRICS.lock().unwrap();
+    let mut map = peer_metrics_guard();
     #[cfg(feature = "telemetry")]
     if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
         for pk in map.keys().cloned().collect::<Vec<_>>() {

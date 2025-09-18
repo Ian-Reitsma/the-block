@@ -54,7 +54,7 @@ impl StorageContract {
     }
 
     /// Verify a provider-supplied proof-of-retrievability.
-pub fn verify_proof(
+    pub fn verify_proof(
         &self,
         chunk_idx: u64,
         proof: [u8; 32],

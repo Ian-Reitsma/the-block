@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use the_block::transaction::{sign_tx, FeeLane, RawTxPayload};
 use the_block::{
     generate_keypair,
-    rpc::client::{RpcClient, WalletQosEvent},
+    rpc::client::{RpcClient, WalletQosError, WalletQosEvent},
 };
 
 const FEE_FLOOR_CACHE_TTL: Duration = Duration::from_secs(10);
@@ -562,7 +562,21 @@ fn record_wallet_event(
     };
     if let Err(err) = client.record_wallet_qos_event(rpc, event) {
         if !json {
-            eprintln!("failed to record wallet telemetry: {err}");
+            let msg = match &err {
+                WalletQosError::Transport(_) => {
+                    format!("failed to record wallet telemetry: {err}")
+                }
+                WalletQosError::Rpc { code, message } => {
+                    format!("wallet telemetry rejected by node (code {code}): {message}")
+                }
+                WalletQosError::MissingStatus => {
+                    "wallet telemetry response missing status field".to_string()
+                }
+                WalletQosError::InvalidStatus(status) => {
+                    format!("wallet telemetry response returned status '{status}'")
+                }
+            };
+            eprintln!("{msg}");
         }
     }
 }

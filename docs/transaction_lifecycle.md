@@ -67,6 +67,11 @@ signed = SignedTransaction(payload, pubkey_bytes, sig_bytes, FeeLane.Consumer)
 
 Helpers in `node/src/transaction.rs` expose `__repr__` and alias properties so Python users can inspect and mutate fields naturally.
 
+> **PyO3 note:** Every static constructor exposed to Python must carry the
+> `#[staticmethod]` attribute in Rust. Without it, PyO3 treats the first
+> argument as `self` and runtime calls like `Blockchain.open(path)` will fail at
+> import time.
+
 ## 4. Admission and Scheduling
 
 1. **Submission** – Clients broadcast via the CLI (`blockctl tx send ...`), direct RPC, or Python bindings (`rpc.submit_tx`).

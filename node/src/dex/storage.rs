@@ -2,8 +2,8 @@
 
 use super::order_book::{Order, OrderBook};
 use crate::simple_db::SimpleDb;
-use dex::escrow::{Escrow, EscrowId, PaymentProof};
 use dex::amm::Pool;
+use dex::escrow::{Escrow, EscrowId, PaymentProof};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

@@ -33,6 +33,17 @@ mod tests {
         assert_eq!(cost(OpCode::Load), GAS_STORAGE_READ);
         assert_eq!(cost(OpCode::Hash), GAS_HASH);
     }
+
+    #[test]
+    fn remaining_tracks_usage() {
+        let mut meter = GasMeter::new(10);
+        assert_eq!(meter.remaining(), 10);
+        meter.charge(4).expect("charge within limit");
+        assert_eq!(meter.remaining(), 6);
+        meter.charge(6).expect("consume rest");
+        assert_eq!(meter.remaining(), 0);
+        assert!(meter.charge(1).is_err());
+    }
 }
 
 /// Basic gas meter for tracking consumption.
@@ -74,5 +85,10 @@ impl GasMeter {
     #[must_use]
     pub fn used(&self) -> u64 {
         self.used
+    }
+
+    #[must_use]
+    pub fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.used)
     }
 }

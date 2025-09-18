@@ -1,7 +1,7 @@
 use clap::Subcommand;
 use hex;
-use the_block::dex::{check_liquidity_rules, storage::EscrowState, DexStore};
 use the_block::dex::amm::Pool;
+use the_block::dex::{check_liquidity_rules, storage::EscrowState, DexStore};
 
 #[derive(Subcommand)]
 pub enum DexCmd {
@@ -92,14 +92,23 @@ pub fn handle(cmd: DexCmd) {
             }
         },
         DexCmd::Liquidity { action } => match action {
-            LiquidityCmd::Add { pool, ct, it, state } => {
+            LiquidityCmd::Add {
+                pool,
+                ct,
+                it,
+                state,
+            } => {
                 let mut store = DexStore::open(&state);
                 let mut p: Pool = store.load_pool(&pool);
                 let minted = p.add_liquidity(ct as u128, it as u128);
                 store.save_pool(&pool, &p);
                 println!("minted shares: {}", minted);
             }
-            LiquidityCmd::Remove { pool, shares, state } => {
+            LiquidityCmd::Remove {
+                pool,
+                shares,
+                state,
+            } => {
                 let mut store = DexStore::open(&state);
                 let mut p: Pool = store.load_pool(&pool);
                 let (ct, it) = p.remove_liquidity(shares as u128);

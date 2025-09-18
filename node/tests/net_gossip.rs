@@ -534,8 +534,8 @@ fn peer_rate_limit_and_ban() {
             transport: Transport::Tcp,
             quic_addr: None,
             quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
         }),
     );
     for _ in 0..4 {

@@ -8901,6 +8901,7 @@ dependencies = [
  "signal-hook",
  "sled",
  "state",
+ "static_assertions",
  "statrs",
  "storage",
  "subtle",

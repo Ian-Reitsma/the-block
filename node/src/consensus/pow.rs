@@ -189,26 +189,65 @@ mod tests {
 
     #[test]
     fn mines_block() {
-        let header = template([0u8; 32], [1u8; 32], [2u8; 32], 1_000_000, 1, 0);
+        let base_fee = 1_000;
+        let retune_hint = -1;
+        let header = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            1_000_000,
+            base_fee,
+            retune_hint,
+        );
         let mut miner = Miner::new(1_000_000, 1_000);
         let mined = miner.mine(header.clone());
         let hash = mined.hash();
         let value = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
         assert!(value <= target(header.difficulty));
+        assert_eq!(mined.base_fee, base_fee);
+        assert_eq!(mined.retune_hint, retune_hint);
     }
 
     #[test]
     fn difficulty_decreases_when_blocks_slow() {
         let mut miner = Miner::new(1_000, 1_000);
-        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
+        let base_fee = 750;
+        let mut h1 = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            miner.difficulty(),
+            base_fee,
+            -1,
+        );
         h1.timestamp_millis = 0;
-        let _b1 = miner.mine(h1);
-        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
+        let b1 = miner.mine(h1);
+        assert_eq!(b1.base_fee, base_fee);
+        assert_eq!(b1.retune_hint, -1);
+        let mut h2 = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            miner.difficulty(),
+            base_fee,
+            0,
+        );
         h2.timestamp_millis = 3_000;
-        let _b2 = miner.mine(h2);
-        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
+        let b2 = miner.mine(h2);
+        assert_eq!(b2.base_fee, base_fee);
+        assert_eq!(b2.retune_hint, 0);
+        let mut h3 = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            miner.difficulty(),
+            base_fee,
+            1,
+        );
         h3.timestamp_millis = 4_000;
         let b3 = miner.mine(h3);
+        assert_eq!(b3.base_fee, base_fee);
+        assert_eq!(b3.retune_hint, 1);
         assert!(b3.difficulty < 1_000);
         assert!(miner.difficulty() <= b3.difficulty);
     }
@@ -216,15 +255,43 @@ mod tests {
     #[test]
     fn difficulty_increases_when_blocks_fast() {
         let mut miner = Miner::new(1_000, 1_000);
-        let mut h1 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
+        let base_fee = 900;
+        let mut h1 = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            miner.difficulty(),
+            base_fee,
+            1,
+        );
         h1.timestamp_millis = 0;
-        let _b1 = miner.mine(h1);
-        let mut h2 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
+        let b1 = miner.mine(h1);
+        assert_eq!(b1.base_fee, base_fee);
+        assert_eq!(b1.retune_hint, 1);
+        let mut h2 = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            miner.difficulty(),
+            base_fee,
+            -1,
+        );
         h2.timestamp_millis = 500;
-        let _b2 = miner.mine(h2);
-        let mut h3 = template([0u8; 32], [1u8; 32], [2u8; 32], miner.difficulty(), 1);
+        let b2 = miner.mine(h2);
+        assert_eq!(b2.base_fee, base_fee);
+        assert_eq!(b2.retune_hint, -1);
+        let mut h3 = template(
+            [0u8; 32],
+            [1u8; 32],
+            [2u8; 32],
+            miner.difficulty(),
+            base_fee,
+            0,
+        );
         h3.timestamp_millis = 1_000;
         let b3 = miner.mine(h3);
+        assert_eq!(b3.base_fee, base_fee);
+        assert_eq!(b3.retune_hint, 0);
         assert!(b3.difficulty > 1_000);
     }
 }

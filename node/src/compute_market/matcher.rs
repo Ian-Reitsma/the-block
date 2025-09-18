@@ -27,15 +27,12 @@ static ASKS: Lazy<Mutex<Vec<Ask>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 /// Replace the current order book with the provided bids and asks.
 pub fn seed_orders(bids: Vec<Bid>, asks: Vec<Ask>) {
-    *BIDS.lock().unwrap_or_else(|e| e.into_inner()) = bids;
-    *ASKS.lock().unwrap_or_else(|e| e.into_inner()) = asks;
+    *BIDS.lock() = bids;
+    *ASKS.lock() = asks;
 }
 
 fn snapshot() -> (Vec<Bid>, Vec<Ask>) {
-    (
-        BIDS.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-        ASKS.lock().unwrap_or_else(|e| e.into_inner()).clone(),
-    )
+    (BIDS.lock().clone(), ASKS.lock().clone())
 }
 
 fn stable_match(mut bids: Vec<Bid>, mut asks: Vec<Ask>) -> Vec<(Bid, Ask)> {
@@ -98,10 +95,42 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
                 }
             }
         }
-        BIDS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        ASKS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        BIDS.lock().clear();
+        ASKS.lock().clear();
         #[cfg(feature = "telemetry")]
         crate::telemetry::MATCH_LOOP_LATENCY_SECONDS.observe(_start.elapsed().as_secs_f64());
         tokio::time::sleep(MATCH_INTERVAL).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seed_orders_populates_order_books() {
+        let bid = Bid {
+            job_id: "job-1".into(),
+            buyer: "buyer".into(),
+            price: 10,
+            lane: FeeLane::Consumer,
+        };
+        let ask = Ask {
+            job_id: "job-1".into(),
+            provider: "provider".into(),
+            price: 10,
+            lane: FeeLane::Consumer,
+        };
+
+        seed_orders(vec![bid.clone()], vec![ask.clone()]);
+
+        let (bids, asks) = snapshot();
+        assert_eq!(bids.len(), 1);
+        assert_eq!(asks.len(), 1);
+        assert_eq!(bids[0].job_id, bid.job_id);
+        assert_eq!(asks[0].provider, ask.provider);
+
+        BIDS.lock().clear();
+        ASKS.lock().clear();
     }
 }

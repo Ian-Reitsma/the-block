@@ -38,11 +38,7 @@ pub fn submit_release(store: &GovStore, mut prop: ReleaseVote) -> sled::Result<u
                     "invalid provenance attestation".into(),
                 ));
             }
-            if crate::provenance::verify_release_attestation(
-                &prop.build_hash,
-                &vk,
-                signature,
-            ) {
+            if crate::provenance::verify_release_attestation(&prop.build_hash, &vk, signature) {
                 if seen.insert(signer_bytes) {
                     valid += 1;
                 }

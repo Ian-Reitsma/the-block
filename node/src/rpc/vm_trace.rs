@@ -1,3 +1,5 @@
+use base64::engine::general_purpose;
+use base64::Engine;
 use futures::SinkExt;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -19,7 +21,7 @@ pub async fn serve_vm_trace(mut stream: TcpStream, key: String, code: Vec<u8>) {
         let mut h = Sha1::new();
         h.update(key.as_bytes());
         h.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-        base64::encode(h.finalize())
+        general_purpose::STANDARD.encode(h.finalize())
     };
     let resp = format!(
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept_key}\r\n\r\n",

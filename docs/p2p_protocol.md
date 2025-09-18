@@ -127,6 +127,18 @@ for (id, info) in peers {
 The registry is cleared on restart.  Future extensions may persist this state for
 long-lived peer reputation tracking.
 
+## Error Reporting
+
+Handshake failures surface through the `HandshakeError` enum returned by the
+network stack. Transport-level issues map to `Tls`, protocol downgrades emit
+`Version`, timeouts are tagged `Timeout`, and certificate validation problems
+resolve to `Certificate`. QUIC builds perform full certificate verification and
+compare the advertised fingerprint; any mismatch records
+`quic_handshake_fail_total{peer="…",reason="certificate"|"fingerprint_mismatch"}`
+and emits a `p2p`-targeted warning log. This mirrors the behaviour exercised by
+`p2p::handshake::validate_quic_certificate`, allowing operators to trace failed
+mutual-TLS rotations directly from telemetry.
+
 ## Telemetry
 
 The handshake module exports the following Prometheus metrics:

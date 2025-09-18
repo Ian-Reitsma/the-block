@@ -108,6 +108,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::KalmanRShort => "kalman_r_short",
         ParamKey::KalmanRMed => "kalman_r_med",
         ParamKey::KalmanRLong => "kalman_r_long",
+        ParamKey::SchedulerWeightGossip => "scheduler_weight_gossip",
+        ParamKey::SchedulerWeightCompute => "scheduler_weight_compute",
+        ParamKey::SchedulerWeightStorage => "scheduler_weight_storage",
     }
 }
 
@@ -740,6 +743,9 @@ impl GovStore {
                                 ParamKey::KalmanRShort => params.kalman_r_short,
                                 ParamKey::KalmanRMed => params.kalman_r_med,
                                 ParamKey::KalmanRLong => params.kalman_r_long,
+                                ParamKey::SchedulerWeightGossip => params.scheduler_weight_gossip,
+                                ParamKey::SchedulerWeightCompute => params.scheduler_weight_compute,
+                                ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -806,6 +812,13 @@ impl GovStore {
         #[cfg(feature = "telemetry")]
         self.update_pending_gauge()?;
         Ok(())
+    }
+
+    pub fn last_activation_record(&self) -> sled::Result<Option<LastActivation>> {
+        match self.last_activation().get("last")? {
+            Some(raw) => de(&raw).map(Some),
+            None => Ok(None),
+        }
     }
 
     pub fn rollback_last(
@@ -922,6 +935,9 @@ impl GovStore {
                 ParamKey::KalmanRShort => params.kalman_r_short,
                 ParamKey::KalmanRMed => params.kalman_r_med,
                 ParamKey::KalmanRLong => params.kalman_r_long,
+                ParamKey::SchedulerWeightGossip => params.scheduler_weight_gossip,
+                ParamKey::SchedulerWeightCompute => params.scheduler_weight_compute,
+                ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
@@ -953,6 +969,9 @@ impl GovStore {
             ParamKey::KalmanRShort => params.kalman_r_short,
             ParamKey::KalmanRMed => params.kalman_r_med,
             ParamKey::KalmanRLong => params.kalman_r_long,
+            ParamKey::SchedulerWeightGossip => params.scheduler_weight_gossip,
+            ParamKey::SchedulerWeightCompute => params.scheduler_weight_compute,
+            ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
         };
         self.persist_param_change(
             &hist_dir,
