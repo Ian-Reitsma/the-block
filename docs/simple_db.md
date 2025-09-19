@@ -1,82 +1,113 @@
-# SimpleDb – WAL-Backed Key-Value Store
+# SimpleDb – Snapshot-Oriented Key-Value Store
 
-`SimpleDb` is a lightweight embedded database used by several subsystems
-(net peer cache, DNS records, chunk gossip, Dex order books, and more).
-It trades advanced features for a compact, auditable write-ahead log (WAL)
-and deterministic serialization. This guide explains the on-disk layout,
-quota mechanics, and recovery process.
+`SimpleDb` provides a lightweight, in-memory map with crash-safe snapshot
+persistence for tests and feature-gated builds that do not link RocksDB. The
+implementation lives in [`node/src/simple_db/memory.rs`](../node/src/simple_db/memory.rs)
+and is used by the peer cache, DNS record store, DEX order book, law-enforcement
+portal logs, and other subsystems that require deterministic persistence without
+external dependencies.
 
-## 1. On-Disk Layout
+## 1. Column-Family Snapshots
 
-`node/src/simple_db.rs` stores two files under the supplied path:
+Each column family (CF) is serialized with `bincode` and written to disk as a
+single file named `<base64(cf)>.bin`, where the identifier is encoded with
+`URL_SAFE_NO_PAD` base64. Examples:
 
-- `db` – bincode-serialized `HashMap<String, Vec<u8>>` containing the
-  current key/value state and a special `__wal_id` entry tracking the last
-  applied WAL record.
-- `wal` – append-only log of pending changes. Each entry is a
-  `WalEntry { op, checksum }` where `op` is either `WalOp::Record` or
-  `WalOp::End { last_id }`. Entries are serialized with bincode and
-  checksummed with BLAKE3 to detect corruption.
+| Column family | On-disk file |
+| --- | --- |
+| `default` | `ZGVmYXVsdA.bin` |
+| `governance:fee_floor` | `Z292ZXJuYW5jZTpmZWVfZmxvb3I.bin` |
+| `dex:escrow` | `ZGV4OmVzY3Jvdy.bin` |
 
-On startup `SimpleDb::open()` loads `db` and then replays any `wal` entries
-newer than `__wal_id`. A terminal `WalOp::End` indicates that the previous
-session flushed successfully and the WAL can be discarded.
+The loader performs a strict round-trip check (`decode → encode == original`)
+before accepting a filename as base64. Sanitized legacy dumps that happen to be
+valid base64 strings therefore fall back to underscore decoding rather than
+being misclassified. When both a base64 and an underscore-sanitized file exist
+for the same column family, the base64 snapshot wins and the legacy file is
+deleted once the new image is parsed.
 
-## 2. WAL Write Path
+Legacy layouts from earlier releases stored snapshots as `<cf_with_underscores>.bin`.
+The loader continues to recognise those names by replacing `_` with `:` after
+failing the base64 round-trip check. If a matching base64 file is present, the
+legacy snapshot is ignored and removed to prevent stale data from shadowing the
+latest state.
 
-Mutation methods (`try_insert`, `try_remove`) first append a `WalOp::Record`
-with a monotonically increasing `id`. The record contains the key, optional
-value, and the sequence number. Only after the WAL write succeeds does the
-in-memory map update and the `__wal_id` key advance. `try_flush()` rewrites
-`db`, appends a terminal `WalOp::End`, and deletes the WAL.
+## 2. Crash-Safe Rewrite Path
 
-## 3. Byte Quotas and Disk-Full Handling
+`SimpleDb` writes every mutation through an atomic, fsync-backed staging
+process:
 
-`SimpleDb` exposes `set_byte_limit()` to cap the serialized `db` size. When
-the limit would be exceeded, `try_flush()` returns `io::ErrorKind::Other`
-and metrics `STORAGE_DISK_FULL_TOTAL` increments under the `telemetry`
-feature. Callers should surface this failure and either purge unneeded keys
-or back off retries.
+1. Serialize the updated map into a `NamedTempFile` allocated inside the target
+directory.
+2. `write_all` the bytes, then `sync_all` the temporary file to ensure the
+filesystem persists the payload.
+3. If an existing base64 snapshot is present, rename it to `<name>.bin.old` as a
+one-deep backup.
+4. `persist` the temporary file into place. On success, remove the backup (if
+any) and delete the legacy underscore-named file. On failure, restore the backup
+so callers can retry without losing state.
 
-## 4. Corruption Recovery
+The helper delays in-memory mutations until persistence succeeds. If `persist`
+or `sync_all` fails, the map rolls back to the previous value before returning
+the error. Empty column families remove both the base64 file and any lingering
+legacy snapshot. The optional byte limit set via `set_byte_limit()` guards
+against runaway allocations prior to serialization.
 
-During `open()` each WAL entry’s checksum is verified. Corrupt entries are
-skipped and `WAL_CORRUPT_RECOVERY_TOTAL` increments. Because every record is
-id-stamped, replays are idempotent: re-applying a record with an older `id`
-has no effect. If the WAL ends without a terminal `End` entry, `open()`
-replays what it can and then removes the WAL so the database continues with
-best-effort recovery.
+`SimpleDb::default()` now retains ownership of the temporary directory that it
+creates, ensuring the backing path remains live for the lifetime of the handle.
+Use `SimpleDb::open(path)` when you want snapshots in a specific directory.
 
-## 5. Usage Examples
+## 3. API Highlights
+
+- `try_insert_cf(name, key, value)` – upserts a namespaced key and returns the
+  previous value if present.
+- `insert_cf_with_delta(name, items)` – applies a batch of mutations and returns
+  a rollback delta vector that can be replayed on error.
+- `put_cf_raw` / `delete_cf_raw` – byte-oriented helpers for subsystems that
+  already own serialized payloads.
+- `flush_wal()` – a no-op shim for compatibility with RocksDB-backed call sites
+  that expect explicit flush hooks.
+
+## 4. Usage Example
 
 ```rust
-use the_block::SimpleDb;
+use the_block::simple_db::SimpleDb;
 
-let mut db = SimpleDb::open("/tmp/example");
-db.try_insert("key", b"value".to_vec()).unwrap();
-assert_eq!(db.get("key"), Some(b"value".to_vec()));
+let mut db = SimpleDb::open("/tmp/simpledb-demo");
+db.try_insert_cf("dex:escrow", "job-1", b"locked".to_vec()).unwrap();
+assert_eq!(db.get("job-1"), Some(b"locked".to_vec()));
 ```
 
-Modules relying on `SimpleDb` include:
+Column families are created lazily; the `default` CF always exists and backs the
+`get` / `insert` convenience methods.
 
-- `node/src/net/peer.rs` – chunk gossip cache.
-- `node/src/gateway/dns.rs` – published DNS TXT records.
-- `node/src/dex/storage.rs` – persistent DEX order books.
-- `node/src/identity/handle_registry.rs` – username-to-key mapping.
+## 5. Regression Coverage
 
-## 6. Testing and Fuzzing
+- `node/src/simple_db/memory.rs` contains unit tests that prove legacy
+  underscore snapshots load correctly, base64 names round-trip, and persisted
+  data survives reopen.
+- `node/tests/simple_db/memory_tests.rs::loads_legacy_sanitized_cf_files` keeps
+  the backward-compatibility path covered.
+- `node/tests/simple_db/memory_tests.rs::prefers_base64_snapshots_over_legacy`
+  verifies the precedence rule and clean-up behaviour.
+- `node/tests/simple_db/memory_tests.rs::cf_names_are_base64_encoded` confirms
+  every emitted filename uses the base64 convention.
 
-- `node/tests/wal_recovery.rs` exercises crash recovery and byte limits.
-- `fuzz/fuzz_targets/wal_fuzz.rs` mutates WAL bytes to stress checksum and
-  replay paths. `make fuzz-wal` runs this harness nightly.
+To run just the lightweight backend regressions during development, target the
+library tests directly:
 
-## 7. Operational Guidelines
+```bash
+cargo test -p the_block --lib simple_db::memory_tests::tests::prefers_base64_snapshots_over_legacy -- --nocapture
+```
 
-- Place databases on fast SSDs; WAL flushes are synchronous.
-- Monitor disk usage and the `STORAGE_DISK_FULL_TOTAL` counter.
-- For unit tests, use temporary directories to avoid polluting the
-  repository tree.
+## 6. Operational Guidance
 
-SimpleDb is intentionally minimal. Complex query patterns should be modeled
-as higher-level indices built on top of this primitive rather than
-embedding additional features into the core store.
+- Keep snapshots on SSD-backed paths; every write fsyncs the temporary file
+  before promotion.
+- Monitor disk quotas alongside the optional byte limit to avoid failed writes
+  during stress tests.
+- When migrating from legacy underscores to base64, allow the loader to clean up
+  superseded files automatically rather than deleting them manually.
+- The lightweight backend is intended for tests and constrained environments.
+  Production deployments should continue to use the RocksDB backend under
+  `--features storage-rocksdb`.

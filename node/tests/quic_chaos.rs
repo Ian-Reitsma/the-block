@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #[cfg(feature = "quic")]
 fn env_ratio(var: &str, default: f64) -> f64 {
     std::env::var(var)

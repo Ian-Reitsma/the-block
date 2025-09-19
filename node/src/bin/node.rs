@@ -8,10 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 use clap::{Parser, Subcommand};
 use ed25519_dalek::SigningKey;
-#[cfg(feature = "telemetry")]
-use tracing::info;
 use tracing_chrome::ChromeLayerBuilder;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
 
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
@@ -69,6 +67,25 @@ fn default_db_path() -> String {
         .join("db")
         .to_string_lossy()
         .into_owned()
+}
+
+fn default_language_for_region(region: &str) -> &'static str {
+    match region {
+        "US" => "en-US",
+        "EU" => "en-GB",
+        _ => "en",
+    }
+}
+
+fn policy_pack_language(pack: &jurisdiction::PolicyPack) -> String {
+    pack.features
+        .iter()
+        .find_map(|feature| {
+            feature
+                .strip_prefix("language:")
+                .map(|code| code.to_string())
+        })
+        .unwrap_or_else(|| default_language_for_region(&pack.region).to_string())
 }
 
 #[derive(Parser)]
@@ -262,19 +279,26 @@ async fn main() -> std::process::ExitCode {
             enable_vm_debug,
         } => {
             if auto_tune {
-                the_block::telemetry::auto_tune();
-                return std::process::ExitCode::SUCCESS;
+                #[cfg(feature = "telemetry")]
+                {
+                    the_block::telemetry::auto_tune();
+                    return std::process::ExitCode::SUCCESS;
+                }
+                #[cfg(not(feature = "telemetry"))]
+                {
+                    eprintln!("telemetry feature not enabled; --auto-tune unavailable");
+                    return std::process::ExitCode::FAILURE;
+                }
             }
             the_block::vm::set_vm_debug_enabled(enable_vm_debug);
             let filter = EnvFilter::new(log_level.join(","));
             let (profiler, _chrome) = if profiling {
-                let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
-                    .file("trace.json")
-                    .build();
-                let subscriber = tracing_subscriber::registry()
+                let (chrome_layer, guard) = ChromeLayerBuilder::new().file("trace.json").build();
+                tracing_subscriber::registry()
                     .with(filter)
-                    .with(chrome_layer);
-                tracing::subscriber::set_global_default(subscriber).expect("set subscriber");
+                    .with(chrome_layer)
+                    .try_init()
+                    .expect("set subscriber");
                 (
                     Some(pprof::ProfilerGuard::new(100).expect("profiler")),
                     Some(guard),
@@ -308,11 +332,13 @@ async fn main() -> std::process::ExitCode {
                 match pack_res {
                     Ok(pack) => {
                         inner.config.jurisdiction = Some(pack.region.clone());
+                        let language = policy_pack_language(&pack);
                         let _ = the_block::le_portal::record_action(
                             "le_jurisdiction.log",
                             "jurisdiction",
                             &format!("loaded {}", pack.region),
                             &pack.region,
+                            &language,
                         );
                     }
                     Err(e) => eprintln!("failed to load jurisdiction pack: {e}"),
@@ -369,12 +395,17 @@ async fn main() -> std::process::ExitCode {
             ));
             let rpc_addr = rx.await.expect("rpc addr");
             println!("RPC listening on {rpc_addr}");
-            if let Some(addr) = status_addr {
+            #[cfg(feature = "gateway")]
+            if let Some(addr) = status_addr.clone() {
                 let bc_status = Arc::clone(&bc);
                 tokio::spawn(async move {
                     let addr: std::net::SocketAddr = addr.parse().unwrap();
                     let _ = the_block::web::status::run(addr, bc_status).await;
                 });
+            }
+            #[cfg(not(feature = "gateway"))]
+            if status_addr.is_some() {
+                eprintln!("gateway feature not enabled; status server unavailable");
             }
             if quic {
                 #[cfg(feature = "quic")]

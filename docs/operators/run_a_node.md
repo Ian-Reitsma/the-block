@@ -33,6 +33,35 @@ tar -xzf node-<ver>-x86_64.tar.gz -C ~/.block
 ~/.block/node --datadir ~/.block/datadir --config ~/.block/config.toml
 ```
 
+### Feature-gated CLI flags
+
+The node binary now honours the workspace feature matrix so that light-weight
+test builds do not have to link telemetry, gateway, or QUIC stacks unless they
+are explicitly requested:
+
+- `--auto-tune` requires building the binary with `--features telemetry`. When
+  the feature is disabled the command exits with a clear
+  `telemetry feature not enabled; --auto-tune unavailable` message instead of
+  attempting to call into missing modules. Operators who want the historical
+  CPU/memory tuning pass should compile with
+  `cargo build -p the_block --features "cli telemetry" --bin node`.
+- Supplying `--metrics-addr` without the `telemetry` feature now fails fast in
+  the same way, preventing silent runs with missing Prometheus exporters.
+- `--status-addr` spins up the HTTP status page only when the binary is built
+  with the `gateway` feature. Plain builds print
+  `gateway feature not enabled; status server unavailable` and continue
+  without binding the port. Package the node with
+  `cargo build -p the_block --features "cli gateway" --bin node` when the
+  status endpoint is required.
+- QUIC helpers (`--quic`, certificate rotation, chaos diagnostics) continue to
+  live behind the `quic` feature. Non-QUIC builds ignore the flag rather than
+  panicking when helper modules are missing.
+
+The jurisdiction loader now records the language that ships with a policy pack
+when calling `le_portal::record_action`, defaulting to English if the pack does
+not specify one. Logs therefore capture both the region and localisation used
+for legal hold records, mirroring the explorer's jurisdiction timeline.
+
 ## Config reload
 
 The node watches `config/default.toml` for changes and reloads rate-limit and reputation settings without restart. Trigger a manual reload with `config reload` from the CLI. Successful reloads increment `config_reload_total{result="ok"}` and update `config_reload_last_ts`; malformed files are logged and ignored.

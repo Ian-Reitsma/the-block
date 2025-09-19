@@ -143,7 +143,7 @@ impl<T> ServiceScheduler<T> {
         for class in ServiceClass::ALL.iter() {
             queues.insert(*class, VecDeque::new());
         }
-        let mut sched = Self {
+        let sched = Self {
             queues,
             weights,
             #[cfg(feature = "reentrant_scheduler")]

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use sim::Simulation;
 use std::fs;
 

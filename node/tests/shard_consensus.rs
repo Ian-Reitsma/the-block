@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ledger::address;
 use the_block::transaction::{CrossShardEnvelope, RawTxPayload};
 

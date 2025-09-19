@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tempfile::tempdir;

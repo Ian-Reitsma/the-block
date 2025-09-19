@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use crate::transaction::FeeLane;
 
+const MAX_BACKOFF_EXPONENT: u32 = 30;
+
 /// Simple JSON-RPC client with jittered timeouts and retry backoff.
 #[derive(Clone)]
 pub struct RpcClient {
@@ -22,6 +24,8 @@ impl RpcClient {
     /// - `TB_RPC_TIMEOUT_MS` base timeout in milliseconds (default 5000)
     /// - `TB_RPC_TIMEOUT_JITTER_MS` added random jitter (default 1000)
     /// - `TB_RPC_MAX_RETRIES` number of retries on failure (default 3)
+    /// - `TB_RPC_FAULT_RATE` probability for fault injection, clamped to the
+    ///   inclusive `[0.0, 1.0]` range (default 0.0)
     pub fn from_env() -> Self {
         let base = std::env::var("TB_RPC_TIMEOUT_MS")
             .ok()
@@ -37,7 +41,9 @@ impl RpcClient {
             .unwrap_or(3);
         let fault = std::env::var("TB_RPC_FAULT_RATE")
             .ok()
-            .and_then(|v| v.parse().ok())
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| !v.is_nan())
+            .map(|v| v.clamp(0.0, 1.0))
             .unwrap_or(0.0);
         Self {
             http: Client::new(),
@@ -54,10 +60,19 @@ impl RpcClient {
     }
 
     fn backoff_with_jitter(&self, attempt: u32) -> Duration {
-        // exponential backoff with jitter
-        let base = self.base_timeout * (1 << attempt);
-        let extra = rand::thread_rng().gen_range(0..=self.jitter.as_millis() as u64);
-        base + Duration::from_millis(extra)
+        // exponential backoff with jitter. The multiplier saturates once the
+        // exponent exceeds `MAX_BACKOFF_EXPONENT` so operators can raise
+        // `TB_RPC_MAX_RETRIES` without triggering shift overflows while we still
+        // add jitter on top of the capped exponential delay.
+        let exponent = attempt.min(MAX_BACKOFF_EXPONENT);
+        let multiplier = 1u64 << exponent;
+        let base = self
+            .base_timeout
+            .checked_mul(multiplier as u32)
+            .unwrap_or(Duration::MAX);
+        let jitter =
+            Duration::from_millis(rand::thread_rng().gen_range(0..=self.jitter.as_millis() as u64));
+        base.checked_add(jitter).unwrap_or(Duration::MAX)
     }
 
     fn maybe_inject_fault(&self) -> Result<(), RpcClientError> {
@@ -369,6 +384,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_ref() {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
     fn consume_http_request(stream: &mut std::net::TcpStream) {
         use std::io::Read;
 
@@ -416,6 +454,138 @@ mod tests {
             }
         }
         0
+    }
+
+    #[test]
+    fn rpc_client_fault_rate_clamping() {
+        for (value, expected) in [("-3.0", 0.0), ("1.5", 1.0)] {
+            {
+                let _guard = EnvGuard::set("TB_RPC_FAULT_RATE", value);
+                let client = RpcClient::from_env();
+                assert_eq!(client.fault_rate, expected, "value {value}");
+            }
+        }
+
+        {
+            let _guard = EnvGuard::set("TB_RPC_FAULT_RATE", "NaN");
+            let client = RpcClient::from_env();
+            assert_eq!(client.fault_rate, 0.0);
+        }
+    }
+
+    #[test]
+    fn maybe_inject_fault_respects_clamped_rate() {
+        let client_full = {
+            let _guard = EnvGuard::set("TB_RPC_FAULT_RATE", "1.5");
+            let client = RpcClient::from_env();
+            assert_eq!(client.fault_rate, 1.0);
+            client
+        };
+
+        for _ in 0..8 {
+            let err = client_full
+                .maybe_inject_fault()
+                .expect_err("sanitized rate of 1.0 should always inject faults");
+            assert!(matches!(err, RpcClientError::InjectedFault));
+        }
+
+        let client_zero = {
+            let _guard = EnvGuard::set("TB_RPC_FAULT_RATE", "-3.0");
+            let client = RpcClient::from_env();
+            assert_eq!(client.fault_rate, 0.0);
+            client
+        };
+
+        for _ in 0..8 {
+            client_zero
+                .maybe_inject_fault()
+                .expect("sanitized rate of 0.0 should never inject faults");
+        }
+    }
+
+    #[test]
+    fn env_guard_restores_previous_value() {
+        const KEY: &str = "TB_RPC_FAULT_RATE";
+        let original = std::env::var_os(KEY);
+        std::env::set_var(KEY, "0.42");
+        {
+            let guard = EnvGuard::set(KEY, "1.0");
+            assert_eq!(std::env::var(KEY).unwrap(), "1.0");
+            drop(guard);
+        }
+        assert_eq!(std::env::var(KEY).unwrap(), "0.42");
+
+        match original {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+    }
+
+    #[test]
+    fn backoff_with_jitter_matches_legacy_for_small_attempts() {
+        let client = RpcClient {
+            http: Client::new(),
+            base_timeout: Duration::from_millis(25),
+            jitter: Duration::from_millis(0),
+            max_retries: 3,
+            fault_rate: 0.0,
+        };
+
+        for attempt in 0..=3 {
+            let expected = client.base_timeout * (1u32 << attempt);
+            let actual = client.backoff_with_jitter(attempt);
+            assert_eq!(actual, expected, "attempt {attempt}");
+        }
+    }
+
+    fn assert_backoff_saturates_for_large_attempts() {
+        let client = RpcClient {
+            http: Client::new(),
+            base_timeout: Duration::from_millis(10),
+            jitter: Duration::from_millis(0),
+            max_retries: 100,
+            fault_rate: 0.0,
+        };
+
+        let delay = client.backoff_with_jitter(100);
+        let expected_multiplier = 1u64 << MAX_BACKOFF_EXPONENT;
+        let expected = client
+            .base_timeout
+            .checked_mul(expected_multiplier as u32)
+            .unwrap();
+        assert_eq!(delay, expected);
+        assert!(delay < Duration::MAX);
+    }
+
+    #[test]
+    fn backoff_with_jitter_saturates_for_large_attempts() {
+        assert_backoff_saturates_for_large_attempts();
+    }
+
+    #[test]
+    fn rpc_client_backoff_handles_large_retries() {
+        assert_backoff_saturates_for_large_attempts();
+    }
+
+    #[test]
+    fn backoff_with_jitter_is_monotonic() {
+        let client = RpcClient {
+            http: Client::new(),
+            base_timeout: Duration::from_millis(5),
+            jitter: Duration::from_millis(0),
+            max_retries: 100,
+            fault_rate: 0.0,
+        };
+
+        let mut previous = Duration::ZERO;
+        for attempt in 0..=100 {
+            let delay = client.backoff_with_jitter(attempt);
+            assert!(
+                delay >= previous,
+                "backoff decreased at attempt {attempt}: {delay:?} < {previous:?}"
+            );
+            previous = delay;
+        }
     }
 
     #[test]

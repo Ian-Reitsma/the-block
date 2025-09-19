@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
 use the_block::p2p::handshake::{
     handle_handshake, FeatureBit, HandshakeCfg, Hello, Transport, SUPPORTED_VERSION,

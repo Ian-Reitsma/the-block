@@ -2,3 +2,6 @@
 RUST_TEST_THREADS = "1"
 PROPTEST_CASES = "64"
 PROPTEST_DISABLE_FAILURE_PERSISTENCE = "1"
+
+[test]
+rustflags = ["-Clink-arg=-fuse-ld=lld"]

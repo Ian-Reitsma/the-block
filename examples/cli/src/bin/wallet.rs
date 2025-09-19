@@ -51,15 +51,19 @@ fn main() {
             let sig = wallet
                 .sign_stake(&role_str, amount, withdraw)
                 .expect("sign");
+            let sig_hex = hex::encode(sig.to_bytes());
+            let pk_hex = wallet.public_key_hex();
             let body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
                 "params": {
-                    "id": wallet.public_key_hex(),
+                    "id": pk_hex.clone(),
                     "role": role_str,
                     "amount": amount,
-                    "sig": hex::encode(sig.to_bytes()),
+                    "sig": sig_hex.clone(),
+                    "signers": [{"pk": pk_hex, "sig": sig_hex}],
+                    "threshold": 1,
                 }
             });
             let client = reqwest::blocking::Client::new();

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::util::versioned_blob::{
     decode_blob, encode_blob, DecodeErr, Versioned, MAGIC_PRICE_BOARD,
 };

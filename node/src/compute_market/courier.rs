@@ -120,7 +120,7 @@ impl CourierStore {
         Ok(acknowledged)
     }
 
-    pub async fn flush_async<F, Fut>(&self, mut forward: F) -> Result<u64, sled::Error>
+    pub async fn flush_async<F, Fut>(&self, forward: F) -> Result<u64, sled::Error>
     where
         F: Fn(&CourierReceipt) -> Fut,
         Fut: std::future::Future<Output = bool>,

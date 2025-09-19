@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};

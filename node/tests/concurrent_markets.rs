@@ -1,6 +1,7 @@
+#![cfg(feature = "integration-tests")]
 use dex::cfmm::swap_del_pino;
-use node::compute_market::price_bands;
 use std::thread;
+use the_block::compute_market::price_bands;
 
 #[test]
 fn concurrent_dex_and_compute_market() {

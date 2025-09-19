@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::{
     generate_keypair, sign_tx, Blockchain, FeeLane, RawTxPayload, SignedTransaction,
     TxAdmissionError,

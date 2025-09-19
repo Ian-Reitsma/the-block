@@ -149,6 +149,7 @@ fn spawn_timeout_signer() -> (String, thread::JoinHandle<()>) {
                 }
                 "/sign" => {
                     std::thread::sleep(Duration::from_secs(2));
+                    break;
                 }
                 _ => {
                     let _ = request.respond(Response::empty(404));

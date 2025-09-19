@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(feature = "fuzzy")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

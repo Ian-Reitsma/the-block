@@ -1,4 +1,6 @@
-use crate::net::peer::{DropReason, PeerMetrics};
+#[cfg(feature = "telemetry")]
+use crate::net::peer::DropReason;
+use crate::net::peer::PeerMetrics;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{verbose, PEER_RATE_LIMIT_TOTAL};
 #[cfg(feature = "telemetry")]

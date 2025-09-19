@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::gateway::dns::{
     clear_verify_cache, set_allow_external, set_disable_verify, set_txt_resolver, verify_txt,
 };

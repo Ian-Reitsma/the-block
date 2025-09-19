@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};

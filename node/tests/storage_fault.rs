@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::os::unix::fs::PermissionsExt;
 
 use tempfile::tempdir;

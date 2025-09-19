@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 #[cfg(feature = "telemetry")]

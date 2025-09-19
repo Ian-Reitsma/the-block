@@ -1,4 +1,4 @@
-use ed25519_dalek::{Keypair, PublicKey};
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
 
@@ -9,10 +9,16 @@ pub fn generate_master() -> [u8; 32] {
     seed
 }
 
-/// Derive a child keypair from the master seed and a derivation path.
+/// Derived signing/verifying key material for a pseudo HD path.
 /// This is a placeholder and does not implement full BIP32 semantics.
+#[derive(Clone)]
+pub struct Keypair {
+    pub secret: SigningKey,
+    pub public: VerifyingKey,
+}
+
 pub fn derive_child(master: &[u8; 32], _path: &str) -> Keypair {
-    let secret = ed25519_dalek::SecretKey::from_bytes(master).expect("seed");
-    let public = PublicKey::from(&secret);
+    let secret = SigningKey::from_bytes(master);
+    let public = secret.verifying_key();
     Keypair { secret, public }
 }

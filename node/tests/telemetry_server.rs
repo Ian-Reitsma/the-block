@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
 
 use std::io::{Read, Write};

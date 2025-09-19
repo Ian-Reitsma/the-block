@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used)]
 use futures::future::join_all;
 use proptest::prelude::*;

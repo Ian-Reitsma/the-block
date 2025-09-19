@@ -2,6 +2,12 @@
 
 The `crates/wallet` crate implements deterministic Ed25519 key management, optional remote signer plumbing, and utilities for building transactions. The command-line interface lives in [`cli/src/wallet.rs`](../cli/src/wallet.rs) and is exposed through the `contract wallet` subcommand.
 
+> **Build status (2025-10-06):** `node/src/bin/wallet.rs` now builds solely
+> against `ed25519-dalek 2.2.x`, forwards multisig signer sets, and passes the
+> escrow hash algorithm into `verify_proof`. Focus on polishing multisig UX
+> (batched signer discovery, richer operator messaging) before tagging the next
+> CLI release.
+
 ## CLI overview
 
 ```
@@ -47,7 +53,34 @@ Every decision is reported back to the node through the `mempool.qos_event` RPC 
 
 ## Remote signer support
 
-The wallet crate ships a reusable remote signer client in [`crates/wallet/src/remote_signer.rs`](../crates/wallet/src/remote_signer.rs). It discovers signers over UDP, supports HTTPS and mutually authenticated WebSockets, and exposes metrics such as `remote_signer_request_total`, `remote_signer_success_total`, and `remote_signer_error_total{reason}`. These counters are only exported when the node or Python bindings are built with the `telemetry` feature flag enabled; feature-off builds skip instrumentation but retain identical signing behaviour. Integrations can combine the remote signer with the CLI by building transactions via `wallet::build_tx` and forwarding the digest to the signer.
+The wallet crate ships a reusable remote signer client in [`crates/wallet/src/remote_signer.rs`](../crates/wallet/src/remote_signer.rs). It discovers signers over UDP, supports HTTPS and mutually authenticated WebSockets, and exposes metrics such as `remote_signer_request_total`, `remote_signer_success_total`, and `remote_signer_error_total{reason}`. These counters are only exported when the node or Python bindings are built with the `telemetry` feature flag enabled; feature-off builds skip instrumentation but retain identical signing behaviour. Integrations can combine the remote signer with the CLI by building transactions via `wallet::build_tx` and forwarding the digest to the signer. Staking flows now return every approving key alongside its signature so the CLI can populate the RPC payload with
+
+```json
+{
+  "id": "<primary signer>",
+  "role": "gateway",
+  "amount": 10,
+  "sig": "<legacy single-sig fallback>",
+  "threshold": 2,
+  "signers": [
+    {"pk": "<signer a>", "sig": "<signature>"},
+    {"pk": "<signer b>", "sig": "<signature>"}
+  ]
+}
+```
+
+This keeps older nodes compatible (they continue to read `sig`) while giving upgraded deployments the data needed to enforce multisignature thresholds.
+
+## Ed25519 dependency alignment
+
+Both the wallet crate and the node CLI depend on `ed25519-dalek 2.2.x`. The
+upgrade replaces the legacy `ed25519` re-export with the modern `Signature`
+API, ensuring remote signer payloads, staking flows, and explorer attestations
+all share identical types. When migrating custom tooling, update any
+`Signature::from_bytes` usage to `Signature::from_slice` (which now returns a
+`Result`) and drop imports from the deprecated `ed25519` crate. The wallet CLI
+also forwards the escrow `HashAlgo` when invoking `verify_proof`, so third-party
+clients should include the same field when constructing release proofs.
 
 ## Telemetry & monitoring
 

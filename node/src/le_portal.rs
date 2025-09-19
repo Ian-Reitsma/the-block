@@ -210,18 +210,21 @@ pub fn list_evidence(base: &str) -> std::io::Result<Vec<EvidenceRecord>> {
 
 /// Sanitize sensitive memo fields according to jurisdiction policy. Returns
 /// true if the payload was modified.
+#[cfg(feature = "privacy")]
 pub fn sanitize_payload(memo: &mut String, jurisdiction: &str) -> bool {
-    #[cfg(feature = "privacy")]
     let changed = {
         // Simple policy: disallow memos for non-local jurisdictions.
         let allowed = jurisdiction == "local";
         redaction::redact_memo(memo, allowed)
     };
-    #[cfg(not(feature = "privacy"))]
-    let changed = false;
     if changed {
         #[cfg(feature = "telemetry")]
         PRIVACY_SANITIZATION_TOTAL.inc();
     }
     changed
+}
+
+#[cfg(not(feature = "privacy"))]
+pub fn sanitize_payload(_memo: &mut String, _jurisdiction: &str) -> bool {
+    false
 }

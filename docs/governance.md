@@ -16,8 +16,8 @@ Two chambers participate in ratifying upgrades:
 3. Cast votes via `contract gov vote <id> --house ops|builders`.
 4. After both houses reach quorum and the timelock elapses, execute with `contract gov exec <id>`.
 5. Inspect progress at any time with `contract gov status <id>` which reports vote totals,
-   execution state and remaining timelock. Use `contract gov list` to view all proposals
-   and their dependencies in a single summary.
+   execution state and remaining timelock. Use `contract gov list` to view all proposals,
+   including their configured voting windows.
 
 Both houses must reach quorum before a proposal enters a timelock period,
 after which it may be executed on-chain.
@@ -27,14 +27,22 @@ Rollback semantics and CLI usage are documented in
 exposes rollback-related metrics so operators can verify that gauges reset after
 reverts.
 
-### Dependencies and Treasury
+### Treasury and Scheduling
 
-Proposals may declare dependencies on previously activated proposals. The
-dependency graph is enforced as a DAG, and voting on a proposal is only allowed
-once all of its dependencies have activated. This allows staged rollouts and
-conflict resolution. Additionally, a governance treasury collects a configurable
-percentage of block subsidies in a `TreasuryState`, providing funds for future
-initiatives.
+Proposals track their voting windows explicitly via `start` and `end` timestamps,
+which the CLI surfaces when listing the governance queue. Explorer timelines and
+telemetry dashboards consume the same fields so operators can monitor concurrent
+scheduling windows without relying on the removed dependency metadata.
+
+> **Update (2025-10-06):** the CLI now lists `start`/`end` windows alongside vote
+> totals and execution status, replacing the removed dependency field. Capture the
+> new scheduling metadata in explorer dashboards before enabling the `cli`
+> feature for production drills.
+
+Operators can stage
+rollouts by configuring these windows and the global timelock.
+Additionally, a governance treasury collects a configurable percentage of block
+subsidies in a `TreasuryState`, providing funds for future initiatives.
 
 ## Proposing an Upgrade
 

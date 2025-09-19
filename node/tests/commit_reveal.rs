@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::commit_reveal::{commit, verify};
 
 #[test]

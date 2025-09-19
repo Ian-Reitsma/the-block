@@ -1,7 +1,8 @@
+#![cfg(feature = "integration-tests")]
 use std::{collections::HashMap, fs};
+use the_block::transaction::{TxSignature, TxVersion};
 use the_block::{
     Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction, TokenAmount,
-    TxSignature, TxVersion,
 };
 
 mod util;

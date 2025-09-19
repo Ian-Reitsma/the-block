@@ -1,6 +1,7 @@
-use node::rpc::client::RpcClient;
+#![cfg(feature = "integration-tests")]
 use reqwest::error::Kind as ReqwestKind;
 use serde_json::Value;
+use the_block::rpc::client::RpcClient;
 
 #[test]
 fn env_fault_rate_triggers_request_errors() {

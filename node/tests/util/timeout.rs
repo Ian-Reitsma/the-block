@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::future::Future;
 use tokio::time::{timeout, Duration};
 

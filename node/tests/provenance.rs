@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::fs::File;
 use std::io::Write;
 

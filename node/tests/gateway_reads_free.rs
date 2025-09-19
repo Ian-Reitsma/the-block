@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::json;
 use tempfile::tempdir;

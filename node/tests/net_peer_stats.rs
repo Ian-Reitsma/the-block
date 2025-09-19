@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ed25519_dalek::SigningKey;
 use hex;
 use insta::assert_snapshot;

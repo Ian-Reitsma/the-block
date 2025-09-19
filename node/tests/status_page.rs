@@ -1,3 +1,6 @@
+#![cfg(feature = "integration-tests")]
+#![cfg(feature = "gateway")]
+
 use std::sync::{Arc, Mutex};
 use tempfile;
 use the_block::web::status;

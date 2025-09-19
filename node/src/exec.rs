@@ -82,7 +82,7 @@ pub fn record(
     pk: [u8; 32],
     sig: Vec<u8>,
     auditor_sig: Vec<u8>,
-    trace_id: &str,
+    _trace_id: &str,
 ) -> IoResult<()> {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)

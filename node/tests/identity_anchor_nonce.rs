@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ed25519_dalek::{Signer, SigningKey};
 use serial_test::serial;
 use std::convert::TryInto;

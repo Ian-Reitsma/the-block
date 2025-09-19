@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use rusqlite::Connection;
 use std::fs::File;
 use std::io::Write;
@@ -13,12 +14,14 @@ fn parse_and_index() {
     let mut f = File::create(&log_path).unwrap();
     writeln!(
         f,
-        "{\"timestamp\":1,\"level\":\"INFO\",\"message\":\"hi\",\"correlation_id\":\"a\"}"
+        "{}",
+        r#"{"timestamp":1,"level":"INFO","message":"hi","correlation_id":"a"}"#
     )
     .unwrap();
     writeln!(
         f,
-        "{\"timestamp\":2,\"level\":\"ERROR\",\"message\":\"bye\",\"correlation_id\":\"b\"}"
+        "{}",
+        r#"{"timestamp":2,"level":"ERROR","message":"bye","correlation_id":"b"}"#
     )
     .unwrap();
     let db_path = dir.path().join("logs.db");
@@ -44,7 +47,8 @@ fn surfaces_decryption_errors() {
     let mut file = File::create(&log_path).unwrap();
     writeln!(
         file,
-        "{\"timestamp\":1,\"level\":\"INFO\",\"message\":\"hello\",\"correlation_id\":\"x\"}"
+        "{}",
+        r#"{"timestamp":1,"level":"INFO","message":"hello","correlation_id":"x"}"#
     )
     .unwrap();
     index_logs(&log_path, &db_path).unwrap();
@@ -66,7 +70,8 @@ fn encrypts_and_decrypts_round_trip() {
     let mut f = File::create(&log_path).unwrap();
     writeln!(
         f,
-        "{\"timestamp\":5,\"level\":\"INFO\",\"message\":\"secret\",\"correlation_id\":\"c\"}"
+        "{}",
+        r#"{"timestamp":5,"level":"INFO","message":"secret","correlation_id":"c"}"#
     )
     .unwrap();
     let db_path = dir.path().join("logs.db");

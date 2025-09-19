@@ -66,9 +66,11 @@ impl FeeFloor {
             changed = true;
         }
         if changed {
-            let floor = self.compute_floor();
             #[cfg(feature = "telemetry")]
-            FEE_FLOOR_CURRENT.set(floor as i64);
+            {
+                let floor = self.compute_floor();
+                FEE_FLOOR_CURRENT.set(floor as i64);
+            }
         }
         changed
     }

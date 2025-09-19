@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #[test]
 fn chaos_simulated_bounds() {
     let dropped = 15; // 15% messages dropped

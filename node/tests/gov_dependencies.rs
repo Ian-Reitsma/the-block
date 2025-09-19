@@ -1,6 +1,7 @@
+#![cfg(feature = "integration-tests")]
 use tempfile::tempdir;
 use the_block::governance::{
-    controller, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime,
+    controller, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
 
 #[test]
@@ -24,6 +25,19 @@ fn dependency_blocks_vote() {
     let mut bc = the_block::Blockchain::default();
     let mut rt = Runtime { bc: &mut bc };
     let mut params = Params::default();
+    store
+        .vote(
+            id1,
+            Vote {
+                proposal_id: id1,
+                voter: "bootstrap".into(),
+                choice: VoteChoice::Yes,
+                weight: 1,
+                received_at: 0,
+            },
+            0,
+        )
+        .unwrap();
     controller::tally(&store, id1, 2).unwrap();
     controller::activate_ready(&store, 5, &mut rt, &mut params).unwrap();
 

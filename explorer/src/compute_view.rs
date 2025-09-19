@@ -5,5 +5,5 @@ use anyhow::Result;
 
 /// List compute jobs indexed by the explorer.
 pub fn list_jobs(exp: &Explorer) -> Result<Vec<ComputeJobRecord>> {
-    exp.compute_jobs()
+    Ok(exp.compute_jobs()?)
 }

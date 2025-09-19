@@ -1,7 +1,6 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};

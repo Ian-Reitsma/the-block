@@ -87,8 +87,8 @@ fn main() {
         Command::List => {
             for p in gov.list() {
                 println!(
-                    "id={} ops_for={} builders_for={} executed={} deps={:?}",
-                    p.id, p.ops_for, p.builders_for, p.executed, p.deps
+                    "id={} start={} end={} ops_for={} builders_for={} executed={}",
+                    p.id, p.start, p.end, p.ops_for, p.builders_for, p.executed
                 );
             }
         }

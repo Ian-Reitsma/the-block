@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99.6/100** with vision completion **~84.2/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99.3/100** with vision completion **~85.0/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. The governance CLI now lists proposals without the removed dependency field, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with escrow hash-algorithm coverage, `SimpleDb` snapshot rewrites stage through fsync’d temporary files before atomic promotion, and the RPC client both clamps `TB_RPC_FAULT_RATE` and saturates exponential backoff to avoid overflow while restoring prior environment state on drop. Remaining focus areas: finish migrating telemetry-gated tests to the default feature mix, extend bridge/DEX docs with signer-set payloads and explorer telemetry, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,7 +16,7 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~86 %
+## 1. Consensus & Core Execution — ~87 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -37,7 +37,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~93 %
+## 2. Networking & Gossip — ~94 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -62,7 +62,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~90 %
+## 3. Governance & Subsidy Economy — ~89 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -87,10 +87,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
  - Kalman filter weights for difficulty retune configurable via governance parameters (`node/src/governance/params.rs`).
 
 **Gaps**
+- Expand explorer timelines with proposal start/end metadata now emitted by the CLI.
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — ~79 %
+## 4. Storage & Free‑Read Hosting — ~81 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -99,6 +100,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - RaptorQ progressive fountain overlay for BLE repair (`node/src/storage/repair.rs`, `docs/storage/repair.md`, `node/tests/raptorq_repair.rs`).
 - Thread-safe `ReadStats` telemetry and analytics RPC (`node/src/telemetry.rs`, `node/tests/analytics.rs`).
 - WAL-backed `SimpleDb` design in `docs/simple_db.md` underpins DNS cache, chunk gossip, and DEX storage.
+- Base64 snapshots stage through `NamedTempFile::persist` plus `sync_all`, with legacy dumps removed only after durable rename (`node/src/simple_db/memory.rs`, `node/tests/simple_db/memory_tests.rs`).
 - Rent escrow metrics (`rent_escrow_locked_ct_total`, etc.) exposed in `docs/monitoring.md` with alert thresholds.
 - Reputation-weighted Lagrange allocation and proof-of-retrievability challenges secure storage contracts (`node/src/gateway/storage_alloc.rs`, `storage/src/contract.rs`).
 
@@ -120,7 +122,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~80 %
+## 6. Compute Marketplace & CBM — ~82 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -128,6 +130,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
 - Admission enforces dynamic fee floors with per-sender slot caps, eviction audit trails, explorer charts, and `mempool.stats` exposure (`node/src/mempool/admission.rs`, `node/src/mempool/scoring.rs`, `docs/mempool_qos.md`, `node/tests/mempool_eviction.rs`). Governance parameters for the floor window and percentile stream through telemetry (`fee_floor_window_changed_total`, `fee_floor_warning_total`, `fee_floor_override_total`) and wallet guidance.
+- `FeeFloor::new(size, percentile)` now requires explicit percentile inputs in tests and CLI paths, aligning mempool QoS regressions with governance-configured sampling windows (`node/src/mempool/scoring.rs`, `node/tests/mempool_qos.rs`).
 - Economic simulator outputs KPIs to CSV (`sim/src`).
 - Durable courier receipts with exponential backoff documented in `docs/compute_market_courier.md` and implemented in `node/src/compute_market/courier.rs`.
 - Groth16/Plonk SNARK verification for compute receipts (`node/src/compute_market/snark.rs`).
@@ -135,7 +138,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrowed payments and SLA enforcement remain rudimentary.
 
-## 7. Trust Lines & DEX — ~78 %
+## 7. Trust Lines & DEX — ~79 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -151,7 +154,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~91 %
+## 8. Wallets, Light Clients & KYC — ~92 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -164,12 +167,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Telemetry `session_key_issued_total`/`session_key_expired_total` and simulator churn knob (`sim/src/lib.rs`).
 - Release fetch/install tooling verifies provenance, records timestamps, and exposes explorer/CLI history for operator audits (`node/src/update.rs`, `cli/src/gov.rs`, `explorer/src/release_view.rs`).
 - Wallet send flow caches fee-floor lookups, emits localized warnings with auto-bump or `--force` overrides, streams telemetry events back to the node, and exposes JSON mode for automation (`cli/src/wallet.rs`, `docs/mempool_qos.md`).
+- Unified `ed25519-dalek 2.2.x` signature handling ensures remote signer payloads, CLI staking flows, and explorer attestations all share compatible types while forwarding multisig signer arrays and escrow hash algorithms (`crates/wallet`, `node/src/bin/wallet.rs`, `tests/remote_signer_multisig.rs`).
+- Remote signer metrics (`remote_signer_request_total`, `remote_signer_success_total`, `remote_signer_error_total{reason}`) integrate with wallet QoS counters so dashboards highlight signer outages alongside fee-floor overrides (`crates/wallet/src/remote_signer.rs`, `docs/monitoring.md`).
 
 **Gaps**
-- Multisig flows missing.
+- Polish multisig UX (batched signer discovery, richer operator prompts) before tagging the next CLI release.
+- Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — ~48 %
+## 9. Bridges & Cross‑Chain Routing — ~49 %
 
 **Evidence**
 - Lock/unlock bridge contract with relayer proofs (`bridges/src/lib.rs`).
@@ -182,7 +188,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~85 %
+## 10. Monitoring, Debugging & Profiling — ~86 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -212,7 +218,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Revocation alerting and recovery runbooks need explorer/CLI integration.
 - Mobile wallet identity UX and bulk export tooling remain outstanding.
 
-## 12. Economic Simulation & Formal Verification — ~38 %
+## 12. Economic Simulation & Formal Verification — ~39 %
 
 **Evidence**
 - Simulation scenarios for inflation/demand/backlog (`sim/src`).
@@ -223,7 +229,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 13. Mobile UX & Contribution Metrics — ~56 %
+## 13. Mobile UX & Contribution Metrics — ~57 %
 
 **Evidence**
 - Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).
@@ -236,4 +242,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑19*
+*Last updated: 2025‑10‑06*

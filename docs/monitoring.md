@@ -48,6 +48,17 @@ correlate reward shifts with governance interventions. After running a monitor
 command, open Grafana and import `monitoring/grafana/dashboard.json` to explore
 the live panels.
 
+Remote signer integrations emit `remote_signer_request_total`,
+`remote_signer_success_total`, and `remote_signer_error_total{reason}` under the
+telemetry feature flag, allowing dashboards to correlate multisig activity with
+wallet QoS events. Pair these with the wallet-side `fee_floor_warning_total` and
+`fee_floor_override_total` counters to spot signer outages that cause operators
+to force submissions below the governance floor. The RPC client’s sanitized
+`TB_RPC_FAULT_RATE` parsing ensures that chaos experiments never panic in
+`gen_bool`; injected faults now surface as explicit
+`RpcClientError::InjectedFault` log entries instead of crashing the dashboard
+scrape loop.
+
 ### Cluster-wide peer metrics
 
 Nodes can push their per-peer statistics to an external

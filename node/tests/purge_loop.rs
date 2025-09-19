@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "telemetry")]

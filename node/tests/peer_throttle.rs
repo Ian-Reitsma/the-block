@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::thread::sleep;
 use std::time::Duration;
 

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::storage::pipeline::{Provider, StoragePipeline};

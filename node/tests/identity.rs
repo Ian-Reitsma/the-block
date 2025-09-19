@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ed25519_dalek::{Signer, SigningKey};
 use tempfile::tempdir;
 use the_block::generate_keypair;

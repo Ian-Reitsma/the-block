@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use arbitrary::Arbitrary;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::collections::HashMap;

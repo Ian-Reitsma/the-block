@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::storage::repair::raptorq_repair_roundtrip;
 
 #[test]

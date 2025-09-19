@@ -119,7 +119,7 @@ pub fn index_logs_with_options(log_path: &Path, db_path: &Path, opts: IndexOptio
     let mut reader = BufReader::new(file);
     let mut line = String::new();
     let key = opts.passphrase.as_ref().map(|p| derive_encryption_key(p));
-    let mut tx = conn.transaction()?;
+    let tx = conn.transaction()?;
     let mut insert = tx.prepare(
         "INSERT INTO logs (
             timestamp,

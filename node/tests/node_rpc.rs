@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::cmp::Ordering;
 use the_block::consensus::fork_choice::{choose_tip, TipMeta};
 

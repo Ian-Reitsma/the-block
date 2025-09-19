@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ed25519_dalek::{Signer, SigningKey};
 use std::convert::TryInto;
 use tempfile::tempdir;

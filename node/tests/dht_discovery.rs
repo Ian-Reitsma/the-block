@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use libp2p::{multiaddr::multiaddr, PeerId};
 use tempfile::tempdir;
 use the_block::net::discovery::Discovery;

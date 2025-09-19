@@ -66,6 +66,8 @@ fn record_latency(addr: String, latency: u128) {
             .with_label_values(&[&addr])
             .set(latency as i64);
     }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = is_new;
 }
 
 pub fn peer_latency(addr: &SocketAddr) -> Option<u128> {

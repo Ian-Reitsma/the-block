@@ -1006,6 +1006,7 @@ impl Blockchain {
         self.shard_roots.get(&shard).copied()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn read_shard_state(&self, shard: ShardId, key: &str) -> Option<Vec<u8>> {
         let cache_key = (shard, key.as_bytes().to_vec());
         if let Some(value) = {
@@ -1066,6 +1067,8 @@ impl Blockchain {
         if changed_consumer || changed_industrial {
             crate::telemetry::FEE_FLOOR_WINDOW_CHANGED_TOTAL.inc();
         }
+        #[cfg(not(feature = "telemetry"))]
+        let _ = (changed_consumer, changed_industrial);
     }
     fn adjust_mempool_size(&self, lane: FeeLane, delta: isize) -> usize {
         use AtomicOrdering::SeqCst;

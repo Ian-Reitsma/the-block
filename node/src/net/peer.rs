@@ -1154,6 +1154,7 @@ fn record_handshake_success(pk: &[u8; 32]) {
     }
 }
 
+#[cfg(feature = "quic")]
 pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
     let mut map = peer_metrics_guard();
     maybe_consolidate(&mut map);
