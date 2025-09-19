@@ -1,4 +1,5 @@
-use light_client::{sync_background, Header, LightClient, SyncOptions};
+#![cfg(feature = "integration-tests")]
+use the_block::light_client::{sync_background, Header, LightClient, SyncOptions};
 
 fn mine(prev: &Header, height: u64) -> Header {
     let mut h = Header {
@@ -6,6 +7,8 @@ fn mine(prev: &Header, height: u64) -> Header {
         prev_hash: prev.hash(),
         merkle_root: [0u8; 32],
         checkpoint_hash: [0u8; 32],
+        validator_key: None,
+        checkpoint_sig: None,
         nonce: 0,
         difficulty: 1,
         timestamp_millis: 0,
@@ -33,6 +36,8 @@ fn partial_to_full_sync() {
         prev_hash: [0u8; 32],
         merkle_root: [0u8; 32],
         checkpoint_hash: [0u8; 32],
+        validator_key: None,
+        checkpoint_sig: None,
         nonce: 0,
         difficulty: 1,
         timestamp_millis: 0,

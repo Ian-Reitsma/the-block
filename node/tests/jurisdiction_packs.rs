@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use jurisdiction::{log_law_enforcement_request, PolicyPack};
 use tempfile::tempdir;
 

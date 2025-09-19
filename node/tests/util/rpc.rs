@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use super::seed::record_seed;
 use rand::thread_rng;
 use rand::{rngs::StdRng, Rng, SeedableRng};

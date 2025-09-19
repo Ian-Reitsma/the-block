@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 //! Test-vectors helper module.
 //!
 //! This file intentionally contains no code; it exists so that `mod vectors;`

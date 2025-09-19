@@ -1,6 +1,8 @@
 use std::cell::Cell;
 
-use crate::vm::gas::{self, GasMeter};
+#[cfg(test)]
+use crate::vm::gas;
+use crate::vm::gas::GasMeter;
 pub use crate::vm::opcodes::OpCode;
 
 use super::exec;

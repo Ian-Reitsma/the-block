@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::collections::HashMap;
 use the_block::consensus::{engine::ConsensusEngine, unl::Unl};
 

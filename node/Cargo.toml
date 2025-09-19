@@ -64,7 +64,7 @@ base64ct = "1.6.0"
 dirs = "5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "test-util", "fs"] }
 sled = { version = "0.34" }
-rocksdb = "0.21"
+rocksdb = { version = "0.21", optional = true }
 rusqlite = { version = "0.30", features = ["bundled"] }
 libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio", "noise", "yamux", "kad"] }
 futures = "0.3"
@@ -101,6 +101,8 @@ bridges = { path = "../bridges" }
 storage = { path = "../storage" }
 # hardware detection
 num_cpus = "1.17"
+# light-client integration
+light-client = { path = "../crates/light-client" }
 # jittered RPC client
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime
@@ -121,6 +123,11 @@ terminal_size = "0.2"
 wasmtime = "24"
 
 [features]
+default = ["storage-rocksdb"]
+storage-rocksdb = ["dep:rocksdb"]
+cli = []
+lightweight-integration = []
+integration-tests = []
 quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 
 fuzzy = ["proptest"]
@@ -157,6 +164,7 @@ insta = { version = "1", features = ["glob"] }
 axum = { version = "0.7", features = ["json"] }
 sha3 = "0.10"
 wat = "1"
+sim = { package = "tb-sim", path = "../sim" }
 
 [[bench]]
 name = "startup_rebuild"
@@ -190,6 +198,60 @@ path = "tests/nonce_supply_prop.rs"
 blake3 = "1"
 
 [lib]
- name = "the_block"
- crate-type = ["cdylib", "rlib"]
+name = "the_block"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "aggregator"
+path = "src/bin/aggregator.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "ban"
+path = "src/bin/ban.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "db_compact"
+path = "src/bin/db_compact.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "db_migrate"
+path = "src/bin/db_migrate.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "gov"
+path = "src/bin/gov.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "net"
+path = "src/bin/net.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "node"
+path = "src/bin/node.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "snapshot"
+path = "src/bin/snapshot.rs"
+required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "wallet"
+path = "src/bin/wallet.rs"
+required-features = ["cli"]
+test = false
 

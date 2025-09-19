@@ -261,7 +261,14 @@ following environment variables control timeout behaviour:
 - `TB_RPC_TIMEOUT_MS` – base timeout per request (default 5000ms)
 - `TB_RPC_TIMEOUT_JITTER_MS` – additional random jitter added to each timeout
   (default 1000ms)
-- `TB_RPC_MAX_RETRIES` – number of retry attempts on timeout (default 3)
+- `TB_RPC_MAX_RETRIES` – number of retry attempts on timeout (default 3).
+  The exponential multiplier saturates at `2^30` once retries reach 31
+  (`MAX_BACKOFF_EXPONENT` in [`node/src/rpc/client.rs`](../node/src/rpc/client.rs)),
+  so later attempts reuse that multiplier while keeping jitter in the delay
+  calculation.
+- `TB_RPC_FAULT_RATE` – probability for chaos-induced faults. Values outside
+  the inclusive `[0.0, 1.0]` range are clamped and `NaN` inputs are ignored so
+  the client never panics when chaos testing is enabled.
 
 Set these variables to tune client behaviour in constrained or high latency
 networks.

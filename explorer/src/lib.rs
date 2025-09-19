@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use storage;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
-    dex::order_book::{OrderBook, Side},
+    dex::order_book::OrderBook,
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
     Block,
@@ -218,7 +218,7 @@ pub struct Explorer {
 impl Explorer {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let p = path.as_ref().to_path_buf();
-        let conn = Connection::open(&p)?;
+        let mut conn = Connection::open(&p)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, epoch INTEGER, provider TEXT, buyer TEXT, amount INTEGER)",
             [],
@@ -310,7 +310,7 @@ impl Explorer {
         let did_registry = DidRegistry::open(DidRegistry::default_path());
         let mut cache = LruCache::new(NonZeroUsize::new(256).unwrap());
         {
-            let mut seed_tx = conn.transaction()?;
+            let seed_tx = conn.transaction()?;
             for view in did_registry
                 .records()
                 .into_iter()
@@ -954,7 +954,7 @@ impl Explorer {
         &self,
         entries: &[release_view::ReleaseHistoryEntry],
     ) -> Result<()> {
-        let conn = self.conn()?;
+        let mut conn = self.conn()?;
         let tx = conn.transaction()?;
         for entry in entries {
             tx.execute(

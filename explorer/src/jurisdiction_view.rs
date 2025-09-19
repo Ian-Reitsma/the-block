@@ -9,7 +9,7 @@ pub struct JurisdictionTxs {
     pub count: usize,
 }
 
-pub async fn route(explorer: Arc<Explorer>, Path(region): Path<String>) -> Json<JurisdictionTxs> {
+pub async fn route(_explorer: Arc<Explorer>, Path(region): Path<String>) -> Json<JurisdictionTxs> {
     // placeholder: real implementation would filter DB by region tag
     Json(JurisdictionTxs { region, count: 0 })
 }

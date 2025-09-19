@@ -21,4 +21,4 @@ lru = "0.11"
 [dev-dependencies]
 tempfile = "3"
 wat = "1"
-ed25519-dalek = { version = "1", features = ["std"] }
+ed25519-dalek = { version = "2.2.0", features = ["std"] }

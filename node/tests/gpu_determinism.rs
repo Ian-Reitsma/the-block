@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::compute_market::{workloads, Workload, WorkloadRunner};
 
 #[test]

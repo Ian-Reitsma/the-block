@@ -1,4 +1,4 @@
-use ed25519_dalek::{Keypair, PublicKey, Signature, Signer};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use sha2::Sha256;
@@ -8,19 +8,21 @@ use thiserror::Error;
 /// Common signer interface for software and hardware wallets.
 pub trait WalletSigner {
     /// Return the primary public key for this signer.
-    fn public_key(&self) -> PublicKey;
+    fn public_key(&self) -> VerifyingKey;
     /// Produce a single signature over `msg`.
     fn sign(&self, msg: &[u8]) -> Result<Signature, WalletError>;
 
     /// Return all participating public keys when operating in multisig mode.
-    fn public_keys(&self) -> Vec<PublicKey> {
+    fn public_keys(&self) -> Vec<VerifyingKey> {
         vec![self.public_key()]
     }
 
     /// Produce signatures from all required parties. Default implementation
-    /// falls back to a single signer.
-    fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<Signature>, WalletError> {
-        self.sign(msg).map(|s| vec![s])
+    /// falls back to a single signer and returns the caller's public key
+    /// alongside its signature so downstream consumers can forward the
+    /// approving set.
+    fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<(VerifyingKey, Signature)>, WalletError> {
+        self.sign(msg).map(|s| vec![(self.public_key(), s)])
     }
 }
 
@@ -49,7 +51,7 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 /// A software wallet holding an Ed25519 keypair.
 pub struct Wallet {
-    keypair: Keypair,
+    signing_key: SigningKey,
 }
 
 pub mod hd;
@@ -80,18 +82,15 @@ pub mod pq {
 impl Wallet {
     /// Create a wallet from a 32-byte seed.
     pub fn from_seed(seed: &[u8; 32]) -> Self {
-        let secret = ed25519_dalek::SecretKey::from_bytes(seed).expect("seed length");
-        let public = PublicKey::from(&secret);
-        Self {
-            keypair: Keypair { secret, public },
-        }
+        let signing_key = SigningKey::from_bytes(seed);
+        Self { signing_key }
     }
 
     /// Generate a new wallet with OS randomness.
     pub fn generate() -> Self {
         let mut rng = OsRng;
-        let keypair = Keypair::generate(&mut rng);
-        Self { keypair }
+        let signing_key = SigningKey::generate(&mut rng);
+        Self { signing_key }
     }
 
     /// Sign a staking message for a given role and amount.
@@ -115,22 +114,22 @@ impl Wallet {
 }
 
 impl WalletSigner for Wallet {
-    fn public_key(&self) -> PublicKey {
-        self.keypair.public
+    fn public_key(&self) -> VerifyingKey {
+        self.signing_key.verifying_key()
     }
 
     fn sign(&self, msg: &[u8]) -> Result<Signature, WalletError> {
-        Ok(self.keypair.sign(msg))
+        Ok(self.signing_key.sign(msg))
     }
 }
 
 pub mod hardware {
-    use super::{Keypair, PublicKey, Signature, Signer, WalletError, WalletSigner};
+    use super::{Signature, Signer, SigningKey, VerifyingKey, WalletError, WalletSigner};
     use rand::rngs::OsRng;
 
     /// Mock hardware wallet implementing the signer interface.
     pub struct MockHardwareWallet {
-        keypair: Keypair,
+        signing_key: SigningKey,
         connected: bool,
     }
 
@@ -143,9 +142,9 @@ pub mod hardware {
     impl MockHardwareWallet {
         pub fn new() -> Self {
             let mut rng = OsRng;
-            let keypair = Keypair::generate(&mut rng);
+            let signing_key = SigningKey::generate(&mut rng);
             Self {
-                keypair,
+                signing_key,
                 connected: false,
             }
         }
@@ -158,15 +157,15 @@ pub mod hardware {
     }
 
     impl WalletSigner for MockHardwareWallet {
-        fn public_key(&self) -> PublicKey {
-            self.keypair.public
+        fn public_key(&self) -> VerifyingKey {
+            self.signing_key.verifying_key()
         }
 
         fn sign(&self, msg: &[u8]) -> Result<Signature, WalletError> {
             if !self.connected {
                 return Err(WalletError::NotConnected);
             }
-            Ok(self.keypair.sign(msg))
+            Ok(self.signing_key.sign(msg))
         }
     }
 

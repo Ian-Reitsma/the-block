@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::fs;
 use the_block::{canonical_payload_bytes, RawTxPayload};

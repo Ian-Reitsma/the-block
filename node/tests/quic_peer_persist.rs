@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::net::SocketAddr;
 use the_block::net::PeerSet;
 use the_block::p2p::handshake::Transport;

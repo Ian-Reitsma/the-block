@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use hex;
 use the_block::net::peer::{broadcast_metrics, subscribe_peer_metrics, PeerMetrics};
 use tokio::time::{timeout, Duration};

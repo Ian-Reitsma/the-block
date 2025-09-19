@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::governance::Params;
 use the_block::rpc::governance;
 

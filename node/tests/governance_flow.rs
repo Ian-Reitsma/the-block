@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used)]
 use the_block::governance::{BicameralGovernance as Governance, House};
 

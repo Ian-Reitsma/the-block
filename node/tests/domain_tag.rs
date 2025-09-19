@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use ed25519_dalek::{Signer, SigningKey, Verifier};
 use the_block::{domain_tag, domain_tag_for};
 

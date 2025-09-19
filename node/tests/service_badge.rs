@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::time::Duration;
 use the_block::service_badge::{current_ts, verify, ServiceBadgeTracker};
 

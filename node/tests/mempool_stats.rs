@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use serial_test::serial;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tempfile::tempdir;

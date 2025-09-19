@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use the_block::net::ban_store::BanStore;

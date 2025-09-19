@@ -4,7 +4,7 @@ use std::time::Duration;
 use base64::engine::general_purpose;
 use base64::Engine;
 use blake3::Hasher;
-use futures::{SinkExt, StreamExt};
+use futures::SinkExt;
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;

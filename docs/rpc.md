@@ -1,5 +1,37 @@
 # RPC
 
+## Client configuration
+
+The CLI and internal tooling use `node/src/rpc/client.rs`, which reads several
+environment variables. Operators can tune request behaviour with:
+
+- `TB_RPC_TIMEOUT_MS` – base timeout in milliseconds (default `5000`).
+- `TB_RPC_TIMEOUT_JITTER_MS` – extra random jitter added to the timeout
+  (default `1000`).
+- `TB_RPC_MAX_RETRIES` – number of retries after transport errors (default `3`).
+  The exponential backoff multiplier caps at `2^30` once the retry attempt
+  reaches 31 (`MAX_BACKOFF_EXPONENT` in
+  [`node/src/rpc/client.rs`](../node/src/rpc/client.rs)), so attempts beyond 30
+  reuse that multiplier while still adding jitter to each request.
+- `TB_RPC_FAULT_RATE` – probability for fault injection during chaos testing.
+  Values outside the inclusive `[0.0, 1.0]` range are clamped, and `NaN`
+  entries are ignored to guarantee a well-defined probability.
+
+The test-only `EnvGuard` helper restores any pre-existing environment values on
+drop so overrides never leak across cases.
+
+Regression coverage exercises both retry saturation and the sanitized fault
+probability. Run
+
+```bash
+cargo test -p the_block --lib rpc_client_backoff_handles_large_retries -- --nocapture
+cargo test -p the_block --lib rpc_client_fault_rate_clamping -- --nocapture
+```
+
+to confirm the exponential multiplier caps at the documented `2^30` ceiling and
+that clamped `TB_RPC_FAULT_RATE` values never panic `gen_bool` during chaos
+testing.
+
 ## Compute-market error codes
 
 | Code   | Meaning           |

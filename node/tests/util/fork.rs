@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::net::Node;
 
 /// Mine `len` blocks on `node` starting at timestamp `ts` without gossiping.

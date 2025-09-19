@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::{
     blockchain::process::{commit, validate_and_apply},
     transaction::{sign_tx, RawTxPayload},

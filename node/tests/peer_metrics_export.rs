@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use serial_test::serial;
 use tempfile::tempdir;
 use the_block::net::{export_peer_stats, record_request, set_metrics_export_dir};

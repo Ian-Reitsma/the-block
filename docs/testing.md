@@ -2,6 +2,12 @@
 
 This document outlines the strategy for integration and chaos testing in **The-Block**.
 
+> **Current caveats (2025-10-06):** CLI binaries now build cleanly on
+> `ed25519-dalek 2.2.x`, but telemetry-gated modules still emit warnings when
+> optional features are disabled. Prefer the `lightweight-integration`
+> feature set for memory-constrained runs and re-enable full telemetry when
+> validating release candidates.
+
 ## Network Integration
 
 - `node/tests/net_integration.rs` boots a five-node harness that mines blocks,
@@ -35,11 +41,25 @@ This document outlines the strategy for integration and chaos testing in **The-B
 - Integration tests use explicit `StdRng::seed_from_u64` seeds or the
   `TB_SIM_SEED` environment variable to enable reproducible scenarios.
 
-## RPC Fault Injection
+## RPC Fault Injection and Retry Backoff
 
 - `node/src/rpc/client.rs` accepts `TB_RPC_FAULT_RATE` to randomly inject
-  request failures, and `node/tests/rpc_fault_injection.rs` verifies that the
-  client surfaces these errors for resiliency testing.
+  request failures. Values are sanitized by clamping the probability to the
+  inclusive `[0.0, 1.0]` range and ignoring `NaN` inputs. The regression tests
+  in `node/tests/rpc_fault_injection.rs` verify that the client surfaces these
+  errors for resiliency testing.
+- `rpc_client_backoff_handles_large_retries` exercises the saturated exponential
+  backoff path, confirming that attempts above the 31st reuse the `2^30`
+  multiplier rather than overflowing. The helper test `backoff_with_jitter_saturates_for_large_attempts`
+  keeps the original monotonicity assertions in place.
+
+Run the targeted retry and fault sanitization suites directly when touching the
+client:
+
+```bash
+cargo test -p the_block --lib rpc_client_backoff_handles_large_retries -- --nocapture
+cargo test -p the_block --lib rpc_client_fault_rate_clamping -- --nocapture
+```
 
 ## Coverage Reporting
 
@@ -51,3 +71,51 @@ This document outlines the strategy for integration and chaos testing in **The-B
 ```
 cargo test --all --features test-telemetry --release
 ```
+
+### Memory-Constrained integration runs
+
+- The `lightweight-integration` crate feature swaps the RocksDB-backed
+  `SimpleDb` for an in-memory implementation that snapshots column families to
+  disk. Enable this feature when running the heaviest integration targets
+  (such as `gov_dependencies` and `maybe_purge_loop`) on machines with limited
+  RAM:
+
+  ```
+  cargo test -p the_block --no-default-features --features lightweight-integration --test gov_dependencies
+  cargo test -p the_block --no-default-features --features lightweight-integration --test maybe_purge_loop
+  ```
+
+- To compare behaviour with the RocksDB backend, run the same targets with
+  `--features storage-rocksdb` (and optionally `--no-default-features` if you
+  only need the library):
+
+  ```
+  cargo test -p the_block --no-default-features --features storage-rocksdb --test gov_dependencies
+  ```
+
+- `cargo test` without additional flags continues to exercise the full RocksDB
+  stack for suites that require on-disk persistence and WAL recovery.
+
+### Opting in to integration binaries
+
+- The heavy integration harnesses under `node/tests/` are now gated behind the
+  `integration-tests` Cargo feature. Enable the flag when you need the full
+  end-to-end coverage:
+
+  ```
+  cargo test -p the_block --features integration-tests
+  ```
+
+  Targeted runs accept the same feature, for example:
+
+  ```
+  cargo test -p the_block --features integration-tests --test light_sync -- --nocapture
+  ```
+
+- CLI binaries (`node`, `gov`, `wallet`, etc.) are no longer compiled during
+  routine `cargo test` invocations. Add `--features cli` to build them when a
+  test requires spawning the command-line tools or when linting the binaries:
+
+  ```
+  cargo build -p the_block --features cli --bin node
+  ```

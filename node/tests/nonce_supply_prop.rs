@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use proptest::prelude::*;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
 

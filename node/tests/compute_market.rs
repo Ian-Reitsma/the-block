@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid};
 use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};

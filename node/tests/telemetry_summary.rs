@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #[cfg(feature = "telemetry")]
 use std::thread::sleep;
 #[cfg(feature = "telemetry")]

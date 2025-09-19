@@ -46,14 +46,14 @@ fn multisig_success_and_failure() {
     let (b, h2) = spawn_mock_signer();
     let signer = RemoteSigner::connect_multi(&vec![a.clone(), b.clone()], 2).expect("connect");
     let msg = b"hello";
-    let sigs = signer.sign_multisig(msg).expect("sign");
-    for (i, sig) in sigs.iter().enumerate() {
-        signer.public_keys()[i].verify(&ledger::crypto::remote_tag(msg), sig).unwrap();
+    let approvals = signer.sign_multisig(msg).expect("sign");
+    for (pk, sig) in &approvals {
+        pk.verify(&ledger::crypto::remote_tag(msg), sig).unwrap();
     }
     h1.join().unwrap();
     h2.join().unwrap();
     // failure when threshold not met
     let signer = RemoteSigner::connect_multi(&vec![a], 1).expect("connect");
-    let res = signer.sign_multisig(b"fail");
-    assert!(res.is_ok());
+    let approvals = signer.sign_multisig(b"fail").expect("single signer");
+    assert_eq!(approvals.len(), 1);
 }

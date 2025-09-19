@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::collections::HashSet;
 
 #[test]

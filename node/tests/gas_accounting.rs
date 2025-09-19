@@ -1,4 +1,5 @@
-use node::vm::{exec, gas::GasMeter, opcodes::OpCode};
+#![cfg(feature = "integration-tests")]
+use the_block::vm::{exec, gas::GasMeter, opcodes::OpCode};
 
 #[test]
 fn deterministic_gas_usage() {

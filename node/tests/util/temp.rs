@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use tempfile::{Builder, TempDir};
 use the_block::Blockchain;
 

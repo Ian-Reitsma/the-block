@@ -1,6 +1,7 @@
-use node::simple_db::SimpleDb;
+#![cfg(feature = "integration-tests")]
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use tempfile::tempdir;
+use the_block::SimpleDb;
 
 #[test]
 fn wal_survives_random_deletes() {

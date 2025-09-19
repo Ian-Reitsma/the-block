@@ -1,5 +1,5 @@
 use crate::{WalletError, WalletSigner};
-use ed25519_dalek::{PublicKey, Signature, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
@@ -20,7 +20,7 @@ use url::Url;
 use uuid::Uuid;
 
 /// Cache of signer public keys with an expiry.
-static PUBKEY_CACHE: Lazy<Mutex<HashMap<String, (PublicKey, Instant)>>> =
+static PUBKEY_CACHE: Lazy<Mutex<HashMap<String, (VerifyingKey, Instant)>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 const PUBKEY_TTL: Duration = Duration::from_secs(600);
 const DISCOVERY_PORT: u16 = 7878;
@@ -47,7 +47,7 @@ pub struct RemoteSigner {
     endpoints: Vec<String>,
     client: Client,
     tls: Option<TlsConnector>,
-    pubkeys: Vec<PublicKey>,
+    pubkeys: Vec<VerifyingKey>,
     timeout: Duration,
     retries: u8,
     threshold: usize,
@@ -81,12 +81,12 @@ impl RemoteSigner {
         out
     }
 
-    fn fetch_pubkey(client: &Client, endpoint: &str) -> Result<PublicKey, WalletError> {
+    fn fetch_pubkey(client: &Client, endpoint: &str) -> Result<VerifyingKey, WalletError> {
         {
             let cache = PUBKEY_CACHE.lock().unwrap();
             if let Some((pk, ts)) = cache.get(endpoint) {
                 if ts.elapsed() < PUBKEY_TTL {
-                    return Ok(*pk);
+                    return Ok(pk.clone());
                 }
             }
         }
@@ -111,7 +111,7 @@ impl RemoteSigner {
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
         let pubkey =
-            PublicKey::from_bytes(&arr).map_err(|e| WalletError::Failure(e.to_string()))?;
+            VerifyingKey::from_bytes(&arr).map_err(|e| WalletError::Failure(e.to_string()))?;
         PUBKEY_CACHE
             .lock()
             .unwrap()
@@ -185,6 +185,11 @@ impl RemoteSigner {
         Self::connect_multi(&[endpoint.to_string()], 1)
     }
 
+    /// Return the configured threshold for approvals.
+    pub fn threshold(&self) -> usize {
+        self.threshold
+    }
+
     fn sign_http(&self, endpoint: &str, payload: &SignReq) -> Result<Signature, WalletError> {
         for attempt in 0..=self.retries {
             info!(%payload.trace, attempt, "remote sign request");
@@ -202,9 +207,7 @@ impl RemoteSigner {
                         if sig_bytes.len() != 64 {
                             return Err(WalletError::Failure("invalid signature length".into()));
                         }
-                        let mut arr = [0u8; 64];
-                        arr.copy_from_slice(&sig_bytes);
-                        return Signature::from_bytes(&arr)
+                        return Signature::from_slice(&sig_bytes)
                             .map_err(|e| WalletError::Failure(e.to_string()));
                     }
                     Err(e) => {
@@ -268,26 +271,25 @@ impl RemoteSigner {
         if sig_bytes.len() != 64 {
             return Err(WalletError::Failure("invalid signature length".into()));
         }
-        let mut arr = [0u8; 64];
-        arr.copy_from_slice(&sig_bytes);
-        Signature::from_bytes(&arr).map_err(|e| WalletError::Failure(e.to_string()))
+        Signature::from_slice(&sig_bytes).map_err(|e| WalletError::Failure(e.to_string()))
     }
 }
 
 impl WalletSigner for RemoteSigner {
-    fn public_key(&self) -> PublicKey {
-        self.pubkeys[0]
+    fn public_key(&self) -> VerifyingKey {
+        self.pubkeys[0].clone()
     }
 
-    fn public_keys(&self) -> Vec<PublicKey> {
+    fn public_keys(&self) -> Vec<VerifyingKey> {
         self.pubkeys.clone()
     }
 
     fn sign(&self, msg: &[u8]) -> Result<Signature, WalletError> {
-        self.sign_multisig(msg).map(|v| v[0])
+        self.sign_multisig(msg)
+            .map(|mut approvals| approvals.remove(0).1)
     }
 
-    fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<Signature>, WalletError> {
+    fn sign_multisig(&self, msg: &[u8]) -> Result<Vec<(VerifyingKey, Signature)>, WalletError> {
         increment_counter!("remote_signer_request_total");
         let start = Instant::now();
         let tagged = remote_tag(msg);
@@ -297,7 +299,8 @@ impl WalletSigner for RemoteSigner {
             trace: &trace_id.to_string(),
             msg: msg_hex,
         };
-        let mut sigs = Vec::new();
+        let mut approvals: Vec<(VerifyingKey, Signature)> = Vec::new();
+        let mut last_error: Option<WalletError> = None;
         for (i, ep) in self.endpoints.iter().enumerate() {
             let res = if ep.starts_with("ws") {
                 self.sign_ws(ep, &payload)
@@ -307,35 +310,33 @@ impl WalletSigner for RemoteSigner {
             match res {
                 Ok(sig) => {
                     if self.pubkeys[i].verify(&tagged, &sig).is_ok() {
-                        sigs.push(sig);
+                        approvals.push((self.pubkeys[i].clone(), sig));
                     } else {
                         warn!(%trace_id, "invalid signature");
-                        if self.endpoints.len() - sigs.len() <= self.threshold - sigs.len() {
-                            return Err(WalletError::Failure("invalid signature".into()));
-                        }
+                        last_error = Some(WalletError::Failure("invalid signature".into()));
                     }
                 }
                 Err(e) => {
                     warn!(%trace_id, error=%e, "signer failure");
-                    if self.endpoints.len() - sigs.len() <= self.threshold - sigs.len() {
-                        return Err(e);
-                    }
+                    last_error = Some(e);
                 }
             }
-            if sigs.len() >= self.threshold {
+            if approvals.len() >= self.threshold {
                 break;
             }
         }
-        if sigs.len() < self.threshold {
-            return Err(WalletError::Failure("threshold not met".into()));
+        if approvals.len() < self.threshold {
+            return Err(
+                last_error.unwrap_or_else(|| WalletError::Failure("threshold not met".into()))
+            );
         }
         let mut lat = start.elapsed().as_secs_f64();
         if std::env::var("DIFF_PRIV").ok().as_deref() == Some("1") {
             let mut rng = rand::thread_rng();
-            lat += rng.gen_range(-0.5, 0.5);
+            lat += rng.gen_range(-0.5..0.5);
         }
         histogram!("remote_signer_latency_seconds", lat);
         increment_counter!("remote_signer_success_total");
-        Ok(sigs)
+        Ok(approvals)
     }
 }

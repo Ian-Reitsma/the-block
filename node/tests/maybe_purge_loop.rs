@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::fs;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread;

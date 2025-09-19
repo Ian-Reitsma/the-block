@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use rand::Rng;
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -1,4 +1,4 @@
-use wasmtime::{AsContext, AsContextMut, Memory, Store};
+use wasmtime::{Memory, Store};
 
 /// Write bytes into WASM linear memory at offset 0.
 #[must_use]

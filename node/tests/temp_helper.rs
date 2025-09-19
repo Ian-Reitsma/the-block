@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 mod util;
 use util::temp::temp_dir;
 

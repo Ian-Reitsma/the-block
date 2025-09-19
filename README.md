@@ -64,8 +64,12 @@ test real services today.
   anchor activity on-chain and mint the corresponding `READ_SUB_CT` reward.
   Reputation-weighted Lagrange coding distributes shards while
   proof-of-retrievability challenges penalize missing data.
-  See [docs/read_receipts.md](docs/read_receipts.md) for the batching and audit
-  flow. (79.0% Complete)
+  Snapshot rewrites now stage column families through fsync’d temporary files
+  before atomically renaming base64 snapshots, preserving legacy dumps until
+  the new image lands. See [docs/read_receipts.md](docs/read_receipts.md) and
+  [docs/simple_db.md](docs/simple_db.md) for the batching, audit, and crash
+  recovery flow. (81.0% Complete — incentive-marketplace wiring remains the
+  main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
@@ -76,7 +80,7 @@ test real services today.
   floor through `mempool.stats` so operators can reason about QoS. Governance can
   retune the fee-floor window and percentile, and wallet sends surface localized
   warnings with auto-bump or `--force` overrides plus JSON output for tooling.
-  (80.0% Complete)
+  (82.0% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -88,13 +92,13 @@ test real services today.
       and leverages a chaos harness to publish retransmit counters, keeping
       operators ahead of packet loss. Shard-aware peer maps route block gossip only
       to interested peers and uptime-based fee rebates reward high-availability
-      peers. (93.0% Complete)
+      peers. (94.0% Complete)
     - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
       resolves forks deterministically, and validates blocks with BLAKE3 hashes,
       multi-window Kalman retargeting, VDF-anchored randomness, macro-block
       checkpointing, and per-shard fork choice. Release installs now gate on
       provenance verification with automated rollback if hashes drift, keeping
-      consensus nodes in lockstep. (86.0% Complete)
+      consensus nodes in lockstep. (87.0% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -103,7 +107,7 @@ test real services today.
     records rollout timestamps. Fee-floor policy updates persist into
     `GovStore` history with rollback support, telemetry counters, and explorer
     timelines so operators can audit parameter changes while governance history
-    archives DID revocations for audit. (90.0% Complete)
+    archives DID revocations for audit. (89.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
       deployable contracts and fee markets alongside traditional PoW headers. (79.0%
@@ -113,18 +117,18 @@ test real services today.
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, telemetry gauges `dex_escrow_locked`,
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
-    constant-product AMM pools provide fallback liquidity with programmable incentives. (78.0%
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (79.0%
     Complete)
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
-Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (48.0% Complete)
+Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (49.0% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).
   Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
   surface history and anchor velocity, while the `contract light-client did`
   subcommands handle anchoring, resolving, remote signing, and sign-only payload
   export with localized messaging. Governance revocations block misused
-  identifiers and are archived alongside anchor history for audit. (78.0% Complete)
+  identifiers and are archived alongside anchor history for audit. (79.0% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
       session-key derivation, auto-update orchestration, and compliance options as
@@ -132,7 +136,10 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       installs for operators, while the wallet caches fee-floor queries, warns
       when sends fall below the floor, and supports localized prompts, JSON
       output, and remote signer attestations. Wallet QoS events feed telemetry so
-      dashboards track warning/override deltas. (91.0% Complete)
+      dashboards track warning/override deltas. Wallet binaries now share a single
+      `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, and forward
+      multisig signer sets end-to-end so explorer tooling can validate threshold
+      staking payloads. (92.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
       and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
@@ -140,16 +147,25 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
       anchor totals land in telemetry so dashboards can trace user choices,
       anchor velocity, and governance parameter rollbacks from a single pane.
-      (85.0% Complete)
+      (86.0% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
-    and encode consensus invariants, laying groundwork for provable safety. (38.0%
+    and encode consensus invariants, laying groundwork for provable safety. (39.0%
     Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
-  subsidy events to make participation feasible on phones. (56.0% Complete)
+  subsidy events to make participation feasible on phones. (57.0% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99.6/100** with vision completion **~84.2/100**.
+  Mainnet readiness sits at **~99.3/100** with vision completion **~85.0/100**.
+  Recent fixes removed the stale proposal dependency formatter, unified the
+  wallet on `ed25519-dalek 2.2.x` with explicit escrow hash algorithms, staged
+  `SimpleDb` snapshot rewrites through fsync’d temporary files, and hardened the
+  RPC client with clamped fault rates plus saturated exponential backoff guarded
+  by scoped environment restorers.
+  Current focus areas: finish migrating telemetry-gated tests to the default
+  feature mix, extend bridge/DEX docs with signer-set payloads and explorer
+  telemetry, continue WAN-scale QUIC chaos drills, and polish multisig wallet UX
+  before the next release tag.
 
 ### Live now
 
@@ -162,6 +178,13 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 - Cluster-wide `metrics-aggregator` collects peer snapshots while the `net stats`
   CLI supports JSON output, drop-reason and reputation filtering, pagination, and
   colorized drop-rate warnings.
+- Node CLI binaries honour feature flags so telemetry, gateway, and QUIC stacks
+  only link when explicitly requested. `--auto-tune` now emits a descriptive
+  error unless telemetry is enabled, `--metrics-addr` and `--status-addr` fail
+  fast when their features are absent, and jurisdiction policy packs record the
+  loaded language in law-enforcement audit logs. Feature-light builds therefore
+  stay lean without sacrificing operator ergonomics when the full stack is
+  required.
 - Metrics-to-logs correlation links Prometheus anomalies to targeted log searches,
   automated QUIC dumps, and Grafana deep links for rapid mitigation.
 - Partition watch tracks peer reachability and stamps gossip with markers so

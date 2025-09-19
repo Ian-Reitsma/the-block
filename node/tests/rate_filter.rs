@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #[cfg(feature = "gateway")]
 use the_block::web::gateway::ip_key;
 

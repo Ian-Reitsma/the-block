@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 

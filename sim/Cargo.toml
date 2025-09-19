@@ -17,7 +17,7 @@ the_block = { path = "../node" }
 ledger = { path = "../ledger" }
 dkg = { path = "../dkg" }
 explorer = { path = "../explorer" }
-ed25519-dalek = { version = "1", features = ["std"] }
+ed25519-dalek = { version = "2.2.0", features = ["std"] }
 hex = "0.4"
 
 [dev-dependencies]

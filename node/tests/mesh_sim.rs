@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(unix)]
 
 use std::io::{Read, Write};

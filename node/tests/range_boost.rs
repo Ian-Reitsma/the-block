@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::range_boost::{HopProof, RangeBoost};
 
 #[test]

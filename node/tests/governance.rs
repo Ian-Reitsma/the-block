@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use tempfile::tempdir;
 use the_block::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
@@ -25,6 +26,7 @@ fn proposal_vote_activation_rollback() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     assert!(store.submit(bad).is_err());
 
@@ -40,6 +42,7 @@ fn proposal_vote_activation_rollback() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     let pid = store.submit(good).unwrap();
 
@@ -111,6 +114,7 @@ fn proposal_vote_activation_rollback() {
         vote_deadline_epoch: 1,
         activation_epoch: None,
         status: ProposalStatus::Open,
+        deps: Vec::new(),
     };
     let pid2 = store.submit(p2).unwrap();
     assert_eq!(

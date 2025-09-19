@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use ed25519_dalek::SigningKey;

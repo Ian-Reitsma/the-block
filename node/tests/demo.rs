@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use std::{fs, path::Path, process::Command, time::Duration};
 
 use wait_timeout::ChildExt;

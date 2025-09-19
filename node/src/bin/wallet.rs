@@ -6,7 +6,6 @@ use ed25519_dalek::Signature;
 use hex::{decode, encode};
 use reqwest::blocking::Client;
 use serde_json::json;
-use std::convert::TryInto;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -46,7 +45,9 @@ enum Commands {
     },
     /// Sign a message using a mock hardware wallet.
     SignHw { message: String },
-    /// Stake CT for a service role
+    /// Stake CT for a service role. Remote signers submit `signers[]` plus a
+    /// `threshold` field so the staking RPC can validate multi-party
+    /// approvals.
     StakeRole {
         #[arg(value_enum)]
         role: Role,
@@ -143,7 +144,10 @@ fn main() {
                 let signer =
                     RemoteSigner::connect_multi(&remote_signer, threshold).expect("connect signer");
                 let sigs = signer.sign_multisig(message.as_bytes()).expect("sign");
-                let agg: Vec<u8> = sigs.into_iter().flat_map(|s| s.to_bytes()).collect();
+                let agg: Vec<u8> = sigs
+                    .into_iter()
+                    .flat_map(|(_, sig)| sig.to_bytes())
+                    .collect();
                 println!("{}", encode(agg));
             } else {
                 let seed = seed.expect("seed required");
@@ -177,6 +181,8 @@ fn main() {
             let role_str = format!("{:?}", role).to_lowercase();
             let sig;
             let id;
+            let signers_payload: Vec<serde_json::Value>;
+            let threshold_value: usize;
             if !remote_signer.is_empty() {
                 if let Some(cert) = signer_cert {
                     std::env::set_var("REMOTE_SIGNER_TLS_CERT", cert);
@@ -191,10 +197,22 @@ fn main() {
                     RemoteSigner::connect_multi(&remote_signer, threshold).expect("connect signer");
                 let action = if withdraw { "unbond" } else { "bond" };
                 let msg = format!("{action}:{role_str}:{amount}");
-                let sigs = signer.sign_multisig(msg.as_bytes()).expect("sign");
-                let agg: Vec<u8> = sigs.iter().flat_map(|s| s.to_bytes()).collect();
-                sig = Signature::from_bytes(&agg[0..64].try_into().unwrap());
-                id = encode(signer.public_keys()[0].to_bytes());
+                let approvals = signer.sign_multisig(msg.as_bytes()).expect("sign");
+                let primary = approvals
+                    .first()
+                    .expect("remote signer returned no approvals");
+                id = encode(primary.0.to_bytes());
+                sig = primary.1.clone();
+                signers_payload = approvals
+                    .iter()
+                    .map(|(pk, sig)| {
+                        json!({
+                            "pk": encode(pk.to_bytes()),
+                            "sig": encode(sig.to_bytes()),
+                        })
+                    })
+                    .collect();
+                threshold_value = signer.threshold();
             } else {
                 let seed = seed.expect("seed required");
                 let bytes = decode(&seed).expect("seed hex");
@@ -206,7 +224,13 @@ fn main() {
                     .sign_stake(&role_str, amount, withdraw)
                     .expect("sign");
                 id = wallet.public_key_hex();
+                signers_payload = vec![json!({
+                    "pk": id.clone(),
+                    "sig": encode(sig.to_bytes()),
+                })];
+                threshold_value = 1;
             }
+            let sig_hex = encode(sig.to_bytes());
             let body = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
@@ -215,7 +239,9 @@ fn main() {
                     "id": id,
                     "role": role_str,
                     "amount": amount,
-                    "sig": encode(sig.to_bytes()),
+                    "sig": sig_hex,
+                    "signers": signers_payload,
+                    "threshold": threshold_value,
                 }
             });
             let client = Client::new();
@@ -260,7 +286,7 @@ fn main() {
                             let root: [u8; 32] =
                                 serde_json::from_value(res["root"].clone()).expect("root");
                             let idx = res["idx"].as_u64().unwrap_or(0) as usize;
-                            if verify_proof(proof.leaf, idx, &proof.path, root) {
+                            if verify_proof(proof.leaf, idx, &proof.path, root, proof.algo) {
                                 println!("released");
                             } else {
                                 eprintln!("invalid proof");

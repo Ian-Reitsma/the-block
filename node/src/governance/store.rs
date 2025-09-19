@@ -1,6 +1,6 @@
 use super::{
-    registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseAttestation,
-    ReleaseBallot, ReleaseVote, Runtime, Vote, VoteChoice,
+    registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
+    ReleaseVote, Runtime, Vote, VoteChoice,
 };
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{

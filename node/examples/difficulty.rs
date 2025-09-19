@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use the_block::rpc::client::RpcClient;
+use the_block::rpc::client::{RpcClient, RpcClientError};
 
 /// Query the node's current difficulty via JSON-RPC.
 ///
@@ -17,7 +17,10 @@ fn main() {
         "method": "consensus.difficulty",
         "params": {}
     });
-    match client.call(&url, &payload).and_then(|r| r.json::<Value>()) {
+    match client
+        .call(&url, &payload)
+        .and_then(|r| r.json::<Value>().map_err(RpcClientError::from))
+    {
         Ok(res) => {
             if let Some(d) = res
                 .get("result")

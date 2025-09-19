@@ -1,9 +1,7 @@
 use super::RpcError;
 use bridges::{
-    header::PowHeader,
-    light_client::{Header, Proof},
-    relayer::RelayerSet,
-    Bridge, RelayerBundle, RelayerProof,
+    header::PowHeader, light_client::Proof, relayer::RelayerSet, Bridge, RelayerBundle,
+    RelayerProof,
 };
 use hex;
 use once_cell::sync::Lazy;

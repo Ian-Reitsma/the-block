@@ -1053,6 +1053,10 @@ fn dispatch(
                     "wallet fee floor event",
                 );
             }
+            #[cfg(not(feature = "telemetry"))]
+            {
+                let _ = (lane, event, fee, floor);
+            }
             serde_json::json!({"status": "ok"})
         }
         "net.peer_stats" => {

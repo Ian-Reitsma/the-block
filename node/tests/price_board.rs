@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use serial_test::serial;
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use std::fs;

@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
 
 use the_block::net::{peer_stats, reset_peer_metrics, simulate_handshake_fail, HandshakeError};

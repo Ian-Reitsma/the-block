@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::compute_market::{
     scheduler::{self, Capability, ReputationStore},
     Accelerator,

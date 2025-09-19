@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::compute_market::{scheduler, ExecutionReceipt, Job, Market, Offer, Workload};
 
 #[test]

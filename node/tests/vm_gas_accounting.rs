@@ -1,4 +1,5 @@
-use node::vm::{bytecode, bytecode::OpCode, gas::GasMeter};
+#![cfg(feature = "integration-tests")]
+use the_block::vm::{bytecode, bytecode::OpCode, gas::GasMeter};
 
 #[test]
 fn gas_determinism() {

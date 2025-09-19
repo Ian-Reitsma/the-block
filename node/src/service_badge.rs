@@ -49,6 +49,8 @@ impl ServiceBadgeTracker {
         crate::telemetry::COMPUTE_PROVIDER_UPTIME
             .with_label_values(&[provider])
             .set(self.uptime_percent().round() as i64);
+        #[cfg(not(feature = "telemetry"))]
+        let _ = provider;
         // Update badge status on each epoch so lapses trigger revocation.
         self.check_badges();
     }

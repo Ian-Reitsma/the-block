@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::consensus::difficulty::expected_difficulty_from_chain as expected_difficulty;
 use the_block::{Block, TokenAmount};
 

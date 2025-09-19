@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 mod util;
 use ed25519_dalek::SigningKey;
 use rand_core::{OsRng, RngCore};

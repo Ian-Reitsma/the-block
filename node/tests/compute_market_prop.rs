@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use blake3::Hasher;
 use proptest::prelude::*;
 use the_block::compute_market::{scheduler, *};

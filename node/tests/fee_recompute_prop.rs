@@ -1,10 +1,12 @@
+#![cfg(feature = "integration-tests")]
 use std::{collections::HashMap, fs};
 
 use proptest::prelude::*;
 use rand::{Rng, SeedableRng};
+use the_block::transaction::{TxSignature, TxVersion};
 use the_block::{
     fee, Block, Blockchain, ChainDisk, FeeLane, Params, RawTxPayload, SignedTransaction,
-    TokenAmount, TxSignature, TxVersion,
+    TokenAmount,
 };
 
 mod util;

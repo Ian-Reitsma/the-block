@@ -56,8 +56,23 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99.6/100** with vision completion **~84.2/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
-Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, and end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC. See `docs/roadmap.md` for the canonical roadmap and near-term tasks.
+Mainnet readiness sits at **~99.3/100** with vision completion **~85.0/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
+Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, and end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
+
+**Latest highlights:**
+- Governance CLI list/status commands now surface `start`/`end` windows instead of the removed dependency set, restoring CLI feature builds and aligning explorer timelines with scheduler metadata.
+- Wallet binaries share a single `ed25519-dalek 2.2.x` dependency, pass escrow hash algorithms through `verify_proof`, forward multisig signer sets end-to-end with JSON payloads suitable for explorer and RPC ingestion, and export remote signer telemetry so Grafana panels can correlate signer health with wallet QoS overrides.
+- RPC clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after the 31st attempt, guard environment overrides with scoped restorers, and expose dedicated regression tests so operators can rely on bounded retry behaviour.
+- `SimpleDb` snapshot rewrites stage data through fsync’d temporary files, atomically rename into place, and retain legacy dumps until the new image lands, eliminating crash-window data loss while keeping legacy reopen logic intact.
+- Node CLI binaries honour telemetry/gateway feature toggles, emitting explicit user-facing errors when unsupported flags are passed and supplying jurisdiction languages to law-enforcement audit logs.
+- The lightweight integration feature toggles keep large harnesses compiling with LLD while still offering RocksDB parity runs for release sign-off.
+
+**Outstanding focus areas:**
+- Finish porting remaining telemetry-gated tests to the default feature set so warning-free builds require fewer bespoke flags.
+- Extend bridge and DEX documentation with the new signer-set payloads and explorer telemetry before the next release train.
+- Continue WAN-scale chaos drills for QUIC/relay fan-out under the new metrics pipeline.
+- Ship multisig wallet UX polish (batched signer discovery, richer CLI prompts) and document the flow for operators and custodians.
+- Close the gap on integration builds that still require feature gating by chasing down lingering optional-module warnings.
 
 ---
 
@@ -309,7 +324,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99.6/100 · Vision completion: ~84.2/100. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99.3/100 · Vision completion: ~85.0/100. Known blockers: stabilise telemetry-gated integration warnings, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -451,46 +466,32 @@ All previously listed directives have been implemented:
 
 The following items block mainnet readiness and should be prioritized. Each task references canonical file paths for ease of navigation:
 
-1. **Add rollback tests for PoS finality gadget**
-   - `node/tests/finality_rollback.rs` should craft adversarial forks and assert state consistency after reorgs.
-2. **Implement contract deployment and persistent state**
-   - Extend `vm/src/tx.rs` for deployment transactions and persist state under `state/contracts/`.
-3. **Ship ABI tooling and contract CLI**
-   - Derive ABI from `vm/src/opcodes.rs` and expose `contract deploy/call` commands in `cli/`.
-4. **Introduce dynamic gas fee market**
-   - Track base fees in `node/src/fees.rs` and adjust per EIP‑1559; update mempool validation.
-5. **Bridge UTXO and account models**
-   - Provide a translation layer in `ledger/src/utxo_account.rs` with atomic balance updates.
-6. **Merge PoW blocks into PoS finality path**
-   - Allow PoW headers to reference PoS checkpoints in `consensus/src/pow.rs` and update fork-choice.
-7. **Build fee-aware mempool**
-   - Sort pending transactions by effective fee and evict low-fee entries in `node/src/mempool.rs`.
-8. **Implement lock/unlock bridge primitives**
-   - Define bridge contracts under `bridges/` and add CLI deposit/withdraw flows.
-9. **Persist DEX order books and trades**
-   - Store books in `dex/src/storage.rs` backed by `SimpleDb` and recover on restart.
-10. **Enhance multi-hop trust-line routing**
-    - Incorporate cost-based path scoring in `trust_lines/src/path.rs` with fallback routes.
-11. **Expose subsidy parameter proposals in gov-ui**
-    - List `inflation.params` proposals and allow voting in `gov-ui` with sync to `governance/params.rs`.
-12. **Index settlement receipts in explorer storage**
-    - Parse finalized receipt batches in `explorer/indexer.rs` and expose REST queries.
-13. **Schedule settlement verification in CI**
-    - Add a `ci/settlement.yml` job invoking `settlement.audit` and failing on mismatches.
-14. **Fuzz peer identifier parsing**
-    - Create a `cargo-fuzz` target for `net/discovery.rs` identifier handling.
-15. **Document manual DHT recovery procedures**
-    - Author `docs/dht_recovery.md` detailing stale-peer cleanup and bootstrap commands.
-16. **Integrate gateway fuzzing**
-    - Build a fuzz harness for `gateway/http.rs` request parsing and run in nightly CI.
-17. **Simulate disk exhaustion in storage tests**
-    - Modify `node/tests/storage_repair.rs` to bound tmpfs size and assert graceful recovery.
-18. **Randomize RPC client timeouts**
-    - Introduce jitter in `node/src/rpc/client.rs` with a `rpc.timeout_jitter_ms` knob.
-19. **Add push notification hooks for balance events**
-    - Emit webhooks/FCM triggers in the wallet and document opt‑in flow.
-20. **Set up formal verification for consensus rules**
-    - Translate the state machine into F* modules under `formal/consensus` and verify in CI.
+1. **Unblock governance CLI builds**
+   - Remove the stale `deps` formatter in `node/src/bin/gov.rs`, surface the remaining proposal fields (start/end, vote totals,
+     execution flag), and add a regression that builds the CLI under `--features cli`.
+2. **Unify wallet Ed25519 dependencies and escrow proof arguments**
+   - Align `crates/wallet` on `ed25519-dalek 2.2`, update `wallet::remote_signer` to return the newer `Signature` type, and pass
+     `proof.algo` to `verify_proof` in `node/src/bin/wallet.rs`. Add a smoke test under `tests/remote_signer_multisig.rs` once the
+     binary links.
+3. **Restore light-sync and mempool QoS integration coverage**
+   - After fixing the binaries, re-enable `cargo test -p the_block --test light_sync -- --nocapture` and
+     `cargo test -p the_block --test mempool_qos -- --nocapture` in CI so regressions in the fee floor and light-client paths are
+     caught quickly.
+4. **Document targeted CLI build flags in runbooks**
+   - Update `docs/testing.md` and `docs/operators/run_a_node.md` with the current feature-gating matrix (`cli`, `telemetry`,
+     `gateway`) so operators know how to reproduce the lean build used in integration tests.
+5. **Finish telemetry/privacy warning cleanup**
+   - Audit modules touched by the recent gating pass (`node/src/service_badge.rs`, `node/src/le_portal.rs`, `node/src/rpc/mod.rs`)
+     for lingering `_unused` placeholders and replace them with feature-gated logic or instrumentation so the code stays readable.
+6. **Track RPC retry saturation and fault clamps in docs**
+   - Keep `docs/networking.md`, `docs/rpc.md`, and `docs/testing.md` aligned with the new `MAX_BACKOFF_EXPONENT` behaviour and
+     `[0,1]` fault-rate clamping so operators do not rely on outdated tuning advice.
+7. **Verify SimpleDb snapshot safeguards under both features**
+   - Add coverage that exercises the atomic rename path with and without `storage-rocksdb` to ensure the recent crash-safe writes
+     behave identically across backends.
+8. **Stage a docs pass after each regression fix**
+   - The build currently fails fast because documentation lags behind implementation; require a `docs/` update in every follow-up
+     PR that touches staking, governance, RPC, or telemetry so contributors keep operator guidance accurate.
 
 ---
 This document supersedes earlier “vision” notes. Outdated references to merchant‑first discounts at TGE, dual‑pool day‑one listings, or protocol‑level backdoors have been removed. The design here aligns all launch materials, SDK plans, marketplace sequencing, governance, legal posture, and networking with the current strategy.
@@ -592,58 +593,60 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 90%
+  - Progress: 89%
+  - ⚠️ Focus: widen integration coverage now that CLI binaries compile cleanly; ensure proposal timelines surface in explorer snapshots before the next milestone.
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
   - [x] Release rollback helper ensures binaries revert when provenance validation fails
-  - Progress: 86%
+  - Progress: 87%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
     - [x] Mutual TLS certificate rotation, diagnostics RPC/CLI, and chaos testing harness
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 93%
+    - Progress: 94%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
-  - [x] Read acknowledgements and WAL-backed stores
+  - [x] Read acknowledgements, WAL-backed stores, and crash-safe snapshot rewrites that stage via fsync’d temp files before promoting base64 images
   - [ ] Incentive-backed DHT marketplace
-  - Progress: 79%
+  - Progress: 81%
   - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
-    - [x] Fee floor enforcement with per-sender slot limits and eviction telemetry
+    - [x] Fee floor enforcement with per-sender slot limits, percentile-configurable windows, wallet telemetry, and eviction audit trails
     - [ ] SLA arbitration and heterogeneous payments
-    - Progress: 80%
+    - Progress: 82%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
-  - Progress: 79%
+  - Progress: 80%
 - **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
-  - Progress: 78%
+  - Progress: 79%
 - **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 48%
+  - Progress: 49%
   - **Wallets** ([docs/wallets.md](docs/wallets.md))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 91%
+    - Progress: 92%
+    - ⚠️ Focus: round out multisig UX (batched signer discovery, richer operator messaging) before tagging the next CLI release.
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
-    - Progress: 85%
+    - Progress: 86%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
     - [x] QUIC loss benchmark comparing TCP vs QUIC under chaos
-    - Progress: 73%
+    - Progress: 74%
 
 ### Troubleshooting: Missing Tests & Dependencies
 

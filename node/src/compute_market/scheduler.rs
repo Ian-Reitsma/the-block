@@ -1119,6 +1119,19 @@ mod tests {
         let top = heap.pop().unwrap();
         assert_eq!(top.job_id, "low");
     }
+
+    #[test]
+    fn reputation_gossip_roundtrip() {
+        reset_for_test();
+        record_success("peer1");
+        let snapshot = reputation_snapshot();
+        reset_for_test();
+        assert_eq!(reputation_get("peer1"), 0);
+        for entry in snapshot {
+            merge_reputation(&entry.provider_id, entry.reputation_score, entry.epoch);
+        }
+        assert_eq!(reputation_get("peer1"), 1);
+    }
 }
 
 pub fn validate_multiplier(m: f64) -> bool {

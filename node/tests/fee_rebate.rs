@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use libp2p::PeerId;
 use the_block::net::uptime;
 

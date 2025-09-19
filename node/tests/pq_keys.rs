@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![cfg(feature = "pq-crypto")]
 use pqcrypto_dilithium::dilithium2;
 use the_block::identity::handle_registry::HandleRegistry;

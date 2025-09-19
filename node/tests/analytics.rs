@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use the_block::{
     gateway,
     rpc::analytics::{self, AnalyticsQuery},

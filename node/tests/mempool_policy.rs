@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::needless_range_loop)]
 
 use std::fs;

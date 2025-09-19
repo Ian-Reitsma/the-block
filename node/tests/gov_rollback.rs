@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 use serial_test::serial;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
