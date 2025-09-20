@@ -18,8 +18,11 @@ pub struct SyncOptions {
 
 `sync_background(client, opts, fetch)` short-circuits when Wi‑Fi is unavailable,
 the device is not charging, or the battery level falls below `min_battery`.
-When the checks pass, it fetches headers starting from the client's tip via the
-provided `fetch(start_height)` closure and verifies them before appending.
+Calling `SyncOptions::default()` yields a conservative configuration that
+requires Wi‑Fi, device charging, and at least 50% battery before syncing.
+When the checks pass, the helper fetches headers starting from the client's tip
+via the provided `fetch(start_height)` closure and verifies them before
+appending.
 Real deployments should replace the stubbed `on_wifi`, `is_charging`, and
 `battery_level` helpers with platform-specific checks in the mobile SDKs.
 

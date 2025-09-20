@@ -1,6 +1,5 @@
 use clap::Subcommand;
-use hex;
-use the_block::dex::amm::Pool;
+use dex::amm::Pool;
 use the_block::dex::{check_liquidity_rules, storage::EscrowState, DexStore};
 
 #[derive(Subcommand)]
@@ -64,9 +63,9 @@ pub fn handle(cmd: DexCmd) {
                         "from:{} to:{} total:{} released:{}",
                         e.from, e.to, e.total, e.released
                     );
-                    for (idx, amt) in e.payments.iter().enumerate() {
+                    for (idx, amount) in e.payments.iter().enumerate() {
                         if let Some(p) = esc.escrow.proof(id, idx) {
-                            println!("payment {}: {}", idx, hex::encode(p.leaf));
+                            println!("payment {}: {} amount:{}", idx, hex::encode(p.leaf), amount);
                         }
                     }
                 } else {

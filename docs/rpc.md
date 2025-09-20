@@ -83,6 +83,41 @@ testing.
   #  "industrial_price_base":null,"pending":[]}
   ```
 
+- `compute_market.provider_balances` – returns CT and industrial token balances
+  for every provider persisted in the settlement ledger. Providers are sorted
+  lexicographically (matching the Merkle root computation) and the payload
+  mirrors `BalanceSnapshot` from `node/src/compute_market/settlement.rs` with
+  `provider`, `ct`, and `industrial` fields.
+
+  ```bash
+  curl -s localhost:26658/compute_market.provider_balances | jq
+  # {"providers":[{"provider":"alice","ct":4200,"industrial":600}]}
+  ```
+
+- `compute_market.audit` – streams the most recent settlement events, including
+  accruals, refunds, penalties, and anchor markers. Each object matches the
+  `AuditRecord` struct with `sequence`, `timestamp`, CT/IT deltas, the updated
+  running balances, and (for anchors) the `anchor` hex string recorded in
+  `metadata.last_anchor_hex`.
+
+  ```bash
+  curl -s localhost:26658/compute_market.audit | jq '.[-2:]'
+  # [
+  #   {"sequence":19,"entity":"provider-nyc-01","memo":"accrue_split",...},
+  #   {"sequence":20,"entity":"__anchor__","memo":"anchor","anchor":"…"}
+  # ]
+  ```
+
+- `compute_market.recent_roots?limit=` – lists the latest Merkle roots for the
+  settlement ledger (default 32) as hex strings produced by the same Blake3
+  fold used in `compute_root`. Use these roots to prove continuity between audit
+  records and explorer snapshots.
+
+  ```bash
+  curl -s "localhost:26658/compute_market.recent_roots?limit=4" | jq '.roots'
+  # ["3c5d…", "97ab…", "42f1…", "1be9…"]
+  ```
+
 - `compute.job_cancel` – cancels an active job and rolls back resources.
 
   - Parameters: `job_id` (string), optional `reason` (`client`|`provider`|`preempted`).
@@ -121,7 +156,7 @@ testing.
     # {"gateway":1000000,"storage":5000000,"exec":0}
     ```
   - `rent.escrow.balance` – returns locked CT per blob or account.
-- `settlement.audit` – replays recent receipts and verifies explorer anchors; used in CI to halt mismatched settlements.
+- `settlement.audit` – replays consensus settlement receipts and verifies explorer anchors; CI invokes this endpoint to halt mismatched settlements. Pair it with `compute_market.audit` to confirm the CT/IT ledger emits matching anchors.
 - `dex.escrow_status?id=` – prints `{from,to,locked,released}` for a pending
   escrow.
 
@@ -148,8 +183,8 @@ testing.
 
 ## Deprecated / removed endpoints
 
-The 2024 third-token ledger removal eliminated a number of legacy RPC calls.
-All methods under the former third-token namespace were removed, and clients
+The 2024 reimbursement-ledger retirement eliminated a number of legacy RPC calls.
+All methods under the former reimbursement namespace were removed, and clients
 should migrate to the subsidy-centric replacements listed above. Any request
 against those paths now returns `-32601` (method not found).
 

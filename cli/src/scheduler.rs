@@ -1,6 +1,6 @@
+use crate::rpc::RpcClient;
 use clap::Subcommand;
 use serde_json::json;
-use the_block::rpc::client::RpcClient;
 
 #[derive(Subcommand)]
 pub enum SchedulerCmd {

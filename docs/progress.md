@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99.3/100** with vision completion **~85.0/100**. The legacy third-token ledger has been fully retired; see `docs/system_changes.md` for migration notes. The governance CLI now lists proposals without the removed dependency field, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with escrow hash-algorithm coverage, `SimpleDb` snapshot rewrites stage through fsync’d temporary files before atomic promotion, and the RPC client both clamps `TB_RPC_FAULT_RATE` and saturates exponential backoff to avoid overflow while restoring prior environment state on drop. Remaining focus areas: finish migrating telemetry-gated tests to the default feature mix, extend bridge/DEX docs with signer-set payloads and explorer telemetry, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99.6/100** with vision completion **~86.9/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace persists CT/IT flows in a RocksDB ledger with activation metadata, Merkle roots, and RPC/telemetry exposure for audits, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, and the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff to avoid overflow and restore environment state on drop. Remaining focus areas: deliver treasury disbursement tooling, harden compute-market SLAs with dashboards, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,7 +16,7 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~87 %
+## 1. Consensus & Core Execution — ~89 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -37,7 +37,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~94 %
+## 2. Networking & Gossip — ~95 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -62,16 +62,17 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~89 %
+## 3. Governance & Subsidy Economy — ~92 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
+- Shared `governance` crate re-exports bicameral voting, sled-backed `GovStore`, proposal DAG validation, Kalman retune helpers, and release workflows for CLI/SDK consumers (`governance/src/lib.rs` and examples).
 - Push notifications on subsidy balance changes (`wallet` tooling).
 - Explorer indexes settlement receipts with query endpoints (`explorer/src/lib.rs`).
 - Risk-sensitive Kalman–LQG governor with variance-aware smoothing (`node/src/governance/kalman.rs`, `node/src/governance/variance.rs`).
 - Laplace-noised multiplier releases and miner-count logistic hysteresis (`node/src/governance/params.rs`, `pow/src/reward.rs`).
 - Emergency kill switch `kill_switch_subsidy_reduction` with telemetry counters (`node/src/governance/params.rs`, `docs/monitoring.md`).
-- Legacy third-token ledger fully removed; CT-only subsidies minted each block with migration documented in `docs/system_changes.md`.
+- Subsidy accounting is unified in the CT ledger with migration documented in `docs/system_changes.md`.
 - Multi-signature release approvals persist signer sets and thresholds (`node/src/governance/release.rs`), gated fetch/install flows (`node/src/update.rs`, `cli/src/gov.rs`), and explorer/CLI timelines (`explorer/src/release_view.rs`, `contract explorer release-history`).
 - Telemetry counters `release_quorum_fail_total` and `release_installs_total` expose quorum health and rollout adoption for dashboards.
 - Fee-floor window and percentile parameters (`node/src/governance/params.rs`) stream through `GovStore` history with rollback support (`node/src/governance/store.rs`), governance CLI updates (`cli/src/gov.rs`), explorer timelines (`explorer/src/lib.rs`), and regression coverage (`governance/tests/mempool_params.rs`).
@@ -87,11 +88,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
  - Kalman filter weights for difficulty retune configurable via governance parameters (`node/src/governance/params.rs`).
 
 **Gaps**
-- Expand explorer timelines with proposal start/end metadata now emitted by the CLI.
+- Publish explorer timelines for proposal windows and upcoming treasury disbursements emitted by the CLI/governance crate.
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — ~81 %
+## 4. Storage & Free‑Read Hosting — ~83 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -108,7 +109,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — ~79 %
+## 5. Smart‑Contract VM & UTXO/PoW — ~82 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -122,13 +123,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~82 %
+## 6. Compute Marketplace & CBM — ~88 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
 - `compute.job_cancel` RPC releases resources and refunds bonds (`node/src/rpc/compute_market.rs`).
 - Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
+- Settlement persists CT/IT balances, audit logs, activation metadata, and Merkle roots in a RocksDB-backed store with RPC/CLI/explorer surfacing (`node/src/compute_market/settlement.rs`, `node/tests/compute_settlement.rs`, `docs/compute_market.md`, `docs/settlement_audit.md`, `explorer/src/compute_view.rs`). The ledger emits telemetry (`SETTLE_APPLIED_TOTAL`, `SETTLE_FAILED_TOTAL{reason}`, `SETTLE_MODE_CHANGE_TOTAL{state}`, `SLASHING_BURN_CT_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}`) and exposes `compute_market.provider_balances`, `compute_market.audit`, and `compute_market.recent_roots` RPCs for automated reconciliation.
+- `Settlement::shutdown` persists any pending ledger deltas and flushes RocksDB handles before teardown so test harnesses (and unplanned exits) leave behind consistent CT/IT balances and Merkle roots for replay.
 - Admission enforces dynamic fee floors with per-sender slot caps, eviction audit trails, explorer charts, and `mempool.stats` exposure (`node/src/mempool/admission.rs`, `node/src/mempool/scoring.rs`, `docs/mempool_qos.md`, `node/tests/mempool_eviction.rs`). Governance parameters for the floor window and percentile stream through telemetry (`fee_floor_window_changed_total`, `fee_floor_warning_total`, `fee_floor_override_total`) and wallet guidance.
 - `FeeFloor::new(size, percentile)` now requires explicit percentile inputs in tests and CLI paths, aligning mempool QoS regressions with governance-configured sampling windows (`node/src/mempool/scoring.rs`, `node/tests/mempool_qos.rs`).
 - Economic simulator outputs KPIs to CSV (`sim/src`).
@@ -136,9 +139,9 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Groth16/Plonk SNARK verification for compute receipts (`node/src/compute_market/snark.rs`).
 
 **Gaps**
-- Escrowed payments and SLA enforcement remain rudimentary.
+- Escrowed payments and automated SLA enforcement remain rudimentary; deadline tracking and slashing heuristics are staged but not yet active.
 
-## 7. Trust Lines & DEX — ~79 %
+## 7. Trust Lines & DEX — ~81 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -154,7 +157,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~92 %
+## 8. Wallets, Light Clients & KYC — ~94 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -175,7 +178,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — ~49 %
+## 9. Bridges & Cross‑Chain Routing — ~52 %
 
 **Evidence**
 - Lock/unlock bridge contract with relayer proofs (`bridges/src/lib.rs`).
@@ -188,7 +191,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~86 %
+## 10. Monitoring, Debugging & Profiling — ~88 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -205,7 +208,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Bridge and VM metrics are sparse.
 - Automated anomaly detection not in place.
 
-## 11. Identity & Explorer — ~78 %
+## 11. Identity & Explorer — ~80 %
 
 **Evidence**
 - DID registry persists anchors with replay protection, governance revocation checks, and optional provenance attestations (`node/src/identity/did.rs`, `state/src/did.rs`).
@@ -218,7 +221,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Revocation alerting and recovery runbooks need explorer/CLI integration.
 - Mobile wallet identity UX and bulk export tooling remain outstanding.
 
-## 12. Economic Simulation & Formal Verification — ~39 %
+## 12. Economic Simulation & Formal Verification — ~41 %
 
 **Evidence**
 - Simulation scenarios for inflation/demand/backlog (`sim/src`).
@@ -229,7 +232,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 13. Mobile UX & Contribution Metrics — ~57 %
+## 13. Mobile UX & Contribution Metrics — ~59 %
 
 **Evidence**
 - Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).
@@ -242,4 +245,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑10‑06*
+*Last updated: 2025‑09‑20*

@@ -1,14 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::rpc::RpcClient;
+use crate::tx::{TxDidAnchor, TxDidAnchorAttestation};
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Subcommand};
 use ed25519_dalek::{Signer, SigningKey};
 use hex;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
-use the_block::rpc::client::RpcClient;
-use the_block::transaction::{TxDidAnchor, TxDidAnchorAttestation};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
 
@@ -202,7 +202,7 @@ struct RpcErrorBody {
     message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct LightHeader {
     pub height: u64,
     pub hash: String,
@@ -469,7 +469,11 @@ pub fn submit_anchor(client: &RpcClient, url: &str, tx: &TxDidAnchor) -> Result<
         .json::<RpcEnvelope<Value>>()
         .context("failed to decode identity.anchor response")?;
     if let Some(err) = resp.error {
-        return Err(anyhow!("identity.anchor error {}", err.message));
+        return Err(anyhow!(
+            "identity.anchor error {} (code {})",
+            err.message,
+            err.code
+        ));
     }
     let result = resp
         .result
@@ -496,7 +500,11 @@ pub fn latest_header(client: &RpcClient, url: &str) -> Result<LightHeader> {
         .json::<RpcEnvelope<LightHeader>>()
         .context("failed to decode light.latest_header response")?;
     if let Some(err) = resp.error {
-        return Err(anyhow!("light.latest_header error {}", err.message));
+        return Err(anyhow!(
+            "light.latest_header error {} (code {})",
+            err.message,
+            err.code
+        ));
     }
     resp.result
         .ok_or_else(|| anyhow!("missing light.latest_header result"))
@@ -517,7 +525,11 @@ pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Resul
         .json::<RpcEnvelope<Value>>()
         .context("failed to decode identity.resolve response")?;
     if let Some(err) = resp.error {
-        return Err(anyhow!("identity.resolve error {}", err.message));
+        return Err(anyhow!(
+            "identity.resolve error {} (code {})",
+            err.message,
+            err.code
+        ));
     }
     let result = resp
         .result

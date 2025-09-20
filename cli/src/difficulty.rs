@@ -1,6 +1,6 @@
 use clap::Subcommand;
+use state::difficulty_history;
 use std::path::PathBuf;
-use the_block::state::difficulty_history;
 
 #[derive(Subcommand)]
 pub enum DifficultyCmd {

@@ -11,12 +11,14 @@ use light_client::{LightClient, SyncOptions, sync_background, Header};
 
 let genesis = Header::default();
 let mut client = LightClient::new(genesis);
-let opts = SyncOptions { wifi_only: true, require_charging: true, min_battery: 0.3 };
+let opts = SyncOptions::default();
 sync_background(&mut client, opts, |_start| Vec::new());
 ```
 
 The helper checks platform power and connectivity hints before contacting the
-network, conserving user resources.
+network, conserving user resources. The default options require Wi‑Fi,
+charging, and at least 50 % battery; adjust the struct fields to loosen those
+guards for debug builds.
 
 ### Compressed Log Uploads
 

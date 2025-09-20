@@ -1,5 +1,5 @@
+use crate::rpc::RpcClient;
 use clap::Subcommand;
-use the_block::rpc::client::RpcClient;
 
 #[derive(Subcommand)]
 pub enum GatewayCmd {

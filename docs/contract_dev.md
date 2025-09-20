@@ -1,6 +1,10 @@
 # Contract Development Guide
 
 This guide covers the basic contract workflow for The‑Block's prototype VM.
+For commands that inspect WASM exports or log indexes, build the CLI with the
+`full` feature flag (`cargo run -p contract-cli --features full -- …`) so the
+optional Wasmtime and SQLite helpers are available. Lean builds without the flag
+skip those integrations to keep test harnesses lightweight.
 
 ## Opcode ABI
 

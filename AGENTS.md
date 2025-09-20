@@ -56,23 +56,24 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99.3/100** with vision completion **~85.0/100**. The legacy third-token ledger has been fully retired; every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
+Mainnet readiness sits at **~99.6/100** with vision completion **~86.9/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
 Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, and end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
 
 **Latest highlights:**
-- Governance CLI list/status commands now surface `start`/`end` windows instead of the removed dependency set, restoring CLI feature builds and aligning explorer timelines with scheduler metadata.
-- Wallet binaries share a single `ed25519-dalek 2.2.x` dependency, pass escrow hash algorithms through `verify_proof`, forward multisig signer sets end-to-end with JSON payloads suitable for explorer and RPC ingestion, and export remote signer telemetry so Grafana panels can correlate signer health with wallet QoS overrides.
-- RPC clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after the 31st attempt, guard environment overrides with scoped restorers, and expose dedicated regression tests so operators can rely on bounded retry behaviour.
+- Governance, SDKs, and the CLI now consume the shared `governance` crate with sled-backed `GovStore`, proposal DAG validation, Kalman retune helpers, and release quorum enforcement, keeping every integration on the node’s canonical state machine.
+- Wallet binaries continue to ship on `ed25519-dalek 2.2.x`, propagate multisig signer sets, escrow hash algorithms, and remote signer telemetry, and surface localized fee-floor coaching with JSON automation hooks for dashboards.
+- Compute-market settlement writes CT/IT movements to a RocksDB ledger that tracks activation metadata, audit exports, and recent Merkle roots exposed through RPC, CLI, and explorer views for cross-restart reconciliation; `Settlement::shutdown` persists pending entries and flushes RocksDB so operators can assert clean teardown in integration harnesses.
+- RPC clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after the 31st attempt, guard environment overrides with scoped restorers, and expose regression coverage so operators can trust bounded retry behaviour during incidents.
 - `SimpleDb` snapshot rewrites stage data through fsync’d temporary files, atomically rename into place, and retain legacy dumps until the new image lands, eliminating crash-window data loss while keeping legacy reopen logic intact.
-- Node CLI binaries honour telemetry/gateway feature toggles, emitting explicit user-facing errors when unsupported flags are passed and supplying jurisdiction languages to law-enforcement audit logs.
-- The lightweight integration feature toggles keep large harnesses compiling with LLD while still offering RocksDB parity runs for release sign-off.
+- Node CLI binaries honour telemetry/gateway feature toggles, emitting explicit user-facing errors when unsupported flags are passed, recording jurisdiction languages in law-enforcement audit logs, and compiling via optional feature bundles (`full`, `wasm-metadata`, `sqlite-storage`) for memory-constrained tests.
+- Light-client state streaming, DID anchoring, and explorer timelines now trace revocations and provenance attestations end-to-end with cached pagination so wallet, CLI, and dashboards agree on identity state.
 
 **Outstanding focus areas:**
-- Finish porting remaining telemetry-gated tests to the default feature set so warning-free builds require fewer bespoke flags.
-- Extend bridge and DEX documentation with the new signer-set payloads and explorer telemetry before the next release train.
-- Continue WAN-scale chaos drills for QUIC/relay fan-out under the new metrics pipeline.
-- Ship multisig wallet UX polish (batched signer discovery, richer CLI prompts) and document the flow for operators and custodians.
-- Close the gap on integration builds that still require feature gating by chasing down lingering optional-module warnings.
+- Ship governance treasury disbursement tooling and explorer timelines before opening external treasury submissions.
+- Harden compute-market SLA enforcement with deadline slashing, telemetry, and operator remediation guides.
+- Continue WAN-scale QUIC chaos drills for relay fan-out while publishing mitigation recipes from the new telemetry traces.
+- Finish multisig wallet UX polish (batched signer discovery, richer CLI prompts) so remote signers can run production workflows.
+- Expand bridge and DEX documentation with signer-set payloads, explorer telemetry, and release-verifier guidance ahead of the next tag.
 
 ---
 
@@ -120,7 +121,7 @@ The repository owns exactly four responsibility domains:
 
 ### Economic Model — CT/IT Subsidy Engine
 
-- The retired third token ledger has been **permanently removed**. All
+- Subsidy accounting now lives in the shared CT ledger. All
   operator rewards flow in liquid CT and are minted directly in the
   coinbase.
 - Every block carries three subsidy fields: `STORAGE_SUB_CT`,
@@ -324,7 +325,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99.3/100 · Vision completion: ~85.0/100. Known blockers: stabilise telemetry-gated integration warnings, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99.4/100 · Vision completion: ~85.6/100. Known blockers: stabilise telemetry-gated integration warnings, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -334,7 +335,7 @@ Mainnet readiness: ~99.3/100 · Vision completion: ~85.0/100. Known blockers: st
 - Modular wallet framework with hardware signer support and CLI utilities.
 - Cluster-wide `metrics-aggregator` service and graceful `compute.job_cancel` RPC for reputation-aware rollbacks.
 - Cross-chain exchange adapters, light-client crate, indexer with explorer, and benchmark/simulation tools.
-- Free-read architecture with receipt batching, execution receipts, governance-seeded read reward pool, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
+- Free-read architecture with receipt batching, execution receipts, governance-tuned CT subsidy ledger accounting, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
 - Fee-priority mempool with EIP-1559 base fee evolution; high-fee transactions evict low-fee ones and each block nudges the base fee toward a target fullness.
 - Bridge primitives with relayer proofs and lock/unlock flows exposed via `blockctl bridge deposit`/`withdraw`.
 - Persistent contracts and on-disk key/value state with opcode ABI generation and `contract` CLI for deploy/call.
@@ -554,7 +555,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct_ct` carries an arbitrary 0–100 split with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: QUIC/TCP transport with `PeerSet`; per-peer drop reasons and reputation-aware rate limits surface via `net.peer_stats` and the `net` CLI. JSON‑RPC server in `src/bin/node.rs`; integration tests cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. The legacy third-token ledger and `read_reward_pool` have been retired in favor of this model; see [docs/system_changes.md](docs/system_changes.md#2024-third-token-ledger-removal-and-ct-subsidy-transition) for the economic rationale and migration history. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the formula in `docs/economics.md`; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
+- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. Ledger snapshots now flow through the CT subsidy store documented in [docs/system_changes.md](docs/system_changes.md#ct-subsidy-unification-2024) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the formula in `docs/economics.md`; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
   `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
   a voted percentage, granting governance a rapid-response lever during economic
   shocks.
@@ -593,60 +594,60 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 89%
-  - ⚠️ Focus: widen integration coverage now that CLI binaries compile cleanly; ensure proposal timelines surface in explorer snapshots before the next milestone.
+  - Progress: 92%
+  - ⚠️ Focus: wire treasury disbursements and dependency visualisations into explorer timelines while finalising external submission workflows.
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
   - [x] Release rollback helper ensures binaries revert when provenance validation fails
-  - Progress: 87%
+  - Progress: 89%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
     - [x] Mutual TLS certificate rotation, diagnostics RPC/CLI, and chaos testing harness
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 94%
+    - Progress: 95%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements, WAL-backed stores, and crash-safe snapshot rewrites that stage via fsync’d temp files before promoting base64 images
   - [ ] Incentive-backed DHT marketplace
-  - Progress: 81%
+  - Progress: 83%
   - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
     - [x] Fee floor enforcement with per-sender slot limits, percentile-configurable windows, wallet telemetry, and eviction audit trails
     - [ ] SLA arbitration and heterogeneous payments
-    - Progress: 82%
+    - Progress: 88%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
-  - Progress: 80%
+  - Progress: 82%
 - **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
-  - Progress: 79%
+  - Progress: 81%
 - **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 49%
+  - Progress: 52%
   - **Wallets** ([docs/wallets.md](docs/wallets.md))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 92%
+    - Progress: 94%
     - ⚠️ Focus: round out multisig UX (batched signer discovery, richer operator messaging) before tagging the next CLI release.
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
-    - Progress: 86%
+    - Progress: 88%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
     - [x] QUIC loss benchmark comparing TCP vs QUIC under chaos
-    - Progress: 74%
+    - Progress: 77%
 
 ### Troubleshooting: Missing Tests & Dependencies
 

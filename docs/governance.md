@@ -9,6 +9,72 @@ Two chambers participate in ratifying upgrades:
 - **Operator House** – one vote per high-uptime node.
 - **Builder House** – one vote per active core developer.
 
+## Shared governance crate
+
+All tooling now consumes the `governance` workspace crate, which mirrors the
+state machine shipped in the node binary. The crate re-exports the bicameral
+voting scaffolding, `GovStore` sled persistence, release approval workflow, and
+parameter registry so SDKs, the CLI, and external services build against the
+same API surface as the node. Consumers instantiate a `GovStore`, submit
+proposals, and drive activation through the provided `Runtime` facade, which is
+backed by a `RuntimeAdapter` implementation that bridges to the host
+application. Release submissions validate provenance attestations via the
+`ReleaseVerifier` trait, and helper docs in the crate show end-to-end proposal
+submission and activation flows.
+
+Migration steps:
+
+1. Add `governance = { path = "../governance" }` to your crate dependencies.
+2. Replace `the_block::governance::*` imports with `governance::*` and, when
+   driving parameter changes, wrap local runtime hooks in a `RuntimeAdapter`
+   implementation.
+3. Use `controller::submit_release` with a verifier that taps existing
+   attestation keys to share the release quorum checks performed by the node.
+
+The CLI already exercises this path, proving compatibility with the existing
+history directories and proposal snapshots.
+
+### GovStore persistence & history artifacts
+
+`GovStore::open` seeds a sled database alongside a `governance/history/`
+directory that mirrors every activation. When parameters change,
+`persist_param_change` appends JSON rows to
+`governance/history/param_changes.json` and, for fee-floor updates, mirrors the
+window/percentile pair into `governance/history/fee_floor_policy.json`. DID
+revocations land in `did_revocations.json` with the address, reason, epoch, and
+wall-clock timestamp captured by `revoke_did`. Release approvals populate
+`approved_releases` in sled while also persisting signer sets, thresholds, and
+install timestamps (`release_installs`) so explorers and dashboards can render
+rollout progress. Every activation snapshot is written to
+`governance/history/<epoch>.json`, giving operators a time series of runtime
+parameters for audit.
+
+Use these artifacts to reconcile CLI output with explorer state and to seed
+disaster-recovery drills. For example, copying `param_changes.json` and
+`did_revocations.json` between environments lets operators replay policy history
+after a catastrophic disk loss.
+
+### Proposal dependency validation
+
+The crate enforces acyclic dependencies via
+`governance::proposals::validate_dag`, which runs cycle detection before a
+proposal is accepted. Downstream tooling (CLI, SDKs, governance UI) should call
+this helper to reject graphs that would deadlock activation. Dependencies are
+stored as proposal IDs and evaluated alongside the activation queue; `activate_ready`
+only applies proposals whose prerequisites have finished, preventing orphaned
+parameter changes from slipping through manual reviews.
+
+### Release quorum tracking and installs
+
+Release votes (`ReleaseVote`/`ReleaseBallot`) now deduplicate signer sets, verify
+attestations through pluggable verifiers, and persist successful hashes into the
+approved-release sled tree. Each installation is recorded via
+`GovStore::record_release_install`, which normalizes timestamps and augments the
+history written under `governance/history`. Dashboards can join the stored
+install vectors with telemetry (`release_installs_total`) to alert when an
+upgrade stalls, and CLI/explorer views render the signer threshold, signatures,
+and install cadence from the same store.
+
 ## Proposal lifecycle
 
 1. Draft a JSON proposal (see `examples/governance/`).
@@ -34,7 +100,7 @@ which the CLI surfaces when listing the governance queue. Explorer timelines and
 telemetry dashboards consume the same fields so operators can monitor concurrent
 scheduling windows without relying on the removed dependency metadata.
 
-> **Update (2025-10-06):** the CLI now lists `start`/`end` windows alongside vote
+> **Update (2025-09-20):** the CLI now lists `start`/`end` windows alongside vote
 > totals and execution status, replacing the removed dependency field. Capture the
 > new scheduling metadata in explorer dashboards before enabling the `cli`
 > feature for production drills.

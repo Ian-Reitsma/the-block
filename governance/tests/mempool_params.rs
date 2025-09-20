@@ -1,14 +1,15 @@
 use std::fs;
+use std::time::Duration;
 
+use governance::{
+    controller, registry, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime,
+    RuntimeAdapter, Vote, VoteChoice,
+};
 use serde::Deserialize;
 use tempfile::tempdir;
-use the_block::governance::{
-    controller, registry, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote,
-    VoteChoice,
-};
-use the_block::Blockchain;
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct FeeFloorEvent {
     epoch: u64,
     proposal_id: u64,
@@ -31,6 +32,7 @@ fn submit_and_activate(
     activation_epoch: u64,
 ) {
     let spec = registry_lookup(key);
+    let vote_deadline = activation_epoch.saturating_sub(governance::ACTIVATION_DELAY);
     let proposal = Proposal {
         id: 0,
         key,
@@ -39,7 +41,7 @@ fn submit_and_activate(
         max: spec.max,
         proposer: "ops".into(),
         created_epoch: 0,
-        vote_deadline_epoch: 0,
+        vote_deadline_epoch: vote_deadline,
         activation_epoch: None,
         status: ProposalStatus::Open,
         deps: Vec::new(),
@@ -58,17 +60,54 @@ fn submit_and_activate(
             0,
         )
         .expect("vote");
-    controller::tally(store, pid, activation_epoch - 1).expect("tally");
+    controller::tally(store, pid, vote_deadline).expect("tally");
     store
         .activate_ready(activation_epoch, runtime, params)
         .expect("activate");
 }
 
-fn registry_lookup(key: ParamKey) -> &'static the_block::governance::ParamSpec {
+fn registry_lookup(key: ParamKey) -> &'static governance::ParamSpec {
     registry()
         .iter()
         .find(|spec| spec.key == key)
         .expect("missing spec")
+}
+
+struct MockRuntime {
+    window: u64,
+    percentile: u64,
+    consumer_comfort: u64,
+    snapshot_secs: u64,
+}
+
+impl MockRuntime {
+    fn new(params: &Params) -> Self {
+        Self {
+            window: params.fee_floor_window as u64,
+            percentile: params.fee_floor_percentile as u64,
+            consumer_comfort: params.consumer_fee_comfort_p90_microunits as u64,
+            snapshot_secs: params.snapshot_interval_secs as u64,
+        }
+    }
+}
+
+impl RuntimeAdapter for MockRuntime {
+    fn set_fee_floor_policy(&mut self, window: u64, percentile: u64) {
+        self.window = window;
+        self.percentile = percentile;
+    }
+
+    fn set_snapshot_interval(&mut self, d: Duration) {
+        self.snapshot_secs = d.as_secs();
+    }
+
+    fn set_consumer_p90_comfort(&mut self, value: u64) {
+        self.consumer_comfort = value;
+    }
+
+    fn fee_floor_policy(&mut self) -> Option<(u64, u64)> {
+        Some((self.window, self.percentile))
+    }
 }
 
 #[test]
@@ -77,10 +116,9 @@ fn fee_floor_policy_governance_updates_and_rollbacks() {
     let store_path = dir.path().join("gov.db");
     let store = GovStore::open(&store_path);
 
-    let mut chain = Blockchain::default();
-    chain.path = dir.path().to_str().unwrap().to_string();
-    let mut runtime = Runtime { bc: &mut chain };
     let mut params = Params::default();
+    let mut adapter = MockRuntime::new(&params);
+    let mut runtime = Runtime::new(&mut adapter);
     runtime.set_fee_floor_policy(
         params.fee_floor_window as u64,
         params.fee_floor_percentile as u64,
@@ -96,7 +134,9 @@ fn fee_floor_policy_governance_updates_and_rollbacks() {
         5,
     );
     assert_eq!(params.fee_floor_window, 128);
-    assert_eq!(runtime.bc.fee_floor_policy(), (128, 75));
+    drop(runtime);
+    assert_eq!((adapter.window, adapter.percentile), (128, 75));
+    let mut runtime = Runtime::new(&mut adapter);
 
     // Change percentile to 90 and activate at a later epoch.
     submit_and_activate(
@@ -108,7 +148,9 @@ fn fee_floor_policy_governance_updates_and_rollbacks() {
         10,
     );
     assert_eq!(params.fee_floor_percentile, 90);
-    assert_eq!(runtime.bc.fee_floor_policy(), (128, 90));
+    drop(runtime);
+    assert_eq!((adapter.window, adapter.percentile), (128, 90));
+    let mut runtime = Runtime::new(&mut adapter);
 
     // Ensure history contains both entries.
     let mut history = read_fee_floor_history(dir.path());
@@ -122,7 +164,8 @@ fn fee_floor_policy_governance_updates_and_rollbacks() {
         .rollback_last(11, &mut runtime, &mut params)
         .expect("rollback last");
     assert_eq!(params.fee_floor_percentile, 75);
-    assert_eq!(runtime.bc.fee_floor_policy(), (128, 75));
+    drop(runtime);
+    assert_eq!((adapter.window, adapter.percentile), (128, 75));
 
     let history_after = read_fee_floor_history(dir.path());
     assert_eq!(history_after.len(), 3);

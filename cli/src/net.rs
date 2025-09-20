@@ -1,9 +1,9 @@
+use crate::rpc::RpcClient;
 use clap::Subcommand;
 use hex;
 use serde::Deserialize;
 use serde_json::json;
 use the_block::net::QuicStatsEntry;
-use the_block::rpc::client::RpcClient;
 
 #[derive(Subcommand)]
 pub enum NetCmd {

@@ -1,6 +1,7 @@
+use crate::rpc::RpcClient;
 use clap::Subcommand;
 use serde_json::json;
-use the_block::rpc::client::RpcClient;
+use std::io::{self, Write};
 
 #[derive(Subcommand)]
 pub enum ComputeCmd {
@@ -36,6 +37,12 @@ pub enum ComputeCmd {
 }
 
 pub fn handle(cmd: ComputeCmd) {
+    let stdout = io::stdout();
+    let mut handle = stdout.lock();
+    let _ = handle_with_writer(cmd, &mut handle);
+}
+
+pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()> {
     match cmd {
         ComputeCmd::Cancel { job_id, url } => {
             let client = RpcClient::from_env();
@@ -59,7 +66,7 @@ pub fn handle(cmd: ComputeCmd) {
             match client.call(&url, &payload) {
                 Ok(resp) => {
                     if let Ok(text) = resp.text() {
-                        println!("{}", text);
+                        writeln!(out, "{}", text)?;
                     }
                 }
                 Err(e) => eprintln!("{e}"),
@@ -72,7 +79,7 @@ pub fn handle(cmd: ComputeCmd) {
                     let mut parts = line.split_whitespace();
                     if let (Some(job), Some(reason)) = (parts.next(), parts.next()) {
                         if !preempted || reason == "preempted" {
-                            println!("{job} {reason}");
+                            writeln!(out, "{job} {reason}")?;
                         }
                     }
                 }
@@ -89,11 +96,10 @@ pub fn handle(cmd: ComputeCmd) {
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
-            let params = if let Some(acc) = accelerator {
-                serde_json::json!({"accelerator": acc})
-            } else {
-                serde_json::Value::Null
-            };
+            let params = accelerator
+                .as_ref()
+                .map(|acc| serde_json::json!({"accelerator": acc}))
+                .unwrap_or(serde_json::Value::Null);
             let payload = Payload {
                 jsonrpc: "2.0",
                 id: 1,
@@ -121,9 +127,10 @@ pub fn handle(cmd: ComputeCmd) {
                                 .get("industrial_price_per_unit")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or_default();
-                            println!(
+                            writeln!(
+                                out,
                                 "backlog: {backlog} util: {util}% units: {units} price: {price}"
-                            );
+                            )?;
                             if let Some(base) =
                                 res.get("industrial_price_base").and_then(|v| v.as_u64())
                             {
@@ -131,10 +138,41 @@ pub fn handle(cmd: ComputeCmd) {
                                     .get("industrial_price_weighted")
                                     .and_then(|v| v.as_u64())
                                     .unwrap_or(base);
-                                println!("median base: {base} weighted: {weighted}");
+                                writeln!(out, "median base: {base} weighted: {weighted}")?;
                             }
                         } else {
-                            println!("{}", text);
+                            writeln!(out, "{}", text)?;
+                        }
+                    }
+                }
+            }
+
+            let balance_payload = Payload {
+                jsonrpc: "2.0",
+                id: 2,
+                method: "compute_market.provider_balances",
+                params: serde_json::Value::Null,
+                auth: None,
+            };
+            if let Ok(resp) = client.call(&url, &balance_payload) {
+                if let Ok(text) = resp.text() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(providers) = val
+                            .get("result")
+                            .and_then(|res| res.get("providers"))
+                            .and_then(|v| v.as_array())
+                        {
+                            for entry in providers {
+                                let provider =
+                                    entry.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                                let ct = entry.get("ct").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let industrial = entry
+                                    .get("industrial")
+                                    .or_else(|| entry.get("it"))
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                writeln!(out, "provider: {provider} ct: {ct} it: {industrial}")?;
+                            }
                         }
                     }
                 }
@@ -170,11 +208,11 @@ pub fn handle(cmd: ComputeCmd) {
                                         .get("effective_priority")
                                         .and_then(|v| v.as_f64())
                                         .unwrap_or(0.0);
-                                    println!("{id} {eff:.3}");
+                                    writeln!(out, "{id} {eff:.3}")?;
                                 }
                             }
                         } else {
-                            println!("{}", text);
+                            writeln!(out, "{}", text)?;
                         }
                     }
                 }
@@ -201,11 +239,12 @@ pub fn handle(cmd: ComputeCmd) {
             };
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
-                    println!("{}", text);
+                    writeln!(out, "{}", text)?;
                 }
             }
         }
     }
+    Ok(())
 }
 
 fn cancel_log_path() -> std::path::PathBuf {

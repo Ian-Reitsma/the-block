@@ -138,6 +138,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "pow.submit",
     "inflation.params",
     "compute_market.stats",
+    "compute_market.provider_balances",
+    "compute_market.audit",
+    "compute_market.recent_roots",
     "compute_market.scheduler_metrics",
     "compute_market.scheduler_stats",
     "compute.reputation_get",
@@ -808,16 +811,13 @@ fn dispatch(
                 SettleMode::Armed { .. } => "armed",
             };
             if let Some(p) = provider {
-                let bal = Settlement::balance(p);
-                serde_json::json!({"mode": mode, "balance": bal})
+                let (ct, industrial) = Settlement::balance_split(p);
+                serde_json::json!({"mode": mode, "balance": ct, "ct": ct, "industrial": industrial})
             } else {
                 serde_json::json!({"mode": mode})
             }
         }
-        "settlement.audit" => {
-            let res = Settlement::audit();
-            serde_json::to_value(res).unwrap_or_else(|_| serde_json::json!([]))
-        }
+        "settlement.audit" => compute_market::settlement_audit(),
         "bridge.relayer_status" => {
             let id = req
                 .params
@@ -995,8 +995,7 @@ fn dispatch(
         }
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-            let roots = Settlement::recent_roots(n);
-            serde_json::json!({"roots": roots})
+            compute_market::recent_roots(n)
         }
         "mempool.stats" => {
             let lane_str = req
@@ -1629,6 +1628,12 @@ fn dispatch(
                     _ => None,
                 });
             compute_market::stats(accel)
+        }
+        "compute_market.provider_balances" => compute_market::provider_balances(),
+        "compute_market.audit" => compute_market::settlement_audit(),
+        "compute_market.recent_roots" => {
+            let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
+            compute_market::recent_roots(n)
         }
         "compute_market.scheduler_metrics" => compute_market::scheduler_metrics(),
         "compute_market.scheduler_stats" => compute_market::scheduler_stats(),

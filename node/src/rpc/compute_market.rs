@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::compute_market::{price_board, scheduler, total_units_processed};
+use crate::compute_market::{
+    price_board, scheduler, settlement::Settlement, total_units_processed,
+};
 use crate::transaction::FeeLane;
 
 /// Return compute market backlog and utilisation metrics.
@@ -68,4 +70,23 @@ pub fn provider_hardware(provider: &str) -> serde_json::Value {
     } else {
         json!({})
     }
+}
+
+/// Return the recent settlement audit log.
+pub fn settlement_audit() -> serde_json::Value {
+    serde_json::to_value(Settlement::audit()).unwrap_or_else(|_| json!([]))
+}
+
+/// Return split token balances for providers.
+pub fn provider_balances() -> serde_json::Value {
+    json!({ "providers": Settlement::balances() })
+}
+
+/// Return recent settlement merkle roots encoded as hex strings.
+pub fn recent_roots(limit: usize) -> serde_json::Value {
+    let roots: Vec<String> = Settlement::recent_roots(limit)
+        .into_iter()
+        .map(|r| hex::encode(r))
+        .collect();
+    json!({ "roots": roots })
 }
