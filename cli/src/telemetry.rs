@@ -30,7 +30,10 @@ pub fn handle(cmd: TelemetryCmd) {
                 }
             }
             #[cfg(not(feature = "telemetry"))]
-            println!("telemetry disabled");
+            {
+                let _ = interval;
+                println!("telemetry disabled");
+            }
         }
     }
 }

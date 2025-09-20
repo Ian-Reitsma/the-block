@@ -20,12 +20,15 @@ mod light_client;
 mod light_sync;
 mod logs;
 mod net;
+mod rpc;
 mod scheduler;
 mod service_badge;
 mod snark;
 mod storage;
 mod telemetry;
+mod tx;
 mod version;
+#[cfg(feature = "quantum")]
 mod wallet;
 use ai::AiCmd;
 use bridge::BridgeCmd;
@@ -51,6 +54,7 @@ use version::VersionCmd;
 #[cfg(feature = "quantum")]
 use wallet::WalletCmd;
 
+#[cfg(feature = "wasm-metadata")]
 fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
     let engine = wasmtime::Engine::default();
     if let Ok(module) = wasmtime::Module::new(&engine, bytes) {
@@ -59,6 +63,11 @@ fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
     } else {
         Vec::new()
     }
+}
+
+#[cfg(not(feature = "wasm-metadata"))]
+fn extract_wasm_metadata(_bytes: &[u8]) -> Vec<u8> {
+    Vec::new()
 }
 
 #[derive(Parser)]

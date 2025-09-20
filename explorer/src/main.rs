@@ -14,6 +14,7 @@ async fn main() -> anyhow::Result<()> {
         explorer.ingest_dir(std::path::Path::new(&dir))?;
     }
     let block_state = explorer.clone();
+    let block_summary_state = explorer.clone();
     let tx_state = explorer.clone();
     let gov_state = explorer.clone();
     let rep_state = explorer.clone();
@@ -60,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         .route(
             "/blocks/:hash",
             get(move |Path(hash): Path<String>| {
-                let state = block_state.clone();
+                let state = block_summary_state.clone();
                 async move { Json(state.get_block(&hash).unwrap_or(None)) }
             }),
         )
@@ -69,14 +70,10 @@ async fn main() -> anyhow::Result<()> {
             get(move |Path(hash): Path<String>| {
                 let state = block_state.clone();
                 async move {
-                    if let Some(rec) = state.get_block(&hash).unwrap_or(None) {
-                        if let Ok(block) = bincode::deserialize::<the_block::Block>(&rec.data) {
-                            let s =
-                                explorer::summarize_block(block.index, block.transactions.len());
-                            Json(Some(s))
-                        } else {
-                            Json(None::<String>)
-                        }
+                    if let Some(block) = state.get_block(&hash).unwrap_or(None) {
+                        let summary =
+                            explorer::summarize_block(block.index, block.transactions.len());
+                        Json(Some(summary))
                     } else {
                         Json(None::<String>)
                     }

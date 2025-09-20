@@ -4,6 +4,7 @@ use hex::encode as hex_encode;
 use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -97,6 +98,14 @@ pub struct ComputeJobRecord {
     pub buyer: String,
     pub provider: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderSettlementRecord {
+    pub provider: String,
+    pub ct: u64,
+    pub industrial: u64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,11 +261,15 @@ impl Explorer {
             [],
         )?;
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS compute_settlement (provider TEXT PRIMARY KEY, ct INTEGER, industrial INTEGER, updated_at INTEGER)",
+            [],
+        )?;
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS snark_proofs (job_id TEXT PRIMARY KEY, verified INTEGER)",
             [],
         )?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS trust_lines (from_id TEXT, to_id TEXT, limit INTEGER)",
+            "CREATE TABLE IF NOT EXISTS trust_lines (from_id TEXT, to_id TEXT, \"limit\" INTEGER)",
             [],
         )?;
         conn.execute(
@@ -703,10 +716,46 @@ impl Explorer {
         Ok(out)
     }
 
+    pub fn index_settlement_balances(&self, balances: &[ProviderSettlementRecord]) -> Result<()> {
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        for bal in balances {
+            let ct = i64::try_from(bal.ct).unwrap_or(i64::MAX);
+            let industrial = i64::try_from(bal.industrial).unwrap_or(i64::MAX);
+            tx.execute(
+                "INSERT OR REPLACE INTO compute_settlement (provider, ct, industrial, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![bal.provider, ct, industrial, bal.updated_at],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn settlement_balances(&self) -> Result<Vec<ProviderSettlementRecord>> {
+        let conn = self.conn()?;
+        let mut stmt =
+            conn.prepare("SELECT provider, ct, industrial, updated_at FROM compute_settlement")?;
+        let rows = stmt.query_map([], |row| {
+            let ct: i64 = row.get(1)?;
+            let industrial: i64 = row.get(2)?;
+            Ok(ProviderSettlementRecord {
+                provider: row.get(0)?,
+                ct: ct.max(0) as u64,
+                industrial: industrial.max(0) as u64,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     pub fn index_trust_line(&self, from: &str, to: &str, limit: u64) -> Result<()> {
         let conn = self.conn()?;
         conn.execute(
-            "INSERT INTO trust_lines (from_id, to_id, limit) VALUES (?1, ?2, ?3)",
+            "INSERT INTO trust_lines (from_id, to_id, \"limit\") VALUES (?1, ?2, ?3)",
             params![from, to, limit],
         )?;
         Ok(())
@@ -714,7 +763,7 @@ impl Explorer {
 
     pub fn trust_lines(&self) -> Result<Vec<TrustLineRecord>> {
         let conn = self.conn()?;
-        let mut stmt = conn.prepare("SELECT from_id, to_id, limit FROM trust_lines")?;
+        let mut stmt = conn.prepare("SELECT from_id, to_id, \"limit\" FROM trust_lines")?;
         let rows = stmt.query_map([], |row| {
             Ok(TrustLineRecord {
                 from: row.get(0)?,

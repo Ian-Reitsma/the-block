@@ -43,7 +43,7 @@ scripts/purge_legacy_ledger.sh ~/.block/datadir
 ```
 
 Genesis files no longer include the legacy balance field; faucets dispense liquid
-CT instead of the old third token. Use the helper script to top up accounts on test networks:
+CT instead of the retired auxiliary reimbursement units. Use the helper script to top up accounts on test networks:
 
 ```bash
 scripts/devnet_faucet.sh <address> [amount_nct]

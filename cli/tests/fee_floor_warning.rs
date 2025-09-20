@@ -1,11 +1,10 @@
 use std::collections::VecDeque;
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
+use contract_cli::rpc::RpcClient;
+use contract_cli::tx::FeeLane;
 use contract_cli::wallet::{build_tx_default_locale, BuildTxStatus};
-use the_block::rpc::client::RpcClient;
-use the_block::transaction::FeeLane;
 use tiny_http::{Header, Response, Server};
 
 fn start_mock_server(

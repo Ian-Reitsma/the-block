@@ -1,8 +1,30 @@
 use clap::Subcommand;
-use the_block::governance::{
-    controller, registry, GovStore, ParamKey, Proposal, ProposalStatus, ReleaseAttestation,
-    ReleaseBallot, ReleaseVote, Vote, VoteChoice,
+use governance::{
+    controller, registry, GovStore, ParamKey, Proposal, ProposalStatus,
+    ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote, Vote,
+    VoteChoice,
 };
+use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
+
+struct CliReleaseVerifier;
+
+impl ReleaseVerifier for CliReleaseVerifier {
+    fn configured_signers(&self) -> Vec<String> {
+        provenance::release_signer_hexes()
+    }
+
+    fn verify(&self, build_hash: &str, signer_hex: &str, signature_hex: &str) -> bool {
+        provenance::parse_signer_hex(signer_hex)
+            .and_then(|vk| {
+                if provenance::verify_release_attestation(build_hash, &vk, signature_hex) {
+                    Some(())
+                } else {
+                    None
+                }
+            })
+            .is_some()
+    }
+}
 
 #[derive(Subcommand)]
 pub enum GovCmd {
@@ -153,10 +175,10 @@ pub fn handle(cmd: GovCmd) {
                     return;
                 }
             }
-            let attestations: Vec<ReleaseAttestation> = signatures
+            let attestations: Vec<GovReleaseAttestation> = signatures
                 .drain(..)
                 .zip(signers.drain(..))
-                .map(|(signature, signer)| ReleaseAttestation { signer, signature })
+                .map(|(signature, signer)| GovReleaseAttestation { signer, signature })
                 .collect();
             let threshold_value = threshold.unwrap_or_default();
             let proposal = ReleaseVote::new(
@@ -167,7 +189,7 @@ pub fn handle(cmd: GovCmd) {
                 0,
                 deadline,
             );
-            match controller::submit_release(&store, proposal) {
+            match controller::submit_release(&store, proposal, Some(&CliReleaseVerifier)) {
                 Ok(id) => println!("release proposal {id} submitted"),
                 Err(e) => eprintln!("submit failed: {e}"),
             }
@@ -208,10 +230,10 @@ pub fn handle(cmd: GovCmd) {
                     return;
                 }
             }
-            let attestations: Vec<ReleaseAttestation> = signatures
+            let attestations: Vec<NodeReleaseAttestation> = signatures
                 .drain(..)
                 .zip(signers.drain(..))
-                .map(|(signature, signer)| ReleaseAttestation { signer, signature })
+                .map(|(signature, signer)| NodeReleaseAttestation { signer, signature })
                 .collect();
             let dest_path = dest.as_deref().map(std::path::Path::new);
             match the_block::update::fetch_release(&hash, &attestations, dest_path) {

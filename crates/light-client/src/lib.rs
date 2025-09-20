@@ -18,6 +18,16 @@ pub struct SyncOptions {
     pub min_battery: f32,
 }
 
+impl Default for SyncOptions {
+    fn default() -> Self {
+        Self {
+            wifi_only: true,
+            require_charging: true,
+            min_battery: 0.5,
+        }
+    }
+}
+
 /// Block header for light-client verification.
 #[derive(Clone, Default, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 pub struct Header {

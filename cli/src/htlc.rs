@@ -2,8 +2,8 @@
 
 use clap::Subcommand;
 use hex::{decode, encode};
-use ripemd160::Ripemd160;
-use sha3::{Digest, Sha3_256};
+use ripemd::{Digest as RipemdDigest, Ripemd160};
+use sha3::{Digest as ShaDigest, Sha3_256};
 use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 #[derive(Subcommand)]
@@ -38,13 +38,13 @@ pub fn handle(cmd: HtlcCmd) {
             let (hash, algo) = match algo.as_str() {
                 "ripemd" => {
                     let mut h = Ripemd160::new();
-                    h.update(&bytes);
-                    (h.finalize().to_vec(), HashAlgo::Ripemd160)
+                    RipemdDigest::update(&mut h, &bytes);
+                    (RipemdDigest::finalize(h).to_vec(), HashAlgo::Ripemd160)
                 }
                 _ => {
                     let mut h = Sha3_256::new();
-                    h.update(&bytes);
-                    (h.finalize().to_vec(), HashAlgo::Sha3)
+                    ShaDigest::update(&mut h, &bytes);
+                    (ShaDigest::finalize(h).to_vec(), HashAlgo::Sha3)
                 }
             };
             let htlc = Htlc::new(hash, algo, timeout);

@@ -1832,20 +1832,23 @@ dependencies = [
  "criterion",
  "crypto",
  "dex",
+ "dirs",
  "dkg",
  "ed25519-dalek",
  "futures",
+ "governance",
  "hex",
  "light-client",
  "once_cell",
  "rand 0.8.5",
  "reqwest 0.11.27",
- "ripemd160",
+ "ripemd",
  "rpassword",
  "rusqlite",
  "serde",
  "serde_json",
  "sha3",
+ "state",
  "storage",
  "the_block",
  "tiny_http",
@@ -3347,13 +3350,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "governance-tests"
+name = "governance"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "nalgebra 0.32.6",
+ "rand 0.8.5",
+ "rustdct",
  "serde",
  "serde_json",
+ "sled",
+ "statrs",
  "tempfile",
- "the_block",
 ]
 
 [[package]]
@@ -7275,12 +7283,6 @@ checksum = "bd124222d17ad93a644ed9d011a40f4fb64aa54275c08cc216524a9ea82fb09f"
 dependencies = [
  "digest 0.10.7",
 ]
-
-[[package]]
-name = "ripemd160"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f923401a7e6614f2838037bd9bac86c003d1629446d2b5816d3159472071be4f"
 
 [[package]]
 name = "rocksdb"

@@ -1,21 +1,19 @@
 #![deny(warnings)]
 
+use crate::rpc::{RpcClient, WalletQosError, WalletQosEvent};
+use crate::tx::{generate_keypair, sign_tx, FeeLane, RawTxPayload};
 use anyhow::{anyhow, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 use crypto::session::SessionKey;
 use hex;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use std::collections::HashMap;
+#[cfg(feature = "quantum")]
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use the_block::transaction::{sign_tx, FeeLane, RawTxPayload};
-use the_block::{
-    generate_keypair,
-    rpc::client::{RpcClient, WalletQosError, WalletQosEvent},
-};
 
 const FEE_FLOOR_CACHE_TTL: Duration = Duration::from_secs(10);
 
@@ -85,7 +83,7 @@ pub enum WalletCmd {
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BuildTxStatus {
     Ready,
@@ -144,7 +142,10 @@ pub fn handle(cmd: WalletCmd) {
             }
             #[cfg(not(feature = "quantum"))]
             {
-                println!("quantum feature not enabled");
+                println!(
+                    "quantum feature not enabled; cannot export keystore to {}",
+                    out
+                );
             }
         }
         WalletCmd::Help => {
@@ -607,8 +608,8 @@ fn parse_lane(lane: &str) -> Result<FeeLane> {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Language {
+#[derive(Clone, Copy, Debug)]
+pub enum Language {
     En,
     Es,
     Fr,
@@ -618,7 +619,7 @@ enum Language {
 }
 
 impl Language {
-    fn detect(explicit: &Option<String>) -> Self {
+    pub fn detect(explicit: &Option<String>) -> Self {
         if let Some(code) = explicit {
             return Self::from_code(code);
         }
@@ -635,7 +636,7 @@ impl Language {
         Language::En
     }
 
-    fn from_code(code: &str) -> Self {
+    pub fn from_code(code: &str) -> Self {
         let lower = code.to_ascii_lowercase();
         if lower.starts_with("es") {
             Language::Es
@@ -653,12 +654,12 @@ impl Language {
     }
 }
 
-struct Localizer {
+pub struct Localizer {
     lang: Language,
 }
 
 impl Localizer {
-    fn new(lang: Language) -> Self {
+    pub fn new(lang: Language) -> Self {
         Self { lang }
     }
 

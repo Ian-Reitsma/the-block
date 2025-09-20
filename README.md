@@ -46,8 +46,8 @@ liquid CT based on the amount of storage, bandwidth, and compute delivered.
 Multipliers retune each epoch to keep inflation under two percent per year, and
 governance can throttle all rewards with a kill switch during emergencies. Base
 miner rewards follow a logistic curve so that supply does not explode when new
-operators join en masse. These mechanisms replaced the retired third-token
-ledger and align incentives without per-request billing.
+operators join en masse. These mechanisms operate entirely within the unified
+CT subsidy ledger and align incentives without per-request billing.
 
 From a user’s perspective, The Block behaves like a resilient, open cloud. A
 wallet or light client syncs headers, resolves DNS-like names published on
@@ -68,19 +68,24 @@ test real services today.
   before atomically renaming base64 snapshots, preserving legacy dumps until
   the new image lands. See [docs/read_receipts.md](docs/read_receipts.md) and
   [docs/simple_db.md](docs/simple_db.md) for the batching, audit, and crash
-  recovery flow. (81.0% Complete — incentive-marketplace wiring remains the
+  recovery flow. (83.0% Complete — incentive-marketplace wiring remains the
   main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
   RPC and `compute cancel <job_id>` CLI, hashes receipts into blocks before
   conversion to CT through multipliers, and verifies optional SNARK receipts
-  prior to crediting payment. Admission now enforces a dynamic fee floor with
+  prior to crediting payment. Settlement persists CT/IT balances in a
+  RocksDB-backed ledger with activation metadata, audit exports, and recent
+  root tracking so operators can reconcile receipts after restarts; `Settlement::shutdown`
+  now forces a final `persist_all` + RocksDB flush so regression suites can assert clean teardown, and metadata captures the
+  last anchor hash plus cancellation reason for post-incident reviews. Admission now enforces a
+  dynamic fee floor with
   per-sender slot limits, records evictions for audit, and exposes the active
   floor through `mempool.stats` so operators can reason about QoS. Governance can
   retune the fee-floor window and percentile, and wallet sends surface localized
   warnings with auto-bump or `--force` overrides plus JSON output for tooling.
-  (82.0% Complete)
+  (88.0% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -92,13 +97,13 @@ test real services today.
       and leverages a chaos harness to publish retransmit counters, keeping
       operators ahead of packet loss. Shard-aware peer maps route block gossip only
       to interested peers and uptime-based fee rebates reward high-availability
-      peers. (94.0% Complete)
+      peers. (95.0% Complete)
     - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
       resolves forks deterministically, and validates blocks with BLAKE3 hashes,
       multi-window Kalman retargeting, VDF-anchored randomness, macro-block
       checkpointing, and per-shard fork choice. Release installs now gate on
       provenance verification with automated rollback if hashes drift, keeping
-      consensus nodes in lockstep. (87.0% Complete)
+      consensus nodes in lockstep. (89.0% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -107,28 +112,32 @@ test real services today.
     records rollout timestamps. Fee-floor policy updates persist into
     `GovStore` history with rollback support, telemetry counters, and explorer
     timelines so operators can audit parameter changes while governance history
-    archives DID revocations for audit. (89.0% Complete)
+    archives DID revocations for audit. All tooling now targets the shared
+    `governance` crate with sled-backed persistence, proposal DAG validation,
+    and Kalman retune helpers. (92.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
-      deployable contracts and fee markets alongside traditional PoW headers. (79.0%
+      deployable contracts and fee markets alongside traditional PoW headers. (82.0%
       Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, telemetry gauges `dex_escrow_locked`,
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
-    constant-product AMM pools provide fallback liquidity with programmable incentives. (79.0%
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (81.0%
     Complete)
 - Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
   deposit/withdraw flows so value can move between chains without custodians.
-Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (49.0% Complete)
+Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (52.0% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).
   Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
   surface history and anchor velocity, while the `contract light-client did`
   subcommands handle anchoring, resolving, remote signing, and sign-only payload
   export with localized messaging. Governance revocations block misused
-  identifiers and are archived alongside anchor history for audit. (79.0% Complete)
+  identifiers and are archived alongside anchor history for audit. Explorer pagination
+  caches and CLI tooling consume the same data, keeping dashboards aligned with wallet
+  history. (81.0% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
       session-key derivation, auto-update orchestration, and compliance options as
@@ -137,9 +146,9 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       when sends fall below the floor, and supports localized prompts, JSON
       output, and remote signer attestations. Wallet QoS events feed telemetry so
       dashboards track warning/override deltas. Wallet binaries now share a single
-      `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, and forward
-      multisig signer sets end-to-end so explorer tooling can validate threshold
-      staking payloads. (92.0% Complete)
+      `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, forward
+      multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
+      staking payloads. (94.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
       and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
@@ -147,25 +156,26 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
       anchor totals land in telemetry so dashboards can trace user choices,
       anchor velocity, and governance parameter rollbacks from a single pane.
-      (86.0% Complete)
+      (88.0% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
-    and encode consensus invariants, laying groundwork for provable safety. (39.0%
+    and encode consensus invariants, laying groundwork for provable safety. (41.0%
     Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
-  subsidy events to make participation feasible on phones. (57.0% Complete)
+  subsidy events to make participation feasible on phones. (59.0% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99.3/100** with vision completion **~85.0/100**.
-  Recent fixes removed the stale proposal dependency formatter, unified the
-  wallet on `ed25519-dalek 2.2.x` with explicit escrow hash algorithms, staged
-  `SimpleDb` snapshot rewrites through fsync’d temporary files, and hardened the
-  RPC client with clamped fault rates plus saturated exponential backoff guarded
-  by scoped environment restorers.
-  Current focus areas: finish migrating telemetry-gated tests to the default
-  feature mix, extend bridge/DEX docs with signer-set payloads and explorer
-  telemetry, continue WAN-scale QUIC chaos drills, and polish multisig wallet UX
-  before the next release tag.
+  Mainnet readiness sits at **~99.6/100** with vision completion **~86.9/100**.
+  Recent work unified downstream tooling on the standalone `governance` crate,
+  shipped the RocksDB-backed compute settlement ledger with activation metadata
+  and audit exports across RPC/CLI/explorer, refreshed wallet telemetry and
+  signer-set propagation, and kept the RPC client resilient with clamped fault
+  rates plus saturated exponential backoff guarded by scoped environment
+  restorers.
+  Current focus areas: deliver treasury disbursement tooling, harden compute-market
+  SLA enforcement and dashboards, continue WAN-scale QUIC chaos drills with
+  mitigation playbooks, polish multisig wallet UX, and expand bridge/DEX docs with
+  signer-set payloads before the next release tag.
 
 ### Live now
 

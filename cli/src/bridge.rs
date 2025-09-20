@@ -1,9 +1,10 @@
 use bridges::{
+    header::PowHeader,
     light_client::{header_hash, Header, Proof},
-    Bridge, RelayerBundle, RelayerProof, RelayerSet,
+    relayer::RelayerSet,
+    Bridge, RelayerBundle, RelayerProof,
 };
 use clap::Subcommand;
-use hex;
 use std::fs;
 use std::path::PathBuf;
 
@@ -78,7 +79,7 @@ pub fn handle(action: BridgeCmd) {
             let path = PathBuf::from(&state);
             let mut bridge = load_state(&path);
             let header_str = fs::read_to_string(&header).expect("read header");
-            let header: Header = serde_json::from_str(&header_str).expect("parse header");
+            let pow_header: PowHeader = serde_json::from_str(&header_str).expect("parse header");
             let proof_str = fs::read_to_string(&proof).expect("read proof");
             let proof: Proof = serde_json::from_str(&proof_str).expect("parse proof");
             let mut relayer_set = RelayerSet::default();
@@ -89,19 +90,26 @@ pub fn handle(action: BridgeCmd) {
                 &primary,
                 &user,
                 amount,
-                &header,
+                &pow_header,
                 &proof,
                 &bundle,
             ) {
                 save_state(&path, &bridge);
                 let dir = PathBuf::from("state/bridge_headers");
                 fs::create_dir_all(&dir).expect("make header dir");
+                let header_view = Header {
+                    chain_id: pow_header.chain_id.clone(),
+                    height: pow_header.height,
+                    merkle_root: pow_header.merkle_root,
+                    signature: pow_header.signature,
+                };
                 let record = serde_json::to_string(&serde_json::json!({
-                    "header": &header,
+                    "pow_header": &pow_header,
+                    "light_header": &header_view,
                     "proof": &proof
                 }))
                 .expect("encode record");
-                let name = hex::encode(header_hash(&header));
+                let name = hex::encode(header_hash(&header_view));
                 fs::write(dir.join(name), record).expect("store header");
                 println!("locked");
             } else {

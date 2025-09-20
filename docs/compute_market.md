@@ -19,6 +19,98 @@ settlement credits providers with the same proportions. Example splits:
 
 Residual escrows are refunded using the original percentages.
 
+## Settlement Ledger & Auditing
+
+Settlement persists CT and industrial token flows in a RocksDB-backed ledger
+located under `compute_settlement.db`. `Settlement::init` wires a
+feature-gated RocksDB handle (`storage-rocksdb`) and transparently falls back to
+an in-memory ledger for tests. Every accrual writes dual entries, updates a
+rolling Merkle root cache, records activation metadata, and bumps a monotonic
+sequence so operators can replay state after restarts. The ledger exposes:
+
+- **CLI:** Build `contract-cli` with `--features full` (or the lighter
+  `--features sqlite-storage`) and invoke `contract compute stats` to report
+  CT/IT balances alongside the most recent audit entries fetched via
+  `compute_market.provider_balances` and `compute_market.audit`.
+- **RPC:**
+  - `compute_market.provider_balances` returns the merged CT/IT totals for every
+    provider persisted in the ledger, sorted lexicographically to match the
+    Merkle-root fold (`compute_root`) and encoded as `{provider, ct, industrial}`
+    structs.
+  - `compute_market.audit` streams JSON receipts suitable for automated
+    reconciliation. Each entry mirrors `AuditRecord` in
+    `node/src/compute_market/settlement.rs` and includes the CT/IT deltas,
+    running balances, timestamp, sequence number, and optional anchor hash.
+  - `compute_market.recent_roots` exposes the last 32 Merkle roots (or a caller
+    supplied limit) as hex strings so explorers can render continuity proofs
+    directly from the RocksDB-backed ledger.
+- **Explorer:** `explorer/src/compute_view.rs` renders provider balances,
+  anchors, and audit logs directly from the persisted ledger, relying on the
+  RPCs above.
+
+Integration tests in `node/tests/compute_settlement.rs` verify persistence,
+refund flows, anchoring, and activation mode transitions. Telemetry counters
+`COMPUTE_SLA_VIOLATIONS_TOTAL`, `SLASHING_BURN_CT_TOTAL`, `SETTLE_APPLIED_TOTAL`,
+`SETTLE_FAILED_TOTAL{reason}`, and `SETTLE_MODE_CHANGE_TOTAL{state}` increment on
+each action, feeding dashboards with SLA burn visibility and mode tracking. The
+log file written via `state::append_audit` stores anchors alongside the JSON
+audit feed for offline reconciliation.
+
+### Activation Modes & Metadata
+
+`SettleMode` tracks whether receipts immediately settle on-chain:
+
+| Mode | Description | Persistence metadata |
+| --- | --- | --- |
+| `DryRun` | Default safety mode. Balances accrue in the ledger without moving CT/IT on-chain. Use for devnets or smoke tests. | `metadata.armed_requested_height` and `metadata.armed_delay` are cleared; `last_cancel_reason` documents why the node fell back. |
+| `Armed { activate_at }` | Governance has requested activation after `delay` blocks. Ledger persists the requested height and delay so a restart cannot skip the waiting period. | Fields capture the requested height and delay until activation or cancellation. |
+| `Real` | Full settlement—balances are authoritative and should be anchored into `state::audit`. | Anchors append to `metadata.last_anchor_hex` and the audit log. |
+
+Operators can request activation through the RPC surface (or configuration) by
+calling `Settlement::arm(delay, current_height)` and revert with
+`Settlement::cancel_arm()` or `Settlement::back_to_dry_run(reason)`. All paths
+persist metadata immediately and flush RocksDB on shutdown so a crash cannot
+skip the arming delay.
+
+### Anchoring and Refunds
+
+- `Settlement::submit_anchor` hashes submitted receipts, appends a durable JSON
+  line via `state::append_audit`, and records a marker audit entry with the
+  anchor hash.
+- `Settlement::refund_split` and `Settlement::accrue_split` always update both
+  ledgers atomically. The recorded audit entry shows the delta for CT and
+  industrial tokens along with the new balances.
+- `Settlement::penalize_sla` burns CT from the provider, records the event with
+  a negative delta, and increments `SLASHING_BURN_CT_TOTAL` plus
+  `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}` to highlight SLA breaches.
+
+Sample RPC calls (adjust the node URL as needed):
+
+```bash
+curl -s localhost:26658/compute_market.provider_balances | jq
+curl -s localhost:26658/compute_market.audit | jq '.[0]'
+curl -s localhost:26658/compute_market.recent_roots | jq '.roots'
+```
+
+Each audit object resembles:
+
+```json
+{
+  "sequence": 19,
+  "timestamp": 1695206400,
+  "entity": "provider-nyc-01",
+  "memo": "accrue_split",
+  "delta_ct": 4200,
+  "delta_it": 600,
+  "balance_ct": 98200,
+  "balance_it": 14000,
+  "anchor": null
+}
+```
+
+Use the anchor entries (`entity == "__anchor__"`) to correlate local ledger
+state with explorer or archival tooling.
+
 ## Normalized Compute Units
 
 Workloads are expressed in **compute units** representing GPU-seconds scaled by
@@ -362,8 +454,10 @@ track quantile bands. Suggested bids are adjusted by a backlog factor of
 ## Receipt Settlement
 
 Matches between bids and asks produce `Receipt` objects that debit CT from the
-buyer and pay the provider. Settlement tracks applied receipts in a sled tree to
-guarantee idempotency across restarts.
+buyer and pay the provider. The settlement engine persists balances in a
+RocksDB-backed `AccountLedger` (`compute_settlement.db`) so CT and industrial
+token accruals survive restarts while remaining compatible with the in-memory
+bridge account logic.
 
 ```text
 { version: 1, job_id, buyer, provider, quote_price, units, issued_at, idempotency_key }
@@ -382,10 +476,16 @@ damaged records.
 - **Real** – debits buyers and pays providers in CT.
 
 Operators can toggle modes via CLI and inspect the current state with the
-`settlement_status` RPC, which reports balances and mode.
+`settlement_status` RPC, which now reports both CT and industrial balances for
+the requested provider.  The `compute_market.provider_balances` RPC streams the
+same data for explorers, and `compute_market.audit` exposes the recent
+ledger events emitted by the durable audit log.
 
-When `Real`, each finalized receipt subtracts `quote_price * units` from the buyer and
-accrues the same amount for the provider with an event tag.  Failures (e.g.,
+When `Real`, each finalized receipt subtracts `quote_price * units` from the
+buyer and accrues the same amount for the provider with an event tag while
+recording the delta in the audit log.  Split payments credit both the CT and
+industrial ledgers atomically, and `compute_market.recent_roots` returns the
+latest settlement Merkle roots for explorer dashboards.  Failures (e.g.,
 insufficient funds) are archived and cause the system to revert to `DryRun`.
 Metrics track behaviour:
 

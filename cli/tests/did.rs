@@ -1,17 +1,16 @@
 use std::collections::VecDeque;
 use std::convert::TryInto;
-use std::io::Read;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
 use contract_cli::light_client::{
     build_anchor_transaction, latest_header, resolve_did_record, submit_anchor, AnchorKeyMaterial,
 };
+use contract_cli::rpc::RpcClient;
+use contract_cli::tx::{generate_keypair, TxDidAnchor};
 use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
 use hex;
 use serde_json::json;
-use the_block::transaction::TxDidAnchor;
-use the_block::{generate_keypair, rpc::client::RpcClient};
 use tiny_http::{Header, Response, Server};
 
 fn start_mock_server(
@@ -31,12 +30,21 @@ fn start_mock_server(
                 .read_to_string(&mut body)
                 .expect("read request body");
             captured_clone.lock().unwrap().push(body);
-            let response_body = responses
-                .pop_front()
-                .unwrap_or_else(|| json!({"jsonrpc": "2.0", "result": {}, "id": 1}).to_string());
+            let (response_body, should_exit) = if let Some(body) = responses.pop_front() {
+                let exit = responses.is_empty();
+                (body, exit)
+            } else {
+                (
+                    json!({"jsonrpc": "2.0", "result": {}, "id": 1}).to_string(),
+                    false,
+                )
+            };
             let mut response = Response::from_string(response_body);
             response.add_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap());
             request.respond(response).expect("send response");
+            if should_exit {
+                break;
+            }
         }
     });
     (addr, captured, handle)
@@ -72,8 +80,8 @@ fn build_anchor_transaction_generates_signatures() {
     let tx = build_anchor_transaction(&document, &material).expect("build anchor");
     let owner_key = owner_signing_key(&owner_secret);
     let owner_vk = owner_key.verifying_key();
-    assert_eq!(tx.address, hex::encode(owner_public));
-    assert_eq!(tx.public_key, owner_public);
+    assert_eq!(tx.address, hex::encode(&owner_public));
+    assert_eq!(tx.public_key, owner_public.clone());
     let parsed_document: serde_json::Value =
         serde_json::from_str(&tx.document).expect("canonical doc");
     assert_eq!(parsed_document, document);
@@ -82,10 +90,13 @@ fn build_anchor_transaction_generates_signatures() {
         .verify(tx.owner_digest().as_ref(), &sig)
         .expect("owner signature verifies");
 
-    let att = tx.remote_attestation.expect("remote attestation present");
-    let remote_vk = VerifyingKey::from_bytes(&remote_public.try_into().unwrap()).unwrap();
-    assert_eq!(att.signer, hex::encode(remote_public));
-    let remote_sig_bytes = hex::decode(att.signature).expect("decode remote sig");
+    let att = tx
+        .remote_attestation
+        .as_ref()
+        .expect("remote attestation present");
+    let remote_vk = VerifyingKey::from_bytes(&remote_public.clone().try_into().unwrap()).unwrap();
+    assert_eq!(att.signer, hex::encode(&remote_public));
+    let remote_sig_bytes = hex::decode(&att.signature).expect("decode remote sig");
     let remote_sig = signature_from_vec(&remote_sig_bytes);
     remote_vk
         .verify(tx.remote_digest().as_ref(), &remote_sig)
