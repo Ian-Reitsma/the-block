@@ -2,6 +2,7 @@
 
 use rand::Rng;
 use reqwest::blocking::{Client, Response};
+use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -69,18 +70,26 @@ impl RpcClient {
 
     /// Perform a JSON-RPC call to `url` with `payload`, retrying on timeout.
     pub fn call<T: Serialize>(&self, url: &str, payload: &T) -> Result<Response, RpcClientError> {
+        self.call_with_auth(url, payload, None)
+    }
+
+    /// Perform a JSON-RPC call with an optional `Authorization` header.
+    pub fn call_with_auth<T: Serialize>(
+        &self,
+        url: &str,
+        payload: &T,
+        auth: Option<&str>,
+    ) -> Result<Response, RpcClientError> {
         let mut attempt = 0;
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
             self.maybe_inject_fault()?;
-            let result = self
-                .http
-                .post(url)
-                .json(payload)
-                .timeout(timeout)
-                .send()
-                .map_err(RpcClientError::from);
+            let mut request = self.http.post(url).timeout(timeout).json(payload);
+            if let Some(token) = auth {
+                request = request.header(AUTHORIZATION, token);
+            }
+            let result = request.send().map_err(RpcClientError::from);
             match result {
                 Ok(resp) => return Ok(resp),
                 Err(RpcClientError::Transport(err))

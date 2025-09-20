@@ -1,9 +1,10 @@
 use serde_json::json;
 
 use crate::compute_market::{
-    price_board, scheduler, settlement::Settlement, total_units_processed,
+    matcher, price_board, scheduler, settlement::Settlement, total_units_processed,
 };
 use crate::transaction::FeeLane;
+use std::time::UNIX_EPOCH;
 
 /// Return compute market backlog and utilisation metrics.
 pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::Value {
@@ -15,6 +16,57 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
         .or(raw)
         .unwrap_or_default();
     let sched = scheduler::stats();
+    let lane_status = matcher::lane_statuses();
+    let lane_warnings = matcher::starvation_warnings();
+    let mut recent = serde_json::Map::new();
+    for status in &lane_status {
+        let receipts = matcher::recent_matches(status.lane, 5);
+        let entries: Vec<_> = receipts
+            .into_iter()
+            .map(|r| {
+                serde_json::json!({
+                    "job_id": r.job_id,
+                    "provider": r.provider,
+                    "buyer": r.buyer,
+                    "price": r.quote_price,
+                    "issued_at": r.issued_at,
+                    "lane": status.lane.as_str(),
+                })
+            })
+            .collect();
+        recent.insert(
+            status.lane.as_str().to_string(),
+            serde_json::Value::Array(entries),
+        );
+    }
+    let lanes_json: Vec<_> = lane_status
+        .iter()
+        .map(|status| {
+            serde_json::json!({
+                "lane": status.lane.as_str(),
+                "bids": status.bids,
+                "asks": status.asks,
+                "oldest_bid_wait_ms": status.oldest_bid_wait.map(|d| d.as_millis()),
+                "oldest_ask_wait_ms": status.oldest_ask_wait.map(|d| d.as_millis()),
+            })
+        })
+        .collect();
+    let warnings_json: Vec<_> = lane_warnings
+        .iter()
+        .map(|warning| {
+            let updated = warning
+                .updated_at
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or_default();
+            serde_json::json!({
+                "lane": warning.lane.as_str(),
+                "job_id": warning.oldest_job,
+                "waited_for_secs": warning.waited_for.as_secs(),
+                "updated_at": updated,
+            })
+        })
+        .collect();
     json!({
         "industrial_backlog": backlog,
         "industrial_utilization": util,
@@ -23,6 +75,9 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
         "industrial_price_weighted": weighted,
         "industrial_price_base": raw,
         "pending": sched.pending,
+        "lanes": lanes_json,
+        "lane_starvation": warnings_json,
+        "recent_matches": recent,
     })
 }
 

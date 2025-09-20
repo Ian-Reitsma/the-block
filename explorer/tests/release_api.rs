@@ -6,6 +6,7 @@ use tempfile::tempdir;
 use the_block::governance::{
     self, controller, GovStore, ProposalStatus, ReleaseAttestation, ReleaseVote, VoteChoice,
 };
+use the_block::provenance;
 
 #[test]
 fn release_api_paginates_and_filters() {
@@ -21,7 +22,7 @@ fn release_api_paginates_and_filters() {
         hex::encode(signer_b.verifying_key().to_bytes())
     );
     std::env::set_var("TB_RELEASE_SIGNERS", &signer_env);
-    governance::provenance::refresh_release_signers();
+    provenance::refresh_release_signers();
 
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
     let msg = format!("release:{hash}");
@@ -71,5 +72,5 @@ fn release_api_paginates_and_filters() {
     assert_eq!(filtered.total, 0);
 
     std::env::remove_var("TB_RELEASE_SIGNERS");
-    governance::provenance::refresh_release_signers();
+    provenance::refresh_release_signers();
 }

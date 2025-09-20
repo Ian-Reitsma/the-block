@@ -8,6 +8,7 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
+use std::fmt;
 
 #[allow(dead_code)]
 const CHAIN_ID: u32 = 1;
@@ -33,7 +34,9 @@ pub struct TxSignature {
 }
 
 /// Fee lane classification for admission and scheduling.
-#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
+#[derive(
+    Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Default,
+)]
 pub enum FeeLane {
     #[default]
     Consumer,
@@ -47,6 +50,12 @@ impl FeeLane {
             FeeLane::Consumer => "consumer",
             FeeLane::Industrial => "industrial",
         }
+    }
+}
+
+impl fmt::Display for FeeLane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

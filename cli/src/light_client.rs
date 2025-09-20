@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use crate::rpc::RpcClient;
 use crate::tx::{TxDidAnchor, TxDidAnchorAttestation};
@@ -7,8 +8,10 @@ use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Subcommand};
 use ed25519_dalek::{Signer, SigningKey};
 use hex;
+use light_client::{self, SyncOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
+use tokio::runtime::Runtime;
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
 
@@ -24,6 +27,11 @@ pub enum LightClientCmd {
         #[command(subcommand)]
         action: DidCmd,
     },
+    /// Inspect or configure device-aware sync policy
+    Device {
+        #[command(subcommand)]
+        action: DeviceCmd,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -32,6 +40,24 @@ pub enum DidCmd {
     Anchor(DidAnchorArgs),
     /// Resolve the latest DID document for an address
     Resolve(DidResolveArgs),
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DeviceCmd {
+    /// Inspect current device probes and gating decision
+    Status {
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Persist an override that skips the charging requirement
+    IgnoreCharging {
+        /// Enable (`true`) or disable (`false`) the override
+        #[arg(long)]
+        enable: bool,
+    },
+    /// Remove all persisted overrides
+    ClearOverrides,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -239,6 +265,23 @@ pub fn handle(cmd: LightClientCmd) {
                 }
             }
         },
+        LightClientCmd::Device { action } => match action {
+            DeviceCmd::Status { json } => {
+                if let Err(err) = run_device_status(json) {
+                    eprintln!("{}", err);
+                }
+            }
+            DeviceCmd::IgnoreCharging { enable } => {
+                if let Err(err) = toggle_charging_override(enable) {
+                    eprintln!("{}", err);
+                }
+            }
+            DeviceCmd::ClearOverrides => {
+                if let Err(err) = clear_device_overrides() {
+                    eprintln!("{}", err);
+                }
+            }
+        },
     }
 }
 
@@ -257,6 +300,93 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
         .text()
         .context("failed to read rebate status response")?;
     println!("{}", text);
+    Ok(())
+}
+
+fn run_device_status(json: bool) -> Result<()> {
+    let cfg = light_client::load_user_config().unwrap_or_default();
+    let opts = SyncOptions::default().apply_config(&cfg);
+    let probe = match light_client::default_probe() {
+        Ok(p) => p,
+        Err(err) => {
+            if json {
+                let payload = serde_json::json!({
+                    "error": err.to_string(),
+                    "gating": opts
+                        .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
+                        .map(|g| g.as_str()),
+                });
+                println!("{}", serde_json::to_string_pretty(&payload)?);
+            } else {
+                println!("device probe unavailable: {}", err);
+            }
+            return Ok(());
+        }
+    };
+    let watcher = light_client::DeviceStatusWatcher::new(probe, opts.fallback, opts.stale_after);
+    let runtime = Runtime::new().context("failed to create tokio runtime")?;
+    let snapshot = runtime.block_on(async { watcher.poll().await });
+    let gating = opts.gating_reason(&snapshot.status);
+    if json {
+        let payload = serde_json::json!({
+            "wifi": snapshot.status.on_wifi,
+            "charging": snapshot.status.is_charging,
+            "battery": snapshot.status.battery_level,
+            "freshness": snapshot.freshness.as_label(),
+            "observed_at_millis": snapshot
+                .observed_at
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+            "stale_for_millis": snapshot.stale_for.as_millis(),
+            "gating": gating.map(|g| g.as_str()),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+    } else {
+        println!(
+            "Wi-Fi: {} (freshness: {:?})",
+            if snapshot.status.on_wifi {
+                "available"
+            } else {
+                "offline"
+            },
+            snapshot.freshness
+        );
+        println!(
+            "Charging: {}",
+            if snapshot.status.is_charging {
+                "yes"
+            } else {
+                "no"
+            }
+        );
+        println!(
+            "Battery level: {:.0}%",
+            snapshot.status.battery_level * 100.0
+        );
+        match gating {
+            Some(reason) => println!("Sync gating: {}", reason.as_str()),
+            None => println!("Sync gating: clear"),
+        }
+    }
+    Ok(())
+}
+
+fn toggle_charging_override(enable: bool) -> Result<()> {
+    let mut cfg = light_client::load_user_config().unwrap_or_default();
+    cfg.ignore_charging_requirement = enable;
+    light_client::save_user_config(&cfg)?;
+    if enable {
+        println!("Charging requirement disabled for background sync");
+    } else {
+        println!("Charging requirement restored to default");
+    }
+    Ok(())
+}
+
+fn clear_device_overrides() -> Result<()> {
+    light_client::save_user_config(&light_client::LightClientConfig::default())?;
+    println!("Cleared light-client device overrides");
     Ok(())
 }
 

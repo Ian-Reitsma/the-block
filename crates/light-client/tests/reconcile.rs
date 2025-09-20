@@ -27,8 +27,8 @@ fn make_header(prev: &Header, height: u64) -> Header {
     h
 }
 
-#[test]
-fn reconciles_partial_and_full_sync() {
+#[tokio::test]
+async fn reconciles_partial_and_full_sync() {
     let genesis = Header {
         height: 0,
         prev_hash: [0; 32],
@@ -51,9 +51,14 @@ fn reconciles_partial_and_full_sync() {
 
     let mut partial = LightClient::new(genesis.clone());
     partial.verify_and_append(h1.clone()).unwrap();
-    let fetch = move |start: u64| match start {
-        2 => vec![h2_for_fetch.clone()],
-        _ => vec![],
+    let fetch = move |start: u64, _batch: usize| {
+        let h2 = h2_for_fetch.clone();
+        async move {
+            match start {
+                2 => vec![h2],
+                _ => vec![],
+            }
+        }
     };
     sync_background(
         &mut partial,
@@ -61,9 +66,12 @@ fn reconciles_partial_and_full_sync() {
             wifi_only: false,
             require_charging: false,
             min_battery: 0.0,
+            ..SyncOptions::default()
         },
         fetch,
-    );
+    )
+    .await
+    .unwrap();
 
     let mut full = LightClient::new(genesis);
     full.verify_and_append(h1).unwrap();

@@ -1,30 +1,55 @@
 # Light-Client Synchronization Guide
 
+*Last updated: 2025-09-20*
+
 The `light-client` crate offers a minimal header verifier intended for mobile
 and resource-constrained environments. It trades full validation for a compact
 sync process that still detects blatant forks and stale peers.
 
 ## Sync Options
 
-`SyncOptions` gate background synchronization based on device conditions:
+`SyncOptions` gate background synchronization based on device conditions and
+drive batching behaviour:
 
 ```rust
 pub struct SyncOptions {
     pub wifi_only: bool,
     pub require_charging: bool,
     pub min_battery: f32,
+    pub batch_size: usize,
+    pub poll_interval: Duration,
+    pub stale_after: Duration,
+    pub fallback: DeviceFallback,
 }
 ```
 
-`sync_background(client, opts, fetch)` short-circuits when Wi‑Fi is unavailable,
-the device is not charging, or the battery level falls below `min_battery`.
-Calling `SyncOptions::default()` yields a conservative configuration that
-requires Wi‑Fi, device charging, and at least 50% battery before syncing.
-When the checks pass, the helper fetches headers starting from the client's tip
-via the provided `fetch(start_height)` closure and verifies them before
-appending.
-Real deployments should replace the stubbed `on_wifi`, `is_charging`, and
-`battery_level` helpers with platform-specific checks in the mobile SDKs.
+`SyncOptions::default()` requires Wi‑Fi, a charging device, and at least 50%
+battery. The new `batch_size` and `poll_interval` fields bound the amount of
+work processed per loop and how often device conditions are re-polled, while
+`stale_after` controls how long cached probe results remain valid before the
+fallback policy is used. `DeviceFallback` captures the behaviour when probes are
+unavailable (e.g. desktop builds).
+
+`sync_background(client, opts, fetch)` is now `async` and returns a
+`Result<SyncOutcome, ProbeError>`. Each iteration requests at most
+`batch_size` headers via the `fetch(start_height, batch_size)` closure, verifies
+them, and re-evaluates the device status before continuing. If Wi‑Fi drops,
+charging stops, or the battery sinks below `min_battery`, the function stops and
+reports the gating reason inside `SyncOutcome::gating`.
+
+Device conditions are provided by implementations of the `DeviceStatusProbe`
+trait. The crate ships Android and iOS probes behind feature flags, plus a
+desktop fallback that always defers to the configured `DeviceFallback`. Probes
+are polled asynchronously and cached for `stale_after`; if the backend fails,
+the last known status (or the fallback policy) is used while emitting a
+`tracing` warning. Every probe result is reported to the
+`light_client_device_status` Prometheus gauge (full metric
+`the_block_light_client_device_status{field="wifi|charging|battery",freshness="fresh|cached|fallback"}`) when the
+`telemetry` feature is enabled. `DeviceStatusWatcher` records both the
+monotonic timestamp and wall-clock instant for each poll so cached reads expose
+how stale the data is; freshness labels let dashboards differentiate a healthy
+backend from fallback policy. The CLI/RPC surfaces now echo the last probed
+status so operators see why sync paused.
 
 ## Header Verification
 
@@ -79,9 +104,35 @@ use light_client::{Header, LightClient, SyncOptions, sync_background};
 
 let genesis = Header { height: 0, ..Default::default() };
 let mut lc = LightClient::new(genesis);
-let opts = SyncOptions { wifi_only: true, require_charging: true, min_battery: 0.5 };
-sync_background(&mut lc, opts, |_start| Vec::new());
+let opts = SyncOptions::default();
+let rt = tokio::runtime::Runtime::new()?;
+let outcome = rt.block_on(async {
+    sync_background(&mut lc, opts, |_start, _batch| Vec::new()).await
+})?;
+if let Some(reason) = outcome.gating {
+    eprintln!("sync gated: {}", reason.as_str());
+}
 ```
+
+## Device policy
+
+Mobile builds persist operator overrides in `~/.the_block/light_client.toml`.
+`LightClientConfig` exposes `ignore_charging_requirement`, optional Wi‑Fi and
+minimum battery overrides, and a custom `DeviceFallback`. Call
+`SyncOptions::apply_config` to merge disk settings with runtime policy:
+
+```rust
+let cfg = light_client::load_user_config()?;
+let opts = SyncOptions::default().apply_config(&cfg);
+```
+
+CLI users can toggle the charging requirement via `contract light-client device set --ignore-charging true`, inspect the
+live probe snapshot with `contract light-client device show`, and reset to defaults with
+`contract light-client device reset`. The crate ensures the configuration directory is created on first write and
+validates values so operators cannot persist out-of-range battery thresholds. RPC consumers can inspect the same gating
+message through `light_client.device_status`. The same device state is embedded in log uploads via
+`upload_compressed_logs`, which now returns an `AnnotatedLogBundle` containing the compressed payload alongside a
+serialized snapshot of the last probed status, freshness label, and elapsed seconds since observation.
 
 ## Further Reading
 

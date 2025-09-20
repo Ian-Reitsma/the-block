@@ -1,15 +1,18 @@
 # Status & Roadmap
 
-Mainnet readiness: ~99.6/100 · Vision completion: ~86.9/100.
+Mainnet readiness: ~99.8/100 · Vision completion: ~88.4/100.
 Known focus areas: deliver treasury disbursement tooling with explorer
-timelines, harden compute-market SLA enforcement and telemetry, continue WAN-scale
-QUIC chaos drills with published mitigation guides, extend bridge/DEX docs with
-multisig signer-set payloads plus release-verifier walkthroughs, and finish the
-multisig wallet UX polish. Downstream tooling now targets the shared
-`governance` crate, compute settlement persists CT/IT flows with audit exports
-across RPC/CLI/explorer, wallet binaries propagate signer sets and telemetry, and
-the RPC client keeps bounded retries through clamped fault rates and saturated
-exponential backoff.
+timelines, wire SLA slashing dashboards atop the lane-aware matcher, continue
+WAN-scale QUIC chaos drills with published mitigation guides, extend bridge/DEX
+docs with multisig signer-set payloads plus release-verifier walkthroughs, and
+finish the multisig wallet UX polish. Downstream tooling now targets the shared
+`governance` crate, compute settlement and the matcher enforce per-lane fairness
+with staged seeding, fairness deadlines, starvation warnings, and per-lane
+telemetry, the mobile gateway cache persists ChaCha20-Poly1305–encrypted
+responses with TTL min-heap sweeping, restart replay, and operator controls,
+wallet binaries propagate signer sets and telemetry, and the RPC client keeps
+bounded retries through clamped fault rates and saturated exponential
+backoff.
 
 The auxiliary reimbursement ledger has been fully retired. Every block now mints `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` in the coinbase, with epoch‑retuned `beta/gamma/kappa/lambda` multipliers smoothing inflation to ≤ 2 %/year. Fleet-wide peer metrics feed a dedicated `metrics-aggregator`, the scheduler supports graceful `compute.job_cancel` rollbacks, fee-floor policy changes persist into `GovStore` history with rollback hooks and telemetry, and DID anchors flow through explorer APIs for cross-navigation with wallet addresses. Historical context and migration notes are in [`docs/system_changes.md`](system_changes.md#ct-subsidy-unification-2024).
 
@@ -40,19 +43,19 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
-| **Governance & Subsidy Economy** | **92 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. The shared `governance` crate exports sled persistence, proposal DAG validation, and Kalman helpers for all downstream tooling. | Expand explorer timelines with treasury disbursements and dependency metadata before opening external submissions. |
+| **Governance & Subsidy Economy** | **93 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. The shared `governance` crate exports sled persistence, proposal DAG validation, and Kalman helpers for all downstream tooling. | Expand explorer timelines with treasury disbursements and dependency metadata before opening external submissions. |
 | **Consensus & Core Execution** | 89 % | Stake-weighted leader rotation, deterministic tie-breaks, multi-window Kalman difficulty retune, release rollback helpers, and the parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 82 % | Persistent contract store, deterministic WASM runtime with debugger, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
-| **Storage & Free-Read Hosting** | **83 %** | Receipt-only logging, hourly batching, L1 anchoring, `gateway.reads_since` analytics, and crash-safe `SimpleDb` snapshot rewrites that stage via fsync’d temporary files before promoting base64 images keep reads free yet auditable. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
+| **Storage & Free-Read Hosting** | **85 %** | Receipt-only logging, hourly batching, L1 anchoring, `gateway.reads_since` analytics, crash-safe `SimpleDb` snapshot rewrites, and a sled-backed, ChaCha20-Poly1305–encrypted mobile cache with TTL min-heap sweeping, restart replay, entry/queue guardrails, CLI/RPC observability, and invalidation hooks keep reads free yet auditable and durable across restarts. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
 | **Networking & Gossip** | 95 % | QUIC mutual-TLS rotation with diagnostics/chaos harnesses, cluster `metrics-aggregator`, partition watch with gossip markers, and CLI/RPC metrics via `net.peer_stats`. | Large-scale WAN chaos tests outstanding. |
-| **Compute Marketplace & CBM** | 88 % | Capability-aware scheduler weights offers by reputation, matches GPU/CPU requirements, persists CT/IT settlement in a RocksDB-backed ledger with activation metadata, Merkle roots, and RPC/telemetry exports, enforces percentile-configurable fee floors with per-sender slots, and surfaces governance-tuned windows to wallets and telemetry. | Escrowed payments and automated SLA enforcement remain rudimentary. |
+| **Compute Marketplace & CBM** | 93 % | Capability-aware scheduler weights offers by reputation, lane-aware matching enforces per-`FeeLane` batching with fairness windows and deadlines, starvation detection, staged seeding, batch throttling, and persisted lane-tagged receipts, settlement tracks CT/IT flows with activation metadata, and telemetry/CLI/RPC surfaces expose queue depths, wait ages, latency histograms, and fee floors. | Escrowed payments and automated SLA enforcement remain rudimentary. |
 | **Trust Lines & DEX** | 81 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). | Cross-chain settlement proofs and advanced routing features outstanding. |
 | **Cross-Chain Bridges** | 52 % | Lock/unlock primitives with light-client verification, persisted headers under `state/bridge_headers/`, and CLI deposit/withdraw flows. | Relayer incentives and incentive safety proofs missing. |
-| **Wallets, Light Clients & KYC** | 94 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, fee-floor caching with localized warnings/JSON output, telemetry-backed QoS overrides, and pluggable KYC hooks. Wallets ship on `ed25519-dalek 2.2.x`, propagate escrow hash algorithms and multisig signer sets, export remote signer metrics, and align explorer attestations with the upgraded payloads. | Polish multisig UX and ship production-grade mobile apps. |
-| **Monitoring, Debugging & Profiling** | 88 % | Prometheus/Grafana dashboards, metrics-to-logs correlation with automated QUIC dumps, VM trace counters, DID anchor gauges, and CLI debugger/profiling utilities ship with nodes; wallet QoS events and fee-floor rollbacks now plot alongside DID timelines. | Bridge/VM anomaly detection still pending. |
+| **Wallets, Light Clients & KYC** | 95 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, fee-floor caching with localized warnings/JSON output, telemetry-backed QoS overrides, and pluggable KYC hooks. Wallets ship on `ed25519-dalek 2.2.x`, propagate escrow hash algorithms and multisig signer sets, export remote signer metrics, and now integrate platform-specific device probes with telemetry, overrides, and annotated log uploads for the light client. | Polish multisig UX and ship production-grade mobile apps. |
+| **Monitoring, Debugging & Profiling** | 90 % | Prometheus/Grafana dashboards, metrics-to-logs correlation with automated QUIC dumps, VM trace counters, DID anchor gauges, per-lane `matches_total`/`match_loop_latency_seconds` charts, mobile cache gauges (`mobile_cache_*`, `mobile_tx_queue_depth`), the `the_block_light_client_device_status{field,freshness}` gauge, and CLI debugger/profiling utilities ship with nodes; wallet QoS events and fee-floor rollbacks now plot alongside DID timelines. | Bridge/VM anomaly detection still pending. |
 | **Identity & Explorer** | 81 % | DID registry anchors with replay protection and optional provenance attestations, wallet and light-client commands support anchoring/resolving with sign-only/remote signer flows, explorer `/dids` endpoints expose history/anchor-rate charts with cached pagination, and governance archives revocation history alongside anchor data for audit. | Governance-driven revocation playbooks and mobile identity UX remain to ship. |
 | **Economic Simulation & Formal Verification** | 41 % | Bench harness simulates inflation/demand; chaos tests capture seeds. | Sparse scenario library and no integrated proof pipeline. |
-| **Mobile UX & Contribution Metrics** | 59 % | Background sync and contribution counters respect battery/network constraints. | Push notifications and broad hardware testing pending. |
+| **Mobile UX & Contribution Metrics** | 68 % | Background sync respects battery/network constraints via platform-specific probes, persisted overrides, CLI/RPC gating messages, freshness-labelled telemetry embedded in log uploads, and operator toggles stored in `~/.the_block/light_client.toml`, while the encrypted mobile cache with TTL sweeping, restart replay, and flush tooling keeps offline transactions durable. | Push notifications and broad hardware testing pending. |
 
 ## Immediate
 

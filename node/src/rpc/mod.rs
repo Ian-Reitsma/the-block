@@ -168,6 +168,8 @@ const ADMIN_METHODS: &[&str] = &[
     "compute_arm_real",
     "compute_cancel_arm",
     "compute_back_to_dry_run",
+    "gateway.mobile_cache_status",
+    "gateway.mobile_cache_flush",
     "gov_propose",
     "gov_vote",
     "submit_proposal",
@@ -984,6 +986,8 @@ fn dispatch(
         "gateway.policy" => gateway::dns::gateway_policy(&req.params),
         "gateway.reads_since" => gateway::dns::reads_since(&req.params),
         "gateway.dns_lookup" => gateway::dns::dns_lookup(&req.params),
+        "gateway.mobile_cache_status" => gateway::mobile_cache::status_snapshot(),
+        "gateway.mobile_cache_flush" => gateway::mobile_cache::flush_cache(),
         #[cfg(feature = "telemetry")]
         "analytics" => {
             let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone())

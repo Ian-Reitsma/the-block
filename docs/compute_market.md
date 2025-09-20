@@ -111,6 +111,104 @@ Each audit object resembles:
 Use the anchor entries (`entity == "__anchor__"`) to correlate local ledger
 state with explorer or archival tooling.
 
+## Lane-Aware Matching & Fairness
+
+The matcher maintains independent order books per `FeeLane` so consumer and
+industrial flows never starve one another. Each lane keeps sorted bid/ask queues
+ordered by price-time priority and honours a configurable fairness window from
+`LaneMetadata`. Bids that arrive within the fairness window are rotated in FIFO
+order so newer, higher-priced jobs cannot eclipse older entries indefinitely.
+`stable_match` processes one lane at a time, ensuring lane tags on receipts
+match before settlement persists them.
+
+Lane metadata travels with every seed. `seed_orders` validates that each lane
+stays within its configured `max_queue_depth`; exceeding the cap returns a
+`CapacityExceeded` error rather than evicting live orders. Operators can stage
+seeds in memory, validate capacity, and then atomically replace the live book so
+invalid staging data never wipes active queues.
+
+`LaneStatus` exposes bid/ask depth alongside `oldest_bid_wait`/`oldest_ask_wait`
+durations, while `LaneWarning` records the job ID, age, and wall-clock timestamp
+for starvation reports. Both structs surface through `compute_market.stats` and
+the CLI to help operators correlate fairness windows with live queue health.
+
+### Batch Controls & Back-Pressure
+
+Background matching processes work in configurable batches. Set
+`TB_COMPUTE_MATCH_BATCH` to bound the number of receipts `match_loop` commits per
+tick; when a batch fills completely the loop yields to give other async tasks
+time on the runtime. Between batches the loop sleeps for `MATCH_INTERVAL` (250
+ms) so sustained bursts do not starve other subsystems.
+
+Each lane enforces back-pressure through its `max_queue_depth`. When a lane is
+full the matcher rejects further orders and emits a warning via `tracing`. This
+prevents runaway memory use if a client floods a lane faster than providers can
+clear it. CLI and RPC surfaces expose current queue depth so operators can
+expand capacity or rebalance senders before the queue saturates.
+
+### Starvation Detection & Operator Signals
+
+`refresh_starvation` walks every lane after each batch to detect bids that have
+waited longer than the configured fairness window. When a lane crosses the
+threshold the node logs a `lane starvation` warning with the offending job ID.
+`compute_market.stats` reports a `lane_starvation` array containing structured
+warnings (`lane`, `job_id`, `waited_for_secs`, `updated_at`). The CLI prints the
+same context when you run `contract compute stats`, making it obvious when a
+lane is stuck behind missing providers or policy misconfiguration.
+
+### Telemetry & Observability
+
+Prometheus metrics now include:
+
+- `matches_total{dry_run="false",lane="consumer"}` – successful matches per lane
+  split by dry-run state.
+- `match_loop_latency_seconds{lane}` – histogram of per-lane batch latency so
+  dashboards can highlight congestion.
+- `receipt_persist_fail_total` – persistence failures while committing lane-tagged
+  receipts.
+
+Cluster dashboards should pair these counters with the existing settlement
+metrics to ensure receipts flow smoothly.
+
+### CLI & RPC Lane Views
+
+`compute_market.stats` returns per-lane queue depth and starvation hints in the
+`lanes` and `lane_starvation` fields. The CLI surfaces this with
+`contract compute stats --url http://localhost:26658`, printing bid/ask counts
+and queue ages per lane. For raw JSON, call the RPC directly:
+
+```bash
+curl -s localhost:26658/compute_market.stats | jq '.lanes, .lane_starvation'
+```
+
+A typical response resembles:
+
+```json
+{
+  "lanes": [
+    {
+      "lane": "Consumer",
+      "bids": 6,
+      "asks": 4,
+      "oldest_bid_wait_secs": 12.4,
+      "oldest_ask_wait_secs": 2.1
+    }
+  ],
+  "lane_starvation": [
+    {
+      "lane": "Consumer",
+      "job_id": "job-nyc-91",
+      "waited_for_secs": 32.8,
+      "updated_at": "2025-09-20T17:12:11Z"
+    }
+  ]
+}
+```
+
+The CLI mirrors these fields, highlighting lanes whose oldest bid exceeded the
+fairness window and including the timestamp of the most recent warning so teams
+can align dashboards with manual interventions.
+
 ## Normalized Compute Units
 
 Workloads are expressed in **compute units** representing GPU-seconds scaled by
@@ -145,7 +243,24 @@ curl localhost:26658/compute_market.stats
   "industrial_price_per_unit": 5,
   "industrial_price_weighted": 6,
   "industrial_price_base": 4,
-  "pending": []
+  "pending": [],
+  "lanes": [
+    {
+      "lane": "consumer",
+      "bids": 3,
+      "asks": 2,
+      "oldest_bid_wait_ms": 1800,
+      "oldest_ask_wait_ms": 0
+    },
+    {
+      "lane": "industrial",
+      "bids": 1,
+      "asks": 4,
+      "oldest_bid_wait_ms": null,
+      "oldest_ask_wait_ms": 4500
+    }
+  ],
+  "lane_starvation": []
 }
 ```
 
@@ -460,11 +575,11 @@ token accruals survive restarts while remaining compatible with the in-memory
 bridge account logic.
 
 ```text
-{ version: 1, job_id, buyer, provider, quote_price, units, issued_at, idempotency_key }
+{ version: 1, job_id, buyer, provider, quote_price, units, issued_at, idempotency_key, lane }
 ```
 
 The `idempotency_key` is `BLAKE3(job_id || buyer || provider || quote_price || units ||
-version)` and is used as the primary index in the `ReceiptStore`.  Receipts are
+version || lane)` and is used as the primary index in the `ReceiptStore`.  Receipts are
 persisted via `compare_and_swap` so duplicates are ignored.  On startup the
 store reloads existing entries and increments `receipt_corrupt_total` for any
 damaged records.
@@ -492,12 +607,38 @@ Metrics track behaviour:
 - `settle_applied_total` – receipts successfully debited and paid.
 - `settle_failed_total{reason}` – settlement failures.
 - `settle_mode_change_total{to}` – mode transitions.
-- `matches_total{dry_run}` – receipts processed by the match loop.
+- `matches_total{dry_run,lane}` – receipts processed by the match loop.
 - `receipt_persist_fail_total` – database write errors.
-- `match_loop_latency_seconds` – time per match-loop iteration.
+- `match_loop_latency_seconds{lane}` – time per match-loop iteration.
 
 The `settlement_cluster` test exercises idempotency by applying receipts across
 node restarts and asserting that metrics record exactly one application.
+
+### Lane-aware matching & batching
+
+The matcher maintains per-lane order books and rotates lanes in a
+round-robin fairness window so consumer traffic cannot starve industrial jobs
+or vice-versa. Orders inside each lane follow strict price-time priority and
+are drained in configurable batches. The matcher persists every matched
+receipt with its lane tag; on restart the `ReceiptStore` filters out completed
+matches and only replays outstanding orders.
+
+Operators can tune behaviour with environment variables:
+
+- `TB_COMPUTE_MATCH_BATCH` – maximum matches drained per loop iteration
+  before yielding (default: `32`).
+- `TB_COMPUTE_LANE_CAP` – per-lane queue depth cap enforced during seeding
+  (default: `1024`).
+- `TB_COMPUTE_FAIRNESS_MS` – fairness window per lane before rotation in
+  milliseconds (default: `5`).
+- `TB_COMPUTE_STARVATION_SECS` – delay before emitting starvation warnings for
+  lanes with stuck bids (default: `30`).
+
+`compute_market.stats` now reports `lanes` (per-lane queue depth, oldest
+waiting age), `lane_starvation` (active warnings), and `recent_matches` keyed by
+lane. The CLI consumes the same payload and renders queue depths, starvation
+alerts, and the latest persisted matches alongside the existing backlog
+figures.
 
 ## Industrial Admission & Fee Lanes
 

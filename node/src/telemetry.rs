@@ -390,6 +390,120 @@ pub static MOBILE_CACHE_HIT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static MOBILE_CACHE_MISS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new("mobile_cache_miss_total", "Total mobile cache misses")
+        .unwrap_or_else(|e| panic!("counter mobile cache miss: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache miss: {e}"));
+    c
+});
+
+pub static MOBILE_CACHE_EVICT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "mobile_cache_evict_total",
+        "Expired or purged mobile cache entries",
+    )
+    .unwrap_or_else(|e| panic!("counter mobile cache evict: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache evict: {e}"));
+    c
+});
+
+pub static MOBILE_CACHE_STALE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "mobile_cache_stale_total",
+        "Mobile cache entries dropped due to TTL expiry",
+    )
+    .unwrap_or_else(|e| panic!("counter mobile cache stale: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache stale: {e}"));
+    c
+});
+
+pub static MOBILE_CACHE_REJECT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "mobile_cache_reject_total",
+        "Mobile cache insertions rejected by limits",
+    )
+    .unwrap_or_else(|e| panic!("counter mobile cache reject: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache reject: {e}"));
+    c
+});
+
+pub static MOBILE_CACHE_ENTRY_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new("mobile_cache_entry_total", "Active mobile cache entries")
+        .unwrap_or_else(|e| panic!("gauge mobile cache entry total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache entry total: {e}"));
+    g
+});
+
+pub static MOBILE_CACHE_ENTRY_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "mobile_cache_entry_bytes",
+        "Total bytes stored in the mobile cache",
+    )
+    .unwrap_or_else(|e| panic!("gauge mobile cache entry bytes: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache entry bytes: {e}"));
+    g
+});
+
+pub static MOBILE_CACHE_QUEUE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "mobile_cache_queue_total",
+        "Offline transactions queued for replay",
+    )
+    .unwrap_or_else(|e| panic!("gauge mobile cache queue total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache queue total: {e}"));
+    g
+});
+
+pub static MOBILE_CACHE_QUEUE_BYTES: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "mobile_cache_queue_bytes",
+        "Bytes buffered in the mobile offline queue",
+    )
+    .unwrap_or_else(|e| panic!("gauge mobile cache queue bytes: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache queue bytes: {e}"));
+    g
+});
+
+pub static MOBILE_CACHE_SWEEP_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "mobile_cache_sweep_total",
+        "Number of mobile cache TTL sweeps",
+    )
+    .unwrap_or_else(|e| panic!("counter mobile cache sweep: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache sweep: {e}"));
+    c
+});
+
+pub static MOBILE_CACHE_SWEEP_WINDOW_SECONDS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "mobile_cache_sweep_window_seconds",
+        "Configured sweep interval for the mobile cache",
+    )
+    .unwrap_or_else(|e| panic!("gauge mobile cache sweep window: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry mobile cache sweep window: {e}"));
+    g
+});
+
 pub static MOBILE_TX_QUEUE_DEPTH: Lazy<IntGauge> = Lazy::new(|| {
     let g = IntGauge::new(
         "mobile_tx_queue_depth",
@@ -799,6 +913,7 @@ pub static THRESHOLD_SIGNATURE_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 #[cfg(feature = "telemetry")]
 pub fn export_dataset<P: AsRef<std::path::Path>>(path: P) -> std::io::Result<()> {
     use std::fs::File;
+    use std::io::Write;
     let metric_families = REGISTRY.gather();
     let mut buf = Vec::new();
     TextEncoder::new()
@@ -1321,7 +1436,7 @@ pub static RETRIEVAL_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 pub static MATCHES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new("matches_total", "Total matched jobs"),
-        &["dry_run"],
+        &["dry_run", "lane"],
     )
     .unwrap_or_else(|e| panic!("counter matches_total: {e}"));
     REGISTRY
@@ -1753,10 +1868,10 @@ pub static RECEIPT_PERSIST_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static MATCH_LOOP_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static MATCH_LOOP_LATENCY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = HistogramOpts::new("match_loop_latency_seconds", "Settlement loop latency");
-    let h =
-        Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram match loop latency: {e}"));
+    let h = HistogramVec::new(opts, &["lane"])
+        .unwrap_or_else(|e| panic!("histogram match loop latency: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry match loop latency: {e}"));

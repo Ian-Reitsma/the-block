@@ -193,10 +193,29 @@ Settlement persistence adds complementary gauges:
 - `SETTLE_APPLIED_TOTAL` – increments whenever a CT/IT accrual, refund, or SLA burn is recorded. Pair this with `compute_market.audit` to ensure every ledger mutation hits telemetry.
 - `SETTLE_FAILED_TOTAL{reason="spend|penalize|refund"}` – surfaces errors during ledger mutation (for example, insufficient balance when penalizing an SLA violation). Any sustained growth warrants investigation before balances drift.
 - `SETTLE_MODE_CHANGE_TOTAL{state="dryrun|armed|real"}` – tracks activation transitions, enabling alerts when a node unexpectedly reverts to dry-run mode.
+- `matches_total{dry_run,lane}` – confirms the lane-aware matcher continues to produce receipts. Alert if a lane’s matches drop to zero while bids pile up.
+- `match_loop_latency_seconds{lane}` – latency histogram for each lane’s batch cycle. Rising p95 suggests fairness windows are expiring before matches land.
+- `receipt_persist_fail_total` – persistence failures writing lane-tagged receipts into the RocksDB-backed `ReceiptStore`.
 - `SLASHING_BURN_CT_TOTAL` and `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}` – expose aggregate burn amounts and per-provider violation counts. Alert if a provider exceeds expected thresholds or if burns stop entirely when violations continue.
 - `settle_audit_mismatch_total` – raised when automated audit checks detect a mismatch between the ledger and the anchored receipts, typically via `TB_SETTLE_AUDIT_INTERVAL_MS` or CI replay jobs.
 
 Dashboards should correlate these counters with the RocksDB health metrics (disk latency, file descriptor usage) and with RPC responses from `compute_market.provider_balances` and `compute_market.recent_roots`. A sudden plateau in `SETTLE_APPLIED_TOTAL` combined with stale Merkle roots usually indicates a stuck anchoring pipeline.
+
+Mobile gateways expose their own telemetry slice: track `mobile_cache_hit_total` versus
+`mobile_cache_miss_total` to validate cache effectiveness, alert on spikes in
+`mobile_cache_reject_total` (insertions exceeding configured payload or count limits),
+and watch `mobile_cache_sweep_total`/`mobile_cache_sweep_window_seconds` for sweep
+health. Pair the gauges `mobile_cache_entry_total`, `mobile_cache_entry_bytes`,
+`mobile_cache_queue_total`, and `mobile_cache_queue_bytes` with CLI `mobile-cache
+status` output to verify offline queues drain after reconnects. Use
+`mobile_tx_queue_depth` to trigger pager alerts when queued transactions exceed the
+expected range for the deployment.
+
+Background light-client probes report their state via
+`the_block_light_client_device_status{field,freshness}`. Alert when `charging` or
+`wifi` labels stay at `0` for longer than the configured `stale_after` window or
+when `battery` remains below the configured threshold; otherwise background sync and
+log uploads will stall.
 
 During incident response, correlate subsidy spikes with `gov_*` metrics and
 `read_denied_total{reason}` to determine whether rewards reflect legitimate
