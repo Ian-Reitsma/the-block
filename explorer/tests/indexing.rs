@@ -7,7 +7,15 @@ fn ingest_and_query() {
     let dir = tempdir().unwrap();
     let receipts = dir.path().join("pending");
     std::fs::create_dir_all(&receipts).unwrap();
-    let r = Receipt::new("job".into(), "buyer".into(), "prov".into(), 10, 1, false);
+    let r = Receipt::new(
+        "job".into(),
+        "buyer".into(),
+        "prov".into(),
+        10,
+        1,
+        false,
+        the_block::transaction::FeeLane::Consumer,
+    );
     let bytes = bincode::serialize(&vec![r]).unwrap();
     std::fs::write(receipts.join("1"), bytes).unwrap();
     let db = dir.path().join("explorer.db");

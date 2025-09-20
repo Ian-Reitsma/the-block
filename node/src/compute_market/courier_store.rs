@@ -1,4 +1,5 @@
 use crate::compute_market::receipt::Receipt;
+use crate::transaction::FeeLane;
 use sled::Tree;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -64,5 +65,26 @@ impl ReceiptStore {
 
     pub fn len(&self) -> Result<usize, sled::Error> {
         Ok(self.tree.len() as usize)
+    }
+
+    pub fn recent_by_lane(&self, lane: FeeLane, limit: usize) -> Result<Vec<Receipt>, sled::Error> {
+        let mut receipts = Vec::new();
+        for entry in self.tree.iter() {
+            match entry {
+                Ok((_key, bytes)) => {
+                    if let Ok(receipt) = bincode::deserialize::<Receipt>(&bytes) {
+                        if receipt.lane == lane {
+                            receipts.push(receipt);
+                        }
+                    }
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        receipts.sort_by(|a, b| b.issued_at.cmp(&a.issued_at));
+        if limit > 0 && receipts.len() > limit {
+            receipts.truncate(limit);
+        }
+        Ok(receipts)
     }
 }

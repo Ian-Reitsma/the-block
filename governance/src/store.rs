@@ -2,9 +2,13 @@ use super::{
     registry, ApprovedRelease, ParamKey, Params, Proposal, ProposalStatus, ReleaseBallot,
     ReleaseVote, Runtime, Vote, VoteChoice,
 };
+use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
-use std::path::Path;
+use std::collections::HashMap;
+use std::env;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const ACTIVATION_DELAY: u64 = 2;
@@ -55,10 +59,14 @@ pub struct DidRevocationRecord {
     pub revoked_at: u64,
 }
 
+#[derive(Clone)]
 pub struct GovStore {
-    db: sled::Db,
-    base_path: std::path::PathBuf,
+    db: Arc<sled::Db>,
+    base_path: PathBuf,
 }
+
+static GOV_DB_REGISTRY: Lazy<Mutex<HashMap<PathBuf, Weak<sled::Db>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
     bincode::serialize(value).map_err(|e| sled::Error::Unsupported(format!("ser: {e}").into()))
@@ -72,6 +80,31 @@ fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
     match de::<Vec<u64>>(bytes) {
         Ok(list) => Ok(list),
         Err(_) => de::<u64>(bytes).map(|single| vec![single]),
+    }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+fn derive_base_path(path: &Path) -> PathBuf {
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.is_dir() {
+            return path.to_path_buf();
+        }
+    }
+    if path.extension().is_none() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
     }
 }
 
@@ -173,15 +206,27 @@ impl GovStore {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Self {
-        let db_path = path.as_ref();
-        let db = Config::new()
-            .path(db_path)
+        let normalized = normalize_path(path.as_ref());
+        let mut registry = GOV_DB_REGISTRY.lock().unwrap();
+        if let Some(existing) = registry.get(&normalized) {
+            if let Some(db) = existing.upgrade() {
+                let base = derive_base_path(&normalized);
+                drop(registry);
+                return Self {
+                    db,
+                    base_path: base,
+                };
+            }
+        }
+        registry.remove(&normalized);
+        let db_handle = Config::new()
+            .path(&normalized)
             .open()
             .unwrap_or_else(|e| panic!("open db: {e}"));
-        let base = db_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| Path::new(".").to_path_buf());
+        let db = Arc::new(db_handle);
+        registry.insert(normalized.clone(), Arc::downgrade(&db));
+        drop(registry);
+        let base = derive_base_path(&normalized);
         Self {
             db,
             base_path: base,

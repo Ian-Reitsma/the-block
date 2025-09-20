@@ -1,3 +1,4 @@
+use crate::transaction::FeeLane;
 use blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +17,7 @@ pub struct Receipt {
     pub dry_run: bool,
     pub issued_at: u64,
     pub idempotency_key: [u8; 32],
+    pub lane: FeeLane,
 }
 
 impl Receipt {
@@ -27,6 +29,7 @@ impl Receipt {
         quote_price: u64,
         units: u64,
         dry_run: bool,
+        lane: FeeLane,
     ) -> Self {
         let version = 1u16;
         let mut h = Hasher::new();
@@ -36,6 +39,7 @@ impl Receipt {
         h.update(&quote_price.to_be_bytes());
         h.update(&units.to_be_bytes());
         h.update(&version.to_be_bytes());
+        h.update(&[lane as u8]);
         let idempotency_key = *h.finalize().as_bytes();
         let issued_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -51,6 +55,7 @@ impl Receipt {
             dry_run,
             issued_at,
             idempotency_key,
+            lane,
         }
     }
 }

@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99.6/100** with vision completion **~86.9/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace persists CT/IT flows in a RocksDB ledger with activation metadata, Merkle roots, and RPC/telemetry exposure for audits, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, and the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff to avoid overflow and restore environment state on drop. Remaining focus areas: deliver treasury disbursement tooling, harden compute-market SLAs with dashboards, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99.8/100** with vision completion **~88.4/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace now enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, and the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff to avoid overflow and restore environment state on drop. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -62,7 +62,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~92 %
+## 3. Governance & Subsidy Economy — ~93 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -92,7 +92,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — ~83 %
+## 4. Storage & Free‑Read Hosting — ~85 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -103,6 +103,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - WAL-backed `SimpleDb` design in `docs/simple_db.md` underpins DNS cache, chunk gossip, and DEX storage.
 - Base64 snapshots stage through `NamedTempFile::persist` plus `sync_all`, with legacy dumps removed only after durable rename (`node/src/simple_db/memory.rs`, `node/tests/simple_db/memory_tests.rs`).
 - Rent escrow metrics (`rent_escrow_locked_ct_total`, etc.) exposed in `docs/monitoring.md` with alert thresholds.
+- Mobile gateway cache persists ChaCha20-Poly1305–encrypted responses and queued transactions to sled with TTL sweeping, eviction guardrails, telemetry counters, CLI `mobile-cache status|flush` commands, RPC inspection endpoints, and invalidation hooks (`node/src/gateway/mobile_cache.rs`, `node/src/rpc/gateway.rs`, `cli/src/gateway.rs`, `docs/mobile_gateway.md`). A min-heap of expirations drives sweep cadence, persistence snapshots reconstruct queues on restart, encryption keys derive from `TB_MOBILE_CACHE_KEY_HEX`/`TB_NODE_KEY_HEX`, and status responses expose per-entry age/expiry plus queue bytes so operators can tune TTL windows and capacity.
 - Reputation-weighted Lagrange allocation and proof-of-retrievability challenges secure storage contracts (`node/src/gateway/storage_alloc.rs`, `storage/src/contract.rs`).
 
 **Gaps**
@@ -123,13 +124,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~88 %
+## 6. Compute Marketplace & CBM — ~93 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
 - `compute.job_cancel` RPC releases resources and refunds bonds (`node/src/rpc/compute_market.rs`).
 - Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
+- Lane-aware matching enforces per-`FeeLane` queues, fairness windows, and starvation timers, throttles via `TB_COMPUTE_MATCH_BATCH`, records `MATCH_LOOP_LATENCY_SECONDS{lane}` histograms, persists receipts with lane tags for replay safety, and surfaces queue depths/capacity guardrails through RPC/CLI (`node/src/compute_market/matcher.rs`, `node/tests/compute_matcher.rs`, `node/src/rpc/compute_market.rs`, `cli/src/compute.rs`). The matcher rotates lanes until a batch quota or fairness deadline triggers, rejects staged seeds that exceed capacity, emits structured starvation warnings with job IDs/ages, and annotates `compute_market.stats` with per-lane wait durations for operators.
 - Settlement persists CT/IT balances, audit logs, activation metadata, and Merkle roots in a RocksDB-backed store with RPC/CLI/explorer surfacing (`node/src/compute_market/settlement.rs`, `node/tests/compute_settlement.rs`, `docs/compute_market.md`, `docs/settlement_audit.md`, `explorer/src/compute_view.rs`). The ledger emits telemetry (`SETTLE_APPLIED_TOTAL`, `SETTLE_FAILED_TOTAL{reason}`, `SETTLE_MODE_CHANGE_TOTAL{state}`, `SLASHING_BURN_CT_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}`) and exposes `compute_market.provider_balances`, `compute_market.audit`, and `compute_market.recent_roots` RPCs for automated reconciliation.
 - `Settlement::shutdown` persists any pending ledger deltas and flushes RocksDB handles before teardown so test harnesses (and unplanned exits) leave behind consistent CT/IT balances and Merkle roots for replay.
 - Admission enforces dynamic fee floors with per-sender slot caps, eviction audit trails, explorer charts, and `mempool.stats` exposure (`node/src/mempool/admission.rs`, `node/src/mempool/scoring.rs`, `docs/mempool_qos.md`, `node/tests/mempool_eviction.rs`). Governance parameters for the floor window and percentile stream through telemetry (`fee_floor_window_changed_total`, `fee_floor_warning_total`, `fee_floor_override_total`) and wallet guidance.
@@ -157,13 +159,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~94 %
+## 8. Wallets, Light Clients & KYC — ~95 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
 - Remote signer workflows (`crates/wallet/src/remote_signer.rs`, `docs/wallets.md`).
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
+- Device status probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, emit `the_block_light_client_device_status{field,freshness}` telemetry, persist overrides in `~/.the_block/light_client.toml`, surface CLI/RPC gating messages, and embed annotated snapshots in compressed log uploads (`crates/light-client`, `cli/src/light_client.rs`, `docs/light_client.md`, `docs/mobile_light_client.md`).
 - Real-time state streaming over WebSockets with zstd snapshots (`docs/light_client_stream.md`, `node/src/rpc/state_stream.rs`).
 - Optional KYC provider wiring (`docs/kyc.md`).
 - Session-key issuance and meta-transaction tooling (`crypto/src/session.rs`, `cli/src/wallet.rs`, `docs/account_abstraction.md`).
@@ -191,7 +194,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Relayer incentive mechanisms undeveloped.
 - No safety audits or circuit proofs.
 
-## 10. Monitoring, Debugging & Profiling — ~88 %
+## 10. Monitoring, Debugging & Profiling — ~90 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -202,6 +205,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - VM trace counters and partition dashboards (`node/src/telemetry.rs`, `monitoring/templates/partition.json`).
     - Settlement audit CI job (`.github/workflows/ci.yml`).
     - Fee-floor policy changes and wallet overrides surface via `fee_floor_window_changed_total`, `fee_floor_warning_total`, and `fee_floor_override_total`, while DID anchors increment `did_anchor_total` for explorer dashboards (`node/src/telemetry.rs`, `monitoring/metrics.json`, `docs/mempool_qos.md`, `docs/identity.md`).
+    - Per-lane compute matcher counters (`matches_total{lane}`), latency histograms (`match_loop_latency_seconds{lane}`), starvation warnings, and mobile cache metrics (`mobile_cache_hit_total`, `mobile_cache_stale_total`, `mobile_cache_entry_bytes`, `mobile_cache_queue_bytes`, `mobile_tx_queue_depth`) feed dashboards alongside the `the_block_light_client_device_status{field,freshness}` gauge for background sync diagnostics (`node/src/telemetry.rs`, `docs/telemetry.md`, `docs/mobile_gateway.md`, `docs/light_client.md`).
     - Incremental log indexer resumes from offsets, rotates encryption keys, streams over WebSocket, and exposes REST filters (`tools/log_indexer.rs`, `docs/logging.md`).
 
 **Gaps**
@@ -232,12 +236,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 13. Mobile UX & Contribution Metrics — ~59 %
+## 13. Mobile UX & Contribution Metrics — ~68 %
 
 **Evidence**
-- Background sync respecting battery/network constraints (`docs/mobile_light_client.md`).
+- Background sync respecting battery/network constraints with platform-specific probes, async caching, CLI/RPC gating messages, and persisted overrides (`docs/light_client.md`, `docs/mobile_light_client.md`, `cli/src/light_client.rs`). Device snapshots capture freshness (`fresh|cached|fallback`) labels, stream to `the_block_light_client_device_status`, embed into compressed log uploads, and expose CLI toggles for charging/Wi‑Fi overrides stored in `~/.the_block/light_client.toml`.
 - Contribution metrics and optional KYC in mobile example (`examples/mobile`).
-- Push notifications for subsidy events (wallet tooling).
+- Push notifications for subsidy events (wallet tooling) plus encrypted mobile cache persistence with TTL hygiene, size guardrails, and CLI flush hooks for reliable offline recovery (`node/src/gateway/mobile_cache.rs`, `docs/mobile_gateway.md`).
 
 **Gaps**
 - Broad hardware testing and production app distribution outstanding.

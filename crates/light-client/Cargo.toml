@@ -3,16 +3,62 @@ name = "light-client"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["desktop-probe"]
+desktop-probe = []
+android-probe = ["dep:ndk", "dep:ndk-context", "dep:jni"]
+ios-probe = [
+    "dep:objc",
+    "dep:objc-foundation",
+    "dep:objc_id",
+    "dep:core-foundation",
+]
+telemetry = ["dep:once_cell", "dep:prometheus"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "5"
+once_cell = { version = "1", optional = true }
+prometheus = { version = "0.13", optional = true }
+async-trait = "0.1"
 blake3 = "1"
 flate2 = "1"
-tokio = { version = "1", features = ["rt", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt", "macros", "net", "time", "sync"] }
 tokio-tungstenite = "0.20"
 futures = "0.3"
 zstd = "0.12"
 bincode = "1"
 ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
+tracing = "0.1"
+
+[dependencies.ndk]
+version = "0.8"
+optional = true
+
+[dependencies.ndk-context]
+version = "0.1"
+optional = true
+
+[dependencies.jni]
+version = "0.21"
+optional = true
+
+[dependencies.objc]
+version = "0.2"
+optional = true
+
+[dependencies.objc-foundation]
+version = "0.1"
+optional = true
+
+[dependencies.objc_id]
+version = "0.1"
+optional = true
+
+[dependencies.core-foundation]
+version = "0.9"
+optional = true
 
 [dev-dependencies]
 rand = "0.8"

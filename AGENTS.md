@@ -56,13 +56,15 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99.6/100** with vision completion **~86.9/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
+Mainnet readiness sits at **~99.8/100** with vision completion **~88.4/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
 Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, and end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
 
 **Latest highlights:**
 - Governance, SDKs, and the CLI now consume the shared `governance` crate with sled-backed `GovStore`, proposal DAG validation, Kalman retune helpers, and release quorum enforcement, keeping every integration on the node’s canonical state machine.
 - Wallet binaries continue to ship on `ed25519-dalek 2.2.x`, propagate multisig signer sets, escrow hash algorithms, and remote signer telemetry, and surface localized fee-floor coaching with JSON automation hooks for dashboards.
-- Compute-market settlement writes CT/IT movements to a RocksDB ledger that tracks activation metadata, audit exports, and recent Merkle roots exposed through RPC, CLI, and explorer views for cross-restart reconciliation; `Settlement::shutdown` persists pending entries and flushes RocksDB so operators can assert clean teardown in integration harnesses.
+- Compute-market matching enforces lane-aware batching with per-lane fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher now rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, and exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards.
+- Mobile gateway caches persist encrypted responses and offline transactions to sled-backed storage with TTL sweeping, max-size guardrails, eviction telemetry, and CLI/RPC status & flush endpoints so mobile users can recover across restarts without leaking stale data. Sweepers drain a min-heap of expirations, boot-time replays rebuild the queue, and ChaCha20-Poly1305 keys derive from `TB_MOBILE_CACHE_KEY_HEX` (or fall back to `TB_NODE_KEY_HEX`) to harden the cache at rest.
+- Light-client device probes now integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, stream `the_block_light_client_device_status{field,freshness}` telemetry (fresh/cached/fallback), surface gating messages in the CLI/RPC, honour overrides stored in `~/.the_block/light_client.toml`, and embed the latest device snapshot inside compressed log uploads.
 - RPC clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after the 31st attempt, guard environment overrides with scoped restorers, and expose regression coverage so operators can trust bounded retry behaviour during incidents.
 - `SimpleDb` snapshot rewrites stage data through fsync’d temporary files, atomically rename into place, and retain legacy dumps until the new image lands, eliminating crash-window data loss while keeping legacy reopen logic intact.
 - Node CLI binaries honour telemetry/gateway feature toggles, emitting explicit user-facing errors when unsupported flags are passed, recording jurisdiction languages in law-enforcement audit logs, and compiling via optional feature bundles (`full`, `wasm-metadata`, `sqlite-storage`) for memory-constrained tests.
@@ -70,7 +72,7 @@ Recent additions now include multi-signature release approvals with explorer and
 
 **Outstanding focus areas:**
 - Ship governance treasury disbursement tooling and explorer timelines before opening external treasury submissions.
-- Harden compute-market SLA enforcement with deadline slashing, telemetry, and operator remediation guides.
+- Integrate compute-market SLA slashing atop the lane-aware matcher and document remediation dashboards for operators.
 - Continue WAN-scale QUIC chaos drills for relay fan-out while publishing mitigation recipes from the new telemetry traces.
 - Finish multisig wallet UX polish (batched signer discovery, richer CLI prompts) so remote signers can run production workflows.
 - Expand bridge and DEX documentation with signer-set payloads, explorer telemetry, and release-verifier guidance ahead of the next tag.
@@ -325,7 +327,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99.4/100 · Vision completion: ~85.6/100. Known blockers: stabilise telemetry-gated integration warnings, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99.8/100 · Vision completion: ~88.4/100. Known blockers: stabilise telemetry-gated integration warnings, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -594,7 +596,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 92%
+  - Progress: 93%
   - ⚠️ Focus: wire treasury disbursements and dependency visualisations into explorer timelines while finalising external submission workflows.
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
@@ -611,12 +613,12 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements, WAL-backed stores, and crash-safe snapshot rewrites that stage via fsync’d temp files before promoting base64 images
   - [ ] Incentive-backed DHT marketplace
-  - Progress: 83%
+  - Progress: 85%
   - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
     - [x] Fee floor enforcement with per-sender slot limits, percentile-configurable windows, wallet telemetry, and eviction audit trails
     - [ ] SLA arbitration and heterogeneous payments
-    - Progress: 88%
+    - Progress: 93%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
@@ -635,19 +637,19 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 94%
+    - Progress: 95%
     - ⚠️ Focus: round out multisig UX (batched signer discovery, richer operator messaging) before tagging the next CLI release.
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
-    - Progress: 88%
+    - Progress: 90%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
     - [x] QUIC loss benchmark comparing TCP vs QUIC under chaos
-    - Progress: 77%
+    - Progress: 78%
 
 ### Troubleshooting: Missing Tests & Dependencies
 

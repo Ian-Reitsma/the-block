@@ -3,7 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(feature = "telemetry")]
+#[cfg(all(feature = "telemetry", feature = "privacy"))]
 use crate::telemetry::PRIVACY_SANITIZATION_TOTAL;
 #[cfg(feature = "privacy")]
 use privacy::redaction;

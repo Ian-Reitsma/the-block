@@ -15,6 +15,7 @@ use lru::LruCache;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::num::NonZeroUsize;
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -249,7 +250,7 @@ impl TxDidAnchor {
 
 /// Distinct fee lanes for transaction scheduling.
 #[pyclass]
-#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FeeLane {
     /// Standard retail transactions sharing the consumer lane.
     Consumer,
@@ -263,6 +264,12 @@ impl FeeLane {
             FeeLane::Consumer => "consumer",
             FeeLane::Industrial => "industrial",
         }
+    }
+}
+
+impl fmt::Display for FeeLane {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 

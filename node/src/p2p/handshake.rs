@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-#[cfg(feature = "telemetry")]
+#[cfg(all(feature = "telemetry", feature = "quic"))]
 use tracing::warn;
 
 #[repr(u32)]

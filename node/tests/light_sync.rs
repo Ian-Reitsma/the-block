@@ -29,8 +29,8 @@ fn mine(prev: &Header, height: u64) -> Header {
     h
 }
 
-#[test]
-fn partial_to_full_sync() {
+#[tokio::test]
+async fn partial_to_full_sync() {
     let genesis = Header {
         height: 0,
         prev_hash: [0u8; 32],
@@ -52,18 +52,21 @@ fn partial_to_full_sync() {
     let mut lc = LightClient::new(genesis);
     lc.verify_and_append(h1).unwrap();
     let remaining = vec![h2];
-    let fetch = move |start: u64| {
-        remaining
-            .clone()
-            .into_iter()
-            .filter(|h| h.height >= start)
-            .collect()
+    let fetch = move |start: u64, _batch: usize| {
+        let remaining = remaining.clone();
+        async move {
+            remaining
+                .into_iter()
+                .filter(|h| h.height >= start)
+                .collect()
+        }
     };
     let opts = SyncOptions {
         wifi_only: false,
         require_charging: false,
         min_battery: 0.0,
+        ..SyncOptions::default()
     };
-    sync_background(&mut lc, opts, fetch);
+    sync_background(&mut lc, opts, fetch).await.unwrap();
     assert_eq!(lc.tip_height(), 2);
 }

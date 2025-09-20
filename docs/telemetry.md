@@ -56,8 +56,19 @@ Additional subsystem counters include:
 - `price_weight_applied_total` tracks how often reputation weighting adjusted a quoted price
 - `scheduler_priority_miss_total` counts high-priority jobs that waited past the
   scheduler's aging threshold
+- `matches_total{dry_run,lane}` counts successful compute matches per lane; pair with
+  `match_loop_latency_seconds{lane}` to flag congestion.
+- `receipt_persist_fail_total` increments when the matcher cannot persist a lane-tagged
+  receipt into the `ReceiptStore`.
 - `fee_floor_warning_total{lane}` and `fee_floor_override_total{lane}` capture wallet guidance decisions, while `fee_floor_window_changed_total` increments whenever governance retunes the mempool fee-floor window or percentile.
 - `did_anchor_total` tracks anchored DID documents; explorers derive `/dids/metrics/anchor_rate` from this counter.
+- `the_block_light_client_device_status{field,freshness}` gauges Wi‑Fi, charging, and battery readings captured by the light client probes. Values are 0/1 for Wi‑Fi and charging, and 0–1.0 for battery level.
+- `mobile_cache_hit_total`, `mobile_cache_miss_total`, `mobile_cache_evict_total`,
+  `mobile_cache_stale_total`, `mobile_cache_reject_total`, `mobile_cache_entry_total`,
+  `mobile_cache_entry_bytes`, `mobile_cache_queue_total`, `mobile_cache_queue_bytes`,
+  `mobile_cache_sweep_total`, `mobile_cache_sweep_window_seconds`, and
+  `mobile_tx_queue_depth` expose the encrypted mobile cache lifecycle (hits/misses,
+  evictions, payload size) plus offline queue depth for operators running the gateway.
 
 The `scheduler_cancel_total{reason}` counter ties into the compute-market
 `compute.job_cancel` RPC, exposing whether cancellations were triggered by the
@@ -165,7 +176,7 @@ Available histograms include:
 
 - `tx_validation_ms` – per-transaction validation latency.
 - `block_verify_ms` – end-to-end block verification time.
-- `match_loop_latency_seconds` – compute-market match cycle.
+- `match_loop_latency_seconds{lane}` – compute-market match cycle.
 - `log_size_bytes` – serialized log length.
 
 Buckets follow a base‑2 exponential scheme (`1,2,4,...,65536`) so p50/p99 can be

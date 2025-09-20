@@ -50,9 +50,10 @@ fn explorer_indexes_recent_dids_and_metrics() {
 
     let mut history = did_view::by_address(&ex, &address).expect("history by address");
     assert_eq!(history.len(), 1);
+    let expected_wallet = format!("/wallets/{}", address);
     assert_eq!(
         history[0].wallet_url.as_deref(),
-        Some(&format!("/wallets/{}", address))
+        Some(expected_wallet.as_str())
     );
 
     // Apply an update and ensure both cache and SQLite history are refreshed.

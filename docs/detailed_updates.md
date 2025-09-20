@@ -3,6 +3,27 @@
 ## Unreleased
 
 ### Added
+- Lane-aware compute matcher with per-`FeeLane` queues, fairness windows,
+  fairness deadlines, starvation detection, staged seeding, and persisted
+  lane-tagged receipts. CLI/RPC surfaces expose per-lane queue depth,
+  wait ages, starvation warnings, batch telemetry (`matches_total{lane}`,
+  `match_loop_latency_seconds{lane}`), and recent matches so operators can
+  monitor fairness (`node/src/compute_market/matcher.rs`,
+  `node/src/rpc/compute_market.rs`, `cli/src/compute.rs`).
+- Encrypted mobile gateway cache backed by sled with TTL min-heap sweeping,
+  max-entry/bytes guardrails, offline queue persistence, telemetry
+  (`mobile_cache_hit_total`, `mobile_cache_stale_total`, `mobile_cache_entry_bytes`,
+  `mobile_tx_queue_depth`, etc.), and CLI/RPC status/flush endpoints for
+  operators. Status payloads report entry ages, per-entry sizes, queue depth,
+  and the oldest queued transaction so TTL tuning is data-driven
+  (`node/src/gateway/mobile_cache.rs`, `node/src/rpc/gateway.rs`,
+  `cli/src/gateway.rs`).
+- Cross-platform light-client device probes integrating Android/iOS power and
+  connectivity hints, asynchronous caching, CLI/RPC gating messages,
+  annotated log uploads, and the
+  `the_block_light_client_device_status{field,freshness}` gauge with freshness
+  labels and seconds-since-observation reporting (`crates/light-client`,
+  `cli/src/light_client.rs`, `docs/light_client.md`).
 - Proof-of-History tick generator with optional GPU hashing and Turbine-style packet fanout for deterministic block propagation ([node/src/poh.rs](../node/src/poh.rs), [node/src/net/turbine.rs](../node/src/net/turbine.rs)).
 - Stake-weighted PoS finality with `PosState` ledger and validator staking RPCs ([node/src/consensus/pos/mod.rs](../node/src/consensus/pos/mod.rs), [node/src/rpc/pos.rs](../node/src/rpc/pos.rs)).
 - Parallel execution engine partitions read/write sets for safe concurrency with benchmarks ([node/src/parallel.rs](../node/src/parallel.rs), [node/benches/parallel_runtime.rs](../node/benches/parallel_runtime.rs)).

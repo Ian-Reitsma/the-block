@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::Read;
 use std::thread;
 use tiny_http::{Response, Server};
+use tokio::runtime::Runtime;
 
 fn main() {
     // simulate syncing headers from a file on disk
@@ -20,16 +21,31 @@ fn main() {
         client.verify_and_append(h).expect("header");
     }
     let remaining: Vec<Header> = iter.collect();
-    let fetch = move |start: u64| remaining
-        .clone()
-        .into_iter()
-        .filter(|h| h.height >= start)
-        .collect();
-    let opts = SyncOptions { wifi_only: true, require_charging: false, min_battery: 0.1 };
-    sync_background(&mut client, opts, fetch);
+    let fetch = move |start: u64, _batch: usize| {
+        let remaining = remaining.clone();
+        async move {
+            remaining
+                .into_iter()
+                .filter(|h| h.height >= start)
+                .collect::<Vec<_>>()
+        }
+    };
+    let opts = SyncOptions {
+        wifi_only: true,
+        require_charging: false,
+        min_battery: 0.1,
+        ..SyncOptions::default()
+    };
+    let rt = Runtime::new().expect("runtime");
+    let outcome = rt
+        .block_on(async { sync_background(&mut client, opts, fetch).await })
+        .expect("sync background");
     println!("synced {} headers", client.chain.len());
-    let compressed = upload_compressed_logs(b"demo log line");
-    println!("compressed log size {} bytes", compressed.len());
+    if let Some(reason) = outcome.gating {
+        println!("sync gated due to {:?}", reason);
+    }
+    let bundle = upload_compressed_logs(b"demo log line", Some(&outcome.status));
+    println!("compressed log size {} bytes", bundle.payload.len());
 
     // start a minimal remote signer service
     let server = Server::http("127.0.0.1:0").expect("server");

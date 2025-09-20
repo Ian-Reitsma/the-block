@@ -1,4 +1,4 @@
-use super::read_receipt;
+use super::{mobile_cache, read_receipt};
 use crate::simple_db::SimpleDb;
 use crate::ERR_DNS_SIG_INVALID;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
@@ -117,6 +117,7 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
         0u64.to_le_bytes().to_vec(),
     );
     db.insert(&format!("dns_last/{}", domain), 0u64.to_le_bytes().to_vec());
+    mobile_cache::purge_policy(domain);
     Ok(serde_json::json!({"status":"ok"}))
 }
 
@@ -184,19 +185,26 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
                     .as_secs();
                 db.insert(&last_key, ts.to_le_bytes().to_vec());
                 let _ = read_receipt::append(domain, "gateway", txt.len() as u64, false, true);
-                return serde_json::json!({
+                let response = serde_json::json!({
                     "record": txt,
                     "reads_total": reads,
                     "last_access_ts": ts,
                 });
+                mobile_cache::cache_policy(domain, &response);
+                return response;
             }
         }
     }
-    serde_json::json!({
+    if let Some(cached) = mobile_cache::cached_policy(domain) {
+        return cached;
+    }
+    let miss = serde_json::json!({
         "record": null,
         "reads_total": 0,
         "last_access_ts": 0,
-    })
+    });
+    mobile_cache::cache_policy(domain, &miss);
+    miss
 }
 
 pub fn reads_since(params: &Value) -> serde_json::Value {

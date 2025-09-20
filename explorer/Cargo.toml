@@ -22,3 +22,4 @@ lru = "0.11"
 tempfile = "3"
 wat = "1"
 ed25519-dalek = { version = "2.2.0", features = ["std"] }
+rand = "0.8"

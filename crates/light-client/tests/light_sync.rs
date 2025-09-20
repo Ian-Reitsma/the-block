@@ -28,8 +28,8 @@ fn make_header(prev: &Header, height: u64) -> Header {
     h
 }
 
-#[test]
-fn syncs_to_chain_tip() {
+#[tokio::test]
+async fn syncs_to_chain_tip() {
     let genesis = Header {
         height: 0,
         prev_hash: [0u8; 32],
@@ -49,9 +49,15 @@ fn syncs_to_chain_tip() {
     let mut lc = LightClient::new(genesis.clone());
     let h1 = make_header(&genesis, 1);
     let h2 = make_header(&h1, 2);
-    let fetch = move |start: u64| match start {
-        1 => vec![h1.clone(), h2.clone()],
-        _ => Vec::new(),
+    let fetch = move |start: u64, _batch: usize| {
+        let h1 = h1.clone();
+        let h2 = h2.clone();
+        async move {
+            match start {
+                1 => vec![h1, h2],
+                _ => Vec::new(),
+            }
+        }
     };
     sync_background(
         &mut lc,
@@ -59,8 +65,11 @@ fn syncs_to_chain_tip() {
             wifi_only: false,
             require_charging: false,
             min_battery: 0.0,
+            ..SyncOptions::default()
         },
         fetch,
-    );
+    )
+    .await
+    .unwrap();
     assert_eq!(lc.tip_height(), 2);
 }

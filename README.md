@@ -66,10 +66,16 @@ test real services today.
   proof-of-retrievability challenges penalize missing data.
   Snapshot rewrites now stage column families through fsync’d temporary files
   before atomically renaming base64 snapshots, preserving legacy dumps until
-  the new image lands. See [docs/read_receipts.md](docs/read_receipts.md) and
-  [docs/simple_db.md](docs/simple_db.md) for the batching, audit, and crash
-  recovery flow. (83.0% Complete — incentive-marketplace wiring remains the
-  main open track.)
+  the new image lands. The mobile gateway cache persists ChaCha20-Poly1305–
+  encrypted responses and offline transactions in a sled store, drains a
+  min-heap of expirations every sweep window, rebuilds queues on restart, and
+  exposes `mobile_cache_*` counters plus CLI/RPC status & flush endpoints so
+  operators can tune TTLs, entry caps, and eviction health. See
+  [docs/read_receipts.md](docs/read_receipts.md),
+  [docs/simple_db.md](docs/simple_db.md), and
+  [docs/mobile_gateway.md](docs/mobile_gateway.md) for the batching, audit,
+  persistence, and cache hygiene flow. (85.0% Complete — incentive-marketplace
+  wiring remains the main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
   `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
@@ -85,7 +91,15 @@ test real services today.
   floor through `mempool.stats` so operators can reason about QoS. Governance can
   retune the fee-floor window and percentile, and wallet sends surface localized
   warnings with auto-bump or `--force` overrides plus JSON output for tooling.
-  (88.0% Complete)
+  Lane-aware batching now stages matches per `FeeLane`, rotates lanes until the
+  batch quota or fairness deadline trips, throttles via `TB_COMPUTE_MATCH_BATCH`,
+  and persists receipts with lane tags so restarts replay only outstanding work.
+  The matcher rejects seeds that exceed per-lane capacity, tracks starvation
+  thresholds with structured warnings, and exports per-lane queue depth/age plus
+  `matches_total{lane}` and `match_loop_latency_seconds{lane}` histograms. CLI and
+  RPC surfaces expose queue depths, capacity guardrails, fairness windows, and
+  recent matches, and settlement continues to persist CT/IT balances with
+  activation metadata, audit exports, and recent root tracking. (93.0% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -114,7 +128,7 @@ test real services today.
     timelines so operators can audit parameter changes while governance history
     archives DID revocations for audit. All tooling now targets the shared
     `governance` crate with sled-backed persistence, proposal DAG validation,
-    and Kalman retune helpers. (92.0% Complete)
+    and Kalman retune helpers. (93.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
       deployable contracts and fee markets alongside traditional PoW headers. (82.0%
@@ -148,7 +162,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       dashboards track warning/override deltas. Wallet binaries now share a single
       `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, forward
       multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
-      staking payloads. (94.0% Complete)
+      staking payloads. (95.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
       and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
@@ -156,24 +170,34 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
       anchor totals land in telemetry so dashboards can trace user choices,
       anchor velocity, and governance parameter rollbacks from a single pane.
-      (88.0% Complete)
+      (89.0% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
     and encode consensus invariants, laying groundwork for provable safety. (41.0%
     Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
-  subsidy events to make participation feasible on phones. (59.0% Complete)
+  subsidy events to make participation feasible on phones. Device heuristics now
+  integrate platform power/network probes, cache asynchronous readings with
+  freshness labels, stream `the_block_light_client_device_status{field,freshness}`
+  telemetry, embed snapshots into compressed log uploads, and surface CLI/RPC
+  gating messages alongside persisted overrides in `~/.the_block/light_client.toml`.
+  Operators can toggle charging/Wi‑Fi requirements via `contract light-client
+  device ...` commands, inspect cached readings, and rely on desktop builds that
+  fall back to configured defaults without stalling sync. (68.0% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99.6/100** with vision completion **~86.9/100**.
-  Recent work unified downstream tooling on the standalone `governance` crate,
-  shipped the RocksDB-backed compute settlement ledger with activation metadata
-  and audit exports across RPC/CLI/explorer, refreshed wallet telemetry and
-  signer-set propagation, and kept the RPC client resilient with clamped fault
-  rates plus saturated exponential backoff guarded by scoped environment
-  restorers.
-  Current focus areas: deliver treasury disbursement tooling, harden compute-market
-  SLA enforcement and dashboards, continue WAN-scale QUIC chaos drills with
+  Mainnet readiness sits at **~99.8/100** with vision completion **~88.4/100**.
+  Recent work layered lane-aware batching onto the compute matcher with
+  fairness deadlines, per-lane queue caps, starvation warnings, and
+  `match_loop_latency_seconds{lane}` histograms, rebuilt the mobile gateway cache
+  around an encrypted sled store with TTL sweeping, min-heap eviction, and
+  operator-facing CLI/RPC/telemetry, and integrated platform-specific device
+  probes into the light client with freshness-labelled telemetry, manual
+  overrides, and annotated log uploads. Governance tooling, wallet telemetry,
+  and the resilient RPC client continue to anchor the ecosystem on the shared
+  state machine.
+  Current focus areas: deliver treasury disbursement tooling, wire SLA slashing
+  dashboards on top of the new matcher, continue WAN-scale QUIC chaos drills with
   mitigation playbooks, polish multisig wallet UX, and expand bridge/DEX docs with
   signer-set payloads before the next release tag.
 
@@ -184,7 +208,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 - Kalman multi-window difficulty retune keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC, `retune_hint` headers, and `difficulty_*` metrics.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently. See [docs/scheduler.md](docs/scheduler.md).
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
-- Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages and jobs can be cancelled gracefully via `compute cancel <job_id>`.
+- Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages, jobs respect lane-aware batching with fairness windows and starvation detection, and operators can inspect per-lane queue depth, capacity limits, and recent matches via CLI/RPC. Background loops throttle with `TB_COMPUTE_MATCH_BATCH`, persist receipts with lane tags, and surface telemetry for dashboards while `compute cancel <job_id>` keeps graceful cancellation intact.
 - Cluster-wide `metrics-aggregator` collects peer snapshots while the `net stats`
   CLI supports JSON output, drop-reason and reputation filtering, pagination, and
   colorized drop-rate warnings.
