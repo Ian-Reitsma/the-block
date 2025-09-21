@@ -23,7 +23,15 @@ pub use device::{
 };
 #[cfg(feature = "telemetry")]
 pub use device::{DEVICE_TELEMETRY_REGISTRY, LIGHT_CLIENT_DEVICE_STATUS};
-pub use state_stream::{StateChunk, StateStream};
+pub use state_stream::{
+    account_state_value, AccountChunk, GapCallback, StateChunk, StateStream, StateStreamBuilder,
+    StateStreamError,
+};
+#[cfg(feature = "telemetry")]
+pub use state_stream::{
+    LIGHT_STATE_SNAPSHOT_COMPRESSED_BYTES, LIGHT_STATE_SNAPSHOT_DECOMPRESSED_BYTES,
+    LIGHT_STATE_SNAPSHOT_DECOMPRESS_ERRORS_TOTAL, STATE_STREAM_TELEMETRY_REGISTRY,
+};
 
 /// Options controlling background synchronization.
 #[derive(Clone, Copy, Debug)]

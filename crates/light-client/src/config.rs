@@ -16,12 +16,26 @@ pub struct LightClientConfig {
     pub min_battery_override: Option<f32>,
     #[serde(default)]
     pub fallback_override: Option<DeviceFallback>,
+    #[serde(default = "default_max_snapshot_bytes")]
+    pub max_snapshot_bytes: u64,
+}
+
+const fn default_max_snapshot_bytes() -> u64 {
+    16 * 1024 * 1024
 }
 
 pub fn config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|mut dir| {
         dir.push(".the_block");
         dir.push("light_client.toml");
+        dir
+    })
+}
+
+pub fn state_cache_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|mut dir| {
+        dir.push(".the_block");
+        dir.push("light_state.cache");
         dir
     })
 }
@@ -56,4 +70,15 @@ pub fn save_user_config(config: &LightClientConfig) -> io::Result<()> {
     let rendered = toml::to_string_pretty(config)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     fs::write(path, rendered)
+}
+
+impl LightClientConfig {
+    pub fn snapshot_limit_bytes(&self) -> usize {
+        let max = if self.max_snapshot_bytes == 0 {
+            default_max_snapshot_bytes()
+        } else {
+            self.max_snapshot_bytes
+        };
+        max.min(u64::from(u32::MAX)) as usize
+    }
 }
