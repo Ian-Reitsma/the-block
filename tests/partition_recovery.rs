@@ -19,6 +19,7 @@ fn dummy_block() -> Block {
         storage_sub_ct: 0,
         read_sub_ct: 0,
         compute_sub_ct: 0,
+        proof_rebate_ct: 0,
         storage_sub_it: 0,
         read_sub_it: 0,
         compute_sub_it: 0,

@@ -4,25 +4,26 @@ The compute market supports running real workloads on job slices. Each slice
 contains input data that is executed by a workload runner and produces a proof
 hash.
 
-## Mixed CT/IT Escrow
+## CT Escrow
 
 Offers specify `fee_pct_ct`, the consumer-token percentage of the quoted price.
-`0` routes the full amount to industrial tokens while `100` pays entirely in
-consumer tokens. During admission, buyers escrow the split amounts and
-settlement credits providers with the same proportions. Example splits:
+Policy pins production lanes to `100`, so live jobs settle entirely in CT while
+leaving the selector available for simulations and regression tests. During
+admission, buyers escrow the computed CT amount and settlement credits providers
+with the same figure. Example selector values (used in tests/devnets) remain:
 
-| `fee_pct_ct` | CT share | IT share |
-|--------------|---------|---------|
-| `0`          | `0%`    | `100%`  |
-| `25`         | `25%`   | `75%`   |
-| `100`        | `100%`  | `0%`    |
+| `fee_pct_ct` | CT share | Legacy industrial share |
+|--------------|---------|-------------------------|
+| `0`          | `0%`    | `100%` (tests only)     |
+| `25`         | `25%`   | `75%` (tests only)      |
+| `100`        | `100%`  | `0%`                    |
 
-Residual escrows are refunded using the original percentages.
+Residual escrows are refunded using the submitted selector; production payouts
+therefore return solely CT.
 
 ## Settlement Ledger & Auditing
 
-Settlement persists CT and industrial token flows in a RocksDB-backed ledger
-located under `compute_settlement.db`. `Settlement::init` wires a
+Settlement persists CT flows (with a legacy industrial field fixed to zero in production) in a RocksDB-backed ledger located under `compute_settlement.db`. `Settlement::init` wires a
 feature-gated RocksDB handle (`storage-rocksdb`) and transparently falls back to
 an in-memory ledger for tests. Every accrual writes dual entries, updates a
 rolling Merkle root cache, records activation metadata, and bumps a monotonic
@@ -30,16 +31,17 @@ sequence so operators can replay state after restarts. The ledger exposes:
 
 - **CLI:** Build `contract-cli` with `--features full` (or the lighter
   `--features sqlite-storage`) and invoke `contract compute stats` to report
-  CT/IT balances alongside the most recent audit entries fetched via
+  CT balances alongside the most recent audit entries fetched via
   `compute_market.provider_balances` and `compute_market.audit`.
 - **RPC:**
-  - `compute_market.provider_balances` returns the merged CT/IT totals for every
+  - `compute_market.provider_balances` returns the merged CT totals for every
     provider persisted in the ledger, sorted lexicographically to match the
     Merkle-root fold (`compute_root`) and encoded as `{provider, ct, industrial}`
-    structs.
+    structs. The `industrial` field remains for compatibility and is zeroed on
+    production lanes.
   - `compute_market.audit` streams JSON receipts suitable for automated
     reconciliation. Each entry mirrors `AuditRecord` in
-    `node/src/compute_market/settlement.rs` and includes the CT/IT deltas,
+    `node/src/compute_market/settlement.rs` and includes the CT deltas,
     running balances, timestamp, sequence number, and optional anchor hash.
   - `compute_market.recent_roots` exposes the last 32 Merkle roots (or a caller
     supplied limit) as hex strings so explorers can render continuity proofs
@@ -62,7 +64,7 @@ audit feed for offline reconciliation.
 
 | Mode | Description | Persistence metadata |
 | --- | --- | --- |
-| `DryRun` | Default safety mode. Balances accrue in the ledger without moving CT/IT on-chain. Use for devnets or smoke tests. | `metadata.armed_requested_height` and `metadata.armed_delay` are cleared; `last_cancel_reason` documents why the node fell back. |
+| `DryRun` | Default safety mode. Balances accrue in the ledger without moving CT on-chain. Use for devnets or smoke tests. | `metadata.armed_requested_height` and `metadata.armed_delay` are cleared; `last_cancel_reason` documents why the node fell back. |
 | `Armed { activate_at }` | Governance has requested activation after `delay` blocks. Ledger persists the requested height and delay so a restart cannot skip the waiting period. | Fields capture the requested height and delay until activation or cancellation. |
 | `Real` | Full settlement—balances are authoritative and should be anchored into `state::audit`. | Anchors append to `metadata.last_anchor_hex` and the audit log. |
 
@@ -78,8 +80,7 @@ skip the arming delay.
   line via `state::append_audit`, and records a marker audit entry with the
   anchor hash.
 - `Settlement::refund_split` and `Settlement::accrue_split` always update both
-  ledgers atomically. The recorded audit entry shows the delta for CT and
-  industrial tokens along with the new balances.
+  ledgers atomically. The recorded audit entry shows the CT delta alongside the legacy industrial column (zeroed in production) with the updated balances.
 - `Settlement::penalize_sla` burns CT from the provider, records the event with
   a negative delta, and increments `SLASHING_BURN_CT_TOTAL` plus
   `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}` to highlight SLA breaches.
@@ -108,8 +109,7 @@ Each audit object resembles:
 }
 ```
 
-Use the anchor entries (`entity == "__anchor__"`) to correlate local ledger
-state with explorer or archival tooling.
+Use the anchor entries (`entity == "__anchor__"`) to correlate local ledger state with explorer or archival tooling. The `*_it` fields remain for compatibility and surface non-zero values only in explicit test scenarios.
 
 ## Lane-Aware Matching & Fairness
 
@@ -199,7 +199,7 @@ A typical response resembles:
       "lane": "Consumer",
       "job_id": "job-nyc-91",
       "waited_for_secs": 32.8,
-      "updated_at": "2025-09-20T17:12:11Z"
+      "updated_at": "2025-09-21T17:12:11Z"
     }
   ]
 }
@@ -703,7 +703,7 @@ When a job is cancelled, the courier rolls back any resource reservations via
 `release_resources(job_id)` with exponential backoff. If the job finishes while
 the cancellation is in flight, the scheduler detects the completed state and
 skips the cancellation. Reasons are persisted for audit, and operators can query
-state with `compute market status <job_id>`. Refunds honour the original CT/IT
+state with `compute market status <job_id>`. Refunds honour the original CT
 split.
 
 ### Querying Admission Parameters

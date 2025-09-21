@@ -17,6 +17,7 @@ pub struct BlockEncoder<'a> {
     pub storage_sub: u64,
     pub read_sub: u64,
     pub compute_sub: u64,
+    pub proof_rebate: u64,
     pub storage_sub_it: u64,
     pub read_sub_it: u64,
     pub compute_sub_it: u64,
@@ -45,6 +46,7 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.storage_sub.to_le_bytes());
         h.update(&self.read_sub.to_le_bytes());
         h.update(&self.compute_sub.to_le_bytes());
+        h.update(&self.proof_rebate.to_le_bytes());
         h.update(&self.storage_sub_it.to_le_bytes());
         h.update(&self.read_sub_it.to_le_bytes());
         h.update(&self.compute_sub_it.to_le_bytes());

@@ -26,7 +26,10 @@ pub mod partition_watch;
 pub mod turbine;
 
 use crate::net::peer::pk_from_addr;
-use crate::{gossip::relay::Relay, BlobTx, Blockchain, ShutdownFlag, SignedTransaction};
+use crate::{
+    gossip::relay::{Relay, RelayStatus},
+    BlobTx, Blockchain, ShutdownFlag, SignedTransaction,
+};
 use anyhow::anyhow;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -109,6 +112,25 @@ struct PeerCertDiskEntry {
 static PEER_CERTS: Lazy<RwLock<HashMap<[u8; 32], PeerCertStore>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 static PEER_CERTS_LOADED: OnceCell<()> = OnceCell::new();
+static GOSSIP_RELAY: Lazy<RwLock<Option<std::sync::Arc<Relay>>>> = Lazy::new(|| RwLock::new(None));
+
+pub fn set_gossip_relay(relay: std::sync::Arc<Relay>) {
+    *GOSSIP_RELAY.write().unwrap() = Some(relay);
+}
+
+pub fn gossip_status() -> Option<RelayStatus> {
+    GOSSIP_RELAY
+        .read()
+        .unwrap()
+        .as_ref()
+        .map(|relay| relay.status())
+}
+
+pub fn register_shard_peer(shard: ShardId, peer: [u8; 32]) {
+    if let Some(relay) = GOSSIP_RELAY.read().unwrap().as_ref() {
+        relay.register_peer(shard, peer);
+    }
+}
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct QuicStatsEntry {
@@ -430,6 +452,7 @@ impl Node {
             .unwrap_or_else(|e| e.into_inner())
             .purge_expired();
         let relay = std::sync::Arc::new(Relay::default());
+        set_gossip_relay(std::sync::Arc::clone(&relay));
         Self {
             addr,
             peers: PeerSet::new(peers),

@@ -28,7 +28,7 @@ pub struct Relayer {
     pub slashes: u64,
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RelayerSet {
     relayers: HashMap<String, Relayer>,
 }
@@ -57,5 +57,13 @@ impl RelayerSet {
                 BRIDGE_SLASHES_TOTAL.inc();
             }
         }
+    }
+
+    pub fn snapshot(&self) -> HashMap<String, Relayer> {
+        self.relayers.clone()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Relayer)> {
+        self.relayers.iter()
     }
 }

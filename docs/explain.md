@@ -18,7 +18,7 @@ relate printed output to blockchain concepts.
 
 3. **Account creation**
    - Prepares four accounts: `miner`, `alice`, `bob`, and `faucet`, each
-     starting with zero consumer and industrial tokens.
+     starting with zero CT (the legacy industrial column is retained for compatibility and remains zero by policy).
    - Printing the balances highlights the dual‑token design that sets
      The‑Block apart from single‑asset chains.
 
@@ -28,14 +28,12 @@ relate printed output to blockchain concepts.
      transactions prove their origin.
 
 5. **Fee matrix**
-   - Calls `fee_decompose()` for selectors `0‒2` across several fee
-     values, showing how each selector splits a payment between the two
-     token pools.
+   - Calls `fee_decompose()` for selectors `0‒2` across several fee values, showing how each selector would split a payment; production pins selectors to `100`, but the demo illustrates the legacy behaviour used in regression tests.
    - Invalid selectors and overflow values trigger explicit errors,
      demonstrating safety checks in the API.
 
 6. **Initial mining**
-   - Mines the first block so the miner receives initial funds.
+   - Mines the first block so the miner receives initial CT.
    - Validation and supply checks show the chain enforces token caps and
      consistent accounting.
 

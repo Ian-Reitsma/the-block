@@ -101,6 +101,12 @@ fn normalize_path(path: &Path) -> PathBuf {
 fn derive_base_path(path: &Path) -> PathBuf {
     if let Ok(meta) = std::fs::metadata(path) {
         if meta.is_dir() {
+            if path.extension().is_some() {
+                return path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."));
+            }
             return path.to_path_buf();
         }
     }
@@ -125,6 +131,7 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::GammaReadSubCt => "gamma_read_sub_ct",
         ParamKey::KappaCpuSubCt => "kappa_cpu_sub_ct",
         ParamKey::LambdaBytesOutSubCt => "lambda_bytes_out_sub_ct",
+        ParamKey::ProofRebateLimitCt => "proof_rebate_limit_ct",
         ParamKey::RentRateCtPerByte => "rent_rate_ct_per_byte",
         ParamKey::KillSwitchSubsidyReduction => "kill_switch_subsidy_reduction",
         ParamKey::MinerRewardLogisticTarget => "miner_reward_logistic_target",
@@ -768,6 +775,7 @@ impl GovStore {
                                 ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
                                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                                ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
                                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
                                 ParamKey::KillSwitchSubsidyReduction => {
                                     params.kill_switch_subsidy_reduction
@@ -964,6 +972,7 @@ impl GovStore {
                 ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
                 ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
                 ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
                 ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
                 ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
                 ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
@@ -998,6 +1007,7 @@ impl GovStore {
             ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
             ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
             ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+            ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
             ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
             ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
             ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,

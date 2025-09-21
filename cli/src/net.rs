@@ -2,7 +2,7 @@ use crate::rpc::RpcClient;
 use clap::Subcommand;
 use hex;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use the_block::net::QuicStatsEntry;
 
 #[derive(Subcommand)]
@@ -45,6 +45,13 @@ pub enum NetCmd {
         url: String,
         #[arg(long)]
         token: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show gossip relay configuration and shard affinity
+    GossipStatus {
+        #[arg(long, default_value = "http://localhost:26658")]
+        url: String,
         #[arg(long)]
         json: bool,
     },
@@ -242,6 +249,43 @@ pub fn handle(cmd: NetCmd) {
                 }
             }
         }
+        NetCmd::GossipStatus { url, json } => {
+            let client = RpcClient::from_env();
+            #[derive(serde::Serialize)]
+            struct Payload {
+                jsonrpc: &'static str,
+                id: u32,
+                method: &'static str,
+                params: serde_json::Value,
+            }
+            let payload = Payload {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "net.gossip_status",
+                params: json!({}),
+            };
+            if let Ok(resp) = client.call(&url, &payload) {
+                if let Ok(text) = resp.text() {
+                    if json {
+                        if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                            let out = val.get("result").cloned().unwrap_or(val);
+                            if let Ok(pretty) = serde_json::to_string_pretty(&out) {
+                                println!("{}", pretty);
+                            } else {
+                                println!("{}", text);
+                            }
+                        } else {
+                            println!("{}", text);
+                        }
+                    } else if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                        let result = val.get("result").cloned().unwrap_or(val);
+                        print_gossip_status(&result);
+                    } else {
+                        println!("{}", text);
+                    }
+                }
+            }
+        }
         NetCmd::RotateCert { url } => {
             let client = RpcClient::from_env();
             #[derive(serde::Serialize)]
@@ -323,5 +367,81 @@ fn print_quic_stats(entries: &[QuicStatsEntry]) {
             entry.endpoint_reuse,
             entry.handshake_failures
         );
+    }
+}
+
+fn print_gossip_status(value: &Value) {
+    let ttl = value.get("ttl_ms").and_then(Value::as_u64).unwrap_or(0);
+    let dedup_size = value.get("dedup_size").and_then(Value::as_u64).unwrap_or(0);
+    let dedup_capacity = value
+        .get("dedup_capacity")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    println!("TTL: {} ms", ttl);
+    println!("Dedup cache: {}/{} entries", dedup_size, dedup_capacity);
+    if let Some(fanout) = value.get("fanout") {
+        let min = fanout.get("min").and_then(Value::as_u64).unwrap_or(0);
+        let base = fanout.get("base").and_then(Value::as_u64).unwrap_or(0);
+        let max = fanout.get("max").and_then(Value::as_u64).unwrap_or(0);
+        println!("Fanout(min/base/max): {}/{}/{}", min, base, max);
+        if let Some(last) = fanout.get("last").and_then(Value::as_u64) {
+            let cand = fanout
+                .get("candidates")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let score = fanout
+                .get("avg_score")
+                .and_then(Value::as_f64)
+                .map(|s| format!("{:.2}", s))
+                .unwrap_or_else(|| "n/a".to_string());
+            println!(
+                "Last selection: {} peers from {} candidates (avg score {})",
+                last, cand, score
+            );
+        }
+    }
+    if let Some(partition) = value.get("partition") {
+        let active = partition
+            .get("active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if active {
+            let marker = partition.get("marker").and_then(Value::as_u64).unwrap_or(0);
+            println!("Partition: active (marker {})", marker);
+        } else {
+            println!("Partition: inactive");
+        }
+        if let Some(list) = partition.get("isolated_peers").and_then(Value::as_array) {
+            if !list.is_empty() {
+                println!("  Isolated peers:");
+                for peer in list {
+                    if let Some(s) = peer.as_str() {
+                        println!("    - {}", s);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(shards) = value.get("shard_affinity").and_then(Value::as_array) {
+        if !shards.is_empty() {
+            println!("Shard affinity:");
+            for entry in shards {
+                let shard = entry.get("shard").and_then(Value::as_u64).unwrap_or(0);
+                let peers = entry
+                    .get("peers")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if peers.is_empty() {
+                    println!("  shard {}: <none>", shard);
+                } else {
+                    let list: Vec<String> = peers
+                        .into_iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    println!("  shard {}: {}", shard, list.join(", "));
+                }
+            }
+        }
     }
 }

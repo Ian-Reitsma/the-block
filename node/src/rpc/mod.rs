@@ -122,6 +122,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.backpressure_clear",
     "net.reputation_sync",
     "net.reputation_show",
+    "net.gossip_status",
     "net.dns_verify",
     "net.key_rotate",
     "net.handshake_failures",
@@ -158,6 +159,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "mesh.peers",
     "light.latest_header",
     "light.headers",
+    "light_client.rebate_status",
+    "light_client.rebate_history",
     "service_badge_verify",
     "jurisdiction.status",
     "jurisdiction.policy_diff",
@@ -821,14 +824,33 @@ fn dispatch(
         }
         "settlement.audit" => compute_market::settlement_audit(),
         "bridge.relayer_status" => {
-            let id = req
+            let relayer = req
                 .params
                 .get("relayer")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            bridge::relayer_status(id)
+            let asset = req.params.get("asset").and_then(|v| v.as_str());
+            bridge::relayer_status(asset, relayer)
+        }
+        "bridge.bond_relayer" => {
+            let relayer = req
+                .params
+                .get("relayer")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let amount = req
+                .params
+                .get("amount")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            bridge::bond_relayer(relayer, amount)?
         }
         "bridge.verify_deposit" => {
+            let asset = req
+                .params
+                .get("asset")
+                .and_then(|v| v.as_str())
+                .unwrap_or("native");
             let relayer = req
                 .params
                 .get("relayer")
@@ -883,9 +905,14 @@ fn dispatch(
                         message: "invalid params",
                     })
                 })?;
-            bridge::verify_deposit(relayer, user, amount, header, proof, proofs)?
+            bridge::verify_deposit(asset, relayer, user, amount, header, proof, proofs)?
         }
         "bridge.request_withdrawal" => {
+            let asset = req
+                .params
+                .get("asset")
+                .and_then(|v| v.as_str())
+                .unwrap_or("native");
             let relayer = req
                 .params
                 .get("relayer")
@@ -914,24 +941,76 @@ fn dispatch(
                         message: "invalid params",
                     })
                 })?;
-            bridge::request_withdrawal(relayer, user, amount, proofs)?
+            bridge::request_withdrawal(asset, relayer, user, amount, proofs)?
         }
         "bridge.challenge_withdrawal" => {
+            let asset = req
+                .params
+                .get("asset")
+                .and_then(|v| v.as_str())
+                .unwrap_or("native");
             let commitment = req
                 .params
                 .get("commitment")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            bridge::challenge_withdrawal(commitment)?
+            let challenger = req
+                .params
+                .get("challenger")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            bridge::challenge_withdrawal(asset, commitment, challenger)?
         }
         "bridge.finalize_withdrawal" => {
+            let asset = req
+                .params
+                .get("asset")
+                .and_then(|v| v.as_str())
+                .unwrap_or("native");
             let commitment = req
                 .params
                 .get("commitment")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            bridge::finalize_withdrawal(commitment)?
+            bridge::finalize_withdrawal(asset, commitment)?
         }
+        "bridge.pending_withdrawals" => {
+            let asset = req.params.get("asset").and_then(|v| v.as_str());
+            bridge::pending_withdrawals(asset)?
+        }
+        "bridge.active_challenges" => {
+            let asset = req.params.get("asset").and_then(|v| v.as_str());
+            bridge::active_challenges(asset)?
+        }
+        "bridge.relayer_quorum" => {
+            let asset = req
+                .params
+                .get("asset")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })?;
+            bridge::relayer_quorum(asset)?
+        }
+        "bridge.deposit_history" => {
+            let asset = req
+                .params
+                .get("asset")
+                .and_then(|v| v.as_str())
+                .ok_or(RpcError {
+                    code: -32602,
+                    message: "invalid params",
+                })?;
+            let cursor = req.params.get("cursor").and_then(|v| v.as_u64());
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(100) as usize;
+            bridge::deposit_history(asset, cursor, limit)?
+        }
+        "bridge.slash_log" => bridge::slash_log()?,
         "localnet.submit_receipt" => {
             let hex = req
                 .params
@@ -1607,6 +1686,72 @@ fn dispatch(
             let guard = bc.lock().unwrap();
             serde_json::to_value(light::headers_since(&guard, start, limit)).unwrap()
         }
+        "light_client.rebate_status" => {
+            let status = {
+                let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+                light::rebate_status(&guard)
+            };
+            match serde_json::to_value(status) {
+                Ok(val) => val,
+                Err(e) => {
+                    #[cfg(feature = "telemetry")]
+                    tracing::warn!(
+                        target: "rpc",
+                        error = %e,
+                        "failed to serialize rebate status"
+                    );
+                    #[cfg(not(feature = "telemetry"))]
+                    let _ = e;
+                    return Err(RpcError {
+                        code: -32603,
+                        message: "serialization error".into(),
+                    });
+                }
+            }
+        }
+        "light_client.rebate_history" => {
+            let relayer = if let Some(hex) = req.params.get("relayer").and_then(|v| v.as_str()) {
+                match hex::decode(hex) {
+                    Ok(bytes) => Some(bytes),
+                    Err(_) => {
+                        return Err(RpcError {
+                            code: -32602,
+                            message: "invalid relayer id".into(),
+                        });
+                    }
+                }
+            } else {
+                None
+            };
+            let cursor = req.params.get("cursor").and_then(|v| v.as_u64());
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(25)
+                .min(200) as usize;
+            let history = {
+                let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+                light::rebate_history(&guard, relayer.as_deref(), cursor, limit)
+            };
+            match serde_json::to_value(history) {
+                Ok(val) => val,
+                Err(e) => {
+                    #[cfg(feature = "telemetry")]
+                    tracing::warn!(
+                        target: "rpc",
+                        error = %e,
+                        "failed to serialize rebate history"
+                    );
+                    #[cfg(not(feature = "telemetry"))]
+                    let _ = e;
+                    return Err(RpcError {
+                        code: -32603,
+                        message: "serialization error".into(),
+                    });
+                }
+            }
+        }
         "rent.escrow.balance" => {
             let esc = RentEscrow::open("rent_escrow.db");
             if let Some(id) = req.params.get("id").and_then(|v| v.as_str()) {
@@ -1689,6 +1834,13 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             net::reputation_show(peer)
+        }
+        "net.gossip_status" => {
+            if let Some(status) = net::gossip_status() {
+                serde_json::to_value(status).unwrap_or_else(|_| serde_json::json!({}))
+            } else {
+                serde_json::json!({"status": "unavailable"})
+            }
         }
         "net.dns_verify" => {
             let domain = req

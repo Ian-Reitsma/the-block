@@ -1,0 +1,24 @@
+# Gossip relay configuration
+# TTL for duplicate suppression in milliseconds
+ttl_ms = 2000
+# Maximum number of recent message hashes stored in the LRU cache
+# (must be non-zero)
+dedup_capacity = 8192
+# Minimum number of peers to fan out to for each message
+min_fanout = 3
+# Target fanout when peer health and latency are nominal
+base_fanout = 8
+# Hard ceiling for fanout under ideal conditions
+max_fanout = 24
+# Weight applied to historical failures when scoring peers
+failure_penalty = 1.5
+# Weight applied to latency observations when scoring peers
+latency_weight = 0.6
+# Weight applied to reputation when scoring peers
+reputation_weight = 1.0
+# Reference latency in milliseconds used when normalising scores
+latency_baseline_ms = 40
+# Peers scoring below this value are deprioritised
+low_score_cutoff = 0.55
+# Path to the shard affinity store persisted by the relay
+shard_store_path = "state/gossip_shards"

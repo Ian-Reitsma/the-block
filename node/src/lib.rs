@@ -610,6 +610,10 @@ pub struct Block {
     pub compute_sub_ct: TokenAmount,
     #[pyo3(get)]
     #[serde(default)]
+    /// CT rebates paid to proof relayers in this block
+    pub proof_rebate_ct: TokenAmount,
+    #[pyo3(get)]
+    #[serde(default)]
     /// IT subsidy minted for storage operations in this block
     pub storage_sub_it: TokenAmount,
     #[pyo3(get)]
@@ -833,6 +837,8 @@ pub struct Blockchain {
     pub blob_scheduler: blob_chain::BlobScheduler,
     /// Pending read acknowledgements awaiting batching
     pub read_batcher: crate::read_receipt::ReadBatcher,
+    /// Persisted proof rebate tracker
+    pub proof_tracker: crate::light_client::proof_tracker::ProofTracker,
     /// Tracker for intermediate block hashes used in reorg rollback
     pub reorg: crate::blockchain::reorg::ReorgTracker,
     /// Recent miners for base-reward logistic feedback
@@ -969,6 +975,7 @@ impl Default for Blockchain {
             pending_blob_bytes: 0,
             blob_scheduler: blob_chain::BlobScheduler::default(),
             read_batcher: crate::read_receipt::ReadBatcher::new(),
+            proof_tracker: crate::light_client::proof_tracker::ProofTracker::default(),
             reorg: crate::blockchain::reorg::ReorgTracker::default(),
             recent_miners: VecDeque::new(),
             recent_timestamps: VecDeque::new(),
@@ -1118,6 +1125,25 @@ impl Blockchain {
     pub fn fee_floor_policy(&self) -> (usize, u32) {
         let guard = self.admission_guard(FeeLane::Consumer);
         guard.policy()
+    }
+
+    pub fn record_proof_relay(&mut self, relayer_id: &[u8], proofs: u64) {
+        if proofs == 0 {
+            return;
+        }
+        let limit = self.params.proof_rebate_limit_ct.max(0) as u64;
+        if limit == 0 {
+            return;
+        }
+        let rate = self.config.proof_rebate_rate.min(limit);
+        if rate == 0 {
+            return;
+        }
+        let amount = rate.saturating_mul(proofs);
+        if amount == 0 {
+            return;
+        }
+        self.proof_tracker.record(relayer_id, proofs, amount);
     }
 
     fn admission_guard(&self, lane: FeeLane) -> MutexGuard<'_, mempool::admission::AdmissionState> {
@@ -1356,6 +1382,7 @@ impl Blockchain {
                                 b.storage_sub_ct,
                                 b.read_sub_ct,
                                 b.compute_sub_ct,
+                                b.proof_rebate_ct,
                                 b.storage_sub_it,
                                 b.read_sub_it,
                                 b.compute_sub_it,
@@ -1483,6 +1510,7 @@ impl Blockchain {
                                     b.storage_sub_ct,
                                     b.read_sub_ct,
                                     b.compute_sub_ct,
+                                    b.proof_rebate_ct,
                                     b.storage_sub_it,
                                     b.read_sub_it,
                                     b.compute_sub_it,
@@ -1629,6 +1657,7 @@ impl Blockchain {
                             b.storage_sub_ct,
                             b.read_sub_ct,
                             b.compute_sub_ct,
+                            b.proof_rebate_ct,
                             b.storage_sub_it,
                             b.read_sub_it,
                             b.compute_sub_it,
@@ -1740,6 +1769,10 @@ impl Blockchain {
         }
         let mut bc = Blockchain::default();
         bc.path = path.to_string();
+        let rebate_path = std::path::Path::new(path)
+            .join("light_client")
+            .join("proof_rebates");
+        bc.proof_tracker = crate::light_client::proof_tracker::ProofTracker::open(rebate_path);
         bc.chain = chain;
         bc.accounts = accounts;
         bc.shard_roots = shard_roots;
@@ -2154,6 +2187,7 @@ impl Blockchain {
             storage_sub_ct: TokenAmount::new(0),
             read_sub_ct: TokenAmount::new(0),
             compute_sub_ct: TokenAmount::new(0),
+            proof_rebate_ct: TokenAmount::new(0),
             storage_sub_it: TokenAmount::new(0),
             read_sub_it: TokenAmount::new(0),
             compute_sub_it: TokenAmount::new(0),
@@ -3493,16 +3527,21 @@ impl Blockchain {
             .saturating_add(
                 (self.lambda_bytes_out_sub_ct_raw as u64).saturating_mul(self.epoch_bytes_out),
             );
-        let coinbase_consumer = reward_consumer
+        let base_coinbase_consumer = reward_consumer
             .0
             .checked_add(storage_sub_ct)
             .and_then(|v| v.checked_add(read_sub_ct))
             .and_then(|v| v.checked_add(compute_sub_ct))
             .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
-        let coinbase_industrial = reward_industrial
+        let coinbase_industrial_total = reward_industrial
             .0
             .checked_add(fee_industrial_u64)
+            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+
+        let rebate_ct = self.proof_tracker.claim_all(index);
+        let coinbase_consumer_total = base_coinbase_consumer
+            .checked_add(rebate_ct)
             .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
 
         let mut fee_hasher = blake3::Hasher::new();
@@ -3517,8 +3556,8 @@ impl Blockchain {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
                 to: miner_addr.to_owned(),
-                amount_consumer: coinbase_consumer,
-                amount_industrial: coinbase_industrial,
+                amount_consumer: coinbase_consumer_total,
+                amount_industrial: coinbase_industrial_total,
                 fee: 0,
                 pct_ct: 100,
                 nonce: 0,
@@ -3598,12 +3637,12 @@ impl Blockchain {
         miner_shadow.balance.consumer = miner_shadow
             .balance
             .consumer
-            .checked_add(coinbase_consumer)
+            .checked_add(coinbase_consumer_total)
             .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
         miner_shadow.balance.industrial = miner_shadow
             .balance
             .industrial
-            .checked_add(coinbase_industrial)
+            .checked_add(coinbase_industrial_total)
             .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
 
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
@@ -3638,11 +3677,12 @@ impl Blockchain {
             retune_hint: self.retune_hint,
             nonce: 0,
             hash: String::new(),
-            coinbase_consumer: TokenAmount::new(coinbase_consumer),
-            coinbase_industrial: TokenAmount::new(coinbase_industrial),
+            coinbase_consumer: TokenAmount::new(base_coinbase_consumer),
+            coinbase_industrial: TokenAmount::new(coinbase_industrial_total),
             storage_sub_ct: storage_sub_token,
             read_sub_ct: read_sub_token,
             compute_sub_ct: compute_sub_token,
+            proof_rebate_ct: TokenAmount::new(0),
             storage_sub_it: TokenAmount::new(0),
             read_sub_it: TokenAmount::new(0),
             compute_sub_it: TokenAmount::new(0),
@@ -3657,6 +3697,8 @@ impl Blockchain {
             vdf_proof: Vec::new(),
         };
 
+        crate::blockchain::process::apply_coinbase_rebates(&mut block, rebate_ct);
+
         let mut nonce = 0u64;
         loop {
             let hash = calculate_hash(
@@ -3666,14 +3708,15 @@ impl Blockchain {
                 nonce,
                 diff,
                 block_base_fee,
-                TokenAmount::new(coinbase_consumer),
-                TokenAmount::new(coinbase_industrial),
-                storage_sub_token,
-                read_sub_token,
-                compute_sub_token,
-                TokenAmount::new(0),
-                TokenAmount::new(0),
-                TokenAmount::new(0),
+                block.coinbase_consumer,
+                block.coinbase_industrial,
+                block.storage_sub_ct,
+                block.read_sub_ct,
+                block.compute_sub_ct,
+                block.proof_rebate_ct,
+                block.storage_sub_it,
+                block.read_sub_it,
+                block.compute_sub_it,
                 block.read_root,
                 &fee_checksum,
                 &txs,
@@ -3927,12 +3970,12 @@ impl Blockchain {
                 miner.balance.consumer = miner
                     .balance
                     .consumer
-                    .checked_add(coinbase_consumer)
+                    .checked_add(coinbase_consumer_total)
                     .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
                 miner.balance.industrial = miner
                     .balance
                     .industrial
-                    .checked_add(coinbase_industrial)
+                    .checked_add(coinbase_industrial_total)
                     .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
                 changed.insert(miner_addr.to_owned());
                 let mut touched_shards: HashSet<ShardId> = HashSet::new();
@@ -3951,9 +3994,10 @@ impl Blockchain {
                         .map_err(|e| PyValueError::new_err(format!("shard state write: {e}")))?;
                 }
 
-                self.emission_consumer += reward_consumer.0;
+                let minted_consumer = reward_consumer.0.saturating_add(rebate_ct);
+                self.emission_consumer = self.emission_consumer.saturating_add(minted_consumer);
                 self.emission_industrial += reward_industrial.0;
-                self.macro_acc_consumer += reward_consumer.0;
+                self.macro_acc_consumer = self.macro_acc_consumer.saturating_add(minted_consumer);
                 self.macro_acc_industrial += reward_industrial.0;
                 self.block_height += 1;
                 if self.block_height % self.macro_interval == 0 {
@@ -4053,6 +4097,7 @@ impl Blockchain {
             block.storage_sub_ct,
             block.read_sub_ct,
             block.compute_sub_ct,
+            block.proof_rebate_ct,
             block.storage_sub_it,
             block.read_sub_it,
             block.compute_sub_it,
@@ -4135,6 +4180,7 @@ impl Blockchain {
             + block.storage_sub_ct.0 as u128
             + block.read_sub_ct.0 as u128
             + block.compute_sub_ct.0 as u128
+            + block.proof_rebate_ct.0 as u128
             + fee_tot_consumer;
         let expected_industrial = self.block_reward_industrial.0 as u128 + fee_tot_industrial;
         if coinbase_consumer_total != expected_consumer
@@ -4170,6 +4216,11 @@ impl Blockchain {
         if depth > 0 {
             #[cfg(feature = "telemetry")]
             observer::record_reorg(depth as u64);
+        }
+        if depth > 0 {
+            for block in old_chain.iter().rev().take(depth) {
+                self.proof_tracker.rollback_claim(block.index);
+            }
         }
         self.chain.clear();
         self.accounts.clear();
@@ -4257,6 +4308,7 @@ impl Blockchain {
                 + block.storage_sub_ct.0 as u128
                 + block.read_sub_ct.0 as u128
                 + block.compute_sub_ct.0 as u128
+                + block.proof_rebate_ct.0 as u128
                 + fee_tot_consumer;
             let expected_industrial = self.block_reward_industrial.0 as u128 + fee_tot_industrial;
             if coinbase_consumer_total != expected_consumer
@@ -4401,6 +4453,7 @@ impl Blockchain {
                 b.storage_sub_ct,
                 b.read_sub_ct,
                 b.compute_sub_ct,
+                b.proof_rebate_ct,
                 b.storage_sub_it,
                 b.read_sub_it,
                 b.compute_sub_it,
@@ -4984,6 +5037,7 @@ fn calculate_hash(
     storage_sub: TokenAmount,
     read_sub: TokenAmount,
     compute_sub: TokenAmount,
+    proof_rebate: TokenAmount,
     storage_sub_it: TokenAmount,
     read_sub_it: TokenAmount,
     compute_sub_it: TokenAmount,
@@ -5013,6 +5067,7 @@ fn calculate_hash(
         storage_sub: storage_sub.0,
         read_sub: read_sub.0,
         compute_sub: compute_sub.0,
+        proof_rebate: proof_rebate.0,
         storage_sub_it: storage_sub_it.0,
         read_sub_it: read_sub_it.0,
         compute_sub_it: compute_sub_it.0,

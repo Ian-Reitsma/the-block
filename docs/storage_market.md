@@ -11,7 +11,7 @@ and retention period.
 Clients split files into erasure-coded shards and allocate them across
 providers using reputation-weighted Lagrange coding. Each `StorageContract`
 tracks the provider, shard count, pricing, retention window, and next payment
-block. Contracts are funded from CT/IT balances via the wallet CLI
+block. Contracts are funded from CT balances via the wallet CLI (legacy industrial columns remain zeroed for compatibility)
 (`blockctl storage upload`), reserving `price_per_block * retention` upfront and
 only paying for successful storage.
 

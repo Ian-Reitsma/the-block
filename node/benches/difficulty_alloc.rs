@@ -25,6 +25,7 @@ fn sample_chain() -> (VecDeque<u64>, Vec<Block>) {
             storage_sub_ct: TokenAmount::new(0),
             read_sub_ct: TokenAmount::new(0),
             compute_sub_ct: TokenAmount::new(0),
+            proof_rebate_ct: TokenAmount::new(0),
             read_root: [0u8; 32],
             fee_checksum: String::new(),
             state_root: String::new(),

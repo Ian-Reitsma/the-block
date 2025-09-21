@@ -108,6 +108,8 @@ pub struct Params {
     pub gamma_read_sub_ct: i64,
     pub kappa_cpu_sub_ct: i64,
     pub lambda_bytes_out_sub_ct: i64,
+    #[serde(default = "default_proof_rebate_limit_ct")]
+    pub proof_rebate_limit_ct: i64,
     pub rent_rate_ct_per_byte: i64,
     pub kill_switch_subsidy_reduction: i64,
     pub miner_reward_logistic_target: i64,
@@ -147,6 +149,7 @@ impl Default for Params {
             gamma_read_sub_ct: 20,
             kappa_cpu_sub_ct: 10,
             lambda_bytes_out_sub_ct: 5,
+            proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
             rent_rate_ct_per_byte: 0,
             kill_switch_subsidy_reduction: 0,
             miner_reward_logistic_target: 100,
@@ -172,6 +175,10 @@ impl Default for Params {
             scheduler_weight_storage: 1,
         }
     }
+}
+
+const fn default_proof_rebate_limit_ct() -> i64 {
+    1
 }
 
 fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -289,6 +296,14 @@ fn apply_lambda_bytes_out_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_proof_rebate_limit(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.proof_rebate_limit_ct = v;
+    Ok(())
+}
+
 fn apply_rent_rate(v: i64, p: &mut Params) -> Result<(), ()> {
     p.rent_rate_ct_per_byte = v;
     Ok(())
@@ -337,7 +352,7 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 28] = [
+    static REGS: [ParamSpec; 29] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -469,6 +484,16 @@ pub fn registry() -> &'static [ParamSpec] {
             unit: "nCT per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_lambda_bytes_out_sub,
+            apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ProofRebateLimitCt,
+            default: default_proof_rebate_limit_ct(),
+            min: 0,
+            max: 1_000_000,
+            unit: "nCT per proof",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_proof_rebate_limit,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {

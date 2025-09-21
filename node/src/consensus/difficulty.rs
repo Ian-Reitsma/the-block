@@ -88,6 +88,7 @@ mod tests {
                 storage_sub_ct: TokenAmount::new(0),
                 read_sub_ct: TokenAmount::new(0),
                 compute_sub_ct: TokenAmount::new(0),
+                proof_rebate_ct: TokenAmount::new(0),
                 storage_sub_it: TokenAmount::new(0),
                 read_sub_it: TokenAmount::new(0),
                 compute_sub_it: TokenAmount::new(0),

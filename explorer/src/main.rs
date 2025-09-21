@@ -57,6 +57,18 @@ async fn main() -> anyhow::Result<()> {
         address: Option<String>,
         limit: Option<usize>,
     }
+    #[derive(Deserialize, Default)]
+    struct RebateHistoryQuery {
+        db: Option<String>,
+        relayer: Option<String>,
+        cursor: Option<u64>,
+        limit: Option<usize>,
+    }
+    #[derive(Deserialize, Default)]
+    struct RelayerBoardQuery {
+        db: Option<String>,
+        limit: Option<usize>,
+    }
     let app = Router::new()
         .route(
             "/blocks/:hash",
@@ -124,6 +136,54 @@ async fn main() -> anyhow::Result<()> {
                                 page: 0,
                                 page_size: 0,
                                 entries: Vec::new(),
+                            })
+                        }
+                    }
+                }
+            }),
+        )
+        .route(
+            "/light_client/top_relayers",
+            get(move |Query(query): Query<RelayerBoardQuery>| {
+                let db_path = query
+                    .db
+                    .clone()
+                    .unwrap_or_else(|| "light_client/proof_rebates".into());
+                let limit = query.limit.unwrap_or(10);
+                async move {
+                    match explorer::light_client::top_relayers(&db_path, limit) {
+                        Ok(list) => Json(list),
+                        Err(err) => {
+                            eprintln!("top relayer query failed: {err}");
+                            Json(Vec::<explorer::light_client::RelayerLeaderboardEntry>::new())
+                        }
+                    }
+                }
+            }),
+        )
+        .route(
+            "/light_client/rebate_history",
+            get(move |Query(query): Query<RebateHistoryQuery>| {
+                let db_path = query
+                    .db
+                    .clone()
+                    .unwrap_or_else(|| "light_client/proof_rebates".into());
+                let relayer = query.relayer.clone();
+                let cursor = query.cursor;
+                let limit = query.limit.unwrap_or(25);
+                async move {
+                    match explorer::light_client::recent_rebate_history(
+                        &db_path,
+                        relayer.as_deref(),
+                        cursor,
+                        limit,
+                    ) {
+                        Ok(page) => Json(page),
+                        Err(err) => {
+                            eprintln!("rebate history query failed: {err}");
+                            Json(explorer::light_client::RebateHistoryPage {
+                                receipts: Vec::new(),
+                                next: None,
                             })
                         }
                     }

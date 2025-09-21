@@ -55,21 +55,14 @@ Keeping block fullness near 50 % provides headroom for bursts and simplifies
 capacity planning. Validators can adjust `TARGET_GAS_PER_BLOCK` through
 `governance.params` proposals if demand patterns change.
 
-## CT/IT Fee Splits
+## CT Fee Selector
 
-The `pct_ct` selector routes an arbitrary percentage of each transaction's fee
-to consumer tokens (`CT`), with the remainder paid in industrial tokens (`IT`).
-Examples:
+The `pct_ct` selector historically routed an arbitrary percentage of each transaction's fee to consumer tokens (`CT`) with the remainder assigned to a legacy industrial bucket. Policy now pins production lanes to `pct_ct = 100`, so all live traffic settles in CT while the selector remains available for tests and devnets.
 
-| `pct_ct` | CT share | IT share |
-|----------|---------|---------|
-| `0`      | `0%`    | `100%`  |
-| `37`     | `37%`   | `63%`   |
-| `100`    | `100%`  | `0%`    |
+| `pct_ct` | CT share | Legacy industrial share |
+|----------|---------|-------------------------|
+| `0`      | `0%`    | `100%` (tests only)     |
+| `37`     | `37%`   | `63%` (tests only)      |
+| `100`    | `100%`  | `0%`                    |
 
-During admission, `reserve_pending` debits the caller's balances according to
-this split; `reserve_pending` in `node/src/transaction.rs` subtracts the CT and
-IT portions separately. When the block is mined, the coinbase accumulates the
-same proportions, so fee accounting matches the original split. See
-[docs/transaction_lifecycle.md](transaction_lifecycle.md) for a full payload
-example using `pct_ct`.
+During admission, `reserve_pending` debits the caller's balances according to the selector, and `node/src/transaction.rs` keeps both columns for compatibility (the industrial path remains zero in production). When the block is mined, the coinbase accumulates the same proportions. See [docs/transaction_lifecycle.md](transaction_lifecycle.md) for a full payload example using `pct_ct`.

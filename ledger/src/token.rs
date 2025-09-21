@@ -29,7 +29,7 @@ pub struct TokenInfo {
 }
 
 /// Registry for native tokens with pluggable emission schedules.
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokenRegistry {
     tokens: HashMap<String, TokenInfo>,
 }

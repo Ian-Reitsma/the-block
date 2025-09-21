@@ -3,7 +3,7 @@
 Settlement auditing now spans two complementary feeds:
 
 1. **Consensus checkpoints** – Receipts written under `state/receipts/pending/<epoch>` prior to finalization. These remain documented by the `settlement.audit` RPC and the optional `tools/indexer` pipeline.
-2. **Compute-market ledger** – The CT/IT settlement ledger persists an append-only JSON log via `state::append_audit` and exposes the same information over `compute_market.audit`.
+2. **Compute-market ledger** – The CT settlement ledger persists an append-only JSON log via `state::append_audit` and exposes the same information over `compute_market.audit`; legacy `*_it` fields remain for compatibility but stay zero in production.
 
 Both surfaces must agree. Operators should stream each endpoint, archive the JSON, and compare anchor hashes to detect tampering.
 
@@ -26,9 +26,9 @@ Each audit record mirrors the `AuditRecord` struct:
   "entity": "provider-nyc-01",
   "memo": "accrue_split",
   "delta_ct": 4200,
-  "delta_it": 600,
+  "delta_it": 0,
   "balance_ct": 98200,
-  "balance_it": 14000,
+  "balance_it": 0,
   "anchor": null
 }
 ```
@@ -41,7 +41,7 @@ The CLI forwards the same data when compiled with settlement support:
 cargo run -p contract-cli --features full -- compute stats --url http://127.0.0.1:26658
 ```
 
-The stats command first issues `compute_market.stats`, then fetches provider balances and recent audit entries to present CT/IT exposure by provider. Use the `--features sqlite-storage` build when only the RocksDB-backed ledger support is required.
+The stats command first issues `compute_market.stats`, then fetches provider balances and recent audit entries to present CT exposure per provider (legacy `industrial` columns are retained for tooling compatibility). Use the `--features sqlite-storage` build when only the RocksDB-backed ledger support is required.
 
 ## Monitoring Consensus Receipt Audits
 

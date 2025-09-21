@@ -190,7 +190,7 @@ These subsidy gauges directly reflect the CT-only economic model: `subsidy_bytes
 
 Settlement persistence adds complementary gauges:
 
-- `SETTLE_APPLIED_TOTAL` – increments whenever a CT/IT accrual, refund, or SLA burn is recorded. Pair this with `compute_market.audit` to ensure every ledger mutation hits telemetry.
+- `SETTLE_APPLIED_TOTAL` – increments whenever a CT accrual, refund, or SLA burn is recorded. Pair this with `compute_market.audit` to ensure every ledger mutation hits telemetry (legacy industrial counters remain for compatibility and stay zero in production).
 - `SETTLE_FAILED_TOTAL{reason="spend|penalize|refund"}` – surfaces errors during ledger mutation (for example, insufficient balance when penalizing an SLA violation). Any sustained growth warrants investigation before balances drift.
 - `SETTLE_MODE_CHANGE_TOTAL{state="dryrun|armed|real"}` – tracks activation transitions, enabling alerts when a node unexpectedly reverts to dry-run mode.
 - `matches_total{dry_run,lane}` – confirms the lane-aware matcher continues to produce receipts. Alert if a lane’s matches drop to zero while bids pile up.
