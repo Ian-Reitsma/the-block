@@ -22,6 +22,8 @@ pub enum LightClientCmd {
         #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
+    /// Inspect historical proof rebate claims
+    RebateHistory(RebateHistoryArgs),
     /// Interact with the decentralized identifier registry
     Did {
         #[command(subcommand)]
@@ -117,6 +119,24 @@ pub struct AnchorKeyMaterial {
 pub struct AnchorRemoteAttestation {
     pub signer: String,
     pub signature: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct RebateHistoryArgs {
+    #[arg(long, default_value = "http://localhost:26658")]
+    pub url: String,
+    /// Hex-encoded relayer identifier to filter receipts
+    #[arg(long)]
+    pub relayer: Option<String>,
+    /// Resume listing before this block height
+    #[arg(long)]
+    pub cursor: Option<u64>,
+    /// Maximum number of receipts to fetch
+    #[arg(long, default_value_t = 25)]
+    pub limit: usize,
+    /// Emit JSON instead of human-readable output
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -228,6 +248,27 @@ struct RpcErrorBody {
     message: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+struct RebateHistoryResult {
+    receipts: Vec<RebateHistoryReceipt>,
+    #[serde(default)]
+    next: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RebateHistoryReceipt {
+    height: u64,
+    amount: u64,
+    #[serde(default)]
+    relayers: Vec<RebateHistoryRelayer>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RebateHistoryRelayer {
+    id: String,
+    amount: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct LightHeader {
     pub height: u64,
@@ -250,6 +291,12 @@ pub fn handle(cmd: LightClientCmd) {
         LightClientCmd::RebateStatus { url } => {
             let client = RpcClient::from_env();
             if let Err(err) = query_rebate_status(&client, &url) {
+                eprintln!("{}", err);
+            }
+        }
+        LightClientCmd::RebateHistory(args) => {
+            let client = RpcClient::from_env();
+            if let Err(err) = query_rebate_history(&client, &args) {
                 eprintln!("{}", err);
             }
         }
@@ -300,6 +347,60 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
         .text()
         .context("failed to read rebate status response")?;
     println!("{}", text);
+    Ok(())
+}
+
+fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<()> {
+    let mut params = serde_json::Map::new();
+    if let Some(relayer) = &args.relayer {
+        params.insert("relayer".to_string(), Value::String(relayer.clone()));
+    }
+    if let Some(cursor) = args.cursor {
+        params.insert("cursor".to_string(), Value::Number(cursor.into()));
+    }
+    params.insert(
+        "limit".to_string(),
+        Value::Number(serde_json::Number::from(args.limit as u64)),
+    );
+
+    let payload = Payload {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "light_client.rebate_history",
+        params: Value::Object(params),
+        auth: None,
+    };
+    let response = client
+        .call(&args.url, &payload)
+        .context("rebate history RPC call failed")?;
+    let text = response
+        .text()
+        .context("failed to read rebate history response")?;
+    let value: Value =
+        serde_json::from_str(&text).context("failed to parse rebate history response")?;
+    let envelope: RpcEnvelope<RebateHistoryResult> =
+        serde_json::from_value(value.clone()).context("invalid rebate history envelope")?;
+    if let Some(err) = envelope.error {
+        anyhow::bail!("{} (code {})", err.message, err.code);
+    }
+    let result = envelope.result.unwrap_or_default();
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&value)?);
+        return Ok(());
+    }
+    if result.receipts.is_empty() {
+        println!("No rebate receipts found.");
+    } else {
+        for receipt in &result.receipts {
+            println!("Block {} – {} CT", receipt.height, receipt.amount);
+            for relayer in &receipt.relayers {
+                println!("  {}: {}", relayer.id, relayer.amount);
+            }
+        }
+    }
+    if let Some(next) = result.next {
+        println!("Next cursor: {}", next);
+    }
     Ok(())
 }
 

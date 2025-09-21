@@ -25,6 +25,9 @@ use ureq;
 
 pub mod summary;
 
+#[cfg(feature = "telemetry")]
+pub use bridges::{BRIDGE_CHALLENGES_TOTAL, BRIDGE_SLASHES_TOTAL};
+
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
 #[cfg(feature = "telemetry")]
@@ -379,6 +382,18 @@ pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry proof rebates amount: {e}"));
     c
+});
+
+pub static PROOF_REBATES_PENDING_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "proof_rebates_pending_total",
+        "Pending CT rebates awaiting claim",
+    )
+    .unwrap_or_else(|e| panic!("gauge proof rebates pending: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry proof rebates pending: {e}"));
+    g
 });
 
 pub static MOBILE_CACHE_HIT_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
@@ -2935,6 +2950,36 @@ pub static GOSSIP_FANOUT_GAUGE: Lazy<IntGauge> = Lazy::new(|| {
     g
 });
 
+pub static GOSSIP_LATENCY_BUCKETS: Lazy<Histogram> = Lazy::new(|| {
+    let opts = prometheus::HistogramOpts::new(
+        "gossip_latency_seconds",
+        "Observed latency hints used for adaptive gossip fanout",
+    )
+    .buckets(vec![
+        0.000_5, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1.0,
+    ]);
+    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    h
+});
+
+pub static GOSSIP_PEER_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        prometheus::Opts::new(
+            "gossip_peer_failure_total",
+            "Reasons peers were skipped during gossip fanout",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
 pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         prometheus::Opts::new(
@@ -3436,6 +3481,8 @@ fn gather() -> String {
         &*ORPHAN_SWEEP_TOTAL,
         &*GOSSIP_DUPLICATE_TOTAL,
         &*GOSSIP_FANOUT_GAUGE,
+        &*GOSSIP_LATENCY_BUCKETS,
+        GOSSIP_PEER_FAILURE_TOTAL.with_label_values(&["__"]),
         &*SHARD_CACHE_EVICT_TOTAL,
         &*PARTITION_EVENTS_TOTAL,
         &*PARTITION_RECOVER_BLOCKS,

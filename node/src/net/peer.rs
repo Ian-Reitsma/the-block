@@ -530,10 +530,11 @@ impl PeerSet {
                 let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = bc.submit_blob_tx(tx);
             }
-            Payload::Block(_shard, block) => {
+            Payload::Block(shard, block) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
+                crate::net::register_shard_peer(shard, peer_key);
                 let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
                 if (block.index as usize) == bc.chain.len() {
                     let prev = bc.chain.last().map(|b| b.hash.clone()).unwrap_or_default();

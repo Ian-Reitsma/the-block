@@ -1,6 +1,6 @@
 # Transaction Lifecycle and Fee Lanes
 
-The transaction subsystem coordinates account debits, signatures, and fee calculation while respecting dual fee lanes. This document walks through the full lifecycle from payload construction to on-chain inclusion and provides references for Python bindings and mempool behavior.
+The transaction subsystem coordinates account debits, signatures, and fee calculation while respecting dual fee lanes and the legacy industrial sub-ledger (retained for compatibility). This document walks through the full lifecycle from payload construction to on-chain inclusion and provides references for Python bindings and mempool behavior.
 
 ## 1. Raw Payload Structure
 
@@ -8,9 +8,9 @@ The transaction subsystem coordinates account debits, signatures, and fee calcul
 
 - `from_` / `to` – UTF-8 account identifiers. The Python bindings expose a `from` alias for ergonomics.
 - `amount_consumer` – CT to transfer on the consumer lane.
-- `amount_industrial` – CT routed through the industrial lane.
+- `amount_industrial` – CT routed through the industrial lane (legacy field; production policy keeps this zero).
 - `fee` – absolute fee paid in CT regardless of lane.
-- `pct_ct` – percentage of the fee paid in consumer tokens. `0` routes the entire fee to industrial tokens, `100` routes it entirely to consumer tokens.
+- `pct_ct` – percentage of the fee paid in consumer tokens. Production policy pins this to `100`, but lower values remain available for simulations and regression tests.
 - `nonce` – sequential per-sender nonce preventing replay; gaps are rejected by the mempool.
 - `memo` – arbitrary byte vector stored verbatim; the mempool enforces a size cap to deter spam.
 

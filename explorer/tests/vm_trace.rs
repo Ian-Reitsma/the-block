@@ -4,9 +4,18 @@ use tempfile::tempdir;
 #[test]
 fn load_trace() {
     let dir = tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join("trace")).unwrap();
+    struct DirGuard(std::path::PathBuf);
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    let guard = DirGuard(std::env::current_dir().unwrap());
+    std::env::set_current_dir(dir.path()).unwrap();
+    std::fs::create_dir_all("trace").unwrap();
     std::fs::write(
-        dir.path().join("trace/tx1.json"),
+        "trace/tx1.json",
         serde_json::to_vec(&vec!["Push", "Halt"]).unwrap(),
     )
     .unwrap();
@@ -14,4 +23,5 @@ fn load_trace() {
     let ex = Explorer::open(&db).unwrap();
     let trace = ex.opcode_trace("tx1").unwrap();
     assert_eq!(trace, vec!["Push", "Halt"]);
+    drop(guard);
 }

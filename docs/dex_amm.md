@@ -1,11 +1,11 @@
 # DEX AMM Pools
 
-This module implements constant-product automated market maker (AMM) pools for CT/IT pairs. Liquidity providers deposit both tokens and receive pool shares representing their claim on the reserves. Swaps maintain the invariant `x * y = k`.
+This module implements constant-product automated market maker (AMM) pools for CT pairs (CT against a paired asset such as USDC or a synthetic test reserve). Liquidity providers deposit both sides of the pair and receive pool shares representing their claim on the reserves. Swaps maintain the invariant `x * y = k`.
 
 ## Liquidity
 
-- **Add liquidity**: deposit CT and IT in proportion to current reserves to mint shares.
-- **Remove liquidity**: burn shares to withdraw proportional reserves.
+- **Add liquidity**: deposit CT and the paired asset in proportion to current reserves to mint shares.
+- **Remove liquidity**: burn shares to withdraw proportional reserves from both sides.
 Wallet CLI exposes `liquidity add` and `liquidity remove` commands for these flows.
 
 ## Swaps

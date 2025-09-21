@@ -17,7 +17,7 @@ This chapter details how The‑Block enforces a one‑to‑one mapping between s
    effective_industrial = balance.industrial − pending_industrial
    ```
 
-   The transaction is rejected if the debit plus fee exceeds either effective balance.
+   The transaction is rejected if the debit plus fee exceeds either effective balance. The industrial ledger is a CT sub-account retained for compatibility; production policy keeps it at zero, but tests may populate it to validate selector logic.
 3. **Reservation** – On success the account reserves the amounts and fee by
    increasing `pending_consumer`, `pending_industrial`, and `pending_nonce`.
    No further transaction from the same sender is allowed unless the nonce is
@@ -33,8 +33,7 @@ This chapter details how The‑Block enforces a one‑to‑one mapping between s
 
 * **INV-PENDING-001** – At any time there is at most one committed or pending
   transaction with nonce `N = account.nonce + pending_nonce + 1`.
-* **INV-PENDING-002** – `balance.consumer + pending_consumer` and
-  `balance.industrial + pending_industrial` are never negative.
+* **INV-PENDING-002** – `balance.consumer + pending_consumer` and the legacy `balance.industrial + pending_industrial` (zero in production) are never negative.
 * **INV-PENDING-003** – `pending_nonce` equals the number of transactions for the
   account currently in the mempool.
 * **INV-PENDING-004** – Atomicity of reservations:
@@ -44,8 +43,7 @@ This chapter details how The‑Block enforces a one‑to‑one mapping between s
   = B_i^{\text{confirmed}}(t_0) - \sum_k d_i(k)
   \]
 
-  where `i` ranges over consumer and industrial token classes and `d_i(k)` is the
-  debit in transaction `k`.
+  where `i` ranges over the consumer ledger and the legacy industrial sub-ledger (used in tests) and `d_i(k)` is the debit in transaction `k`.
 
 ## Nonce and Supply Invariants
 
@@ -90,7 +88,7 @@ pending_consumer= 0
 Reorg or explicit eviction reverses the reservation step so the "Before" state
 is restored.
 
-### Mixed Consumer/Industrial Example
+### Mixed Consumer/Industrial Example (tests/devnets)
 
 ```text
 nonce                  = 0
@@ -101,7 +99,7 @@ pending_consumer       = 0
 pending_industrial     = 0
 ```
 
-After a transaction debiting 5 consumer and 4 industrial with fee 1:
+After a transaction debiting 5 consumer and 4 industrial with fee 1 (values used in regression tests):
 
 ```text
 nonce                  = 0

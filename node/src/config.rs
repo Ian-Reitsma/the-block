@@ -463,18 +463,38 @@ pub fn watch(dir: &str) {
     {
         *CONFIG_DIR.write().unwrap() = dir.to_string();
     }
+    crate::gossip::config::watch(dir);
     let cfg_dir = dir.to_string();
     thread::spawn(move || {
         let (tx, rx) = channel();
         let mut watcher: RecommendedWatcher = notify::recommended_watcher(tx).expect("watcher");
-        let path = Path::new(&cfg_dir).join("default.toml");
-        watcher
-            .watch(&path, RecursiveMode::NonRecursive)
-            .expect("watch config");
+        let path = Path::new(&cfg_dir);
+        if watcher.watch(path, RecursiveMode::NonRecursive).is_err() {
+            return;
+        }
         for res in rx {
             if let Ok(event) = res {
-                if matches!(event.kind, EventKind::Modify(_)) {
-                    let _ = reload();
+                if matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                ) {
+                    let mut reload_node = false;
+                    let mut reload_gossip = false;
+                    for path in &event.paths {
+                        if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                            match name {
+                                "default.toml" => reload_node = true,
+                                "gossip.toml" => reload_gossip = true,
+                                _ => {}
+                            }
+                        }
+                    }
+                    if reload_node {
+                        let _ = reload();
+                    }
+                    if reload_gossip {
+                        crate::gossip::config::reload();
+                    }
                 }
             }
         }
@@ -484,6 +504,7 @@ pub fn watch(dir: &str) {
         let mut signals = Signals::new([SIGHUP]).expect("signals");
         for _ in signals.forever() {
             let _ = reload();
+            crate::gossip::config::reload();
         }
     });
 }
@@ -494,6 +515,16 @@ pub fn current() -> NodeConfig {
 
 pub fn set_current(cfg: NodeConfig) {
     *CURRENT_CONFIG.write().unwrap() = cfg;
+}
+
+/// Return the directory backing the node configuration if available.
+pub fn config_dir() -> Option<String> {
+    let dir = CONFIG_DIR.read().unwrap().clone();
+    if dir.is_empty() {
+        None
+    } else {
+        Some(dir)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]

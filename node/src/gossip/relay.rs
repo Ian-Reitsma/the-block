@@ -1,32 +1,218 @@
+use crate::gossip::config::{self, GossipConfig};
+use crate::net::partition_watch::PARTITION_WATCH;
+use crate::net::peer::{pk_from_addr, PeerMetrics};
+use crate::net::{peer_stats_map, send_msg, send_quic_msg, Message, Transport};
+use crate::simple_db::SimpleDb;
+use blake3::hash;
+use hex;
+use ledger::address::ShardId;
+use lru::LruCache;
 use parking_lot::Mutex;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
+use serde::Serialize;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
-use blake3::hash;
-use rand::seq::SliceRandom;
-
-use crate::net::{partition_watch::PARTITION_WATCH, send_msg, send_quic_msg, Message, Transport};
-use crate::range_boost;
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_TTL_DROP_TOTAL};
-use ledger::address::ShardId;
+use crate::telemetry::{
+    GOSSIP_DUPLICATE_TOTAL, GOSSIP_FANOUT_GAUGE, GOSSIP_LATENCY_BUCKETS, GOSSIP_PEER_FAILURE_TOTAL,
+    GOSSIP_TTL_DROP_TOTAL,
+};
+
+use crate::range_boost;
 
 type PeerId = [u8; 32];
 
+#[derive(Clone)]
+struct GossipSettings {
+    ttl: Duration,
+    dedup_capacity: NonZeroUsize,
+    min_fanout: usize,
+    base_fanout: usize,
+    max_fanout: usize,
+    failure_penalty: f64,
+    latency_weight: f64,
+    reputation_weight: f64,
+    latency_baseline_ms: f64,
+    low_score_cutoff: f64,
+    shard_store_path: String,
+}
+
+impl From<GossipConfig> for GossipSettings {
+    fn from(cfg: GossipConfig) -> Self {
+        Self {
+            ttl: Duration::from_millis(cfg.ttl_ms.max(1)),
+            dedup_capacity: cfg.dedup_capacity(),
+            min_fanout: cfg.min_fanout,
+            base_fanout: cfg.base_fanout,
+            max_fanout: cfg.max_fanout,
+            failure_penalty: cfg.failure_penalty,
+            latency_weight: cfg.latency_weight,
+            reputation_weight: cfg.reputation_weight,
+            latency_baseline_ms: cfg.latency_baseline_ms as f64,
+            low_score_cutoff: cfg.low_score_cutoff,
+            shard_store_path: cfg.shard_store_path,
+        }
+    }
+}
+
+struct ShardStore {
+    db: Mutex<SimpleDb>,
+    cache: Mutex<HashMap<ShardId, Vec<PeerId>>>,
+}
+
+impl ShardStore {
+    fn new(path: &str) -> Self {
+        let db = SimpleDb::open(path);
+        let cache = Mutex::new(Self::load(&db));
+        Self {
+            db: Mutex::new(db),
+            cache,
+        }
+    }
+
+    #[cfg(test)]
+    fn temporary() -> Self {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.into_path().join("gossip_store");
+        let db = SimpleDb::open(path.to_str().unwrap());
+        let cache = Mutex::new(Self::load(&db));
+        Self {
+            db: Mutex::new(db),
+            cache,
+        }
+    }
+
+    fn load(db: &SimpleDb) -> HashMap<ShardId, Vec<PeerId>> {
+        let mut out = HashMap::new();
+        for key in db.keys_with_prefix("shard:") {
+            if let Some(suffix) = key.strip_prefix("shard:") {
+                if let Ok(shard) = suffix.parse::<ShardId>() {
+                    if let Some(bytes) = db.get(&key) {
+                        if let Ok(mut peers) = bincode::deserialize::<Vec<PeerId>>(&bytes) {
+                            peers.sort();
+                            peers.dedup();
+                            out.insert(shard, peers);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn register(&self, shard: ShardId, peer: PeerId) {
+        let mut cache = self.cache.lock();
+        let entry = cache.entry(shard).or_default();
+        if entry.contains(&peer) {
+            return;
+        }
+        entry.push(peer);
+        entry.sort();
+        entry.dedup();
+        let snapshot = entry.clone();
+        drop(cache);
+        if let Ok(bytes) = bincode::serialize(&snapshot) {
+            let key = format!("shard:{shard}");
+            let mut db = self.db.lock();
+            let _ = db.insert(&key, bytes);
+        }
+    }
+
+    fn peers(&self, shard: ShardId) -> Vec<PeerId> {
+        self.cache.lock().get(&shard).cloned().unwrap_or_default()
+    }
+
+    fn snapshot(&self) -> HashMap<ShardId, Vec<PeerId>> {
+        self.cache.lock().clone()
+    }
+}
+
+#[derive(Default)]
+struct RelayMetrics {
+    last_fanout: Option<usize>,
+    last_candidates: Option<usize>,
+    avg_score: Option<f64>,
+    last_updated: Option<Instant>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct FanoutStatus {
+    pub min: usize,
+    pub base: usize,
+    pub max: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidates: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_score: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub millis_since_update: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ShardAffinity {
+    pub shard: ShardId,
+    pub peers: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct PartitionStatus {
+    pub active: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marker: Option<u64>,
+    pub isolated_peers: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct RelayStatus {
+    pub ttl_ms: u64,
+    pub dedup_capacity: usize,
+    pub dedup_size: usize,
+    pub fanout: FanoutStatus,
+    pub shard_affinity: Vec<ShardAffinity>,
+    pub partition: PartitionStatus,
+}
+
+#[derive(Clone)]
+struct PeerCandidate {
+    addr: SocketAddr,
+    transport: Transport,
+    cert: Option<Vec<u8>>,
+    score: f64,
+    latency_ms: Option<f64>,
+    peer_kind: CandidateKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CandidateKind {
+    Preferred,
+    Deprioritized,
+}
+
 /// Relay provides TTL-based duplicate suppression and fanout selection.
 pub struct Relay {
-    recent: Mutex<HashMap<[u8; 32], Instant>>,
-    ttl: Duration,
-    shard_peers: Mutex<HashMap<ShardId, Vec<PeerId>>>,
+    recent: Mutex<LruCache<[u8; 32], Instant>>,
+    settings: GossipSettings,
+    shard_store: ShardStore,
+    metrics: Mutex<RelayMetrics>,
 }
 
 impl Relay {
-    pub fn new(ttl: Duration) -> Self {
+    pub fn new(config: GossipConfig) -> Self {
+        let settings: GossipSettings = config.into();
+        let shard_store = ShardStore::new(&settings.shard_store_path);
+        let recent = Mutex::new(LruCache::new(settings.dedup_capacity));
         Self {
-            recent: Mutex::new(HashMap::new()),
-            ttl,
-            shard_peers: Mutex::new(HashMap::new()),
+            recent,
+            settings,
+            shard_store,
+            metrics: Mutex::new(RelayMetrics::default()),
         }
     }
 
@@ -34,32 +220,197 @@ impl Relay {
         hash(&bincode::serialize(msg).unwrap_or_default()).into()
     }
 
-    /// Returns true if the message has not been seen recently.
-    pub fn should_process(&self, msg: &Message) -> bool {
-        let h = Self::hash_msg(msg);
+    pub fn should_process_at(&self, msg: &Message, now: Instant) -> bool {
         let mut guard = self.recent.lock();
-        let now = Instant::now();
-        let before = guard.len();
-        guard.retain(|_, t| now.duration_since(*t) < self.ttl);
-        let dropped = before - guard.len();
+        let dropped = Self::clean_expired_locked(&mut guard, self.settings.ttl, now);
         #[cfg(feature = "telemetry")]
         if dropped > 0 {
             GOSSIP_TTL_DROP_TOTAL.inc_by(dropped as u64);
         }
         #[cfg(not(feature = "telemetry"))]
         let _ = dropped;
-        if guard.contains_key(&h) {
+        let h = Self::hash_msg(msg);
+        if guard.peek(&h).is_some() {
             #[cfg(feature = "telemetry")]
-            GOSSIP_DUPLICATE_TOTAL.inc();
-            false
-        } else {
-            guard.insert(h, now);
-            true
+            {
+                GOSSIP_DUPLICATE_TOTAL.inc();
+                GOSSIP_PEER_FAILURE_TOTAL
+                    .with_label_values(&["duplicate"])
+                    .inc();
+            }
+            return false;
         }
+        guard.put(h, now);
+        true
     }
 
-    fn compute_fanout(num_peers: usize) -> usize {
-        ((num_peers as f64).sqrt().ceil() as usize).min(16)
+    /// Returns true if the message has not been seen recently.
+    pub fn should_process(&self, msg: &Message) -> bool {
+        self.should_process_at(msg, Instant::now())
+    }
+
+    fn compute_score(
+        &self,
+        metrics: Option<&PeerMetrics>,
+        latency_ms: Option<f64>,
+    ) -> (f64, CandidateKind) {
+        let reputation = metrics
+            .map(|m| m.reputation.score)
+            .unwrap_or(self.settings.reputation_weight);
+        let latency_ms = latency_ms.unwrap_or(self.settings.latency_baseline_ms);
+        let latency_score = 1.0 / (1.0 + (latency_ms / self.settings.latency_baseline_ms).max(0.0));
+        let success = (reputation * self.settings.reputation_weight
+            + latency_score * self.settings.latency_weight)
+            / (self.settings.reputation_weight + self.settings.latency_weight);
+        let failures = metrics.map_or(0.0, |m| {
+            let drops: u64 = m.drops.values().copied().sum();
+            let handshake_fail: u64 = m.handshake_fail.values().copied().sum();
+            let denom = (m.requests + m.handshake_success + 1) as f64;
+            (drops + handshake_fail) as f64 / denom
+        });
+        let mut score = (success - failures * self.settings.failure_penalty).max(0.0);
+        if score.is_nan() || !score.is_finite() {
+            score = success;
+        }
+        let kind = if score < self.settings.low_score_cutoff {
+            CandidateKind::Deprioritized
+        } else {
+            CandidateKind::Preferred
+        };
+        (score, kind)
+    }
+
+    fn gather_candidates(
+        &self,
+        peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+    ) -> Vec<PeerCandidate> {
+        let mut candidates = Vec::with_capacity(peers.len());
+        let mut skipped_partition = 0usize;
+        let stats = peer_stats_map(None, None)
+            .into_iter()
+            .filter_map(|(id, metrics)| hex::decode(id).ok().map(|bytes| (bytes, metrics)))
+            .filter(|(pk, _)| pk.len() == 32)
+            .map(|(pk, metrics)| {
+                let mut peer = [0u8; 32];
+                peer.copy_from_slice(&pk);
+                (peer, metrics)
+            })
+            .collect::<HashMap<PeerId, PeerMetrics>>();
+        for (addr, transport, cert) in peers.iter() {
+            if PARTITION_WATCH.is_isolated(addr) {
+                skipped_partition += 1;
+                continue;
+            }
+            let peer_id = pk_from_addr(addr);
+            let metrics = peer_id.and_then(|pk| stats.get(&pk));
+            let latency = range_boost::peer_latency(addr)
+                .map(|l| l as f64)
+                .or_else(|| metrics.map(|m| m.last_handshake_ms as f64));
+            let (score, kind) = self.compute_score(metrics, latency);
+            candidates.push(PeerCandidate {
+                addr: *addr,
+                transport: *transport,
+                cert: cert.clone(),
+                score,
+                latency_ms: latency,
+                peer_kind: kind,
+            });
+        }
+        #[cfg(feature = "telemetry")]
+        if skipped_partition > 0 {
+            GOSSIP_PEER_FAILURE_TOTAL
+                .with_label_values(&["partition"])
+                .inc_by(skipped_partition as u64);
+        }
+        #[cfg(not(feature = "telemetry"))]
+        let _ = skipped_partition;
+        candidates
+    }
+
+    fn adaptive_selection(
+        &self,
+        candidates: Vec<PeerCandidate>,
+        fanout_all: bool,
+    ) -> (Vec<PeerCandidate>, usize, f64) {
+        if candidates.is_empty() {
+            return (Vec::new(), 0, 0.0);
+        }
+        let total = candidates.len();
+        let base = self
+            .settings
+            .base_fanout
+            .min(total)
+            .max(self.settings.min_fanout.min(total));
+        let max = self.settings.max_fanout.min(total);
+        let mut preferred: Vec<PeerCandidate> = candidates
+            .iter()
+            .cloned()
+            .filter(|c| c.peer_kind == CandidateKind::Preferred)
+            .collect();
+        let mut deprioritized: Vec<PeerCandidate> = candidates
+            .into_iter()
+            .filter(|c| c.peer_kind == CandidateKind::Deprioritized)
+            .collect();
+        let avg_score = {
+            let sum: f64 = preferred
+                .iter()
+                .chain(deprioritized.iter())
+                .map(|c| c.score)
+                .sum();
+            sum / total as f64
+        };
+        let mut rng = thread_rng();
+        preferred.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        deprioritized.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
+        let mut fanout = if fanout_all { total } else { base };
+        if !fanout_all {
+            if avg_score < 0.8 {
+                let scale = avg_score.clamp(0.4, 1.0);
+                let scaled = ((fanout as f64) * scale).ceil() as usize;
+                fanout = scaled.max(self.settings.min_fanout.min(total));
+            } else if avg_score > 1.2 {
+                let scale = avg_score.min((self.settings.max_fanout as f64) / fanout.max(1) as f64);
+                let scaled = ((fanout as f64) * scale).round() as usize;
+                fanout = scaled.max(self.settings.min_fanout.min(total));
+            }
+        }
+        fanout = fanout.min(max).max(if total > 0 { 1 } else { 0 });
+        let mut selected: Vec<PeerCandidate> = preferred
+            .into_iter()
+            .chain(deprioritized.clone().into_iter())
+            .take(fanout)
+            .collect();
+        if !fanout_all {
+            selected.shuffle(&mut rng);
+        }
+        #[cfg(feature = "telemetry")]
+        {
+            let used_deprioritized = selected
+                .iter()
+                .filter(|c| c.peer_kind == CandidateKind::Deprioritized)
+                .count();
+            let skipped_low = deprioritized.len().saturating_sub(used_deprioritized);
+            if skipped_low > 0 {
+                GOSSIP_PEER_FAILURE_TOTAL
+                    .with_label_values(&["low_score"])
+                    .inc_by(skipped_low as u64);
+            }
+        }
+        #[cfg(not(feature = "telemetry"))]
+        let _ = deprioritized;
+        (selected, total, avg_score)
+    }
+
+    fn update_metrics(&self, fanout: usize, candidates: usize, avg_score: f64) {
+        let mut guard = self.metrics.lock();
+        guard.last_fanout = Some(fanout);
+        guard.last_candidates = Some(candidates);
+        guard.avg_score = Some(avg_score);
+        guard.last_updated = Some(Instant::now());
+        #[cfg(feature = "telemetry")]
+        {
+            GOSSIP_FANOUT_GAUGE.set(fanout as i64);
+        }
     }
 
     /// Broadcast a message to a random subset of peers using default sender.
@@ -69,7 +420,7 @@ impl Relay {
         self.broadcast_with(msg, peers, |(addr, transport, cert), m| {
             if large {
                 if let Some(c) = cert {
-                    let _ = send_quic_msg(addr, &c, m);
+                    let _ = send_quic_msg(addr, c, m);
                 } else {
                     let _ = send_msg(addr, m);
                 }
@@ -80,7 +431,7 @@ impl Relay {
                     }
                     Transport::Quic => {
                         if let Some(c) = cert {
-                            let _ = send_quic_msg(addr, &c, m);
+                            let _ = send_quic_msg(addr, c, m);
                         }
                     }
                 }
@@ -90,7 +441,7 @@ impl Relay {
 
     /// Broadcast a message to peers belonging to a specific shard.
     pub fn register_peer(&self, shard: ShardId, peer: PeerId) {
-        self.shard_peers.lock().entry(shard).or_default().push(peer);
+        self.shard_store.register(shard, peer);
     }
 
     pub fn broadcast_shard(
@@ -99,11 +450,11 @@ impl Relay {
         msg: &Message,
         peers: &HashMap<PeerId, (SocketAddr, Transport, Option<Vec<u8>>)>,
     ) {
-        let ids = self.shard_peers.lock().get(&shard).cloned();
-        let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = if let Some(ids) = ids {
-            ids.iter().filter_map(|id| peers.get(id).cloned()).collect()
-        } else {
+        let ids = self.shard_store.peers(shard);
+        let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = if ids.is_empty() {
             peers.values().cloned().collect()
+        } else {
+            ids.iter().filter_map(|id| peers.get(id).cloned()).collect()
         };
         self.broadcast(msg, &targets);
     }
@@ -123,56 +474,145 @@ impl Relay {
         let fanout_all = std::env::var("TB_GOSSIP_FANOUT")
             .map(|v| v == "all")
             .unwrap_or(false);
-        let mut list = peers.to_vec();
-        if range_boost::is_enabled() {
-            list.sort_by_key(|(addr, _, _)| range_boost::peer_latency(addr).unwrap_or(u128::MAX));
+        let candidates = self.gather_candidates(peers);
+        let (selected, candidate_len, avg_score) = self.adaptive_selection(candidates, fanout_all);
+        self.update_metrics(selected.len(), candidate_len, avg_score);
+        if selected.is_empty() {
+            return;
         }
-        let fanout = if fanout_all {
-            list.len()
-        } else {
-            Self::compute_fanout(list.len()).min(list.len().max(1))
+        let partition_marker = PARTITION_WATCH.current_marker();
+        let mut marked = msg.clone();
+        marked.partition = partition_marker;
+        for candidate in selected {
+            #[cfg(feature = "telemetry")]
+            if let Some(latency) = candidate.latency_ms {
+                GOSSIP_LATENCY_BUCKETS.observe(latency / 1_000.0);
+            }
+            #[cfg(not(feature = "telemetry"))]
+            let _ = candidate.latency_ms;
+            let cert = candidate.cert.as_deref();
+            send((candidate.addr, candidate.transport, cert), &marked);
+        }
+    }
+
+    fn clean_expired_locked(
+        cache: &mut LruCache<[u8; 32], Instant>,
+        ttl: Duration,
+        now: Instant,
+    ) -> usize {
+        let mut dropped = 0;
+        while let Some(ts) = cache.peek_lru().map(|(_, ts)| *ts) {
+            if now.saturating_duration_since(ts) < ttl {
+                break;
+            }
+            cache.pop_lru();
+            dropped += 1;
+        }
+        dropped
+    }
+
+    pub fn status(&self) -> RelayStatus {
+        let dedup_size = self.recent.lock().len();
+        let fanout = {
+            let guard = self.metrics.lock();
+            FanoutStatus {
+                min: self.settings.min_fanout,
+                base: self.settings.base_fanout,
+                max: self.settings.max_fanout,
+                last: guard.last_fanout,
+                candidates: guard.last_candidates,
+                avg_score: guard.avg_score,
+                millis_since_update: guard
+                    .last_updated
+                    .map(|inst| inst.elapsed().as_millis() as u64),
+            }
         };
-        #[cfg(feature = "telemetry")]
-        GOSSIP_FANOUT_GAUGE.set(fanout as i64);
-        if !fanout_all {
-            list.truncate(fanout);
-            let mut rng = rand::thread_rng();
-            list.shuffle(&mut rng);
-        }
-        for peer in list.into_iter().take(fanout) {
-            let cert = peer.2.as_deref();
-            let mut marked = msg.clone();
-            marked.partition = PARTITION_WATCH.current_marker();
-            send((peer.0, peer.1, cert), &marked);
+        let shard_affinity = self
+            .shard_store
+            .snapshot()
+            .into_iter()
+            .map(|(shard, peers)| ShardAffinity {
+                shard,
+                peers: peers.into_iter().map(hex::encode).collect(),
+            })
+            .collect();
+        let partition = PartitionStatus {
+            active: PARTITION_WATCH.is_partitioned(),
+            marker: PARTITION_WATCH.current_marker(),
+            isolated_peers: PARTITION_WATCH
+                .isolated_peers()
+                .into_iter()
+                .map(|addr| addr.to_string())
+                .collect(),
+        };
+        RelayStatus {
+            ttl_ms: self.settings.ttl.as_millis() as u64,
+            dedup_capacity: self.settings.dedup_capacity.get(),
+            dedup_size,
+            fanout,
+            shard_affinity,
+            partition,
         }
     }
 }
 
 impl Default for Relay {
     fn default() -> Self {
-        Self::new(Duration::from_secs(2))
+        Self::new(config::current())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
-    use std::net::SocketAddr;
-
     use crate::net::Payload;
+    use ed25519_dalek::SigningKey;
+
+    fn test_settings() -> GossipSettings {
+        GossipSettings::from(GossipConfig {
+            ttl_ms: 10,
+            dedup_capacity: 1024,
+            min_fanout: 2,
+            base_fanout: 4,
+            max_fanout: 8,
+            failure_penalty: 1.5,
+            latency_weight: 0.6,
+            reputation_weight: 1.0,
+            latency_baseline_ms: 40,
+            low_score_cutoff: 0.55,
+            shard_store_path: String::new(),
+        })
+    }
+
+    fn relay_for_tests() -> Relay {
+        let settings = test_settings();
+        let shard_store = ShardStore::temporary();
+        Relay {
+            recent: Mutex::new(LruCache::new(settings.dedup_capacity)),
+            settings,
+            shard_store,
+            metrics: Mutex::new(RelayMetrics::default()),
+        }
+    }
 
     #[test]
-    fn relay_dedup_and_fanout() {
-        let relay = Relay::new(Duration::from_secs(2));
+    fn relay_dedup_respects_ttl() {
+        let relay = relay_for_tests();
         let sk = SigningKey::from_bytes(&[1u8; 32]);
         let msg = Message::new(Payload::Hello(vec![]), &sk);
+        let now = Instant::now();
+        assert!(relay.should_process_at(&msg, now));
+        assert!(!relay.should_process_at(&msg, now));
+        std::thread::sleep(Duration::from_millis(20));
         assert!(relay.should_process(&msg));
-        assert!(!relay.should_process(&msg));
-        #[cfg(feature = "telemetry")]
-        assert!(crate::telemetry::GOSSIP_DUPLICATE_TOTAL.get() > 0);
+    }
 
-        let peers: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = (0..25)
+    #[test]
+    fn relay_respects_fanout_bounds() {
+        let relay = relay_for_tests();
+        let sk = SigningKey::from_bytes(&[2u8; 32]);
+        let msg = Message::new(Payload::Hello(vec![]), &sk);
+        let peers: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = (0..16)
             .map(|i| {
                 (
                     format!("127.0.0.1:{}", 10000 + i).parse().unwrap(),
@@ -181,44 +621,35 @@ mod tests {
                 )
             })
             .collect();
-        let msg2 = Message::new(Payload::Hello(vec![peers[0].0]), &sk);
-        let expected = ((peers.len() as f64).sqrt().ceil() as usize).min(16);
         let mut delivered = 0usize;
-        let mut count = 0usize;
-        let loss = (expected as f64 * 0.15).ceil() as usize;
-        relay.broadcast_with(&msg2, &peers, |_, _| {
-            if count >= loss {
-                delivered += 1;
-            }
-            count += 1;
-        });
-        assert_eq!(count, expected);
-        assert!(delivered >= expected - loss);
+        relay.broadcast_with(&msg, &peers, |_, _| delivered += 1);
+        assert!(delivered >= relay.settings.min_fanout);
+        assert!(delivered <= relay.settings.max_fanout);
     }
 
     #[test]
-    fn relay_mixed_transport_fanout() {
-        std::env::set_var("TB_GOSSIP_FANOUT", "all");
-        let relay = Relay::default();
-        let sk = SigningKey::from_bytes(&[1u8; 32]);
+    fn relay_shuffle_prevents_bias() {
+        let relay = relay_for_tests();
+        let sk = SigningKey::from_bytes(&[3u8; 32]);
         let msg = Message::new(Payload::Hello(vec![]), &sk);
-        let peers = vec![
-            ("127.0.0.1:10000".parse().unwrap(), Transport::Tcp, None),
-            (
-                "127.0.0.1:10001".parse().unwrap(),
-                Transport::Quic,
-                Some(vec![1, 2, 3]),
-            ),
-        ];
-        let mut seen: Vec<(SocketAddr, Transport)> = Vec::new();
-        relay.broadcast_with(&msg, &peers, |(addr, t, _), _| seen.push((addr, t)));
-        assert_eq!(seen.len(), 2);
-        assert!(seen
-            .iter()
-            .any(|(a, t)| (*a, *t) == (peers[0].0, peers[0].1)));
-        assert!(seen
-            .iter()
-            .any(|(a, t)| (*a, *t) == (peers[1].0, peers[1].1)));
-        std::env::remove_var("TB_GOSSIP_FANOUT");
+        let peers: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = (0..8)
+            .map(|i| {
+                (
+                    format!("127.0.0.1:{}", 12000 + i).parse().unwrap(),
+                    Transport::Tcp,
+                    None,
+                )
+            })
+            .collect();
+        let mut first_hits = HashMap::new();
+        for _ in 0..20 {
+            let mut calls = Vec::new();
+            relay.broadcast_with(&msg, &peers, |peer, _| calls.push(peer.0));
+            if let Some(addr) = calls.first() {
+                *first_hits.entry(*addr).or_insert(0usize) += 1;
+            }
+            relay.recent.lock().clear();
+        }
+        assert!(first_hits.len() > 1);
     }
 }

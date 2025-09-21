@@ -1,6 +1,6 @@
 # Light-Client Synchronization Guide
 
-*Last updated: 2025-09-20*
+*Last updated: 2025-09-21*
 
 The `light-client` crate offers a minimal header verifier intended for mobile
 and resource-constrained environments. It trades full validation for a compact

@@ -2,7 +2,7 @@
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99.8/100** with vision completion **~88.4/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace now enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, and the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff to avoid overflow and restore environment state on drop. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **~99.88/100** with vision completion **~89.3/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, the gossip relay now couples an LRU-backed dedup cache with adaptive fanout, shard persistence, and partition tagging, and the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -16,7 +16,7 @@ R_0(N) = \frac{R_{\max}}{1 + e^{\xi (N - N^\star)}}
 
 with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [`docs/economics.md`](economics.md). The canonical roadmap with near‑term tasks lives in [`docs/roadmap.md`](roadmap.md).
 
-## 1. Consensus & Core Execution — ~89 %
+## 1. Consensus & Core Execution — ~90 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -24,6 +24,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Rollback checkpoints and partition recovery hooks in `node/src/consensus/fork_choice.rs` and `node/tests/partition_recovery.rs`.
 - EIP‑1559 base fee tracker: `node/src/fees.rs` adjusts per block and `node/tests/base_fee.rs` verifies target fullness tracking.
 - Adversarial rollback tests in `node/tests/finality_rollback.rs` assert ledger state after competing forks.
+- Coinbase assembly applies proof rebates via `node/src/blockchain/process.rs::apply_rebates`, with restart/reorg coverage in `node/tests/light_client_rebates.rs`.
 - Pietrzak VDF with timed commitment and delayed preimage reveal (`node/src/consensus/vdf.rs`, `node/tests/vdf.rs`) shrinks proofs and blocks speculative computation.
 - Hadamard–Unruh committee sampler with Count-Sketch top‑k (`node/src/consensus/hadamard.rs`, `node/src/consensus/committee/topk.rs`).
 - Sequential BLAKE3 proof-of-history ticker with optional GPU offload (`node/src/poh.rs`, `node/tests/poh.rs`). See `docs/poh.md`.
@@ -37,14 +38,15 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~95 %
+## 2. Networking & Gossip — ~97 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
 - QUIC transport with mutual-TLS certificate rotation, cached diagnostics, TCP fallback, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs`, `node/src/net/transport_quic.rs`, and `docs/network_quic.md`, with telemetry via `quic_cert_rotation_total` and per-peer `quic_retransmit_total`/`quic_handshake_fail_total` counters.
 - `net.quic_stats` RPC and `contract-cli net quic-stats` expose cached latency,
   retransmit, and endpoint reuse data with per-peer failure metrics for operators.
-- TTL-based duplicate suppression and sqrt-N fanout documented in `docs/gossip.md` and implemented in `node/src/gossip/relay.rs`.
+- LRU-backed duplicate suppression, adaptive fanout, and shard-aware persistence documented in `docs/gossip.md` and implemented in `node/src/gossip/relay.rs` with configurable TTL/fanout stored in `config/gossip.toml`.
+  - `net gossip-status` CLI / `net.gossip_status` RPC expose live TTL, cache, fanout, partition tags, and persisted shard peer sets for operators.
   - Peer identifier fuzzing prevents malformed IDs from crashing DHT routing (`net/fuzz/peer_id.rs`).
   - Manual DHT recovery runbook (`docs/networking.md#dht-recovery`).
   - Peer database and chunk cache persist across restarts with configurable paths (`node/src/net/peer.rs` via `TB_PEER_DB_PATH` and `TB_CHUNK_DB_PATH`); `TB_PEER_SEED` fixes shuffle order for reproducible bootstraps.
@@ -52,7 +54,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
   - SIMD Xor8 rate-limit filter with AVX2/NEON dispatch (`node/src/web/rate_limit.rs`, `docs/benchmarks.md`) handles 1 M rps bursts.
   - Jittered JSON‑RPC client with exponential backoff (`node/src/rpc/client.rs`) prevents thundering-herd reconnect storms.
   - Gateway DNS publishing and policy retrieval logged in `docs/gateway_dns.md` and implemented in `node/src/gateway/dns.rs`.
-    - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`.
+    - Per-peer rate-limit telemetry and reputation tracking via `net.peer_stats` RPC and `net stats` CLI, capped by `max_peer_metrics`, with dashboards ingesting `GOSSIP_PEER_FAILURE_TOTAL` and `GOSSIP_LATENCY_BUCKETS`.
      - Partition watch detects split-brain conditions and stamps gossip with markers (`node/src/net/partition_watch.rs`, `node/src/gossip/relay.rs`).
      - Cluster-wide metrics pushed to the `metrics-aggregator` crate for fleet visibility.
     - Shard-aware peer maps and gossip routing limit block broadcasts to interested shards (`node/src/gossip/relay.rs`).
@@ -62,7 +64,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Large-scale WAN chaos experiments remain open.
 - Bootstrap peer churn analysis missing.
 
-## 3. Governance & Subsidy Economy — ~93 %
+## 3. Governance & Subsidy Economy — ~95 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -73,6 +75,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Laplace-noised multiplier releases and miner-count logistic hysteresis (`node/src/governance/params.rs`, `pow/src/reward.rs`).
 - Emergency kill switch `kill_switch_subsidy_reduction` with telemetry counters (`node/src/governance/params.rs`, `docs/monitoring.md`).
 - Subsidy accounting is unified in the CT ledger with migration documented in `docs/system_changes.md`.
+- Proof-rebate tracker persists per-relayer receipts with governance rate clamps and coinbase integration (`node/src/light_client/proof_tracker.rs`, `node/src/blockchain/process.rs`, `docs/light_client_incentives.md`).
 - Multi-signature release approvals persist signer sets and thresholds (`node/src/governance/release.rs`), gated fetch/install flows (`node/src/update.rs`, `cli/src/gov.rs`), and explorer/CLI timelines (`explorer/src/release_view.rs`, `contract explorer release-history`).
 - Telemetry counters `release_quorum_fail_total` and `release_installs_total` expose quorum health and rollout adoption for dashboards.
 - Fee-floor window and percentile parameters (`node/src/governance/params.rs`) stream through `GovStore` history with rollback support (`node/src/governance/store.rs`), governance CLI updates (`cli/src/gov.rs`), explorer timelines (`explorer/src/lib.rs`), and regression coverage (`governance/tests/mempool_params.rs`).
@@ -82,8 +85,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Demand gauges `industrial_backlog` and `industrial_utilization` feed
     `Block::industrial_subsidies()` and surface via `inflation.params` and
     `compute_market.stats`.
-- Arbitrary CT/IT fee splits tracked by `pct_ct`; `reserve_pending` debits
-    balances before coinbase accumulation, documented in `docs/fees.md`.
+- `pct_ct` tracks CT fee routing; production lanes pin the selector to 100 while `reserve_pending` debits balances before coinbase accumulation (`docs/fees.md`).
 - Logistic base reward `R_0(N) = R_max / (1 + e^{ξ (N - N^*)})` with hysteresis `ΔN ≈ √N*` dampens miner churn and is implemented in `pow/src/reward.rs`.
  - Kalman filter weights for difficulty retune configurable via governance parameters (`node/src/governance/params.rs`).
 
@@ -132,13 +134,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
 - Lane-aware matching enforces per-`FeeLane` queues, fairness windows, and starvation timers, throttles via `TB_COMPUTE_MATCH_BATCH`, records `MATCH_LOOP_LATENCY_SECONDS{lane}` histograms, persists receipts with lane tags for replay safety, and surfaces queue depths/capacity guardrails through RPC/CLI (`node/src/compute_market/matcher.rs`, `node/tests/compute_matcher.rs`, `node/src/rpc/compute_market.rs`, `cli/src/compute.rs`). The matcher rotates lanes until a batch quota or fairness deadline triggers, rejects staged seeds that exceed capacity, emits structured starvation warnings with job IDs/ages, and annotates `compute_market.stats` with per-lane wait durations for operators.
-- Settlement persists CT/IT balances, audit logs, activation metadata, and Merkle roots in a RocksDB-backed store with RPC/CLI/explorer surfacing (`node/src/compute_market/settlement.rs`, `node/tests/compute_settlement.rs`, `docs/compute_market.md`, `docs/settlement_audit.md`, `explorer/src/compute_view.rs`). The ledger emits telemetry (`SETTLE_APPLIED_TOTAL`, `SETTLE_FAILED_TOTAL{reason}`, `SETTLE_MODE_CHANGE_TOTAL{state}`, `SLASHING_BURN_CT_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}`) and exposes `compute_market.provider_balances`, `compute_market.audit`, and `compute_market.recent_roots` RPCs for automated reconciliation.
-- `Settlement::shutdown` persists any pending ledger deltas and flushes RocksDB handles before teardown so test harnesses (and unplanned exits) leave behind consistent CT/IT balances and Merkle roots for replay.
+- Settlement persists CT balances, audit logs, activation metadata, and Merkle roots in a RocksDB-backed store with RPC/CLI/explorer surfacing (`node/src/compute_market/settlement.rs`, `node/tests/compute_settlement.rs`, `docs/compute_market.md`, `docs/settlement_audit.md`, `explorer/src/compute_view.rs`). The ledger emits telemetry (`SETTLE_APPLIED_TOTAL`, `SETTLE_FAILED_TOTAL{reason}`, `SETTLE_MODE_CHANGE_TOTAL{state}`, `SLASHING_BURN_CT_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}`) and exposes `compute_market.provider_balances`, `compute_market.audit`, and `compute_market.recent_roots` RPCs for automated reconciliation.
+- `Settlement::shutdown` persists any pending ledger deltas and flushes RocksDB handles before teardown so test harnesses (and unplanned exits) leave behind consistent CT balances and Merkle roots for replay.
 - Admission enforces dynamic fee floors with per-sender slot caps, eviction audit trails, explorer charts, and `mempool.stats` exposure (`node/src/mempool/admission.rs`, `node/src/mempool/scoring.rs`, `docs/mempool_qos.md`, `node/tests/mempool_eviction.rs`). Governance parameters for the floor window and percentile stream through telemetry (`fee_floor_window_changed_total`, `fee_floor_warning_total`, `fee_floor_override_total`) and wallet guidance.
 - `FeeFloor::new(size, percentile)` now requires explicit percentile inputs in tests and CLI paths, aligning mempool QoS regressions with governance-configured sampling windows (`node/src/mempool/scoring.rs`, `node/tests/mempool_qos.rs`).
 - Economic simulator outputs KPIs to CSV (`sim/src`).
 - Durable courier receipts with exponential backoff documented in `docs/compute_market_courier.md` and implemented in `node/src/compute_market/courier.rs`.
 - Groth16/Plonk SNARK verification for compute receipts (`node/src/compute_market/snark.rs`).
+- Policy pins `fee_pct_ct` to CT-only payouts for production lanes while retaining selector compatibility in tests (`node/src/compute_market/mod.rs`, `docs/compute_market.md`).
 
 **Gaps**
 - Escrowed payments and automated SLA enforcement remain rudimentary; deadline tracking and slashing heuristics are staged but not yet active.
@@ -159,7 +162,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~95 %
+## 8. Wallets, Light Clients & KYC — ~96 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -175,26 +178,26 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Wallet send flow caches fee-floor lookups, emits localized warnings with auto-bump or `--force` overrides, streams telemetry events back to the node, and exposes JSON mode for automation (`cli/src/wallet.rs`, `docs/mempool_qos.md`).
 - Unified `ed25519-dalek 2.2.x` signature handling ensures remote signer payloads, CLI staking flows, and explorer attestations all share compatible types while forwarding multisig signer arrays and escrow hash algorithms (`crates/wallet`, `node/src/bin/wallet.rs`, `tests/remote_signer_multisig.rs`).
 - Remote signer metrics (`remote_signer_request_total`, `remote_signer_success_total`, `remote_signer_error_total{reason}`) integrate with wallet QoS counters so dashboards highlight signer outages alongside fee-floor overrides (`crates/wallet/src/remote_signer.rs`, `docs/monitoring.md`).
+- Light-client rebate history and leaderboards exposed via RPC/CLI/explorer (`node/src/rpc/light.rs`, `cli/src/light_client.rs`, `explorer/src/light_client.rs`, `docs/light_client_incentives.md`).
 
 **Gaps**
 - Polish multisig UX (batched signer discovery, richer operator prompts) before tagging the next CLI release.
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — ~52 %
+## 9. Bridges & Cross‑Chain Routing — ~74 %
 
 **Evidence**
-- Lock/unlock bridge contract with relayer proofs (`bridges/src/lib.rs`).
-- Light-client verification checks foreign headers (`docs/bridges.md`).
-- CLI deposit/withdraw flows (`cli/src/main.rs` subcommands).
-- Hardened HTLC script parsing supports SHA3 and RIPEMD encodings (`bridges/src/lib.rs`).
-- Bridge walkthrough in `docs/bridges.md`.
+- Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
+- Multi-signature quorum enforcement and governance authorization hooks in `bridge.verify_deposit` and `governance::ensure_release_authorized`, covered by integration tests `node/tests/bridge.rs` and adversarial suites `bridges/tests/adversarial.rs`.
+- Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`.
+- Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
+- CLI/RPC surfaces for quorum composition, pending withdrawals, history, and slash logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
 
 **Gaps**
-- Relayer incentive mechanisms undeveloped.
-- No safety audits or circuit proofs.
+- Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
 
-## 10. Monitoring, Debugging & Profiling — ~90 %
+## 10. Monitoring, Debugging & Profiling — ~91 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -249,4 +252,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑20*
+*Last updated: 2025‑09‑21*

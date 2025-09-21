@@ -1,7 +1,8 @@
 use ledger::{Emission, TokenRegistry};
+use serde::{Deserialize, Serialize};
 
 /// Simplified token bridge that locks tokens and mints wrapped assets.
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TokenBridge {
     registry: TokenRegistry,
 }

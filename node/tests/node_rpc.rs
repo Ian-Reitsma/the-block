@@ -2,6 +2,7 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
+use hex;
 use serde_json::Value;
 use serial_test::serial;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -107,6 +108,7 @@ async fn rpc_smoke() {
     Settlement::shutdown();
 
     handle.abort();
+    let _ = handle.await;
 }
 
 #[tokio::test]
@@ -133,23 +135,142 @@ async fn rpc_nonce_replay_rejected() {
     ));
     let addr = expect_timeout(rx).await.unwrap();
 
-    let first = expect_timeout(rpc(
+    let start = expect_timeout(rpc(
         &addr,
         r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
         Some("testtoken"),
     ))
     .await;
-    assert_eq!(first["result"]["status"], "ok");
-    let replay = expect_timeout(rpc(
+    assert_eq!(start["result"]["status"], "ok");
+    let stop = expect_timeout(rpc(
         &addr,
-        r#"{"method":"stop_mining","params":{"nonce":1}}"#,
+        r#"{"method":"stop_mining","params":{"nonce":2}}"#,
         Some("testtoken"),
     ))
     .await;
-    assert_eq!(
-        replay["error"]["message"].as_str().unwrap(),
-        "replayed nonce"
-    );
+    assert_eq!(stop["result"]["status"], "ok");
+    let replay = expect_timeout(rpc(
+        &addr,
+        r#"{"method":"stop_mining","params":{"nonce":2}}"#,
+        Some("testtoken"),
+    ))
+    .await;
+    assert_eq!(replay["error"]["message"].as_str(), Some("replayed nonce"));
+
+    handle.abort();
+    let _ = handle.await;
+}
+
+#[tokio::test]
+#[serial]
+async fn rpc_light_client_rebate_status() {
+    let dir = util::temp::temp_dir("rpc_rebate_status");
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    {
+        let mut guard = bc.lock().unwrap();
+        guard.record_proof_relay(b"relay", 3);
+    }
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let rpc_cfg = RpcConfig {
+        enable_debug: true,
+        relay_only: false,
+        ..Default::default()
+    };
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        rpc_cfg,
+        tx,
+    ));
+    let addr = expect_timeout(rx).await.unwrap();
+
+    let status = expect_timeout(rpc(
+        &addr,
+        r#"{"method":"light_client.rebate_status"}"#,
+        None,
+    ))
+    .await;
+    let result = status.get("result").expect("result");
+    assert_eq!(result["pending_total"].as_u64().unwrap(), 3);
+    let relayers = result["relayers"].as_array().expect("array");
+    assert_eq!(relayers.len(), 1);
+    let relayer = &relayers[0];
+    let expected_id = hex::encode(b"relay");
+    assert_eq!(relayer["id"].as_str(), Some(expected_id.as_str()));
+    assert_eq!(relayer["pending"].as_u64().unwrap(), 3);
+    assert_eq!(relayer["total_proofs"].as_u64().unwrap(), 3);
+    assert_eq!(relayer["total_claimed"].as_u64().unwrap(), 0);
+    assert!(relayer.get("last_claim_height").is_none());
+
+    handle.abort();
+    let _ = handle.await;
+}
+
+#[tokio::test]
+#[serial]
+async fn rpc_light_client_rebate_history() {
+    let dir = util::temp::temp_dir("rpc_rebate_history");
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    {
+        let mut guard = bc.lock().unwrap();
+        guard
+            .add_account("miner".to_string(), 0, 0)
+            .expect("add miner");
+        guard.record_proof_relay(b"relay", 5);
+        guard.mine_block("miner").expect("mine block");
+    }
+    {
+        let guard = bc.lock().unwrap();
+        let page = guard.proof_tracker.receipt_history(None, None, 10);
+        assert_eq!(page.receipts.len(), 1);
+    }
+    let mining = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let rpc_cfg = RpcConfig {
+        enable_debug: true,
+        relay_only: false,
+        ..Default::default()
+    };
+    let handle = tokio::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".to_string(),
+        rpc_cfg,
+        tx,
+    ));
+    let addr = expect_timeout(rx).await.unwrap();
+
+    let history = expect_timeout(rpc(
+        &addr,
+        r#"{"method":"light_client.rebate_history","params":{"limit":10}}"#,
+        None,
+    ))
+    .await;
+    let result = history.get("result").expect("result");
+    let receipts = result["receipts"].as_array().expect("array");
+    assert_eq!(receipts.len(), 1);
+    let receipt = &receipts[0];
+    assert_eq!(receipt["height"].as_u64().unwrap(), 0);
+    assert_eq!(receipt["amount"].as_u64().unwrap(), 5);
+    let relayers = receipt["relayers"].as_array().expect("relayers");
+    assert_eq!(relayers.len(), 1);
+    let relayer = &relayers[0];
+    assert_eq!(relayer["id"].as_str().unwrap(), hex::encode(b"relay"));
+    assert_eq!(relayer["amount"].as_u64().unwrap(), 5);
+
+    let filtered = expect_timeout(rpc(
+        &addr,
+        &format!(
+            "{{\"method\":\"light_client.rebate_history\",\"params\":{{\"relayer\":\"{}\",\"limit\":10}}}}",
+            hex::encode(b"relay")
+        ),
+        None,
+    ))
+    .await;
+    let filtered_receipts = filtered["result"]["receipts"].as_array().unwrap();
+    assert_eq!(filtered_receipts.len(), 1);
 
     handle.abort();
     let _ = handle.await;
@@ -330,4 +451,5 @@ async fn rpc_fragmented_request() {
     assert_eq!(val["result"]["status"], "ok");
 
     handle.abort();
+    let _ = handle.await;
 }

@@ -83,20 +83,16 @@ testing.
   #  "industrial_price_base":null,"pending":[]}
   ```
 
-- `compute_market.provider_balances` – returns CT and industrial token balances
-  for every provider persisted in the settlement ledger. Providers are sorted
-  lexicographically (matching the Merkle root computation) and the payload
-  mirrors `BalanceSnapshot` from `node/src/compute_market/settlement.rs` with
-  `provider`, `ct`, and `industrial` fields.
+- `compute_market.provider_balances` – returns CT balances for every provider persisted in the settlement ledger. Providers are sorted lexicographically (matching the Merkle root computation) and the payload mirrors `BalanceSnapshot` from `node/src/compute_market/settlement.rs` with `provider`, `ct`, and a legacy `industrial` field that remains zero in production.
 
   ```bash
   curl -s localhost:26658/compute_market.provider_balances | jq
-  # {"providers":[{"provider":"alice","ct":4200,"industrial":600}]}
+  # {"providers":[{"provider":"alice","ct":4200,"industrial":0}]}
   ```
 
 - `compute_market.audit` – streams the most recent settlement events, including
   accruals, refunds, penalties, and anchor markers. Each object matches the
-  `AuditRecord` struct with `sequence`, `timestamp`, CT/IT deltas, the updated
+  `AuditRecord` struct with `sequence`, `timestamp`, CT deltas (plus a legacy `delta_it` field), the updated
   running balances, and (for anchors) the `anchor` hex string recorded in
   `metadata.last_anchor_hex`.
 
@@ -156,7 +152,7 @@ testing.
     # {"gateway":1000000,"storage":5000000,"exec":0}
     ```
   - `rent.escrow.balance` – returns locked CT per blob or account.
-- `settlement.audit` – replays consensus settlement receipts and verifies explorer anchors; CI invokes this endpoint to halt mismatched settlements. Pair it with `compute_market.audit` to confirm the CT/IT ledger emits matching anchors.
+- `settlement.audit` – replays consensus settlement receipts and verifies explorer anchors; CI invokes this endpoint to halt mismatched settlements. Pair it with `compute_market.audit` to confirm the CT ledger emits matching anchors (legacy industrial fields remain for compatibility).
 - `dex.escrow_status?id=` – prints `{from,to,locked,released}` for a pending
   escrow.
 
@@ -188,6 +184,6 @@ All methods under the former reimbursement namespace were removed, and clients
 should migrate to the subsidy-centric replacements listed above. Any request
 against those paths now returns `-32601` (method not found).
 
-Endpoints returning fees expose mixed CT/IT accounting. Fee reports such as
+Endpoints returning fees expose CT accounting (selectors remain for tests). Fee reports such as
 `mempool.stats` and settlement receipts include `pct_ct` or separate `fee_ct`
 and `fee_it` fields to track splits between consumer and industrial lanes.

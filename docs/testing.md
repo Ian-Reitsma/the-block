@@ -2,7 +2,7 @@
 
 This document outlines the strategy for integration and chaos testing in **The-Block**.
 
-> **Current caveats (2025-09-20):** CLI binaries now build cleanly on
+> **Current caveats (2025-09-21):** CLI binaries now build cleanly on
 > `ed25519-dalek 2.2.x`, but telemetry-gated modules still emit warnings when
 > optional features are disabled. Prefer the `lightweight-integration`
 > feature set for memory-constrained runs and re-enable full telemetry when

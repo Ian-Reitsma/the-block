@@ -62,6 +62,24 @@ impl PartitionWatch {
             None
         }
     }
+
+    /// Snapshot the set of peers currently considered unreachable.
+    pub fn isolated_peers(&self) -> Vec<SocketAddr> {
+        let mut peers = self
+            .unreachable
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        peers.sort();
+        peers
+    }
+
+    /// Returns true if the provided peer is currently marked unreachable.
+    pub fn is_isolated(&self, peer: &SocketAddr) -> bool {
+        self.unreachable.lock().unwrap().contains(peer)
+    }
 }
 
 /// Global partition watcher used by networking components.

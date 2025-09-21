@@ -1,44 +1,43 @@
 # Gossip Relay Semantics
 
 The gossip layer relays messages between peers while suppressing duplicates and
-constraining bandwidth.  `node/src/gossip/relay.rs` implements a TTL-based hash
-of serialized messages and stamps outbound traffic with the current partition
-marker from `net::partition_watch` so downstream peers can reconcile forks:
+constraining bandwidth. `node/src/gossip/relay.rs` now stores recently seen
+message digests in a bounded LRU cache so duplicate suppression survives long
+uptimes without growing unbounded. Every node persists its relay settings in
+`config/gossip.toml`, which controls the TTL, cache capacity, and fanout limits.
+On startup the relay loads this configuration, and any edits to
+`gossip.toml` (or a `SIGHUP`) reload the settings without restarting the node.
 
-```rust
-pub fn should_process(&self, msg: &Message) -> bool {
-    let h = hash(&bincode::serialize(msg).unwrap_or_default());
-    let mut guard = self.recent.lock().unwrap_or_else(|e| e.into_inner());
-    let now = Instant::now();
-    guard.retain(|_, t| now.duration_since(*t) < self.ttl);
-    if guard.contains_key(&h) {
-        GOSSIP_DUPLICATE_TOTAL.inc();
-        false
-    } else {
-        guard.insert(h, now);
-        true
-    }
-}
-```
-
-The default TTL is two seconds.  Any message seen within that window is dropped
-and `gossip_duplicate_total` increments.  Telemetry consumers can monitor this
-counter to diagnose misbehaving peers or replay storms.
+Each message records the current partition marker from
+`net::partition_watch`, allowing downstream peers to reconcile forks. The cache
+is swept on every lookup; expired entries increment
+`gossip_ttl_drop_total` and the duplicate path increments the new
+`gossip_peer_failure_total{reason="duplicate"}` counter so operators can spot
+looping traffic.
 
 ## Fanout Selection
 
-When a message passes the duplicate check, the relay chooses a random subset of
-peers to forward it to.  The fanout size is `ceil(sqrt(N))` capped at 16, where
-`N` is the current number of connected peers.  This produces logarithmic spread
-without broadcasting to everyone at once.  The chosen fanout is exposed via the
-`gossip_fanout_gauge` metric.
+When a message passes the duplicate check, the relay scores each candidate peer
+before deciding on a fanout. The score blends the persisted reputation from
+`peer_metrics_store`, recent latency hints, and recent failure history.
+Low-reputation peers fall below the configured `low_score_cutoff` and are only
+contacted when there are not enough high-quality peers to satisfy the minimum
+fanout. Peers marked unreachable by `partition_watch` are skipped entirely and
+counted in `gossip_peer_failure_total{reason="partition"}`.
+
+The fanout size adapts between the configured `min_fanout`, `base_fanout`, and
+`max_fanout` (all set in `gossip.toml`). Healthy clusters with low observed
+latency scale toward `max_fanout`, while high failure rates contract toward the
+minimum to reduce wasted bandwidth. The chosen fanout and computed latency
+observations are exported via `gossip_fanout_gauge` and the
+`gossip_latency_seconds` histogram.
 
 For each selected peer the relay consults the peer registry to determine the
 preferred transport. If the peer advertises QUIC support the relay uses
 `net::quic::send`; otherwise it falls back to the TCP `send_msg` helper. If a
 QUIC send fails, the relay retries over TCP to maintain delivery. Session-level
 metrics `quic_bytes_sent_total` and `quic_bytes_recv_total` record per-transport
-traffic alongside the `gossip_fanout_gauge` gauge.
+traffic alongside the gossip metrics.
 
 ## Reputation Dissemination
 
@@ -50,38 +49,27 @@ epoch is newer than their locally persisted snapshot, otherwise
 `reputation_gossip_latency_seconds` histogram. Operators can inspect local
 scores with `net reputation show <peer>` via the CLI.
 
-Setting the environment variable `TB_GOSSIP_FANOUT=all` disables the random
-selection and forces broadcast to every peer.  This override is useful for
+Setting the environment variable `TB_GOSSIP_FANOUT=all` disables the adaptive
+heuristics and forces broadcast to every peer. This override is useful for
 small testnets where full fanout is desired.
 
-The selection procedure shuffles the peer list with `rand::thread_rng` and sends
-to the first `fanout` entries:
-
-```rust
-let mut list = peers.to_vec();
-if !fanout_all {
-    list.shuffle(&mut rng);
-}
-for addr in list.into_iter().take(fanout) {
-    send(addr, msg);
-}
-```
-
-Integration tests in `node/tests/gossip_relay.rs` assert that duplicate messages
-are dropped and that the computed fanout stays within the expected range even
-under packet loss.  The `node/tests/turbine.rs` harness verifies that the
-deterministic Turbine tree reaches all peers when the relay fanout equals the
-computed `sqrt(N)`.
+Property-based regression tests in `node/tests/gossip_relay.rs` assert that the
+LRU deduplication window respects the configured TTL and that the adaptive
+fanout never exceeds the `gossip.toml` bounds across a wide range of peer
+counts.
 
 ## Operational Guidance
 
-- Monitor `gossip_duplicate_total` for spikes indicating loops or floods.
-- Track `gossip_fanout_gauge` to ensure the relay adapts as peers join or leave.
+- Monitor `gossip_duplicate_total` and
+  `gossip_peer_failure_total{reason="duplicate"}` for spikes indicating loops
+  or floods.
+- Track `gossip_latency_seconds` and `gossip_fanout_gauge` to confirm the relay
+  adapts as peers join or leave.
 - Use `TB_GOSSIP_FANOUT=all` only in controlled environments; it negates the
   bandwidth savings of adaptive fanout.
-- The default TTL of two seconds balances duplicate suppression with tolerance
-  for legitimate replays.  Adjust `Relay::new(ttl)` if your deployment requires
-  a different window.
+- Tune `config/gossip.toml` to set the TTL, cache capacity, and fanout bounds
+  appropriate for your deployment. Changes take effect immediately thanks to
+  the live config watcher.
 
 ## Rate-Limit Telemetry
 
@@ -134,49 +122,19 @@ reputation (`--min-reputation`), and interactive paging for large peer sets.
 Rows with drop rates ≥5 % show in yellow and ≥20 % in red, and exit codes surface
 errors (`0` success, `2` unknown peer, `3` unauthorized):
 
-Additional flags improve usability:
+### Inspecting Runtime State
 
-- `--sort-by latency|drop-rate|reputation` orders peers before display.
-- `--filter <regex>` matches peer IDs or addresses.
-- `--watch <secs>` refreshes the listing periodically.
-- `--summary` prints only aggregate totals.
-
-Latency columns embed a Unicode sparkline scaled to the slowest peer, and table
-output clamps to terminal width to avoid wrapping.
+Operators can inspect the live relay configuration and shard affinities via the
+CLI:
 
 ```bash
-net stats <peer_id>
+net gossip-status
 ```
 
-```json
-{"method":"net.peer_stats","params":{"peer_id":"abcd…"}}
-```
-
-```json
-{"method":"net.peer_stats_all","params":{"offset":0,"limit":2}}
-```
-
-Example output:
-
-```json
-[
-  {
-    "peer_id": "abcd…",
-    "metrics": {"requests": 10, "bytes_sent": 512, "drops": {"rate_limit": 1}}
-  },
-  {
-    "peer_id": "dcba…",
-    "metrics": {"requests": 4, "bytes_sent": 128, "drops": 0}
-  }
-]
-```
-
-Configuration knobs:
-
-- `max_peer_metrics` – cap tracked peers to bound memory
-- `peer_metrics_export` – disable per‑peer Prometheus labels when `false`
-- `track_peer_drop_reasons` – collapse drop reasons into `other` when `false`
-- `track_handshake_failures` – disable detailed handshake error labels when `false`
+This command calls the new `net.gossip_status` RPC and displays the TTL, cache
+occupancy, current fanout bounds, recent adaptive decisions, partition status,
+and persisted shard peer lists. Passing `--json` returns the raw JSON payload
+for automation.
 - `peer_reputation_decay` – rate at which reputation decays toward `1.0`
 
 See [`docs/networking.md`](networking.md) for peer database recovery and

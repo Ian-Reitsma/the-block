@@ -77,29 +77,30 @@ test real services today.
   persistence, and cache hygiene flow. (85.0% Complete — incentive-marketplace
   wiring remains the main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
-  metered in normalized compute units. Offers escrow mixed CT/IT fee splits via
-  `pct_ct`, supports graceful job cancellation through the `compute.job_cancel`
-  RPC and `compute cancel <job_id>` CLI, hashes receipts into blocks before
-  conversion to CT through multipliers, and verifies optional SNARK receipts
-  prior to crediting payment. Settlement persists CT/IT balances in a
-  RocksDB-backed ledger with activation metadata, audit exports, and recent
-  root tracking so operators can reconcile receipts after restarts; `Settlement::shutdown`
-  now forces a final `persist_all` + RocksDB flush so regression suites can assert clean teardown, and metadata captures the
-  last anchor hash plus cancellation reason for post-incident reviews. Admission now enforces a
-  dynamic fee floor with
-  per-sender slot limits, records evictions for audit, and exposes the active
-  floor through `mempool.stats` so operators can reason about QoS. Governance can
-  retune the fee-floor window and percentile, and wallet sends surface localized
-  warnings with auto-bump or `--force` overrides plus JSON output for tooling.
-  Lane-aware batching now stages matches per `FeeLane`, rotates lanes until the
-  batch quota or fairness deadline trips, throttles via `TB_COMPUTE_MATCH_BATCH`,
-  and persists receipts with lane tags so restarts replay only outstanding work.
-  The matcher rejects seeds that exceed per-lane capacity, tracks starvation
-  thresholds with structured warnings, and exports per-lane queue depth/age plus
-  `matches_total{lane}` and `match_loop_latency_seconds{lane}` histograms. CLI and
-  RPC surfaces expose queue depths, capacity guardrails, fairness windows, and
-  recent matches, and settlement continues to persist CT/IT balances with
-  activation metadata, audit exports, and recent root tracking. (93.0% Complete)
+  metered in normalized compute units. Offers escrow CT via the `pct_ct` selector
+  (policy now pins it to 100 for live lanes), supports graceful job cancellation
+  through the `compute.job_cancel` RPC and `compute cancel <job_id>` CLI, hashes
+  receipts into blocks before conversion to CT through multipliers, and verifies
+  optional SNARK receipts prior to crediting payment. Settlement persists CT
+  balances in a RocksDB-backed ledger with activation metadata, audit exports,
+  and recent root tracking so operators can reconcile receipts after restarts;
+  `Settlement::shutdown` now forces a final `persist_all` + RocksDB flush so
+  regression suites can assert clean teardown, and metadata captures the last
+  anchor hash plus cancellation reason for post-incident reviews. Admission now
+  enforces a dynamic fee floor with per-sender slot limits, records evictions for
+  audit, and exposes the active floor through `mempool.stats` so operators can
+  reason about QoS. Governance can retune the fee-floor window and percentile,
+  and wallet sends surface localized warnings with auto-bump or `--force`
+  overrides plus JSON output for tooling. Lane-aware batching now stages matches
+  per `FeeLane`, rotates lanes until the batch quota or fairness deadline trips,
+  throttles via `TB_COMPUTE_MATCH_BATCH`, and persists receipts with lane tags so
+  restarts replay only outstanding work. The matcher rejects seeds that exceed
+  per-lane capacity, tracks starvation thresholds with structured warnings, and
+  exports per-lane queue depth/age plus `matches_total{lane}` and
+  `match_loop_latency_seconds{lane}` histograms. CLI and RPC surfaces expose queue
+  depths, capacity guardrails, fairness windows, and recent matches, and
+  settlement continues to persist CT balances with activation metadata, audit
+  exports, and recent root tracking. (93.0% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -111,13 +112,13 @@ test real services today.
       and leverages a chaos harness to publish retransmit counters, keeping
       operators ahead of packet loss. Shard-aware peer maps route block gossip only
       to interested peers and uptime-based fee rebates reward high-availability
-      peers. (95.0% Complete)
+      peers. (97.0% Complete)
     - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
       resolves forks deterministically, and validates blocks with BLAKE3 hashes,
       multi-window Kalman retargeting, VDF-anchored randomness, macro-block
       checkpointing, and per-shard fork choice. Release installs now gate on
       provenance verification with automated rollback if hashes drift, keeping
-      consensus nodes in lockstep. (89.0% Complete)
+      consensus nodes in lockstep. (90.0% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -128,7 +129,7 @@ test real services today.
     timelines so operators can audit parameter changes while governance history
     archives DID revocations for audit. All tooling now targets the shared
     `governance` crate with sled-backed persistence, proposal DAG validation,
-    and Kalman retune helpers. (93.0% Complete)
+    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (95.0% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
       deployable contracts and fee markets alongside traditional PoW headers. (82.0%
@@ -140,9 +141,11 @@ test real services today.
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
     constant-product AMM pools provide fallback liquidity with programmable incentives. (81.0%
     Complete)
-- Cross-chain bridge primitives lock assets, verify relayer proofs, and expose
-  deposit/withdraw flows so value can move between chains without custodians.
-Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. (52.0% Complete)
+- Cross-chain bridge primitives track per-asset channels, persist relayer sets,
+  enforce multi-signature quorums, and expose challenge windows with slashing for
+  invalid proofs. Deposit/withdraw flows carry partition tags, HTLC parsing accepts
+  both SHA3 and RIPEMD encodings, and light-client verification guards every transfer.
+  Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history. (74.0% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).
   Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
@@ -162,7 +165,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       dashboards track warning/override deltas. Wallet binaries now share a single
       `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, forward
       multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
-      staking payloads. (95.0% Complete)
+      staking payloads. (96.0% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
       and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
@@ -170,7 +173,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
       drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
       anchor totals land in telemetry so dashboards can trace user choices,
       anchor velocity, and governance parameter rollbacks from a single pane.
-      (89.0% Complete)
+      (91.0% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
     and encode consensus invariants, laying groundwork for provable safety. (41.0%
     Complete)
@@ -186,16 +189,17 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99.8/100** with vision completion **~88.4/100**.
+  Mainnet readiness sits at **~99.88/100** with vision completion **~89.3/100**.
   Recent work layered lane-aware batching onto the compute matcher with
   fairness deadlines, per-lane queue caps, starvation warnings, and
-  `match_loop_latency_seconds{lane}` histograms, rebuilt the mobile gateway cache
-  around an encrypted sled store with TTL sweeping, min-heap eviction, and
-  operator-facing CLI/RPC/telemetry, and integrated platform-specific device
-  probes into the light client with freshness-labelled telemetry, manual
-  overrides, and annotated log uploads. Governance tooling, wallet telemetry,
-  and the resilient RPC client continue to anchor the ecosystem on the shared
-  state machine.
+  `match_loop_latency_seconds{lane}` histograms, overhauled the gossip relay with
+  LRU-backed deduplication, adaptive fanout, partition tagging, and shard-aware
+  persistence, and integrated the durable proof-rebate pipeline so receipts
+  persist to disk, surface through explorer/CLI pagination, and land in coinbase
+  assembly. Governance tooling, wallet telemetry, and the resilient RPC client
+  continue to anchor the ecosystem on the shared state machine while the bridge
+  stack now enforces multi-signature quorums, challenge windows, and relayer
+  slashing.
   Current focus areas: deliver treasury disbursement tooling, wire SLA slashing
   dashboards on top of the new matcher, continue WAN-scale QUIC chaos drills with
   mitigation playbooks, polish multisig wallet UX, and expand bridge/DEX docs with
@@ -208,7 +212,7 @@ Light-client verification guards all transfers, and HTLC parsing accepts both SH
 - Kalman multi-window difficulty retune keeps the 1 s block cadence stable and is exposed via `consensus.difficulty` RPC, `retune_hint` headers, and `difficulty_*` metrics.
 - Parallel execution engine running non-overlapping transactions across threads; conflict detection partitions read/write sets so independent transactions execute concurrently. See [docs/scheduler.md](docs/scheduler.md).
 - GPU-optional hash workloads for validators and compute marketplace jobs; GPU paths are cross-checked against CPU hashes to guarantee determinism.
-- Compute-market jobs quote normalized compute units and escrow mixed CT/IT fee splits via `pct_ct`; refunds honour the original percentages, jobs respect lane-aware batching with fairness windows and starvation detection, and operators can inspect per-lane queue depth, capacity limits, and recent matches via CLI/RPC. Background loops throttle with `TB_COMPUTE_MATCH_BATCH`, persist receipts with lane tags, and surface telemetry for dashboards while `compute cancel <job_id>` keeps graceful cancellation intact.
+- Compute-market jobs quote normalized compute units and escrow CT via `pct_ct` (live lanes pin the selector to 100). Refunds honour the submitted split, jobs respect lane-aware batching with fairness windows and starvation detection, and operators can inspect per-lane queue depth, capacity limits, and recent matches via CLI/RPC. Background loops throttle with `TB_COMPUTE_MATCH_BATCH`, persist receipts with lane tags, and surface telemetry for dashboards while `compute cancel <job_id>` keeps graceful cancellation intact.
 - Cluster-wide `metrics-aggregator` collects peer snapshots while the `net stats`
   CLI supports JSON output, drop-reason and reputation filtering, pagination, and
   colorized drop-rate warnings.

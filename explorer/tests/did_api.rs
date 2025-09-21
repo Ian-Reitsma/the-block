@@ -29,18 +29,32 @@ fn explorer_indexes_recent_dids_and_metrics() {
     let dir = tempdir().unwrap();
     let did_path = dir.path().join("did.db");
     std::env::set_var("TB_DID_DB_PATH", did_path.to_string_lossy().as_ref());
-    let mut registry = DidRegistry::open(&did_path);
     let gov = GovStore::open(dir.path().join("gov.db"));
 
     let (sk_bytes, pk_bytes) = generate_keypair();
     let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
     let address = hex::encode(pk_bytes);
 
-    let mut anchor = build_anchor("{\"id\":1}", 1, &sk);
-    registry.anchor(&anchor, Some(&gov)).expect("first anchor");
-
     let explorer_db = dir.path().join("explorer.db");
+
+    let (record_one, record_two) = {
+        let mut registry = DidRegistry::open(&did_path);
+        let anchor_one = build_anchor("{\"id\":1}", 1, &sk);
+        let record_one = registry
+            .anchor(&anchor_one, Some(&gov))
+            .expect("first anchor");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let anchor_two = build_anchor("{\"id\":2}", 2, &sk);
+        let record_two = registry
+            .anchor(&anchor_two, Some(&gov))
+            .expect("second anchor");
+        (record_one, record_two)
+    };
+
+    let expected_wallet = format!("/wallets/{}", address);
     let ex = Explorer::open(&explorer_db).expect("open explorer");
+    ex.record_did_anchor(&record_one.clone().into())
+        .expect("seed explorer");
 
     let record = ex
         .did_document(&address)
@@ -48,25 +62,20 @@ fn explorer_indexes_recent_dids_and_metrics() {
     assert_eq!(record.nonce, 1);
     assert_eq!(record.document, "{\"id\":1}");
 
-    let mut history = did_view::by_address(&ex, &address).expect("history by address");
+    let history = did_view::by_address(&ex, &address).expect("history by address");
     assert_eq!(history.len(), 1);
-    let expected_wallet = format!("/wallets/{}", address);
     assert_eq!(
         history[0].wallet_url.as_deref(),
         Some(expected_wallet.as_str())
     );
 
-    // Apply an update and ensure both cache and SQLite history are refreshed.
-    anchor.nonce = 2;
-    anchor.document = "{\"id\":2}".to_string();
-    let sig = sk.sign(anchor.owner_digest().as_ref());
-    anchor.signature = sig.to_bytes().to_vec();
-    registry.anchor(&anchor, Some(&gov)).expect("second anchor");
+    ex.record_did_anchor(&record_two.clone().into())
+        .expect("update explorer");
 
     let updated = ex.did_document(&address).expect("cached resolve");
     assert_eq!(updated.nonce, 2);
 
-    history = did_view::by_address(&ex, &address).expect("history refreshed");
+    let history = did_view::by_address(&ex, &address).expect("history refreshed");
     assert!(history.len() >= 2);
 
     let recent = did_view::recent(&ex, 8).expect("recent anchors");

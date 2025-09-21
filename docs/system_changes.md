@@ -61,7 +61,7 @@ where `S` is circulating CT supply, `I_target` is the annual inflation ceiling (
 | UX for new users | Required staging an auxiliary balance | Wallet works immediately |
 | Governance surface | Multiple mint/decay levers | Simple multiplier votes |
 | Economic transparency | Harder to audit total issuance | Inflation capped ≤2 % with public multipliers |
-| Regulatory posture | Additional instrument to justify | Two-token utility system |
+| Regulatory posture | Additional instrument to justify | Single-token utility system with CT sub-ledgers |
 
 ### Migration Notes
 Devnet operators should run `scripts/purge_legacy_ledger.sh` to wipe obsolete reimbursement data and regenerate genesis files without the legacy balance field. Faucet scripts now dispense CT. Operators must verify `inflation.params` after upgrade and ensure no deprecated configuration keys persist in configs or dashboards.
@@ -69,19 +69,19 @@ Devnet operators should run `scripts/purge_legacy_ledger.sh` to wipe obsolete re
 ### Future Entries
 Subsequent economic shifts—such as changing the rent refund ratio, altering subsidy shares, or introducing new service roles—must document their motivation, implementation, and impact in a new dated section below. This file serves as the canonical audit log for all system-wide model changes.
 
-## Durable Compute Settlement Ledger (2025-09-20)
+## Durable Compute Settlement Ledger (2025-09-21)
 
 ### Rationale for Persistence & Dual-Ledger Accounting
 
-- **Crash resilience:** The in-memory compute settlement shim dropped balances on restart. Persisting CT/IT flows in RocksDB guarantees recovery, even if the node or process exits unexpectedly.
+- **Crash resilience:** The in-memory compute settlement shim dropped balances on restart. Persisting CT flows (with legacy industrial columns retained for tooling) in RocksDB guarantees recovery, even if the node or process exits unexpectedly.
 - **Anchored accountability:** Governance required an auditable trail that explorers, operators, and regulators can replay. Recording sequences, timestamps, and anchors ensures receipts reconcile with the global ledger.
-- **Split-token clarity:** Providers and buyers need to understand both CT and industrial-token balances after every job. Persisting paired ledgers avoids race conditions when reconstructing balances from mempool traces.
+- **Ledger clarity:** Providers and buyers need to understand CT balances after every job. Persisting the ledger avoids race conditions when reconstructing balances from mempool traces and keeps the legacy industrial column available for regression tooling.
 
 ### Implementation Summary
 
 - `Settlement::init` now opens (or creates) `compute_settlement.db` inside the configured settlement directory, wiring sled-style helpers that load or default each sub-tree (`ledger_ct`, `ledger_it`, `metadata`, `audit_log`, `recent_roots`, `next_seq`). Test builds without `storage-rocksdb` transparently fall back to an ephemeral directory.
 - Every accrual, refund, or penalty updates both the in-memory ledger and the persisted state via `persist_all`, bumping a monotonic sequence and recomputing the Merkle root (`compute_root`).
-- `Settlement::shutdown` always calls `persist_all` on the active state and flushes RocksDB handles before dropping them, ensuring integration harnesses (and crash recovery drills) see fully durable CT/IT balances even if the node exits between accruals.
+- `Settlement::shutdown` always calls `persist_all` on the active state and flushes RocksDB handles before dropping them, ensuring integration harnesses (and crash recovery drills) see fully durable CT balances (with zeroed industrial fields) even if the node exits between accruals.
 - `Settlement::submit_anchor` hashes submitted receipts, records the anchor in `metadata.last_anchor_hex`, pushes a marker into the audit deque, and appends a JSON line to the on-disk audit log through `state::append_audit`.
 - Activation metadata (`metadata.armed_requested_height`, `metadata.armed_delay`, `metadata.last_cancel_reason`) captures the reason for every transition between `DryRun`, `Armed`, and `Real` modes. `Settlement::arm`, `cancel_arm`, and `back_to_dry_run` persist these fields immediately and emit telemetry via `SETTLE_MODE_CHANGE_TOTAL{state}`.
 - Telemetry counters `SETTLE_APPLIED_TOTAL`, `SETTLE_FAILED_TOTAL{reason}`, `SLASHING_BURN_CT_TOTAL`, and `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}` expose a live view of accruals, refunds, and penalties. Dashboards can alert on stalled anchors or repeated SLA violations.

@@ -45,6 +45,7 @@ pub enum ParamKey {
     GammaReadSubCt,
     KappaCpuSubCt,
     LambdaBytesOutSubCt,
+    ProofRebateLimitCt,
     RentRateCtPerByte,
     KillSwitchSubsidyReduction,
     MinerRewardLogisticTarget,

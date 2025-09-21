@@ -190,6 +190,11 @@ pub fn commit(chain: &mut Blockchain, deltas: Vec<StateDelta>) -> std::io::Resul
     ctx.commit()
 }
 
+/// Apply rebate claims to a block's coinbase totals after subsidy calculation.
+pub fn apply_coinbase_rebates(block: &mut Block, rebate_ct: u64) {
+    crate::light_client::proof_tracker::apply_rebates(block, rebate_ct);
+}
+
 pub(crate) fn shard_state_root(
     accounts: &HashMap<String, Account>,
     shard: address::ShardId,

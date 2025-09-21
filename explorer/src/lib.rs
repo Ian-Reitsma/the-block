@@ -24,6 +24,7 @@ pub mod dex_view;
 pub mod did_view;
 pub mod gov_param_view;
 pub mod htlc_view;
+pub mod light_client;
 pub mod net_view;
 pub mod release_view;
 pub mod snark_view;
@@ -225,6 +226,20 @@ pub struct Explorer {
 }
 
 impl Explorer {
+    fn decode_block(bytes: &[u8]) -> AnyhowResult<Block> {
+        if let Ok(block) = serde_json::from_slice(bytes) {
+            return Ok(block);
+        }
+        bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode block: {e}"))
+    }
+
+    fn decode_tx(bytes: &[u8]) -> AnyhowResult<SignedTransaction> {
+        if let Ok(tx) = serde_json::from_slice(bytes) {
+            return Ok(tx);
+        }
+        bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode tx: {e}"))
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let p = path.as_ref().to_path_buf();
         let mut conn = Connection::open(&p)?;
@@ -393,7 +408,7 @@ impl Explorer {
 
     pub fn index_block(&self, block: &Block) -> Result<()> {
         let conn = self.conn()?;
-        let data = bincode::serialize(block).unwrap();
+        let data = serde_json::to_vec(block).unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
             params![block.hash, block.index, data],
@@ -402,7 +417,7 @@ impl Explorer {
             let hash = Self::tx_hash(tx);
             let memo = String::from_utf8(tx.payload.memo.clone()).unwrap_or_default();
             let contract = tx.payload.to.clone();
-            let data = bincode::serialize(tx).unwrap();
+            let data = serde_json::to_vec(tx).unwrap();
             conn.execute(
                 "INSERT OR REPLACE INTO txs (hash, block_hash, memo, contract, data) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![hash, block.hash, memo, contract, data],
@@ -415,7 +430,7 @@ impl Explorer {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for ent in entries.flatten() {
                 if let Ok(bytes) = std::fs::read(ent.path()) {
-                    if let Ok(block) = bincode::deserialize::<Block>(&bytes) {
+                    if let Ok(block) = Self::decode_block(&bytes) {
                         let _ = self.index_block(&block);
                     }
                 }
@@ -433,7 +448,7 @@ impl Explorer {
                 |row| row.get(0),
             )
             .optional()?;
-        Ok(bytes.map(|b| bincode::deserialize(&b).unwrap()))
+        Ok(bytes.map(|b| Self::decode_block(&b).expect("failed to decode block from explorer db")))
     }
 
     /// Fetch the base fee at the specified block height if present.
@@ -447,7 +462,7 @@ impl Explorer {
             )
             .optional()?;
         Ok(bytes
-            .and_then(|b| bincode::deserialize::<Block>(&b).ok())
+            .and_then(|b| Self::decode_block(&b).ok())
             .map(|b| b.base_fee))
     }
 
@@ -458,7 +473,7 @@ impl Explorer {
                 row.get(0)
             })
             .optional()?;
-        Ok(bytes.map(|b| bincode::deserialize(&b).unwrap()))
+        Ok(bytes.map(|b| Self::decode_tx(&b).unwrap()))
     }
 
     pub fn search_memo(&self, memo: &str) -> Result<Vec<SignedTransaction>> {
@@ -468,7 +483,7 @@ impl Explorer {
         let mut out = Vec::new();
         for r in rows {
             if let Ok(bytes) = r {
-                if let Ok(tx) = bincode::deserialize::<SignedTransaction>(&bytes) {
+                if let Ok(tx) = Self::decode_tx(&bytes) {
                     out.push(tx);
                 }
             }
@@ -483,7 +498,7 @@ impl Explorer {
         let mut out = Vec::new();
         for r in rows {
             if let Ok(bytes) = r {
-                if let Ok(tx) = bincode::deserialize::<SignedTransaction>(&bytes) {
+                if let Ok(tx) = Self::decode_tx(&bytes) {
                     out.push(tx);
                 }
             }

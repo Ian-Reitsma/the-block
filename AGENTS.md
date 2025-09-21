@@ -56,19 +56,21 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **~99.8/100** with vision completion **~88.4/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
-Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, and end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, network fee rebates, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
+Mainnet readiness sits at **~99.88/100** with vision completion **~89.3/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
+Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards, and the proof-rebate pipeline now persisting receipts that are appended to coinbase outputs during block production. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, adaptive gossip fanout with LRU deduplication, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
 
 **Latest highlights:**
 - Governance, SDKs, and the CLI now consume the shared `governance` crate with sled-backed `GovStore`, proposal DAG validation, Kalman retune helpers, and release quorum enforcement, keeping every integration on the node’s canonical state machine.
 - Wallet binaries continue to ship on `ed25519-dalek 2.2.x`, propagate multisig signer sets, escrow hash algorithms, and remote signer telemetry, and surface localized fee-floor coaching with JSON automation hooks for dashboards.
-- Compute-market matching enforces lane-aware batching with per-lane fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher now rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, and exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards.
+- Compute-market matching enforces lane-aware batching with per-lane fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher now rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards, and records payouts exclusively in CT following the retirement of the capped incentive token.
 - Mobile gateway caches persist encrypted responses and offline transactions to sled-backed storage with TTL sweeping, max-size guardrails, eviction telemetry, and CLI/RPC status & flush endpoints so mobile users can recover across restarts without leaking stale data. Sweepers drain a min-heap of expirations, boot-time replays rebuild the queue, and ChaCha20-Poly1305 keys derive from `TB_MOBILE_CACHE_KEY_HEX` (or fall back to `TB_NODE_KEY_HEX`) to harden the cache at rest.
 - Light-client device probes now integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, stream `the_block_light_client_device_status{field,freshness}` telemetry (fresh/cached/fallback), surface gating messages in the CLI/RPC, honour overrides stored in `~/.the_block/light_client.toml`, and embed the latest device snapshot inside compressed log uploads.
 - RPC clients clamp `TB_RPC_FAULT_RATE`, saturate exponential backoff after the 31st attempt, guard environment overrides with scoped restorers, and expose regression coverage so operators can trust bounded retry behaviour during incidents.
 - `SimpleDb` snapshot rewrites stage data through fsync’d temporary files, atomically rename into place, and retain legacy dumps until the new image lands, eliminating crash-window data loss while keeping legacy reopen logic intact.
 - Node CLI binaries honour telemetry/gateway feature toggles, emitting explicit user-facing errors when unsupported flags are passed, recording jurisdiction languages in law-enforcement audit logs, and compiling via optional feature bundles (`full`, `wasm-metadata`, `sqlite-storage`) for memory-constrained tests.
 - Light-client state streaming, DID anchoring, and explorer timelines now trace revocations and provenance attestations end-to-end with cached pagination so wallet, CLI, and dashboards agree on identity state.
+- Gossip relay scheduling now relies on configurable TTLs, latency-aware fanout scoring, shard-affinity persistence, and partition tagging with telemetry for dedup drops and peer failures, all surfaced through new CLI introspection.
+- Proof-relay rebates persist to disk with governance-parameterised rates, block-production integration, explorer leaderboards, and CLI/RPC pagination for historical receipts.
 
 **Outstanding focus areas:**
 - Ship governance treasury disbursement tooling and explorer timelines before opening external treasury submissions.
@@ -103,7 +105,7 @@ Recent additions now include multi-signature release approvals with explorer and
 
 ## 1 · Project Mission & Scope — Production-Grade Mandate
 
-**The‑Block** is a *formally‑specified*, **Rust-first**, dual-token, proof‑of‑work + proof‑of‑service blockchain kernel destined for main-net deployment.
+**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (CT) proof‑of‑work + proof‑of‑service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility.
 The repository owns exactly four responsibility domains:
 
 | Domain        | In-Scope Artifacts                                                     | Out-of-Scope (must live in sibling repos) |
@@ -121,11 +123,12 @@ The repository owns exactly four responsibility domains:
 | Memory- & Thread-Safety       | `#![forbid(unsafe_code)]`; FFI boundary capped at 2 % LOC; Miri & AddressSanitizer in nightly CI. | 0 undefined-behaviour findings in continuous fuzz. |
 | Portability                   | Cross-compile matrix: Linux glibc & musl, macOS, Windows‑WSL; reproducible Docker images. | Successful `cargo test --release` on all targets per PR. |
 
-### Economic Model — CT/IT Subsidy Engine
+### Economic Model — Unified CT Subsidy Engine
 
-- Subsidy accounting now lives in the shared CT ledger. All
-  operator rewards flow in liquid CT and are minted directly in the
-  coinbase.
+- Subsidy accounting now lives in the shared CT ledger. Industrial workloads
+  remain tracked as labelled CT subaccounts rather than a separate capped
+  token, and all operator rewards settle in transferable CT minted directly
+  in the coinbase.
 - Every block carries three subsidy fields: `STORAGE_SUB_CT`,
   `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
 - `industrial_backlog` and `industrial_utilization` gauges feed
@@ -217,7 +220,7 @@ the kernel of that architecture.
 The codebase already ships a reproducible kernel with:
 
 - dynamic difficulty retargeting and one-second block cadence,
-- dual-token fee routing and decay-driven emissions,
+- unified CT fee routing with decay-driven emissions and legacy industrial sub-ledger reporting,
 - purge-loop infrastructure with telemetry counters and TTL/orphan sweeps,
 - a minimal TCP gossip layer and JSON-RPC control surface,
 - cross-language serialization tests and a Python demo.
@@ -239,7 +242,7 @@ The following section is the complete, up‑to‑date vision. It supersedes any 
 Service Guarantees Citizenship: A Civic-Scale Architecture for a One-Second L1, Notarized Micro‑Shards, and Contribution‑Weighted Governance
 
 ## Abstract
-The‑Block is a production‑grade, people‑powered blockchain designed to make everyday digital life faster, cheaper, and more trustworthy while rewarding real service. A simple, auditable 1‑second L1 handles value and policy; sub‑second micro‑shards batch heavy AI/data into notarized roots per tick. Economics use two tradeable tokens—Consumer (BLOCKc) for the retail surface and Industrial (BLOCKi) for compute settlement—plus non‑transferable, expiring bill‑reducers for smooth UX. Governance binds rights to earned service via bicameral votes (Operators + Builders), quorum, and timelocks. The networking model extends beyond classic blockchains: nearby devices form a “people‑built internet” (LocalNet + Range Boost) where proximity and motion become infrastructure, coverage earns more where it’s scarce, and money maps to useful time and reach. Launch proceeds consumer‑first (single USDC pool), with Industrial lanes lighting once readiness trips.
+The-Block is a production-grade, people-powered blockchain designed to make everyday digital life faster, cheaper, and more trustworthy while rewarding real service. A simple, auditable 1-second L1 handles value and policy; sub-second micro-shards batch heavy AI/data into notarized roots per tick. Economics now revolve around a single transferable CT, with consumer and industrial sub-ledgers governing payout share and personal rebates acting as expiring bill reducers rather than tokens. Governance binds rights to earned service via bicameral votes (Operators + Builders), quorum, and timelocks. The networking model extends beyond classic blockchains: nearby devices form a "people-built internet" (LocalNet + Range Boost) where proximity and motion become infrastructure, coverage earns more where it’s scarce, and money maps to useful time and reach. Launch proceeds consumer-first (single USDC pool), with industrial lanes lighting once readiness trips.
 
 ## 1. Introduction & Current State
 Public chains excel in different slices—monetary credibility (Bitcoin), programmability (Ethereum), low latency (Solana), payments (XRP)—but none marries auditability, sub‑second data, wide participation, and service‑tied rights. Our blueprint: keep L1 minimal and deterministic; push heavy work to shards; pay for accepted results; and let “service guarantee citizenship.”
@@ -258,10 +261,10 @@ L1: value transfers, governance, shard‑root receipts; fixed 256‑bit header; 
 ### 2.2 Service Identity & Roles
 Nodes attest uptime and verifiable work (bandwidth/storage/compute). Each epoch, percentile ranking assigns roles: target ~70% Consumer / ~30% Industrial; roles lock for the epoch with hysteresis to prevent flapping.
 
-### 2.3 Economics: Two Tokens + Bill Reducers
-- BLOCKc (Consumer): retail‑facing fees and spendable balance
-- BLOCKi (Industrial): compute settlement and operator rewards
-- Personal rebates/priority (non‑transferable, expiring) auto‑apply to your own bills; never tradable, never change market price. Equal pay per slice; fast rigs earn more/hour by completing more slices.
+### 2.3 Economics: Unified CT Supply
+- CT is the sole transferable unit covering fees, staking, and rewards. Governance manages its emission curve and circulating float.
+- Industrial workloads draw from a dedicated CT sub-ledger that governs payout share without introducing a separate token. Split targets are tuned by policy rather than markets.
+- Personal rebates/priority credits remain ledger entries only. They auto-apply to your own bills, expire per policy, and never circulate or affect spot pricing.
 
 ## 3. Governance: Constitution vs Rulebook
 **Constitution (immutable):** hard caps and monotone emissions; 1‑second cadence; one‑badge‑one‑vote; quorum + timelocks; no mint‑to‑EOA; no backdoors.
@@ -271,9 +274,9 @@ Nodes attest uptime and verifiable work (bandwidth/storage/compute). Each epoch,
 **Process:** bicameral votes (Operators/Builders); snapshot voters at create; secret ballots; param changes next epoch after timelock; upgrades require supermajority + longer timelock + rollback window; emergencies only at catalog/app layer, auto‑expire, fully logged.
 
 ## 4. Rewards, Fees, Emissions
-- Two pots per block (CON/IND); CON pays all active nodes by uptime; IND weights validated work. If industrial supply is scarce, nudge split within bounds (economics, not edicts).
-- Emissions anchored to block height; publish curve and tests; first‑month issuance stays tame (≈0.01% per token). No variable caps; vest any pre‑TGE accrual by uptime/validated work.
-- Reads free; writes burn personal rebates first, then coins (BLOCKi for shard roots, BLOCKc for L1).
+- Two CT subsidy sub-ledgers (consumer/industrial) accrue in every coinbase; consumer share pays uptime, industrial share weights validated work. If industrial demand spikes, governance nudges the split within bounds rather than minting a new asset.
+- Emissions anchor to block height; publish curves and tests; first-month issuance stays tame (≈0.01% of circulating CT). No variable caps; vest any pre-TGE accrual by uptime/validated work.
+- Reads stay free; writes burn personal rebates first, then CT (shard roots debit the industrial bucket, L1 transactions debit consumer). All flows settle in CT accounts.
 
 ## 5. Privacy & UX
 - Vault + Personal AI: default‑private content with revocable capabilities; explainable citations (which items answered a query); content encrypted at source; chain notarizes proofs only.
@@ -294,20 +297,20 @@ Phones earn by carrying sealed bundles along commutes; settlement releases on de
 User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, spend anywhere; roaming without passwords/SIMs; wrapped traffic and rate caps for host safety.
 
 ## 7. Compute Marketplace
-- Per‑slice pricing; sealed‑bid batch matches with tiny deposits; equal pay per slice type.
-- Canary lanes (transcode, authenticity checks) at Industrial TGE to set anchors; expand to heavier jobs with caps.
-- Shadow intents (stake‑backed) pre‑TGE show p25–p75 bands; convert escrow to BLOCKi at go‑live; start jobs; rebates begin as personal bill reducers.
-- Operator guardrails: daily per‑node payout caps; UI break‑even/margin probes (power cost × hours/shard × watts).
+- Per-slice pricing settles entirely in CT; sealed-bid batch matches run with refundable deposits and equal pay per slice type.
+- Canary lanes (transcode, authenticity checks) remain the benchmark set; heavier jobs expand under governance-approved caps with SLA telemetry.
+- Shadow intents (stake-backed) show p25–p75 bands before activation; when armed, escrows convert into CT payouts and start jobs with rebates landing as personal credits.
+- Operator guardrails: daily per-node payout caps; UI break-even/margin probes (power cost × hours/shard × watts).
 
 ## 8. Compute‑Backed Money (CBM) & Instant Apps
-- CBM: daily redeem curves—X BLOCK buys Y seconds standard compute or Z MB delivered; protocol enforces redeemability with a minimal backstop from marketplace fees.
+- CBM: daily redeem curves—X CT buys Y seconds standard compute or Z MB delivered; protocol enforces redeemability with a minimal backstop from marketplace fees.
 - Instant Apps: tap‑to‑use applets execute via nearby compute/caches and settle later; creators paid per use in CBM; users often pay zero if they contributed.
 
 ## 9. Launch Plan
-- Consumer‑first TGE: seed $500 USDC : 1,000,000 BLOCKc (single USDC pool), time‑lock LP, 48h slow‑start; publish pool math and addresses.
-- Marketplace preview: stake‑backed intents show bands without orders.
-- Readiness trips Industrial (nodes, capacity, liquidity, vote sustained N days): arm 72h countdown; list USDC/BLOCKi; auto‑convert escrows; start canary lanes; subsidies act as rebates.
-- Vesting & caps: any pre‑TGE accrual vests by uptime/validated work; cap total pre‑launch claims.
+- CT TGE: seed initial liquidity against a single USDC pool, time-lock LP shares, slow-start 48h, and publish pool math plus addresses.
+- Marketplace preview: stake-backed intents show pricing bands without filling orders until governance opens the lanes.
+- Readiness gates industrial payouts on sustained node capacity, liquidity, and votes; once tripped, start canary lanes, migrate shadow intents into live CT escrows, and credit rebates as ledger entries.
+- Vesting & caps: any pre-TGE accrual vests by uptime/validated work; cap total pre-launch claims.
 
 ## 10. SDKs
 - Provenance: sensor‑edge signing, proof bundles, content hash anchoring; explainable citations.
@@ -320,17 +323,20 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 - Founder exit: burn protocol admin keys; reproducible builds; move marks/domains to a standards non‑profit; bicameral governance; public irrevocability txs.
 
 ## 12. Dashboard & Metrics
-- Home: BLOCKc/day (USD est.), 7‑day sparkline; readiness score & bottleneck; node mix; inflation; circulating supply.
+- Home: CT/day (USD est.), 7-day sparkline; readiness score & bottleneck; node mix; inflation; circulating supply.
 - Marketplace: job cards w/ p25–p75, p_adj; est. duration on your device; break‑even/margin; refundable capacity stakes.
-- Wallet/Swap: balances, recent tx; DEX swap (USDC↔BLOCKc); no fiat in‑app.
+- Wallet/Swap: balances, recent tx; DEX swap (USDC↔CT); no fiat in-app.
 - Policy: emissions curve; live R(t,b); reserve inventory; jurisdiction pack hashes; transparency log.
 
 ## 13. Roadmap
 
-Mainnet readiness: ~99.8/100 · Vision completion: ~88.4/100. Known blockers: stabilise telemetry-gated integration warnings, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99.88/100 · Vision completion: ~89.3/100. Known blockers: finalise treasury disbursement tooling, finish bridge/DEX signer-set documentation, polish multisig UX, and continue WAN-scale QUIC chaos drills informed by the new gossip telemetry. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
+- Persistent proof-rebate tracker with governance rate caps now writes receipts to disk, injects payouts into coinbase assembly, and exposes explorer/CLI history with telemetry for pending balances.
+- Bridge module tracks per-asset channels, multi-signature quorums, and challenge windows with slashing hooks, persisted state, and expanded RPC/CLI coverage.
+- Gossip relay now runs an LRU-backed dedup cache with configurable TTLs, latency-aware fanout scoring, shard-affinity persistence, partition tagging, and detailed telemetry surfaces.
 - Stake-weighted PoS finality with validator registration, bonding/unbonding, and slashing RPCs.
 - Proof-of-History tick generator and Turbine-style gossip for deterministic propagation.
 - Parallel execution engine with optional GPU hash workloads.
@@ -508,7 +514,7 @@ This section consolidates actionable playbooks from §§18–19. It is included 
 ### 17.1 Updated Vision & Next Steps
 
 - Phase A (0–2 weeks): Consumer‑first TGE and preview
-  - Single USDC/BLOCKc pool seeded and time‑locked; 48h slow‑start; publish pool math/addresses.
+  - Single USDC/CT pool seeded and time-locked; 48h slow-start; publish pool math/addresses.
   - Dashboard readiness index and bottleneck tile; earnings sparkline; vesting view (if enabled).
   - Shadow marketplace with stake‑backed intents; p25–p75 bands and p_adj; break‑even/margin probe.
   - LocalNet short relays with receipts and paid relays; strict defaults and battery/data caps.
@@ -596,20 +602,20 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 93%
+  - Progress: 95%
   - ⚠️ Focus: wire treasury disbursements and dependency visualisations into explorer timelines while finalising external submission workflows.
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
   - [x] Release rollback helper ensures binaries revert when provenance validation fails
-  - Progress: 89%
+  - Progress: 90%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
     - [x] Mutual TLS certificate rotation, diagnostics RPC/CLI, and chaos testing harness
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 95%
+    - Progress: 97%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements, WAL-backed stores, and crash-safe snapshot rewrites that stage via fsync’d temp files before promoting base64 images
   - [ ] Incentive-backed DHT marketplace
@@ -632,18 +638,18 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 52%
+  - Progress: 74%
   - **Wallets** ([docs/wallets.md](docs/wallets.md))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 95%
+    - Progress: 96%
     - ⚠️ Focus: round out multisig UX (batched signer discovery, richer operator messaging) before tagging the next CLI release.
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
-    - Progress: 90%
+    - Progress: 91%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements

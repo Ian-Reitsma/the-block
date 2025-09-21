@@ -5,8 +5,8 @@ The bridge subsystem moves value between The‑Block and external chains without
 ## Architecture Overview
 
 1. **Lock Phase**
-   - Users invoke `blockctl bridge deposit --amount <amt> --dest <chain>`.
-   - The transaction locks funds in the on-chain `Bridge` contract and emits an event containing the deposit ID and destination chain.
+ - Users invoke `blockctl bridge deposit --amount <amt> --dest <chain>`.
+  - The transaction locks funds in the on-chain `Bridge` contract and emits an event containing the deposit ID, destination chain, and current partition marker so downstream relayers can avoid isolated shards.
 2. **Relayer Proof**
    - Off-chain relayers watch the event stream and submit a Merkle proof to the destination chain.
    - Proofs include the deposit ID, amount, source account, and the BLAKE3 commitment of the lock event.
@@ -14,7 +14,7 @@ The bridge subsystem moves value between The‑Block and external chains without
    - Once the destination chain verifies the proof, relayers call `blockctl bridge withdraw --id <deposit-id>` on The‑Block.
    - The contract validates that the deposit is unspent and releases the locked balance to the caller.
 
-All bridge state lives under `state/bridges/` and survives restarts via bincode snapshots.
+All bridge state lives under the `SimpleDb` tree (`state/bridges/`) so channel balances, relayer sets, and pending withdrawals survive restarts and reload automatically.
 
 ## Light-Client Header Verification
 
@@ -76,7 +76,7 @@ Relayers must sign the serialized `LockProof` with their Ed25519 key. The contra
 
 ## Relayer Workflow & Incentives
 
-Relayers stake native tokens to participate in bridge operations. Each `Relayer` maintains a bonded `stake` and a `slashes` counter. Deposits now require a quorum of approvals: the `bridge.verify_deposit` RPC accepts a `RelayerBundle` containing multiple proofs and validates that at least `BridgeConfig::relayer_quorum` entries check out.
+Relayers stake native tokens to participate in bridge operations. Each `Relayer` maintains a bonded `stake` and a `slashes` counter. Deposits now require a quorum of approvals: the `bridge.verify_deposit` RPC accepts a `RelayerBundle` containing multiple proofs and validates that at least `BridgeConfig::relayer_quorum` entries check out while matching persisted shard affinity.
 
 1. Each proof in the bundle is recomputed; invalid signers are slashed immediately and surfaced in `bridge_slashes_total`.
 2. `PowHeader` encapsulates an external header and lightweight PoW target; `verify_deposit` rejects headers that fail the `verify_pow` check.
@@ -113,10 +113,46 @@ If a challenge is required, submit it with the commitment hash returned by the C
 blockctl bridge challenge --commitment <hex>
 ```
 
+Operators can also monitor the live bridge ledger via:
+
+```bash
+blockctl bridge pending --asset native
+blockctl bridge challenges
+blockctl bridge relayers --asset native
+blockctl bridge history --asset native --limit 20
+blockctl bridge slash-log
+```
+
+Relayer bonds can be provisioned off-chain and topped up through the RPC by calling
+`blockctl bridge bond --relayer <id> --amount <tokens>`.
+
 `header.json` and `proof.json` follow the formats above and are consumed directly by the CLI.
 
 ## Outstanding Work
 
 - **Multi-Asset Support** – extend the lock contract to wrap arbitrary tokens with minted representations on the destination chain.
 
-Progress: 45%
+Progress: 74%
+
+## Dispute Resolution & Threat Model
+
+The node now persists per-asset bridge channels in a sled-backed database so that lock
+balances, pending withdrawals, and relayer collateral all survive process restarts and
+chain rollbacks. Deposits record their originating proof metadata with monotonically
+increasing nonces to prevent replay; receipts can be paged via `bridge.deposit_history`
+and exported for audit.
+
+Withdrawals enter a challenge window (default 30 seconds) where any operator can invoke
+`bridge.challenge_withdrawal`. Challenged releases immediately re-credit the user’s
+locked balance, mark the receipt for review, and slash every relayer that signed the
+bundle. Collateral is debited from the bond ledger and the slashing event appears under
+`bridge.slash_log`. Successful releases require a governance attestation: the node calls
+`governance::ensure_release_authorized("bridge:<asset>:<commitment>")` before honouring a
+withdrawal, guaranteeing that signer thresholds are enforced alongside the relayer quorum.
+
+Telemetry counters `bridge_challenges_total` and `bridge_slashes_total` expose these
+events for dashboards, while CLI helpers allow operators to enumerate active challenges
+and relayer quorum composition. The threat model assumes at least one honest challenger
+per channel during the dispute window; even if a malicious quorum attempts to withdraw
+forged funds, bonded relayers are penalised and the audited receipts provide clear
+evidence for governance intervention.
