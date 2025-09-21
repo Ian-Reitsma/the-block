@@ -31,6 +31,8 @@ zstd = "0.12"
 bincode = "1"
 ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 tracing = "0.1"
+state = { path = "../../state" }
+thiserror = "1"
 
 [dependencies.ndk]
 version = "0.8"
@@ -62,3 +64,4 @@ optional = true
 
 [dev-dependencies]
 rand = "0.8"
+tempfile = "3"

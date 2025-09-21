@@ -1,6 +1,6 @@
 use clap::Subcommand;
 use futures::{SinkExt, StreamExt};
-use light_client::{StateChunk, StateStream};
+use light_client::{load_user_config, LightClientConfig, StateChunk, StateStream};
 
 #[derive(Subcommand)]
 pub enum LightSyncCmd {
@@ -16,7 +16,8 @@ pub fn handle(cmd: LightSyncCmd) {
                 match tokio_tungstenite::connect_async(url).await {
                     Ok((ws, _)) => {
                         let (mut write, mut read) = ws.split();
-                        let mut stream = StateStream::new();
+                        let config: LightClientConfig = load_user_config().unwrap_or_default();
+                        let mut stream = StateStream::from_config(&config);
                         let _ = write
                             .send(tokio_tungstenite::tungstenite::Message::Ping(vec![]))
                             .await;
@@ -25,7 +26,9 @@ pub fn handle(cmd: LightSyncCmd) {
                                 if let Ok(chunk) =
                                     serde_json::from_str::<StateChunk>(msg.to_text().unwrap())
                                 {
-                                    let _ = stream.apply_chunk(chunk.clone());
+                                    if let Err(err) = stream.apply_chunk(chunk.clone()) {
+                                        eprintln!("failed to apply chunk: {err}");
+                                    }
                                     if stream.lagging(chunk.tip_height) {
                                         #[cfg(feature = "telemetry")]
                                         the_block::telemetry::STATE_STREAM_LAG_ALERT_TOTAL.inc();
