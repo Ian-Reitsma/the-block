@@ -40,6 +40,8 @@ pub struct ParallelExecutor;
 impl ParallelExecutor {
     /// Execute tasks, partitioning them to avoid state conflicts.
     pub fn execute<T: Send + Sync>(tasks: Vec<Task<T>>) -> Vec<T> {
+        #[cfg(feature = "telemetry")]
+        let start = std::time::Instant::now();
         let mut groups: Vec<Vec<Task<T>>> = Vec::new();
         for task in tasks {
             let mut task_opt = Some(task);
@@ -57,10 +59,19 @@ impl ParallelExecutor {
                 groups.push(vec![t]);
             }
         }
-        groups
+        let results = groups
             .into_iter()
             .flat_map(|g| g.into_par_iter().map(|t| (t.func)()).collect::<Vec<_>>())
-            .collect()
+            .collect();
+        #[cfg(feature = "telemetry")]
+        {
+            crate::telemetry::sampled_observe(
+                &crate::telemetry::PARALLEL_EXECUTE_SECONDS,
+                start.elapsed().as_secs_f64(),
+            );
+            crate::telemetry::update_memory_usage(crate::telemetry::MemoryComponent::Compute);
+        }
+        results
     }
 }
 

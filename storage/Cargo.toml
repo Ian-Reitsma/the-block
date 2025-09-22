@@ -3,7 +3,17 @@ name = "storage"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+telemetry = []
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 blake3 = "1"
+
+[dev-dependencies]
+tempfile = "3"
+the_block = { path = "../node", features = ["telemetry"] }
+bincode = "1"
+hex = "0.4"

@@ -84,7 +84,7 @@ mod tests {
         ];
         let mut meter = GasMeter::new(20);
         let stack = execute(&code, &mut meter).unwrap();
-        assert_eq!(stack, vec![0b1111]);
+        assert_eq!(stack, vec![0b1011]);
         // pushes:3 *2 gas =6, and=1, or=1 -> total 8 gas
         assert_eq!(meter.used(), 8);
     }
@@ -203,6 +203,7 @@ mod tests {
             0,
             0,
             OpCode::Push as u8,
+            0,
             0,
             0,
             0,

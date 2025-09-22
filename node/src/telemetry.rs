@@ -23,6 +23,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use ureq;
 
+#[cfg(feature = "telemetry")]
+use serde::Serialize;
+
 pub mod summary;
 
 #[cfg(feature = "telemetry")]
@@ -33,18 +36,116 @@ pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 #[cfg(feature = "telemetry")]
 static SAMPLE_RATE: AtomicU64 = AtomicU64::new(1_000_000); // parts per million
 #[cfg(feature = "telemetry")]
+static BASE_SAMPLE_RATE: AtomicU64 = AtomicU64::new(1_000_000);
+#[cfg(feature = "telemetry")]
+static SAMPLE_FAIL_EVENTS: AtomicU64 = AtomicU64::new(0);
+#[cfg(feature = "telemetry")]
 static COMPACTION_SECS: AtomicU64 = AtomicU64::new(60);
 #[cfg(feature = "telemetry")]
 static COMPACTOR: Once = Once::new();
+
 #[cfg(feature = "telemetry")]
-static HDR_MEMORY: Lazy<Mutex<HdrHistogram<u64>>> =
-    Lazy::new(|| HdrHistogram::new(3).unwrap().into());
+const ADAPTIVE_MIN_SAMPLE_RATE: u64 = 10_000; // 1%
+#[cfg(feature = "telemetry")]
+const ADAPTIVE_WINDOW_SECS: u64 = 30;
+
+#[cfg(feature = "telemetry")]
+static ADAPTIVE_LOOP: Lazy<()> = Lazy::new(|| {
+    std::thread::spawn(adaptive_sampling_loop);
+});
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum MemoryComponent {
+    Mempool,
+    Storage,
+    Compute,
+}
+
+impl MemoryComponent {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MemoryComponent::Mempool => "mempool",
+            MemoryComponent::Storage => "storage",
+            MemoryComponent::Compute => "compute",
+        }
+    }
+}
+
+#[cfg_attr(feature = "telemetry", derive(Serialize))]
+#[derive(Clone, Copy, Default, Debug)]
+pub struct MemorySnapshot {
+    pub latest: u64,
+    pub p50: u64,
+    pub p90: u64,
+    pub p99: u64,
+}
+
+#[cfg(feature = "telemetry")]
+struct MemoryHist {
+    hist: Mutex<HdrHistogram<u64>>,
+    latest: AtomicU64,
+}
+
+#[cfg(feature = "telemetry")]
+impl Default for MemoryHist {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "telemetry")]
+impl MemoryHist {
+    fn new() -> Self {
+        Self {
+            hist: Mutex::new(HdrHistogram::new_with_bounds(1, 1 << 42, 3).unwrap()),
+            latest: AtomicU64::new(0),
+        }
+    }
+
+    fn observe(&self, value: u64) {
+        self.latest.store(value, Ordering::Relaxed);
+        if let Ok(mut guard) = self.hist.lock() {
+            let _ = guard.record(value);
+        }
+    }
+
+    fn reset(&self) {
+        if let Ok(mut guard) = self.hist.lock() {
+            guard.reset();
+        }
+    }
+
+    fn snapshot(&self) -> MemorySnapshot {
+        let latest = self.latest.load(Ordering::Relaxed);
+        if let Ok(guard) = self.hist.lock() {
+            if guard.len() == 0 {
+                MemorySnapshot {
+                    latest,
+                    ..MemorySnapshot::default()
+                }
+            } else {
+                MemorySnapshot {
+                    latest,
+                    p50: guard.value_at_percentile(50.0),
+                    p90: guard.value_at_percentile(90.0),
+                    p99: guard.value_at_percentile(99.0),
+                }
+            }
+        } else {
+            MemorySnapshot {
+                latest,
+                ..MemorySnapshot::default()
+            }
+        }
+    }
+}
 
 /// In-memory read metrics aggregated per domain.
 #[cfg(feature = "telemetry")]
 #[derive(Default)]
 pub struct ReadStats {
     inner: DashMap<String, ReadStat>,
+    memory: DashMap<MemoryComponent, MemoryHist>,
 }
 
 #[cfg(feature = "telemetry")]
@@ -57,9 +158,21 @@ struct ReadStat {
 #[cfg(feature = "telemetry")]
 impl ReadStats {
     pub fn new() -> Self {
-        Self {
+        let stats = Self {
             inner: DashMap::new(),
+            memory: DashMap::new(),
+        };
+        for component in [
+            MemoryComponent::Mempool,
+            MemoryComponent::Storage,
+            MemoryComponent::Compute,
+        ] {
+            stats
+                .memory
+                .entry(component)
+                .or_insert_with(MemoryHist::new);
         }
+        stats
     }
 
     pub fn record(&self, domain: &str, bytes: u64) {
@@ -82,6 +195,28 @@ impl ReadStats {
             })
             .unwrap_or((0, 0))
     }
+
+    pub fn record_memory(&self, component: MemoryComponent, bytes: u64) {
+        let entry = self.memory.entry(component).or_insert_with(MemoryHist::new);
+        entry.observe(bytes);
+    }
+
+    pub fn memory_snapshot(&self, component: MemoryComponent) -> Option<MemorySnapshot> {
+        self.memory.get(&component).map(|h| h.snapshot())
+    }
+
+    pub fn memory_snapshot_all(&self) -> HashMap<&'static str, MemorySnapshot> {
+        self.memory
+            .iter()
+            .map(|entry| (entry.key().as_str(), entry.value().snapshot()))
+            .collect()
+    }
+
+    pub fn reset_memory(&self) {
+        for mut entry in self.memory.iter_mut() {
+            entry.value_mut().reset();
+        }
+    }
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -97,6 +232,14 @@ impl ReadStats {
     pub fn snapshot(&self, _domain: &str) -> (u64, u64) {
         (0, 0)
     }
+    pub fn record_memory(&self, _component: MemoryComponent, _bytes: u64) {}
+    pub fn memory_snapshot(&self, _component: MemoryComponent) -> Option<MemorySnapshot> {
+        None
+    }
+    pub fn memory_snapshot_all(&self) -> HashMap<&'static str, MemorySnapshot> {
+        HashMap::new()
+    }
+    pub fn reset_memory(&self) {}
 }
 
 #[cfg(feature = "telemetry")]
@@ -106,6 +249,7 @@ pub static READ_STATS: ReadStats = ReadStats;
 
 #[cfg(feature = "telemetry")]
 fn should_sample() -> bool {
+    Lazy::force(&ADAPTIVE_LOOP);
     let rate = SAMPLE_RATE.load(Ordering::Relaxed);
     if rate >= 1_000_000 {
         return true;
@@ -146,14 +290,16 @@ pub fn sampled_observe(hist: &Histogram, v: f64) {
 
 #[cfg(feature = "telemetry")]
 pub fn set_sample_rate(rate: f64) {
+    Lazy::force(&ADAPTIVE_LOOP);
     let scaled = (rate.clamp(0.0, 1.0) * 1_000_000.0) as u64;
+    BASE_SAMPLE_RATE.store(scaled, Ordering::Relaxed);
     SAMPLE_RATE.store(scaled, Ordering::Relaxed);
 }
 
 #[cfg(feature = "telemetry")]
 fn compact_histograms() {
-    HDR_MEMORY.lock().unwrap().reset();
-    update_memory_usage();
+    READ_STATS.reset_memory();
+    update_memory_usage(MemoryComponent::Storage);
 }
 
 #[cfg(feature = "telemetry")]
@@ -166,7 +312,7 @@ pub fn set_compaction_interval(secs: u64) {
             compact_histograms();
         });
     });
-    update_memory_usage();
+    update_memory_usage(MemoryComponent::Storage);
 }
 
 #[cfg(feature = "telemetry")]
@@ -185,11 +331,110 @@ pub fn current_alloc_bytes() -> u64 {
 }
 
 #[cfg(feature = "telemetry")]
-pub fn update_memory_usage() {
-    let bytes = current_alloc_bytes();
+pub fn record_memory_bytes(component: MemoryComponent, bytes: u64) {
     TELEMETRY_ALLOC_BYTES.set(bytes as i64);
-    HDR_MEMORY.lock().unwrap().record(bytes).ok();
+    READ_STATS.record_memory(component, bytes);
 }
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_memory_bytes(_component: MemoryComponent, _bytes: u64) {}
+
+#[cfg(feature = "telemetry")]
+pub fn update_memory_usage(component: MemoryComponent) {
+    let bytes = current_alloc_bytes();
+    record_memory_bytes(component, bytes);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn update_memory_usage(_component: MemoryComponent) {}
+
+#[cfg(feature = "telemetry")]
+fn adaptive_sampling_loop() {
+    let mut last_rate = SAMPLE_RATE.load(Ordering::Relaxed);
+    loop {
+        std::thread::sleep(Duration::from_secs(ADAPTIVE_WINDOW_SECS));
+        let base = BASE_SAMPLE_RATE.load(Ordering::Relaxed);
+        if base == 0 {
+            SAMPLE_RATE.store(0, Ordering::Relaxed);
+            last_rate = 0;
+            SAMPLE_FAIL_EVENTS.store(0, Ordering::Relaxed);
+            continue;
+        }
+        let fails = SAMPLE_FAIL_EVENTS.swap(0, Ordering::Relaxed);
+        let mut current = SAMPLE_RATE.load(Ordering::Relaxed);
+        let floor = if base < ADAPTIVE_MIN_SAMPLE_RATE {
+            base
+        } else {
+            ADAPTIVE_MIN_SAMPLE_RATE
+        };
+
+        let mut changed = false;
+        if fails > 0 {
+            let severity = (fails.min(10) as f64) * 0.05;
+            let factor = (1.0 - severity).clamp(0.1, 1.0);
+            let mut target = ((current as f64) * factor).round() as u64;
+            if target < floor && base != 0 {
+                target = floor;
+            }
+            if target < current {
+                SAMPLE_RATE.store(target, Ordering::Relaxed);
+                current = target;
+                changed = true;
+                tracing::warn!(
+                    sample_rate_ppm = current,
+                    fails,
+                    "adaptive_sampling_throttled"
+                );
+            }
+        } else if current < base {
+            let diff = base - current;
+            if diff > 0 {
+                let step = ((diff as f64) * 0.25).ceil() as u64;
+                let target = (current + step).min(base);
+                if target != current {
+                    SAMPLE_RATE.store(target, Ordering::Relaxed);
+                    current = target;
+                    changed = true;
+                    tracing::info!(sample_rate_ppm = current, "adaptive_sampling_recovering");
+                }
+            }
+        }
+
+        if !changed && current != last_rate {
+            tracing::debug!(sample_rate_ppm = current, "adaptive_sampling_updated");
+        }
+        last_rate = current;
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn sample_rate_ppm() -> u64 {
+    SAMPLE_RATE.load(Ordering::Relaxed)
+}
+
+#[cfg(feature = "telemetry")]
+pub fn compaction_interval_secs() -> u64 {
+    COMPACTION_SECS.load(Ordering::Relaxed)
+}
+
+#[cfg(feature = "telemetry")]
+pub fn record_log_correlation_fail() {
+    LOG_CORRELATION_FAIL_TOTAL.inc();
+    SAMPLE_FAIL_EVENTS.fetch_add(1, Ordering::Relaxed);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn sample_rate_ppm() -> u64 {
+    0
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn compaction_interval_secs() -> u64 {
+    0
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_log_correlation_fail() {}
 
 #[cfg(not(feature = "telemetry"))]
 pub fn sampled_inc(_c: &IntCounter) {}
@@ -208,7 +453,7 @@ pub fn current_alloc_bytes() -> u64 {
     0
 }
 #[cfg(not(feature = "telemetry"))]
-pub fn update_memory_usage() {}
+pub fn update_memory_usage(_component: MemoryComponent) {}
 
 #[cfg(feature = "telemetry")]
 pub fn log_context() -> tracing::Span {
@@ -673,6 +918,22 @@ pub static PRICE_WEIGHT_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     .unwrap();
     REGISTRY.register(Box::new(c.clone())).unwrap();
     c
+});
+
+pub static PARALLEL_EXECUTE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let buckets = prometheus::exponential_buckets(0.001, 2.0, 12)
+        .unwrap_or_else(|e| panic!("parallel execute buckets: {e}"));
+    let opts = HistogramOpts::new(
+        "parallel_execute_seconds",
+        "Elapsed wall-clock time for ParallelExecutor batches",
+    )
+    .buckets(buckets);
+    let h = Histogram::with_opts(opts)
+        .unwrap_or_else(|e| panic!("histogram parallel execute seconds: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry parallel execute seconds: {e}"));
+    h
 });
 
 pub static DEX_ESCROW_LOCKED: Lazy<IntGauge> = Lazy::new(|| {
@@ -1298,6 +1559,22 @@ pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     h
 });
 
+pub static STORAGE_PUT_OBJECT_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let buckets = prometheus::exponential_buckets(0.005, 1.8, 12)
+        .unwrap_or_else(|e| panic!("storage put object buckets: {e}"));
+    let opts = HistogramOpts::new(
+        "storage_put_object_seconds",
+        "End-to-end latency for StoragePipeline::put_object",
+    )
+    .buckets(buckets);
+    let h =
+        Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram storage put object: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry storage put object: {e}"));
+    h
+});
+
 pub static STORAGE_PUT_CHUNK_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("storage_put_chunk_seconds", "Time to put a single chunk");
     let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
@@ -1307,25 +1584,25 @@ pub static STORAGE_PUT_CHUNK_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     h
 });
 
-pub static STORAGE_PROVIDER_RTT_MS: Lazy<Histogram> = Lazy::new(|| {
+pub static STORAGE_PROVIDER_RTT_MS: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = HistogramOpts::new(
         "storage_provider_rtt_ms",
         "Observed provider RTT in milliseconds",
     );
-    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    let hv = HistogramVec::new(opts, &["provider"]).unwrap_or_else(|e| panic!("histogram: {e}"));
     REGISTRY
-        .register(Box::new(h.clone()))
+        .register(Box::new(hv.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    hv
 });
 
-pub static STORAGE_PROVIDER_LOSS_RATE: Lazy<Histogram> = Lazy::new(|| {
+pub static STORAGE_PROVIDER_LOSS_RATE: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = HistogramOpts::new("storage_provider_loss_rate", "Observed provider loss rate");
-    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    let hv = HistogramVec::new(opts, &["provider"]).unwrap_or_else(|e| panic!("histogram: {e}"));
     REGISTRY
-        .register(Box::new(h.clone()))
+        .register(Box::new(hv.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+    hv
 });
 
 pub static STORAGE_REPAIR_BYTES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
@@ -1340,10 +1617,28 @@ pub static STORAGE_REPAIR_BYTES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
-pub static STORAGE_REPAIR_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new(
-        "storage_repair_failures_total",
-        "Total storage repair failures",
+pub static STORAGE_REPAIR_ATTEMPTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "storage_repair_attempts_total",
+            "Storage repair attempts by outcome",
+        ),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static STORAGE_REPAIR_FAILURES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "storage_repair_failures_total",
+            "Total storage repair failures by error category",
+        ),
+        &["error"],
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
@@ -3189,12 +3484,15 @@ pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static QUIC_CERT_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::new(
-        "quic_cert_rotation_total",
-        "Total QUIC certificate rotations",
+pub static QUIC_CERT_ROTATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "quic_cert_rotation_total",
+            "Total QUIC certificate rotations by peer",
+        ),
+        &["peer"],
     )
-    .unwrap_or_else(|e| panic!("counter quic cert rotate: {e}"));
+    .unwrap_or_else(|e| panic!("counter vec quic cert rotate: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic cert rotate: {e}"));

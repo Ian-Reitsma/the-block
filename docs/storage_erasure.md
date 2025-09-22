@@ -80,3 +80,39 @@ let original = erasure::reconstruct(shards, chunk_cipher_len)?;
 
 For a walkthrough of the entire storage pipeline, see
 [`docs/storage_pipeline.md`](storage_pipeline.md).
+
+## Repair Loop Operations and Observability
+
+The periodic repair worker now executes chunk reconstruction on a bounded
+thread pool (`MAX_CONCURRENT_REPAIRS` = 4) so that a burst of degraded manifests
+cannot monopolise CPU time. Each shard recovery attempt is recorded to disk
+under `storage/repair_log/` as line-delimited JSON containing the manifest
+fingerprint, chunk index, status (`success`, `failure`, `skipped`, or `fatal`),
+bytes written, and any error cause. Logs rotate daily and the directory retains
+the 14 most recent files.
+
+Repair attempts and failures feed Prometheus metrics that power dashboards:
+
+- `storage_repair_attempts_total{status="success|failure|skipped|fatal"}`
+  increments for every attempt outcome.
+- `storage_repair_failures_total{error="manifest|integrity|reconstruct|encode|database"}`
+  captures structured failure causes so operators can spot corruption versus
+  transient capacity issues.
+- `storage_repair_bytes_total` continues to report the volume of data
+  reconstructed.
+
+Clients can introspect the repair loop via the storage RPC and CLI tooling:
+
+- `storage.repair_history` returns recent log entries (limit configurable).
+- `storage.repair_run` triggers a one-shot repair sweep and returns a summary
+  of manifests touched and bytes restored.
+- `storage.repair_chunk` forces a repair attempt for a specific manifest hash
+  and chunk index, optionally rewriting all shards when `--force` is set.
+- The CLI mirrors these endpoints via `tb storage repair-history`,
+  `tb storage repair-run`, and `tb storage repair-chunk`.
+
+The Explorer’s storage view exposes the same repair history with timestamped
+status, byte counts, and error text so operators can audit long-running
+clusters. Backoff state is persisted per `(manifest, chunk)` and surfaced as
+`status="skipped"` entries containing the next retry time, ensuring repeated
+failures do not thrash the encoder.

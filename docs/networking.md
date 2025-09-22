@@ -55,12 +55,33 @@ fingerprints; the same cache backs the explorer endpoint at
 Manual rotations are available via `contract-cli net rotate-cert` (or the
 equivalent RPC), which returns the new fingerprint along with the previous
 chain for audit logging. Every successful rotation increments
-`quic_cert_rotation_total` for dashboards. Session health is exposed through the
+`quic_cert_rotation_total{peer}` for dashboards, tagging the rotating peer so
+operators can correlate the event with transport metrics. Session health is
+exposed through the
 `net.quic_stats` RPC: operators receive cached latency, retransmit totals,
 endpoint reuse counts, and per-peer `quic_handshake_fail_total{peer}` values.
 The CLI wrapper `contract-cli net quic-stats --json --token <AUTH>` renders the
 same data for scripting, while the aggregator can trigger automated log dumps
 whenever a peer’s failure counter spikes.
+
+`net.quic_certs` surfaces the full certificate cache—including the active
+fingerprint, prior history, observed age, and whether the node still retains the
+DER blob—for dashboard automation. The CLI mirrors this via
+`contract-cli net quic history`, which prints a human readable summary or JSON.
+Use `contract-cli net quic refresh` (RPC: `net.quic_certs_refresh`) when
+rotations occur out-of-band; the node will reload the cache immediately instead
+of waiting for the filesystem watcher to notice the update. History entries are
+age-bounded (`MAX_PEER_CERT_HISTORY` × 30 days) so stale fingerprints are
+pruned automatically before persistence.
+
+Certificate blobs are encrypted on disk using a ChaCha20-Poly1305 key derived
+from the node’s Ed25519 signing key (or `TB_PEER_CERT_KEY_HEX`). Operators
+running stateless deployments can disable persistence entirely by exporting
+`TB_PEER_CERT_DISABLE_DISK=1`, in which case the cache remains in-memory and no
+filesystem writes occur. Incoming certificates are hashed before persistence to
+guard against corrupted disk entries, and the background watcher hot-reloads the
+cache whenever `quic_peer_certs.json` changes so long-lived nodes never serve
+stale fingerprints.
 
 Metrics `quic_conn_latency_seconds`, `quic_bytes_sent_total`,
 `quic_bytes_recv_total`, `quic_retransmit_total`, and

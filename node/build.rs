@@ -48,6 +48,7 @@ fn main() {
     h.update(&0u64.to_le_bytes()); // storage_sub
     h.update(&0u64.to_le_bytes()); // read_sub
     h.update(&0u64.to_le_bytes()); // compute_sub
+    h.update(&0u64.to_le_bytes()); // proof_rebate
     h.update(&0u64.to_le_bytes()); // storage_sub_it
     h.update(&0u64.to_le_bytes()); // read_sub_it
     h.update(&0u64.to_le_bytes()); // compute_sub_it

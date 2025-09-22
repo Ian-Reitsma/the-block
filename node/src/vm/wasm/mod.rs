@@ -34,7 +34,15 @@ pub fn execute(code: &[u8], input: &[u8], meter: &mut GasMeter) -> Result<Vec<u8
         "wasmtime engine compiled without fuel support; enable Config::consume_fuel"
     })?;
     let fuel_used = fuel.saturating_sub(remaining_fuel);
-    let gas_used = gas::from_fuel(fuel_used);
+    let mut gas_used = gas::from_fuel(fuel_used);
+    if gas_used == 0 {
+        gas_used = remaining.min(1);
+        if gas_used == 0 {
+            return Err(anyhow!("out of gas"));
+        }
+    } else if gas_used > remaining {
+        gas_used = remaining;
+    }
     meter.charge(gas_used).map_err(anyhow::Error::msg)?;
     #[cfg(feature = "telemetry")]
     {

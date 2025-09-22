@@ -26,7 +26,7 @@ fn rent_escrow_deposit_refund() {
     catalog.register(DummyProvider { id: "p1".into() });
 
     let (receipt, _blob_tx) = pipeline
-        .put_object(b"hello", "alice", &catalog)
+        .put_object(b"hello", "alice", &mut catalog)
         .expect("store blob");
 
     assert_eq!(Settlement::balance("alice"), 95);

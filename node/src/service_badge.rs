@@ -4,7 +4,7 @@ use std::time::Duration;
 /// Badge lifetime in seconds; adjustable via governance hooks.
 ///
 /// ```
-/// use node::service_badge::ServiceBadgeTracker;
+/// use the_block::service_badge::ServiceBadgeTracker;
 /// use std::time::Duration;
 /// let mut tracker = ServiceBadgeTracker::default();
 /// tracker.record_epoch("node", true, Duration::from_millis(1));

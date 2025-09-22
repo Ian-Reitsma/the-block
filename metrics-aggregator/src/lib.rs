@@ -41,7 +41,7 @@ fn upload_sync(bucket: String, data: Vec<u8>) {
 }
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -65,11 +65,30 @@ fn archive_metrics(blob: &str) {
 }
 
 const MAX_CORRELATIONS_PER_METRIC: usize = 64;
+const TELEMETRY_WINDOW: usize = 120;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerStat {
     pub peer_id: String,
     pub metrics: serde_json::Value,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct MemorySnapshotEntry {
+    latest: u64,
+    p50: u64,
+    p90: u64,
+    p99: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct TelemetrySummaryEntry {
+    node_id: String,
+    seq: u64,
+    timestamp: u64,
+    sample_rate_ppm: u64,
+    compaction_secs: u64,
+    memory: HashMap<String, MemorySnapshotEntry>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -99,6 +118,7 @@ pub struct AppState {
     wal: Option<Arc<Wal>>,
     correlations: Arc<Mutex<HashMap<String, VecDeque<CorrelationRecord>>>>,
     last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
+    telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummaryEntry>>>>,
 }
 
 impl AppState {
@@ -135,6 +155,7 @@ impl AppState {
             wal,
             correlations: Arc::new(Mutex::new(HashMap::new())),
             last_metric_values: Arc::new(Mutex::new(HashMap::new())),
+            telemetry: Arc::new(Mutex::new(HashMap::new())),
         };
         state.prune();
         state
@@ -259,6 +280,39 @@ impl AppState {
         );
         spawn_log_dump(record.clone());
     }
+    fn record_telemetry(&self, entry: TelemetrySummaryEntry) {
+        if let Ok(mut map) = self.telemetry.lock() {
+            let deque = map
+                .entry(entry.node_id.clone())
+                .or_insert_with(VecDeque::new);
+            deque.push_back(entry);
+            while deque.len() > TELEMETRY_WINDOW {
+                deque.pop_front();
+            }
+        }
+    }
+
+    fn telemetry_latest(&self) -> HashMap<String, TelemetrySummaryEntry> {
+        self.telemetry
+            .lock()
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(node, deque)| {
+                        deque.back().cloned().map(|entry| (node.clone(), entry))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn telemetry_history(&self, node: &str) -> Vec<TelemetrySummaryEntry> {
+        self.telemetry
+            .lock()
+            .ok()
+            .and_then(|map| map.get(node).cloned())
+            .map(|deque| deque.into_iter().collect())
+            .unwrap_or_default()
+    }
 }
 
 static INGEST_TOTAL: Lazy<IntCounter> =
@@ -372,7 +426,10 @@ fn collect_correlations(value: &serde_json::Value) -> Vec<RawCorrelation> {
 
     let mut out = Vec::new();
     walk(value, None, &mut out);
-    out
+    let mut seen = HashSet::new();
+    out.into_iter()
+        .filter(|entry| seen.insert((entry.metric.clone(), entry.correlation_id.clone())))
+        .collect()
 }
 
 fn spawn_log_dump(record: CorrelationRecord) {
@@ -689,6 +746,38 @@ async fn export_all(
     Ok(resp)
 }
 
+async fn telemetry_post(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(entry): Json<TelemetrySummaryEntry>,
+) -> StatusCode {
+    let token = state.current_token();
+    let authorized = headers
+        .get("x-auth-token")
+        .and_then(|h| h.to_str().ok())
+        .map(|h| h == token)
+        .unwrap_or(false);
+    if authorized {
+        state.record_telemetry(entry);
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::UNAUTHORIZED
+    }
+}
+
+async fn telemetry_index(
+    State(state): State<AppState>,
+) -> Json<HashMap<String, TelemetrySummaryEntry>> {
+    Json(state.telemetry_latest())
+}
+
+async fn telemetry_node(
+    State(state): State<AppState>,
+    AxumPath(node): AxumPath<String>,
+) -> Json<Vec<TelemetrySummaryEntry>> {
+    Json(state.telemetry_history(&node))
+}
+
 async fn metrics() -> String {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
@@ -703,6 +792,8 @@ pub fn router(state: AppState) -> Router {
         .route("/peer/:id", get(peer))
         .route("/correlations/:metric", get(correlations))
         .route("/cluster", get(cluster))
+        .route("/telemetry", post(telemetry_post).get(telemetry_index))
+        .route("/telemetry/:node", get(telemetry_node))
         .route("/export/all", get(export_all))
         .route("/healthz", get(health))
         .route("/metrics", get(metrics))

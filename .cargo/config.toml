@@ -3,5 +3,25 @@ RUST_TEST_THREADS = "1"
 PROPTEST_CASES = "64"
 PROPTEST_DISABLE_FAILURE_PERSISTENCE = "1"
 
+[build]
+# Limit build parallelism when running the full test suite so the linker and
+# C++ builds (e.g. RocksDB) do not exhaust constrained CI machines. Developers
+# can override this locally by setting `CARGO_BUILD_JOBS`.
+jobs = 1
+
 [test]
-rustflags = ["-Clink-arg=-fuse-ld=lld"]
+# The previous configuration forced use of `ld.lld` for test binaries to speed
+# up linking.  In environments where `lld` is not installed this caused
+# `cargo test` to fail during the link step (`cc: fatal error: cannot find 'lld'`).
+# Allow Cargo to fall back to the platform linker by default so the workspace
+# test suite remains portable.  Operators that have `lld` available can still
+# opt-in by exporting `CARGO_TEST_RUSTFLAGS="-Clink-arg=-fuse-ld=lld"`.
+#
+# Large workspaces like this one can also exhaust the default GNU linker’s
+# memory budget on smaller CI runners.  Help the linker release pages as it
+# progresses through the link by enabling `--no-keep-memory` and
+# `--reduce-memory-overheads`.
+rustflags = [
+  "-Clink-arg=-Wl,--no-keep-memory",
+  "-Clink-arg=-Wl,--reduce-memory-overheads",
+]

@@ -14,6 +14,8 @@ use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, proc
 use crate::consensus::constants::DIFFICULTY_WINDOW;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
+#[cfg(feature = "telemetry")]
+use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
 use blake3;
 use dashmap::DashMap;
@@ -1107,6 +1109,7 @@ impl Blockchain {
             telemetry::MEMPOOL_SIZE
                 .with_label_values(&[lane.as_str()])
                 .set(size as i64);
+            telemetry::update_memory_usage(MemoryComponent::Mempool);
         }
 
         size

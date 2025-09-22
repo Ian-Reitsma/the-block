@@ -34,6 +34,8 @@ use anyhow::anyhow;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use blake3;
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use ed25519_dalek::SigningKey;
 use hex;
 use ledger::address::ShardId;
@@ -41,14 +43,17 @@ use once_cell::sync::{Lazy, OnceCell};
 use rand::Rng;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
-use std::sync::{atomic::Ordering, Arc, Mutex, RwLock};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc::channel, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
+
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
 pub use message::{BlobChunk, Message, Payload};
@@ -56,13 +61,14 @@ pub use peer::ReputationUpdate;
 pub use peer::{
     clear_peer_metrics, clear_throttle, export_all_peer_stats, export_peer_stats, known_peers,
     load_peer_metrics, p2p_max_bytes_per_sec, p2p_max_per_sec, peer_reputation_decay, peer_stats,
-    peer_stats_all, peer_stats_map, persist_peer_metrics, recent_handshake_failures,
-    record_request, reset_peer_metrics, rotate_peer_key, set_max_peer_metrics,
-    set_metrics_aggregator, set_metrics_export_dir, set_p2p_max_bytes_per_sec, set_p2p_max_per_sec,
-    set_peer_metrics_compress, set_peer_metrics_export, set_peer_metrics_export_quota,
-    set_peer_metrics_path, set_peer_metrics_retention, set_peer_metrics_sample_rate,
-    set_peer_reputation_decay, set_track_drop_reasons, set_track_handshake_fail, throttle_peer,
-    DropReason, HandshakeError, PeerMetrics, PeerReputation, PeerSet, PeerStat,
+    peer_stats_all, peer_stats_map, persist_peer_metrics, publish_telemetry_summary,
+    recent_handshake_failures, record_request, reset_peer_metrics, rotate_peer_key,
+    set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
+    set_p2p_max_bytes_per_sec, set_p2p_max_per_sec, set_peer_metrics_compress,
+    set_peer_metrics_export, set_peer_metrics_export_quota, set_peer_metrics_path,
+    set_peer_metrics_retention, set_peer_metrics_sample_rate, set_peer_reputation_decay,
+    set_track_drop_reasons, set_track_handshake_fail, throttle_peer, DropReason, HandshakeError,
+    PeerMetrics, PeerReputation, PeerSet, PeerStat,
 };
 
 pub use peer::simulate_handshake_fail;
@@ -79,6 +85,9 @@ pub fn quic_stats() -> Vec<QuicStatsEntry> {
 
 const PEER_CERT_STORE_FILE: &str = "quic_peer_certs.json";
 const MAX_PEER_CERT_HISTORY: usize = 4;
+const MAX_PEER_CERT_AGE_SECS: u64 = 30 * 24 * 60 * 60;
+const CERT_BLOB_PREFIX: &str = "enc:v1:";
+const DISABLE_PERSIST_ENV: &str = "TB_PEER_CERT_DISABLE_DISK";
 
 #[derive(Clone)]
 struct CertSnapshot {
@@ -91,6 +100,7 @@ struct CertSnapshot {
 struct PeerCertStore {
     current: CertSnapshot,
     history: VecDeque<CertSnapshot>,
+    rotations: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -107,11 +117,17 @@ struct PeerCertDiskEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     current: Option<CertDiskRecord>,
     history: Vec<CertDiskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rotations: Option<u64>,
 }
 
 static PEER_CERTS: Lazy<RwLock<HashMap<[u8; 32], PeerCertStore>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
-static PEER_CERTS_LOADED: OnceCell<()> = OnceCell::new();
+static PEER_CERTS_INITIALIZED: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+static PEER_CERT_WATCH_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
+static PEER_CERT_PERSIST_DISABLED: Lazy<bool> =
+    Lazy::new(|| std::env::var_os(DISABLE_PERSIST_ENV).is_some());
+static PEER_CERT_ENC_KEY: OnceCell<Option<[u8; 32]>> = OnceCell::new();
 static GOSSIP_RELAY: Lazy<RwLock<Option<std::sync::Arc<Relay>>>> = Lazy::new(|| RwLock::new(None));
 
 pub fn set_gossip_relay(relay: std::sync::Arc<Relay>) {
@@ -139,6 +155,8 @@ pub struct QuicStatsEntry {
     pub address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
     pub retransmits: u64,
     pub endpoint_reuse: u64,
     pub handshake_failures: u64,
@@ -150,6 +168,22 @@ pub struct PeerCertSnapshot {
     pub peer: [u8; 32],
     pub fingerprint: [u8; 32],
     pub updated_at: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PeerCertHistoryEntry {
+    pub peer: String,
+    pub current: PeerCertHistoryRecord,
+    pub history: Vec<PeerCertHistoryRecord>,
+    pub rotations: u64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PeerCertHistoryRecord {
+    pub fingerprint: String,
+    pub updated_at: u64,
+    pub age_secs: u64,
+    pub has_certificate: bool,
 }
 
 fn unix_now() -> u64 {
@@ -169,42 +203,222 @@ fn peer_cert_store_path() -> PathBuf {
         .join(PEER_CERT_STORE_FILE)
 }
 
-fn ensure_peer_cert_store_loaded() {
-    if PEER_CERTS_LOADED.get().is_some() {
-        return;
+fn peer_cert_persistence_enabled() -> bool {
+    !*PEER_CERT_PERSIST_DISABLED
+}
+
+fn peer_cert_encryption_key() -> Option<[u8; 32]> {
+    if !peer_cert_persistence_enabled() {
+        return None;
     }
-    let mut map = PEER_CERTS.write().unwrap();
-    if let Ok(data) = fs::read(peer_cert_store_path()) {
-        if let Ok(entries) = serde_json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
-            for entry in entries {
-                if let Ok(bytes) = hex::decode(&entry.peer) {
-                    if bytes.len() != 32 {
-                        continue;
+    PEER_CERT_ENC_KEY
+        .get_or_init(|| {
+            if let Ok(key_hex) = std::env::var("TB_PEER_CERT_KEY_HEX") {
+                if let Ok(bytes) = hex::decode(key_hex.trim()) {
+                    if bytes.len() == 32 {
+                        let mut key = [0u8; 32];
+                        key.copy_from_slice(&bytes);
+                        return Some(key);
                     }
-                    let mut peer = [0u8; 32];
-                    peer.copy_from_slice(&bytes);
-                    if let Some(current) =
-                        entry.current.as_ref().and_then(|rec| disk_to_snapshot(rec))
-                    {
-                        let mut history = VecDeque::new();
-                        for rec in &entry.history {
-                            if let Some(snapshot) = disk_to_snapshot(rec) {
-                                history.push_back(snapshot);
-                            }
+                    let hash = blake3::hash(&bytes);
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(hash.as_bytes());
+                    return Some(key);
+                }
+            }
+            if let Ok(node_hex) = std::env::var("TB_NODE_KEY_HEX") {
+                if let Ok(bytes) = hex::decode(node_hex.trim()) {
+                    let hash = blake3::hash(&bytes);
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(hash.as_bytes());
+                    return Some(key);
+                }
+            }
+            let key = load_net_key();
+            Some(blake3::derive_key(
+                "the-block:quic-peer-cert-store",
+                &key.to_keypair_bytes(),
+            ))
+        })
+        .clone()
+}
+
+fn encrypt_cert_blob(cert: &[u8]) -> Option<String> {
+    if cert.is_empty() {
+        return None;
+    }
+    if let Some(key) = peer_cert_encryption_key() {
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+        let mut nonce = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce);
+        if let Ok(mut ciphertext) = cipher.encrypt(Nonce::from_slice(&nonce), cert) {
+            let mut payload = Vec::with_capacity(nonce.len() + ciphertext.len());
+            payload.extend_from_slice(&nonce);
+            payload.append(&mut ciphertext);
+            return Some(format!("{}{}", CERT_BLOB_PREFIX, B64.encode(payload)));
+        }
+    }
+    Some(B64.encode(cert))
+}
+
+fn decrypt_cert_blob(data: &str) -> Option<Vec<u8>> {
+    if data.starts_with(CERT_BLOB_PREFIX) {
+        let payload = B64.decode(data[CERT_BLOB_PREFIX.len()..].as_bytes()).ok()?;
+        if payload.len() < 12 {
+            return None;
+        }
+        let (nonce, ciphertext) = payload.split_at(12);
+        let key = peer_cert_encryption_key()?;
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
+        cipher.decrypt(Nonce::from_slice(nonce), ciphertext).ok()
+    } else {
+        B64.decode(data.as_bytes()).ok()
+    }
+}
+
+fn prune_store_entry(store: &mut PeerCertStore, now: u64) {
+    store
+        .history
+        .retain(|snapshot| now.saturating_sub(snapshot.updated_at) <= MAX_PEER_CERT_AGE_SECS);
+    while store.history.len() > MAX_PEER_CERT_HISTORY {
+        store.history.pop_back();
+    }
+}
+
+fn reload_peer_cert_store_from_path(path: &Path) -> bool {
+    if !peer_cert_persistence_enabled() {
+        return false;
+    }
+    let now = unix_now();
+    match fs::read(path) {
+        Ok(data) => match serde_json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
+            Ok(entries) => {
+                let mut rebuilt = HashMap::new();
+                for entry in entries {
+                    if let Ok(bytes) = hex::decode(&entry.peer) {
+                        if bytes.len() != 32 {
+                            continue;
                         }
-                        map.insert(peer, PeerCertStore { current, history });
+                        let mut peer = [0u8; 32];
+                        peer.copy_from_slice(&bytes);
+                        if let Some(current) =
+                            entry.current.as_ref().and_then(|rec| disk_to_snapshot(rec))
+                        {
+                            let mut history = VecDeque::new();
+                            for rec in &entry.history {
+                                if let Some(snapshot) = disk_to_snapshot(rec) {
+                                    history.push_back(snapshot);
+                                }
+                            }
+                            let mut store = PeerCertStore {
+                                current,
+                                history,
+                                rotations: entry.rotations.unwrap_or(0),
+                            };
+                            prune_store_entry(&mut store, now);
+                            rebuilt.insert(peer, store);
+                        }
                     }
                 }
+                let mut map = PEER_CERTS.write().unwrap();
+                *map = rebuilt;
+                true
+            }
+            Err(_) => false,
+        },
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                let mut map = PEER_CERTS.write().unwrap();
+                map.clear();
+                true
+            } else {
+                false
             }
         }
     }
-    PEER_CERTS_LOADED.set(()).ok();
 }
 
-fn persist_peer_cert_store(map: &HashMap<[u8; 32], PeerCertStore>) {
+fn reload_peer_cert_store_from_disk() -> bool {
+    let path = peer_cert_store_path();
+    reload_peer_cert_store_from_path(&path)
+}
+
+fn spawn_peer_cert_store_watch(path: PathBuf) {
+    if !peer_cert_persistence_enabled() {
+        return;
+    }
+    let mut guard = PEER_CERT_WATCH_PATH.lock().unwrap();
+    if guard.as_ref() == Some(&path) {
+        return;
+    }
+    *guard = Some(path.clone());
+    thread::spawn(move || {
+        let parent = path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let (tx, rx) = channel();
+        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
+            Ok(w) => w,
+            Err(_) => return,
+        };
+        if watcher.watch(&parent, RecursiveMode::NonRecursive).is_err() {
+            return;
+        }
+        for res in rx {
+            if let Ok(event) = res {
+                if !matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                ) {
+                    continue;
+                }
+                let mut relevant = false;
+                for changed in &event.paths {
+                    if changed == &path {
+                        relevant = true;
+                        break;
+                    }
+                    if let (Some(file), Some(target)) = (changed.file_name(), path.file_name()) {
+                        if file == target {
+                            relevant = true;
+                            break;
+                        }
+                    }
+                }
+                if relevant {
+                    let _ = reload_peer_cert_store_from_disk();
+                }
+            }
+        }
+    });
+}
+
+fn ensure_peer_cert_store_loaded() {
+    if PEER_CERTS_INITIALIZED.load(Ordering::SeqCst) {
+        return;
+    }
+    if !peer_cert_persistence_enabled() {
+        PEER_CERTS_INITIALIZED.store(true, Ordering::SeqCst);
+        return;
+    }
+    let path = peer_cert_store_path();
+    let _ = reload_peer_cert_store_from_path(&path);
+    spawn_peer_cert_store_watch(path);
+    PEER_CERTS_INITIALIZED.store(true, Ordering::SeqCst);
+}
+
+fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], PeerCertStore>) {
+    if !peer_cert_persistence_enabled() {
+        return;
+    }
     let path = peer_cert_store_path();
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
+    }
+    let now = unix_now();
+    for store in map.values_mut() {
+        prune_store_entry(store, now);
     }
     let entries: Vec<PeerCertDiskEntry> = map
         .iter()
@@ -212,6 +426,7 @@ fn persist_peer_cert_store(map: &HashMap<[u8; 32], PeerCertStore>) {
             peer: hex::encode(peer),
             current: Some(snapshot_to_disk(&store.current)),
             history: store.history.iter().map(snapshot_to_disk).collect(),
+            rotations: Some(store.rotations),
         })
         .collect();
     if let Ok(json) = serde_json::to_vec_pretty(&entries) {
@@ -229,8 +444,14 @@ fn disk_to_snapshot(record: &CertDiskRecord) -> Option<CertSnapshot> {
     let cert = record
         .cert
         .as_ref()
-        .and_then(|c| B64.decode(c.as_bytes()).ok())
+        .and_then(|c| decrypt_cert_blob(c))
         .unwrap_or_default();
+    if !cert.is_empty() {
+        let hash = blake3::hash(&cert);
+        if hash.as_bytes() != &fingerprint {
+            return None;
+        }
+    }
     Some(CertSnapshot {
         fingerprint,
         cert,
@@ -241,12 +462,21 @@ fn disk_to_snapshot(record: &CertDiskRecord) -> Option<CertSnapshot> {
 fn snapshot_to_disk(snapshot: &CertSnapshot) -> CertDiskRecord {
     CertDiskRecord {
         fingerprint: hex::encode(snapshot.fingerprint),
-        cert: if snapshot.cert.is_empty() {
-            None
-        } else {
-            Some(B64.encode(&snapshot.cert))
-        },
+        cert: encrypt_cert_blob(&snapshot.cert),
         updated_at: snapshot.updated_at,
+    }
+}
+
+fn append_previous(entry: &mut PeerCertStore, previous: &[[u8; 32]], now: u64) {
+    for fp in previous {
+        if entry.current.fingerprint == *fp || entry.history.iter().any(|h| h.fingerprint == *fp) {
+            continue;
+        }
+        entry.history.push_back(CertSnapshot {
+            fingerprint: *fp,
+            cert: Vec::new(),
+            updated_at: now,
+        });
     }
 }
 
@@ -256,52 +486,68 @@ pub fn record_peer_certificate(
     fingerprint: [u8; 32],
     previous: Vec<[u8; 32]>,
 ) {
+    if !cert.is_empty() {
+        let computed = blake3::hash(&cert);
+        if computed.as_bytes() != &fingerprint {
+            return;
+        }
+    }
     ensure_peer_cert_store_loaded();
     let mut map = PEER_CERTS.write().unwrap();
     let now = unix_now();
-    let entry = map.entry(*peer).or_insert_with(|| PeerCertStore {
-        current: CertSnapshot {
-            fingerprint,
-            cert: cert.clone(),
-            updated_at: now,
-        },
-        history: VecDeque::new(),
-    });
-    if entry.current.fingerprint != fingerprint {
-        let prev = CertSnapshot {
-            fingerprint: entry.current.fingerprint,
-            cert: std::mem::take(&mut entry.current.cert),
-            updated_at: entry.current.updated_at,
-        };
-        entry.history.push_front(prev);
-        entry.current = CertSnapshot {
-            fingerprint,
-            cert: cert.clone(),
-            updated_at: now,
-        };
-    } else {
-        entry.current.cert = cert.clone();
-        entry.current.updated_at = now;
-    }
-    for fp in previous {
-        if entry.current.fingerprint == fp || entry.history.iter().any(|h| h.fingerprint == fp) {
-            continue;
+    match map.entry(*peer) {
+        Entry::Vacant(slot) => {
+            let mut store = PeerCertStore {
+                current: CertSnapshot {
+                    fingerprint,
+                    cert: cert.clone(),
+                    updated_at: now,
+                },
+                history: VecDeque::new(),
+                rotations: 0,
+            };
+            append_previous(&mut store, &previous, now);
+            prune_store_entry(&mut store, now);
+            slot.insert(store);
         }
-        entry.history.push_back(CertSnapshot {
-            fingerprint: fp,
-            cert: Vec::new(),
-            updated_at: now,
-        });
+        Entry::Occupied(mut entry) => {
+            let store = entry.get_mut();
+            if store.current.fingerprint != fingerprint {
+                let prev = CertSnapshot {
+                    fingerprint: store.current.fingerprint,
+                    cert: std::mem::take(&mut store.current.cert),
+                    updated_at: store.current.updated_at,
+                };
+                store.history.push_front(prev);
+                store.current = CertSnapshot {
+                    fingerprint,
+                    cert: cert.clone(),
+                    updated_at: now,
+                };
+                store.rotations = store.rotations.saturating_add(1);
+                append_previous(store, &previous, now);
+                #[cfg(feature = "telemetry")]
+                {
+                    let label = hex::encode(peer);
+                    crate::telemetry::QUIC_CERT_ROTATION_TOTAL
+                        .with_label_values(&[label.as_str()])
+                        .inc();
+                }
+            } else {
+                store.current.cert = cert.clone();
+                store.current.updated_at = now;
+            }
+            prune_store_entry(store, now);
+        }
     }
-    while entry.history.len() > MAX_PEER_CERT_HISTORY {
-        entry.history.pop_back();
-    }
-    persist_peer_cert_store(&map);
+    persist_peer_cert_store(&mut map);
 }
 
-pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) -> bool {
-    ensure_peer_cert_store_loaded();
-    let map = PEER_CERTS.read().unwrap();
+fn verify_peer_fingerprint_inner(
+    map: &HashMap<[u8; 32], PeerCertStore>,
+    peer: &[u8; 32],
+    fingerprint: Option<&[u8; 32]>,
+) -> bool {
     match map.get(peer) {
         Some(store) => {
             if let Some(fp) = fingerprint {
@@ -318,6 +564,22 @@ pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) 
     }
 }
 
+pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) -> bool {
+    ensure_peer_cert_store_loaded();
+    {
+        let map = PEER_CERTS.read().unwrap();
+        let result = verify_peer_fingerprint_inner(&map, peer, fingerprint);
+        if result || fingerprint.is_none() {
+            return result;
+        }
+    }
+    if reload_peer_cert_store_from_disk() {
+        let map = PEER_CERTS.read().unwrap();
+        return verify_peer_fingerprint_inner(&map, peer, fingerprint);
+    }
+    false
+}
+
 pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
     ensure_peer_cert_store_loaded();
     let map = PEER_CERTS.read().unwrap();
@@ -328,6 +590,47 @@ pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
             updated_at: store.current.updated_at,
         })
         .collect()
+}
+
+fn history_record(snapshot: &CertSnapshot, now: u64) -> PeerCertHistoryRecord {
+    PeerCertHistoryRecord {
+        fingerprint: hex::encode(snapshot.fingerprint),
+        updated_at: snapshot.updated_at,
+        age_secs: now.saturating_sub(snapshot.updated_at),
+        has_certificate: !snapshot.cert.is_empty(),
+    }
+}
+
+pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
+    ensure_peer_cert_store_loaded();
+    let now = unix_now();
+    let map = PEER_CERTS.read().unwrap();
+    let mut entries: Vec<_> = map
+        .iter()
+        .map(|(peer, store)| PeerCertHistoryEntry {
+            peer: hex::encode(peer),
+            current: history_record(&store.current, now),
+            history: store
+                .history
+                .iter()
+                .map(|h| history_record(h, now))
+                .collect(),
+            rotations: store.rotations,
+        })
+        .collect();
+    entries.sort_by(|a, b| a.peer.cmp(&b.peer));
+    entries
+}
+
+pub fn refresh_peer_cert_store_from_disk() -> bool {
+    ensure_peer_cert_store_loaded();
+    reload_peer_cert_store_from_disk()
+}
+
+pub fn current_peer_fingerprint(peer: &[u8; 32]) -> Option<[u8; 32]> {
+    ensure_peer_cert_store_loaded();
+    let map = PEER_CERTS.read().unwrap();
+    map.get(peer).map(|store| store.current.fingerprint)
 }
 
 /// Manually verify DNS TXT record for `domain`.

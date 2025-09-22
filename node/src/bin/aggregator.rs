@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use reqwest::blocking::Client;
 use serde_json::Value;
 use std::collections::VecDeque;
 
@@ -18,6 +19,11 @@ enum Command {
     Prune {
         #[arg(long)]
         before: u64,
+    },
+    /// Fetch latest telemetry summaries from the aggregator HTTP API
+    Telemetry {
+        #[arg(long, default_value = "http://localhost:8080")]
+        url: String,
     },
 }
 
@@ -43,6 +49,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             db.flush()?;
             println!("pruned {total}");
+        }
+        Command::Telemetry { url } => {
+            let client = Client::new();
+            let resp = client.get(format!("{}/telemetry", url)).send()?;
+            if !resp.status().is_success() {
+                eprintln!("telemetry request failed: {}", resp.status());
+            }
+            let body = resp.text()?;
+            println!("{}", body);
         }
     }
     Ok(())

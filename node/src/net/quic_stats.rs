@@ -5,9 +5,11 @@ use std::net::SocketAddr;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
+use super::quic::{self, ConnectionStatsSnapshot};
 use super::transport_quic;
 
 const CACHE_TTL: Duration = Duration::from_millis(500);
+#[cfg(feature = "telemetry")]
 const UNKNOWN_PEER_LABEL: &str = "unknown";
 
 #[derive(Default, Clone)]
@@ -86,20 +88,8 @@ pub(super) fn snapshot() -> Vec<super::QuicStatsEntry> {
     guard.cache.entries.clone()
 }
 
-pub(super) fn note_connection_stats(addr: SocketAddr, stats: &quinn::ConnectionStats) {
-    let mut guard = STORE.write().unwrap();
-    if let Some(peer) = super::peer::pk_from_addr(&addr) {
-        let entry = guard.peers.entry(peer).or_default();
-        update_retransmits(entry, stats.path.lost_packets);
-        entry.latency_ms = Some(stats.path.rtt.as_millis() as u64);
-        entry.address = Some(addr);
-        entry.last_updated = now();
-        invalidate_cache(&mut guard);
-    }
-}
-
 fn refresh_locked(store: &mut Store) {
-    for (addr, stats) in super::quic::connection_stats() {
+    for (addr, stats) in quic::connection_stats() {
         note_stats_locked(store, addr, stats);
     }
     let mut entries: Vec<_> = store
@@ -109,6 +99,7 @@ fn refresh_locked(store: &mut Store) {
             peer_id: hex::encode(peer),
             address: state.address.map(|a| a.to_string()),
             latency_ms: state.latency_ms,
+            fingerprint: super::current_peer_fingerprint(peer).map(|fp| hex::encode(fp)),
             retransmits: state.retransmits,
             endpoint_reuse: state.endpoint_reuse,
             handshake_failures: state.handshake_failures,
@@ -120,11 +111,11 @@ fn refresh_locked(store: &mut Store) {
     store.cache.last_refresh = Some(Instant::now());
 }
 
-fn note_stats_locked(store: &mut Store, addr: SocketAddr, stats: quinn::ConnectionStats) {
+fn note_stats_locked(store: &mut Store, addr: SocketAddr, stats: ConnectionStatsSnapshot) {
     if let Some(peer) = super::peer::pk_from_addr(&addr) {
         let entry = store.peers.entry(peer).or_default();
-        update_retransmits(entry, stats.path.lost_packets);
-        entry.latency_ms = Some(stats.path.rtt.as_millis() as u64);
+        update_retransmits(entry, stats.lost_packets);
+        entry.latency_ms = Some(stats.rtt.as_millis() as u64);
         entry.address = Some(addr);
         entry.last_updated = now();
     }
@@ -137,6 +128,7 @@ fn update_retransmits(entry: &mut PeerState, latest: u64) {
     entry.retransmits = latest;
 }
 
+#[cfg(feature = "telemetry")]
 pub(super) fn peer_label(peer: Option<[u8; 32]>) -> String {
     peer.map(|pk| hex::encode(pk))
         .unwrap_or_else(|| UNKNOWN_PEER_LABEL.to_string())

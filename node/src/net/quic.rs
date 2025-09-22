@@ -1,10 +1,11 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use quinn::{Connection, ConnectionStats, Endpoint};
+use quinn::{Connection, Endpoint};
 use rand::Rng;
 use rcgen::generate_simple_self_signed;
 #[cfg(any(test, debug_assertions))]
@@ -15,9 +16,6 @@ use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
 #[cfg(any(test, debug_assertions))]
 use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
 use tokio::time::Instant;
-
-#[cfg(feature = "telemetry")]
-use hex;
 
 use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
@@ -137,6 +135,7 @@ pub async fn connect(
             }
             #[cfg(feature = "quic")]
             super::peer::record_handshake_fail_addr(addr, err);
+            #[cfg(feature = "telemetry")]
             tracing::error!(error = ?e, reason = err.as_str(), "quic_connect_fail");
             Err(ConnectError::Handshake(err))
         }
@@ -154,6 +153,7 @@ pub async fn connect(
             }
             #[cfg(feature = "quic")]
             super::peer::record_handshake_fail_addr(addr, err);
+            #[cfg(feature = "telemetry")]
             tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake(err))
         }
@@ -161,6 +161,12 @@ pub async fn connect(
 }
 
 static CONNECTIONS: Lazy<DashMap<SocketAddr, Connection>> = Lazy::new(|| DashMap::new());
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ConnectionStatsSnapshot {
+    pub lost_packets: u64,
+    pub rtt: Duration,
+}
 
 /// Obtain a cached QUIC connection to `addr` if available, otherwise establish
 /// a new one. Reused connections are counted via `QUIC_ENDPOINT_REUSE_TOTAL`.
@@ -192,10 +198,19 @@ pub fn drop_connection(addr: &SocketAddr) {
 }
 
 #[cfg(feature = "quic")]
-pub(crate) fn connection_stats() -> Vec<(SocketAddr, ConnectionStats)> {
+pub(crate) fn connection_stats() -> Vec<(SocketAddr, ConnectionStatsSnapshot)> {
     CONNECTIONS
         .iter()
-        .map(|entry| (*entry.key(), entry.value().stats()))
+        .map(|entry| {
+            let stats = entry.value().stats();
+            (
+                *entry.key(),
+                ConnectionStatsSnapshot {
+                    lost_packets: stats.path.lost_packets,
+                    rtt: stats.path.rtt,
+                },
+            )
+        })
         .collect()
 }
 
@@ -271,6 +286,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
                 }
                 super::peer::record_handshake_fail_addr(addr, err);
             }
+            #[cfg(feature = "telemetry")]
             tracing::error!(error = ?e, reason = err.as_str(), "quic_connect_fail");
             Err(ConnectError::Handshake(err))
         }
@@ -285,13 +301,13 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
                 }
                 super::peer::record_handshake_fail_addr(addr, err);
             }
+            #[cfg(feature = "telemetry")]
             tracing::error!("quic_connect_timeout");
             Err(ConnectError::Handshake(err))
         }
     }
 }
 
-#[cfg(feature = "telemetry")]
 pub(crate) fn classify_err(e: &quinn::ConnectionError) -> HandshakeError {
     let msg = e.to_string().to_lowercase();
     if msg.contains("certificate") {

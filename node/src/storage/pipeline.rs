@@ -1,16 +1,19 @@
 use super::erasure;
 use super::fs::RentEscrow;
-use super::placement::NodeCatalog;
+use super::placement::{NodeCatalog, NodeHandle};
+use super::repair;
 use super::types::{
-    ChunkRef, ObjectManifest, Redundancy, StoreReceipt, CHACHA20_POLY1305_NONCE_LEN,
+    ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy, StoreReceipt,
+    CHACHA20_POLY1305_NONCE_LEN,
 };
 use crate::compute_market::settlement::Settlement;
 use crate::simple_db::SimpleDb;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    STORAGE_CHUNK_SIZE_BYTES, STORAGE_FINAL_CHUNK_SIZE, STORAGE_INITIAL_CHUNK_SIZE,
-    STORAGE_PROVIDER_LOSS_RATE, STORAGE_PROVIDER_RTT_MS, STORAGE_PUT_CHUNK_SECONDS,
-    STORAGE_PUT_ETA_SECONDS, SUBSIDY_BYTES_TOTAL,
+    MemoryComponent, STORAGE_CHUNK_SIZE_BYTES, STORAGE_FINAL_CHUNK_SIZE,
+    STORAGE_INITIAL_CHUNK_SIZE, STORAGE_PROVIDER_LOSS_RATE, STORAGE_PROVIDER_RTT_MS,
+    STORAGE_PUT_CHUNK_SECONDS, STORAGE_PUT_ETA_SECONDS, STORAGE_PUT_OBJECT_SECONDS,
+    SUBSIDY_BYTES_TOTAL,
 };
 use crate::transaction::BlobTx;
 use blake3::Hasher;
@@ -20,8 +23,11 @@ use chacha20poly1305::{
 };
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::convert::TryFrom;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 const VERSION: u16 = 1;
@@ -38,6 +44,7 @@ pub const LOSS_HI: f64 = 0.02; // 2%
 const LOSS_LO: f64 = 0.002; // 0.2%
 pub const RTT_HI_MS: f64 = 200.0;
 const RTT_LO_MS: f64 = 80.0;
+const QUOTA_BYTES_PER_CREDIT: u64 = 1024 * 1024; // 1 credit == 1 MiB logical quota
 
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
@@ -57,6 +64,27 @@ pub struct ProviderProfile {
     pub preferred_chunk: u32,
     pub stable_chunks: u32,
     pub updated_at: u64,
+    #[serde(default)]
+    pub success_rate_ewma: f64,
+    #[serde(default)]
+    pub recent_failures: u32,
+    #[serde(default)]
+    pub total_chunks: u64,
+    #[serde(default)]
+    pub total_failures: u64,
+    #[serde(default)]
+    pub last_upload_bytes: u64,
+    #[serde(default)]
+    pub last_upload_secs: f64,
+    #[serde(default)]
+    pub maintenance: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ProviderProfileSnapshot {
+    pub provider: String,
+    pub profile: ProviderProfile,
+    pub quota_bytes: u64,
 }
 
 impl ProviderProfile {
@@ -68,14 +96,133 @@ impl ProviderProfile {
             preferred_chunk: DEFAULT_CHUNK,
             stable_chunks: 0,
             updated_at: 0,
+            success_rate_ewma: 0.0,
+            recent_failures: 0,
+            total_chunks: 0,
+            total_failures: 0,
+            last_upload_bytes: 0,
+            last_upload_secs: 0.0,
+            maintenance: false,
         }
     }
+
+    fn ensure_defaults(&mut self) {
+        if self.preferred_chunk == 0 {
+            self.preferred_chunk = DEFAULT_CHUNK;
+        }
+    }
+
+    fn record_chunk(
+        &mut self,
+        chunk_bytes: usize,
+        throughput: f64,
+        rtt: f64,
+        loss: f64,
+        success: bool,
+    ) {
+        self.ensure_defaults();
+        self.total_chunks = self.total_chunks.saturating_add(1);
+        self.last_upload_bytes = chunk_bytes as u64;
+        self.last_upload_secs = if throughput > 0.0 {
+            chunk_bytes as f64 / throughput
+        } else {
+            0.0
+        };
+        if success {
+            self.bw_ewma = StoragePipeline::ewma(self.bw_ewma, throughput);
+            self.rtt_ewma = StoragePipeline::ewma(self.rtt_ewma, rtt);
+            self.loss_ewma = StoragePipeline::ewma(self.loss_ewma, loss);
+            self.success_rate_ewma = StoragePipeline::ewma(self.success_rate_ewma, 1.0);
+            self.recent_failures = 0;
+            self.stable_chunks = self.stable_chunks.saturating_add(1);
+            self.adjust_preferred_chunk();
+        } else {
+            self.total_failures = self.total_failures.saturating_add(1);
+            self.success_rate_ewma = StoragePipeline::ewma(self.success_rate_ewma, 0.0);
+            self.recent_failures = self.recent_failures.saturating_add(1);
+            self.stable_chunks = 0;
+            if self.preferred_chunk > CHUNK_LADDER[0] {
+                let idx = CHUNK_LADDER
+                    .iter()
+                    .position(|s| *s == self.preferred_chunk)
+                    .unwrap_or(0);
+                let downgraded_idx = idx.saturating_sub(1);
+                self.preferred_chunk = CHUNK_LADDER[downgraded_idx];
+            }
+        }
+        if let Ok(secs) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            self.updated_at = secs.as_secs();
+        }
+    }
+
+    fn adjust_preferred_chunk(&mut self) {
+        let mut desired = StoragePipeline::clamp_to_ladder(self.bw_ewma * TARGET_TIME_SECS);
+        let current = self.preferred_chunk;
+        let step_idx = CHUNK_LADDER.iter().position(|s| *s == current).unwrap_or(2);
+        let desired_idx = CHUNK_LADDER
+            .iter()
+            .position(|s| *s == desired)
+            .unwrap_or(step_idx);
+        let diff = desired_idx as i32 - step_idx as i32;
+
+        if self.loss_ewma > LOSS_HI || self.rtt_ewma > RTT_HI_MS {
+            desired = CHUNK_LADDER[step_idx.saturating_sub(1)];
+        } else if self.loss_ewma < LOSS_LO && self.rtt_ewma < RTT_LO_MS {
+            // allow desired as computed
+        } else {
+            desired = current;
+        }
+
+        if desired != current && self.stable_chunks >= 3 {
+            if (diff.abs() as usize) >= 1 {
+                self.preferred_chunk = desired;
+                self.stable_chunks = 0;
+            }
+        }
+    }
+}
+
+struct ProviderState {
+    handle: NodeHandle,
+    profile: ProviderProfile,
+    quota_bytes: u64,
+    used_bytes: u64,
+}
+
+impl ProviderState {
+    fn available_bytes(&self) -> u64 {
+        if self.quota_bytes == 0 {
+            u64::MAX
+        } else {
+            self.quota_bytes.saturating_sub(self.used_bytes)
+        }
+    }
+
+    fn has_capacity(&self, bytes: usize) -> bool {
+        self.quota_bytes == 0 || self.available_bytes() >= bytes as u64
+    }
+
+    fn score(&self) -> f64 {
+        let loss = self.handle.loss.max(0.0).min(0.5);
+        let rtt = self.handle.rtt.max(1.0);
+        let success = self.profile.success_rate_ewma.max(0.1);
+        (1.0 - loss).max(0.05) * success / rtt
+    }
+
+    fn id(&self) -> &str {
+        &self.handle.id
+    }
+}
+
+enum DispatchError {
+    InsufficientCapacity,
 }
 
 pub struct StoragePipeline {
     db: SimpleDb,
     rent: RentEscrow,
     rent_rate: i64,
+    repair_log_dir: PathBuf,
 }
 
 impl StoragePipeline {
@@ -83,10 +230,12 @@ impl StoragePipeline {
         if tokio::runtime::Handle::try_current().is_ok() {
             super::repair::spawn(path.to_string(), Duration::from_secs(60));
         }
+        let repair_log_dir = PathBuf::from(path).join("repair_log");
         Self {
             db: SimpleDb::open(path),
             rent: RentEscrow::open(&format!("{path}/rent_escrow.db")),
             rent_rate: 0,
+            repair_log_dir,
         }
     }
 
@@ -114,9 +263,8 @@ impl StoragePipeline {
     }
 
     /// Logical quota in bytes derived from the provider's stake balance.
-    /// Placeholder implementation until stake-backed quotas are implemented.
-    pub fn logical_quota_bytes(_provider: &str) -> u64 {
-        u64::MAX
+    pub fn logical_quota_bytes(provider: &str) -> u64 {
+        Self::quota_for(provider)
     }
 
     fn profile_key(provider: &str) -> String {
@@ -125,10 +273,13 @@ impl StoragePipeline {
 
     fn load_profile(&self, provider: &str) -> ProviderProfile {
         let key = Self::profile_key(provider);
-        self.db
+        let mut profile = self
+            .db
             .get(&key)
             .and_then(|b| bincode::deserialize(&b).ok())
-            .unwrap_or_else(ProviderProfile::new)
+            .unwrap_or_else(ProviderProfile::new);
+        profile.ensure_defaults();
+        profile
     }
 
     fn save_profile(&mut self, provider: &str, profile: &ProviderProfile) {
@@ -143,6 +294,33 @@ impl StoragePipeline {
         self.db
             .get(&key)
             .and_then(|b| bincode::deserialize(&b).ok())
+    }
+
+    pub fn provider_profile_snapshots(&self) -> Vec<ProviderProfileSnapshot> {
+        self.db
+            .keys_with_prefix("provider_profiles/")
+            .into_iter()
+            .filter_map(|key| {
+                let provider = key.strip_prefix("provider_profiles/")?.to_string();
+                let profile = self.get_profile(&provider)?;
+                Some(ProviderProfileSnapshot {
+                    quota_bytes: Self::logical_quota_bytes(&provider),
+                    provider,
+                    profile,
+                })
+            })
+            .collect()
+    }
+
+    pub fn set_provider_maintenance(
+        &mut self,
+        provider: &str,
+        maintenance: bool,
+    ) -> Result<(), String> {
+        let mut profile = self.load_profile(provider);
+        profile.maintenance = maintenance;
+        self.save_profile(provider, &profile);
+        Ok(())
     }
 
     fn clamp_to_ladder(bytes: f64) -> u32 {
@@ -163,16 +341,211 @@ impl StoragePipeline {
         }
     }
 
+    fn quota_for(provider: &str) -> u64 {
+        let (ct, industrial) = Settlement::balance_split(provider);
+        ct.saturating_add(industrial)
+            .saturating_mul(QUOTA_BYTES_PER_CREDIT)
+    }
+
+    fn select_chunk_len(states: &[ProviderState], remaining: usize) -> usize {
+        if remaining == 0 {
+            return 0;
+        }
+        let mut best = 0usize;
+        let mut best_score = f64::MIN;
+        for state in states {
+            let preferred = state.profile.preferred_chunk as usize;
+            if preferred == 0 {
+                continue;
+            }
+            let candidate = preferred.min(remaining);
+            if candidate == 0 || !state.has_capacity(candidate) {
+                continue;
+            }
+            let score = state.score();
+            if score > best_score {
+                best_score = score;
+                best = candidate;
+            }
+        }
+        if best == 0 {
+            remaining.min(DEFAULT_CHUNK as usize)
+        } else {
+            best
+        }
+    }
+
+    fn previous_chunk_step(current: usize) -> usize {
+        if current <= 1 {
+            return 0;
+        }
+        if let Some(step) = CHUNK_LADDER
+            .iter()
+            .rev()
+            .find(|&&step| (step as usize) < current)
+        {
+            *step as usize
+        } else {
+            std::cmp::max(1, current / 2)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_shards(
+        &mut self,
+        provider_states: &mut [ProviderState],
+        catalog: &mut NodeCatalog,
+        shards: Vec<Vec<u8>>,
+        chunk_idx: usize,
+        chunk_plain_len: usize,
+        chunks: &mut Vec<ChunkRef>,
+        provider_chunk_index: &mut BTreeMap<String, ProviderChunkEntry>,
+        provider_keys: &mut BTreeMap<String, Vec<u8>>,
+        key_bytes: &[u8; 32],
+    ) -> Result<(), DispatchError> {
+        let mut provider_order: Vec<usize> = (0..provider_states.len()).collect();
+        provider_order.sort_by(|a, b| {
+            provider_states[*b]
+                .score()
+                .partial_cmp(&provider_states[*a].score())
+                .unwrap_or(Ordering::Equal)
+        });
+
+        for (idx, shard) in shards.into_iter().enumerate() {
+            let mut assigned = None;
+            for &pi in &provider_order {
+                if !provider_states[pi].has_capacity(shard.len()) {
+                    continue;
+                }
+                let provider_id = provider_states[pi].id().to_string();
+                let start = Instant::now();
+                match provider_states[pi].handle.provider.send_chunk(&shard) {
+                    Ok(()) => {
+                        let duration = start.elapsed();
+                        let throughput = if duration.as_secs_f64() > 0.0 {
+                            shard.len() as f64 / duration.as_secs_f64()
+                        } else {
+                            shard.len() as f64
+                        };
+                        provider_states[pi].used_bytes = provider_states[pi]
+                            .used_bytes
+                            .saturating_add(shard.len() as u64);
+                        let rtt = provider_states[pi].handle.rtt;
+                        let loss = provider_states[pi].handle.loss;
+                        provider_states[pi].profile.record_chunk(
+                            shard.len(),
+                            throughput,
+                            rtt,
+                            loss,
+                            true,
+                        );
+                        catalog.record_chunk_result(&provider_id, shard.len(), duration, true);
+                        let entry = provider_keys.entry(provider_id.clone()).or_insert_with(|| {
+                            let mut keyed = Hasher::new_keyed(key_bytes);
+                            keyed.update(provider_id.as_bytes());
+                            keyed.finalize().as_bytes().to_vec()
+                        });
+                        let provider_key = entry.clone();
+
+                        let mut h = Hasher::new();
+                        h.update(&[idx as u8]);
+                        h.update(&shard);
+                        let id = *h.finalize().as_bytes();
+                        if self
+                            .db
+                            .try_insert(&format!("chunk/{}", hex::encode(id)), shard.clone())
+                            .is_err()
+                        {
+                            return Err(DispatchError::InsufficientCapacity);
+                        }
+
+                        let mut chunk_ref = ChunkRef {
+                            id,
+                            nodes: vec![provider_id.clone()],
+                            provider_chunks: Vec::new(),
+                        };
+                        chunk_ref.provider_chunks.push(ProviderChunkEntry {
+                            provider: provider_id.clone(),
+                            chunk_indices: vec![chunk_idx as u32],
+                            chunk_lens: vec![chunk_plain_len as u32],
+                            encryption_key: provider_key.clone(),
+                        });
+                        chunks.push(chunk_ref);
+
+                        let entry = provider_chunk_index
+                            .entry(provider_id.clone())
+                            .or_insert_with(|| ProviderChunkEntry {
+                                provider: provider_id.clone(),
+                                ..Default::default()
+                            });
+                        if entry.chunk_indices.last().copied().unwrap_or(u32::MAX)
+                            != chunk_idx as u32
+                        {
+                            entry.chunk_indices.push(chunk_idx as u32);
+                            entry.chunk_lens.push(chunk_plain_len as u32);
+                        }
+                        if entry.encryption_key.is_empty() {
+                            entry.encryption_key = provider_key.clone();
+                        }
+
+                        #[cfg(feature = "telemetry")]
+                        {
+                            STORAGE_PROVIDER_RTT_MS
+                                .with_label_values(&[provider_id.as_str()])
+                                .observe(rtt);
+                            STORAGE_PROVIDER_LOSS_RATE
+                                .with_label_values(&[provider_id.as_str()])
+                                .observe(loss);
+                        }
+                        assigned = Some(());
+                        break;
+                    }
+                    Err(err) => {
+                        provider_states[pi].profile.record_chunk(
+                            shard.len(),
+                            0.0,
+                            provider_states[pi].handle.rtt,
+                            1.0,
+                            false,
+                        );
+                        catalog.record_chunk_result(
+                            &provider_id,
+                            shard.len(),
+                            start.elapsed(),
+                            false,
+                        );
+                        #[cfg(feature = "telemetry")]
+                        {
+                            tracing::warn!(%err, provider = %provider_id, "storage shard send failed");
+                        }
+                        #[cfg(not(feature = "telemetry"))]
+                        {
+                            let _ = err;
+                        }
+                        continue;
+                    }
+                }
+            }
+            if assigned.is_none() {
+                return Err(DispatchError::InsufficientCapacity);
+            }
+        }
+        Ok(())
+    }
+
     pub fn put_object(
         &mut self,
         data: &[u8],
         lane: &str,
-        catalog: &NodeCatalog,
+        catalog: &mut NodeCatalog,
     ) -> Result<(StoreReceipt, BlobTx), String> {
+        #[cfg(feature = "telemetry")]
+        let telemetry_start = Instant::now();
         let rent = (self.rent_rate as u64).saturating_mul(data.len() as u64);
         if Settlement::spend(lane, "rent", rent).is_err() {
             return Err("ERR_RENT_ESCROW_INSUFFICIENT".into());
         }
+
         let mut data_hasher = Hasher::new();
         data_hasher.update(data);
         let blob_root: [u8; 32] = data_hasher.finalize().into();
@@ -182,91 +555,100 @@ impl StoragePipeline {
         OsRng.fill_bytes(&mut key_bytes);
         let key = Key::from_slice(&key_bytes);
         let cipher = ChaCha20Poly1305::new(key);
-        let providers = catalog.healthy_nodes();
-        if providers.is_empty() {
+
+        let handles = catalog.ranked_nodes();
+        let mut provider_states: Vec<ProviderState> = handles
+            .into_iter()
+            .filter(|h| !h.maintenance)
+            .filter_map(|handle| {
+                let profile = self.load_profile(&handle.id);
+                if profile.maintenance {
+                    return None;
+                }
+                Some(ProviderState {
+                    quota_bytes: Self::quota_for(&handle.id),
+                    used_bytes: 0,
+                    profile,
+                    handle,
+                })
+            })
+            .collect();
+
+        if provider_states.is_empty() {
             return Err("no providers".into());
         }
-        let mut profile = self.load_profile(providers[0].id());
-        let chunk_len = profile.preferred_chunk as usize;
+
         #[cfg(feature = "telemetry")]
-        STORAGE_INITIAL_CHUNK_SIZE.set(chunk_len as i64);
+        {
+            let initial = provider_states
+                .first()
+                .map(|p| p.profile.preferred_chunk)
+                .unwrap_or(DEFAULT_CHUNK);
+            STORAGE_INITIAL_CHUNK_SIZE.set(initial as i64);
+        }
 
         let mut chunks = Vec::new();
-        let mut offset = 0;
-        let mut provider_idx = 0;
+        let mut chunk_lens: Vec<u32> = Vec::new();
+        let mut provider_chunk_index: BTreeMap<String, ProviderChunkEntry> = BTreeMap::new();
+        let mut provider_keys: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+
+        let mut offset = 0usize;
         while offset < data.len() {
-            let end = (offset + chunk_len).min(data.len());
-            let chunk = &data[offset..end];
-            let mut nonce = [0u8; 12];
-            OsRng.fill_bytes(&mut nonce);
-            let nonce = Nonce::from_slice(&nonce);
-            let start = Instant::now();
-            let ciphertext = cipher.encrypt(nonce, chunk).map_err(|e| e.to_string())?;
-            let mut blob = nonce.to_vec();
-            blob.extend_from_slice(&ciphertext);
-            let shards = erasure::encode(&blob)?;
-            for (idx, shard) in shards.into_iter().enumerate() {
-                let prov = &providers[provider_idx % providers.len()];
-                prov.send_chunk(&shard)?;
-                provider_idx += 1;
-                let mut h = Hasher::new();
-                h.update(&[idx as u8]);
-                h.update(&shard);
-                let id = *h.finalize().as_bytes();
-                self.db
-                    .try_insert(&format!("chunk/{}", hex::encode(id)), shard.clone())
-                    .map_err(|e| e.to_string())?;
-                chunks.push(ChunkRef {
-                    id,
-                    nodes: vec![prov.id().into()],
-                });
+            let remaining = data.len() - offset;
+            let mut desired = Self::select_chunk_len(&provider_states, remaining);
+            if desired == 0 {
+                desired = remaining;
             }
-            let dur = start.elapsed();
-            let throughput = chunk.len() as f64 / dur.as_secs_f64();
-            profile.bw_ewma = Self::ewma(profile.bw_ewma, throughput);
-            let (rtt, loss) = catalog.stats(providers[0].id());
-            profile.rtt_ewma = Self::ewma(profile.rtt_ewma, rtt);
-            profile.loss_ewma = Self::ewma(profile.loss_ewma, loss);
-            profile.stable_chunks += 1;
-            #[cfg(feature = "telemetry")]
-            {
-                STORAGE_CHUNK_SIZE_BYTES.observe(chunk.len() as f64);
-                STORAGE_PUT_CHUNK_SECONDS.observe(dur.as_secs_f64());
-                STORAGE_PROVIDER_RTT_MS.observe(rtt);
-                STORAGE_PROVIDER_LOSS_RATE.observe(loss);
+            let mut dispatched = false;
+
+            while desired > 0 && !dispatched {
+                let end = offset + desired.min(remaining);
+                let chunk = &data[offset..end];
+                let mut nonce_bytes = [0u8; 12];
+                OsRng.fill_bytes(&mut nonce_bytes);
+                let nonce = Nonce::from_slice(&nonce_bytes);
+                #[cfg(feature = "telemetry")]
+                let chunk_start = Instant::now();
+                let ciphertext = cipher.encrypt(nonce, chunk).map_err(|e| e.to_string())?;
+                let mut blob = nonce_bytes.to_vec();
+                blob.extend_from_slice(&ciphertext);
+                let shards = erasure::encode(&blob)?;
+
+                match self.dispatch_shards(
+                    provider_states.as_mut_slice(),
+                    catalog,
+                    shards,
+                    chunk_lens.len(),
+                    chunk.len(),
+                    &mut chunks,
+                    &mut provider_chunk_index,
+                    &mut provider_keys,
+                    &key_bytes,
+                ) {
+                    Ok(()) => {
+                        #[cfg(feature = "telemetry")]
+                        {
+                            STORAGE_CHUNK_SIZE_BYTES.observe(chunk.len() as f64);
+                            STORAGE_PUT_CHUNK_SECONDS.observe(chunk_start.elapsed().as_secs_f64());
+                        }
+                        chunk_lens.push(chunk.len() as u32);
+                        offset = end;
+                        dispatched = true;
+                    }
+                    Err(DispatchError::InsufficientCapacity) => {
+                        desired = Self::previous_chunk_step(desired);
+                    }
+                }
             }
-            offset = end;
-        }
 
-        // Decide next chunk size using hysteresis
-        let mut desired = Self::clamp_to_ladder(profile.bw_ewma * TARGET_TIME_SECS);
-        let current = profile.preferred_chunk;
-        let step_idx = CHUNK_LADDER.iter().position(|s| *s == current).unwrap_or(2);
-        let desired_idx = CHUNK_LADDER
-            .iter()
-            .position(|s| *s == desired)
-            .unwrap_or(step_idx);
-        let diff = desired_idx as i32 - step_idx as i32;
-
-        if profile.loss_ewma > LOSS_HI || profile.rtt_ewma > RTT_HI_MS {
-            desired = CHUNK_LADDER[step_idx.saturating_sub(1)]
-        } else if profile.loss_ewma < LOSS_LO && profile.rtt_ewma < RTT_LO_MS {
-            // allow desired as computed
-        } else {
-            desired = current;
-        }
-
-        if desired != current && profile.stable_chunks >= 3 {
-            if (diff.abs() as usize) >= 1 {
-                profile.preferred_chunk = desired;
-                profile.stable_chunks = 0;
+            if !dispatched {
+                return Err("storage provider capacity exhausted".into());
             }
         }
 
-        if let Ok(secs) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-            profile.updated_at = secs.as_secs();
+        for state in &provider_states {
+            self.save_profile(state.id(), &state.profile);
         }
-        self.save_profile(providers[0].id(), &profile);
 
         let (rs_data, rs_parity) = erasure::reed_solomon_counts();
         let rs_data_u8 = u8::try_from(rs_data).map_err(|_| "invalid data shard count")?;
@@ -275,7 +657,7 @@ impl StoragePipeline {
         let mut manifest = ObjectManifest {
             version: VERSION,
             total_len: data.len() as u64,
-            chunk_len: chunk_len as u32,
+            chunk_len: chunk_lens.first().copied().unwrap_or(DEFAULT_CHUNK) as u32,
             chunks,
             redundancy: Redundancy::ReedSolomon {
                 data: rs_data_u8,
@@ -283,6 +665,8 @@ impl StoragePipeline {
             },
             content_key_enc: key_bytes.to_vec(),
             blake3: [0u8; 32],
+            chunk_lens,
+            provider_chunks: provider_chunk_index.values().cloned().collect(),
         };
         let mut h = Hasher::new();
         let manifest_bytes_temp = bincode::serialize(&manifest).map_err(|e| e.to_string())?;
@@ -326,11 +710,26 @@ impl StoragePipeline {
             .inc_by(data.len() as u64);
         #[cfg(feature = "telemetry")]
         {
-            STORAGE_FINAL_CHUNK_SIZE.set(profile.preferred_chunk as i64);
-            if profile.bw_ewma > 0.0 {
-                let eta = data.len() as f64 / profile.bw_ewma;
+            if let Some(final_pref) = provider_states.first() {
+                STORAGE_FINAL_CHUNK_SIZE.set(final_pref.profile.preferred_chunk as i64);
+            }
+            let total_bw: f64 = provider_states
+                .iter()
+                .map(|s| s.profile.bw_ewma)
+                .filter(|bw| *bw > 0.0)
+                .sum();
+            if total_bw > 0.0 {
+                let eta = data.len() as f64 / total_bw;
                 STORAGE_PUT_ETA_SECONDS.set(eta as i64);
             }
+        }
+        #[cfg(feature = "telemetry")]
+        {
+            crate::telemetry::sampled_observe(
+                &STORAGE_PUT_OBJECT_SECONDS,
+                telemetry_start.elapsed().as_secs_f64(),
+            );
+            crate::telemetry::update_memory_usage(MemoryComponent::Storage);
         }
         Ok((receipt, blob_tx))
     }
@@ -435,6 +834,14 @@ impl StoragePipeline {
     pub fn db_mut(&mut self) -> &mut SimpleDb {
         &mut self.db
     }
+
+    pub fn repair_log(&self) -> repair::RepairLog {
+        repair::RepairLog::new(self.repair_log_dir.clone())
+    }
+
+    pub fn repair_log_dir(&self) -> PathBuf {
+        self.repair_log_dir.clone()
+    }
 }
 
 #[cfg(test)]
@@ -448,9 +855,45 @@ impl StoragePipeline {
 mod tests {
     use super::*;
     use super::{erasure, NodeCatalog};
+    use crate::compute_market::settlement::{SettleMode, Settlement};
     use crate::storage::repair;
     use crate::storage::types::ObjectManifest;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
     use tempfile::tempdir;
+
+    static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct SettlementGuard {
+        _lock: MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl SettlementGuard {
+        fn new() -> Self {
+            let lock = SETTLEMENT_TEST_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let dir = tempdir().expect("settlement tempdir");
+            let path = dir.path().join("settlement");
+            let path_str = path.to_str().expect("settlement path str");
+            Settlement::init(path_str, SettleMode::DryRun);
+            Self {
+                _lock: lock,
+                _dir: dir,
+            }
+        }
+
+        fn prefund_lane(&self, lane: &str, amount: u64) {
+            Settlement::accrue(lane, "test_prefund", amount);
+        }
+    }
+
+    impl Drop for SettlementGuard {
+        fn drop(&mut self) {
+            Settlement::shutdown();
+        }
+    }
 
     struct StubProvider {
         id: String,
@@ -485,15 +928,17 @@ mod tests {
 
     #[test]
     fn get_object_round_trips_with_missing_shards() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund_lane("lane", 1_000_000);
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("pipeline-db");
         let path_str = path.to_str().expect("path str");
         let mut pipeline = StoragePipeline::open(path_str);
-        let catalog = catalog_with_stub();
+        let mut catalog = catalog_with_stub();
 
         let data = sample_blob(1_200_000);
         let (receipt, _) = pipeline
-            .put_object(&data, "lane", &catalog)
+            .put_object(&data, "lane", &mut catalog)
             .expect("store object");
 
         let manifest = load_manifest(&pipeline, &receipt.manifest_hash);
@@ -515,15 +960,17 @@ mod tests {
 
     #[test]
     fn repair_rebuilds_missing_shards() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund_lane("lane", 1_000_000);
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("repair-db");
         let path_str = path.to_str().expect("path str");
         let mut pipeline = StoragePipeline::open(path_str);
-        let catalog = catalog_with_stub();
+        let mut catalog = catalog_with_stub();
 
         let data = sample_blob(1_000_000);
         let (receipt, _) = pipeline
-            .put_object(&data, "lane", &catalog)
+            .put_object(&data, "lane", &mut catalog)
             .expect("store object");
 
         let manifest = load_manifest(&pipeline, &receipt.manifest_hash);
@@ -538,7 +985,9 @@ mod tests {
             removed_keys.push(key);
         }
 
-        repair::run_once(pipeline.db_mut()).expect("repair");
+        let log = pipeline.repair_log();
+        repair::run_once(pipeline.db_mut(), &log, repair::RepairRequest::default())
+            .expect("repair");
 
         for key in &removed_keys {
             assert!(pipeline.db().get(key).is_some());
@@ -555,9 +1004,9 @@ static L2_CAP_BYTES_PER_EPOCH: AtomicU64 = AtomicU64::new(33_554_432);
 static BYTES_PER_SENDER_EPOCH_CAP: AtomicU64 = AtomicU64::new(16_777_216);
 
 pub fn set_l2_cap_bytes_per_epoch(v: u64) {
-    L2_CAP_BYTES_PER_EPOCH.store(v, Ordering::Relaxed);
+    L2_CAP_BYTES_PER_EPOCH.store(v, AtomicOrdering::Relaxed);
 }
 
 pub fn set_bytes_per_sender_epoch_cap(v: u64) {
-    BYTES_PER_SENDER_EPOCH_CAP.store(v, Ordering::Relaxed);
+    BYTES_PER_SENDER_EPOCH_CAP.store(v, AtomicOrdering::Relaxed);
 }
