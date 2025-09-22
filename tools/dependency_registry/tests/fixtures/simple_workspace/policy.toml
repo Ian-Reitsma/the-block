@@ -1,0 +1,10 @@
+[settings]
+max_depth = 2
+
+[tiers]
+strategic = ["app"]
+replaceable = ["dep_a", "deep_dep"]
+forbidden = ["dep_b"]
+
+[licenses]
+forbidden = ["AGPL-3.0"]

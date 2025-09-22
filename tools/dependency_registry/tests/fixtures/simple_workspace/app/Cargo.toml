@@ -1,0 +1,9 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+dep_a = { path = "../dep_a" }
+dep_b = { path = "../dep_b" }

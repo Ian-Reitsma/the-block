@@ -1,0 +1,31 @@
+# Dependency governance policies.
+
+[settings]
+# Maximum allowed distance from a workspace crate to a dependency in the resolved DAG.
+max_depth = 3
+
+[tiers]
+strategic = [
+  "tokio",
+  "libp2p",
+  "quinn",
+  "rustls",
+  "ed25519-dalek",
+]
+replaceable = [
+  "sled",
+  "rocksdb",
+  "serde",
+  "bincode",
+  "zstd",
+  "reed-solomon",
+  "raptorq",
+]
+forbidden = [
+]
+
+[licenses]
+forbidden = [
+  "AGPL-3.0",
+  "SSPL-1.0",
+]

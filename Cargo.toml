@@ -33,7 +33,7 @@ members = [
   "privacy",
   "dkg",
   "governance"
-]
+, "tools/dependency_registry"]
 default-members = [
   "node",
 "state",
