@@ -373,7 +373,7 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
             .unwrap_or(false)
             && out.is_empty()
         {
-            crate::telemetry::LOG_CORRELATION_FAIL_TOTAL.inc();
+            crate::telemetry::record_log_correlation_fail();
         }
     }
     Ok(out)

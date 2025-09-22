@@ -37,8 +37,11 @@ pub fn retune(prev: u64, timestamps: &[u64], hint: i8, params: &Params) -> (u64,
     let km = params.kalman_r_med.max(1) as f64;
     let kl = params.kalman_r_long.max(1) as f64;
     let total = ks + km + kl;
-    let predicted = (short * ks + med * km + long * kl) / total;
-    let mut next = (prev as f64) * predicted / TARGET_SPACING_MS as f64;
+    let mut predicted = (short * ks + med * km + long * kl) / total;
+    if predicted < 1.0 {
+        predicted = 1.0;
+    }
+    let mut next = (prev as f64) * (TARGET_SPACING_MS as f64 / predicted);
     // Apply previous hint as ±5% adjustment.
     let adjust = 1.0 + (hint as f64) * 0.05;
     next *= adjust;

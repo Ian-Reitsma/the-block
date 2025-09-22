@@ -101,6 +101,8 @@ pub fn validate_quic_certificate(
                         "QUIC certificate validation failed"
                     );
                 }
+                #[cfg(not(feature = "telemetry"))]
+                let _ = err;
                 HandshakeError::Certificate
             })?;
         if let Some(expected) = hello.quic_fingerprint.as_ref() {

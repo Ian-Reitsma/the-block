@@ -218,6 +218,25 @@ availability.
 
 High‑volume counters can be probabilistically sampled to reduce memory
 pressure. Configure the global sampling rate with
+
+```
+blockctl telemetry configure --sample-rate 0.5 --compaction 120 --token <admin-token>
+```
+
+Adaptive sampling monitors `log_correlation_fail_total` exporter lag and automatically reduces
+sampling when the aggregator falls behind. The node lowers the sample rate in 5% increments (flooring
+at 1% of events unless operators explicitly set a lower baseline) and ramps back up once the lag
+clears. Current settings are exposed via the same RPC response:
+
+```
+curl -H 'Authorization: Bearer <token>' -d '{"jsonrpc":"2.0","id":1,"method":"telemetry.configure","params":{}}' http://localhost:26658
+```
+
+Mempool, storage, and compute subsystems each feed per-component memory histograms. The aggregator
+accepts summaries at `/telemetry` and serves the latest window at `/telemetry/<node>` for dashboards.
+The lightweight HTML dashboard in `dashboard/index.html` links to these endpoints, and the
+`aggregator telemetry` CLI helper prints the JSON payload for ad hoc inspection.
+
 `telemetry.sample_rate` in `config/default.toml` (1.0 disables
 sampling). Sampled counters scale their increments to preserve expected
 totals, while histograms simply drop unsampled observations.

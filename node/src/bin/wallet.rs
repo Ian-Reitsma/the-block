@@ -306,7 +306,7 @@ fn main() {
             let mut catalog = NodeCatalog::new();
             catalog.register(DummyProvider { id: "local".into() });
             let (_receipt, tx) = pipeline
-                .put_object(&data, &owner, &catalog)
+                .put_object(&data, &owner, &mut catalog)
                 .expect("store blob");
             println!("{}", hex::encode(tx.blob_root));
         }

@@ -3,7 +3,7 @@ use clap::Subcommand;
 use hex;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use the_block::net::QuicStatsEntry;
+use the_block::net::{PeerCertHistoryEntry, QuicStatsEntry};
 
 #[derive(Subcommand)]
 pub enum NetCmd {
@@ -81,6 +81,18 @@ pub enum DnsCmd {
 pub enum QuicCmd {
     /// Show recent handshake failures
     Failures {
+        #[arg(long, default_value = "http://localhost:26658")]
+        url: String,
+    },
+    /// Inspect cached QUIC certificate history
+    History {
+        #[arg(long, default_value = "http://localhost:26658")]
+        url: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reload the QUIC certificate cache from disk
+    Refresh {
         #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
@@ -205,6 +217,64 @@ pub fn handle(cmd: NetCmd) {
                     jsonrpc: "2.0",
                     id: 1,
                     method: "net.handshake_failures",
+                    params: serde_json::Value::Null,
+                    auth: None,
+                };
+                if let Ok(resp) = client.call(&url, &payload) {
+                    if let Ok(text) = resp.text() {
+                        println!("{}", text);
+                    }
+                }
+            }
+            QuicCmd::History { url, json } => {
+                let client = RpcClient::from_env();
+                #[derive(serde::Serialize)]
+                struct Payload<'a> {
+                    jsonrpc: &'static str,
+                    id: u32,
+                    method: &'static str,
+                    params: serde_json::Value,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    auth: Option<&'a str>,
+                }
+                #[derive(Deserialize)]
+                struct Envelope<T> {
+                    result: T,
+                }
+                let payload = Payload {
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "net.quic_certs",
+                    params: serde_json::Value::Null,
+                    auth: None,
+                };
+                if let Ok(resp) = client.call(&url, &payload) {
+                    if json {
+                        if let Ok(data) = resp.json::<Envelope<Vec<PeerCertHistoryEntry>>>() {
+                            if let Ok(text) = serde_json::to_string_pretty(&data.result) {
+                                println!("{}", text);
+                            }
+                        }
+                    } else if let Ok(data) = resp.json::<Envelope<Vec<PeerCertHistoryEntry>>>() {
+                        print_quic_cert_history(&data.result);
+                    }
+                }
+            }
+            QuicCmd::Refresh { url } => {
+                let client = RpcClient::from_env();
+                #[derive(serde::Serialize)]
+                struct Payload<'a> {
+                    jsonrpc: &'static str,
+                    id: u32,
+                    method: &'static str,
+                    params: serde_json::Value,
+                    #[serde(skip_serializing_if = "Option::is_none")]
+                    auth: Option<&'a str>,
+                }
+                let payload = Payload {
+                    jsonrpc: "2.0",
+                    id: 1,
+                    method: "net.quic_certs_refresh",
                     params: serde_json::Value::Null,
                     auth: None,
                 };
@@ -351,8 +421,8 @@ fn print_quic_stats(entries: &[QuicStatsEntry]) {
         return;
     }
     println!(
-        "{:<66} {:>12} {:>14} {:>10} {:>12}",
-        "Peer", "Latency(ms)", "Retransmits", "Reuse", "Failures"
+        "{:<66} {:<66} {:>12} {:>14} {:>10} {:>12}",
+        "Peer", "Fingerprint", "Latency(ms)", "Retransmits", "Reuse", "Failures"
     );
     for entry in entries {
         let latency = entry
@@ -360,13 +430,44 @@ fn print_quic_stats(entries: &[QuicStatsEntry]) {
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".into());
         println!(
-            "{:<66} {:>12} {:>14} {:>10} {:>12}",
+            "{:<66} {:<66} {:>12} {:>14} {:>10} {:>12}",
             entry.peer_id,
+            entry.fingerprint.as_deref().unwrap_or("-"),
             latency,
             entry.retransmits,
             entry.endpoint_reuse,
             entry.handshake_failures
         );
+    }
+}
+
+fn print_quic_cert_history(entries: &[PeerCertHistoryEntry]) {
+    if entries.is_empty() {
+        println!("no cached QUIC certificates");
+        return;
+    }
+    for entry in entries {
+        println!("Peer {} (rotations: {})", entry.peer, entry.rotations);
+        let current = &entry.current;
+        println!(
+            "  current: {} (age: {}s, cert: {})",
+            current.fingerprint,
+            current.age_secs,
+            if current.has_certificate { "yes" } else { "no" }
+        );
+        if entry.history.is_empty() {
+            println!("  history: <empty>");
+        } else {
+            println!("  history:");
+            for hist in &entry.history {
+                println!(
+                    "    - {} (age: {}s, cert: {})",
+                    hist.fingerprint,
+                    hist.age_secs,
+                    if hist.has_certificate { "yes" } else { "no" }
+                );
+            }
+        }
     }
 }
 

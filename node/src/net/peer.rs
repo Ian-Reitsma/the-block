@@ -3,9 +3,9 @@ use crate::config::AggregatorConfig;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use crate::net::message::{Message, Payload};
-use crate::p2p::handshake::Transport;
 #[cfg(feature = "quic")]
-use crate::p2p::handshake::{validate_quic_certificate, ValidatedCert};
+use crate::p2p::handshake::validate_quic_certificate;
+use crate::p2p::handshake::Transport;
 use crate::simple_db::SimpleDb;
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
+use std::future::Future;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
@@ -30,6 +31,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::runtime::{Handle, Runtime};
 use tokio::sync::broadcast;
 
 use tar::Builder;
@@ -271,6 +273,7 @@ impl PeerSet {
             entry.count = 0;
         }
         entry.count += 1;
+        let limit = p2p_max_per_sec();
         let allowed = {
             let mut metrics = peer_metrics_guard();
             let pm = metrics.entry(*pk).or_insert_with(PeerMetrics::default);
@@ -278,7 +281,11 @@ impl PeerSet {
             pm.last_updated = now_secs();
             let score = pm.reputation.score;
             update_reputation_metric(pk, score);
-            (p2p_max_per_sec() as f64 * score) as u32
+            let mut allowed = ((limit as f64) * score).floor() as u32;
+            if limit > 0 {
+                allowed = allowed.max(1);
+            }
+            allowed
         };
         if entry.count > allowed {
             {
@@ -1826,12 +1833,7 @@ mod tests {
         });
         let bad = "http://127.0.0.1:59999".to_string();
         let good = format!("http://{}", addr);
-        let client = AggregatorClient {
-            urls: vec![bad, good],
-            token: "t".into(),
-            client: reqwest::Client::new(),
-            idx: Arc::new(AtomicUsize::new(0)),
-        };
+        let client = AggregatorClient::new(vec![bad, good], "t".into());
         aggregator_guard().replace(client.clone());
         let snap = PeerSnapshot {
             peer_id: "p".into(),
@@ -2034,17 +2036,60 @@ static METRIC_TX: Lazy<broadcast::Sender<PeerSnapshot>> = Lazy::new(|| {
 });
 
 #[derive(Clone)]
+enum AggregatorExecutor {
+    Handle(Handle),
+    Runtime(Arc<Runtime>),
+}
+
+#[derive(Clone)]
 struct AggregatorClient {
     urls: Vec<String>,
     token: String,
     client: reqwest::Client,
     idx: Arc<AtomicUsize>,
+    executor: AggregatorExecutor,
 }
 
 impl AggregatorClient {
+    fn new(urls: Vec<String>, token: String) -> Self {
+        let executor = Handle::try_current()
+            .map(AggregatorExecutor::Handle)
+            .unwrap_or_else(|_| {
+                let rt = Runtime::new().expect("aggregator runtime");
+                AggregatorExecutor::Runtime(Arc::new(rt))
+            });
+        Self {
+            urls,
+            token,
+            client: reqwest::Client::new(),
+            idx: Arc::new(AtomicUsize::new(0)),
+            executor,
+        }
+    }
+
+    fn spawn<F>(&self, fut: F)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        match &self.executor {
+            AggregatorExecutor::Handle(handle) => {
+                let _ = handle.spawn(fut);
+            }
+            AggregatorExecutor::Runtime(rt) => {
+                let _ = rt.spawn(fut);
+            }
+        }
+    }
+
     async fn ingest(&self, snaps: Vec<PeerSnapshot>) {
         let body = serde_json::to_value(snaps).unwrap();
         self.post("ingest", body).await;
+    }
+
+    #[cfg(feature = "telemetry")]
+    async fn telemetry_summary(&self, summary: crate::telemetry::summary::TelemetrySummary) {
+        let body = serde_json::to_value(summary).unwrap();
+        self.post("telemetry", body).await;
     }
 
     async fn post(&self, path: &str, body: serde_json::Value) {
@@ -2071,6 +2116,19 @@ static AGGREGATOR: Lazy<Mutex<Option<AggregatorClient>>> = Lazy::new(|| Mutex::n
 fn aggregator_guard() -> parking_lot::MutexGuard<'static, Option<AggregatorClient>> {
     AGGREGATOR.lock()
 }
+
+#[cfg(feature = "telemetry")]
+pub fn publish_telemetry_summary(summary: crate::telemetry::summary::TelemetrySummary) {
+    if let Some(client) = aggregator_guard().clone() {
+        let fut_client = client.clone();
+        client.spawn(async move {
+            fut_client.telemetry_summary(summary).await;
+        });
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn publish_telemetry_summary(_summary: crate::telemetry::summary::TelemetrySummary) {}
 
 fn ban_store_guard() -> std::sync::MutexGuard<'static, ban_store::BanStore> {
     ban_store::store().lock().unwrap_or_else(|e| e.into_inner())
@@ -2126,8 +2184,9 @@ pub fn broadcast_metrics(pk: &[u8; 32], m: &PeerMetrics) {
         let guard = aggregator_guard();
         guard.clone()
     } {
-        tokio::spawn(async move {
-            client.ingest(vec![snap]).await;
+        let fut_client = client.clone();
+        client.spawn(async move {
+            fut_client.ingest(vec![snap]).await;
         });
     }
 }
@@ -2146,9 +2205,10 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
             peer_id: hex::encode(old),
             metrics: json!({ "key_rotation": hex::encode(new) }),
         };
-        tokio::spawn(async move {
+        let fut_client = client.clone();
+        client.spawn(async move {
             let body = serde_json::to_value(vec![event]).unwrap();
-            client.post("ingest", body).await;
+            fut_client.post("ingest", body).await;
         });
     }
 }
@@ -2212,12 +2272,11 @@ pub fn set_metrics_aggregator(cfg: Option<AggregatorConfig>) {
             }
         }
         urls.retain(|u| !u.is_empty());
-        *guard = Some(AggregatorClient {
-            urls,
-            token: cfg.auth_token,
-            client: reqwest::Client::new(),
-            idx: Arc::new(AtomicUsize::new(0)),
-        });
+        if urls.is_empty() {
+            *guard = None;
+        } else {
+            *guard = Some(AggregatorClient::new(urls, cfg.auth_token));
+        }
     } else {
         *guard = None;
     }

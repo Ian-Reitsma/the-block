@@ -3,7 +3,9 @@ use crate::provenance;
 use reqwest::blocking::Client;
 use std::collections::HashSet;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -128,6 +130,29 @@ pub fn fetch_release(
 }
 
 fn persist_temp_file(file: NamedTempFile, dest: &Path) -> Result<PathBuf, UpdateError> {
+    if let Some(parent) = dest.parent() {
+        if let Ok(metadata) = fs::metadata(parent) {
+            let read_only = {
+                #[cfg(unix)]
+                {
+                    metadata.permissions().mode() & 0o200 == 0
+                }
+                #[cfg(not(unix))]
+                {
+                    metadata.permissions().readonly()
+                }
+            };
+            if read_only {
+                return Err(UpdateError::Io(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "cannot persist release into read-only directory {}",
+                        parent.display()
+                    ),
+                )));
+            }
+        }
+    }
     file.persist(dest)
         .map_err(|err| UpdateError::Io(err.error))?;
     Ok(dest.to_path_buf())

@@ -22,6 +22,33 @@ pub enum StorageCmd {
         chunk: u64,
         block: u64,
     },
+    /// List provider quotas and recent upload metrics
+    Providers {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Toggle maintenance mode for a provider
+    Maintenance {
+        provider_id: String,
+        #[arg(long, default_value_t = true)]
+        maintenance: bool,
+    },
+    /// Show recent repair attempts and outcomes
+    RepairHistory {
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Trigger the repair loop once and print summary statistics
+    RepairRun {},
+    /// Force a repair attempt for a manifest chunk
+    RepairChunk {
+        manifest: String,
+        chunk: u32,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 pub fn handle(cmd: StorageCmd) {
@@ -75,6 +102,103 @@ pub fn handle(cmd: StorageCmd) {
             let mut proof = [0u8; 32];
             proof.copy_from_slice(h.finalize().as_bytes());
             let resp = rpc::storage::challenge(&object_id, chunk, proof, block);
+            println!("{}", resp);
+        }
+        StorageCmd::Providers { json } => {
+            let resp = rpc::storage::provider_profiles();
+            if json {
+                println!("{}", resp);
+            } else if let Some(list) = resp.get("profiles").and_then(|v| v.as_array()) {
+                println!(
+                    "{:>20} {:>12} {:>8} {:>10} {:>8} {:>8} {:>6}",
+                    "provider", "quota_bytes", "chunk", "throughput", "loss", "rtt_ms", "maint"
+                );
+                for entry in list {
+                    let provider = entry
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let quota = entry
+                        .get("quota_bytes")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let chunk = entry
+                        .get("preferred_chunk")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let throughput = entry
+                        .get("throughput_bps")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let loss = entry.get("loss").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let rtt = entry.get("rtt_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let maintenance = entry
+                        .get("maintenance")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    println!(
+                        "{:>20} {:>12} {:>8} {:>10.0} {:>8.3} {:>8.1} {:>6}",
+                        provider,
+                        quota,
+                        chunk,
+                        throughput,
+                        loss,
+                        rtt,
+                        if maintenance { "yes" } else { "no" }
+                    );
+                }
+            } else {
+                println!("{}", resp);
+            }
+        }
+        StorageCmd::Maintenance {
+            provider_id,
+            maintenance,
+        } => {
+            let resp = rpc::storage::set_provider_maintenance(&provider_id, maintenance);
+            println!("{}", resp);
+        }
+        StorageCmd::RepairHistory { limit, json } => {
+            let resp = rpc::storage::repair_history(limit);
+            if json {
+                println!("{}", resp);
+            } else if let Some(entries) = resp.get("entries").and_then(|v| v.as_array()) {
+                println!(
+                    "{:<40} {:>8} {:>10} {:>12} {:<}",
+                    "manifest", "chunk", "bytes", "status", "error"
+                );
+                for entry in entries {
+                    let manifest = entry
+                        .get("manifest")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let chunk = entry
+                        .get("chunk")
+                        .and_then(|v| v.as_u64())
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    let bytes = entry.get("bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let status = entry.get("status").and_then(|v| v.as_str()).unwrap_or("-");
+                    let error = entry.get("error").and_then(|v| v.as_str()).unwrap_or("");
+                    println!(
+                        "{:<40} {:>8} {:>10} {:>12} {:<}",
+                        manifest, chunk, bytes, status, error
+                    );
+                }
+            } else {
+                println!("{}", resp);
+            }
+        }
+        StorageCmd::RepairRun {} => {
+            let resp = rpc::storage::repair_run();
+            println!("{}", resp);
+        }
+        StorageCmd::RepairChunk {
+            manifest,
+            chunk,
+            force,
+        } => {
+            let resp = rpc::storage::repair_chunk(&manifest, chunk, force);
             println!("{}", resp);
         }
     }

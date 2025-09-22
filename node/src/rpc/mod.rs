@@ -127,6 +127,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.key_rotate",
     "net.handshake_failures",
     "net.quic_stats",
+    "net.quic_certs",
+    "net.quic_certs_refresh",
     "kyc.verify",
     "pow.get_template",
     "dex_escrow_status",
@@ -136,6 +138,9 @@ const PUBLIC_METHODS: &[&str] = &[
     "htlc_refund",
     "storage_upload",
     "storage_challenge",
+    "storage.repair_history",
+    "storage.repair_run",
+    "storage.repair_chunk",
     "pow.submit",
     "inflation.params",
     "compute_market.stats",
@@ -173,6 +178,7 @@ const ADMIN_METHODS: &[&str] = &[
     "compute_back_to_dry_run",
     "gateway.mobile_cache_status",
     "gateway.mobile_cache_flush",
+    "telemetry.configure",
     "gov_propose",
     "gov_vote",
     "submit_proposal",
@@ -1068,6 +1074,37 @@ fn dispatch(
         "gateway.mobile_cache_status" => gateway::mobile_cache::status_snapshot(),
         "gateway.mobile_cache_flush" => gateway::mobile_cache::flush_cache(),
         #[cfg(feature = "telemetry")]
+        "telemetry.configure" => {
+            #[derive(Deserialize)]
+            struct TelemetryConfigure {
+                sample_rate: Option<f64>,
+                compaction_secs: Option<u64>,
+            }
+            let cfg: TelemetryConfigure =
+                serde_json::from_value(req.params.clone()).unwrap_or(TelemetryConfigure {
+                    sample_rate: None,
+                    compaction_secs: None,
+                });
+            if let Some(rate) = cfg.sample_rate {
+                crate::telemetry::set_sample_rate(rate);
+            }
+            if let Some(secs) = cfg.compaction_secs {
+                crate::telemetry::set_compaction_interval(secs);
+            }
+            serde_json::json!({
+                "status": "ok",
+                "sample_rate_ppm": crate::telemetry::sample_rate_ppm(),
+                "compaction_secs": crate::telemetry::compaction_interval_secs(),
+            })
+        }
+        #[cfg(not(feature = "telemetry"))]
+        "telemetry.configure" => {
+            return Err(RpcError {
+                code: -32603,
+                message: "telemetry disabled",
+            });
+        }
+        #[cfg(feature = "telemetry")]
         "analytics" => {
             let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone())
                 .unwrap_or(analytics::AnalyticsQuery {
@@ -1394,9 +1431,13 @@ fn dispatch(
                         })
                     }
                     Err(err) => {
+                        #[cfg(feature = "telemetry")]
+                        tracing::error!(error = %err, "quic_cert_rotation_failed");
+                        #[cfg(not(feature = "telemetry"))]
+                        let _ = err;
                         return Err(RpcError {
                             code: -32603,
-                            message: format!("rotation failed: {err}"),
+                            message: "rotation failed",
                         });
                     }
                 }
@@ -1507,6 +1548,23 @@ fn dispatch(
                 });
             }
         },
+        "net.quic_certs" => match serde_json::to_value(net::peer_cert_history()) {
+            Ok(val) => val,
+            Err(e) => {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!(target: "rpc", error = %e, "failed to serialize quic cert history");
+                #[cfg(not(feature = "telemetry"))]
+                let _ = e;
+                return Err(RpcError {
+                    code: -32603,
+                    message: "serialization error",
+                });
+            }
+        },
+        "net.quic_certs_refresh" => {
+            let refreshed = net::refresh_peer_cert_store_from_disk();
+            serde_json::json!({ "reloaded": refreshed })
+        }
         "peer.rebate_status" => {
             let peer = req
                 .params
@@ -2359,6 +2417,20 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             storage::challenge(object_id, chunk_idx, proof, current_block)
+        }
+        "storage_provider_profiles" => storage::provider_profiles(),
+        "storage_provider_set_maintenance" => {
+            let provider = req
+                .params
+                .get("provider")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let maintenance = req
+                .params
+                .get("maintenance")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            storage::set_provider_maintenance(provider, maintenance)
         }
         "gov_propose" => {
             let proposer = req

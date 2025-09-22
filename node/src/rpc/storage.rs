@@ -6,6 +6,13 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 use storage::{contract::ContractError, StorageContract, StorageOffer};
 
+use crate::storage::pipeline::StoragePipeline;
+use crate::storage::repair::RepairRequest;
+
+fn pipeline_path() -> String {
+    std::env::var("TB_STORAGE_PIPELINE_DIR").unwrap_or_else(|_| "blobstore".to_string())
+}
+
 static CONTRACTS: Lazy<Mutex<BTreeMap<String, StorageContract>>> =
     Lazy::new(|| Mutex::new(BTreeMap::new()));
 static ALLOCATIONS: Lazy<Mutex<BTreeMap<String, Vec<String>>>> =
@@ -72,11 +79,125 @@ pub fn challenge(
     }
 }
 
+/// Return provider profile snapshots including quotas and recent upload stats.
+pub fn provider_profiles() -> serde_json::Value {
+    let pipeline = StoragePipeline::open(&pipeline_path());
+    let profiles: Vec<serde_json::Value> = pipeline
+        .provider_profile_snapshots()
+        .into_iter()
+        .map(|snap| {
+            json!({
+                "provider": snap.provider,
+                "quota_bytes": snap.quota_bytes,
+                "preferred_chunk": snap.profile.preferred_chunk,
+                "throughput_bps": snap.profile.bw_ewma,
+                "rtt_ms": snap.profile.rtt_ewma,
+                "loss": snap.profile.loss_ewma,
+                "success_rate": snap.profile.success_rate_ewma,
+                "recent_failures": snap.profile.recent_failures,
+                "total_chunks": snap.profile.total_chunks,
+                "total_failures": snap.profile.total_failures,
+                "last_upload_bytes": snap.profile.last_upload_bytes,
+                "last_upload_secs": snap.profile.last_upload_secs,
+                "maintenance": snap.profile.maintenance,
+            })
+        })
+        .collect();
+    json!({"profiles": profiles})
+}
+
+/// Return recent storage repair log entries.
+pub fn repair_history(limit: Option<usize>) -> serde_json::Value {
+    let pipeline = StoragePipeline::open(&pipeline_path());
+    let log = pipeline.repair_log();
+    let limit = limit.unwrap_or(25).min(500);
+    match log.recent_entries(limit) {
+        Ok(entries) => json!({
+            "status": "ok",
+            "entries": entries,
+        }),
+        Err(err) => json!({
+            "error": err.to_string(),
+        }),
+    }
+}
+
+/// Trigger a manual repair loop iteration and return the summary.
+pub fn repair_run() -> serde_json::Value {
+    let mut pipeline = StoragePipeline::open(&pipeline_path());
+    let log = pipeline.repair_log();
+    match crate::storage::repair::run_once(pipeline.db_mut(), &log, RepairRequest::default()) {
+        Ok(summary) => json!({
+            "status": "ok",
+            "manifests": summary.manifests,
+            "attempts": summary.attempts,
+            "successes": summary.successes,
+            "failures": summary.failures,
+            "skipped": summary.skipped,
+            "bytes_repaired": summary.bytes_repaired,
+        }),
+        Err(err) => json!({
+            "error": err.label(),
+        }),
+    }
+}
+
+/// Force a repair attempt for a specific manifest and chunk index.
+pub fn repair_chunk(manifest_hex: &str, chunk_idx: u32, force: bool) -> serde_json::Value {
+    let bytes = match hex::decode(manifest_hex) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            return json!({
+                "error": format!("invalid manifest hash: {err}"),
+            });
+        }
+    };
+    if bytes.len() != 32 {
+        return json!({"error": "manifest hash must be 32 bytes"});
+    }
+    let mut manifest = [0u8; 32];
+    manifest.copy_from_slice(&bytes);
+
+    let mut pipeline = StoragePipeline::open(&pipeline_path());
+    let log = pipeline.repair_log();
+    let mut request = RepairRequest::default();
+    request.manifest = Some(manifest);
+    request.chunk = Some(chunk_idx as usize);
+    request.force = force;
+    match crate::storage::repair::run_once(pipeline.db_mut(), &log, request) {
+        Ok(summary) => json!({
+            "status": "ok",
+            "attempts": summary.attempts,
+            "successes": summary.successes,
+            "failures": summary.failures,
+            "skipped": summary.skipped,
+            "bytes_repaired": summary.bytes_repaired,
+        }),
+        Err(err) => json!({
+            "error": err.label(),
+        }),
+    }
+}
+
+/// Toggle maintenance mode for a provider, updating the persisted profile.
+pub fn set_provider_maintenance(provider: &str, maintenance: bool) -> serde_json::Value {
+    let mut pipeline = StoragePipeline::open(&pipeline_path());
+    match pipeline.set_provider_maintenance(provider, maintenance) {
+        Ok(()) => json!({
+            "status": "ok",
+            "provider": provider,
+            "maintenance": maintenance,
+        }),
+        Err(err) => json!({"error": err}),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
     use storage::{StorageContract, StorageOffer};
+    use tempfile::tempdir;
 
     fn reset_state() {
         CONTRACTS.lock().unwrap().clear();
@@ -154,5 +275,35 @@ mod tests {
         assert_eq!(wrong, json!({"error": "challenge_failed"}));
 
         reset_state();
+    }
+
+    #[test]
+    fn repair_history_returns_empty_when_log_absent() {
+        let dir = tempdir().expect("dir");
+        std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
+        let resp = repair_history(Some(5));
+        assert_eq!(resp["status"], json!("ok"));
+        assert!(resp["entries"].as_array().unwrap().is_empty());
+        std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
+    }
+
+    #[test]
+    fn repair_run_handles_empty_database() {
+        let dir = tempdir().expect("dir");
+        std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
+        let resp = repair_run();
+        assert_eq!(resp["status"], json!("ok"));
+        assert_eq!(resp["attempts"], json!(0));
+        std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
+    }
+
+    #[test]
+    fn repair_chunk_with_unknown_manifest_returns_ok() {
+        let dir = tempdir().expect("dir");
+        std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
+        let manifest_hex = hex::encode([0u8; 32]);
+        let resp = repair_chunk(&manifest_hex, 0, true);
+        assert_eq!(resp["status"], json!("ok"));
+        std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
 }

@@ -131,7 +131,7 @@ integration-tests = []
 quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 
 fuzzy = ["proptest"]
-telemetry = ["log", "prometheus", "tracing", "ureq"]
+telemetry = ["log", "prometheus", "tracing", "ureq", "bridges/telemetry"]
 telemetry-json = ["telemetry"]
 test-telemetry = ["telemetry"]
 telemetry-verbose = ["telemetry"]

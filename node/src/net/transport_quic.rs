@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ::time::{Duration, OffsetDateTime};
 use anyhow::{anyhow, Context, Result};
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use der::asn1::ObjectIdentifier;
 use dirs;
 use ed25519_dalek::pkcs8::EncodePrivateKey;
 use ed25519_dalek::SigningKey;
@@ -17,9 +17,8 @@ use hex;
 use once_cell::sync::Lazy;
 use rand_core::{OsRng, RngCore};
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair, SanType};
-use s2n_quic::{client::Connect, Client, Server};
+use s2n_quic::{client::Connect, provider::tls, Client, Server};
 use serde::{Deserialize, Serialize};
-use time::{Duration, OffsetDateTime};
 use x509_parser::prelude::*;
 use x509_parser::time::ASN1Time;
 
@@ -30,6 +29,7 @@ use crate::telemetry::{
 
 const MAX_PREVIOUS_CERTS: usize = 4;
 const CERT_STORE_FILE: &str = "quic_certs.json";
+const ED25519_OID: &str = "1.3.101.112";
 
 #[derive(Clone, Debug)]
 pub struct LocalCert {
@@ -140,11 +140,10 @@ pub fn fingerprint(cert: &[u8]) -> [u8; 32] {
 pub fn verify_remote_certificate(peer_key: &[u8; 32], cert_der: &[u8]) -> Result<[u8; 32]> {
     let (_, parsed) =
         X509Certificate::from_der(cert_der).map_err(|_| anyhow!("invalid x509 certificate"))?;
-    const ED25519_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.101.112");
-    if parsed.subject_pki.algorithm.algorithm != ED25519_OID {
+    if parsed.subject_pki.algorithm.algorithm.to_id_string() != ED25519_OID {
         return Err(anyhow!("unexpected certificate algorithm"));
     }
-    let pk_bytes = parsed.subject_pki.subject_public_key.data;
+    let pk_bytes = parsed.subject_pki.subject_public_key.data.as_ref();
     if pk_bytes != peer_key {
         return Err(anyhow!("certificate public key mismatch"));
     }
@@ -173,7 +172,7 @@ fn rotate_state(signing_key: &SigningKey, state: &mut CertState) -> Result<()> {
     }
     let fresh = generate_local_cert(signing_key)?;
     #[cfg(feature = "telemetry")]
-    QUIC_CERT_ROTATION_TOTAL.inc();
+    QUIC_CERT_ROTATION_TOTAL.with_label_values(&["local"]).inc();
     state.current = Some(fresh);
     while state.previous.len() > MAX_PREVIOUS_CERTS {
         state.previous.pop_back();
@@ -198,7 +197,7 @@ fn generate_local_cert(signing_key: &SigningKey) -> Result<LocalCert> {
     let key_der = signing_key
         .to_pkcs8_der()
         .map_err(|e| anyhow!("pkcs8 encoding failed: {e}"))?;
-    let key_pair = KeyPair::from_pkcs8(key_der.as_bytes())?;
+    let key_pair = KeyPair::from_der(key_der.as_bytes())?;
     params.key_pair = Some(key_pair);
     let cert = Certificate::from_params(params)?;
     let cert_der = cert.serialize_der()?;
@@ -212,14 +211,11 @@ fn generate_local_cert(signing_key: &SigningKey) -> Result<LocalCert> {
     })
 }
 
-fn random_serial() -> i128 {
+fn random_serial() -> rcgen::SerialNumber {
     let mut buf = [0u8; 16];
     OsRng.fill_bytes(&mut buf);
-    let mut serial = i128::from_be_bytes(buf);
-    if serial < 0 {
-        serial = -serial;
-    }
-    serial
+    buf[0] &= 0x7F;
+    rcgen::SerialNumber::from_slice(&buf)
 }
 
 fn load_from_disk(state: &mut CertState) -> Result<()> {
@@ -323,25 +319,23 @@ fn now_secs() -> u64 {
 pub async fn start_server(addr: SocketAddr) -> Result<Server, Box<dyn std::error::Error>> {
     let key = super::load_net_key();
     let _ = initialize(&key)?;
+    let current = current_cert().ok_or_else(|| anyhow!("missing current certificate"))?;
     let server = Server::builder()
-        .with_default_tls_config()?
+        .with_tls((current.cert.as_slice(), current.key.as_slice()))?
         .with_io(addr)?
-        .start()
-        .await?;
+        .start()?;
     Ok(server)
 }
 
 /// Establish a QUIC connection to `addr` using default TLS.
 pub async fn connect(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::builder()
-        .with_default_tls_config()?
-        .with_io("0.0.0.0:0".parse::<SocketAddr>()?)?
-        .start()
+        .with_tls(tls::Default::default())?
+        .with_io("0.0.0.0:0")?
+        .start()?;
+    let _connection = client
+        .connect(Connect::new(addr).with_server_name("the-block"))
         .await?;
-    let _ = client
-        .connect(Connect::new(addr, "the-block"))
-        .await?
-        .into_stream();
     Ok(())
 }
 
@@ -354,10 +348,14 @@ pub fn record_handshake_fail(reason: &str) {
             .with_label_values(&[peer_label.as_str(), reason])
             .inc();
     }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = reason;
 }
 
 /// Record a retransmission event for telemetry.
 pub fn record_retransmit(count: u64) {
     #[cfg(feature = "telemetry")]
     QUIC_RETRANSMIT_TOTAL.inc_by(count);
+    #[cfg(not(feature = "telemetry"))]
+    let _ = count;
 }

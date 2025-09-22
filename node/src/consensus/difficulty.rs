@@ -1,7 +1,50 @@
-use super::constants::{DIFFICULTY_WINDOW, TARGET_SPACING_MS};
+use super::constants::{DIFFICULTY_CLAMP_FACTOR, DIFFICULTY_WINDOW, TARGET_SPACING_MS};
 use crate::consensus::difficulty_retune;
 use crate::governance::Params;
 use crate::Block;
+
+fn scale_timestamps_to_target(timestamps: &[u64], target_spacing_ms: u64) -> Vec<u64> {
+    if timestamps.is_empty() {
+        return Vec::new();
+    }
+    let mut scaled = Vec::with_capacity(timestamps.len());
+    scaled.push(0);
+    let mut prev = timestamps[0];
+    let mut accum: u128 = 0;
+    let numerator = TARGET_SPACING_MS as u128;
+    let denominator = target_spacing_ms.max(1) as u128;
+    for &ts in &timestamps[1..] {
+        let delta = ts.saturating_sub(prev) as u128;
+        let mut scaled_delta = ((delta * numerator) + (denominator / 2)) / denominator;
+        if scaled_delta == 0 {
+            scaled_delta = 1;
+        }
+        accum = (accum + scaled_delta).min(u64::MAX as u128);
+        scaled.push(accum as u64);
+        prev = ts;
+    }
+    scaled
+}
+
+fn scale_difficulty_to_canonical(value: u64, spacing: u64) -> u64 {
+    if spacing == TARGET_SPACING_MS {
+        return value.max(1);
+    }
+    let numerator = TARGET_SPACING_MS as u128;
+    let denominator = spacing.max(1) as u128;
+    let scaled = ((value as u128 * numerator) + (denominator / 2)) / denominator;
+    scaled.max(1).min(u64::MAX as u128) as u64
+}
+
+fn scale_difficulty_from_canonical(value: u64, spacing: u64) -> u64 {
+    if spacing == TARGET_SPACING_MS {
+        return value.max(1);
+    }
+    let numerator = spacing as u128;
+    let denominator = TARGET_SPACING_MS as u128;
+    let scaled = ((value as u128 * numerator) + (denominator / 2)) / denominator;
+    scaled.max(1).min(u64::MAX as u128) as u64
+}
 
 /// Retarget helper maintained for legacy callers.
 ///
@@ -16,13 +59,28 @@ pub fn retarget(prev: u64, timestamps: &[u64], target_spacing_ms: u64) -> u64 {
         return prev.max(1);
     }
     let params = Params::default();
-    let (next, _) = difficulty_retune::retune(prev, timestamps, 0, &params);
-    if target_spacing_ms == TARGET_SPACING_MS || target_spacing_ms == 0 {
-        next
+    let spacing = if target_spacing_ms == 0 {
+        TARGET_SPACING_MS
     } else {
-        let scale = TARGET_SPACING_MS as f64 / target_spacing_ms as f64;
-        ((next as f64) * scale).round().max(1.0) as u64
+        target_spacing_ms
+    };
+    if spacing == TARGET_SPACING_MS {
+        return difficulty_retune::retune(prev, timestamps, 0, &params).0;
     }
+    let canonical_prev = scale_difficulty_to_canonical(prev, spacing);
+    let scaled_timestamps = scale_timestamps_to_target(timestamps, spacing);
+    let (canonical_next, _) =
+        difficulty_retune::retune(canonical_prev, &scaled_timestamps, 0, &params);
+    let mut next = scale_difficulty_from_canonical(canonical_next, spacing);
+    let min = (prev / DIFFICULTY_CLAMP_FACTOR).max(1);
+    let max = prev.saturating_mul(DIFFICULTY_CLAMP_FACTOR).max(1);
+    if next < min {
+        next = min;
+    }
+    if next > max {
+        next = max;
+    }
+    next
 }
 
 /// Compatibility shim delegating to [`difficulty_retune::retune`].
@@ -67,6 +125,17 @@ mod tests {
         // Blocks coming twice as slow (240s vs target 120s)
         let next = retarget(prev, &[0, 240_000], 120_000);
         assert!(next < prev);
+    }
+
+    #[test]
+    fn retarget_scaled_spacing_matches_canonical() {
+        let canonical_prev = 1200;
+        let canonical_next = retarget(canonical_prev, &[0, 2_000], TARGET_SPACING_MS);
+        let spacing = 120_000;
+        let alt_prev = scale_difficulty_from_canonical(canonical_prev, spacing);
+        let alt_next = retarget(alt_prev, &[0, 240_000], spacing);
+        let expected_alt = scale_difficulty_from_canonical(canonical_next, spacing);
+        assert_eq!(alt_next, expected_alt);
     }
 
     #[test]

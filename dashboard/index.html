@@ -7,5 +7,18 @@
 <body>
     <h1>Node Dashboard</h1>
     <p>mempool, price bands, subsidies, and LocalNet stats placeholder.</p>
+    <section>
+        <h2>Telemetry Memory Histograms</h2>
+        <p>
+            The aggregator now records per-component memory histograms for mempool, storage, and compute
+            subsystems. Use <code>/telemetry</code> on the metrics-aggregator service or the
+            <code>aggregator telemetry</code> CLI command to inspect the latest percentile snapshots.
+        </p>
+        <ul>
+            <li><strong>storage_put_object_seconds</strong> – end-to-end latency for storage uploads.</li>
+            <li><strong>parallel_execute_seconds</strong> – batch execution time for the parallel executor.</li>
+            <li><strong>telemetry sampling rate</strong> – adaptive sampling auto-tunes based on exporter lag.</li>
+        </ul>
+    </section>
 </body>
 </html>

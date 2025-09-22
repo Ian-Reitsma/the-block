@@ -8,6 +8,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use bincode;
 use ledger::address::ShardId;
 use static_assertions::assert_impl_all;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use tempfile::{self, NamedTempFile, TempDir};
 
 /// In-memory fallback database that persists column families to disk using
@@ -103,6 +105,24 @@ impl SimpleDb {
     fn persist_cf(&self, name: &str, inner: &Inner) -> io::Result<()> {
         let path = self.cf_path(name);
         let legacy_path = self.legacy_cf_path(name);
+        let read_only = fs::metadata(&self.path)
+            .map(|meta| {
+                #[cfg(unix)]
+                {
+                    meta.permissions().mode() & 0o200 == 0
+                }
+                #[cfg(not(unix))]
+                {
+                    meta.permissions().readonly()
+                }
+            })
+            .unwrap_or(false);
+        if read_only {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("database directory {} is read-only", self.path.display()),
+            ));
+        }
         if let Some(map) = inner.get_cf(name) {
             if map.is_empty() {
                 if path.exists() {

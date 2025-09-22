@@ -1,10 +1,19 @@
 use regex::Regex;
 use serde_json::Value;
 use std::fs;
+use std::path::PathBuf;
 
 #[test]
 fn metric_names_follow_convention() {
-    let data = fs::read_to_string("monitoring/metrics.json").unwrap();
+    let path: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "monitoring",
+        "metrics.json",
+    ]
+    .iter()
+    .collect();
+    let data = fs::read_to_string(path).unwrap();
     let v: Value = serde_json::from_str(&data).unwrap();
     let metrics = v["metrics"].as_array().unwrap();
     let re = Regex::new(r"^[a-z0-9_]+$").unwrap();

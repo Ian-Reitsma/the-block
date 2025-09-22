@@ -9,6 +9,14 @@ per-provider basis:
 
 For attack surfaces and mitigations see [threat_model/storage.md](threat_model/storage.md).
 
+Beginning with the multi-provider coordinator, the pipeline derives a logical
+quota for each provider from `Settlement::balance_split(provider)` (1 credit →
+1 MiB). Providers exceeding their quota, failing recent uploads, or explicitly
+flagged for maintenance are skipped when selecting chunk targets. The manifest
+now records `chunk_lens` and `provider_chunks` so heterogeneous chunk sizes can
+be reconstructed during re-downloads; each `provider_chunks` entry stores the
+chunk indices, plain lengths, and derived per-provider encryption keys.
+
 - Allowed sizes: 256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB
 - Target chunk time: ~3 s
 - Per-chunk throughput, RTT, and loss are folded into an EWMA profile stored in

@@ -14,10 +14,23 @@ pub enum Redundancy {
     ReedSolomon { data: u8, parity: u8 },
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ProviderChunkEntry {
+    pub provider: String,
+    #[serde(default)]
+    pub chunk_indices: Vec<u32>,
+    #[serde(default)]
+    pub chunk_lens: Vec<u32>,
+    #[serde(default)]
+    pub encryption_key: Vec<u8>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChunkRef {
     pub id: [u8; 32],
     pub nodes: Vec<String>,
+    #[serde(default)]
+    pub provider_chunks: Vec<ProviderChunkEntry>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -29,11 +42,18 @@ pub struct ObjectManifest {
     pub redundancy: Redundancy,
     pub content_key_enc: Vec<u8>,
     pub blake3: [u8; 32],
+    #[serde(default)]
+    pub chunk_lens: Vec<u32>,
+    #[serde(default)]
+    pub provider_chunks: Vec<ProviderChunkEntry>,
 }
 
 impl ObjectManifest {
     /// Number of plaintext chunks represented by the manifest.
     pub fn chunk_count(&self) -> usize {
+        if !self.chunk_lens.is_empty() {
+            return self.chunk_lens.len();
+        }
         let chunk_len = self.chunk_len as u64;
         if chunk_len == 0 {
             return 0;
@@ -46,6 +66,9 @@ impl ObjectManifest {
 
     /// Plaintext length of the `index`-th chunk prior to encryption.
     pub fn chunk_plain_len(&self, index: usize) -> usize {
+        if !self.chunk_lens.is_empty() {
+            return self.chunk_lens.get(index).copied().unwrap_or(0) as usize;
+        }
         let chunk_len = self.chunk_len as usize;
         if chunk_len == 0 {
             return 0;

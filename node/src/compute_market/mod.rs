@@ -663,6 +663,41 @@ impl PriceBoard {
 mod tests {
     use super::*;
     use blake3::Hasher;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct SettlementGuard {
+        _lock: MutexGuard<'static, ()>,
+        _dir: tempfile::TempDir,
+    }
+
+    impl SettlementGuard {
+        fn new() -> Self {
+            let lock = SETTLEMENT_TEST_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let dir = tempfile::tempdir().expect("settlement tempdir");
+            let path = dir.path().join("settlement");
+            let path_str = path.to_str().expect("settlement path str");
+            settlement::Settlement::init(path_str, settlement::SettleMode::DryRun);
+            Self {
+                _lock: lock,
+                _dir: dir,
+            }
+        }
+
+        fn prefund(&self, account: &str, amount: u64) {
+            settlement::Settlement::accrue(account, "test_prefund", amount);
+        }
+    }
+
+    impl Drop for SettlementGuard {
+        fn drop(&mut self) {
+            settlement::Settlement::shutdown();
+        }
+    }
 
     #[test]
     fn offer_requires_bonds() {
@@ -725,6 +760,9 @@ mod tests {
 
     #[test]
     fn job_lifecycle_and_finalize() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 1_000_000);
+        settlement.prefund("buyer", 1_000_000);
         scheduler::reset_for_test();
         reset_units_processed_for_test();
         let mut market = Market::new();
@@ -782,6 +820,9 @@ mod tests {
 
     #[test]
     fn backlog_adjusts_price() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 1_000_000);
+        settlement.prefund("buyer", 1_000_000);
         scheduler::reset_for_test();
         let mut market = Market::new();
         let mut h = Hasher::new();
@@ -830,6 +871,9 @@ mod tests {
 
     #[test]
     fn cancel_paths() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 1_000_000);
+        settlement.prefund("buyer", 1_000_000);
         scheduler::reset_for_test();
         let mut market = Market::new();
         let offer = Offer {
@@ -876,6 +920,9 @@ mod tests {
 
     #[test]
     fn cancel_mid_execution_records_event() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 1_000_000);
+        settlement.prefund("buyer", 1_000_000);
         scheduler::reset_for_test();
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var(
@@ -938,6 +985,7 @@ mod tests {
 
     #[test]
     fn courier_cancel_stops_handoff() {
+        let _settlement = SettlementGuard::new();
         scheduler::reset_for_test();
         courier::cancel_job("c1");
         assert!(courier::handoff_job("c1", "prov").is_err());
@@ -945,6 +993,9 @@ mod tests {
 
     #[test]
     fn execute_job_path() {
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 1_000_000);
+        settlement.prefund("buyer", 1_000_000);
         scheduler::reset_for_test();
         let mut market = Market::new();
         let job_id = "exec".to_string();

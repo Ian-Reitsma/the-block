@@ -2,6 +2,7 @@ use serde::Serialize;
 use storage::StorageContract;
 
 use crate::ProviderStorageStat;
+use the_block::storage::repair::RepairLogEntry;
 
 #[derive(Serialize)]
 pub struct StorageContractView {
@@ -16,6 +17,16 @@ pub struct ProviderStatsView {
     pub contracts: u64,
     pub capacity_bytes: u64,
     pub reputation: i64,
+}
+
+#[derive(Serialize)]
+pub struct RepairHistoryView {
+    pub manifest: String,
+    pub chunk: Option<u32>,
+    pub status: String,
+    pub bytes: u64,
+    pub error: Option<String>,
+    pub timestamp: i64,
 }
 
 pub fn render_contracts(contracts: &[StorageContract]) -> Vec<StorageContractView> {
@@ -37,6 +48,20 @@ pub fn render_provider_stats(stats: &[ProviderStorageStat]) -> Vec<ProviderStats
             contracts: s.contracts,
             capacity_bytes: s.capacity_bytes,
             reputation: s.reputation,
+        })
+        .collect()
+}
+
+pub fn render_repair_history(entries: &[RepairLogEntry]) -> Vec<RepairHistoryView> {
+    entries
+        .iter()
+        .map(|entry| RepairHistoryView {
+            manifest: entry.manifest.clone(),
+            chunk: entry.chunk,
+            status: entry.status.to_string(),
+            bytes: entry.bytes,
+            error: entry.error.clone(),
+            timestamp: entry.timestamp,
         })
         .collect()
 }
