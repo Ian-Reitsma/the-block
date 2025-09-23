@@ -227,9 +227,7 @@ pub struct StoragePipeline {
 
 impl StoragePipeline {
     pub fn open(path: &str) -> Self {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            super::repair::spawn(path.to_string(), Duration::from_secs(60));
-        }
+        super::repair::spawn(path.to_string(), Duration::from_secs(60));
         let repair_log_dir = PathBuf::from(path).join("repair_log");
         Self {
             db: SimpleDb::open(path),

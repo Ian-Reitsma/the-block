@@ -33,6 +33,7 @@ ed25519-dalek = { version = "2", features = ["std", "rand_core"] }
 tracing = "0.1"
 state = { path = "../../state" }
 thiserror = "1"
+runtime = { path = "../runtime", default-features = false, features = ["tokio-backend"] }
 
 [dependencies.ndk]
 version = "0.8"

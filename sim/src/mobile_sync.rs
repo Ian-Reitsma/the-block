@@ -1,6 +1,5 @@
 use light_client::{sync_background, Header, LightClient, SyncOptions};
 use std::time::{Duration, Instant};
-use tokio::runtime::Runtime;
 
 /// Measure the time required to sync a batch of headers on a simulated mobile client.
 /// Each fetched header incurs an artificial `delay` to model network latency.
@@ -30,7 +29,6 @@ pub fn measure_sync_latency(headers: Vec<Header>, delay: Duration) -> Duration {
         ..SyncOptions::default()
     };
     let start = Instant::now();
-    let rt = Runtime::new().expect("runtime");
-    rt.block_on(async { sync_background(&mut client, opts, fetch).await.unwrap() });
+    runtime::block_on(async { sync_background(&mut client, opts, fetch).await.unwrap() });
     start.elapsed()
 }

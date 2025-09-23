@@ -20,8 +20,6 @@ use std::thread;
 use std::time::Duration;
 use time::format_description::well_known::Iso8601;
 use time::OffsetDateTime;
-use tokio::task;
-
 const MAX_CONCURRENT_REPAIRS: usize = 4;
 const MAX_LOG_FILES: usize = 14;
 const FAILURE_PREFIX: &str = "repair/failures/";
@@ -41,7 +39,7 @@ static REPAIR_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 });
 
 pub fn spawn(path: String, period: Duration) {
-    task::spawn_blocking(move || {
+    let _ = runtime::spawn_blocking(move || {
         let mut db = SimpleDb::open(&path);
         let log = RepairLog::new(Path::new(&path).join("repair_log"));
         loop {
@@ -845,34 +843,27 @@ fn should_stop() -> bool {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    use tokio::runtime::Builder;
 
     #[test]
     fn spawn_runs_loop_and_signals_iterations() {
         let tempdir = tempdir().expect("temp dir");
         let path = tempdir.path().join("repair-db");
         let path_str = path.to_str().expect("path").to_string();
-        let rt = Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("runtime");
-
-        rt.block_on(async move {
+        runtime::block_on(async move {
             let _guard = tempdir; // keep directory alive for the background task
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             install_iteration_hook(tx);
             spawn(path_str, Duration::from_millis(10));
 
             for _ in 0..2 {
-                tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                runtime::timeout(Duration::from_secs(1), rx.recv())
                     .await
                     .expect("timer")
                     .expect("iteration");
             }
 
             request_stop();
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            runtime::sleep(Duration::from_millis(20)).await;
             clear_iteration_hook();
         });
     }

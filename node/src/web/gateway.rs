@@ -215,12 +215,12 @@ async fn ws_peer_metrics(req: Request<Body>) -> Result<Response<Body>, hyper::Er
             .unwrap());
     }
     let (resp, fut) = upgrade(req, None).unwrap();
-    tokio::spawn(async move {
+    runtime::spawn(async move {
         if let Ok(ws) = fut.await {
             let (mut ws_tx, mut ws_rx) = ws.split();
             let mut rx = crate::net::peer::subscribe_peer_metrics();
             loop {
-                tokio::select! {
+                runtime::select! {
                     msg = rx.recv() => {
                         match msg {
                             Ok(snap) => {

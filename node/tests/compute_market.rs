@@ -119,8 +119,8 @@ async fn dry_run_receipts_are_idempotent() {
     }])
     .unwrap();
     let stop = CancellationToken::new();
-    let handle = tokio::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let handle = the_block::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
+    the_block::sleep(std::time::Duration::from_millis(20)).await;
     stop.cancel();
     handle.await.unwrap();
     assert_eq!(store.len().unwrap(), 1);
@@ -146,8 +146,8 @@ async fn dry_run_receipts_are_idempotent() {
     }])
     .unwrap();
     let stop = CancellationToken::new();
-    let handle = tokio::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    let handle = the_block::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
+    the_block::sleep(std::time::Duration::from_millis(20)).await;
     stop.cancel();
     handle.await.unwrap();
     assert_eq!(store.len().unwrap(), 1);

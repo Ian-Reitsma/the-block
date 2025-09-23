@@ -70,7 +70,7 @@ async fn rpc_reports_handshake_failures() {
 
     let mining = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),

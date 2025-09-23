@@ -3,11 +3,11 @@ use blake3::Hasher;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rand::RngCore;
+use runtime::{block_on, sleep};
 use serde::{Deserialize, Serialize};
 use sled::Tree;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::sleep;
 
 /// Receipt stored for carry-to-earn courier mode.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -110,8 +110,8 @@ impl CourierStore {
                             if attempt >= 5 {
                                 break;
                             }
-                            std::thread::sleep(delay);
-                            delay *= 2;
+                            let wait = take_backoff_delay(&mut delay);
+                            block_on(sleep(wait));
                         }
                     }
                 }
@@ -169,8 +169,8 @@ impl CourierStore {
                             if attempt >= 5 {
                                 break;
                             }
-                            sleep(delay).await;
-                            delay *= 2;
+                            let wait = take_backoff_delay(&mut delay);
+                            sleep(wait).await;
                         }
                     }
                 }
@@ -186,6 +186,12 @@ impl CourierStore {
             .flatten()
             .and_then(|v| bincode::deserialize(&v).ok())
     }
+}
+
+fn take_backoff_delay(delay: &mut Duration) -> Duration {
+    let current = *delay;
+    *delay = delay.saturating_mul(2);
+    current
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};

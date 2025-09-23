@@ -21,6 +21,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
 use libp2p::PeerId;
 use once_cell::sync::Lazy;
+use runtime::timeout;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -31,9 +32,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
+use std::time::Duration;
 use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
-use tokio::time::{timeout, Duration};
 
 pub mod ledger;
 pub mod limiter;
@@ -2713,7 +2714,7 @@ pub async fn run_rpc_server(
         let handles_cl = Arc::clone(&handles);
         let dids_cl = Arc::clone(&dids);
         let cfg_cl = Arc::clone(&runtime_cfg);
-        tokio::spawn(async move {
+        runtime::spawn(async move {
             let _p = permit;
             handle_conn(stream, bc, mining, nonces, handles_cl, dids_cl, cfg_cl).await;
         });

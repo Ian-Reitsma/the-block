@@ -81,7 +81,7 @@ async fn tail_streams_indexed_rows() -> Result<()> {
 
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
-    let server = tokio::spawn(async move {
+    let server = the_block::spawn(async move {
         let (mut stream, _) = listener.accept().await.expect("accept connection");
         let mut request_bytes = Vec::new();
         let mut buf = [0u8; 1024];

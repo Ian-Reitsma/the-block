@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::Read;
 use std::thread;
 use tiny_http::{Response, Server};
-use tokio::runtime::Runtime;
 
 fn main() {
     // simulate syncing headers from a file on disk
@@ -36,9 +35,7 @@ fn main() {
         min_battery: 0.1,
         ..SyncOptions::default()
     };
-    let rt = Runtime::new().expect("runtime");
-    let outcome = rt
-        .block_on(async { sync_background(&mut client, opts, fetch).await })
+    let outcome = runtime::block_on(async { sync_background(&mut client, opts, fetch).await })
         .expect("sync background");
     println!("synced {} headers", client.chain.len());
     if let Some(reason) = outcome.gating {

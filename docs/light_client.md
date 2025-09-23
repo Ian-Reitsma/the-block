@@ -99,14 +99,15 @@ account state or receipts before acting on them.
 
 ## Usage Example
 
+The workspace's `runtime` crate drives asynchronous helpers so examples remain backend-agnostic:
+
 ```rust
 use light_client::{Header, LightClient, SyncOptions, sync_background};
 
 let genesis = Header { height: 0, ..Default::default() };
 let mut lc = LightClient::new(genesis);
 let opts = SyncOptions::default();
-let rt = tokio::runtime::Runtime::new()?;
-let outcome = rt.block_on(async {
+let outcome = runtime::block_on(async {
     sync_background(&mut lc, opts, |_start, _batch| Vec::new()).await
 })?;
 if let Some(reason) = outcome.gating {

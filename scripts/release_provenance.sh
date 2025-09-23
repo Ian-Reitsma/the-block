@@ -7,6 +7,9 @@ mkdir -p "$OUTDIR"
 # Ensure reproducible timestamps
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
 
+# Enforce dependency policy and capture the current registry snapshot.
+cargo run -p dependency_registry -- --check --out-dir "$OUTDIR" config/dependency_policies.toml
+
 # Build binaries
 cargo build --release
 

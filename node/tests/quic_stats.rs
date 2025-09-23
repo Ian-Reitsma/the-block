@@ -85,7 +85,7 @@ async fn quic_stats_rpc() {
 
     let (accept_tx, accept_rx) = tokio::sync::oneshot::channel();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         if let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
             accept_tx.send(()).ok();
@@ -109,7 +109,7 @@ async fn quic_stats_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),

@@ -88,7 +88,7 @@ async fn peer_stats_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -147,7 +147,7 @@ async fn peer_stats_all_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -200,7 +200,7 @@ async fn peer_stats_reset_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -262,7 +262,7 @@ async fn peer_stats_export_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -395,7 +395,7 @@ async fn peer_stats_export_all_rpc_map() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -441,7 +441,7 @@ async fn peer_stats_export_all_rpc_dir() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -665,7 +665,7 @@ async fn peer_stats_cli_show_and_reputation() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -681,7 +681,7 @@ async fn peer_stats_cli_show_and_reputation() {
     let peer_id = hex::encode(pk);
     let peer_id_clone = peer_id.clone();
     let rpc_url = format!("http://{}", addr);
-    let output = tokio::task::spawn_blocking(move || {
+    let output = the_block::spawn_blocking(move || {
         Command::new(env!("CARGO_BIN_EXE_net"))
             .args(["stats", "show", "--rpc", &rpc_url, &peer_id_clone])
             .output()
@@ -708,7 +708,7 @@ async fn peer_stats_cli_show_and_reputation() {
 
     let peer_id_clone = peer_id.clone();
     let rpc_url = format!("http://{}", addr);
-    let output = tokio::task::spawn_blocking(move || {
+    let output = the_block::spawn_blocking(move || {
         Command::new(env!("CARGO_BIN_EXE_net"))
             .args(["stats", "reputation", "--rpc", &rpc_url, &peer_id_clone])
             .output()
@@ -753,7 +753,7 @@ async fn peer_stats_cli_show_table_snapshot() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -765,7 +765,7 @@ async fn peer_stats_cli_show_table_snapshot() {
     let peer_id = hex::encode(pk);
     let rpc_url = format!("http://{}", addr);
     let peer_id_clone = peer_id.clone();
-    let output = tokio::task::spawn_blocking(move || {
+    let output = the_block::spawn_blocking(move || {
         Command::new(env!("CARGO_BIN_EXE_net"))
             .env("CLICOLOR_FORCE", "1")
             .args([
@@ -817,7 +817,7 @@ async fn peer_stats_cli_show_json_snapshot() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -829,7 +829,7 @@ async fn peer_stats_cli_show_json_snapshot() {
     let peer_id = hex::encode(pk);
     let rpc_url = format!("http://{}", addr);
     let peer_id_clone = peer_id.clone();
-    let output = tokio::task::spawn_blocking(move || {
+    let output = the_block::spawn_blocking(move || {
         Command::new(env!("CARGO_BIN_EXE_net"))
             .args([
                 "stats",
@@ -905,7 +905,7 @@ async fn peer_stats_cli_sort_filter_snapshot() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -916,7 +916,7 @@ async fn peer_stats_cli_sort_filter_snapshot() {
     let rpc_url = format!("http://{}", addr);
 
     // sort by reputation
-    let output = tokio::task::spawn_blocking({
+    let output = the_block::spawn_blocking({
         let rpc_url = rpc_url.clone();
         move || {
             Command::new(env!("CARGO_BIN_EXE_net"))
@@ -956,7 +956,7 @@ async fn peer_stats_cli_sort_filter_snapshot() {
 
     // filter by first peer prefix
     let prefix = &hex::encode(pk1)[..4];
-    let output2 = tokio::task::spawn_blocking({
+    let output2 = the_block::spawn_blocking({
         let rpc_url = rpc_url.clone();
         let patt = format!("^{}", prefix);
         move || {
@@ -1000,7 +1000,7 @@ async fn peer_stats_malformed_id() {
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -1026,7 +1026,7 @@ async fn peer_stats_unknown_peer() {
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -1085,7 +1085,7 @@ async fn peer_stats_drop_counter_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -1141,7 +1141,7 @@ async fn peer_stats_cli_reset() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -1199,7 +1199,7 @@ async fn peer_stats_all_pagination_rpc() {
 
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),

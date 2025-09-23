@@ -22,6 +22,13 @@ pub struct Cli {
     )]
     pub config: PathBuf,
 
+    /// Optional positional override for the dependency policy configuration.
+    ///
+    /// This preserves backwards compatibility with tooling that passed the
+    /// configuration path without `--config`.
+    #[arg(value_name = "CONFIG", hide = true)]
+    pub positional_config: Option<PathBuf>,
+
     /// Validate the freshly generated registry against the committed baseline.
     #[arg(long)]
     pub check: bool,
@@ -49,4 +56,12 @@ pub struct Cli {
     /// Output directory for generated artifacts.
     #[arg(long, value_name = "DIR", default_value = "target")]
     pub out_dir: PathBuf,
+}
+
+impl Cli {
+    pub fn resolved_config(&self) -> PathBuf {
+        self.positional_config
+            .clone()
+            .unwrap_or_else(|| self.config.clone())
+    }
 }

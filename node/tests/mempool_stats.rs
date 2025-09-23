@@ -64,7 +64,7 @@ async fn mempool_stats_rpc() {
     }
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -94,7 +94,7 @@ async fn mempool_qos_event_public_rpc() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -113,7 +113,7 @@ async fn mempool_qos_event_public_rpc() {
 
     let client_ack = client.clone();
     let url_ack = url.clone();
-    let ack = tokio::task::spawn_blocking(move || {
+    let ack = the_block::spawn_blocking(move || {
         let payload = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 7,
@@ -138,7 +138,7 @@ async fn mempool_qos_event_public_rpc() {
 
     let client_send = client.clone();
     let url_send = url.clone();
-    tokio::task::spawn_blocking(move || client_send.record_wallet_qos_event(&url_send, event))
+    the_block::spawn_blocking(move || client_send.record_wallet_qos_event(&url_send, event))
         .await
         .unwrap()
         .expect("wallet telemetry call should succeed when ack is ok");
@@ -162,7 +162,7 @@ async fn mempool_qos_event_public_rpc() {
     });
 
     let stub_url = format!("http://{}", stub_addr);
-    let error = tokio::task::spawn_blocking(move || {
+    let error = the_block::spawn_blocking(move || {
         RpcClient::from_env().record_wallet_qos_event(&stub_url, event)
     })
     .await

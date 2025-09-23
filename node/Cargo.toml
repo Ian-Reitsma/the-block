@@ -31,6 +31,8 @@ anyhow = "1"
 nix = { version = "0.27", default-features = false, features = ["user"] }
 # Wallet framework
 wallet = { path = "../crates/wallet" }
+# Async runtime facade
+runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
 # Region policy packs
 jurisdiction = { path = "../crates/jurisdiction" }
 # Post-quantum signature support

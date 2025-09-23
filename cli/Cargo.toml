@@ -21,6 +21,7 @@ ed25519-dalek = { version = "2" }
 sha3 = "0.10"
 ripemd = "0.1"
 storage = { path = "../storage" }
+runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
 tokio = { version = "1", features = ["rt", "macros", "net"] }
 tokio-tungstenite = "0.20"
 futures = "0.3"

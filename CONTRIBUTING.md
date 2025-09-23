@@ -34,6 +34,34 @@ mdbook build docs
 Continuous integration runs this command for every pull request, so ensure it
 passes locally before submitting patches.
 
+## Managing dependencies
+
+The dependency policy for the workspace lives in
+[`config/dependency_policies.toml`](config/dependency_policies.toml).  It
+defines the maximum allowed dependency depth, the risk tier for crates that are
+strategic or replaceable, and licenses that are forbidden in downstream
+transitive dependencies.
+
+Run the registry auditor locally before committing changes:
+
+```bash
+cargo run -p dependency_registry -- --check config/dependency_policies.toml
+```
+
+The same command is available through `just dependency-audit` and `make
+dependency-check`.  The tool produces `target/dependency-registry.json` and
+`target/dependency-violations.json`, and it refreshes the committed baseline in
+`docs/dependency_inventory.json`/`.md`.  Continuous integration surfaces the
+registry snapshot as a build artifact and fails when unapproved crates are
+introduced.
+
+To request an exception, open a pull request that updates
+`config/dependency_policies.toml` with the proposed tier or license change and
+document the rationale in the PR description.  Include the regenerated registry
+artifacts so reviewers can verify the impact of the policy change.  Developers
+who want the audit to run automatically can symlink
+`config/hooks/pre-commit` into `.git/hooks/pre-commit`.
+
 ## Agent/Codex Workflow
 
 Contributors using AI agents or codex-style tooling must read and honor `AGENTS.md` at the repository root. The file defines coding standards, testing requirements, and commit protocol. Agents should describe changes in the pull request summary and run `cargo test --all --features test-telemetry --release` before submitting.

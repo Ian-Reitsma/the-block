@@ -74,6 +74,6 @@ async fn run_stream(mut ws: WebSocketStream<TcpStream>, bc: Arc<Mutex<Blockchain
             break;
         }
         seq += 1;
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        runtime::sleep(Duration::from_secs(1)).await;
     }
 }

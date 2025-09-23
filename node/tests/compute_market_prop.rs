@@ -21,8 +21,7 @@ proptest! {
         }
         let job = Job { job_id: job_id.clone(), buyer: "buyer".into(), slices: refs, price_per_unit: price, consumer_bond: 1, workloads: wls, capability: scheduler::Capability::default(), deadline: u64::MAX, priority: scheduler::Priority::Normal };
         market.submit_job(job).unwrap();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let total = rt.block_on(market.execute_job(&job_id)).unwrap();
+        let total = runtime::block_on(market.execute_job(&job_id)).unwrap();
         prop_assert_eq!(total, price * slices as u64);
         prop_assert_eq!(market.finalize_job(&job_id).unwrap(), (1,1));
     }

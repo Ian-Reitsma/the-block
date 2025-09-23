@@ -291,7 +291,7 @@ where
             }
         }
         if opts.poll_interval > Duration::from_secs(0) {
-            tokio::time::sleep(opts.poll_interval).await;
+            runtime::sleep(opts.poll_interval).await;
         } else {
             tokio::task::yield_now().await;
         }

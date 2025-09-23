@@ -109,6 +109,102 @@ jobs:
         run: |
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --all --format xml --output sbom.xml
+      - name: dependency policy check
+        id: dependency_audit
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          mkdir -p target/dependency-registry
+          cargo run -p dependency_registry -- --check --out-dir target/dependency-registry config/dependency_policies.toml
+      - name: upload dependency registry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-registry
+          path: |
+            target/dependency-registry/dependency-registry.json
+            target/dependency-registry/dependency-violations.json
+          if-no-files-found: warn
+      - name: dependency policy summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { summary, setFailed } = require('@actions/core');
+
+            const registryPath = 'target/dependency-registry/dependency-registry.json';
+            const violationsPath = 'target/dependency-registry/dependency-violations.json';
+            const outcome = '${{ steps.dependency_audit.outcome }}';
+
+            let registry = null;
+            let violations = { entries: [] };
+
+            const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
+
+            summary.addHeading('Dependency policy check');
+
+            if (fs.existsSync(registryPath)) {
+              try {
+                registry = readJson(registryPath);
+              } catch (error) {
+                summary.addRaw(`Failed to parse \`${registryPath}\`: ${error.message}`, true);
+              }
+            } else {
+              summary.addRaw(`Registry output not found at \`${registryPath}\`.`, true);
+            }
+
+            if (fs.existsSync(violationsPath)) {
+              try {
+                violations = readJson(violationsPath);
+              } catch (error) {
+                summary.addRaw(`Failed to parse \`${violationsPath}\`: ${error.message}`, true);
+              }
+            } else {
+              summary.addRaw(`Violation report not found at \`${violationsPath}\`.`, true);
+            }
+
+            if (registry && Array.isArray(registry.entries)) {
+              summary.addRaw(`Policy depth limit: ${registry.policy?.max_depth ?? 'n/a'}`, true);
+            }
+
+            if (registry && Array.isArray(violations.entries) && violations.entries.length > 0) {
+              const lookup = new Map();
+              for (const entry of registry.entries) {
+                lookup.set(`${entry.name}@${entry.version}`, entry);
+              }
+
+              const rows = [[
+                { data: 'Crate', header: true },
+                { data: 'Version', header: true },
+                { data: 'Policy tier', header: true },
+                { data: 'Reason', header: true },
+              ]];
+
+              for (const violation of violations.entries) {
+                const key = `${violation.name}@${violation.version}`;
+                const entry = lookup.get(key);
+                rows.push([
+                  `\`${violation.name}\``,
+                  violation.version,
+                  entry?.tier ?? '—',
+                  violation.detail,
+                ]);
+              }
+
+              summary.addRaw(`Violations detected: ${violations.entries.length}`, true);
+              summary.addTable(rows);
+            } else if (registry && Array.isArray(violations.entries)) {
+              summary.addRaw('No dependency policy violations detected. ✅', true);
+            }
+
+            await summary.write();
+
+            if (outcome === 'failure' || (Array.isArray(violations.entries) && violations.entries.length > 0)) {
+              setFailed('Dependency policy check reported violations.');
+            }
+      - name: tokio usage audit
+        run: cargo run --manifest-path tools/xtask/Cargo.toml --bin refcheck
       - name: sign image
         run: scripts/sign-image.sh theblock/node:latest
       - name: verify container image

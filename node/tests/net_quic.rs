@@ -30,7 +30,7 @@ async fn quic_handshake_roundtrip() {
     let listen_addr = server_ep.local_addr().unwrap();
     let (tx, rx) = tokio::sync::oneshot::channel();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         if let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
             if let Some(bytes) = quic::recv(&connection).await {
@@ -84,7 +84,7 @@ async fn quic_gossip_roundtrip() {
     let (hs_tx, hs_rx) = tokio::sync::oneshot::channel();
     let (msg_tx, msg_rx) = tokio::sync::oneshot::channel();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         if let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
             if let Some(bytes) = quic::recv(&connection).await {
@@ -148,7 +148,7 @@ async fn quic_disconnect() {
     let listen_addr = server_ep.local_addr().unwrap();
     let (close_tx, close_rx) = tokio::sync::oneshot::channel();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         if let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
             let _ = quic::recv(&connection).await;
@@ -214,7 +214,7 @@ async fn quic_fallback_to_tcp() {
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     let msg_clone = msg.clone();
-    tokio::task::spawn_blocking(move || {
+    the_block::spawn_blocking(move || {
         let relay = relay;
         relay.broadcast(&msg_clone, &[(addr, Transport::Quic, Some(cert))]);
     })
@@ -231,7 +231,7 @@ async fn quic_endpoint_reuse() {
     let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
     let (server_ep, cert) = quic::listen(addr).await.unwrap();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         while let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
             connection.close(0u32.into(), b"done");
@@ -310,7 +310,7 @@ async fn quic_version_mismatch() {
     let listen_addr = server_ep.local_addr().unwrap();
     let (tx, rx) = tokio::sync::oneshot::channel();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         if let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
             if let Some(bytes) = quic::recv(&connection).await {
@@ -363,10 +363,10 @@ async fn quic_packet_loss_env() {
     let listen_addr = server_ep.local_addr().unwrap();
     let (tx, rx) = tokio::sync::oneshot::channel();
     let ep = server_ep.clone();
-    tokio::spawn(async move {
+    the_block::spawn(async move {
         if let Some(conn) = ep.accept().await {
             let connection = conn.await.unwrap();
-            let res = tokio::time::timeout(
+            let res = the_block::timeout(
                 std::time::Duration::from_millis(200),
                 quic::recv(&connection),
             )

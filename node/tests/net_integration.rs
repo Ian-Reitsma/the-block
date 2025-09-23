@@ -2,9 +2,9 @@
 use serial_test::serial;
 use std::net::SocketAddr;
 use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
 use the_block::{net::Node, Blockchain, ShutdownFlag};
-use tokio::time::Instant;
 
 fn free_addr() -> SocketAddr {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -33,7 +33,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         if start.elapsed() > max {
             return false;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        the_block::sleep(Duration::from_millis(20)).await;
     }
 }
 
@@ -86,7 +86,7 @@ async fn partitions_merge_consistent_fork_choice() {
         nodes.push(tn);
     }
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    the_block::sleep(Duration::from_millis(100)).await;
     let mut ts = 1u64;
     for _ in 0..3 {
         {
@@ -95,7 +95,7 @@ async fn partitions_merge_consistent_fork_choice() {
             ts += 1;
         }
         nodes[0].node.broadcast_chain();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
 
     assert!(
@@ -122,7 +122,7 @@ async fn partitions_merge_consistent_fork_choice() {
         for i in 0..3 {
             nodes[i].node.broadcast_chain();
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
 
     for _ in 0..5 {
@@ -134,7 +134,7 @@ async fn partitions_merge_consistent_fork_choice() {
         for j in 3..5 {
             nodes[j].node.broadcast_chain();
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
 
     for i in 0..3 {

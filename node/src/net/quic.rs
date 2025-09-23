@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
@@ -15,7 +15,6 @@ use rustls::client::{
 use rustls::{Certificate, ClientConfig, PrivateKey, RootCertStore};
 #[cfg(any(test, debug_assertions))]
 use rustls::{DigitallySignedStruct, ServerName, SignatureScheme};
-use tokio::time::Instant;
 
 use super::peer::HandshakeError;
 #[cfg(feature = "telemetry")]
@@ -59,7 +58,7 @@ pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
             Ok(endpoint) => return Ok((endpoint, cert)),
             Err(_e) if attempts < 3 => {
                 attempts += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                runtime::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
             }
             Err(e) => return Err(anyhow!(e)),
@@ -82,7 +81,7 @@ pub async fn listen_with_cert(
             Ok(endpoint) => return Ok(endpoint),
             Err(_e) if attempts < 3 => {
                 attempts += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                runtime::sleep(std::time::Duration::from_millis(50)).await;
                 continue;
             }
             Err(e) => return Err(anyhow!(e)),
@@ -110,7 +109,7 @@ pub async fn connect(
     let attempt = endpoint
         .connect_with(client_cfg, addr, "the-block")
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
-    let res = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
+    let res = runtime::timeout(std::time::Duration::from_secs(5), attempt).await;
     match res {
         Ok(Ok(conn)) => {
             let elapsed = _start.elapsed();
@@ -268,7 +267,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
     let attempt = endpoint
         .connect_with(client_cfg, addr, "the-block")
         .map_err(|e| ConnectError::Other(anyhow!(e)))?;
-    let res = tokio::time::timeout(std::time::Duration::from_secs(5), attempt).await;
+    let res = runtime::timeout(std::time::Duration::from_secs(5), attempt).await;
     match res {
         Ok(Ok(conn)) => {
             #[cfg(feature = "telemetry")]
