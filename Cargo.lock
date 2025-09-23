@@ -1901,6 +1901,7 @@ dependencies = [
  "reqwest 0.11.27",
  "ripemd",
  "rpassword",
+ "runtime",
  "rusqlite",
  "serde",
  "serde_json",
@@ -5168,6 +5169,7 @@ dependencies = [
  "once_cell",
  "prometheus",
  "rand 0.8.5",
+ "runtime",
  "serde",
  "state",
  "tempfile",
@@ -5436,6 +5438,7 @@ dependencies = [
  "prometheus",
  "regex",
  "reqwest 0.11.27",
+ "runtime",
  "serde",
  "serde_json",
  "sled",
@@ -7532,6 +7535,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "futures-util",
+ "metrics",
+ "once_cell",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "rusqlite"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8903,13 +8918,13 @@ dependencies = [
  "light-client",
  "rand 0.8.5",
  "rocksdb",
+ "runtime",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha3",
  "tempfile",
  "the_block",
- "tokio",
 ]
 
 [[package]]
@@ -9042,6 +9057,7 @@ dependencies = [
  "reqwest 0.11.27",
  "ripemd",
  "rocksdb",
+ "runtime",
  "rusqlite",
  "rustdct",
  "rustls 0.21.12",

@@ -54,7 +54,7 @@ async fn snapshot_interval_persist() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -112,7 +112,7 @@ async fn snapshot_interval_restart_cycle() {
             relay_only: false,
             ..Default::default()
         };
-        let handle = tokio::spawn(run_rpc_server(
+        let handle = the_block::spawn(run_rpc_server(
             Arc::clone(&bc),
             Arc::clone(&mining),
             "127.0.0.1:0".to_string(),

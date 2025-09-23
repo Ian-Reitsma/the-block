@@ -65,3 +65,6 @@ format:
 
 lint:
     cargo clippy --all-targets --all-features -- -D warnings
+
+dependency-audit:
+    cargo run -p dependency_registry -- --check config/dependency_policies.toml

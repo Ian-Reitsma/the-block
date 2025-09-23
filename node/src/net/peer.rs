@@ -31,7 +31,6 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::runtime::{Handle, Runtime};
 use tokio::sync::broadcast;
 
 use tar::Builder;
@@ -1826,7 +1825,7 @@ mod tests {
         let app = Router::new().route("/ingest", post(handler));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
+        runtime::spawn(async move {
             axum::serve(listener, app.into_make_service())
                 .await
                 .unwrap();
@@ -2036,34 +2035,22 @@ static METRIC_TX: Lazy<broadcast::Sender<PeerSnapshot>> = Lazy::new(|| {
 });
 
 #[derive(Clone)]
-enum AggregatorExecutor {
-    Handle(Handle),
-    Runtime(Arc<Runtime>),
-}
-
-#[derive(Clone)]
 struct AggregatorClient {
     urls: Vec<String>,
     token: String,
     client: reqwest::Client,
     idx: Arc<AtomicUsize>,
-    executor: AggregatorExecutor,
+    handle: runtime::RuntimeHandle,
 }
 
 impl AggregatorClient {
     fn new(urls: Vec<String>, token: String) -> Self {
-        let executor = Handle::try_current()
-            .map(AggregatorExecutor::Handle)
-            .unwrap_or_else(|_| {
-                let rt = Runtime::new().expect("aggregator runtime");
-                AggregatorExecutor::Runtime(Arc::new(rt))
-            });
         Self {
             urls,
             token,
             client: reqwest::Client::new(),
             idx: Arc::new(AtomicUsize::new(0)),
-            executor,
+            handle: runtime::handle(),
         }
     }
 
@@ -2071,14 +2058,7 @@ impl AggregatorClient {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        match &self.executor {
-            AggregatorExecutor::Handle(handle) => {
-                let _ = handle.spawn(fut);
-            }
-            AggregatorExecutor::Runtime(rt) => {
-                let _ = rt.spawn(fut);
-            }
-        }
+        let _ = self.handle.spawn(fut);
     }
 
     async fn ingest(&self, snaps: Vec<PeerSnapshot>) {

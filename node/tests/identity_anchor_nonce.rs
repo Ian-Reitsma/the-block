@@ -84,7 +84,7 @@ async fn identity_anchor_nonces_are_scoped_per_address() {
     let _did_env = EnvVarGuard::set("TB_DID_DB_PATH", did_db_path.to_str().expect("did path"));
 
     let (tx_ready, rx_ready) = tokio::sync::oneshot::channel();
-    let server = tokio::spawn(run_rpc_server(
+    let server = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),

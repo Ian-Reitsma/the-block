@@ -164,8 +164,8 @@ impl NodeCatalog {
 }
 
 pub fn spawn_probe(catalog: Arc<std::sync::Mutex<NodeCatalog>>, interval: Duration) {
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(interval);
+    runtime::spawn(async move {
+        let mut tick = runtime::interval(interval);
         loop {
             tick.tick().await;
             if let Ok(mut cat) = catalog.lock() {

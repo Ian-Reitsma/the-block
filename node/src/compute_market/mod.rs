@@ -217,7 +217,7 @@ impl WorkloadRunner {
         if let Some(cached) = self.cache.lock().get(&slice_id) {
             return *cached;
         }
-        let res = tokio::task::spawn_blocking(move || match w {
+        let res = runtime::spawn_blocking(move || match w {
             Workload::Transcode(data) => workloads::transcode::run(&data),
             Workload::Inference(data) => workloads::inference::run(&data),
             Workload::GpuHash(data) => workloads::gpu::run(&data),
@@ -1031,9 +1031,7 @@ mod tests {
         market
             .submit_job(job)
             .unwrap_or_else(|e| panic!("submit job: {e}"));
-        let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| panic!("runtime: {e}"));
-        let total = rt
-            .block_on(market.execute_job(&job_id))
+        let total = runtime::block_on(market.execute_job(&job_id))
             .unwrap_or_else(|e| panic!("execute job: {e}"));
         assert_eq!(total, 2);
         let bonds = market

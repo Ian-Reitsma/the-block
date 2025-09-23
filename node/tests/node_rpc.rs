@@ -58,7 +58,7 @@ async fn rpc_smoke() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -126,7 +126,7 @@ async fn rpc_nonce_replay_rejected() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -177,7 +177,7 @@ async fn rpc_light_client_rebate_status() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -233,7 +233,7 @@ async fn rpc_light_client_rebate_history() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -299,7 +299,7 @@ async fn rpc_concurrent_controls() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -327,7 +327,7 @@ async fn rpc_concurrent_controls() {
     for i in 0..6 {
         let addr = addr.clone();
         let tx = Arc::clone(&tx_arc);
-        handles.push(tokio::spawn(async move {
+        handles.push(the_block::spawn(async move {
             let body = match i % 3 {
                 0 => format!(
                     "{{\"method\":\"start_mining\",\"params\":{{\"miner\":\"alice\",\"nonce\":{i}}}}}",
@@ -373,7 +373,7 @@ async fn rpc_error_responses() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -423,7 +423,7 @@ async fn rpc_fragmented_request() {
         relay_only: false,
         ..Default::default()
     };
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".to_string(),
@@ -441,7 +441,7 @@ async fn rpc_fragmented_request() {
     let mut stream = TcpStream::connect(&addr).await.unwrap();
     let mid = req.len() / 2;
     stream.write_all(&req.as_bytes()[..mid]).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    the_block::sleep(Duration::from_millis(5)).await;
     stream.write_all(&req.as_bytes()[mid..]).await.unwrap();
     let mut resp = Vec::new();
     stream.read_to_end(&mut resp).await.unwrap();

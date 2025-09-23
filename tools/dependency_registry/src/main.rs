@@ -19,12 +19,13 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let policy = PolicyConfig::load(&cli.config)?;
+    let config_path = cli.resolved_config();
+    let policy = PolicyConfig::load(&config_path)?;
 
     let build = build_registry(BuildOptions {
         manifest_path: cli.manifest_path.as_deref(),
         policy: &policy,
-        config_path: &cli.config,
+        config_path: &config_path,
         override_depth: cli.max_depth,
     })?;
 

@@ -5,6 +5,7 @@ members = [
   "state",
   "ledger",
   "crates/probe",
+  "crates/runtime",
   "crates/wallet",
   "crates/light-client",
   "crates/jurisdiction",
@@ -32,8 +33,9 @@ members = [
   "storage",
   "privacy",
   "dkg",
-  "governance"
-, "tools/dependency_registry"]
+  "governance",
+  "tools/dependency_registry",
+]
 default-members = [
   "node",
 "state",

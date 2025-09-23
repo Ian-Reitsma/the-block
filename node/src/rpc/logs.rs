@@ -9,7 +9,6 @@ use serde::Serialize;
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::{protocol::Role, Message};
 use tokio_tungstenite::WebSocketStream;
 use url::form_urlencoded;
@@ -301,7 +300,7 @@ async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
                 break;
             }
         }
-        sleep(cfg.interval).await;
+        runtime::sleep(cfg.interval).await;
     }
 }
 

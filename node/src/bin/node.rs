@@ -353,7 +353,7 @@ async fn main() -> std::process::ExitCode {
 
             let receipt_store = ReceiptStore::open(&format!("{data_dir}/receipts"));
             let match_stop = CancellationToken::new();
-            tokio::spawn(matcher::match_loop(
+            runtime::spawn(matcher::match_loop(
                 receipt_store.clone(),
                 dry_run,
                 match_stop.clone(),
@@ -386,7 +386,7 @@ async fn main() -> std::process::ExitCode {
             let (tx, rx) = tokio::sync::oneshot::channel();
             let mut rpc_cfg = bc.lock().unwrap().config.rpc.clone();
             rpc_cfg.relay_only = relay_only;
-            let handle = tokio::spawn(run_rpc_server(
+            let handle = runtime::spawn(run_rpc_server(
                 Arc::clone(&bc),
                 Arc::clone(&mining),
                 rpc_addr.clone(),
@@ -398,7 +398,7 @@ async fn main() -> std::process::ExitCode {
             #[cfg(feature = "gateway")]
             if let Some(addr) = status_addr.clone() {
                 let bc_status = Arc::clone(&bc);
-                tokio::spawn(async move {
+                runtime::spawn(async move {
                     let addr: std::net::SocketAddr = addr.parse().unwrap();
                     let _ = the_block::web::status::run(addr, bc_status).await;
                 });

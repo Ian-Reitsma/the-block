@@ -23,3 +23,4 @@
   - [Incident Playbook](operators/incident_playbook.md)
   - [Upgrade Guide](operators/upgrade.md)
 - [Contributing](contributing.md)
+- [Development Notes](development.md)

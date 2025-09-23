@@ -3,7 +3,7 @@ use crate::telemetry;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
-use tokio::time::{Duration, Instant};
+use std::time::{Duration, Instant};
 
 #[doc(hidden)]
 pub struct ClientState {

@@ -19,7 +19,7 @@ dkg = { path = "../dkg" }
 explorer = { path = "../explorer" }
 ed25519-dalek = { version = "2.2.0", features = ["std"] }
 hex = "0.4"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
 
 [dev-dependencies]
 tempfile = "3"

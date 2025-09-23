@@ -291,7 +291,7 @@ and remain compatible with existing workloads.
 Both formats are deterministic; identical inputs always yield the same hash. The
 `WorkloadRunner` dispatches to the appropriate reference job based on the
 `Workload` enum and returns the proof hash for inclusion in an `ExecutionReceipt`. Each
-slice is processed in a `tokio::task::spawn_blocking` worker, allowing multiple
+slice is processed via the shared runtime's `spawn_blocking` helper, allowing multiple
 slices to execute in parallel. Results are cached per slice ID so repeated
 invocations avoid recomputation. Parallel execution is deterministic—the same
 inputs always yield the same hashes regardless of concurrency.

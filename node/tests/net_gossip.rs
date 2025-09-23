@@ -7,6 +7,7 @@ use std::fs;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
+use std::time::Instant;
 use tempfile::tempdir;
 use the_block::{
     generate_keypair,
@@ -14,7 +15,6 @@ use the_block::{
     p2p::handshake::{Hello, Transport},
     sign_tx, Block, Blockchain, RawTxPayload, ShutdownFlag, TokenAmount,
 };
-use tokio::time::Instant;
 use util::fork::inject_fork;
 
 fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
@@ -70,7 +70,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         if start.elapsed() > max {
             return false;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        the_block::sleep(Duration::from_millis(20)).await;
     }
 }
 
@@ -83,7 +83,7 @@ async fn wait_until_peers(nodes: &[&Node], expected: usize, max: Duration) -> bo
         if start.elapsed() > max {
             return false;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        the_block::sleep(Duration::from_millis(20)).await;
     }
 }
 
@@ -97,7 +97,7 @@ async fn broadcast_until(node: &Node, group: &[&Node]) {
         if Instant::now() > deadline {
             panic!("gossip convergence failed");
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -125,7 +125,7 @@ async fn gossip_converges_to_longest_chain() {
     let jh3 = node3.start_with_flag(&flag3);
 
     // Wait for listeners to bind before peer discovery.
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    the_block::sleep(Duration::from_millis(500)).await;
 
     let mut discovered = false;
     for _ in 0..5 {
@@ -142,12 +142,12 @@ async fn gossip_converges_to_longest_chain() {
             discovered = true;
             break;
         }
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        the_block::sleep(Duration::from_millis(200)).await;
     }
     assert!(discovered, "peer discovery failed");
 
     // allow handshakes to settle
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    the_block::sleep(Duration::from_millis(200)).await;
 
     // genesis block from node1
     let mut ts = 1;

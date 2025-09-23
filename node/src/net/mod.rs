@@ -1000,11 +1000,9 @@ pub(crate) fn send_quic_msg(
     #[cfg(feature = "telemetry")]
     use crate::telemetry::QUIC_FALLBACK_TCP_TOTAL;
     use rustls::Certificate;
-    use tokio::runtime::Runtime;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
     let cert = Certificate(cert.to_vec());
-    let rt = Runtime::new().unwrap();
-    let res = rt.block_on(async {
+    let res = runtime::block_on(async {
         let conn = quic::get_connection(addr, cert).await?;
         if let Err(e) = quic::send(&conn, &bytes).await {
             quic::drop_connection(&addr);

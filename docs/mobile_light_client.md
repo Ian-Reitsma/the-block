@@ -12,8 +12,7 @@ use light_client::{LightClient, SyncOptions, sync_background, Header};
 let genesis = Header::default();
 let mut client = LightClient::new(genesis);
 let opts = SyncOptions::default();
-let rt = tokio::runtime::Runtime::new()?;
-let outcome = rt.block_on(async {
+let outcome = runtime::block_on(async {
     sync_background(&mut client, opts, |_start, _batch| Vec::new()).await
 })?;
 if let Some(reason) = outcome.gating {

@@ -12,7 +12,6 @@ fn main() {
         _ => Workload::Transcode(data),
     };
     let runner = WorkloadRunner::new();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let out = rt.block_on(runner.run(0, workload));
+    let out = runtime::block_on(runner.run(0, workload));
     println!("{}", hex::encode(out));
 }

@@ -3,12 +3,12 @@ use crate::compute_market::receipt::Receipt;
 use crate::transaction::FeeLane;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use runtime::yield_now;
 use std::collections::VecDeque;
 use std::env;
 use std::sync::RwLock;
 use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
-use tokio::task;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
@@ -501,9 +501,9 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
         }
         refresh_starvation();
         if matches.len() >= batch && batch > 0 {
-            task::yield_now().await;
+            yield_now().await;
         } else {
-            tokio::time::sleep(MATCH_INTERVAL).await;
+            runtime::sleep(MATCH_INTERVAL).await;
         }
     }
     let mut guard = RECEIPT_STORE.write().unwrap_or_else(|e| e.into_inner());

@@ -24,9 +24,8 @@ pub fn run(data: &[u8]) {
     let handles_cl = Arc::clone(&handles);
     thread::spawn(move || {
         if let Ok((stream, _)) = listener.accept() {
-            let rt = tokio::runtime::Runtime::new().unwrap();
             let dids_cl = Arc::clone(&dids);
-            rt.block_on(handle_conn(stream, bc_cl, mining_cl, nonces_cl, handles_cl, dids_cl, cfg));
+            runtime::block_on(handle_conn(stream, bc_cl, mining_cl, nonces_cl, handles_cl, dids_cl, cfg));
         }
     });
     if let Ok(mut s) = std::net::TcpStream::connect(addr) {

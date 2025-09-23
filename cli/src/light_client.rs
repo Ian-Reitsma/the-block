@@ -11,7 +11,6 @@ use hex;
 use light_client::{self, SyncOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
-use tokio::runtime::Runtime;
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
 
@@ -425,8 +424,7 @@ fn run_device_status(json: bool) -> Result<()> {
         }
     };
     let watcher = light_client::DeviceStatusWatcher::new(probe, opts.fallback, opts.stale_after);
-    let runtime = Runtime::new().context("failed to create tokio runtime")?;
-    let snapshot = runtime.block_on(async { watcher.poll().await });
+    let snapshot = runtime::block_on(async { watcher.poll().await });
     let gating = opts.gating_reason(&snapshot.status);
     if json {
         let payload = serde_json::json!({

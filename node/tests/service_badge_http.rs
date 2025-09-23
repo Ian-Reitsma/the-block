@@ -15,7 +15,7 @@ async fn badge_status_endpoint() {
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     let mining = Arc::new(AtomicBool::new(false));
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(run_rpc_server(
+    let handle = the_block::spawn(run_rpc_server(
         Arc::clone(&bc),
         Arc::clone(&mining),
         "127.0.0.1:0".into(),

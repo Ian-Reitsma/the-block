@@ -5,6 +5,24 @@ transactions and tasks can run concurrently. Two primitives coordinate this:
 `ParallelExecutor` for generic workloads and `TxScheduler` for UTXO
 transactions. This guide outlines their semantics and best practices.
 
+## Runtime abstraction
+
+Async helpers across the node, CLI, and auxiliary tooling no longer wire Tokio
+directly. Instead the workspace uses [`crates/runtime`](../crates/runtime/) as a
+facade that exposes `spawn`, `spawn_blocking`, `sleep`, `interval`, `timeout`,
+and `block_on`. The wrapper selects a backend at process start, defaulting to
+Tokio but supporting an opt-in stub executor for synchronous tests. The active
+backend can be overridden by setting `TB_RUNTIME_BACKEND=tokio` or
+`TB_RUNTIME_BACKEND=stub`; unsupported values fall back to the default while
+logging a warning.
+
+Crates consuming the abstraction should import the helpers from the facade
+(`runtime::spawn`, `the_block::spawn`, etc.) rather than referencing Tokio
+handles or timers directly. This keeps scheduling code agnostic to the event
+loop implementation and allows future experimentation without invasive changes.
+Integration tests under `crates/runtime/tests/` exercise both the Tokio and
+stub backends to ensure consistent behaviour.
+
 ## 1. `ParallelExecutor`
 
 `node/src/parallel.rs` provides a thread‑pool powered by `rayon`. Callers

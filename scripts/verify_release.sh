@@ -18,3 +18,9 @@ else
 fi
 sbom=$(ls "$(dirname "$ARCHIVE")"/SBOM-*.json 2>/dev/null | head -n1 || true)
 echo "SBOM at ${sbom:-<missing>}"
+snapshot_path="$(dirname "$ARCHIVE")/dependency-registry.json"
+if [ -f "$snapshot_path" ]; then
+  echo "Dependency snapshot at $snapshot_path"
+else
+  echo "warning: dependency snapshot missing" >&2
+fi

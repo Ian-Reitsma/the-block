@@ -1,10 +1,9 @@
 #![cfg(feature = "integration-tests")]
 use serial_test::serial;
 use std::net::SocketAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use the_block::{net::Node, Blockchain, ShutdownFlag};
-use tokio::time::Instant;
 
 fn free_addr() -> SocketAddr {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -43,7 +42,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         if start.elapsed() > max {
             return false;
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        the_block::sleep(Duration::from_millis(20)).await;
     }
 }
 
@@ -127,7 +126,7 @@ async fn kill_node_recovers() {
         }
         nodes.push(tn);
     }
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    the_block::sleep(Duration::from_secs(1)).await;
     let mut ts = 1u64;
     for _ in 0..20 {
         {
@@ -136,7 +135,7 @@ async fn kill_node_recovers() {
             ts += 1;
         }
         nodes[0].node.broadcast_chain();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
     let max = Duration::from_secs(5 * timeout_factor());
     let start = Instant::now();
@@ -159,7 +158,7 @@ async fn kill_node_recovers() {
             ts += 1;
         }
         nodes[0].node.broadcast_chain();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
     let active: Vec<&Node> = nodes
         .iter()
@@ -221,7 +220,7 @@ async fn partition_heals_to_majority() {
         }
         nodes.push(tn);
     }
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    the_block::sleep(Duration::from_secs(1)).await;
     let mut ts = 1u64;
     {
         let mut bc = nodes[0].node.blockchain();
@@ -246,7 +245,7 @@ async fn partition_heals_to_majority() {
             ts += 1;
         }
         nodes[0].node.broadcast_chain();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        the_block::sleep(Duration::from_millis(50)).await;
     }
     {
         let mut bc = nodes[iso].node.blockchain();

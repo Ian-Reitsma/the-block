@@ -21,12 +21,13 @@ use openssl::{
 };
 use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
 use reqwest::Client;
+use runtime::spawn;
 use tracing::{info, warn};
 use urlencoding::encode;
 
 #[cfg(feature = "s3")]
 fn upload_sync(bucket: String, data: Vec<u8>) {
-    let handle = tokio::runtime::Handle::current();
+    let handle = runtime::handle();
     handle.block_on(async move {
         let config = aws_config::load_from_env().await;
         let client = S3Client::new(&config);
@@ -45,7 +46,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -209,9 +210,8 @@ impl AppState {
 
     pub fn spawn_cleanup(&self) {
         let state = self.clone();
-        tokio::spawn(async move {
-            use tokio::time::{interval, Duration};
-            let mut ticker = interval(Duration::from_secs(60));
+        spawn(async move {
+            let mut ticker = runtime::interval(Duration::from_secs(60));
             loop {
                 ticker.tick().await;
                 state.prune();
@@ -437,7 +437,7 @@ fn spawn_log_dump(record: CorrelationRecord) {
     let db = std::env::var("TB_LOG_DB_PATH").ok();
     let dump_dir = std::env::var("TB_LOG_DUMP_DIR").unwrap_or_else(|_| "log_dumps".into());
     if let (Some(api), Some(db)) = (api, db) {
-        tokio::spawn(async move {
+        spawn(async move {
             if let Err(err) = fetch_and_dump_logs(api, db, dump_dir.clone(), record.clone()).await {
                 warn!(
                     target: "aggregator",
@@ -667,7 +667,7 @@ async fn export_all(
     #[cfg(not(feature = "s3"))]
     let bucket: Option<String> = None;
     let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
-    tokio::task::spawn_blocking(move || {
+    let _ = runtime::spawn_blocking(move || {
         let _bucket = bucket;
         use zip::write::FileOptions;
         let mut cursor = io::Cursor::new(Vec::new());

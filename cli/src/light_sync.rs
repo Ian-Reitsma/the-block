@@ -11,8 +11,7 @@ pub enum LightSyncCmd {
 pub fn handle(cmd: LightSyncCmd) {
     match cmd {
         LightSyncCmd::Start { url } => {
-            let rt = tokio::runtime::Runtime::new().expect("runtime");
-            rt.block_on(async move {
+            runtime::block_on(async move {
                 match tokio_tungstenite::connect_async(url).await {
                     Ok((ws, _)) => {
                         let (mut write, mut read) = ws.split();
