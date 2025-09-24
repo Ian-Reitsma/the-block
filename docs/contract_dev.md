@@ -1,5 +1,5 @@
 # Contract Development Guide
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This guide covers the basic contract workflow for The‑Block's prototype VM.
 For commands that inspect WASM exports or log indexes, build the CLI with the

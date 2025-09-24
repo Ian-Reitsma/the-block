@@ -1,5 +1,5 @@
 # HTTP Gateway – Zero‑Fee Web Hosting
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The HTTP gateway is the public entry point for on‑chain web sites. It maps a
 `SiteManifestTx` domain to its blob assets, executes optional `FuncTx` WASM

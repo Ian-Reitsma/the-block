@@ -19,7 +19,7 @@
 
 ---
 
-> **Review (2025-09-23):** The documentation reflects the dependency-sovereignty pivot and September progress audit; third-token plans have been retired in favour of a single CT ledger.
+> **Review (2025-09-24):** The documentation reflects the dependency-sovereignty pivot and September progress audit; third-token plans have been retired in favour of a single CT ledger.
 
 ## What is The Block?
 
@@ -79,9 +79,11 @@ test real services today.
   operators can tune TTLs, entry caps, and eviction health. See
   [docs/read_receipts.md](docs/read_receipts.md),
   [docs/simple_db.md](docs/simple_db.md), and
-  [docs/mobile_gateway.md](docs/mobile_gateway.md) for the batching, audit,
-  persistence, and cache hygiene flow. (88.5% Complete — incentive-marketplace
-  wiring remains the main open track.)
+    [docs/mobile_gateway.md](docs/mobile_gateway.md) for the batching, audit,
+    persistence, and cache hygiene flow. Storage backends now route through the
+    unified `storage_engine` crate so SimpleDb selects RocksDB, sled, or in-memory
+    engines via configuration without leaking provider APIs. (90.1% Complete —
+    incentive-marketplace wiring remains the main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow CT via the `pct_ct` selector
   (policy now pins it to 100 for live lanes), supports graceful job cancellation
@@ -105,26 +107,28 @@ test real services today.
   exports per-lane queue depth/age plus `matches_total{lane}` and
   `match_loop_latency_seconds{lane}` histograms. CLI and RPC surfaces expose queue
   depths, capacity guardrails, fairness windows, and recent matches, and
-  settlement continues to persist CT balances with activation metadata, audit
-  exports, and recent root tracking. (93.7% Complete)
-    - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
-      letting operators run `net stats`, filter by reputation or drop reason, emit
-      JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
-      A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
-      `aggregator_ingest_total` gauges, partition markers flag split-brain events,
-      and metrics are bounded by `max_peer_metrics` so abusive peers cannot exhaust
-      memory. QUIC now derives mutual-TLS certificates from node keys, gossips
-      fingerprints, exposes cached diagnostics over the `net.quic_stats` RPC / CLI,
-      and leverages a chaos harness to publish retransmit counters, keeping
-      operators ahead of packet loss while the transport layer advertises provider metadata, per-provider connect counters, and mockable adapters for tests. Shard-aware peer maps route block gossip only
-      to interested peers and uptime-based fee rebates reward high-availability
-      peers. (96.0% Complete)
-    - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
-      resolves forks deterministically, and validates blocks with BLAKE3 hashes,
-      multi-window Kalman retargeting, VDF-anchored randomness, macro-block
-      checkpointing, and per-shard fork choice. Release installs now gate on
-      provenance verification with automated rollback if hashes drift, keeping
-      consensus nodes in lockstep. (92.2% Complete)
+    settlement continues to persist CT balances with activation metadata, audit
+    exports, and recent root tracking. (94.5% Complete)
+      - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
+        letting operators run `net stats`, filter by reputation or drop reason, emit
+        JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
+        A cluster-wide `metrics-aggregator` rolls up `cluster_peer_active_total` and
+        `aggregator_ingest_total` gauges, partition markers flag split-brain events,
+        and metrics are bounded by `max_peer_metrics` so abusive peers cannot exhaust
+        memory. QUIC now derives mutual-TLS certificates from node keys, gossips
+        fingerprints, exposes cached diagnostics over the `net.quic_stats` RPC / CLI,
+        and leverages a chaos harness to publish retransmit counters, keeping
+        operators ahead of packet loss while the transport layer advertises provider metadata, per-provider connect counters, and mockable adapters for tests. Overlay discovery, uptime tracking, and persistence now flow through the
+        `p2p_overlay` crate with selectable libp2p/stub backends, CLI overrides,
+        telemetry gauges, and integration tests, so node modules only depend on overlay traits. Shard-aware peer maps route block gossip only
+        to interested peers and uptime-based fee rebates reward high-availability
+        peers. (97.2% Complete)
+      - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
+        resolves forks deterministically, and validates blocks with BLAKE3 hashes,
+        multi-window Kalman retargeting, VDF-anchored randomness, macro-block
+        checkpointing, and per-shard fork choice. Release installs now gate on
+        provenance verification with automated rollback if hashes drift, keeping
+        consensus nodes in lockstep. (92.6% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -135,23 +139,24 @@ test real services today.
     timelines so operators can audit parameter changes while governance history
     archives DID revocations for audit. All tooling now targets the shared
     `governance` crate with sled-backed persistence, proposal DAG validation,
-    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (94.5% Complete)
+    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (95.1% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
-      deployable contracts and fee markets alongside traditional PoW headers. (84.1%
+      deployable contracts and fee markets alongside traditional PoW headers. (85.4%
       Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, telemetry gauges `dex_escrow_locked`,
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
-    constant-product AMM pools provide fallback liquidity with programmable incentives. (83.1%
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (84.0%
     Complete)
-- Cross-chain bridge primitives track per-asset channels, persist relayer sets,
-  enforce multi-signature quorums, and expose challenge windows with slashing for
-  invalid proofs. Deposit/withdraw flows carry partition tags, HTLC parsing accepts
-  both SHA3 and RIPEMD encodings, and light-client verification guards every transfer.
-  Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history. (78.0% Complete)
+  - Cross-chain bridge primitives track per-asset channels, persist relayer sets,
+    enforce multi-signature quorums, and expose challenge windows with slashing for
+    invalid proofs. Deposit/withdraw flows carry partition tags, HTLC parsing accepts
+    both SHA3 and RIPEMD encodings, and light-client verification guards every transfer.
+    CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history.
+    (79.3% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).
   Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
@@ -170,16 +175,18 @@ test real services today.
       output, and remote signer attestations. Wallet QoS events feed telemetry so
       dashboards track warning/override deltas. Wallet binaries now share a single
       `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, forward
-      multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
-      staking payloads. (94.8% Complete)
-    - Monitoring, debugging, and profiling tools export Prometheus metrics,
-      structured traces, readiness endpoints, VM trace counters, partition dashboards,
-      and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
-      now link metrics anomalies to log searches, automated QUIC dumps, and Grafana
-      drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
-      anchor totals land in telemetry so dashboards can trace user choices,
-      anchor velocity, and governance parameter rollbacks from a single pane.
-      (93.6% Complete)
+        multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
+        staking payloads. (95.2% Complete)
+      - Monitoring, debugging, and profiling tools export Prometheus metrics,
+        structured traces, readiness endpoints, VM trace counters, partition dashboards,
+        and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
+        now link metrics anomalies to log searches, automated QUIC dumps, and Grafana
+        drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
+        anchor totals land in telemetry so dashboards can trace user choices,
+        anchor velocity, and governance parameter rollbacks from a single pane.
+        Overlay gauges (`overlay_backend_active`, `overlay_peer_total`, persisted counts)
+        now expose backend health alongside transport for quick verification. (94.0%
+        Complete)
   - Economic simulation and formal verification suites model inflation scenarios
     and encode consensus invariants, laying groundwork for provable safety. (42.0%
     Complete)
@@ -195,7 +202,7 @@ test real services today.
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **97.6/100** with vision completion **88.3/100**.
+  Mainnet readiness sits at **97.9/100** with vision completion **89.0/100**.
   Recent work codified the dependency-sovereignty pivot: every guide now
   references the transport/runtime/registry wrappers, and the new
   [`pivot_dependency_strategy.md`](docs/pivot_dependency_strategy.md) runbook

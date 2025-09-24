@@ -1,18 +1,26 @@
 #![cfg(feature = "integration-tests")]
-use libp2p::{multiaddr::multiaddr, PeerId};
 use tempfile::tempdir;
-use the_block::net::discovery::Discovery;
+use the_block::config::OverlayConfig;
+use the_block::net;
+use the_block::net::discovery::{self, PeerId};
+use the_block::net::OverlayAddress;
 
 #[test]
 fn persist_and_load_peers() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("peers.db");
+    let previous = net::overlay_service();
+    net::configure_overlay(&OverlayConfig {
+        peer_db_path: path.to_string_lossy().into_owned(),
+        ..OverlayConfig::default()
+    });
     let local = PeerId::random();
-    let mut d = Discovery::new(local, path.to_str().unwrap());
+    let mut d = discovery::new(local.clone());
     let other = PeerId::random();
-    let addr = multiaddr!(Ip4([127, 0, 0, 1]), Tcp(1234u16));
+    let addr: OverlayAddress = "/ip4/127.0.0.1/tcp/1234".parse().unwrap();
     d.add_peer(other, addr);
     d.persist();
-    let d2 = Discovery::new(local, path.to_str().unwrap());
+    let d2 = discovery::new(local);
     assert!(d2.has_peer(&other));
+    net::install_overlay(previous);
 }

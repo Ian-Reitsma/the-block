@@ -1,5 +1,5 @@
 # Simulation Framework Manual
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `sim/` crate models network topologies and economic scenarios. Scenarios are
 expressed in YAML and replay deterministically so developers can reproduce bugs

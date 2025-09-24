@@ -1,5 +1,5 @@
 # Reproducible Builds
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The project pins the Rust toolchain in `rust-toolchain.toml` and provides `scripts/docker/Dockerfile` that compiles the node with `cargo build --release --locked`.
 

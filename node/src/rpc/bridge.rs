@@ -1,6 +1,7 @@
 use super::RpcError;
 use crate::{
     bridge::{Bridge, BridgeError},
+    simple_db::names,
     SimpleDb,
 };
 use bridges::{header::PowHeader, light_client::Proof, RelayerBundle, RelayerProof};
@@ -10,7 +11,7 @@ use std::sync::Mutex;
 
 static SERVICE: Lazy<Mutex<Bridge>> = Lazy::new(|| {
     let path = std::env::var("TB_BRIDGE_DB_PATH").unwrap_or_else(|_| "state/bridge_db".into());
-    let db = SimpleDb::open(&path);
+    let db = SimpleDb::open_named(names::RPC_BRIDGE, &path);
     Mutex::new(Bridge::with_db(db))
 });
 

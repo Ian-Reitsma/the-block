@@ -11,6 +11,7 @@ use ed25519_dalek::SigningKey;
 use tracing_chrome::ChromeLayerBuilder;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
 
+use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
 use the_block::{
@@ -93,6 +94,21 @@ fn policy_pack_language(pack: &jurisdiction::PolicyPack) -> String {
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+enum OverlayBackendArg {
+    Libp2p,
+    Stub,
+}
+
+impl From<OverlayBackendArg> for OverlayBackend {
+    fn from(arg: OverlayBackendArg) -> Self {
+        match arg {
+            OverlayBackendArg::Libp2p => OverlayBackend::Libp2p,
+            OverlayBackendArg::Stub => OverlayBackend::Stub,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -182,6 +198,10 @@ enum Commands {
         /// Country code or path to jurisdiction policy pack
         #[arg(long)]
         jurisdiction: Option<String>,
+
+        /// Overlay backend for peer discovery and uptime tracking
+        #[arg(long = "overlay-backend", value_enum)]
+        overlay_backend: Option<OverlayBackendArg>,
 
         /// Enable VM debugging features
         #[arg(long, default_value_t = false)]
@@ -276,6 +296,7 @@ async fn main() -> std::process::ExitCode {
             quic_cert_ttl_days: _quic_cert_ttl_days,
             profiling,
             jurisdiction,
+            overlay_backend,
             enable_vm_debug,
         } => {
             if auto_tune {
@@ -350,6 +371,23 @@ async fn main() -> std::process::ExitCode {
                 inner.save_config();
             }
             let bc = Arc::new(Mutex::new(inner));
+
+            let overlay_choice = overlay_backend.map(OverlayBackend::from);
+            let overlay_cfg = {
+                let mut guard = bc.lock().unwrap();
+                if let Some(choice) = overlay_choice {
+                    if guard.config.overlay.backend != choice {
+                        guard.config.overlay.backend = choice;
+                        guard.save_config();
+                    }
+                }
+                guard.config.overlay.clone()
+            };
+            the_block::net::configure_overlay(&overlay_cfg);
+            if let Err(err) = the_block::config::ensure_overlay_sanity(&overlay_cfg) {
+                eprintln!("overlay_sanity_failed: {err}");
+                return std::process::ExitCode::FAILURE;
+            }
 
             let receipt_store = ReceiptStore::open(&format!("{data_dir}/receipts"));
             let match_stop = CancellationToken::new();

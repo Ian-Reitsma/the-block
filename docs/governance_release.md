@@ -1,5 +1,5 @@
 # Governance-Secured Release Flow
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document outlines the process for approving and installing node
 software releases through on-chain governance. Nodes may only install
@@ -150,3 +150,14 @@ Operators can rehearse rollback procedures offline:
 4. Reinstall the current release with `--install` so `release_installs_total` reflects the return to service.
 
 Documenting the outcome of these drills in change-management systems ensures that multi-signer governance remains enforceable even when a release needs to be revoked under pressure.
+
+## Release Checklist
+
+- Verify `the-block net overlay-status` on staging nodes before tagging a release
+  and confirm the reported backend and peer database path match the planned
+  configuration.
+- Confirm Grafana dashboards display non-zero `overlay_peer_total{backend}` and
+  `overlay_peer_persisted_total{backend}` values for the active backend so fleet
+  telemetry agrees with the staging sanity check.
+- Capture the overlay backend selection in the release notes so operators can
+  audit that production nodes match the staged configuration.

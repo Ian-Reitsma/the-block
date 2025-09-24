@@ -1,4 +1,4 @@
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     RENT_ESCROW_BURNED_CT_TOTAL, RENT_ESCROW_LOCKED_CT_TOTAL, RENT_ESCROW_REFUNDED_CT_TOTAL,
@@ -19,7 +19,7 @@ pub struct RentEscrow {
 impl RentEscrow {
     pub fn open(path: &str) -> Self {
         Self {
-            db: SimpleDb::open(path),
+            db: SimpleDb::open_named(names::STORAGE_FS, path),
         }
     }
     pub fn lock(&mut self, id: &str, depositor: &str, amount: u64, expiry: u64) {

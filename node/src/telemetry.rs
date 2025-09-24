@@ -1707,6 +1707,96 @@ pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     c
 });
 
+pub static STORAGE_ENGINE_PENDING_COMPACTIONS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_pending_compactions",
+            "Pending compactions reported by the storage engine",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_pending_compactions: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_pending_compactions: {e}"));
+    g
+});
+
+pub static STORAGE_ENGINE_RUNNING_COMPACTIONS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_running_compactions",
+            "Active compactions reported by the storage engine",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_running_compactions: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_running_compactions: {e}"));
+    g
+});
+
+pub static STORAGE_ENGINE_LEVEL0_FILES: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_level0_files",
+            "Level-0 file count per storage engine",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_level0_files: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_level0_files: {e}"));
+    g
+});
+
+pub static STORAGE_ENGINE_SST_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_sst_bytes",
+            "Total bytes stored in SST files",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_sst_bytes: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_sst_bytes: {e}"));
+    g
+});
+
+pub static STORAGE_ENGINE_MEMTABLE_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_memtable_bytes",
+            "Bytes retained in storage engine memtables",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_memtable_bytes: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_memtable_bytes: {e}"));
+    g
+});
+
+pub static STORAGE_ENGINE_SIZE_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_size_bytes",
+            "Bytes consumed on disk by the storage engine",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_size_bytes: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_size_bytes: {e}"));
+    g
+});
+
 pub static STORAGE_CONTRACT_CREATED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     let c = IntCounter::new(
         "storage_contract_created_total",
@@ -2799,6 +2889,51 @@ pub static PEER_METRICS_ACTIVE: Lazy<IntGauge> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
+    g
+});
+
+pub static OVERLAY_BACKEND_ACTIVE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "overlay_backend_active",
+            "Indicator gauge for the active overlay backend (1 active / 0 inactive)",
+        ),
+        &["backend"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec overlay_backend_active: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry overlay_backend_active: {e}"));
+    g
+});
+
+pub static OVERLAY_PEER_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "overlay_peer_total",
+            "Overlay peers currently tracked by the uptime service, grouped by backend",
+        ),
+        &["backend"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec overlay_peer_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry overlay_peer_total: {e}"));
+    g
+});
+
+pub static OVERLAY_PEER_PERSISTED_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "overlay_peer_persisted_total",
+            "Persisted overlay peer records grouped by backend",
+        ),
+        &["backend"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec overlay_peer_persisted_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry overlay_peer_persisted_total: {e}"));
     g
 });
 

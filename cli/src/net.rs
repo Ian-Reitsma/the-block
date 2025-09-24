@@ -1,9 +1,35 @@
 use crate::rpc::RpcClient;
-use clap::Subcommand;
+use clap::{Subcommand, ValueEnum};
 use hex;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use the_block::net::{PeerCertHistoryEntry, QuicStatsEntry};
+
+#[derive(Deserialize)]
+struct RpcEnvelope<T> {
+    result: T,
+}
+
+#[derive(Deserialize)]
+struct OverlayStatusView {
+    backend: String,
+    active_peers: usize,
+    persisted_peers: usize,
+    #[serde(default)]
+    database_path: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+enum OverlayOutputFormat {
+    Plain,
+    Json,
+}
+
+impl Default for OverlayOutputFormat {
+    fn default() -> Self {
+        OverlayOutputFormat::Plain
+    }
+}
 
 #[derive(Subcommand)]
 pub enum NetCmd {
@@ -52,6 +78,15 @@ pub enum NetCmd {
     GossipStatus {
         #[arg(long, default_value = "http://localhost:26658")]
         url: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show overlay backend and persistence status
+    OverlayStatus {
+        #[arg(long, default_value = "http://localhost:26658")]
+        url: String,
+        #[arg(long = "format", value_enum)]
+        format: Option<OverlayOutputFormat>,
         #[arg(long)]
         json: bool,
     },
@@ -356,6 +391,51 @@ pub fn handle(cmd: NetCmd) {
                 }
             }
         }
+        NetCmd::OverlayStatus { url, json, format } => {
+            let client = RpcClient::from_env();
+            #[derive(serde::Serialize)]
+            struct Payload {
+                jsonrpc: &'static str,
+                id: u32,
+                method: &'static str,
+                params: serde_json::Value,
+            }
+            let payload = Payload {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "net.overlay_status",
+                params: serde_json::Value::Null,
+            };
+            if let Ok(resp) = client.call(&url, &payload) {
+                if let Ok(text) = resp.text() {
+                    let output = format.unwrap_or_else(|| {
+                        if json {
+                            OverlayOutputFormat::Json
+                        } else {
+                            OverlayOutputFormat::Plain
+                        }
+                    });
+
+                    if output == OverlayOutputFormat::Json {
+                        if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                            let out = val.get("result").cloned().unwrap_or(val);
+                            if let Ok(pretty) = serde_json::to_string_pretty(&out) {
+                                println!("{}", pretty);
+                            } else {
+                                println!("{}", text);
+                            }
+                        } else {
+                            println!("{}", text);
+                        }
+                    } else {
+                        match serde_json::from_str::<RpcEnvelope<OverlayStatusView>>(&text) {
+                            Ok(env) => print_overlay_status(&env.result),
+                            Err(_) => println!("{}", text),
+                        }
+                    }
+                }
+            }
+        }
         NetCmd::RotateCert { url } => {
             let client = RpcClient::from_env();
             #[derive(serde::Serialize)]
@@ -412,6 +492,16 @@ pub fn handle(cmd: NetCmd) {
                 }
             }
         },
+    }
+}
+
+fn print_overlay_status(status: &OverlayStatusView) {
+    println!("Active overlay backend: {}", status.backend);
+    println!("Peers observed by uptime tracker: {}", status.active_peers);
+    println!("Persisted peer entries: {}", status.persisted_peers);
+    match &status.database_path {
+        Some(path) => println!("Peer database: {}", path),
+        None => println!("Peer database: (in-memory)"),
     }
 }
 

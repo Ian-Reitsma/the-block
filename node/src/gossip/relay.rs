@@ -2,7 +2,7 @@ use crate::gossip::config::{self, GossipConfig};
 use crate::net::partition_watch::PARTITION_WATCH;
 use crate::net::peer::{pk_from_addr, PeerMetrics};
 use crate::net::{peer_stats_map, send_msg, send_quic_msg, Message, Transport};
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 use blake3::hash;
 use hex;
 use ledger::address::ShardId;
@@ -67,7 +67,7 @@ struct ShardStore {
 
 impl ShardStore {
     fn new(path: &str) -> Self {
-        let db = SimpleDb::open(path);
+        let db = SimpleDb::open_named(names::GOSSIP_RELAY, path);
         let cache = Mutex::new(Self::load(&db));
         Self {
             db: Mutex::new(db),
@@ -79,7 +79,7 @@ impl ShardStore {
     fn temporary() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.into_path().join("gossip_store");
-        let db = SimpleDb::open(path.to_str().unwrap());
+        let db = SimpleDb::open_named(names::GOSSIP_RELAY, path.to_str().unwrap());
         let cache = Mutex::new(Self::load(&db));
         Self {
             db: Mutex::new(db),

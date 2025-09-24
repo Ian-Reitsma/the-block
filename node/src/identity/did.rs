@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     governance::GovStore,
-    provenance, to_array_32, to_array_64,
+    provenance,
+    simple_db::names,
+    to_array_32, to_array_64,
     transaction::{TxDidAnchor, TxDidAnchorAttestation},
     SimpleDb,
 };
@@ -89,7 +91,7 @@ impl DidRegistry {
     pub fn open(path: impl AsRef<Path>) -> Self {
         let path_str = path.as_ref().to_string_lossy().to_string();
         Self {
-            db: SimpleDb::open(&path_str),
+            db: SimpleDb::open_named(names::IDENTITY_DID, &path_str),
         }
     }
 

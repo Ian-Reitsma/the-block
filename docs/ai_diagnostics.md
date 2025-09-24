@@ -1,5 +1,5 @@
 # AI Diagnostics
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document outlines the experimental AI-assisted diagnostics pipeline.
 Models analyse telemetry streams to flag anomalies and suggest configuration

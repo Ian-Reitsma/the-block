@@ -1,7 +1,7 @@
 use std::convert::TryInto;
 use std::path::Path;
 
-use crate::{Block, SimpleDb, TokenAmount};
+use crate::{simple_db::names, Block, SimpleDb, TokenAmount};
 
 const RELAYER_PREFIX: &str = "relayers/";
 const RECEIPT_PREFIX: &str = "receipts/";
@@ -76,7 +76,7 @@ impl ProofTracker {
     pub fn open<P: AsRef<Path>>(path: P) -> Self {
         let path_ref = path.as_ref();
         let db_path = path_ref.to_string_lossy().into_owned();
-        Self::with_db(SimpleDb::open(&db_path))
+        Self::with_db(SimpleDb::open_named(names::LIGHT_CLIENT_PROOFS, &db_path))
     }
 
     pub fn with_db(db: SimpleDb) -> Self {

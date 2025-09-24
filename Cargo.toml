@@ -10,6 +10,8 @@ members = [
   "crates/transport",
   "crates/light-client",
   "crates/jurisdiction",
+  "crates/p2p_overlay",
+  "crates/storage_engine",
   "fuzz",
   "sim",
   "tools/xtask",

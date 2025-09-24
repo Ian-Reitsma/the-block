@@ -1,5 +1,5 @@
 # Supply Chain Security
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This project enables reproducible builds via Nix. The `nix` directory contains a `build.nix` that pins dependencies and produces deterministic binaries. Operators can compare hashes using `nix-build` on multiple machines.
 

@@ -1,5 +1,5 @@
 # DEX and Trust Lines
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The in-tree DEX exposes a simple order book with slippage checks and trust-line settlement. Routing logic supports multi-hop transfers over a graph of authorised trust lines and returns a fallback path when the cheapest route fails mid-flight.
 

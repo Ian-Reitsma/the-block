@@ -3,6 +3,7 @@ members = [
   "app",
   "dep_a",
   "dep_b",
+  "node",
 ]
 resolver = "2"
-default-members = ["app"]
+default-members = ["app", "node"]

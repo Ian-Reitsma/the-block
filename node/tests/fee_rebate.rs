@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use libp2p::PeerId;
-use the_block::net::uptime;
+use the_block::net::uptime::{self, PeerId};
 
 #[test]
 fn rebate_claim_once_per_epoch() {

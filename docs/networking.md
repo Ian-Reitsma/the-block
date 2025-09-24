@@ -1,5 +1,5 @@
 # Networking Recovery Guide
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This guide describes how to restore the distributed hash table (DHT) state when the peer database becomes corrupt or unreachable.
 Overlay abstraction progress and dependency controls are tracked in
@@ -36,6 +36,37 @@ crate.
    curl -s localhost:9100/metrics | rg '^dht_peers_total'
    ```
 A steadily increasing peer count after bootstrap indicates healthy gossip.
+
+## Overlay Backend Troubleshooting
+
+Overlay swaps now rely on the `crates/p2p_overlay` abstraction. When a node
+starts, the configuration loader performs a sanity check to confirm the active
+overlay backend matches `config/default.toml`; failures print
+`overlay_sanity_failed` along with remediation steps. Use the following flow
+when diagnostics disagree with the configured backend:
+
+1. Inspect the live overlay snapshot:
+   ```bash
+   the-block net overlay-status --format json
+   # Legacy --json remains accepted for backward compatibility
+   ```
+   (The legacy `--json` flag is still accepted.) The output includes the active
+   backend label, tracked peer count, and the persisted database path (if
+   applicable). When the CLI reports `stub` or an unexpected path, restart the
+   node after updating configuration.
+2. Confirm Prometheus gauges `overlay_backend_active{backend}`,
+   `overlay_peer_total{backend}`, and `overlay_peer_persisted_total{backend}` are
+   reporting values for the intended backend:
+   ```bash
+   curl -s localhost:9100/metrics | rg '^overlay_'
+   ```
+   Only the selected backend should emit non-zero values.
+3. When a mismatch persists, delete the stale peer database (libp2p) or restart
+   the process (stub) so the sanity check can reinstall the correct overlay and
+   rehydrate peer state.
+
+A green sanity check plus non-zero overlay gauges indicates the overlay swap is
+operating correctly.
 
 ## Partition Detection
 

@@ -1,5 +1,5 @@
 # Mobile Gateway
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 A lightweight RPC gateway serves mobile clients with a local cache to reduce bandwidth and latency. The cache now provides
 durable persistence, bounded growth controls, and telemetry so operators can treat mobile devices as intermittently

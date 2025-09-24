@@ -1,10 +1,26 @@
 # On-Chain Blob Storage Flow
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document describes the end‑to‑end lifecycle of a file that is uploaded
 through the The‑Block storage interface and committed on chain as a `BlobTx`.
 It is intentionally verbose so future auditors can follow each step without
 referencing external context.
+
+## 0. Storage Engine Abstraction
+
+Persistent components in the node now route all key-value access through the
+`crates/storage_engine` crate. This crate defines a `KeyValue` trait with
+associated batching, iterators, and telemetry methods so RocksDB, sled, and the
+in-memory engine expose a single API surface. Every subsystem opens its
+database via `SimpleDb::open_named(<name>, <path>)`, which looks up the desired
+backend in `[storage]` within `config/default.toml`. Operators can override the
+`default_engine` or specific handles such as `gossip_relay`,
+`net_peer_chunks`, and `gateway_dns` to pin light-weight stores to sled or the
+in-memory backend while keeping the ledger on RocksDB. The storage engine layer
+also surfaces health metrics (`storage_engine_*` gauges) so dashboards can track
+pending compactions, SST growth, and memtable pressure regardless of the chosen
+backend. Introducing a new engine requires implementing the trait and hooking it
+into the registry; no call sites outside `SimpleDb` need to change.
 
 ## 1. Local Chunking & Hashing
 

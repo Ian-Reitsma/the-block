@@ -1,0 +1,8 @@
+[package]
+name = "libp2p"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+
+[lib]
+path = "lib.rs"

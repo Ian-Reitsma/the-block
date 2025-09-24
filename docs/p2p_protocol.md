@@ -1,9 +1,43 @@
 # P2P Handshake and Capability Negotiation
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Peers exchange a two-step handshake before participating in gossip. The
 handshake verifies network identity, negotiates protocol versions, and records
 supported feature bits for later routing and policy decisions.
+
+## Overlay Abstraction
+
+Discovery, peer persistence, and uptime accounting live behind the
+`crates/p2p_overlay` crate. The crate defines `PeerId`, `OverlayStore`,
+`Discovery`, and `OverlayService` traits so the node can talk to any overlay
+backend that can serialize peer identifiers and addresses. The default
+`Libp2pOverlay` wraps the existing libp2p behaviour, while `StubOverlay`
+provides an in-memory implementation that never touches libp2p and is handy for
+unit tests or smoke tests.
+
+Swapping implementations does not require touching the networking stack. Update
+`overlay.backend` in the node configuration to switch backends:
+
+```toml
+[overlay]
+backend = "stub"   # or "libp2p" (default)
+peer_db_path = "state/overlay_peers.bin"
+```
+
+Operators can also override the backend at launch with the CLI. The `Run`
+subcommand accepts `--overlay-backend libp2p|stub`, allowing one-off runs with
+the stub overlay without rewriting configuration files:
+
+```bash
+the-block node run --overlay-backend stub
+```
+
+Under the hood, the node injects whichever overlay implementation is selected
+into discovery and uptime tracking via `OverlayService`, so higher-level code
+only touches the trait methods and serialized peer identifiers rather than
+libp2p-specific types. This keeps the node in control of persistence (via
+bincode) and leaves room to drop in an in-house overlay in the future without
+rewriting discovery logic.
 
 ## Message Flow
 

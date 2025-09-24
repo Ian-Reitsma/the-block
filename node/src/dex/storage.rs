@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use super::order_book::{Order, OrderBook};
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 use dex::amm::Pool;
 use dex::escrow::{Escrow, EscrowId, PaymentProof};
 use serde::{Deserialize, Serialize};
@@ -24,7 +24,7 @@ pub struct DexStore {
 impl DexStore {
     pub fn open(path: &str) -> Self {
         Self {
-            db: SimpleDb::open(path),
+            db: SimpleDb::open_named(names::DEX_STORAGE, path),
         }
     }
 

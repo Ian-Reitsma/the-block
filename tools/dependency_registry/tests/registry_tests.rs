@@ -66,3 +66,24 @@ fn enforces_maximum_depth() {
         .iter()
         .any(|v| v.name == "deep_dep" && matches!(v.kind, ViolationKind::Depth)));
 }
+
+#[test]
+fn flags_direct_libp2p_usage() {
+    let manifest = fixture_path("Cargo.toml");
+    let policy_path = fixture_path("policy.toml");
+    let policy = PolicyConfig::load(&policy_path).expect("policy should load");
+
+    let build = build_registry(BuildOptions {
+        manifest_path: Some(manifest.as_path()),
+        policy: &policy,
+        config_path: &policy_path,
+        override_depth: None,
+    })
+    .expect("registry build should succeed");
+
+    assert!(build
+        .violations
+        .entries
+        .iter()
+        .any(|v| v.name == "node" && matches!(v.kind, ViolationKind::DirectLibp2p)));
+}

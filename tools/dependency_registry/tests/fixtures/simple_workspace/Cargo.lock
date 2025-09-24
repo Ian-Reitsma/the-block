@@ -24,3 +24,14 @@ dependencies = [
 [[package]]
 name = "dep_b"
 version = "0.1.0"
+
+[[package]]
+name = "libp2p"
+version = "0.0.1"
+
+[[package]]
+name = "node"
+version = "0.1.0"
+dependencies = [
+ "libp2p",
+]

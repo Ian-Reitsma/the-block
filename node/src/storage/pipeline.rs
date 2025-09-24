@@ -7,7 +7,7 @@ use super::types::{
     CHACHA20_POLY1305_NONCE_LEN,
 };
 use crate::compute_market::settlement::Settlement;
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     MemoryComponent, STORAGE_CHUNK_SIZE_BYTES, STORAGE_FINAL_CHUNK_SIZE,
@@ -230,7 +230,7 @@ impl StoragePipeline {
         super::repair::spawn(path.to_string(), Duration::from_secs(60));
         let repair_log_dir = PathBuf::from(path).join("repair_log");
         Self {
-            db: SimpleDb::open(path),
+            db: SimpleDb::open_named(names::STORAGE_PIPELINE, path),
             rent: RentEscrow::open(&format!("{path}/rent_escrow.db")),
             rent_rate: 0,
             repair_log_dir,

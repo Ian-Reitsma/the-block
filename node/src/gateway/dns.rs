@@ -1,5 +1,5 @@
 use super::{mobile_cache, read_receipt};
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 use crate::ERR_DNS_SIG_INVALID;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
 use hex;
@@ -22,7 +22,7 @@ use trust_dns_resolver::{config::*, Resolver};
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_DNS_DB_PATH").unwrap_or_else(|_| "dns_db".into());
-    Mutex::new(SimpleDb::open(&path))
+    Mutex::new(SimpleDb::open_named(names::GATEWAY_DNS, &path))
 });
 
 static ALLOW_EXTERNAL: AtomicBool = AtomicBool::new(false);

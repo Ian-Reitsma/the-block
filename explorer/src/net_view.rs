@@ -8,6 +8,14 @@ pub struct CertRecord {
     pub updated_at: u64,
 }
 
+#[derive(Serialize)]
+pub struct OverlayStatusRecord {
+    pub backend: String,
+    pub active_peers: usize,
+    pub persisted_peers: usize,
+    pub database_path: Option<String>,
+}
+
 pub fn list_peer_certs() -> Vec<CertRecord> {
     the_block::net::peer_cert_snapshot()
         .into_iter()
@@ -17,4 +25,14 @@ pub fn list_peer_certs() -> Vec<CertRecord> {
             updated_at: entry.updated_at,
         })
         .collect()
+}
+
+pub fn overlay_status() -> OverlayStatusRecord {
+    let status = the_block::net::overlay_status();
+    OverlayStatusRecord {
+        backend: status.backend,
+        active_peers: status.active_peers,
+        persisted_peers: status.persisted_peers,
+        database_path: status.database_path,
+    }
 }
