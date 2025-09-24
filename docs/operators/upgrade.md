@@ -1,4 +1,5 @@
 # Upgrade a node
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 1. Download new release and verify:
 ```sh
@@ -56,4 +57,3 @@ If migrating a fleet, roll out upgrades in waves and monitor the first upgraded
 node for at least one epoch to ensure subsidy gauges increment and that
 `governance/history` records the expected multiplier entries. Only after
 confirmation should the remaining nodes be switched over.
-

@@ -1,4 +1,5 @@
 # Compute-Market Courier and Retry Logic
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The compute market supports a store-and-forward "courier" mode where contributors shuttle data bundles across intermittent links. Each bundle generates a durable receipt that is retried with exponential backoff until an upstream worker acknowledges it. This guide explains the receipt format, storage layout, retry schedule, and operational tooling.
 

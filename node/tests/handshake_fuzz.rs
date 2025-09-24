@@ -32,6 +32,12 @@ proptest! {
             quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
+
+
         };
         let msg = Message::new(Payload::Handshake(hello), &sample_sk());
         // Should never panic regardless of contents

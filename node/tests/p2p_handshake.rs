@@ -30,8 +30,17 @@ fn reject_mismatched_network() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
+
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let ack = handle_handshake("peer1", hello, &cfg());
     assert!(!ack.ok);
@@ -61,8 +70,17 @@ fn reject_old_proto() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
+
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let ack = handle_handshake("peer2", hello, &cfg());
     assert!(!ack.ok);
@@ -92,8 +110,17 @@ fn accept_and_record() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
+
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let ack = handle_handshake("peer3", hello, &cfg());
     assert!(ack.ok);

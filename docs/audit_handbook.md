@@ -1,4 +1,5 @@
 # Audit Handbook
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document consolidates the management directives for audit and development agents working on **the-block**. It outlines the uncompromising standards expected for environment setup, testing, and adversarial review. These requirements supplement `AGENTS.md` and `Agents-Sup.md`.
 An automated audit matrix (`xtask gen-audit-matrix`) maps every requirement ID to its verifying test and CI job. CI runs `xtask check-audit-matrix` to ensure docs and code remain in lockstep.

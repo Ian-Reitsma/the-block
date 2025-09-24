@@ -1,4 +1,5 @@
 # Threat Model Overview
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This folder outlines adversarial surfaces and the counter-measures baked into the CT-only design.
 

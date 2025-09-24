@@ -131,6 +131,10 @@ mod tests {
             quic_cert: None,
             quic_fingerprint: None,
             quic_fingerprint_previous: Vec::new(),
+
+            quic_provider: None,
+
+            quic_capabilities: Vec::new(),
         };
         Message::new(Payload::Handshake(hello), &sk)
     }

@@ -1,41 +1,69 @@
 # QUIC Transport Integration
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
-This document outlines the deterministic QUIC transport layer used for peer to peer communication.
+This document outlines the trait-based QUIC transport layer that carries peer-to-peer traffic in The-Block.
 
 ## Handshake
-Peers establish connections using `s2n-quic` with mutual TLS. Certificates are derived from each node's Ed25519 network identity and rotated at startup to limit reuse.
 
-During startup the node generates a fresh Ed25519-backed X.509 certificate via `net::transport_quic::initialize`. The prior certificate is preserved so peers can migrate gracefully. Gossip messages embed the current certificate fingerprint, and `p2p::handshake` validates that the certificate presented by a peer matches the advertised fingerprint and the peer's signing key.
+Peers establish connections by dialing through `transport::ProviderRegistry`, which selects either the Quinn (default) or s2n-quic backend based on `config/quic.toml`. Each provider advertises its identifier and capability set (`certificate_rotation`, `telemetry_callbacks`, `fingerprint_history`) during the handshake so the `p2p::handshake` module can persist provider metadata, expose it through CLI/RPC surfaces, and route validation through the correct certificate store. Certificates are derived from the node’s Ed25519 network identity, rotated on startup, and cached so peers can migrate without drops. `p2p::handshake` verifies that the peer-presented certificate matches the advertised fingerprint and signer key before upgrading the session.
 
-Per-peer certificate fingerprints are cached on disk (`~/.the_block/quic_peer_certs.json`) so subsequent gossip can reject stale or unknown identities. The cache is exposed through `net::peer_cert_snapshot()` for tooling and the explorer.
+During startup the registry loads `transport::Config`, instantiates the configured provider, and applies the shared retry/backoff policy. Quinn maintains a pooled set of `Connection` handles to amortise handshakes, while s2n wraps its server/client builders in `Arc` so rotation can happen without recreating listeners. Telemetry callbacks record `quic_conn_latency_seconds`, `quic_handshake_fail_total{peer,provider}`, and the new `quic_provider_connect_total{provider}` counter every time a backend accepts a peer.
 
-## Chaos Testing
-The `tests/quic_chaos.rs` harness injects packet loss and duplication to verify session stability. Metrics `quic_handshake_fail_total` and `quic_retransmit_total` surface handshake errors and retransmissions. Configure the harness by exporting loss and duplicate ratios (floats or percentages):
+## Certificate cache and rotation
+
+Per-peer certificate fingerprints are cached on disk (`~/.the_block/quic_peer_certs.json`) and are now partitioned by provider so history survives backend swaps. The cache is exposed via `transport::CertificateStore::snapshot` and surfaced through `net::peer_cert_snapshot()` for tooling and explorer integration. Retention is governed by `rotation_history` and `rotation_max_age_secs` in `config/quic.toml`.
+
+## Provider registry and configuration
+
+Runtime configuration is split between `config/default.toml` (ports and legacy flags) and `config/quic.toml`, which feeds the transport layer. The following keys map directly onto `transport::Config`:
+
+| Key | Description |
+|-----|-------------|
+| `provider` | Either `"quinn"` (default) or `"s2n-quic"`; determines which backend the registry instantiates. |
+| `certificate_cache` | Optional path used for provider-managed certificates. Reuse the same path when switching providers to preserve history. |
+| `retry_attempts` / `retry_backoff_ms` | Listener/connection retry policy passed to the backend. |
+| `handshake_timeout_ms` | Timeout before a connect attempt fails (default 5000 ms). |
+| `rotation_history` | Number of historical fingerprints retained per provider (default 4). |
+| `rotation_max_age_secs` | Maximum age of stored fingerprints in seconds (default 30 days). |
+
+Changing the file and issuing `blockctl config reload` (or `SIGHUP`) triggers the registry to rebuild providers with the new settings; the same path applies on restart.
+
+## Chaos testing
+
+`node/tests/quic_chaos.rs` injects packet loss and duplication to verify session stability across both providers. Metrics `quic_handshake_fail_total{peer,provider}` and `quic_retransmit_total` surface handshake errors and retransmissions. Configure the harness by exporting loss and duplicate ratios (floats or percentages):
 
 ```
 export TB_QUIC_PACKET_LOSS=0.08
 export TB_QUIC_PACKET_DUP=3%
-cargo test -p node --test quic_chaos --features quic
+cargo test -p the_block --test quic_chaos --features "integration-tests quic"
 ```
 
-The test provisions ephemeral Ed25519 certificates, exercises a full QUIC handshake through the `s2n_quic::provider::io::testing` model, and asserts that payload delivery plus acknowledgements survive the configured chaos parameters. Loss deltas are also reflected in the `quic_retransmit_total` counter for telemetry.
+The test provisions ephemeral Ed25519 certificates, exercises the full QUIC handshake through the configured backend, and asserts that payload delivery plus acknowledgements survive the configured chaos parameters. Loss deltas also appear in the `quic_retransmit_total` counter for telemetry.
 
-For long running chaos drills, `scripts/chaos.sh` now forwards `--quic-loss` and `--quic-dup` flags which set the same environment variables before bootstrapping a swarm. Run summaries can be aggregated with the helpers in `sim/quic_chaos_summary.rs` to capture success rates and retransmit totals for dashboards or post-mortems.
+For long-running drills, `scripts/chaos.sh` forwards `--quic-loss` and `--quic-dup` flags, populating the same environment variables before bootstrapping a swarm. Summaries can be aggregated with `sim/quic_chaos_summary.rs` to capture retransmit totals and provider mix data for dashboards or post-mortems.
 
-The fuzz corpus at `fuzz/corpus/quic` seeds the `cargo +nightly fuzz run quic_frame` target which repeatedly deserialises QUIC message frames to harden bincode parsing. Deterministic seeds keep the harness reproducible under CI.
+The fuzz corpus at `fuzz/corpus/quic` seeds the `cargo +nightly fuzz run quic_frame` target which repeatedly deserialises QUIC frames to harden bincode parsing. Deterministic seeds keep the harness reproducible under CI.
 
-Certificate rotations are counted via the `quic_cert_rotation_total` counter.
+Certificate rotations are counted via the `quic_cert_rotation_total{provider}` counter, allowing dashboards to correlate cache churn with provider swaps.
 
 ## Benchmarks
-`node/benches/net_latency.rs` provides a Criterion benchmark that compares QUIC handshakes (through the testing model) against a synthetic TCP resend model under the same loss assumptions. Run it with `cargo bench -p the_block net_latency --features quic` to gauge the relative penalty of retransmits and duplicates when tuning operator settings.
+
+`node/benches/net_latency.rs` includes a Criterion benchmark that compares QUIC handshakes (through the active transport backend) against a synthetic TCP resend model under the same loss assumptions. Run it with
+
+```
+cargo bench -p the_block net_latency --features quic
+```
+
+to gauge the relative penalty of retransmits and duplicates when tuning operator settings.
 
 ## CLI & Explorer Support
 
-Use `the-block-cli net rotate-cert` to request an on-demand QUIC certificate rotation. The command returns the new fingerprint and prior fingerprints (hex encoded) for audit tracking.
+Use `blockctl net quic rotate` to request an on-demand QUIC certificate rotation. The command now returns the new fingerprint, prior fingerprints (hex encoded), the provider identifier, and rotation timestamps for audit tracking. `blockctl net peers --format table` and `blockctl net quic history` surface the same provider-labelled metadata, and RPC consumers receive identical fields for automation.
 
-The explorer publishes the current cache of peer fingerprints at `GET /network/certs`, returning peer identifiers and their active fingerprint. This view is backed by the same on-disk cache used by the node, ensuring operators can cross-reference rotations across the cluster.
+The explorer publishes the cached peer fingerprints at `GET /network/certs`, returning peer identifiers, provider IDs, and active fingerprints. This view is backed by the on-disk cache, ensuring operators can cross-reference rotations and provider migrations across the fleet.
 
 ## Diagnostics
-Use `contract-cli net quic-stats --url http://localhost:26658` to inspect active sessions and per-peer health. The command shows the last observed handshake latency, retransmission count, endpoint reuse counter, cached jitter, and accumulated handshake failures for each peer. Passing `--json` emits the raw response for scripting and `--token <ADMIN>` forwards an authentication token when the RPC endpoint requires it.
 
-Operators can query the same data programmatically through the `net.quic_stats` RPC which returns an array of objects containing the fields surfaced in the CLI. Statistics are cached in memory for sub-millisecond responses, telemetry exports `quic_handshake_fail_total{peer="…"}` alongside retransmit totals, and the metrics-to-logs correlation stack triggers automated log dumps when per-peer failures spike. Large gossip messages automatically prefer QUIC streams when available.
+`blockctl net quic-stats --url http://localhost:26658` inspects active sessions and per-peer health. The command shows the last observed handshake latency, retransmission count, endpoint reuse counter, cached jitter, accumulated handshake failures, and the provider ID for each peer. Passing `--json` emits the raw response for scripting and `--token <ADMIN>` forwards an authentication token when the RPC endpoint requires it.
+
+Operators can query the same data via the `net.quic_stats` RPC, which returns the fields surfaced in the CLI alongside provider metadata. Statistics are cached in memory for sub-millisecond responses, telemetry exports `quic_handshake_fail_total{peer,provider}`, `quic_provider_connect_total{provider}`, and retransmit totals, and the metrics-to-logs correlation stack triggers automated log dumps when per-peer failures spike. Large gossip messages continue to prefer QUIC streams when available, falling back to TCP when the transport registry reports a failure.

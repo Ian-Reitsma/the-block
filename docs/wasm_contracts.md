@@ -1,4 +1,5 @@
 # WASM Contracts
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Smart contracts can now be authored in WebAssembly and executed through a
 Wasmtime interpreter configured for determinism. The engine enables fuel-based

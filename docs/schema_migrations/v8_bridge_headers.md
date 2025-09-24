@@ -1,4 +1,5 @@
 # v8 – Bridge Header Store
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 ## Summary
 - add `verified_headers` set to bridge state to prevent replay of external deposits

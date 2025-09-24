@@ -1912,6 +1912,28 @@ impl Blockchain {
         crate::net::set_metrics_export_dir(cfg.metrics_export_dir.clone());
         crate::net::set_peer_metrics_export_quota(cfg.peer_metrics_export_quota_bytes);
         crate::net::set_metrics_aggregator(cfg.metrics_aggregator.clone());
+        #[cfg(feature = "quic")]
+        {
+            let quic_cfg = cfg.quic.as_ref();
+            let transport_cfg = quic_cfg
+                .map(|quic| quic.transport.to_transport_config())
+                .unwrap_or_else(transport::Config::default);
+            if let Err(err) = crate::net::configure_transport(&transport_cfg) {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!(reason = %err, "transport_configure_failed");
+                #[cfg(not(feature = "telemetry"))]
+                eprintln!("transport_configure_failed: {err}");
+            }
+            let (history, max_age) = quic_cfg
+                .map(|quic| {
+                    (
+                        quic.transport.rotation_history,
+                        quic.transport.rotation_max_age_secs,
+                    )
+                })
+                .unwrap_or((None, None));
+            crate::net::configure_peer_cert_policy(history, max_age);
+        }
         crate::net::set_track_drop_reasons(cfg.track_peer_drop_reasons);
         crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
         crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);

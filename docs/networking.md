@@ -1,6 +1,11 @@
 # Networking Recovery Guide
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This guide describes how to restore the distributed hash table (DHT) state when the peer database becomes corrupt or unreachable.
+Overlay abstraction progress and dependency controls are tracked in
+[`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md); consult that
+plan when swapping libp2p backends or testing the upcoming `crates/p2p_overlay`
+crate.
 
 ## Resetting the Peer Database
 1. **Stop the node** to avoid concurrent writes.
@@ -41,38 +46,73 @@ metrics are documented in [network_partitions.md](network_partitions.md).
 
 ## QUIC Configuration
 
-Enable QUIC with the `--quic` flag and expose a UDP port. During startup the
-node derives an ephemeral X.509 certificate from its Ed25519 network key via
-`transport_quic::initialize`, rotates out any certificate older than the
-configured TTL, and persists the previous chain so peers can migrate without
-drops. Gossip messages include the active fingerprint, and `p2p::handshake`
-verifies that the presented certificate matches both the gossiped fingerprint
-and the signer identity. A per-peer cache stored at
-`~/.the_block/quic_peer_certs.json` lets the node reject stale or spoofed
-fingerprints; the same cache backs the explorer endpoint at
-`/network/certs`.
+Enable QUIC with the `--quic` flag and expose a UDP port. Startup now reads
+`config/default.toml` and merges any overrides from `config/quic.toml` into a
+`transport::Config` before instantiating the provider registry. The new config
+file carries the shared fields exposed by the transport layer:
 
-Manual rotations are available via `contract-cli net rotate-cert` (or the
+* `provider` — set to `"quinn"` or `"s2n-quic"` to select the backend.
+* `certificate_cache` — optional on-disk cache used by providers that manage
+  X.509 material (s2n-quic honours the path directly; Quinn uses it when
+  mirroring fingerprints for peers).
+* `retry_attempts` / `retry_backoff_ms` — socket bind/connection retry policy
+  forwarded to the active backend.
+* `handshake_timeout_ms` — connection handshake deadline (default 5 seconds).
+* `rotation_history` / `rotation_max_age_secs` — certificate persistence
+  policy applied per provider. Defaults retain four historical fingerprints for
+  30 days.
+
+The registry defaults to Quinn when the file is absent, and the loader applies
+the selected rotation policy on both initial startup and every config reload so
+changes take effect without restarts.
+
+Every QUIC handshake now advertises the provider identifier and the capability
+set reported by the backend (`certificate_rotation`, `telemetry_callbacks`, etc.).
+The handshake layer persists these fields in peer state, and both the CLI and
+RPC endpoints surface them so operators can see which peers have migrated to a
+different implementation. Successful connections increment
+`quic_provider_connect_total{provider}`, allowing dashboards to watch provider
+mix changes over time. The telemetry callbacks remain replaceable and continue
+to drive the existing latency, retransmit, and disconnect metrics regardless of
+the selected backend.
+
+With the Quinn provider the transport layer derives an ephemeral X.509
+certificate from the node’s Ed25519 network key, rotates out any certificate
+older than the configured TTL, and persists the previous chain so peers can
+migrate without drops. Gossip messages include the active fingerprint, and
+`p2p::handshake` verifies that the presented certificate matches both the
+gossiped fingerprint and the signer identity. A per-peer cache stored at
+`~/.the_block/quic_peer_certs.json` lets the node reject stale or spoofed
+fingerprints; the same cache backs the explorer endpoint at `/network/certs`.
+
+Selecting the s2n provider honours the same configuration and telemetry hooks
+while deriving certificates from the shared cache path. Certificate history is
+persisted per provider so switching backends does not overwrite Quinn’s stored
+fingerprints or the telemetry served by `net.quic_certs`.
+
+Manual rotations are available via `blockctl net quic rotate` (or the
 equivalent RPC), which returns the new fingerprint along with the previous
 chain for audit logging. Every successful rotation increments
 `quic_cert_rotation_total{peer}` for dashboards, tagging the rotating peer so
 operators can correlate the event with transport metrics. Session health is
-exposed through the
-`net.quic_stats` RPC: operators receive cached latency, retransmit totals,
-endpoint reuse counts, and per-peer `quic_handshake_fail_total{peer}` values.
-The CLI wrapper `contract-cli net quic-stats --json --token <AUTH>` renders the
-same data for scripting, while the aggregator can trigger automated log dumps
-whenever a peer’s failure counter spikes.
+exposed through the `net.quic_stats` RPC: operators receive cached latency,
+retransmit totals, endpoint reuse counts, and per-peer
+`quic_handshake_fail_total{peer}` values. The CLI wrapper
+`blockctl net quic stats --json --token <AUTH>` renders the same data for
+scripting, while the aggregator can trigger automated log dumps whenever a
+peer’s failure counter spikes.
 
 `net.quic_certs` surfaces the full certificate cache—including the active
 fingerprint, prior history, observed age, and whether the node still retains the
 DER blob—for dashboard automation. The CLI mirrors this via
-`contract-cli net quic history`, which prints a human readable summary or JSON.
-Use `contract-cli net quic refresh` (RPC: `net.quic_certs_refresh`) when
+`blockctl net quic history`, which prints a human readable summary or JSON.
+Use `blockctl net quic refresh` (RPC: `net.quic_certs_refresh`) when
 rotations occur out-of-band; the node will reload the cache immediately instead
 of waiting for the filesystem watcher to notice the update. History entries are
 age-bounded (`MAX_PEER_CERT_HISTORY` × 30 days) so stale fingerprints are
-pruned automatically before persistence.
+pruned automatically before persistence. Entries are keyed by provider
+identifier, and the CLI reports rotation timestamps per backend so mixed Quinn
+and s2n deployments remain auditable during migrations.
 
 Certificate blobs are encrypted on disk using a ChaCha20-Poly1305 key derived
 from the node’s Ed25519 signing key (or `TB_PEER_CERT_KEY_HEX`). Operators
@@ -107,7 +147,7 @@ suite to avoid spurious handshake failures.
 
 If a QUIC handshake fails, the node automatically retries the connection over
 TCP. Each failure increments `quic_handshake_fail_total{peer}` and is reflected
-in the cached diagnostics surfaced by `contract-cli net quic-stats`. A spike in
+in the cached diagnostics surfaced by `blockctl net quic stats`. A spike in
 these counters usually signals certificate drift, UDP filtering, or exhausted
 token buckets. Pair the CLI output with the metrics-to-logs correlation tool to
 pull the associated log dumps automatically; the aggregator requests dumps when

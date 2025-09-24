@@ -509,6 +509,7 @@ impl PeerSet {
                         if let Some(vc) = &validated_cert {
                             record_peer_certificate(
                                 &peer_key,
+                                &vc.provider,
                                 cert,
                                 vc.fingerprint,
                                 vc.previous.clone(),

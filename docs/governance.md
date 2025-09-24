@@ -1,4 +1,5 @@
 # Governance and Upgrade Path
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The Block uses service badges to weight votes on protocol changes. Nodes with a
 badge may participate in on-chain governance, proposing and approving feature
@@ -100,7 +101,7 @@ which the CLI surfaces when listing the governance queue. Explorer timelines and
 telemetry dashboards consume the same fields so operators can monitor concurrent
 scheduling windows without relying on the removed dependency metadata.
 
-> **Update (2025-09-21):** the CLI now lists `start`/`end` windows alongside vote
+> **Update (2025-09-23):** the CLI now lists `start`/`end` windows alongside vote
 > totals and execution status, replacing the removed dependency field. Capture the
 > new scheduling metadata in explorer dashboards before enabling the `cli`
 > feature for production drills.

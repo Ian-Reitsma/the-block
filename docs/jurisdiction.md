@@ -1,4 +1,5 @@
 # Jurisdiction Policies and Law-Enforcement Logging
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `jurisdiction` crate provides region-specific policy packs and an optional
 post-quantum (PQ) encrypted logging helper so operators can comply with local

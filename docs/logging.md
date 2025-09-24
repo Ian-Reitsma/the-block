@@ -1,4 +1,5 @@
 # Log Correlation and Search
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Structured logs include a per-request `correlation_id` field that links
 individual log entries with telemetry metrics and external tooling.

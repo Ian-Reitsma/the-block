@@ -1,4 +1,5 @@
 # Governance Parameters
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The chain exposes a handful of live‑tunable parameters that can be updated via on‑chain governance. Each proposal carries a key, a new value, and bounds. When a proposal passes, the change is queued and activates at the next epoch boundary.
 

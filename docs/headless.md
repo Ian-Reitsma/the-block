@@ -1,4 +1,5 @@
 # Headless Node Installation
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `installer` utility packages signed binaries and provides an auto-update
 mechanism suitable for servers or minimal environments.

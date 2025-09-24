@@ -1,6 +1,8 @@
 #![deny(warnings)]
 
 use crate::net::peer::HandshakeError;
+#[cfg(feature = "quic")]
+use crate::net::transport_quic;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use once_cell::sync::Lazy;
@@ -9,6 +11,8 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 #[cfg(all(feature = "telemetry", feature = "quic"))]
 use tracing::warn;
+#[cfg(feature = "quic")]
+use transport;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy)]
@@ -44,6 +48,10 @@ pub struct Hello {
     pub quic_fingerprint: Option<Vec<u8>>,
     #[serde(default)]
     pub quic_fingerprint_previous: Vec<Vec<u8>>,
+    #[serde(default)]
+    pub quic_provider: Option<String>,
+    #[serde(default)]
+    pub quic_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,16 +77,76 @@ pub struct PeerInfo {
     pub transport: Transport,
     pub quic_addr: Option<std::net::SocketAddr>,
     pub quic_cert: Option<Vec<u8>>,
+    pub quic_provider: Option<String>,
+    pub quic_capabilities: Vec<String>,
+    pub quic_fingerprint: Option<Vec<u8>>,
+    pub quic_fingerprint_previous: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatedCert {
+    pub provider: String,
     pub fingerprint: [u8; 32],
     pub previous: Vec<[u8; 32]>,
 }
 
 #[cfg(feature = "quic")]
-use crate::net::transport_quic;
+fn infer_quic_provider_kind(hello: &Hello) -> Option<transport::ProviderKind> {
+    if let Some(provider) = hello.quic_provider.as_deref() {
+        if let Some(kind) = transport::provider_kind_from_id(provider) {
+            return Some(kind);
+        }
+    }
+
+    let advertises_rotation = hello
+        .quic_capabilities
+        .iter()
+        .any(|cap| cap.eq_ignore_ascii_case("certificate_rotation"));
+
+    if advertises_rotation || hello.quic_cert.is_some() {
+        #[cfg(feature = "s2n-quic")]
+        {
+            return Some(transport::ProviderKind::S2nQuic);
+        }
+
+        #[cfg(not(feature = "s2n-quic"))]
+        {
+            return None;
+        }
+    }
+
+    if let Some(registry) = crate::net::transport_registry() {
+        Some(registry.kind())
+    } else {
+        Some(transport::ProviderKind::Quinn)
+    }
+}
+
+#[cfg(feature = "quic")]
+fn canonical_provider_id(hello: &Hello, fallback: transport::ProviderKind) -> String {
+    hello
+        .quic_provider
+        .as_ref()
+        .and_then(|id| transport::provider_kind_from_id(id).map(|kind| kind.id().to_string()))
+        .unwrap_or_else(|| fallback.id().to_string())
+}
+
+#[cfg(feature = "quic")]
+fn verify_certificate_with_provider(
+    kind: transport::ProviderKind,
+    provider_id: &str,
+    peer_key: &[u8; 32],
+    cert: &[u8],
+) -> anyhow::Result<[u8; 32]> {
+    if let transport::ProviderKind::S2nQuic = kind {
+        if let Some(registry) = crate::net::transport_registry() {
+            if let Some(adapter) = registry.s2n() {
+                return adapter.verify_remote_certificate(peer_key, cert);
+            }
+        }
+    }
+    transport::verify_remote_certificate_for(provider_id, peer_key, cert)
+}
 
 #[cfg(feature = "quic")]
 pub fn validate_quic_certificate(
@@ -86,25 +154,44 @@ pub fn validate_quic_certificate(
     hello: &Hello,
 ) -> Result<Option<ValidatedCert>, HandshakeError> {
     if let Some(cert) = hello.quic_cert.as_ref() {
+        let provider_kind = infer_quic_provider_kind(hello).ok_or_else(|| {
+            #[cfg(feature = "telemetry")]
+            {
+                let peer = hex::encode(peer_key);
+                telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+                    .with_label_values(&[&peer, "certificate"])
+                    .inc();
+                warn!(
+                    target: "p2p",
+                    peer = %hex::encode(peer_key),
+                    "QUIC certificate presented without a supported provider"
+                );
+            }
+            HandshakeError::Certificate
+        })?;
+        let provider_id = canonical_provider_id(hello, provider_kind);
         let fingerprint =
-            transport_quic::verify_remote_certificate(peer_key, cert).map_err(|err| {
-                #[cfg(feature = "telemetry")]
-                {
-                    let peer = hex::encode(peer_key);
-                    telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[&peer, "certificate"])
-                        .inc();
-                    warn!(
-                        target: "p2p",
-                        peer = %hex::encode(peer_key),
-                        error = %err,
-                        "QUIC certificate validation failed"
-                    );
-                }
-                #[cfg(not(feature = "telemetry"))]
-                let _ = err;
-                HandshakeError::Certificate
-            })?;
+            verify_certificate_with_provider(provider_kind, &provider_id, peer_key, cert).map_err(
+                |err| {
+                    #[cfg(feature = "telemetry")]
+                    {
+                        let peer = hex::encode(peer_key);
+                        telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+                            .with_label_values(&[&peer, "certificate"])
+                            .inc();
+                        warn!(
+                            target: "p2p",
+                            peer = %hex::encode(peer_key),
+                            provider = provider_id.as_str(),
+                            error = %err,
+                            "QUIC certificate validation failed"
+                        );
+                    }
+                    #[cfg(not(feature = "telemetry"))]
+                    let _ = err;
+                    HandshakeError::Certificate
+                },
+            )?;
         if let Some(expected) = hello.quic_fingerprint.as_ref() {
             if expected.len() != 32 || expected.as_slice() != fingerprint.as_slice() {
                 #[cfg(feature = "telemetry")]
@@ -133,6 +220,7 @@ pub fn validate_quic_certificate(
             }
         }
         Ok(Some(ValidatedCert {
+            provider: provider_id,
             fingerprint,
             previous,
         }))
@@ -148,6 +236,7 @@ pub fn validate_quic_certificate(
 ) -> Result<Option<ValidatedCert>, HandshakeError> {
     if hello.quic_cert.is_some() {
         Ok(Some(ValidatedCert {
+            provider: String::new(),
             fingerprint: [0u8; 32],
             previous: Vec::new(),
         }))
@@ -225,6 +314,10 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
             transport: hello.transport,
             quic_addr: hello.quic_addr,
             quic_cert: hello.quic_cert.clone(),
+            quic_provider: hello.quic_provider.clone(),
+            quic_capabilities: hello.quic_capabilities.clone(),
+            quic_fingerprint: hello.quic_fingerprint.clone(),
+            quic_fingerprint_previous: hello.quic_fingerprint_previous.clone(),
         },
     );
     HelloAck {
@@ -239,6 +332,21 @@ pub fn handle_handshake(peer_id: &str, hello: Hello, cfg: &HandshakeCfg) -> Hell
 pub fn list_peers() -> Vec<(String, PeerInfo)> {
     let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
     peers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+pub fn peer_provider(peer: &[u8; 32]) -> Option<String> {
+    let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
+    let key = hex::encode(peer);
+    peers.get(&key).and_then(|info| info.quic_provider.clone())
+}
+
+pub fn peer_capabilities(peer: &[u8; 32]) -> Vec<String> {
+    let peers = PEERS.lock().unwrap_or_else(|e| e.into_inner());
+    let key = hex::encode(peer);
+    peers
+        .get(&key)
+        .map(|info| info.quic_capabilities.clone())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -267,6 +375,8 @@ mod tests {
             quic_cert: None,
             quic_fingerprint: None,
             quic_fingerprint_previous: Vec::new(),
+            quic_provider: None,
+            quic_capabilities: Vec::new(),
         }
     }
 
@@ -298,6 +408,8 @@ mod tests {
         hello.transport = Transport::Quic;
         hello.quic_cert = Some(cert);
         hello.quic_fingerprint = fingerprint;
+        hello.quic_provider = Some(transport::ProviderKind::S2nQuic.id().to_string());
+        hello.quic_capabilities = vec!["certificate_rotation".into()];
         hello
     }
 
@@ -339,5 +451,28 @@ mod tests {
         let hello = quic_hello(cert, Some(mismatched));
         let err = validate_quic_certificate(&peer_key, &hello).unwrap_err();
         assert_eq!(err, HandshakeError::Certificate);
+    }
+
+    #[cfg(feature = "quic")]
+    #[test]
+    fn infers_quinn_provider_when_metadata_missing() {
+        let mut hello = base_hello();
+        hello.transport = Transport::Quic;
+        assert_eq!(
+            super::infer_quic_provider_kind(&hello),
+            Some(transport::ProviderKind::Quinn)
+        );
+    }
+
+    #[cfg(all(feature = "quic", feature = "s2n-quic"))]
+    #[test]
+    fn infers_s2n_from_rotation_capability() {
+        let mut hello = base_hello();
+        hello.transport = Transport::Quic;
+        hello.quic_capabilities = vec!["CERTIFICATE_ROTATION".into()];
+        assert_eq!(
+            super::infer_quic_provider_kind(&hello),
+            Some(transport::ProviderKind::S2nQuic)
+        );
     }
 }

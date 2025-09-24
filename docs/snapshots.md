@@ -1,4 +1,5 @@
 # Snapshot Rotation and CI Restore
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Nodes periodically emit a full snapshot followed by incremental diffs. CI uses
 `scripts/snapshot_ci.sh` to verify that the latest snapshot plus diffs reconstruct

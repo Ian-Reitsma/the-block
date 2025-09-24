@@ -1,4 +1,5 @@
 # Storage Erasure Coding and Reconstruction
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The storage pipeline protects blobs with local-reconstruction codes (LRC) and a
 small fountain overlay so nodes can recover data even when shards are missing.

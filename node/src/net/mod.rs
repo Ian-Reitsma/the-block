@@ -48,12 +48,25 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc::channel, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+#[cfg(all(feature = "quic", feature = "telemetry"))]
+use crate::telemetry::{
+    sampled_observe, QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CERT_ROTATION_TOTAL,
+    QUIC_CONN_LATENCY_SECONDS, QUIC_DISCONNECT_TOTAL, QUIC_ENDPOINT_REUSE_TOTAL,
+    QUIC_HANDSHAKE_FAIL_TOTAL, QUIC_PROVIDER_CONNECT_TOTAL, QUIC_RETRANSMIT_TOTAL,
+};
+#[cfg(feature = "quic")]
+use transport::{
+    self, Config as TransportConfig, DefaultFactory as TransportDefaultFactory,
+    ProviderRegistry as TransportProviderRegistry, QuinnCallbacks, QuinnDisconnect, S2nCallbacks,
+    TransportCallbacks, TransportFactory,
+};
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
 pub use message::{BlobChunk, Message, Payload};
@@ -83,9 +96,173 @@ pub fn quic_stats() -> Vec<QuicStatsEntry> {
     Vec::new()
 }
 
+#[cfg(feature = "quic")]
+static TRANSPORT_FACTORY: Lazy<RwLock<Arc<dyn transport::TransportFactory>>> =
+    Lazy::new(|| RwLock::new(Arc::new(TransportDefaultFactory::default()) as Arc<_>));
+
+#[cfg(feature = "quic")]
+static TRANSPORT_REGISTRY: Lazy<RwLock<Option<TransportProviderRegistry>>> =
+    Lazy::new(|| RwLock::new(None));
+
+#[cfg(feature = "quic")]
+pub fn install_transport_factory(factory: Arc<dyn transport::TransportFactory>) {
+    *TRANSPORT_FACTORY.write().unwrap() = factory;
+}
+
+#[cfg(feature = "quic")]
+pub fn configure_transport(cfg: &TransportConfig) -> anyhow::Result<()> {
+    let callbacks = build_transport_callbacks();
+    let factory = TRANSPORT_FACTORY.read().unwrap().clone();
+    let registry = factory.create(cfg, &callbacks)?;
+    *TRANSPORT_REGISTRY.write().unwrap() = Some(registry);
+    Ok(())
+}
+
+#[cfg(feature = "quic")]
+pub(crate) fn transport_registry() -> Option<TransportProviderRegistry> {
+    {
+        let guard = TRANSPORT_REGISTRY.read().unwrap();
+        if guard.is_some() {
+            return guard.clone();
+        }
+    }
+    if let Err(err) = configure_transport(&TransportConfig::default()) {
+        #[cfg(feature = "telemetry")]
+        tracing::warn!(reason = %err, "transport_configure_default_failed");
+        #[cfg(not(feature = "telemetry"))]
+        eprintln!("transport_configure_default_failed: {err}");
+    }
+    TRANSPORT_REGISTRY.read().unwrap().clone()
+}
+
+#[cfg(feature = "quic")]
+fn build_transport_callbacks() -> TransportCallbacks {
+    let mut callbacks = TransportCallbacks::default();
+
+    #[cfg(feature = "quic")]
+    let provider_counter: Arc<dyn Fn(&'static str) + Send + Sync + 'static> = {
+        let cb = Arc::new(|provider: &'static str| {
+            #[cfg(feature = "telemetry")]
+            QUIC_PROVIDER_CONNECT_TOTAL
+                .with_label_values(&[provider])
+                .inc();
+        });
+        cb
+    };
+
+    {
+        let quinn = &mut callbacks.quinn;
+        #[cfg(feature = "quinn")]
+        {
+            quinn.provider_connect = Some(provider_counter.clone());
+        }
+        quinn.handshake_latency = Some(Arc::new(|addr: SocketAddr, elapsed: Duration| {
+            #[cfg(feature = "telemetry")]
+            sampled_observe(&QUIC_CONN_LATENCY_SECONDS, elapsed.as_secs_f64());
+            if let Some(pk) = pk_from_addr(&addr) {
+                peer::record_handshake_latency(&pk, elapsed.as_millis() as u64);
+            }
+        }));
+
+        quinn.handshake_failure = Some(Arc::new(|addr: SocketAddr, err| {
+            let mapped = map_quinn_handshake_error(err);
+            if let Some(pk) = pk_from_addr(&addr) {
+                quic_stats::record_handshake_failure(&pk);
+            }
+            peer::record_handshake_fail_addr(addr, mapped);
+            #[cfg(feature = "telemetry")]
+            {
+                if peer::track_handshake_fail_enabled() {
+                    let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[peer_label.as_str(), mapped.as_str()])
+                        .inc();
+                }
+                tracing::error!(reason = mapped.as_str(), "quic_connect_fail");
+            }
+        }));
+
+        quinn.endpoint_reuse = Some(Arc::new(|addr: SocketAddr| {
+            #[cfg(feature = "telemetry")]
+            QUIC_ENDPOINT_REUSE_TOTAL.inc();
+            if let Some(pk) = pk_from_addr(&addr) {
+                quic_stats::record_endpoint_reuse(&pk);
+            }
+        }));
+
+        quinn.bytes_sent = Some(Arc::new(|_addr: SocketAddr, bytes: u64| {
+            #[cfg(feature = "telemetry")]
+            QUIC_BYTES_SENT_TOTAL.inc_by(bytes);
+        }));
+
+        quinn.bytes_received = Some(Arc::new(|_addr: SocketAddr, bytes: u64| {
+            #[cfg(feature = "telemetry")]
+            QUIC_BYTES_RECV_TOTAL.inc_by(bytes);
+        }));
+
+        quinn.disconnect = Some(Arc::new(|_addr: SocketAddr, reason: QuinnDisconnect| {
+            #[cfg(feature = "telemetry")]
+            {
+                let label = reason.label();
+                QUIC_DISCONNECT_TOTAL
+                    .with_label_values(&[label.as_ref()])
+                    .inc();
+            }
+        }));
+    }
+
+    {
+        let s2n = &mut callbacks.s2n;
+        #[cfg(feature = "s2n-quic")]
+        {
+            s2n.provider_connect = Some(provider_counter.clone());
+        }
+        s2n.cert_rotated = Some(Arc::new(|label: &'static str| {
+            #[cfg(feature = "telemetry")]
+            QUIC_CERT_ROTATION_TOTAL.with_label_values(&[label]).inc();
+        }));
+
+        s2n.handshake_failure = Some(Arc::new(|reason: &str| {
+            #[cfg(feature = "telemetry")]
+            {
+                let peer_label = quic_stats::peer_label(None);
+                QUIC_HANDSHAKE_FAIL_TOTAL
+                    .with_label_values(&[peer_label.as_str(), reason])
+                    .inc();
+            }
+        }));
+
+        s2n.retransmit = Some(Arc::new(|count: u64| {
+            #[cfg(feature = "telemetry")]
+            QUIC_RETRANSMIT_TOTAL.inc_by(count);
+        }));
+    }
+
+    callbacks
+}
+
+#[cfg(feature = "quic")]
+fn map_quinn_handshake_error(err: transport::HandshakeError) -> peer::HandshakeError {
+    match err {
+        transport::HandshakeError::Tls => peer::HandshakeError::Tls,
+        transport::HandshakeError::Version => peer::HandshakeError::Version,
+        transport::HandshakeError::Timeout => peer::HandshakeError::Timeout,
+        transport::HandshakeError::Certificate => peer::HandshakeError::Certificate,
+        transport::HandshakeError::Other => peer::HandshakeError::Other,
+    }
+}
+
+#[cfg(feature = "quic")]
+fn capability_label(cap: transport::ProviderCapability) -> &'static str {
+    match cap {
+        transport::ProviderCapability::CertificateRotation => "certificate_rotation",
+        transport::ProviderCapability::ConnectionPooling => "connection_pooling",
+        transport::ProviderCapability::InsecureConnect => "insecure_connect",
+        transport::ProviderCapability::TelemetryCallbacks => "telemetry_callbacks",
+    }
+}
+
 const PEER_CERT_STORE_FILE: &str = "quic_peer_certs.json";
-const MAX_PEER_CERT_HISTORY: usize = 4;
-const MAX_PEER_CERT_AGE_SECS: u64 = 30 * 24 * 60 * 60;
 const CERT_BLOB_PREFIX: &str = "enc:v1:";
 const DISABLE_PERSIST_ENV: &str = "TB_PEER_CERT_DISABLE_DISK";
 
@@ -103,6 +280,8 @@ struct PeerCertStore {
     rotations: u64,
 }
 
+type ProviderCertStores = HashMap<String, PeerCertStore>;
+
 #[derive(Clone, Serialize, Deserialize)]
 struct CertDiskRecord {
     fingerprint: String,
@@ -114,6 +293,8 @@ struct CertDiskRecord {
 #[derive(Clone, Serialize, Deserialize)]
 struct PeerCertDiskEntry {
     peer: String,
+    #[serde(default)]
+    providers: Vec<ProviderDiskRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     current: Option<CertDiskRecord>,
     history: Vec<CertDiskRecord>,
@@ -121,9 +302,23 @@ struct PeerCertDiskEntry {
     rotations: Option<u64>,
 }
 
-static PEER_CERTS: Lazy<RwLock<HashMap<[u8; 32], PeerCertStore>>> =
+#[derive(Clone, Serialize, Deserialize)]
+struct ProviderDiskRecord {
+    provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<CertDiskRecord>,
+    #[serde(default)]
+    history: Vec<CertDiskRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rotations: Option<u64>,
+}
+
+static PEER_CERTS: Lazy<RwLock<HashMap<[u8; 32], ProviderCertStores>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 static PEER_CERTS_INITIALIZED: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+static PEER_CERT_HISTORY_LIMIT: Lazy<AtomicUsize> =
+    Lazy::new(|| AtomicUsize::new(DEFAULT_PEER_CERT_HISTORY));
+static PEER_CERT_MAX_AGE: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(DEFAULT_PEER_CERT_MAX_AGE));
 static PEER_CERT_WATCH_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 static PEER_CERT_PERSIST_DISABLED: Lazy<bool> =
     Lazy::new(|| std::env::var_os(DISABLE_PERSIST_ENV).is_some());
@@ -157,6 +352,8 @@ pub struct QuicStatsEntry {
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
     pub retransmits: u64,
     pub endpoint_reuse: u64,
     pub handshake_failures: u64,
@@ -166,6 +363,7 @@ pub struct QuicStatsEntry {
 #[derive(Clone, Serialize)]
 pub struct PeerCertSnapshot {
     pub peer: [u8; 32],
+    pub provider: String,
     pub fingerprint: [u8; 32],
     pub updated_at: u64,
 }
@@ -173,6 +371,7 @@ pub struct PeerCertSnapshot {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerCertHistoryEntry {
     pub peer: String,
+    pub provider: String,
     pub current: PeerCertHistoryRecord,
     pub history: Vec<PeerCertHistoryRecord>,
     pub rotations: u64,
@@ -185,6 +384,9 @@ pub struct PeerCertHistoryRecord {
     pub age_secs: u64,
     pub has_certificate: bool,
 }
+
+const DEFAULT_PEER_CERT_HISTORY: usize = 4;
+const DEFAULT_PEER_CERT_MAX_AGE: u64 = 30 * 24 * 60 * 60;
 
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -205,6 +407,21 @@ fn peer_cert_store_path() -> PathBuf {
 
 fn peer_cert_persistence_enabled() -> bool {
     !*PEER_CERT_PERSIST_DISABLED
+}
+
+fn max_peer_cert_history() -> usize {
+    PEER_CERT_HISTORY_LIMIT.load(Ordering::Relaxed)
+}
+
+fn max_peer_cert_age_secs() -> u64 {
+    PEER_CERT_MAX_AGE.load(Ordering::Relaxed)
+}
+
+pub fn configure_peer_cert_policy(history: Option<usize>, max_age: Option<u64>) {
+    let history = history.unwrap_or(DEFAULT_PEER_CERT_HISTORY);
+    let max_age = max_age.unwrap_or(DEFAULT_PEER_CERT_MAX_AGE);
+    PEER_CERT_HISTORY_LIMIT.store(history, Ordering::Relaxed);
+    PEER_CERT_MAX_AGE.store(max_age, Ordering::Relaxed);
 }
 
 fn peer_cert_encryption_key() -> Option<[u8; 32]> {
@@ -279,8 +496,8 @@ fn decrypt_cert_blob(data: &str) -> Option<Vec<u8>> {
 fn prune_store_entry(store: &mut PeerCertStore, now: u64) {
     store
         .history
-        .retain(|snapshot| now.saturating_sub(snapshot.updated_at) <= MAX_PEER_CERT_AGE_SECS);
-    while store.history.len() > MAX_PEER_CERT_HISTORY {
+        .retain(|snapshot| now.saturating_sub(snapshot.updated_at) <= max_peer_cert_age_secs());
+    while store.history.len() > max_peer_cert_history() {
         store.history.pop_back();
     }
 }
@@ -294,6 +511,11 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
         Ok(data) => match serde_json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
             Ok(entries) => {
                 let mut rebuilt = HashMap::new();
+                let legacy_provider = if cfg!(feature = "s2n-quic") {
+                    transport::ProviderKind::S2nQuic.id().to_string()
+                } else {
+                    transport::ProviderKind::Quinn.id().to_string()
+                };
                 for entry in entries {
                     if let Ok(bytes) = hex::decode(&entry.peer) {
                         if bytes.len() != 32 {
@@ -301,22 +523,40 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
                         }
                         let mut peer = [0u8; 32];
                         peer.copy_from_slice(&bytes);
-                        if let Some(current) =
-                            entry.current.as_ref().and_then(|rec| disk_to_snapshot(rec))
-                        {
-                            let mut history = VecDeque::new();
-                            for rec in &entry.history {
-                                if let Some(snapshot) = disk_to_snapshot(rec) {
-                                    history.push_back(snapshot);
+                        let mut stores = HashMap::new();
+                        let provider_records = if entry.providers.is_empty() {
+                            vec![ProviderDiskRecord {
+                                provider: legacy_provider.clone(),
+                                current: entry.current.clone(),
+                                history: entry.history.clone(),
+                                rotations: entry.rotations,
+                            }]
+                        } else {
+                            entry.providers
+                        };
+                        for provider_entry in provider_records {
+                            if let Some(current) = provider_entry
+                                .current
+                                .as_ref()
+                                .and_then(|rec| disk_to_snapshot(rec))
+                            {
+                                let mut history = VecDeque::new();
+                                for rec in &provider_entry.history {
+                                    if let Some(snapshot) = disk_to_snapshot(rec) {
+                                        history.push_back(snapshot);
+                                    }
                                 }
+                                let mut store = PeerCertStore {
+                                    current,
+                                    history,
+                                    rotations: provider_entry.rotations.unwrap_or(0),
+                                };
+                                prune_store_entry(&mut store, now);
+                                stores.insert(provider_entry.provider.clone(), store);
                             }
-                            let mut store = PeerCertStore {
-                                current,
-                                history,
-                                rotations: entry.rotations.unwrap_or(0),
-                            };
-                            prune_store_entry(&mut store, now);
-                            rebuilt.insert(peer, store);
+                        }
+                        if !stores.is_empty() {
+                            rebuilt.insert(peer, stores);
                         }
                     }
                 }
@@ -408,7 +648,7 @@ fn ensure_peer_cert_store_loaded() {
     PEER_CERTS_INITIALIZED.store(true, Ordering::SeqCst);
 }
 
-fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], PeerCertStore>) {
+fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
     if !peer_cert_persistence_enabled() {
         return;
     }
@@ -417,16 +657,30 @@ fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], PeerCertStore>) {
         let _ = fs::create_dir_all(parent);
     }
     let now = unix_now();
-    for store in map.values_mut() {
-        prune_store_entry(store, now);
+    for stores in map.values_mut() {
+        for store in stores.values_mut() {
+            prune_store_entry(store, now);
+        }
     }
     let entries: Vec<PeerCertDiskEntry> = map
         .iter()
-        .map(|(peer, store)| PeerCertDiskEntry {
-            peer: hex::encode(peer),
-            current: Some(snapshot_to_disk(&store.current)),
-            history: store.history.iter().map(snapshot_to_disk).collect(),
-            rotations: Some(store.rotations),
+        .map(|(peer, providers)| {
+            let provider_records: Vec<ProviderDiskRecord> = providers
+                .iter()
+                .map(|(provider, store)| ProviderDiskRecord {
+                    provider: provider.clone(),
+                    current: Some(snapshot_to_disk(&store.current)),
+                    history: store.history.iter().map(snapshot_to_disk).collect(),
+                    rotations: Some(store.rotations),
+                })
+                .collect();
+            PeerCertDiskEntry {
+                peer: hex::encode(peer),
+                providers: provider_records,
+                current: None,
+                history: Vec::new(),
+                rotations: None,
+            }
         })
         .collect();
     if let Ok(json) = serde_json::to_vec_pretty(&entries) {
@@ -482,6 +736,7 @@ fn append_previous(entry: &mut PeerCertStore, previous: &[[u8; 32]], now: u64) {
 
 pub fn record_peer_certificate(
     peer: &[u8; 32],
+    provider: &str,
     cert: Vec<u8>,
     fingerprint: [u8; 32],
     previous: Vec<[u8; 32]>,
@@ -495,6 +750,7 @@ pub fn record_peer_certificate(
     ensure_peer_cert_store_loaded();
     let mut map = PEER_CERTS.write().unwrap();
     let now = unix_now();
+    let key = provider.to_string();
     match map.entry(*peer) {
         Entry::Vacant(slot) => {
             let mut store = PeerCertStore {
@@ -508,10 +764,21 @@ pub fn record_peer_certificate(
             };
             append_previous(&mut store, &previous, now);
             prune_store_entry(&mut store, now);
-            slot.insert(store);
+            let mut providers = HashMap::new();
+            providers.insert(key, store);
+            slot.insert(providers);
         }
         Entry::Occupied(mut entry) => {
-            let store = entry.get_mut();
+            let providers = entry.get_mut();
+            let store = providers.entry(key).or_insert_with(|| PeerCertStore {
+                current: CertSnapshot {
+                    fingerprint,
+                    cert: cert.clone(),
+                    updated_at: now,
+                },
+                history: VecDeque::new(),
+                rotations: 0,
+            });
             if store.current.fingerprint != fingerprint {
                 let prev = CertSnapshot {
                     fingerprint: store.current.fingerprint,
@@ -544,23 +811,38 @@ pub fn record_peer_certificate(
 }
 
 fn verify_peer_fingerprint_inner(
-    map: &HashMap<[u8; 32], PeerCertStore>,
+    map: &HashMap<[u8; 32], ProviderCertStores>,
     peer: &[u8; 32],
+    provider: Option<&str>,
     fingerprint: Option<&[u8; 32]>,
 ) -> bool {
-    match map.get(peer) {
-        Some(store) => {
-            if let Some(fp) = fingerprint {
-                if fp == &store.current.fingerprint {
-                    true
-                } else {
-                    store.history.iter().any(|h| &h.fingerprint == fp)
-                }
-            } else {
-                false
+    let stores = match map.get(peer) {
+        Some(stores) => stores,
+        None => return fingerprint.is_none(),
+    };
+    if let Some(fp) = fingerprint {
+        if let Some(id) = provider {
+            return stores
+                .get(id)
+                .map(|store| {
+                    if &store.current.fingerprint == fp {
+                        true
+                    } else {
+                        store.history.iter().any(|h| &h.fingerprint == fp)
+                    }
+                })
+                .unwrap_or(false);
+        }
+        for store in stores.values() {
+            if &store.current.fingerprint == fp
+                || store.history.iter().any(|h| &h.fingerprint == fp)
+            {
+                return true;
             }
         }
-        None => fingerprint.is_none(),
+        false
+    } else {
+        false
     }
 }
 
@@ -568,14 +850,14 @@ pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) 
     ensure_peer_cert_store_loaded();
     {
         let map = PEER_CERTS.read().unwrap();
-        let result = verify_peer_fingerprint_inner(&map, peer, fingerprint);
+        let result = verify_peer_fingerprint_inner(&map, peer, None, fingerprint);
         if result || fingerprint.is_none() {
             return result;
         }
     }
     if reload_peer_cert_store_from_disk() {
         let map = PEER_CERTS.read().unwrap();
-        return verify_peer_fingerprint_inner(&map, peer, fingerprint);
+        return verify_peer_fingerprint_inner(&map, peer, None, fingerprint);
     }
     false
 }
@@ -583,13 +865,18 @@ pub fn verify_peer_fingerprint(peer: &[u8; 32], fingerprint: Option<&[u8; 32]>) 
 pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
     ensure_peer_cert_store_loaded();
     let map = PEER_CERTS.read().unwrap();
-    map.iter()
-        .map(|(peer, store)| PeerCertSnapshot {
-            peer: *peer,
-            fingerprint: store.current.fingerprint,
-            updated_at: store.current.updated_at,
-        })
-        .collect()
+    let mut snapshots = Vec::new();
+    for (peer, stores) in map.iter() {
+        for (provider, store) in stores.iter() {
+            snapshots.push(PeerCertSnapshot {
+                peer: *peer,
+                provider: provider.clone(),
+                fingerprint: store.current.fingerprint,
+                updated_at: store.current.updated_at,
+            });
+        }
+    }
+    snapshots
 }
 
 fn history_record(snapshot: &CertSnapshot, now: u64) -> PeerCertHistoryRecord {
@@ -605,20 +892,30 @@ pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
     ensure_peer_cert_store_loaded();
     let now = unix_now();
     let map = PEER_CERTS.read().unwrap();
-    let mut entries: Vec<_> = map
-        .iter()
-        .map(|(peer, store)| PeerCertHistoryEntry {
-            peer: hex::encode(peer),
-            current: history_record(&store.current, now),
-            history: store
-                .history
-                .iter()
-                .map(|h| history_record(h, now))
-                .collect(),
-            rotations: store.rotations,
-        })
-        .collect();
-    entries.sort_by(|a, b| a.peer.cmp(&b.peer));
+    let mut entries: Vec<_> = Vec::new();
+    for (peer, stores) in map.iter() {
+        for (provider, store) in stores.iter() {
+            entries.push(PeerCertHistoryEntry {
+                peer: hex::encode(peer),
+                provider: provider.clone(),
+                current: history_record(&store.current, now),
+                history: store
+                    .history
+                    .iter()
+                    .map(|h| history_record(h, now))
+                    .collect(),
+                rotations: store.rotations,
+            });
+        }
+    }
+    entries.sort_by(|a, b| {
+        let ord = a.peer.cmp(&b.peer);
+        if ord == std::cmp::Ordering::Equal {
+            a.provider.cmp(&b.provider)
+        } else {
+            ord
+        }
+    });
     entries
 }
 
@@ -628,9 +925,24 @@ pub fn refresh_peer_cert_store_from_disk() -> bool {
 }
 
 pub fn current_peer_fingerprint(peer: &[u8; 32]) -> Option<[u8; 32]> {
+    current_peer_fingerprint_for_provider(peer, None)
+}
+
+pub fn current_peer_fingerprint_for_provider(
+    peer: &[u8; 32],
+    provider: Option<&str>,
+) -> Option<[u8; 32]> {
     ensure_peer_cert_store_loaded();
     let map = PEER_CERTS.read().unwrap();
-    map.get(peer).map(|store| store.current.fingerprint)
+    let stores = map.get(peer)?;
+    if let Some(id) = provider {
+        stores.get(id).map(|store| store.current.fingerprint)
+    } else {
+        stores
+            .values()
+            .next()
+            .map(|store| store.current.fingerprint)
+    }
 }
 
 /// Manually verify DNS TXT record for `domain`.
@@ -849,6 +1161,20 @@ impl Node {
             Transport::Tcp
         };
         #[cfg(feature = "quic")]
+        let (quic_provider, quic_capabilities) = {
+            let meta = transport_registry().map(|registry| registry.metadata());
+            let provider = meta.as_ref().map(|m| m.id.to_string());
+            let caps = meta
+                .map(|m| {
+                    m.capabilities
+                        .iter()
+                        .map(|cap| capability_label(*cap).to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (provider, caps)
+        };
+        #[cfg(feature = "quic")]
         let (quic_cert, quic_fp, quic_prev) = match &self.quic_advert {
             Some(advert) => (
                 Some(advert.cert.clone()),
@@ -881,6 +1207,14 @@ impl Node {
             quic_fingerprint: None,
             #[cfg(not(feature = "quic"))]
             quic_fingerprint_previous: Vec::new(),
+            #[cfg(feature = "quic")]
+            quic_provider,
+            #[cfg(feature = "quic")]
+            quic_capabilities,
+            #[cfg(not(feature = "quic"))]
+            quic_provider: None,
+            #[cfg(not(feature = "quic"))]
+            quic_capabilities: Vec::new(),
         };
         let hs_msg = Message::new(Payload::Handshake(hello), &self.key);
         for p in &peers {
@@ -999,11 +1333,10 @@ pub(crate) fn send_quic_msg(
     use crate::net::quic;
     #[cfg(feature = "telemetry")]
     use crate::telemetry::QUIC_FALLBACK_TCP_TOTAL;
-    use rustls::Certificate;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
-    let cert = Certificate(cert.to_vec());
+    let cert = quic::certificate_from_der(cert.to_vec()).map_err(quic::ConnectError::Other)?;
     let res = runtime::block_on(async {
-        let conn = quic::get_connection(addr, cert).await?;
+        let conn = quic::get_connection(addr, &cert).await?;
         if let Err(e) = quic::send(&conn, &bytes).await {
             quic::drop_connection(&addr);
             return Err(quic::ConnectError::Other(anyhow!(e)));

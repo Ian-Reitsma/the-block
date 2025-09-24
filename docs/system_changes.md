@@ -1,6 +1,79 @@
 # System-Wide Economic Changes
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
+
+## Dependency Sovereignty Pivot (2025-09-23)
+
+### Rationale
+
+- **Risk management:** The node relied on 800+ third-party crates spanning runtime,
+  transport, storage, coding, crypto, and serialization. A surprise upstream
+  change could invalidate safety guarantees or stall releases.
+- **Operational control:** Wrapping these surfaces in first-party crates lets
+  governance gate backend selection, run fault drills, and schedule replacements
+  without pleading for upstream releases.
+- **Observability & trust:** Telemetry, CLI, and RPC endpoints now report active
+  providers (runtime, transport, overlay, storage engine, codec, crypto) so
+  operators can audit rollouts and correlate incidents with backend switches.
+
+### Implementation Summary
+
+- Formalised the pivot plan in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
+  with 20 tracked phases covering registry, tooling, wrappers, governance,
+  telemetry, and simulation milestones.
+- Delivered the dependency registry, CI gating, runtime wrapper, runtime
+  adoption linting, QUIC transport abstraction, provider introspection,
+  release-time vendor syncs, and documentation updates as completed phases.
+- Inserted a uniform review banner across the documentation set referencing the
+  pivot date so future audits can confirm alignment.
+
+### Operator & Governance Impact
+
+- Operators must reference wrapper crates rather than upstream APIs and consult
+  the registry before accepting dependency changes.
+- Governance proposals will inherit new parameter families to approve backend
+  selections; telemetry dashboards already surface the metadata required to
+  evaluate those votes.
+- Release managers must include registry snapshots and vendor tree hashes with
+  every tagged build; CI now fails if policy drift is detected.
+
+### What’s Next
+
+- Ship the overlay, storage-engine, coding, crypto, and codec abstractions,
+  then extend telemetry/governance hooks across each wrapper.
+- Build the dependency fault simulation harness so fallbacks can be rehearsed in
+  staging before enabling on production.
+- Migrate wallet, explorer, and mobile clients onto the new abstractions as they
+  land, keeping documentation in sync with the pivot guide.
+
+## QUIC Transport Abstraction (2025-09-23)
+
+### Rationale for the Trait Layer
+
+- **Provider neutrality:** The node previously called Quinn APIs directly and carried an optional s2n path. Abstracting both behind `crates/transport` lets governance swap providers or inject mocks without forking networking code.
+- **Deterministic testing:** Integration suites can now supply in-memory providers implementing the shared traits, delivering deterministic handshake behaviour for fuzzers and chaos harnesses.
+- **Telemetry parity:** Handshake callbacks, latency metrics, and certificate rotation counters now originate from a common interface so dashboards remain consistent regardless of backend.
+
+### Implementation Summary
+
+- Introduced `crates/transport` with `QuicListener`, `QuicConnector`, and `CertificateStore` traits, plus capability enums consumed by the handshake layer.
+- Moved Quinn logic into `crates/transport/src/quinn_backend.rs` with pooled connections, retry helpers, and replaceable telemetry callbacks.
+- Ported the s2n implementation into `crates/transport/src/s2n_backend.rs`, wrapping builders in `Arc`, sharing certificate caches, and exposing provider IDs.
+- Added a `ProviderRegistry` that selects backends from `config/quic.toml`, surfaces provider metadata to `p2p::handshake`, and emits `quic_provider_connect_total{provider}` telemetry.
+- Updated CLI/RPC surfaces to display provider identifiers, rotation timestamps, and fingerprint history sourced from the shared certificate store.
+
+### Operator Impact
+
+- Configuration lives in `config/quic.toml`; reloads rebuild providers without restarting the node.
+- Certificate caches are partitioned by provider so migration between Quinn and s2n retains history.
+- Telemetry dashboards can segment connection successes/failures by provider, highlighting regressions during phased rollouts.
+
+### Testing & Tooling
+
+- `node/tests/net_quic.rs` exercises both providers via parameterised harnesses, while mocks cover retry loops.
+- CLI commands (`blockctl net quic history`, `blockctl net quic stats`, `blockctl net quic rotate`) expose provider metadata for on-call triage.
+- Chaos suites reuse the same trait interfaces, ensuring packet-loss drills and fuzz targets remain backend agnostic.
 
 ## CT Subsidy Unification (2024)
 

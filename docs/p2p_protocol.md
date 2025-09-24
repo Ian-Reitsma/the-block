@@ -1,4 +1,5 @@
 # P2P Handshake and Capability Negotiation
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Peers exchange a two-step handshake before participating in gossip. The
 handshake verifies network identity, negotiates protocol versions, and records

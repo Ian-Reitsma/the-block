@@ -1,12 +1,15 @@
 # Integration and Chaos Testing
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document outlines the strategy for integration and chaos testing in **The-Block**.
 
-> **Current caveats (2025-09-21):** CLI binaries now build cleanly on
-> `ed25519-dalek 2.2.x`, but telemetry-gated modules still emit warnings when
-> optional features are disabled. Prefer the `lightweight-integration`
-> feature set for memory-constrained runs and re-enable full telemetry when
-> validating release candidates.
+> **Current caveats (2025-09-23):** CLI binaries now build cleanly on
+> `ed25519-dalek 2.2.x`, the transport crate re-exports the `quic` feature so
+> integration harnesses must pass `--features "integration-tests quic"` when
+> selecting providers, and telemetry-gated modules still emit warnings when
+> optional features are disabled. Prefer the `lightweight-integration` feature
+> set for memory-constrained runs and re-enable full telemetry when validating
+> release candidates.
 
 ## Network Integration
 

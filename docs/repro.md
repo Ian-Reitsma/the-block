@@ -1,4 +1,5 @@
 # Reproducible Releases
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 To rebuild official releases byte-for-byte, follow these guidelines.
 

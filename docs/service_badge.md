@@ -1,4 +1,5 @@
 # Service Badge Tracker
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The service badge incentivizes long‑lived, responsive nodes. Operators earn a
 badge after demonstrating 90 consecutive epochs of high availability; losing

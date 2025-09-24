@@ -3,12 +3,18 @@
 use ed25519_dalek::SigningKey;
 use serial_test::serial;
 use std::io::Read;
+#[cfg(feature = "s2n-quic")]
+use tempfile::tempdir;
 use the_block::gossip::relay::Relay;
+#[cfg(feature = "s2n-quic")]
+use the_block::net::transport_quic;
 use the_block::net::{self, quic, Message, Payload, PeerSet, PROTOCOL_VERSION};
 use the_block::p2p::handshake::{Hello, Transport};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry::{QUIC_ENDPOINT_REUSE_TOTAL, QUIC_HANDSHAKE_FAIL_TOTAL};
 use the_block::Blockchain;
+#[cfg(feature = "s2n-quic")]
+use transport::{Config as TransportConfig, ListenerHandle, ProviderKind};
 
 #[cfg(feature = "telemetry")]
 fn reset_counters() {
@@ -18,6 +24,39 @@ fn reset_counters() {
 
 fn sample_sk() -> SigningKey {
     SigningKey::from_bytes(&[1u8; 32])
+}
+
+#[cfg(feature = "s2n-quic")]
+struct S2nTransportGuard {
+    _dir: tempfile::TempDir,
+}
+
+#[cfg(feature = "s2n-quic")]
+impl S2nTransportGuard {
+    fn install() -> Self {
+        let dir = tempdir().expect("tempdir");
+        let cert_store = dir.path().join("cert_store.json");
+        let peer_store = dir.path().join("peer_store.json");
+        let net_key = dir.path().join("net_key");
+        std::env::set_var("TB_NET_CERT_STORE_PATH", &cert_store);
+        std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
+        std::env::set_var("TB_NET_KEY_PATH", &net_key);
+        let mut cfg = TransportConfig::default();
+        cfg.provider = ProviderKind::S2nQuic;
+        cfg.certificate_cache = Some(cert_store);
+        the_block::net::configure_transport(&cfg).expect("configure transport");
+        Self { _dir: dir }
+    }
+}
+
+#[cfg(feature = "s2n-quic")]
+impl Drop for S2nTransportGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("TB_NET_CERT_STORE_PATH");
+        std::env::remove_var("TB_PEER_CERT_CACHE_PATH");
+        std::env::remove_var("TB_NET_KEY_PATH");
+        let _ = the_block::net::configure_transport(&TransportConfig::default());
+    }
 }
 
 #[tokio::test]
@@ -55,6 +94,8 @@ async fn quic_handshake_roundtrip() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+        quic_provider: None,
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
     let bytes = bincode::serialize(&msg).unwrap();
@@ -112,6 +153,8 @@ async fn quic_gossip_roundtrip() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+        quic_provider: None,
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())
@@ -169,6 +212,10 @@ async fn quic_disconnect() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())
@@ -211,6 +258,10 @@ async fn quic_fallback_to_tcp() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     let msg_clone = msg.clone();
@@ -223,6 +274,41 @@ async fn quic_fallback_to_tcp() {
     let recv = rx.await.unwrap();
     let parsed: Message = bincode::deserialize(&recv).unwrap();
     assert!(matches!(parsed.body, Payload::Handshake(_)));
+}
+
+#[cfg(feature = "s2n-quic")]
+#[tokio::test]
+#[serial]
+async fn s2n_quic_connect_roundtrip() {
+    let _guard = S2nTransportGuard::install();
+    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let listener = transport_quic::start_server(addr)
+        .await
+        .expect("start s2n server");
+    let listen_addr = match &listener {
+        ListenerHandle::S2n(server) => server.local_addr().expect("local addr"),
+        #[cfg(feature = "quinn")]
+        ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
+    };
+    let server = match listener {
+        ListenerHandle::S2n(server) => server,
+        #[cfg(feature = "quinn")]
+        ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
+    };
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    let accept = server.clone();
+    the_block::spawn(async move {
+        if let Some(connecting) = accept.accept().await {
+            let _ = connecting.await;
+        }
+        let _ = done_tx.send(());
+    });
+
+    transport_quic::connect(listen_addr)
+        .await
+        .expect("connect to s2n server");
+
+    done_rx.await.unwrap();
 }
 
 #[tokio::test]
@@ -331,6 +417,10 @@ async fn quic_version_mismatch() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())
@@ -387,6 +477,10 @@ async fn quic_packet_loss_env() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sample_sk());
     quic::send(&conn, &bincode::serialize(&msg).unwrap())

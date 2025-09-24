@@ -1,6 +1,8 @@
 # Summary
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 - [Progress Snapshot](progress.md)
+- [Dependency Sovereignty Pivot](pivot_dependency_strategy.md)
 - [Status & Roadmap](roadmap.md)
 - [Telemetry](telemetry.md)
 - [Telemetry Operations Runbook](telemetry_ops.md)

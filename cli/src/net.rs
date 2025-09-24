@@ -421,8 +421,8 @@ fn print_quic_stats(entries: &[QuicStatsEntry]) {
         return;
     }
     println!(
-        "{:<66} {:<66} {:>12} {:>14} {:>10} {:>12}",
-        "Peer", "Fingerprint", "Latency(ms)", "Retransmits", "Reuse", "Failures"
+        "{:<66} {:<16} {:<66} {:>12} {:>14} {:>10} {:>12}",
+        "Peer", "Provider", "Fingerprint", "Latency(ms)", "Retransmits", "Reuse", "Failures"
     );
     for entry in entries {
         let latency = entry
@@ -430,8 +430,9 @@ fn print_quic_stats(entries: &[QuicStatsEntry]) {
             .map(|v| v.to_string())
             .unwrap_or_else(|| "-".into());
         println!(
-            "{:<66} {:<66} {:>12} {:>14} {:>10} {:>12}",
+            "{:<66} {:<16} {:<66} {:>12} {:>14} {:>10} {:>12}",
             entry.peer_id,
+            entry.provider.as_deref().unwrap_or("-"),
             entry.fingerprint.as_deref().unwrap_or("-"),
             latency,
             entry.retransmits,
@@ -447,13 +448,17 @@ fn print_quic_cert_history(entries: &[PeerCertHistoryEntry]) {
         return;
     }
     for entry in entries {
-        println!("Peer {} (rotations: {})", entry.peer, entry.rotations);
+        println!(
+            "Peer {} via {} (rotations: {})",
+            entry.peer, entry.provider, entry.rotations
+        );
         let current = &entry.current;
         println!(
-            "  current: {} (age: {}s, cert: {})",
+            "  current: {} (age: {}s, cert: {}, updated_at: {})",
             current.fingerprint,
             current.age_secs,
-            if current.has_certificate { "yes" } else { "no" }
+            if current.has_certificate { "yes" } else { "no" },
+            current.updated_at
         );
         if entry.history.is_empty() {
             println!("  history: <empty>");
@@ -461,10 +466,11 @@ fn print_quic_cert_history(entries: &[PeerCertHistoryEntry]) {
             println!("  history:");
             for hist in &entry.history {
                 println!(
-                    "    - {} (age: {}s, cert: {})",
+                    "    - {} (age: {}s, cert: {}, updated_at: {})",
                     hist.fingerprint,
                     hist.age_secs,
-                    if hist.has_certificate { "yes" } else { "no" }
+                    if hist.has_certificate { "yes" } else { "no" },
+                    hist.updated_at
                 );
             }
         }

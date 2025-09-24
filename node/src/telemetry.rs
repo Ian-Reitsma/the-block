@@ -3484,6 +3484,21 @@ pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static QUIC_PROVIDER_CONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "quic_provider_connect_total",
+            "Successful QUIC connection events by provider",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("counter vec quic provider connect: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic provider connect: {e}"));
+    c
+});
+
 pub static QUIC_CERT_ROTATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(

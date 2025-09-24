@@ -1,4 +1,5 @@
 # Security & Cryptography
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document outlines recent cryptographic enhancements:
 
@@ -35,4 +36,3 @@ mismatched tags reject signatures.
 
 `cargo audit --deny warnings` runs in CI to ensure dependencies remain free of
 known vulnerabilities.
-
