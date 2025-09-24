@@ -1,4 +1,5 @@
 # Run a node
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 ## Hardware
 
@@ -15,13 +16,59 @@
 
 ## QUIC mode
 
-Start the node with `--quic` to enable QUIC gossip alongside TCP. The listener
-binds to a UDP port specified by `--quic-port` (default `3033`). On first run a
-self-signed certificate and key are written to `<data_dir>/quic.cert` and
-`<data_dir>/quic.key` with `0600` permissions; subsequent restarts reuse these
-files.  Certificates rotate automatically after the number of days specified by
-`--quic-cert-ttl-days` (default 30). Ensure the key files remain owner-readable
-only to avoid peers rejecting the endpoint.
+Start the node with `--quic` to enable QUIC gossip alongside TCP. Runtime
+configuration now lives in two files:
+
+* `config/default.toml` retains port selection and legacy flags.
+* `config/quic.toml` selects the transport provider and shared parameters for
+  both Quinn and s2n. The loader merges this file on startup and every reload.
+
+The following keys mirror the transport abstraction exposed by
+`crates/transport`:
+
+| Key | Description |
+|-----|-------------|
+| `provider` | Either `"quinn"` (default) or `"s2n-quic"`; determines which backend the registry instantiates. |
+| `certificate_cache` | Optional path used for provider-managed certificates. Reuse the same path when switching providers so stored fingerprints survive. |
+| `retry_attempts` / `retry_backoff_ms` | Listener/connection retry policy passed to the backend. |
+| `handshake_timeout_ms` | Timeout before a connect attempt is treated as failed (default 5000 ms). |
+| `rotation_history` | Number of historical fingerprints retained per provider (default 4). |
+| `rotation_max_age_secs` | Maximum age of stored fingerprints in seconds (default 30 days). |
+
+Successful connections increment `quic_provider_connect_total{provider}` so the
+metrics dashboard reflects which implementation accepted a peer. CLI commands
+(`blockctl net peers`, `blockctl net quic history`) now include the provider
+identifier, fingerprint history, and most recent rotation timestamp. Use
+`blockctl net quic stats --format table` (or `--json`) to inspect provider-labelled handshake latency, retransmits, and endpoint reuse without hitting the metrics endpoint. RPC
+responses expose the same metadata for automation, and the cache stored in
+`~/.the_block/quic_peer_certs.json` is partitioned by provider so history is
+preserved when you swap backends. Reference the phase chart in
+[`docs/pivot_dependency_strategy.md`](../pivot_dependency_strategy.md) before
+changing providers so governance, telemetry, and simulation plans stay aligned.
+
+Certificates continue to rotate automatically based on the TTL in
+`config/default.toml`. Ensure the private key path remains owner-readable to
+avoid remote peers rejecting the endpoint.
+
+### Migrating between QUIC providers
+
+To move from Quinn to s2n-quic (or back) without losing stored fingerprints:
+
+1. Inspect the current cache via `blockctl net quic history --format table` to
+   confirm recent rotations and note the provider column.
+2. Ensure `config/quic.toml` points `certificate_cache` at a shared location (for
+   example `state/quic_peer_certs.json`). Copy any existing cache into that
+   path if it differs from the default.
+3. Update `config/quic.toml` with `provider = "s2n-quic"` (or `"quinn"`) and,
+   if required, adjust `handshake_timeout_ms` or the rotation policy. Run
+   `blockctl config reload` or send `SIGHUP` so the node applies the new
+   settings; the loader also reapplies them on restart.
+4. Watch `quic_provider_connect_total{provider}` and the CLI history output to
+   confirm new peers are attaching to the desired backend while previous
+   fingerprints remain available for audit.
+
+The cache retains separate histories for each provider, so you can roll back by
+reverting the `provider` field and reloading without losing the prior chain.
 
 ## Quickstart
 

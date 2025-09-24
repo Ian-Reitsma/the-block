@@ -1,4 +1,5 @@
 # Probe CLI and Metrics Manual
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `probe` utility performs synthetic health checks against a node. It ships as
 a standalone binary in `crates/probe` and supports multiple subcommands for

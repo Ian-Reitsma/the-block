@@ -1,4 +1,5 @@
 # Telemetry Log Fields
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Structured telemetry logs include the following fields. All identifiers are privacy-scrubbed with BLAKE3 before emission.
 
@@ -38,6 +39,10 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_stats_export_all_total{result}` counts bulk snapshot exports (ok, error)
 - `gateway_dns_lookup_total{status}` counts verified versus rejected DNS entries
 - `peer_reputation_score{peer_id}` gauges the dynamic reputation used for rate limits
+- `quic_provider_connect_total{provider}` tracks successful QUIC dials per backend;
+  pair with `quic_handshake_fail_total{peer,provider}`, `quic_endpoint_reuse_total{provider}`,
+  and `quic_cert_rotation_total{provider}` to gauge provider health during the
+  dependency-sovereignty pivot (see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)).
 
 Additional subsystem counters include:
 
@@ -249,4 +254,3 @@ via `cli telemetry dump`, and is exported as the
 
 Sampling trades precision for lower memory usage; operators requiring
 exact counts should keep the sample rate at `1.0`.
-

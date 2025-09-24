@@ -19,6 +19,8 @@
 
 ---
 
+> **Review (2025-09-23):** The documentation reflects the dependency-sovereignty pivot and September progress audit; third-token plans have been retired in favour of a single CT ledger.
+
 ## What is The Block?
 
 The Block is a decentralized compute and storage network that blends a
@@ -39,6 +41,10 @@ claiming subsidies in the next block. Developer tooling—from a CLI node to PyO
 bindings—lets engineers prototype features without spinning up bespoke
 infrastructure. The protocol prioritizes determinism so that results are
 repeatable across hardware and operating systems.
+
+For the canonical subsystem evidence and live percentages, see
+[`docs/progress.md`](docs/progress.md); the summary below highlights the most
+operator-facing pieces.
 
 Economics are structured to reward useful work and keep fees predictable. Three
 per-block subsidies (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) mint
@@ -74,7 +80,7 @@ test real services today.
   [docs/read_receipts.md](docs/read_receipts.md),
   [docs/simple_db.md](docs/simple_db.md), and
   [docs/mobile_gateway.md](docs/mobile_gateway.md) for the batching, audit,
-  persistence, and cache hygiene flow. (85.0% Complete — incentive-marketplace
+  persistence, and cache hygiene flow. (88.5% Complete — incentive-marketplace
   wiring remains the main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
   metered in normalized compute units. Offers escrow CT via the `pct_ct` selector
@@ -100,7 +106,7 @@ test real services today.
   `match_loop_latency_seconds{lane}` histograms. CLI and RPC surfaces expose queue
   depths, capacity guardrails, fairness windows, and recent matches, and
   settlement continues to persist CT balances with activation metadata, audit
-  exports, and recent root tracking. (93.0% Complete)
+  exports, and recent root tracking. (93.7% Complete)
     - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
       letting operators run `net stats`, filter by reputation or drop reason, emit
       JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -110,15 +116,15 @@ test real services today.
       memory. QUIC now derives mutual-TLS certificates from node keys, gossips
       fingerprints, exposes cached diagnostics over the `net.quic_stats` RPC / CLI,
       and leverages a chaos harness to publish retransmit counters, keeping
-      operators ahead of packet loss. Shard-aware peer maps route block gossip only
+      operators ahead of packet loss while the transport layer advertises provider metadata, per-provider connect counters, and mockable adapters for tests. Shard-aware peer maps route block gossip only
       to interested peers and uptime-based fee rebates reward high-availability
-      peers. (97.0% Complete)
+      peers. (96.0% Complete)
     - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
       resolves forks deterministically, and validates blocks with BLAKE3 hashes,
       multi-window Kalman retargeting, VDF-anchored randomness, macro-block
       checkpointing, and per-shard fork choice. Release installs now gate on
       provenance verification with automated rollback if hashes drift, keeping
-      consensus nodes in lockstep. (90.0% Complete)
+      consensus nodes in lockstep. (92.2% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -129,23 +135,23 @@ test real services today.
     timelines so operators can audit parameter changes while governance history
     archives DID revocations for audit. All tooling now targets the shared
     `governance` crate with sled-backed persistence, proposal DAG validation,
-    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (95.0% Complete)
+    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (94.5% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
-      deployable contracts and fee markets alongside traditional PoW headers. (82.0%
+      deployable contracts and fee markets alongside traditional PoW headers. (84.1%
       Complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, telemetry gauges `dex_escrow_locked`,
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
-    constant-product AMM pools provide fallback liquidity with programmable incentives. (81.0%
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (83.1%
     Complete)
 - Cross-chain bridge primitives track per-asset channels, persist relayer sets,
   enforce multi-signature quorums, and expose challenge windows with slashing for
   invalid proofs. Deposit/withdraw flows carry partition tags, HTLC parsing accepts
   both SHA3 and RIPEMD encodings, and light-client verification guards every transfer.
-  Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history. (74.0% Complete)
+  Light-client verification guards all transfers, and HTLC parsing accepts both SHA3 and RIPEMD encodings. CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history. (78.0% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).
   Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
@@ -154,7 +160,7 @@ test real services today.
   export with localized messaging. Governance revocations block misused
   identifiers and are archived alongside anchor history for audit. Explorer pagination
   caches and CLI tooling consume the same data, keeping dashboards aligned with wallet
-  history. (81.0% Complete)
+  history. (82.5% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
       session-key derivation, auto-update orchestration, and compliance options as
@@ -165,7 +171,7 @@ test real services today.
       dashboards track warning/override deltas. Wallet binaries now share a single
       `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, forward
       multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
-      staking payloads. (96.0% Complete)
+      staking payloads. (94.8% Complete)
     - Monitoring, debugging, and profiling tools export Prometheus metrics,
       structured traces, readiness endpoints, VM trace counters, partition dashboards,
       and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
@@ -173,9 +179,9 @@ test real services today.
       drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
       anchor totals land in telemetry so dashboards can trace user choices,
       anchor velocity, and governance parameter rollbacks from a single pane.
-      (91.0% Complete)
+      (93.6% Complete)
   - Economic simulation and formal verification suites model inflation scenarios
-    and encode consensus invariants, laying groundwork for provable safety. (41.0%
+    and encode consensus invariants, laying groundwork for provable safety. (42.0%
     Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
   subsidy events to make participation feasible on phones. Device heuristics now
@@ -185,24 +191,27 @@ test real services today.
   gating messages alongside persisted overrides in `~/.the_block/light_client.toml`.
   Operators can toggle charging/Wi‑Fi requirements via `contract light-client
   device ...` commands, inspect cached readings, and rely on desktop builds that
-  fall back to configured defaults without stalling sync. (68.0% Complete)
+  fall back to configured defaults without stalling sync. (72.4% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **~99.88/100** with vision completion **~89.3/100**.
-  Recent work layered lane-aware batching onto the compute matcher with
-  fairness deadlines, per-lane queue caps, starvation warnings, and
-  `match_loop_latency_seconds{lane}` histograms, overhauled the gossip relay with
-  LRU-backed deduplication, adaptive fanout, partition tagging, and shard-aware
-  persistence, and integrated the durable proof-rebate pipeline so receipts
-  persist to disk, surface through explorer/CLI pagination, and land in coinbase
-  assembly. Governance tooling, wallet telemetry, and the resilient RPC client
-  continue to anchor the ecosystem on the shared state machine while the bridge
-  stack now enforces multi-signature quorums, challenge windows, and relayer
-  slashing.
+  Mainnet readiness sits at **97.6/100** with vision completion **88.3/100**.
+  Recent work codified the dependency-sovereignty pivot: every guide now
+  references the transport/runtime/registry wrappers, and the new
+  [`pivot_dependency_strategy.md`](docs/pivot_dependency_strategy.md) runbook
+  aligns engineering and governance on the staged third-party drawdown. Lane-aware
+  batching in the compute matcher gained fairness deadlines, per-lane queue caps,
+  starvation warnings, and `match_loop_latency_seconds{lane}` histograms; the gossip
+  relay now layers LRU-backed deduplication, adaptive fanout, partition tagging,
+  and shard-aware persistence; and the proof-rebate pipeline persists receipts to
+  disk, exposes explorer/CLI pagination, and feeds coinbase assembly. Governance
+  tooling, wallet telemetry, and the resilient RPC client continue to anchor the
+  ecosystem on the shared state machine while the bridge stack enforces
+  multi-signature quorums, challenge windows, and relayer slashing.
   Current focus areas: deliver treasury disbursement tooling, wire SLA slashing
-  dashboards on top of the new matcher, continue WAN-scale QUIC chaos drills with
-  mitigation playbooks, polish multisig wallet UX, and expand bridge/DEX docs with
+  dashboards on top of the new matcher, finish the libp2p/storage-engine/coding
+  wrapper migrations, continue WAN-scale QUIC chaos drills with mitigation
+  playbooks, polish multisig wallet UX, and expand bridge/DEX docs with
   signer-set payloads before the next release tag.
 
 ### Live now
@@ -233,7 +242,7 @@ test real services today.
 - Cross-chain exchange adapters for Uniswap and Osmosis with fee and slippage checks; unit tests cover slippage bounds and revert on price manipulation.
 - Versioned P2P handshake negotiates feature bits, records peer metadata, and enforces minimum protocol versions. See [docs/p2p_protocol.md](docs/p2p_protocol.md).
 - QUIC gossip transport with mutual-TLS certificate rotation, fingerprint gossip,
-  cached diagnostics via `net.quic_stats`/`contract-cli net quic-stats`, and TCP fallback; fanout selects
+  cached diagnostics via `net.quic_stats`/`blockctl net quic stats`, and TCP fallback; fanout selects
   per-peer transport while chaos tooling surfaces retransmit spikes and the metrics-to-logs pipeline dumps offending sessions automatically.
 - Light-client crate with mobile example and FFI helpers; mobile demos showcase header sync, background polling, and optional KYC flows. The synchronization model and security trade-offs are described in [docs/light_client.md](docs/light_client.md).
 - SQLite-backed indexer, HTTP explorer, and profiling CLI; node events and anchors persist to a local database that the explorer queries over REST. DID anchors feed a dedicated `did_records` table, REST endpoints (`/dids`, `/identity/dids/:address`, `/dids/metrics/anchor_rate`), and an explorer view for cross-navigation with wallet addresses.

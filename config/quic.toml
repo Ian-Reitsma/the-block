@@ -1,0 +1,19 @@
+# QUIC transport overrides. Values in this file augment node/src/config.rs defaults.
+# Set the provider to "quinn" or "s2n-quic" to choose the backend used at runtime.
+provider = "quinn"
+
+# Optional override for the on-disk certificate cache used by the s2n provider.
+# certificate_cache = "state/quic_peer_certs.json"
+
+# Handshake timeout in milliseconds before a connection attempt is treated as failed.
+# handshake_timeout_ms = 5000
+
+# Quinn and s2n retry policy when binding listeners or establishing new connections.
+# retry_attempts = 3
+# retry_backoff_ms = 50
+
+# Persisted certificate rotation policy. history controls the number of retained
+# historical fingerprints per provider, and max_age_secs bounds how long entries stay
+# on disk before they are pruned.
+# rotation_history = 4
+# rotation_max_age_secs = 2592000

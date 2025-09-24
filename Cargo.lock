@@ -9046,12 +9046,10 @@ dependencies = [
  "prometheus",
  "proptest",
  "pyo3",
- "quinn",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "raptorq",
  "rayon",
- "rcgen 0.12.1",
  "reed-solomon-erasure",
  "regex",
  "reqwest 0.11.27",
@@ -9060,8 +9058,6 @@ dependencies = [
  "runtime",
  "rusqlite",
  "rustdct",
- "rustls 0.21.12",
- "s2n-quic",
  "serde",
  "serde_bytes",
  "serde_cbor",
@@ -9091,6 +9087,7 @@ dependencies = [
  "tracing-chrome",
  "tracing-subscriber",
  "tracing-test",
+ "transport",
  "trust-dns-resolver",
  "tungstenite 0.21.0",
  "unicode-normalization",
@@ -9661,6 +9658,33 @@ checksum = "04659ddb06c87d233c566112c1c9c5b9e98256d9af50ec3bc9c8327f873a7568"
 dependencies = [
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "transport"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "blake3",
+ "dashmap",
+ "dirs",
+ "ed25519-dalek",
+ "hex",
+ "once_cell",
+ "quinn",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rcgen 0.12.1",
+ "runtime",
+ "rustls 0.21.12",
+ "s2n-quic",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+ "x509-parser 0.16.0",
 ]
 
 [[package]]

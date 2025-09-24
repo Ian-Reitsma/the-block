@@ -6,6 +6,7 @@ use tempfile::tempdir;
 use the_block::net::{
     peer_cert_history, record_peer_certificate, refresh_peer_cert_store_from_disk, transport_quic,
 };
+use transport::{Config as TransportConfig, ProviderKind};
 
 fn setup_env(dir: &tempfile::TempDir) {
     let cert_store = dir.path().join("peer_certs.json");
@@ -16,6 +17,10 @@ fn setup_env(dir: &tempfile::TempDir) {
     std::env::set_var("TB_NET_CERT_STORE_PATH", &quic_store);
     // ensure the in-memory cache points at the new path
     let _ = refresh_peer_cert_store_from_disk();
+    let mut cfg = TransportConfig::default();
+    cfg.provider = ProviderKind::S2nQuic;
+    cfg.certificate_cache = Some(quic_store);
+    the_block::net::configure_transport(&cfg).expect("configure transport");
 }
 
 fn teardown_env() {
@@ -36,6 +41,7 @@ fn encrypts_and_reloads_quic_peer_certs() {
     let peer = [11u8; 32];
     record_peer_certificate(
         &peer,
+        transport::ProviderKind::S2nQuic.id(),
         advert.cert.clone(),
         advert.fingerprint,
         advert.previous.clone(),
@@ -69,12 +75,14 @@ fn prunes_stale_quic_cert_history() {
     let peer = [29u8; 32];
     record_peer_certificate(
         &peer,
+        transport::ProviderKind::S2nQuic.id(),
         advert.cert.clone(),
         advert.fingerprint,
         advert.previous.clone(),
     );
     record_peer_certificate(
         &peer,
+        transport::ProviderKind::S2nQuic.id(),
         rotated.cert.clone(),
         rotated.fingerprint,
         rotated.previous.clone(),
@@ -98,6 +106,7 @@ fn prunes_stale_quic_cert_history() {
 
     record_peer_certificate(
         &peer,
+        transport::ProviderKind::S2nQuic.id(),
         rotated.cert.clone(),
         rotated.fingerprint,
         rotated.previous.clone(),
@@ -121,6 +130,7 @@ fn refresh_clears_removed_quic_cert_store() {
     let peer = [201u8; 32];
     record_peer_certificate(
         &peer,
+        transport::ProviderKind::S2nQuic.id(),
         advert.cert.clone(),
         advert.fingerprint,
         advert.previous.clone(),

@@ -1,4 +1,5 @@
 # Benchmark Notes
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 ## Gateway Rate-Limit Filter
 
@@ -9,4 +10,3 @@
 
 Benchmarks run on an x86_64 AVX2 host with synthetic 1 M rps micro‑burst
 workload. NEON results were within 5 % of AVX2 on an M1 target.
-

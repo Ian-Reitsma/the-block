@@ -1,4 +1,5 @@
 # Gossip Chaos Harness
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The chaos harness exercises gossip under adverse conditions by dropping 15%
 of messages and injecting up to 200 ms of jitter. It records convergence time,

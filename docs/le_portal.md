@@ -1,4 +1,5 @@
 # Law-Enforcement Portal Logging and Warrant Canaries
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `le_portal` module records law-enforcement requests and publishes warrant
 canaries so operators can prove absence of secret orders. All records are stored

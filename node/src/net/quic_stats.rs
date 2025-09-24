@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::quic::{self, ConnectionStatsSnapshot};
 use super::transport_quic;
+use crate::p2p::handshake;
 
 const CACHE_TTL: Duration = Duration::from_millis(500);
 #[cfg(feature = "telemetry")]
@@ -95,15 +96,25 @@ fn refresh_locked(store: &mut Store) {
     let mut entries: Vec<_> = store
         .peers
         .iter()
-        .map(|(peer, state)| super::QuicStatsEntry {
-            peer_id: hex::encode(peer),
-            address: state.address.map(|a| a.to_string()),
-            latency_ms: state.latency_ms,
-            fingerprint: super::current_peer_fingerprint(peer).map(|fp| hex::encode(fp)),
-            retransmits: state.retransmits,
-            endpoint_reuse: state.endpoint_reuse,
-            handshake_failures: state.handshake_failures,
-            last_updated: state.last_updated,
+        .map(|(peer, state)| {
+            let provider = handshake::peer_provider(peer);
+            let fingerprint = if let Some(ref id) = provider {
+                super::current_peer_fingerprint_for_provider(peer, Some(id.as_str()))
+            } else {
+                super::current_peer_fingerprint(peer)
+            }
+            .map(|fp| hex::encode(fp));
+            super::QuicStatsEntry {
+                peer_id: hex::encode(peer),
+                address: state.address.map(|a| a.to_string()),
+                latency_ms: state.latency_ms,
+                fingerprint,
+                provider,
+                retransmits: state.retransmits,
+                endpoint_reuse: state.endpoint_reuse,
+                handshake_failures: state.handshake_failures,
+                last_updated: state.last_updated,
+            }
         })
         .collect();
     entries.sort_by(|a, b| a.peer_id.cmp(&b.peer_id));

@@ -1,4 +1,5 @@
 # Concurrency Primitives
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The codebase mixes `parking_lot` locks with the standard library's `std::sync`
 mutexes and RwLocks. `parking_lot` locks never return a `Result` when acquiring

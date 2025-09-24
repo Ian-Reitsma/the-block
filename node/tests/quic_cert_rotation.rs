@@ -8,6 +8,14 @@ use the_block::net::{
     Transport, SUPPORTED_VERSION,
 };
 use the_block::p2p::handshake::validate_quic_certificate;
+use transport::{Config as TransportConfig, ProviderKind};
+
+fn configure_transport(quic_store: &std::path::Path) {
+    let mut cfg = TransportConfig::default();
+    cfg.provider = ProviderKind::S2nQuic;
+    cfg.certificate_cache = Some(quic_store.to_path_buf());
+    the_block::net::configure_transport(&cfg).expect("configure transport");
+}
 
 #[test]
 fn rotates_and_tracks_fingerprints() {
@@ -16,6 +24,7 @@ fn rotates_and_tracks_fingerprints() {
     let peer_store = dir.path().join("peers.json");
     std::env::set_var("TB_NET_CERT_STORE_PATH", &cert_store);
     std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
+    configure_transport(&cert_store);
 
     let key_bytes = [7u8; 32];
     let signing_key = SigningKey::from_bytes(&key_bytes);
@@ -33,6 +42,7 @@ fn rotates_and_tracks_fingerprints() {
     let peer = [3u8; 32];
     record_peer_certificate(
         &peer,
+        transport::ProviderKind::S2nQuic.id(),
         rotated.cert.clone(),
         rotated.fingerprint,
         rotated.previous.clone(),
@@ -47,6 +57,7 @@ fn fingerprint_mismatch_rejects_certificate() {
     let peer_store = dir.path().join("peers.json");
     std::env::set_var("TB_NET_CERT_STORE_PATH", &cert_store);
     std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
+    configure_transport(&cert_store);
 
     let peer_key = [9u8; 32];
     let signing_key = SigningKey::from_bytes(&peer_key);
@@ -66,6 +77,8 @@ fn fingerprint_mismatch_rejects_certificate() {
         quic_cert: Some(advert.cert.clone()),
         quic_fingerprint: Some(forged_fp.to_vec()),
         quic_fingerprint_previous: Vec::new(),
+        quic_provider: Some(transport::ProviderKind::S2nQuic.id().to_string()),
+        quic_capabilities: vec!["certificate_rotation".into()],
     };
 
     let result = validate_quic_certificate(&peer_key, &hello);

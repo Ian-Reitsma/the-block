@@ -1,4 +1,5 @@
 # Quantum-Safe Signature Migration
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This note outlines a phased migration from the current Ed25519 scheme to a dual-key model incorporating Dilithium.
 
@@ -15,4 +16,3 @@ Each signature scheme uses a distinct domain‑separation tag.  Legacy transacti
 ## Migration Utility
 
 A dedicated tool will derive Dilithium keypairs alongside existing Ed25519 keys and update account records on chain.  Historical signatures remain valid and traceable through the account's version history.
-

@@ -1,4 +1,5 @@
 # On-Chain Blob Storage Flow
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document describes the end‑to‑end lifecycle of a file that is uploaded
 through the The‑Block storage interface and committed on chain as a `BlobTx`.

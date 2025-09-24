@@ -1,4 +1,5 @@
 # Ledger Invariants
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document enumerates the key invariants that underpin balance and nonce
 correctness.  Each is referenced by a stable ID so logs and metrics can refer to

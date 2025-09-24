@@ -1,4 +1,5 @@
 # Simulation Framework Manual
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `sim/` crate models network topologies and economic scenarios. Scenarios are
 expressed in YAML and replay deterministically so developers can reproduce bugs
@@ -60,4 +61,3 @@ the scenario to detect tampering.
 - Benchmarks: [docs/benchmarks.md](benchmarks.md)
 - Gossip chaos harness: [docs/gossip_chaos.md](gossip_chaos.md)
 - Compute-market admission scenarios: [sim/compute_market](../sim/compute_market/)
-

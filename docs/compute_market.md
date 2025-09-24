@@ -1,4 +1,5 @@
 # Compute Market Workloads
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The compute market supports running real workloads on job slices. Each slice
 contains input data that is executed by a workload runner and produces a proof
@@ -199,7 +200,7 @@ A typical response resembles:
       "lane": "Consumer",
       "job_id": "job-nyc-91",
       "waited_for_secs": 32.8,
-      "updated_at": "2025-09-21T17:12:11Z"
+      "updated_at": "2025-09-23T10:02:17Z"
     }
   ]
 }

@@ -1,4 +1,5 @@
 # State Pruning and Compaction Guide
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 State grows monotonically as blocks commit new key/value pairs. To keep disk usage
 bounded the node exposes a pruning subsystem that periodically drops historical
@@ -78,4 +79,3 @@ block 0. After restoring a replacement snapshot, restart the node with
 
 Running `state prune --dry-run` first is recommended in critical environments to
 list files that would be deleted without modifying disk state.
-

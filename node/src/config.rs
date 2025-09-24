@@ -10,6 +10,10 @@ use std::fs;
 use std::path::Path;
 use std::sync::{mpsc::channel, Arc, RwLock};
 use std::thread;
+use std::time::Duration;
+
+#[cfg(feature = "quic")]
+use transport::{Config as TransportConfig, ProviderKind};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct NodeConfig {
@@ -335,10 +339,85 @@ pub struct QuicConfig {
     pub key_path: String,
     #[serde(default = "default_cert_ttl_days")]
     pub cert_ttl_days: u64,
+    #[serde(default)]
+    pub transport: QuicTransportConfig,
 }
 
 fn default_cert_ttl_days() -> u64 {
     30
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub struct QuicTransportConfig {
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub certificate_cache: Option<String>,
+    #[serde(default)]
+    pub retry_attempts: Option<u32>,
+    #[serde(default)]
+    pub retry_backoff_ms: Option<u64>,
+    #[serde(default)]
+    pub handshake_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub rotation_history: Option<usize>,
+    #[serde(default)]
+    pub rotation_max_age_secs: Option<u64>,
+}
+
+impl QuicTransportConfig {
+    #[cfg(feature = "quic")]
+    pub fn to_transport_config(&self) -> TransportConfig {
+        let mut cfg = TransportConfig::default();
+        if let Some(provider) = self.provider.as_ref() {
+            let parsed = match provider.to_ascii_lowercase().as_str() {
+                "quinn" => Some(ProviderKind::Quinn),
+                "s2n" | "s2n-quic" => Some(ProviderKind::S2nQuic),
+                _ => None,
+            };
+            if let Some(kind) = parsed {
+                cfg.provider = kind;
+            }
+        }
+        if let Some(path) = self.certificate_cache.as_ref() {
+            cfg.certificate_cache = Some(Path::new(path).to_path_buf());
+        }
+        if let Some(attempts) = self.retry_attempts {
+            cfg.retry.attempts = attempts as usize;
+        }
+        if let Some(ms) = self.retry_backoff_ms {
+            cfg.retry.backoff = Duration::from_millis(ms as u64);
+        }
+        if let Some(ms) = self.handshake_timeout_ms {
+            cfg.handshake_timeout = Duration::from_millis(ms);
+        }
+        cfg
+    }
+
+    #[cfg(feature = "quic")]
+    pub fn apply_overrides(&mut self, other: &QuicTransportConfig) {
+        if let Some(provider) = other.provider.as_ref() {
+            self.provider = Some(provider.clone());
+        }
+        if let Some(cache) = other.certificate_cache.as_ref() {
+            self.certificate_cache = Some(cache.clone());
+        }
+        if let Some(attempts) = other.retry_attempts {
+            self.retry_attempts = Some(attempts);
+        }
+        if let Some(backoff) = other.retry_backoff_ms {
+            self.retry_backoff_ms = Some(backoff);
+        }
+        if let Some(timeout) = other.handshake_timeout_ms {
+            self.handshake_timeout_ms = Some(timeout);
+        }
+        if let Some(history) = other.rotation_history {
+            self.rotation_history = Some(history);
+        }
+        if let Some(age) = other.rotation_max_age_secs {
+            self.rotation_max_age_secs = Some(age);
+        }
+    }
 }
 
 impl Default for RpcConfig {
@@ -380,7 +459,18 @@ impl NodeConfig {
 fn load_file(dir: &str) -> Result<NodeConfig> {
     let path = format!("{}/default.toml", dir);
     let data = fs::read_to_string(&path)?;
-    Ok(toml::from_str(&data)?)
+    let mut cfg: NodeConfig = toml::from_str(&data)?;
+    #[cfg(feature = "quic")]
+    {
+        let quic_path = format!("{}/quic.toml", dir);
+        if let Ok(quic_raw) = fs::read_to_string(&quic_path) {
+            if let Ok(overrides) = toml::from_str::<QuicTransportConfig>(&quic_raw) {
+                let quic_cfg = cfg.quic.get_or_insert_with(QuicConfig::default);
+                quic_cfg.transport.apply_overrides(&overrides);
+            }
+        }
+    }
+    Ok(cfg)
 }
 
 fn apply(cfg: &NodeConfig) {
@@ -419,6 +509,28 @@ fn apply(cfg: &NodeConfig) {
     {
         crate::telemetry::set_sample_rate(cfg.telemetry.sample_rate);
         crate::telemetry::set_compaction_interval(cfg.telemetry.compaction_secs);
+    }
+    #[cfg(feature = "quic")]
+    {
+        let quic_cfg = cfg.quic.as_ref();
+        let transport_cfg = quic_cfg
+            .map(|quic| quic.transport.to_transport_config())
+            .unwrap_or_else(TransportConfig::default);
+        if let Err(err) = crate::net::configure_transport(&transport_cfg) {
+            #[cfg(feature = "telemetry")]
+            tracing::warn!(reason = %err, "transport_configure_failed");
+            #[cfg(not(feature = "telemetry"))]
+            eprintln!("transport_configure_failed: {err}");
+        }
+        let (history, max_age) = quic_cfg
+            .map(|quic| {
+                (
+                    quic.transport.rotation_history,
+                    quic.transport.rotation_max_age_secs,
+                )
+            })
+            .unwrap_or((None, None));
+        crate::net::configure_peer_cert_policy(history, max_age);
     }
 }
 

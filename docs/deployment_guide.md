@@ -1,4 +1,5 @@
 # Cross-Platform Deployment Guide
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This guide aggregates the project’s deployment tooling across desktop
 operating systems, containerized environments, and infrastructure-as-code
@@ -89,4 +90,3 @@ Services expose metrics on `localhost:9090` and the explorer on
   `deploy/README.md`.
 - For air‑gapped environments, pre-seed the `bootstrap.sh` caches and copy
   Docker images into a local registry.
-

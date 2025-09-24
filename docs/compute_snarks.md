@@ -1,4 +1,5 @@
 # Compute Market SNARK Guidelines
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Providers may supply Groth16/Plonk proofs for compute workloads. Proofs are
 constructed over small WASM tasks compiled into circuits. The `compute_market`

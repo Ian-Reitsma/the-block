@@ -116,10 +116,7 @@ bytes = "1"
 lru = "0.11"
 parking_lot = "0.12"
 tracing-chrome = "0.6"
- quinn = { version = "0.10", features = ["rustls"], optional = true }
- rcgen = { version = "0.12", optional = true }
- rustls = { version = "0.21", features = ["dangerous_configuration"] }
- s2n-quic = { version = "1", optional = true, features = ["unstable-provider-io-testing"] }
+transport = { path = "../crates/transport", optional = true, default-features = false, features = ["quinn", "s2n-quic"] }
 regex = "1"
 terminal_size = "0.2"
 wasmtime = "24"
@@ -141,7 +138,7 @@ pq-crypto = ["pqcrypto-dilithium"]
 bluetooth = []
 gpu = []
 gateway = []
- quic = ["quinn", "rcgen", "s2n-quic"]
+ quic = ["transport"]
 privacy = ["dep:privacy"]
 reentrant_scheduler = []
 

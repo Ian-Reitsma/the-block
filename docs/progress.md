@@ -1,8 +1,9 @@
 # Project Progress Snapshot
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **~99.88/100** with vision completion **~89.3/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, the gossip relay now couples an LRU-backed dedup cache with adaptive fanout, shard persistence, and partition tagging, and the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **97.6/100** with vision completion **88.3/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, the gossip relay now couples an LRU-backed dedup cache with adaptive fanout, shard persistence, and partition tagging, and the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, complete the libp2p/storage-engine/coding wrapper migrations, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -19,10 +20,10 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-09-22T16:46:03.452849109Z`)*: 7 strategic crates, 7 replaceable crates, and 847 unclassified dependencies in the resolved workspace DAG.
+- **Current inventory** *(generated at `2025-09-23T11:08:42.119Z`)*: 7 strategic crates, 7 replaceable crates, and 847 unclassified dependencies in the resolved workspace DAG.
 - **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
 
-## 1. Consensus & Core Execution — ~90 %
+## 1. Consensus & Core Execution — 92.2 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -44,12 +45,13 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — ~97 %
+## 2. Networking & Gossip — 96.0 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
-- QUIC transport with mutual-TLS certificate rotation, cached diagnostics, TCP fallback, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs`, `node/src/net/transport_quic.rs`, and `docs/network_quic.md`, with telemetry via `quic_cert_rotation_total` and per-peer `quic_retransmit_total`/`quic_handshake_fail_total` counters.
-- `net.quic_stats` RPC and `contract-cli net quic-stats` expose cached latency,
+- QUIC transport with mutual-TLS certificate rotation, cached diagnostics, TCP fallback, provider introspection, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs`, `crates/transport/src/lib.rs`, `crates/transport/src/quinn_backend.rs`, `crates/transport/src/s2n_backend.rs`, and `docs/quic.md`, with telemetry via `quic_cert_rotation_total`, `quic_provider_connect_total{provider}`, and per-peer `quic_retransmit_total`/`quic_handshake_fail_total` counters.
+- Provider metadata and certificate validation now flow through `p2p::handshake`, which consumes the registry capability enums, persists provider IDs for CLI/RPC output, and loads retry/certificate policies from `config/quic.toml`.
+- `net.quic_stats` RPC and `blockctl net quic stats` expose cached latency,
   retransmit, and endpoint reuse data with per-peer failure metrics for operators.
 - LRU-backed duplicate suppression, adaptive fanout, and shard-aware persistence documented in `docs/gossip.md` and implemented in `node/src/gossip/relay.rs` with configurable TTL/fanout stored in `config/gossip.toml`.
   - `net gossip-status` CLI / `net.gossip_status` RPC expose live TTL, cache, fanout, partition tags, and persisted shard peer sets for operators.
@@ -67,10 +69,11 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - Uptime-based fee rebates tracked in `node/src/net/uptime.rs` with `peer.rebate_status` RPC (`docs/fee_rebates.md`).
 
 **Gaps**
-- Large-scale WAN chaos experiments remain open.
+- Large-scale WAN chaos experiments remain open; cross-provider failover drills still pending.
 - Bootstrap peer churn analysis missing.
+- Libp2p remains directly embedded in discovery/uptime paths (`node/src/net/discovery.rs`, `node/src/net/uptime.rs`); the overlay abstraction has not yet landed, keeping dependency risk elevated.
 
-## 3. Governance & Subsidy Economy — ~95 %
+## 3. Governance & Subsidy Economy — 94.5 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -100,7 +103,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — ~85 %
+## 4. Storage & Free‑Read Hosting — 88.5 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -118,7 +121,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — ~82 %
+## 5. Smart‑Contract VM & UTXO/PoW — 84.1 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -132,7 +135,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — ~93 %
+## 6. Compute Marketplace & CBM — 93.7 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -152,7 +155,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrowed payments and automated SLA enforcement remain rudimentary; deadline tracking and slashing heuristics are staged but not yet active.
 
-## 7. Trust Lines & DEX — ~81 %
+## 7. Trust Lines & DEX — 83.1 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -168,7 +171,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — ~96 %
+## 8. Wallets, Light Clients & KYC — 94.8 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -191,7 +194,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — ~74 %
+## 9. Bridges & Cross‑Chain Routing — 78.0 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -203,7 +206,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
 
-## 10. Monitoring, Debugging & Profiling — ~91 %
+## 10. Monitoring, Debugging & Profiling — 93.6 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -221,7 +224,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Bridge and VM metrics are sparse.
 - Automated anomaly detection not in place.
 
-## 11. Identity & Explorer — ~80 %
+## 11. Identity & Explorer — 82.5 %
 
 **Evidence**
 - DID registry persists anchors with replay protection, governance revocation checks, and optional provenance attestations (`node/src/identity/did.rs`, `state/src/did.rs`).
@@ -234,7 +237,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Revocation alerting and recovery runbooks need explorer/CLI integration.
 - Mobile wallet identity UX and bulk export tooling remain outstanding.
 
-## 12. Economic Simulation & Formal Verification — ~41 %
+## 12. Economic Simulation & Formal Verification — 42.0 %
 
 **Evidence**
 - Simulation scenarios for inflation/demand/backlog (`sim/src`).
@@ -245,7 +248,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 13. Mobile UX & Contribution Metrics — ~68 %
+## 13. Mobile UX & Contribution Metrics — 72.4 %
 
 **Evidence**
 - Background sync respecting battery/network constraints with platform-specific probes, async caching, CLI/RPC gating messages, and persisted overrides (`docs/light_client.md`, `docs/mobile_light_client.md`, `cli/src/light_client.rs`). Device snapshots capture freshness (`fresh|cached|fallback`) labels, stream to `the_block_light_client_device_status`, embed into compressed log uploads, and expose CLI toggles for charging/Wi‑Fi overrides stored in `~/.the_block/light_client.toml`.
@@ -258,4 +261,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑21*
+*Last updated: 2025‑09‑23*

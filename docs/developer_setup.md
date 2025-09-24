@@ -1,4 +1,5 @@
 # Developer Setup
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Run `./scripts/bootstrap.sh` to install toolchains. The script creates `.venv` and prepends its `bin` directory to `PATH`, so `python demo.py` works immediately. If a system `python` is missing, a shim is installed at `bin/python` and added to the path.
 

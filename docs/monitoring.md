@@ -1,4 +1,5 @@
 # Monitoring
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The default dashboard bundles Prometheus and Grafana to visualize subsystem metrics.
 Operational alert handling and correlation procedures live in the

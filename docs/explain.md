@@ -1,4 +1,5 @@
 # Demo Walkthrough
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 `demo.py` narrates the full journey of data through The‑Block.  Each
 numbered section below maps to a portion of the script so readers can
@@ -64,4 +65,3 @@ relate printed output to blockchain concepts.
 
 Running `python demo.py` prints detailed narration and exits with code
 `0`.  Apart from the keypair, every run is deterministic.
-

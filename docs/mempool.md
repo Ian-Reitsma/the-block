@@ -1,4 +1,5 @@
 # Mempool Architecture
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The mempool admits, prioritizes, and evicts transactions before they enter a
 block.  Implementation details live in [`node/src/lib.rs`](../node/src/lib.rs)

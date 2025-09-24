@@ -61,6 +61,10 @@ async fn rpc_reports_handshake_failures() {
         quic_cert: None,
         quic_fingerprint: None,
         quic_fingerprint_previous: Vec::new(),
+
+        quic_provider: None,
+
+        quic_capabilities: Vec::new(),
     };
     let msg = Message::new(Payload::Handshake(hello), &sk);
     peers.handle_message(msg, None, &bc);

@@ -1,4 +1,5 @@
 # Fee Market Reference
+> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The Block uses an EIP‑1559 style fee mechanism to balance demand across
 consumer and industrial lanes. Each block carries a `base_fee` that adjusts
