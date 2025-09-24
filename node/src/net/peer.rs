@@ -6,7 +6,7 @@ use crate::net::message::{Message, Payload};
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::Transport;
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use fs2::FileExt;
@@ -1904,7 +1904,10 @@ static CHUNK_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    Mutex::new(SimpleDb::open(path.to_str().unwrap()))
+    Mutex::new(SimpleDb::open_named(
+        names::NET_PEER_CHUNKS,
+        path.to_str().unwrap(),
+    ))
 });
 
 fn persist_peers(set: &HashSet<SocketAddr>) {

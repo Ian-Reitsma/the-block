@@ -1,5 +1,5 @@
 # Release Provenance & SBOM
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Each tagged release includes a Software Bill of Materials (SBOM) and a signed provenance statement.
 

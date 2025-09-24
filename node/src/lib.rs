@@ -20,6 +20,8 @@
 #![clippy::disallowed_methods = "tokio::runtime::Builder::new_multi_thread"]
 #![clippy::disallowed_types = "tokio::runtime::Runtime"]
 #![clippy::disallowed_types = "tokio::task::JoinHandle"]
+#![clippy::disallowed_types = "libp2p::PeerId"]
+#![clippy::disallowed_types = "libp2p::Multiaddr"]
 
 //! Core blockchain implementation with Python bindings.
 //!
@@ -1911,6 +1913,14 @@ impl Blockchain {
         crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
         crate::net::set_metrics_export_dir(cfg.metrics_export_dir.clone());
         crate::net::set_peer_metrics_export_quota(cfg.peer_metrics_export_quota_bytes);
+        crate::net::configure_overlay(&cfg.overlay);
+        crate::simple_db::configure_engines(cfg.storage.clone());
+        if let Err(err) = crate::config::ensure_overlay_sanity(&cfg.overlay) {
+            #[cfg(feature = "telemetry")]
+            tracing::warn!(reason = %err, "overlay_sanity_failed");
+            #[cfg(not(feature = "telemetry"))]
+            eprintln!("overlay_sanity_failed: {err}");
+        }
         crate::net::set_metrics_aggregator(cfg.metrics_aggregator.clone());
         #[cfg(feature = "quic")]
         {

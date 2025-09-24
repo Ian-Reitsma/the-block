@@ -1,5 +1,5 @@
 # Local Swarm
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 `just swarm-up` launches a 5-node test network with Prometheus and Grafana.
 

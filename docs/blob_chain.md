@@ -1,5 +1,5 @@
 # Blob Scheduler and Multi-Layer Root Anchoring
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 `BlobScheduler` coordinates when pending blob roots are aggregated and
 anchored on-chain. The scheduler tracks two independent queues:

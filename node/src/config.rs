@@ -1,13 +1,14 @@
+use crate::simple_db::EngineConfig;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::CONFIG_RELOAD_TOTAL;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use signal_hook::consts::signal::SIGHUP;
 use signal_hook::iterator::Signals;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc::channel, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -44,6 +45,10 @@ pub struct NodeConfig {
     pub metrics_export_dir: String,
     #[serde(default = "default_peer_metrics_export_quota_bytes")]
     pub peer_metrics_export_quota_bytes: u64,
+    #[serde(default)]
+    pub overlay: OverlayConfig,
+    #[serde(default)]
+    pub storage: EngineConfig,
     #[serde(default)]
     pub metrics_aggregator: Option<AggregatorConfig>,
     #[serde(default = "default_true")]
@@ -101,6 +106,8 @@ impl Default for NodeConfig {
             peer_metrics_sample_rate: default_peer_metrics_sample_rate(),
             metrics_export_dir: default_metrics_export_dir(),
             peer_metrics_export_quota_bytes: default_peer_metrics_export_quota_bytes(),
+            overlay: OverlayConfig::default(),
+            storage: EngineConfig::default(),
             metrics_aggregator: None,
             track_peer_drop_reasons: default_true(),
             track_handshake_failures: default_true(),
@@ -136,6 +143,36 @@ impl Default for TelemetryConfig {
         Self {
             sample_rate: default_sample_rate(),
             compaction_secs: default_compaction_secs(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayBackend {
+    Libp2p,
+    Stub,
+}
+
+impl Default for OverlayBackend {
+    fn default() -> Self {
+        OverlayBackend::Libp2p
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct OverlayConfig {
+    #[serde(default = "default_overlay_db_path")]
+    pub peer_db_path: String,
+    #[serde(default)]
+    pub backend: OverlayBackend,
+}
+
+impl Default for OverlayConfig {
+    fn default() -> Self {
+        Self {
+            peer_db_path: default_overlay_db_path(),
+            backend: OverlayBackend::default(),
         }
     }
 }
@@ -237,6 +274,17 @@ fn default_peer_metrics_retention() -> u64 {
 
 fn default_metrics_export_dir() -> String {
     "state".into()
+}
+
+fn default_overlay_db_path() -> String {
+    std::env::var("TB_OVERLAY_DB_PATH").unwrap_or_else(|_| {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".the_block")
+            .join("overlay_peers.bin")
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 fn default_peer_metrics_export_quota_bytes() -> u64 {
@@ -473,6 +521,53 @@ fn load_file(dir: &str) -> Result<NodeConfig> {
     Ok(cfg)
 }
 
+pub fn ensure_overlay_sanity(cfg: &OverlayConfig) -> Result<()> {
+    if matches!(cfg.backend, OverlayBackend::Libp2p) && cfg.peer_db_path.trim().is_empty() {
+        return Err(anyhow!(
+            "overlay peer_db_path must be set when using the libp2p backend"
+        ));
+    }
+
+    let expected_label = match cfg.backend {
+        OverlayBackend::Libp2p => "libp2p",
+        OverlayBackend::Stub => "stub",
+    };
+
+    let status = crate::net::overlay_status();
+
+    if status.backend != expected_label {
+        return Err(anyhow!(
+            "overlay backend mismatch: config expects `{expected_label}` but runtime reports `{}`. Run `the-block net overlay-status` to inspect active overlay state.",
+            status.backend
+        ));
+    }
+
+    match cfg.backend {
+        OverlayBackend::Libp2p => {
+            let runtime_path = status
+                .database_path
+                .ok_or_else(|| anyhow!(
+                    "libp2p overlay did not report a persisted database path. Check `the-block net overlay-status` and configuration before starting the node."
+                ))?;
+            if Path::new(&runtime_path) != Path::new(&cfg.peer_db_path) {
+                return Err(anyhow!(
+                    "libp2p overlay peer database mismatch: config points to `{}` but diagnostics reported `{runtime_path}`",
+                    cfg.peer_db_path
+                ));
+            }
+        }
+        OverlayBackend::Stub => {
+            if status.database_path.is_some() {
+                return Err(anyhow!(
+                    "stub overlay should not expose a database path; ensure the stub backend is active and restart if diagnostics disagree"
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn apply(cfg: &NodeConfig) {
     {
         let mut rl = RATE_LIMIT_CFG.write().unwrap();
@@ -495,6 +590,14 @@ fn apply(cfg: &NodeConfig) {
     crate::net::set_track_handshake_fail(cfg.track_handshake_failures);
     crate::net::set_peer_metrics_sample_rate(cfg.peer_metrics_sample_rate as u64);
     crate::net::set_peer_metrics_export(cfg.peer_metrics_export);
+    crate::net::configure_overlay(&cfg.overlay);
+    if let Err(err) = ensure_overlay_sanity(&cfg.overlay) {
+        #[cfg(feature = "telemetry")]
+        tracing::warn!(reason = %err, "overlay_sanity_failed");
+        #[cfg(not(feature = "telemetry"))]
+        eprintln!("overlay_sanity_failed: {err}");
+    }
+    crate::simple_db::configure_engines(cfg.storage.clone());
     crate::net::peer_metrics_store::init(&cfg.peer_metrics_db);
     crate::net::load_peer_metrics();
     crate::net::set_metrics_aggregator(cfg.metrics_aggregator.clone());

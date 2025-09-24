@@ -1,5 +1,5 @@
 # Transaction Lifecycle and Fee Lanes
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The transaction subsystem coordinates account debits, signatures, and fee calculation while respecting dual fee lanes and the legacy industrial sub-ledger (retained for compatibility). This document walks through the full lifecycle from payload construction to on-chain inclusion and provides references for Python bindings and mempool behavior.
 

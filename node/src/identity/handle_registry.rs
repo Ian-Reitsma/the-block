@@ -1,4 +1,4 @@
-use crate::SimpleDb;
+use crate::{simple_db::names, SimpleDb};
 use blake3::Hasher;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -44,7 +44,7 @@ pub struct HandleRegistry {
 impl HandleRegistry {
     pub fn open(path: &str) -> Self {
         Self {
-            db: SimpleDb::open(path),
+            db: SimpleDb::open_named(names::IDENTITY_HANDLES, path),
         }
     }
 

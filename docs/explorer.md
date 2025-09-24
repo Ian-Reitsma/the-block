@@ -1,5 +1,5 @@
 # Explorer API
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The explorer exposes a lightweight REST service for querying on-chain data and analytics. DID anchors are cached in-process so repeated resolves hit memory rather than RocksDB, and the dedicated `did_view` page links anchors to wallet details for faster operator workflows.
 

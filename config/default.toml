@@ -7,6 +7,19 @@ peer_metrics_compress = false
 peer_metrics_sample_rate = 1
 metrics_export_dir = "state"
 peer_metrics_export_quota_bytes = 10485760
+[overlay]
+backend = "libp2p"
+peer_db_path = "state/overlay_peers.bin"
+
+[storage]
+default_engine = "rocksdb"
+
+[storage.overrides]
+gossip_relay = "sled"
+net_peer_chunks = "sled"
+gateway_dns = "memory"
+localnet_receipts = "memory"
+
 track_peer_drop_reasons = true
 track_handshake_failures = true
 peer_reputation_decay = 0.01

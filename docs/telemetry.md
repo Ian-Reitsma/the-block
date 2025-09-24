@@ -1,5 +1,5 @@
 # Telemetry Log Fields
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Structured telemetry logs include the following fields. All identifiers are privacy-scrubbed with BLAKE3 before emission.
 
@@ -28,6 +28,19 @@ All per-peer metrics include a `peer_id` label and, where applicable, a
 - `peer_handshake_fail_total{peer_id,reason}` records QUIC handshake errors
 - `peer_metrics_active` gauges the number of peers currently tracked
 - `peer_metrics_memory_bytes` approximates memory used by peer metrics
+- `overlay_backend_active{backend}` flips to 1 for the active overlay backend
+  (stub or libp2p)
+- `overlay_peer_total{backend}` counts overlay peers currently tracked by the
+  uptime service, grouped by backend
+- `overlay_peer_persisted_total{backend}` reports persisted overlay peer
+  records for the active backend
+- `storage_engine_pending_compactions{db,engine}`,
+  `storage_engine_running_compactions{db,engine}`,
+  `storage_engine_level0_files{db,engine}`,
+  `storage_engine_sst_bytes{db,engine}`,
+  `storage_engine_memtable_bytes{db,engine}`, and
+  `storage_engine_size_bytes{db,engine}` expose engine health across RocksDB,
+  sled, or the in-memory backend for every `SimpleDb` handle
 - `peer_throttle_total{reason}` counts peers temporarily throttled for request or bandwidth limits
 - `peer_backpressure_active_total{reason}` increments when a peer is throttled for exceeding limits
 - `peer_backpressure_dropped_total{reason}` counts requests rejected due to active backpressure

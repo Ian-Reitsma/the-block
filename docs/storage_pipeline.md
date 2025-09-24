@@ -1,5 +1,5 @@
 # Storage Pipeline
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The storage client splits objects into encrypted chunks before handing them to
 providers. Completed blob roots are queued for on-chain anchoring by the

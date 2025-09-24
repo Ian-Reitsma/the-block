@@ -1,5 +1,5 @@
 # Proof-of-History Tick Generator
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The PoH subsystem produces a deterministic sequence of hashes that act as a
 "clock" for consensus and receipt auditing. Each tick is the BLAKE3 hash of the

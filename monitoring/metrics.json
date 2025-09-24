@@ -151,7 +151,9 @@
     {
       "deprecated": false,
       "description": "Orders submitted to the DEX by side",
-      "labels": ["side"],
+      "labels": [
+        "side"
+      ],
       "name": "dex_orders_total"
     },
     {
@@ -205,13 +207,17 @@
     {
       "deprecated": false,
       "description": "Wallet fee floor warnings surfaced to users",
-      "labels": ["lane"],
+      "labels": [
+        "lane"
+      ],
       "name": "fee_floor_warning_total"
     },
     {
       "deprecated": false,
       "description": "Wallet sends that override fee floor guidance",
-      "labels": ["lane"],
+      "labels": [
+        "lane"
+      ],
       "name": "fee_floor_override_total"
     },
     {
@@ -389,13 +395,17 @@
     {
       "deprecated": false,
       "description": "Total compute provider SLA violations",
-      "labels": ["provider"],
+      "labels": [
+        "provider"
+      ],
       "name": "compute_sla_violations_total"
     },
     {
       "deprecated": false,
       "description": "Rolling uptime percentage for the compute provider",
-      "labels": ["provider"],
+      "labels": [
+        "provider"
+      ],
       "name": "compute_provider_uptime"
     },
     {
@@ -525,13 +535,17 @@
     {
       "deprecated": false,
       "description": "Per-peer hits on the request rate limiter",
-      "labels": ["peer_id"],
+      "labels": [
+        "peer_id"
+      ],
       "name": "p2p_request_limit_hits_total"
     },
     {
       "deprecated": false,
       "description": "Rate limit drops per peer",
-      "labels": ["peer_id"],
+      "labels": [
+        "peer_id"
+      ],
       "name": "peer_rate_limit_total"
     },
     {
@@ -551,6 +565,30 @@
       "description": "Number of peers currently tracked for telemetry",
       "labels": [],
       "name": "peer_metrics_active"
+    },
+    {
+      "deprecated": false,
+      "description": "Indicator gauge for the active overlay backend (1 active / 0 inactive)",
+      "labels": [
+        "backend"
+      ],
+      "name": "overlay_backend_active"
+    },
+    {
+      "deprecated": false,
+      "description": "Overlay peers currently tracked by the uptime service, grouped by backend",
+      "labels": [
+        "backend"
+      ],
+      "name": "overlay_peer_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Persisted overlay peer records grouped by backend",
+      "labels": [
+        "backend"
+      ],
+      "name": "overlay_peer_persisted_total"
     },
     {
       "deprecated": false,
@@ -818,8 +856,12 @@
         {
           "expr": "increase(scheduler_cancel_total[5m]) > 100",
           "for": "5m",
-          "labels": {"severity": "warning"},
-          "annotations": {"summary": "High scheduler cancellation rate"}
+          "labels": {
+            "severity": "warning"
+          },
+          "annotations": {
+            "summary": "High scheduler cancellation rate"
+          }
         }
       ]
     },
@@ -946,6 +988,60 @@
       "description": "Number of storage writes that failed due to disk exhaustion",
       "labels": [],
       "name": "storage_disk_full_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Pending compactions reported by the storage engine",
+      "labels": [
+        "db",
+        "engine"
+      ],
+      "name": "storage_engine_pending_compactions"
+    },
+    {
+      "deprecated": false,
+      "description": "Active compactions reported by the storage engine",
+      "labels": [
+        "db",
+        "engine"
+      ],
+      "name": "storage_engine_running_compactions"
+    },
+    {
+      "deprecated": false,
+      "description": "Level-0 file count per storage engine",
+      "labels": [
+        "db",
+        "engine"
+      ],
+      "name": "storage_engine_level0_files"
+    },
+    {
+      "deprecated": false,
+      "description": "Bytes stored in SST files for each storage engine",
+      "labels": [
+        "db",
+        "engine"
+      ],
+      "name": "storage_engine_sst_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Bytes retained in storage engine memtables",
+      "labels": [
+        "db",
+        "engine"
+      ],
+      "name": "storage_engine_memtable_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Disk footprint per storage engine",
+      "labels": [
+        "db",
+        "engine"
+      ],
+      "name": "storage_engine_size_bytes"
     },
     {
       "deprecated": false,

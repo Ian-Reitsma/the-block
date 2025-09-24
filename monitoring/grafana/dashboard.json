@@ -1858,6 +1858,39 @@
       ],
       "title": "telemetry_alloc_bytes",
       "type": "timeseries"
+    },
+    {
+      "description": "Active overlay backend indicator",
+      "id": 170,
+      "targets": [
+        {
+          "expr": "overlay_backend_active"
+        }
+      ],
+      "title": "overlay_backend_active",
+      "type": "timeseries"
+    },
+    {
+      "description": "Overlay peers tracked by backend",
+      "id": 171,
+      "targets": [
+        {
+          "expr": "overlay_peer_total"
+        }
+      ],
+      "title": "overlay_peer_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Persisted overlay peer records by backend",
+      "id": 172,
+      "targets": [
+        {
+          "expr": "overlay_peer_persisted_total"
+        }
+      ],
+      "title": "overlay_peer_persisted_total",
+      "type": "timeseries"
     }
   ]
 }

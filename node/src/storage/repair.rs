@@ -1,6 +1,6 @@
 use super::erasure;
 use super::types::{ObjectManifest, Redundancy};
-use crate::simple_db::SimpleDb;
+use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
@@ -40,7 +40,7 @@ static REPAIR_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 
 pub fn spawn(path: String, period: Duration) {
     let _ = runtime::spawn_blocking(move || {
-        let mut db = SimpleDb::open(&path);
+        let mut db = SimpleDb::open_named(names::STORAGE_REPAIR, &path);
         let log = RepairLog::new(Path::new(&path).join("repair_log"));
         loop {
             if let Err(err) = run_once(&mut db, &log, RepairRequest::default()) {

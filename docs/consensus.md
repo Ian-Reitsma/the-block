@@ -1,5 +1,5 @@
 # CONSENSUS — Fee Routing State Transitions
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document codifies the fee routing logic that is baked into consensus after **FORK-FEE-01**.  The algebra below is the single source of truth for how a transaction's `fee` field is decomposed and applied.
 

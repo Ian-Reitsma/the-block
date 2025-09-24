@@ -1,5 +1,5 @@
 # Network Bootstrapping and Recovery
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Peers discovered by the gossip layer are persisted to `~/.the_block/peers.txt`.
 On startup the node merges these records with any statically configured

@@ -1,454 +1,8 @@
 {
   "panels": [
     {
+      "description": "Remaining burst quota",
       "id": 1,
-      "title": "DEX",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 2,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dex_escrow_locked"
-        }
-      ],
-      "title": "dex_escrow_locked",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dex_escrow_pending"
-        }
-      ],
-      "title": "dex_escrow_pending",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dex_liquidity_locked_total"
-        }
-      ],
-      "title": "dex_liquidity_locked_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dex_orders_total"
-        }
-      ],
-      "title": "dex_orders_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 6,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "dex_trade_volume"
-        }
-      ],
-      "title": "dex_trade_volume",
-      "type": "timeseries"
-    },
-    {
-      "id": 7,
-      "title": "Compute",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "compute_sla_violations_total"
-        }
-      ],
-      "title": "compute_sla_violations_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "compute_provider_uptime"
-        }
-      ],
-      "title": "compute_provider_uptime",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_accelerator_fail_total"
-        }
-      ],
-      "title": "scheduler_accelerator_fail_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_accelerator_miss_total"
-        }
-      ],
-      "title": "scheduler_accelerator_miss_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_accelerator_util_total"
-        }
-      ],
-      "title": "scheduler_accelerator_util_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 13,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_active_jobs"
-        }
-      ],
-      "title": "scheduler_active_jobs",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 14,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_cancel_total"
-        }
-      ],
-      "title": "scheduler_cancel_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 15,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_effective_price"
-        }
-      ],
-      "title": "scheduler_effective_price",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 16,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_match_latency_seconds"
-        }
-      ],
-      "title": "scheduler_match_latency_seconds",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 17,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_match_total"
-        }
-      ],
-      "title": "scheduler_match_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 18,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_preempt_total"
-        }
-      ],
-      "title": "scheduler_preempt_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 19,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_priority_miss_total"
-        }
-      ],
-      "title": "scheduler_priority_miss_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 20,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "scheduler_provider_reputation"
-        }
-      ],
-      "title": "scheduler_provider_reputation",
-      "type": "timeseries"
-    },
-    {
-      "id": 21,
-      "title": "Gossip",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 22,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "gossip_convergence_seconds"
-        }
-      ],
-      "title": "gossip_convergence_seconds",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 23,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "gossip_duplicate_total"
-        }
-      ],
-      "title": "gossip_duplicate_total",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 24,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "gossip_fanout_gauge"
-        }
-      ],
-      "title": "gossip_fanout_gauge",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 25,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
-      "targets": [
-        {
-          "expr": "gossip_ttl_drop_total"
-        }
-      ],
-      "title": "gossip_ttl_drop_total",
-      "type": "timeseries"
-    },
-    {
-      "id": 26,
-      "title": "Other",
-      "type": "row"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 27,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
       "targets": [
         {
           "expr": "active_burst_quota"
@@ -458,16 +12,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 28,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "effective active miners",
+      "id": 2,
       "targets": [
         {
           "expr": "active_miners"
@@ -477,16 +23,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 29,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current industrial admission mode",
+      "id": 3,
       "targets": [
         {
           "expr": "admission_mode"
@@ -496,16 +34,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 30,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total peer metric ingests",
+      "id": 4,
       "targets": [
         {
           "expr": "aggregator_ingest_total"
@@ -515,16 +45,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 31,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer metric samples pruned by retention",
+      "id": 5,
       "targets": [
         {
           "expr": "aggregator_retention_pruned_total"
@@ -534,16 +56,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 32,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Whether a service badge is active (1/0)",
+      "id": 6,
       "targets": [
         {
           "expr": "badge_active"
@@ -553,16 +67,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 33,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Unix timestamp of the last badge mint/burn",
+      "id": 7,
       "targets": [
         {
           "expr": "badge_last_change_seconds"
@@ -572,16 +78,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 34,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total service badges issued",
+      "id": 8,
       "targets": [
         {
           "expr": "badge_issued_total"
@@ -591,16 +89,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 35,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total service badges revoked",
+      "id": 9,
       "targets": [
         {
           "expr": "badge_revoked_total"
@@ -610,16 +100,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 36,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Transactions rejected due to balance overflow",
+      "id": 10,
       "targets": [
         {
           "expr": "balance_overflow_reject_total"
@@ -629,16 +111,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 37,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Expiration timestamp for active peer bans",
+      "id": 11,
       "targets": [
         {
           "expr": "banned_peer_expiration_seconds"
@@ -648,16 +122,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 38,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total peers currently banned",
+      "id": 12,
       "targets": [
         {
           "expr": "banned_peers_total"
@@ -667,16 +133,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 39,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "base reward after logistic factor",
+      "id": 13,
       "targets": [
         {
           "expr": "base_reward_ct"
@@ -686,16 +144,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 40,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total mined blocks",
+      "id": 14,
       "targets": [
         {
           "expr": "block_mined_total"
@@ -705,16 +155,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 41,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Unique peers tracked by aggregator",
+      "id": 15,
       "targets": [
         {
           "expr": "cluster_peer_active_total"
@@ -724,16 +166,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 42,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Unix timestamp of the last successful config reload",
+      "id": 16,
       "targets": [
         {
           "expr": "config_reload_last_ts"
@@ -743,16 +177,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 43,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Configuration reload attempts grouped by result",
+      "id": 17,
       "targets": [
         {
           "expr": "config_reload_total"
@@ -762,16 +188,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 44,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Median consumer fee",
+      "id": 18,
       "targets": [
         {
           "expr": "consumer_fee_p50"
@@ -781,16 +199,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 45,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "p90 consumer fee",
+      "id": 19,
       "targets": [
         {
           "expr": "consumer_fee_p90"
@@ -800,16 +210,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 46,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total courier receipt flush attempts",
+      "id": 20,
       "targets": [
         {
           "expr": "courier_flush_attempt_total"
@@ -819,16 +221,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 47,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Failed courier receipt flush attempts",
+      "id": 21,
       "targets": [
         {
           "expr": "courier_flush_failure_total"
@@ -838,16 +232,63 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 48,
-      "options": {
-        "legend": {
-          "showLegend": false
+      "description": "Total funds locked in DEX escrow",
+      "id": 22,
+      "targets": [
+        {
+          "expr": "dex_escrow_locked"
         }
-      },
+      ],
+      "title": "dex_escrow_locked",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of pending DEX escrows",
+      "id": 23,
+      "targets": [
+        {
+          "expr": "dex_escrow_pending"
+        }
+      ],
+      "title": "dex_escrow_pending",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total liquidity currently locked in DEX escrow",
+      "id": 24,
+      "targets": [
+        {
+          "expr": "dex_liquidity_locked_total"
+        }
+      ],
+      "title": "dex_liquidity_locked_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Orders submitted to the DEX by side",
+      "id": 25,
+      "targets": [
+        {
+          "expr": "dex_orders_total"
+        }
+      ],
+      "title": "dex_orders_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total matched trade quantity across all DEX pairs",
+      "id": 26,
+      "targets": [
+        {
+          "expr": "dex_trade_volume"
+        }
+      ],
+      "title": "dex_trade_volume",
+      "type": "timeseries"
+    },
+    {
+      "description": "Retarget calculations clamped to bounds",
+      "id": 27,
       "targets": [
         {
           "expr": "difficulty_clamp_total"
@@ -857,16 +298,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 49,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Number of difficulty retarget calculations",
+      "id": 28,
       "targets": [
         {
           "expr": "difficulty_retarget_total"
@@ -876,16 +309,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 50,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total DNS verification failures",
+      "id": 29,
       "targets": [
         {
           "expr": "dns_verification_fail_total"
@@ -895,16 +320,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 51,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "drop_transaction failures for missing entries",
+      "id": 30,
       "targets": [
         {
           "expr": "drop_not_found_total"
@@ -914,16 +331,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 52,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Transactions rejected as duplicate",
+      "id": 31,
       "targets": [
         {
           "expr": "dup_tx_reject_total"
@@ -933,16 +342,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 53,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total mempool evictions",
+      "id": 32,
       "targets": [
         {
           "expr": "evictions_total"
@@ -952,16 +353,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 54,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Transactions rejected for low fee",
+      "id": 33,
       "targets": [
         {
           "expr": "fee_floor_reject_total"
@@ -971,16 +364,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 55,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "base seconds for Fibonacci smoothing",
+      "id": 34,
       "targets": [
         {
           "expr": "fib_window_base_secs"
@@ -990,16 +375,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 56,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total observed fork reorgs",
+      "id": 35,
       "targets": [
         {
           "expr": "fork_reorg_total"
@@ -1009,16 +386,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 57,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Gateway DNS verification attempts grouped by status",
+      "id": 36,
       "targets": [
         {
           "expr": "gateway_dns_lookup_total"
@@ -1028,16 +397,41 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 58,
-      "options": {
-        "legend": {
-          "showLegend": false
+      "description": "Time for all peers to agree on the network tip",
+      "id": 37,
+      "targets": [
+        {
+          "expr": "gossip_convergence_seconds"
         }
-      },
+      ],
+      "title": "gossip_convergence_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Duplicate gossip messages dropped",
+      "id": 38,
+      "targets": [
+        {
+          "expr": "gossip_duplicate_total"
+        }
+      ],
+      "title": "gossip_duplicate_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Current gossip fanout",
+      "id": 39,
+      "targets": [
+        {
+          "expr": "gossip_fanout_gauge"
+        }
+      ],
+      "title": "gossip_fanout_gauge",
+      "type": "timeseries"
+    },
+    {
+      "description": "Delay between scheduled and actual activation",
+      "id": 40,
       "targets": [
         {
           "expr": "gov_activation_delay_seconds"
@@ -1047,16 +441,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 59,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Governance activations",
+      "id": 41,
       "targets": [
         {
           "expr": "gov_activation_total"
@@ -1066,16 +452,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 60,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Open governance proposals",
+      "id": 42,
       "targets": [
         {
           "expr": "gov_open_proposals"
@@ -1085,16 +463,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 61,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Governance proposals by status",
+      "id": 43,
       "targets": [
         {
           "expr": "gov_proposals_total"
@@ -1104,16 +474,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 62,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Governance quorum",
+      "id": 44,
       "targets": [
         {
           "expr": "gov_quorum_required"
@@ -1123,16 +485,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 63,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Governance rollbacks",
+      "id": 45,
       "targets": [
         {
           "expr": "gov_rollback_total"
@@ -1142,16 +496,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 64,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Governance votes",
+      "id": 46,
       "targets": [
         {
           "expr": "gov_votes_total"
@@ -1161,16 +507,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 65,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "eta parameter for burst veto x1000",
+      "id": 47,
       "targets": [
         {
           "expr": "haar_eta_milli"
@@ -1180,16 +518,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 66,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Handshake failures grouped by reason",
+      "id": 48,
       "targets": [
         {
           "expr": "handshake_fail_total"
@@ -1199,16 +529,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 67,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "A* heuristic mu x1000",
+      "id": 49,
       "targets": [
         {
           "expr": "heuristic_mu_milli"
@@ -1218,16 +540,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 68,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Non-contiguous nonce submissions",
+      "id": 50,
       "targets": [
         {
           "expr": "identity_nonce_skips_total"
@@ -1237,16 +551,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 69,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Handle registration attempts",
+      "id": 51,
       "targets": [
         {
           "expr": "identity_registrations_total"
@@ -1256,16 +562,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 70,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Rejected identity replay attempts",
+      "id": 52,
       "targets": [
         {
           "expr": "identity_replays_blocked_total"
@@ -1275,16 +573,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 71,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Industrial lane transactions admitted",
+      "id": 53,
       "targets": [
         {
           "expr": "industrial_admitted_total"
@@ -1294,16 +584,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 72,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Pending industrial compute slices",
+      "id": 54,
       "targets": [
         {
           "expr": "industrial_backlog"
@@ -1313,16 +595,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 73,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Industrial lane submissions deferred",
+      "id": 55,
       "targets": [
         {
           "expr": "industrial_deferred_total"
@@ -1332,16 +606,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 74,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current industrial subsidy multiplier",
+      "id": 56,
       "targets": [
         {
           "expr": "industrial_multiplier"
@@ -1351,16 +617,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 75,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Latest price per compute unit",
+      "id": 57,
       "targets": [
         {
           "expr": "industrial_price_per_unit"
@@ -1370,16 +628,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 76,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Industrial admission rejections by reason",
+      "id": 58,
       "targets": [
         {
           "expr": "industrial_rejected_total"
@@ -1389,16 +639,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 77,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total normalized compute units processed",
+      "id": 59,
       "targets": [
         {
           "expr": "industrial_units_total"
@@ -1408,16 +650,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 78,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Industrial compute utilisation percentage",
+      "id": 60,
       "targets": [
         {
           "expr": "industrial_utilization"
@@ -1427,16 +661,30 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 79,
-      "options": {
-        "legend": {
-          "showLegend": false
+      "description": "Total compute provider SLA violations",
+      "id": 61,
+      "targets": [
+        {
+          "expr": "compute_sla_violations_total"
         }
-      },
+      ],
+      "title": "compute_sla_violations_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Rolling uptime percentage for the compute provider",
+      "id": 62,
+      "targets": [
+        {
+          "expr": "compute_provider_uptime"
+        }
+      ],
+      "title": "compute_provider_uptime",
+      "type": "timeseries"
+    },
+    {
+      "description": "Transactions rejected for invalid fee selector",
+      "id": 63,
       "targets": [
         {
           "expr": "invalid_selector_reject_total"
@@ -1446,16 +694,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 80,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Successful peer key rotations",
+      "id": 64,
       "targets": [
         {
           "expr": "key_rotation_total"
@@ -1465,16 +705,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 81,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Times the subsidy kill switch was activated",
+      "id": 65,
       "targets": [
         {
           "expr": "kill_switch_trigger_total"
@@ -1484,16 +716,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 82,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Lock acquisition failures due to poisoning",
+      "id": 66,
       "targets": [
         {
           "expr": "lock_poison_total"
@@ -1503,16 +727,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 83,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Logs dropped due to rate limiting",
+      "id": 67,
       "targets": [
         {
           "expr": "log_drop_total"
@@ -1522,16 +738,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 84,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total emitted log events",
+      "id": 68,
       "targets": [
         {
           "expr": "log_emit_total"
@@ -1541,16 +749,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 85,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Size of serialized log events in bytes",
+      "id": 69,
       "targets": [
         {
           "expr": "log_size_bytes"
@@ -1560,16 +760,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 86,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Settlement loop latency",
+      "id": 70,
       "targets": [
         {
           "expr": "match_loop_latency_seconds"
@@ -1579,16 +771,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 87,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total matched jobs",
+      "id": 71,
       "targets": [
         {
           "expr": "matches_total"
@@ -1598,16 +782,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 88,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current mempool size",
+      "id": 72,
       "targets": [
         {
           "expr": "mempool_size"
@@ -1617,16 +793,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 89,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Times the miner reward logistic factor was recalculated",
+      "id": 73,
       "targets": [
         {
           "expr": "miner_reward_recalc_total"
@@ -1636,16 +804,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 90,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "QUIC handshake failures per peer grouped by reason",
+      "id": 74,
       "targets": [
         {
           "expr": "net_peer_handshake_fail_total"
@@ -1655,16 +815,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 91,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Transactions dropped because the sender account is missing",
+      "id": 75,
       "targets": [
         {
           "expr": "orphan_sweep_total"
@@ -1674,16 +826,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 92,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Successful handshakes by feature mask",
+      "id": 76,
       "targets": [
         {
           "expr": "p2p_handshake_accept_total"
@@ -1693,16 +837,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 93,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Handshakes rejected by reason",
+      "id": 77,
       "targets": [
         {
           "expr": "p2p_handshake_reject_total"
@@ -1712,16 +848,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 94,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current active governance parameter values",
+      "id": 78,
       "targets": [
         {
           "expr": "param_change_active"
@@ -1731,16 +859,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 95,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Governance parameter changes pending activation",
+      "id": 79,
       "targets": [
         {
           "expr": "param_change_pending"
@@ -1750,16 +870,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 96,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Number of settlement payouts capped per identity",
+      "id": 80,
       "targets": [
         {
           "expr": "payout_cap_hits_total"
@@ -1769,16 +881,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 97,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Bytes sent to peer",
+      "id": 81,
       "targets": [
         {
           "expr": "peer_bytes_sent_total"
@@ -1788,16 +892,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 98,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Messages dropped grouped by reason",
+      "id": 82,
       "targets": [
         {
           "expr": "peer_drop_total"
@@ -1807,16 +903,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 99,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Per-peer hits on the request rate limiter",
+      "id": 83,
       "targets": [
         {
           "expr": "p2p_request_limit_hits_total"
@@ -1826,16 +914,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 100,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Rate limit drops per peer",
+      "id": 84,
       "targets": [
         {
           "expr": "peer_rate_limit_total"
@@ -1845,16 +925,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 101,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total peer errors grouped by code",
+      "id": 85,
       "targets": [
         {
           "expr": "peer_error_total"
@@ -1864,16 +936,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 102,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer key rotation attempts grouped by result",
+      "id": 86,
       "targets": [
         {
           "expr": "peer_key_rotate_total"
@@ -1883,16 +947,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 103,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Number of peers currently tracked for telemetry",
+      "id": 87,
       "targets": [
         {
           "expr": "peer_metrics_active"
@@ -1902,16 +958,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 104,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Websocket peer metrics frames dropped",
+      "id": 88,
       "targets": [
         {
           "expr": "peer_metrics_dropped_total"
@@ -1921,16 +969,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 105,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Approximate memory used by peer metrics map",
+      "id": 89,
       "targets": [
         {
           "expr": "peer_metrics_memory_bytes"
@@ -1940,16 +980,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 106,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Active peer metrics websocket subscribers",
+      "id": 90,
       "targets": [
         {
           "expr": "peer_metrics_subscribers"
@@ -1959,16 +991,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 107,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peers rejected grouped by reason",
+      "id": 91,
       "targets": [
         {
           "expr": "peer_rejected_total"
@@ -1978,16 +1002,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 108,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer reputation score",
+      "id": 92,
       "targets": [
         {
           "expr": "peer_reputation_score"
@@ -1997,16 +1013,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 109,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total requests received from peer",
+      "id": 93,
       "targets": [
         {
           "expr": "peer_request_total"
@@ -2016,16 +1024,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 110,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Bulk peer metric export attempts grouped by result",
+      "id": 94,
       "targets": [
         {
           "expr": "peer_stats_export_all_total"
@@ -2035,16 +1035,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 111,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer metric export attempts grouped by result",
+      "id": 95,
       "targets": [
         {
           "expr": "peer_stats_export_total"
@@ -2054,16 +1046,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 112,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer metric queries grouped by peer",
+      "id": 96,
       "targets": [
         {
           "expr": "peer_stats_query_total"
@@ -2073,16 +1057,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 113,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer metric resets grouped by peer",
+      "id": 97,
       "targets": [
         {
           "expr": "peer_stats_reset_total"
@@ -2092,16 +1068,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 114,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Peer throttle events grouped by reason",
+      "id": 98,
       "targets": [
         {
           "expr": "peer_throttle_total"
@@ -2111,16 +1079,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 115,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Backpressure activations grouped by reason",
+      "id": 99,
       "targets": [
         {
           "expr": "peer_backpressure_active_total"
@@ -2130,16 +1090,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 116,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Requests dropped due to backpressure grouped by reason",
+      "id": 100,
       "targets": [
         {
           "expr": "peer_backpressure_dropped_total"
@@ -2149,16 +1101,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 117,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total price entries adjusted by reputation weight",
+      "id": 101,
       "targets": [
         {
           "expr": "price_weight_applied_total"
@@ -2168,16 +1112,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 118,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current reputation score per provider",
+      "id": 102,
       "targets": [
         {
           "expr": "provider_reputation_score"
@@ -2187,16 +1123,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 119,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total bytes received over QUIC",
+      "id": 103,
       "targets": [
         {
           "expr": "quic_bytes_recv_total"
@@ -2206,16 +1134,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 120,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total bytes sent over QUIC",
+      "id": 104,
       "targets": [
         {
           "expr": "quic_bytes_sent_total"
@@ -2225,16 +1145,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 121,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "QUIC connection handshake latency",
+      "id": 105,
       "targets": [
         {
           "expr": "quic_conn_latency_seconds"
@@ -2244,16 +1156,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 122,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "QUIC disconnects by error code",
+      "id": 106,
       "targets": [
         {
           "expr": "quic_disconnect_total"
@@ -2263,16 +1167,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 123,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total QUIC endpoint reuse count",
+      "id": 107,
       "targets": [
         {
           "expr": "quic_endpoint_reuse_total"
@@ -2282,16 +1178,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 124,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total QUIC handshake failures by reason",
+      "id": 108,
       "targets": [
         {
           "expr": "quic_handshake_fail_total"
@@ -2301,16 +1189,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 125,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Reads denied by reason",
+      "id": 109,
       "targets": [
         {
           "expr": "read_denied_total"
@@ -2320,16 +1200,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 126,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Corrupted receipt entries on load",
+      "id": 110,
       "targets": [
         {
           "expr": "receipt_corrupt_total"
@@ -2339,16 +1211,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 127,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Receipt persistence failures",
+      "id": 111,
       "targets": [
         {
           "expr": "receipt_persist_fail_total"
@@ -2358,16 +1222,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 128,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total CT burned from rent escrow",
+      "id": 112,
       "targets": [
         {
           "expr": "rent_escrow_burned_ct_total"
@@ -2377,16 +1233,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 129,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total CT locked in rent escrow",
+      "id": 113,
       "targets": [
         {
           "expr": "rent_escrow_locked_ct_total"
@@ -2396,16 +1244,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 130,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total CT refunded from rent escrow",
+      "id": 114,
       "targets": [
         {
           "expr": "rent_escrow_refunded_ct_total"
@@ -2415,16 +1255,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 131,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Reputation adjustments",
+      "id": 115,
       "targets": [
         {
           "expr": "reputation_adjust_total"
@@ -2434,16 +1266,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 132,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Reputation updates that failed verification or were stale",
+      "id": 116,
       "targets": [
         {
           "expr": "reputation_gossip_fail_total"
@@ -2453,16 +1277,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 133,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Propagation latency for reputation updates",
+      "id": 117,
       "targets": [
         {
           "expr": "reputation_gossip_latency_seconds"
@@ -2472,16 +1288,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 134,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Reputation gossip updates processed grouped by result",
+      "id": 118,
       "targets": [
         {
           "expr": "reputation_gossip_total"
@@ -2491,16 +1299,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 135,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total RPC bans issued",
+      "id": 119,
       "targets": [
         {
           "expr": "rpc_bans_total"
@@ -2510,16 +1310,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 136,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total RPC client errors grouped by code",
+      "id": 120,
       "targets": [
         {
           "expr": "rpc_client_error_total"
@@ -2529,16 +1321,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 137,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "RPC requests checked against the rate limiter",
+      "id": 121,
       "targets": [
         {
           "expr": "rpc_rate_limit_attempt_total"
@@ -2548,16 +1332,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 138,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "RPC requests rejected by the rate limiter",
+      "id": 122,
       "targets": [
         {
           "expr": "rpc_rate_limit_reject_total"
@@ -2567,16 +1343,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 139,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current RPC rate limiter tokens per client",
+      "id": 123,
       "targets": [
         {
           "expr": "rpc_tokens_available"
@@ -2586,16 +1354,118 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 140,
-      "options": {
-        "legend": {
-          "showLegend": false
+      "description": "Accelerator jobs that failed or were cancelled",
+      "id": 124,
+      "targets": [
+        {
+          "expr": "scheduler_accelerator_fail_total"
         }
-      },
+      ],
+      "title": "scheduler_accelerator_fail_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Jobs requiring accelerators that could not be matched",
+      "id": 125,
+      "targets": [
+        {
+          "expr": "scheduler_accelerator_miss_total"
+        }
+      ],
+      "title": "scheduler_accelerator_miss_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Jobs requiring accelerators that started successfully",
+      "id": 126,
+      "targets": [
+        {
+          "expr": "scheduler_accelerator_util_total"
+        }
+      ],
+      "title": "scheduler_accelerator_util_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Number of currently assigned jobs",
+      "id": 127,
+      "targets": [
+        {
+          "expr": "scheduler_active_jobs"
+        }
+      ],
+      "title": "scheduler_active_jobs",
+      "type": "timeseries"
+    },
+    {
+      "description": "Scheduler cancellations",
+      "id": 128,
+      "targets": [
+        {
+          "expr": "scheduler_cancel_total"
+        }
+      ],
+      "title": "scheduler_cancel_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Effective compute price per unit by provider",
+      "id": 129,
+      "targets": [
+        {
+          "expr": "scheduler_effective_price"
+        }
+      ],
+      "title": "scheduler_effective_price",
+      "type": "timeseries"
+    },
+    {
+      "description": "Time to perform a scheduler match",
+      "id": 130,
+      "targets": [
+        {
+          "expr": "scheduler_match_latency_seconds"
+        }
+      ],
+      "title": "scheduler_match_latency_seconds",
+      "type": "timeseries"
+    },
+    {
+      "description": "Scheduler match outcomes by result",
+      "id": 131,
+      "targets": [
+        {
+          "expr": "scheduler_match_total"
+        }
+      ],
+      "title": "scheduler_match_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Scheduler preemption events by reason",
+      "id": 132,
+      "targets": [
+        {
+          "expr": "scheduler_preempt_total"
+        }
+      ],
+      "title": "scheduler_preempt_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "High-priority jobs exceeding wait threshold",
+      "id": 133,
+      "targets": [
+        {
+          "expr": "scheduler_priority_miss_total"
+        }
+      ],
+      "title": "scheduler_priority_miss_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Time a job waited in the scheduler queue",
+      "id": 134,
       "targets": [
         {
           "expr": "job_age_seconds"
@@ -2605,16 +1475,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 141,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Jobs whose priority was boosted due to aging",
+      "id": 135,
       "targets": [
         {
           "expr": "priority_boost_total"
@@ -2624,16 +1486,19 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 142,
-      "options": {
-        "legend": {
-          "showLegend": false
+      "description": "Distribution of provider reputation scores",
+      "id": 136,
+      "targets": [
+        {
+          "expr": "scheduler_provider_reputation"
         }
-      },
+      ],
+      "title": "scheduler_provider_reputation",
+      "type": "timeseries"
+    },
+    {
+      "description": "Receipts applied",
+      "id": 137,
       "targets": [
         {
           "expr": "settle_applied_total"
@@ -2643,16 +1508,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 143,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Receipts failing settlement audit",
+      "id": 138,
       "targets": [
         {
           "expr": "settle_audit_mismatch_total"
@@ -2662,16 +1519,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 144,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Settlement failures",
+      "id": 139,
       "targets": [
         {
           "expr": "settle_failed_total"
@@ -2681,16 +1530,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 145,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Settlement mode changes",
+      "id": 140,
       "targets": [
         {
           "expr": "settle_mode_change_total"
@@ -2700,16 +1541,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 146,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total CT burned from slashing penalties",
+      "id": 141,
       "targets": [
         {
           "expr": "slashing_burn_ct_total"
@@ -2719,16 +1552,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 147,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Snapshot operation duration",
+      "id": 142,
       "targets": [
         {
           "expr": "snapshot_duration_seconds"
@@ -2738,16 +1563,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 148,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total snapshot operation failures",
+      "id": 143,
       "targets": [
         {
           "expr": "snapshot_fail_total"
@@ -2757,16 +1574,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 149,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Snapshot interval in blocks",
+      "id": 144,
       "targets": [
         {
           "expr": "snapshot_interval"
@@ -2776,16 +1585,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 150,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Last requested snapshot interval",
+      "id": 145,
       "targets": [
         {
           "expr": "snapshot_interval_changed"
@@ -2795,16 +1596,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 151,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Expired mempool entries dropped during startup",
+      "id": 146,
       "targets": [
         {
           "expr": "startup_ttl_drop_total"
@@ -2814,16 +1607,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 152,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Size of chunks put into storage",
+      "id": 147,
       "targets": [
         {
           "expr": "storage_chunk_size_bytes"
@@ -2833,16 +1618,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 153,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Number of storage writes that failed due to disk exhaustion",
+      "id": 148,
       "targets": [
         {
           "expr": "storage_disk_full_total"
@@ -2852,16 +1629,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 154,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Final preferred chunk size after upload",
+      "id": 149,
       "targets": [
         {
           "expr": "storage_final_chunk_size"
@@ -2871,16 +1640,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 155,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Initial chunk size used for object upload",
+      "id": 150,
       "targets": [
         {
           "expr": "storage_initial_chunk_size"
@@ -2890,16 +1651,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 156,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Observed provider loss rate",
+      "id": 151,
       "targets": [
         {
           "expr": "storage_provider_loss_rate"
@@ -2909,16 +1662,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 157,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Observed provider RTT in milliseconds",
+      "id": 152,
       "targets": [
         {
           "expr": "storage_provider_rtt_ms"
@@ -2928,16 +1673,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 158,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Time to put a single chunk",
+      "id": 153,
       "targets": [
         {
           "expr": "storage_put_chunk_seconds"
@@ -2947,16 +1684,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 159,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Estimated time to upload object in seconds",
+      "id": 154,
       "targets": [
         {
           "expr": "storage_put_eta_seconds"
@@ -2966,16 +1695,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 160,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total bytes reconstructed by repair loop",
+      "id": 155,
       "targets": [
         {
           "expr": "storage_repair_bytes_total"
@@ -2985,16 +1706,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 161,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total storage repair failures",
+      "id": 156,
       "targets": [
         {
           "expr": "storage_repair_failures_total"
@@ -3004,16 +1717,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 162,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Multiplier auto-reduction events due to inflation guard",
+      "id": 157,
       "targets": [
         {
           "expr": "subsidy_auto_reduced_total"
@@ -3023,16 +1728,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 163,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total subsidized bytes by type",
+      "id": 158,
       "targets": [
         {
           "expr": "subsidy_bytes_total"
@@ -3042,16 +1739,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 164,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total subsidized compute time in ms",
+      "id": 159,
       "targets": [
         {
           "expr": "subsidy_cpu_ms_total"
@@ -3061,16 +1750,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 165,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Current subsidy multipliers",
+      "id": 160,
       "targets": [
         {
           "expr": "subsidy_multiplier"
@@ -3080,16 +1761,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 166,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "True subsidy multipliers",
+      "id": 161,
       "targets": [
         {
           "expr": "subsidy_multiplier_raw"
@@ -3099,16 +1772,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 167,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Transactions dropped due to TTL expiration",
+      "id": 162,
       "targets": [
         {
           "expr": "ttl_drop_total"
@@ -3118,16 +1783,19 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 168,
-      "options": {
-        "legend": {
-          "showLegend": false
+      "description": "Gossip dedup entries removed due to TTL expiry",
+      "id": 163,
+      "targets": [
+        {
+          "expr": "gossip_ttl_drop_total"
         }
-      },
+      ],
+      "title": "gossip_ttl_drop_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Total admitted transactions",
+      "id": 164,
       "targets": [
         {
           "expr": "tx_admitted_total"
@@ -3137,16 +1805,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 169,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total rejected transactions",
+      "id": 165,
       "targets": [
         {
           "expr": "tx_rejected_total"
@@ -3156,16 +1816,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 170,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Total submitted transactions",
+      "id": 166,
       "targets": [
         {
           "expr": "tx_submitted_total"
@@ -3175,16 +1827,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 171,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "utilisation variance threshold x1000",
+      "id": 167,
       "targets": [
         {
           "expr": "util_var_threshold_milli"
@@ -3194,16 +1838,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 172,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "WAL entries skipped due to checksum mismatch",
+      "id": 168,
       "targets": [
         {
           "expr": "wal_corrupt_recovery_total"
@@ -3213,16 +1849,8 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
-      },
-      "id": 173,
-      "options": {
-        "legend": {
-          "showLegend": false
-        }
-      },
+      "description": "Telemetry memory allocation in bytes",
+      "id": 169,
       "targets": [
         {
           "expr": "telemetry_alloc_bytes"
@@ -3230,9 +1858,39 @@
       ],
       "title": "telemetry_alloc_bytes",
       "type": "timeseries"
+    },
+    {
+      "description": "Active overlay backend indicator",
+      "id": 170,
+      "targets": [
+        {
+          "expr": "overlay_backend_active"
+        }
+      ],
+      "title": "overlay_backend_active",
+      "type": "timeseries"
+    },
+    {
+      "description": "Overlay peers tracked by backend",
+      "id": 171,
+      "targets": [
+        {
+          "expr": "overlay_peer_total"
+        }
+      ],
+      "title": "overlay_peer_total",
+      "type": "timeseries"
+    },
+    {
+      "description": "Persisted overlay peer records by backend",
+      "id": 172,
+      "targets": [
+        {
+          "expr": "overlay_peer_persisted_total"
+        }
+      ],
+      "title": "overlay_peer_persisted_total",
+      "type": "timeseries"
     }
-  ],
-  "schemaVersion": 37,
-  "title": "The-Block Auto",
-  "version": 1
+  ]
 }

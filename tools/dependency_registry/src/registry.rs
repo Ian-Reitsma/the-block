@@ -16,6 +16,9 @@ use crate::{
     },
 };
 
+const LIBP2P_PREFIX: &str = "libp2p";
+const DIRECT_LIBP2P_TARGETS: &[&str] = &["node", "cli", "explorer"];
+
 pub struct BuildOptions<'a> {
     pub manifest_path: Option<&'a Path>,
     pub policy: &'a PolicyConfig,
@@ -226,6 +229,12 @@ fn detect_violations(
     forbidden_licenses: &[String],
 ) -> ViolationReport {
     let mut report = ViolationReport::default();
+    let entry_lookup: HashMap<(String, String), &DependencyEntry> = registry
+        .entries
+        .iter()
+        .map(|entry| ((entry.name.clone(), entry.version.clone()), entry))
+        .collect();
+
     for entry in &registry.entries {
         if entry.depth > max_depth {
             report.push(ViolationEntry {
@@ -260,6 +269,29 @@ fn detect_violations(
                 detail: "crate marked as forbidden by policy".to_string(),
                 depth: Some(entry.depth),
             });
+        }
+
+        if entry.name.starts_with(LIBP2P_PREFIX) {
+            for dependent in &entry.dependents {
+                if DIRECT_LIBP2P_TARGETS
+                    .iter()
+                    .any(|target| dependent.name.eq_ignore_ascii_case(target))
+                {
+                    let depth = entry_lookup
+                        .get(&(dependent.name.clone(), dependent.version.clone()))
+                        .map(|dep| dep.depth);
+                    report.push(ViolationEntry {
+                        name: dependent.name.clone(),
+                        version: dependent.version.clone(),
+                        kind: ViolationKind::DirectLibp2p,
+                        detail: format!(
+                            "crate `{}` depends directly on `{}`; use crates/p2p_overlay instead",
+                            dependent.name, entry.name
+                        ),
+                        depth,
+                    });
+                }
+            }
         }
     }
     report

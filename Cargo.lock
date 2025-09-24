@@ -6106,6 +6106,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
+name = "p2p_overlay"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "libp2p",
+ "serde",
+ "tempfile",
+]
+
+[[package]]
 name = "pairing"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8682,6 +8692,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "storage_engine"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "parking_lot 0.12.4",
+ "rocksdb",
+ "sled",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "str_stack"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9038,6 +9061,7 @@ dependencies = [
  "notify",
  "num_cpus",
  "once_cell",
+ "p2p_overlay",
  "parking_lot 0.12.4",
  "pprof 0.13.0",
  "pqcrypto-dilithium",
@@ -9071,6 +9095,7 @@ dependencies = [
  "static_assertions",
  "statrs",
  "storage",
+ "storage_engine",
  "subtle",
  "tar",
  "tb-sim",

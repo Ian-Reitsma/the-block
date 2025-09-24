@@ -1,5 +1,5 @@
 # Storage Threat Model
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 ## Rent Escrow
 - Blobs pay `rent_rate_ct_per_byte` on admission, locked under `rent_escrow.db`.

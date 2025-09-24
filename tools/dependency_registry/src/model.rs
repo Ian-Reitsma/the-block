@@ -75,6 +75,7 @@ pub enum ViolationKind {
     Depth,
     License,
     Tier,
+    DirectLibp2p,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

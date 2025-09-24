@@ -1,9 +1,9 @@
 # Wallets
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The `crates/wallet` crate implements deterministic Ed25519 key management, optional remote signer plumbing, and utilities for building transactions. The command-line interface lives in [`cli/src/wallet.rs`](../cli/src/wallet.rs) and is exposed through the `contract wallet` subcommand.
 
-> **Build status (2025-09-23):** `node/src/bin/wallet.rs` now builds solely
+> **Build status (2025-09-24):** `node/src/bin/wallet.rs` now builds solely
 > against `ed25519-dalek 2.2.x`, forwards multisig signer sets, and passes the
 > escrow hash algorithm into `verify_proof`. Focus on polishing multisig UX
 > (batched signer discovery, richer operator messaging) before tagging the next

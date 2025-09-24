@@ -2,22 +2,109 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const FORBIDDEN_PATTERNS: &[&str] = &[
-    "tokio::spawn",
-    "tokio::task::spawn",
-    "tokio::task::spawn_blocking",
-    "tokio::task::yield_now",
-    "tokio::time::sleep",
-    "tokio::time::timeout",
-    "tokio::time::interval",
-    "tokio::runtime::Runtime::block_on",
-    "tokio::runtime::Runtime::spawn",
-    "tokio::runtime::Runtime::spawn_blocking",
-    "tokio::runtime::Builder::build",
-    "tokio::runtime::Builder::enable_all",
-    "tokio::runtime::Builder::new_current_thread",
-    "tokio::runtime::Builder::new_multi_thread",
-    "tokio::select!",
+const LIBP2P_SCOPES: &[&str] = &["/node/", "/cli/", "/explorer/"];
+
+struct ForbiddenPattern {
+    needle: &'static str,
+    message: &'static str,
+    scopes: Option<&'static [&'static str]>,
+}
+
+impl ForbiddenPattern {
+    const fn new(needle: &'static str, message: &'static str) -> Self {
+        Self {
+            needle,
+            message,
+            scopes: None,
+        }
+    }
+
+    const fn scoped(
+        needle: &'static str,
+        message: &'static str,
+        scopes: &'static [&'static str],
+    ) -> Self {
+        Self {
+            needle,
+            message,
+            scopes: Some(scopes),
+        }
+    }
+
+    fn applies_to(&self, path: &str) -> bool {
+        match self.scopes {
+            Some(scopes) => scopes.iter().any(|scope| path.contains(scope)),
+            None => true,
+        }
+    }
+}
+
+const FORBIDDEN_PATTERNS: &[ForbiddenPattern] = &[
+    ForbiddenPattern::new(
+        "tokio::spawn",
+        "contains forbidden Tokio usage `tokio::spawn`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::task::spawn",
+        "contains forbidden Tokio usage `tokio::task::spawn`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::task::spawn_blocking",
+        "contains forbidden Tokio usage `tokio::task::spawn_blocking`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::task::yield_now",
+        "contains forbidden Tokio usage `tokio::task::yield_now`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::time::sleep",
+        "contains forbidden Tokio usage `tokio::time::sleep`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::time::timeout",
+        "contains forbidden Tokio usage `tokio::time::timeout`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::time::interval",
+        "contains forbidden Tokio usage `tokio::time::interval`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Runtime::block_on",
+        "contains forbidden Tokio usage `tokio::runtime::Runtime::block_on`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Runtime::spawn",
+        "contains forbidden Tokio usage `tokio::runtime::Runtime::spawn`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Runtime::spawn_blocking",
+        "contains forbidden Tokio usage `tokio::runtime::Runtime::spawn_blocking`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Builder::build",
+        "contains forbidden Tokio usage `tokio::runtime::Builder::build`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Builder::enable_all",
+        "contains forbidden Tokio usage `tokio::runtime::Builder::enable_all`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Builder::new_current_thread",
+        "contains forbidden Tokio usage `tokio::runtime::Builder::new_current_thread`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::runtime::Builder::new_multi_thread",
+        "contains forbidden Tokio usage `tokio::runtime::Builder::new_multi_thread`",
+    ),
+    ForbiddenPattern::new(
+        "tokio::select!",
+        "contains forbidden Tokio usage `tokio::select!`",
+    ),
+    ForbiddenPattern::scoped(
+        "libp2p::",
+        "direct libp2p usage detected; route calls through crates/p2p_overlay",
+        LIBP2P_SCOPES,
+    ),
 ];
 
 const FORBIDDEN_ALLOWLIST: &[&str] = &[
@@ -87,13 +174,18 @@ fn check_forbidden_tokens(path: &Path, content: &str, forbidden: &mut Vec<String
         {
             continue;
         }
-        if let Some(pattern) = FORBIDDEN_PATTERNS.iter().find(|pat| line.contains(*pat)) {
-            forbidden.push(format!(
-                "{}:{} contains forbidden Tokio usage `{}`",
-                path.display(),
-                idx + 1,
-                pattern
-            ));
+        for pattern in FORBIDDEN_PATTERNS {
+            if !pattern.applies_to(&path_str) {
+                continue;
+            }
+            if line.contains(pattern.needle) {
+                forbidden.push(format!(
+                    "{}:{} {}",
+                    path.display(),
+                    idx + 1,
+                    pattern.message
+                ));
+            }
         }
     }
 }

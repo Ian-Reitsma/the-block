@@ -2,7 +2,7 @@
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::BRIDGE_CHALLENGES_TOTAL;
-use crate::{governance, SimpleDb};
+use crate::{governance, simple_db::names, SimpleDb};
 use blake3::Hasher;
 use bridges::relayer::RelayerSet;
 use bridges::{
@@ -198,7 +198,7 @@ impl Default for Bridge {
 
 impl Bridge {
     pub fn open(path: &str) -> Self {
-        let db = SimpleDb::open(path);
+        let db = SimpleDb::open_named(names::BRIDGE, path);
         Self::with_db(db)
     }
 

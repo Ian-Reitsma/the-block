@@ -340,6 +340,10 @@ async fn main() -> anyhow::Result<()> {
             get(move || async move { Json(explorer::net_view::list_peer_certs()) }),
         )
         .route(
+            "/network/overlay",
+            get(move || async move { Json(explorer::net_view::overlay_status()) }),
+        )
+        .route(
             "/blocks/:hash/proof",
             get(move |Path(hash): Path<String>| {
                 let state = proof_state.clone();

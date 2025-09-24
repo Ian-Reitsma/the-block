@@ -1,5 +1,5 @@
 # Dependency Sovereignty Pivot
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The dependency-sovereignty initiative formalises the founders’ directive to own
 our substrate end-to-end. The registry, wrapper, and governance hooks promoted

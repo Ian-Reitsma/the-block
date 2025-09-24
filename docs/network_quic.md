@@ -1,5 +1,5 @@
 # QUIC Transport Integration
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This document outlines the trait-based QUIC transport layer that carries peer-to-peer traffic in The-Block.
 

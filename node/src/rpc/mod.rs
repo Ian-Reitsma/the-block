@@ -8,7 +8,7 @@ use crate::{
     kyc,
     localnet::{validate_proximity, AssistReceipt},
     net, range_boost,
-    simple_db::SimpleDb,
+    simple_db::{names, SimpleDb},
     storage::fs::RentEscrow,
     transaction::FeeLane,
     Blockchain, SignedTransaction,
@@ -19,7 +19,6 @@ use base64::Engine;
 use bincode;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hex;
-use libp2p::PeerId;
 use once_cell::sync::Lazy;
 use runtime::timeout;
 use serde::{Deserialize, Serialize};
@@ -70,7 +69,7 @@ static GOV_STORE: Lazy<GovStore> = Lazy::new(|| GovStore::open("governance_db"))
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
 static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
-    Mutex::new(SimpleDb::open(&path))
+    Mutex::new(SimpleDb::open_named(names::LOCALNET_RECEIPTS, &path))
 });
 
 pub struct RpcRuntimeConfig {
@@ -120,6 +119,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "net.peer_stats_export_all",
     "net.peer_stats_persist",
     "net.peer_throttle",
+    "net.overlay_status",
     "net.backpressure_clear",
     "net.reputation_sync",
     "net.reputation_show",
@@ -1179,6 +1179,15 @@ fn dispatch(
             }
             serde_json::json!({"status": "ok"})
         }
+        "net.overlay_status" => {
+            let status = net::overlay_status();
+            serde_json::json!({
+                "backend": status.backend,
+                "active_peers": status.active_peers,
+                "persisted_peers": status.persisted_peers,
+                "database_path": status.database_path,
+            })
+        }
         "net.peer_stats" => {
             let id = req
                 .params
@@ -1582,12 +1591,12 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let pk = PeerId::from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(|_| {
-                RpcError {
+            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(
+                |_| RpcError {
                     code: -32602,
                     message: "bad peer",
-                }
-            })?;
+                },
+            )?;
             let eligible = net::uptime::eligible(&pk, threshold, epoch);
             serde_json::json!({"eligible": eligible})
         }
@@ -1612,12 +1621,12 @@ fn dispatch(
                 .get("reward")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let pk = PeerId::from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(|_| {
-                RpcError {
+            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(
+                |_| RpcError {
                     code: -32602,
                     message: "bad peer",
-                }
-            })?;
+                },
+            )?;
             let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
             serde_json::json!({"voucher": voucher})
         }

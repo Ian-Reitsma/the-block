@@ -1,5 +1,5 @@
 # Telemetry Operations Runbook
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 This guide captures the day-two playbook for responding to telemetry alerts and
 for correlating metrics with structured logs across the fleet.

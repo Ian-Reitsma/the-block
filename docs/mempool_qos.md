@@ -1,5 +1,5 @@
 # Mempool QoS and Spam Controls
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 The mempool enforces a rolling fee floor computed from the configurable percentile of recent transaction fees (75th percentile by default). Transactions below this dynamic threshold trigger a wallet warning and may be rejected. Governance controls both the sampling window and the percentile via the parameters `mempool.fee_floor_window` and `mempool.fee_floor_percentile`. Submitters can propose updates directly from the CLI, e.g. `contract gov param update mempool.fee_floor_window 512`, which creates a proposal bounded by the registry defaults. Every activation (or rollback) appends an entry to `governance/history/fee_floor_policy.json`, increments the `fee_floor_window_changed_total` counter, and is surfaced through the explorer endpoint `/mempool/fee_floor_policy` for operator review.
 

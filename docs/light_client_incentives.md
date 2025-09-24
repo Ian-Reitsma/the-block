@@ -1,5 +1,5 @@
 # Light-Client Incentives Playbook
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 Light-client relayers earn consumer-token (CT) rebates whenever they submit
 valid proofs that are later folded into mined blocks. This guide explains the

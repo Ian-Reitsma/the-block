@@ -1,5 +1,5 @@
 # Telemetry overview
-> **Review (2025-09-23):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
 
 See [docs/economics.md](../economics.md#epoch-retuning-formula) for subsidy formulas and ROI guidance. Historical context on the subsidy transition lives in [docs/system_changes.md](../system_changes.md#ct-subsidy-unification-2024).
 
