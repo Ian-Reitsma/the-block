@@ -11,6 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc::channel, Arc, RwLock};
 use std::thread;
+#[cfg(feature = "quic")]
 use std::time::Duration;
 
 #[cfg(feature = "quic")]
@@ -49,6 +50,8 @@ pub struct NodeConfig {
     pub overlay: OverlayConfig,
     #[serde(default)]
     pub storage: EngineConfig,
+    #[serde(default = "default_false")]
+    pub storage_legacy_mode: bool,
     #[serde(default)]
     pub metrics_aggregator: Option<AggregatorConfig>,
     #[serde(default = "default_true")]
@@ -108,6 +111,7 @@ impl Default for NodeConfig {
             peer_metrics_export_quota_bytes: default_peer_metrics_export_quota_bytes(),
             overlay: OverlayConfig::default(),
             storage: EngineConfig::default(),
+            storage_legacy_mode: default_false(),
             metrics_aggregator: None,
             track_peer_drop_reasons: default_true(),
             track_handshake_failures: default_true(),
@@ -507,7 +511,7 @@ impl NodeConfig {
 fn load_file(dir: &str) -> Result<NodeConfig> {
     let path = format!("{}/default.toml", dir);
     let data = fs::read_to_string(&path)?;
-    let mut cfg: NodeConfig = toml::from_str(&data)?;
+    let cfg: NodeConfig = toml::from_str(&data)?;
     #[cfg(feature = "quic")]
     {
         let quic_path = format!("{}/quic.toml", dir);
@@ -518,6 +522,7 @@ fn load_file(dir: &str) -> Result<NodeConfig> {
             }
         }
     }
+    crate::storage::settings::configure_from_dir(dir);
     Ok(cfg)
 }
 
@@ -597,6 +602,7 @@ fn apply(cfg: &NodeConfig) {
         #[cfg(not(feature = "telemetry"))]
         eprintln!("overlay_sanity_failed: {err}");
     }
+    crate::simple_db::set_legacy_mode(cfg.storage_legacy_mode);
     crate::simple_db::configure_engines(cfg.storage.clone());
     crate::net::peer_metrics_store::init(&cfg.peer_metrics_db);
     crate::net::load_peer_metrics();
@@ -650,6 +656,7 @@ pub fn reload() -> bool {
         Ok(cfg) => {
             apply(&cfg);
             *CURRENT_CONFIG.write().unwrap() = cfg;
+            crate::storage::settings::configure_from_dir(&dir);
             #[cfg(feature = "telemetry")]
             {
                 CONFIG_RELOAD_TOTAL.with_label_values(&["ok"]).inc();
@@ -695,11 +702,13 @@ pub fn watch(dir: &str) {
                 ) {
                     let mut reload_node = false;
                     let mut reload_gossip = false;
+                    let mut reload_storage = false;
                     for path in &event.paths {
                         if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
                             match name {
                                 "default.toml" => reload_node = true,
                                 "gossip.toml" => reload_gossip = true,
+                                "storage.toml" => reload_storage = true,
                                 _ => {}
                             }
                         }
@@ -709,6 +718,9 @@ pub fn watch(dir: &str) {
                     }
                     if reload_gossip {
                         crate::gossip::config::reload();
+                    }
+                    if reload_storage {
+                        crate::storage::settings::configure_from_dir(&cfg_dir);
                     }
                 }
             }

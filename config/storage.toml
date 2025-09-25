@@ -1,0 +1,28 @@
+[encryption]
+algorithm = "chacha20-poly1305"
+
+[erasure]
+algorithm = "reed-solomon"
+# Use `"xor"` to enable the in-house fallback coder for supply-chain isolation.
+data_shards = 16
+parity_shards = 8
+
+[fountain]
+algorithm = "raptorq"
+symbol_size = 1024
+rate = 1.2
+
+[compression]
+algorithm = "zstd"
+# Set to `"rle"` to use the lightweight run-length fallback compressor.
+level = 0
+
+[chunks]
+default_bytes = 1048576
+ladder = [262144, 524288, 1048576, 2097152, 4194304]
+
+[rollout]
+allow_fallback_coder = false
+allow_fallback_compressor = false
+require_emergency_switch = false
+# emergency_switch_env = "TB_STORAGE_FALLBACK_EMERGENCY"

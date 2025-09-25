@@ -1,13 +1,13 @@
-use super::erasure;
+use super::erasure::{self, ErasureParams};
 use super::types::{ObjectManifest, Redundancy};
 use crate::simple_db::{names, SimpleDb};
+use crate::storage::settings;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
 use blake3::Hasher;
 use once_cell::sync::Lazy;
-use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
 use rayon::prelude::*;
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
@@ -26,10 +26,6 @@ const FAILURE_PREFIX: &str = "repair/failures/";
 const FAILURE_BACKOFF_BASE_SECS: u64 = 30;
 const FAILURE_BACKOFF_CAP_SECS: u64 = 60 * 60;
 
-/// RaptorQ overlay constants tuned for BLE repair
-const SYMBOL_SIZE: u16 = 1024; // 1 KiB symbols
-const RATE: f32 = 1.2; // 20% overhead
-
 static REPAIR_POOL: Lazy<ThreadPool> = Lazy::new(|| {
     ThreadPoolBuilder::new()
         .num_threads(MAX_CONCURRENT_REPAIRS)
@@ -46,8 +42,13 @@ pub fn spawn(path: String, period: Duration) {
             if let Err(err) = run_once(&mut db, &log, RepairRequest::default()) {
                 #[cfg(feature = "telemetry")]
                 {
+                    let algorithms = settings::algorithms();
                     STORAGE_REPAIR_FAILURES_TOTAL
-                        .with_label_values(&[err.label()])
+                        .with_label_values(&[
+                            err.label(),
+                            algorithms.erasure(),
+                            algorithms.compression(),
+                        ])
                         .inc();
                     STORAGE_REPAIR_ATTEMPTS_TOTAL
                         .with_label_values(&["fatal"])
@@ -68,6 +69,45 @@ pub struct RepairRequest {
     pub manifest: Option<[u8; 32]>,
     pub chunk: Option<usize>,
     pub force: bool,
+}
+
+fn manifest_algorithms(db: &SimpleDb, manifest_hex: &str) -> (String, String) {
+    let defaults = settings::algorithms();
+    let key = format!("manifest/{manifest_hex}");
+    if let Some(bytes) = db.get(&key) {
+        if let Ok(manifest) = bincode::deserialize::<ObjectManifest>(&bytes) {
+            let erasure = manifest
+                .erasure_alg
+                .clone()
+                .unwrap_or_else(|| defaults.erasure().to_string());
+            let compression = manifest
+                .compression_alg
+                .clone()
+                .unwrap_or_else(|| defaults.compression().to_string());
+            return (erasure, compression);
+        }
+    }
+    (
+        defaults.erasure().to_string(),
+        defaults.compression().to_string(),
+    )
+}
+
+fn manifest_erasure_params(manifest: &ObjectManifest) -> Result<ErasureParams, String> {
+    match manifest.redundancy {
+        Redundancy::ReedSolomon { data, parity } => {
+            let algorithm = manifest
+                .erasure_alg
+                .clone()
+                .unwrap_or_else(|| settings::algorithms().erasure().to_string());
+            Ok(ErasureParams::new(
+                algorithm,
+                data as usize,
+                parity as usize,
+            ))
+        }
+        Redundancy::None => Err("manifest has no erasure redundancy".into()),
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -237,7 +277,14 @@ impl RepairErrorKind {
 
 #[derive(Clone, Debug)]
 pub enum SkipReason {
-    Backoff { next_retry_at: i64 },
+    Backoff {
+        next_retry_at: i64,
+    },
+    AlgorithmLimited {
+        algorithm: String,
+        missing: usize,
+        parity_available: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -376,9 +423,25 @@ pub fn run_once(
 
         if let Redundancy::ReedSolomon { .. } = manifest.redundancy {
             let manifest_hex = key.trim_start_matches("manifest/").to_string();
-            let shards_per_chunk = erasure::total_shards_per_chunk();
             let mut jobs = Vec::new();
             let mut outcomes = Vec::new();
+            let params = match manifest_erasure_params(&manifest) {
+                Ok(p) => p,
+                Err(reason) => {
+                    outcomes.push(RepairOutcome::Failure {
+                        manifest: manifest_hex.clone(),
+                        chunk: None,
+                        failure_key: None,
+                        error: RepairErrorKind::Manifest,
+                        message: reason,
+                    });
+                    for outcome in outcomes {
+                        handle_outcome(db, log, &mut summary, outcome)?;
+                    }
+                    continue;
+                }
+            };
+            let shards_per_chunk = erasure::total_shards_for_params(&params);
             for (chunk_idx, group) in manifest.chunks.chunks(shards_per_chunk).enumerate() {
                 if let Some(filter_chunk) = request.chunk {
                     if chunk_idx != filter_chunk {
@@ -430,6 +493,30 @@ pub fn run_once(
                     continue;
                 }
 
+                let missing_data = missing
+                    .iter()
+                    .filter(|&&slot| slot < params.data_shards)
+                    .count();
+                let available_parity = (params.data_shards..params.total_rs())
+                    .filter(|&slot| shards.get(slot).and_then(|s| s.as_ref()).is_some())
+                    .count();
+
+                if params.is_xor() && missing_data > 0 {
+                    let insufficient = missing_data > 1 || available_parity == 0;
+                    if insufficient {
+                        outcomes.push(RepairOutcome::Skipped {
+                            manifest: manifest_hex.clone(),
+                            chunk: chunk_idx,
+                            reason: SkipReason::AlgorithmLimited {
+                                algorithm: params.algorithm.clone(),
+                                missing: missing_data,
+                                parity_available: available_parity,
+                            },
+                        });
+                        continue;
+                    }
+                }
+
                 if missing.is_empty() && !request.force {
                     continue;
                 }
@@ -460,6 +547,7 @@ pub fn run_once(
                     expected_cipher,
                     missing_slots,
                     failure_key: failure_key.clone(),
+                    erasure: params.clone(),
                 });
             }
 
@@ -488,11 +576,12 @@ struct ScheduledJob {
     expected_cipher: usize,
     missing_slots: Vec<usize>,
     failure_key: String,
+    erasure: ErasureParams,
 }
 
 fn process_job(job: ScheduledJob) -> RepairOutcome {
-    match erasure::reconstruct(job.shards.clone(), job.expected_cipher) {
-        Ok(rebuilt) => match erasure::encode(&rebuilt) {
+    match erasure::reconstruct_with_params(job.shards.clone(), job.expected_cipher, &job.erasure) {
+        Ok(rebuilt) => match erasure::encode_with_params(&rebuilt, &job.erasure) {
             Ok(encoded) => {
                 if encoded.len() != job.entries.len() {
                     return RepairOutcome::Failure {
@@ -593,11 +682,16 @@ fn handle_outcome(
                 });
                 #[cfg(feature = "telemetry")]
                 {
+                    let (erasure_alg, compression_alg) = manifest_algorithms(db, &manifest);
                     STORAGE_REPAIR_ATTEMPTS_TOTAL
                         .with_label_values(&["failure"])
                         .inc();
                     STORAGE_REPAIR_FAILURES_TOTAL
-                        .with_label_values(&[RepairErrorKind::Database.label()])
+                        .with_label_values(&[
+                            RepairErrorKind::Database.label(),
+                            erasure_alg.as_str(),
+                            compression_alg.as_str(),
+                        ])
                         .inc();
                 }
                 log.append(&RepairLogEntry {
@@ -656,11 +750,16 @@ fn handle_outcome(
             });
             #[cfg(feature = "telemetry")]
             {
+                let (erasure_alg, compression_alg) = manifest_algorithms(db, &manifest);
                 STORAGE_REPAIR_ATTEMPTS_TOTAL
                     .with_label_values(&["failure"])
                     .inc();
                 STORAGE_REPAIR_FAILURES_TOTAL
-                    .with_label_values(&[error.label()])
+                    .with_label_values(&[
+                        error.label(),
+                        erasure_alg.as_str(),
+                        compression_alg.as_str(),
+                    ])
                     .inc();
             }
             log.append(&RepairLogEntry {
@@ -699,6 +798,24 @@ fn handle_outcome(
                     })
                     .map_err(RepairFatalError::Log)?;
                 }
+                SkipReason::AlgorithmLimited {
+                    algorithm,
+                    missing,
+                    parity_available,
+                } => {
+                    log.append(&RepairLogEntry {
+                        timestamp,
+                        manifest,
+                        chunk: Some(chunk as u32),
+                        status: RepairLogStatus::Skipped,
+                        bytes: 0,
+                        missing_slots: Vec::new(),
+                        error: Some(format!(
+                            "algorithm_limited:{algorithm}:missing={missing}:parity={parity_available}"
+                        )),
+                    })
+                    .map_err(RepairFatalError::Log)?;
+                }
             }
         }
     }
@@ -706,16 +823,19 @@ fn handle_outcome(
 }
 
 fn validate_manifest(manifest: &ObjectManifest) -> Result<(), String> {
-    let shards_per_chunk = erasure::total_shards_per_chunk();
-    if shards_per_chunk == 0 {
-        return Err("no shards configured".into());
-    }
-    if manifest.chunks.len() % shards_per_chunk != 0 {
-        return Err("chunk list not aligned to shard groups".into());
-    }
-    let expected_chunks = manifest.chunk_count();
-    if expected_chunks * shards_per_chunk != manifest.chunks.len() {
-        return Err("manifest chunk count mismatch".into());
+    if let Redundancy::ReedSolomon { .. } = manifest.redundancy {
+        let params = manifest_erasure_params(manifest)?;
+        let shards_per_chunk = erasure::total_shards_for_params(&params);
+        if shards_per_chunk == 0 {
+            return Err("no shards configured".into());
+        }
+        if manifest.chunks.len() % shards_per_chunk != 0 {
+            return Err("chunk list not aligned to shard groups".into());
+        }
+        let expected_chunks = manifest.chunk_count();
+        if expected_chunks * shards_per_chunk != manifest.chunks.len() {
+            return Err("manifest chunk count mismatch".into());
+        }
     }
 
     let mut copy = manifest.clone();
@@ -774,21 +894,13 @@ fn current_timestamp() -> i64 {
 /// Encodes `data` into RaptorQ packets with the BLE-tuned parameters and decodes
 /// them after dropping a single packet, returning the recovered bytes.
 pub fn raptorq_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
-    let oti = ObjectTransmissionInformation::with_defaults(data.len() as u64, SYMBOL_SIZE);
-    let encoder = Encoder::new(data, oti.clone());
-    let symbols = (data.len() as f32 / SYMBOL_SIZE as f32).ceil();
-    let repair = ((symbols * (RATE - 1.0)).ceil()) as u32;
-    let total = symbols as u32;
-    let mut packets: Vec<EncodingPacket> = encoder.get_encoded_packets(total + repair);
+    let coder = settings::fountain();
+    let batch = coder.encode(data).map_err(|e| e.to_string())?;
+    let (metadata, mut packets) = batch.into_parts();
     if !packets.is_empty() {
         packets.remove(0);
     }
-    let mut decoder = Decoder::new(oti);
-    for p in packets {
-        // feed all packets; decoder yields `None` until enough symbols arrive
-        decoder.decode(p);
-    }
-    decoder.get_result().ok_or_else(|| "decode".to_string())
+    coder.decode(&metadata, &packets).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

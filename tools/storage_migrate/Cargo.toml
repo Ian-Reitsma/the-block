@@ -1,0 +1,8 @@
+[package]
+name = "storage_migrate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+blake3 = "1"
+storage_engine = { path = "../../crates/storage_engine", features = ["rocksdb", "sled"] }

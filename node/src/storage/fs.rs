@@ -18,9 +18,24 @@ pub struct RentEscrow {
 
 impl RentEscrow {
     pub fn open(path: &str) -> Self {
+        Self::open_with_factory(path, &SimpleDb::open_named)
+    }
+
+    pub fn open_with_factory<F>(path: &str, factory: &F) -> Self
+    where
+        F: Fn(&str, &str) -> SimpleDb,
+    {
         Self {
-            db: SimpleDb::open_named(names::STORAGE_FS, path),
+            db: factory(names::STORAGE_FS, path),
         }
+    }
+
+    pub fn with_db(db: SimpleDb) -> Self {
+        Self { db }
+    }
+
+    pub fn engine_label(&self) -> &'static str {
+        self.db.backend_name()
     }
     pub fn lock(&mut self, id: &str, depositor: &str, amount: u64, expiry: u64) {
         let key = format!("escrow/{id}");

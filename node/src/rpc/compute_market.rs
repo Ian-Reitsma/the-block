@@ -67,6 +67,7 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
             })
         })
         .collect();
+    let settlement_engine = Settlement::engine_info();
     json!({
         "industrial_backlog": backlog,
         "industrial_utilization": util,
@@ -78,6 +79,10 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
         "lanes": lanes_json,
         "lane_starvation": warnings_json,
         "recent_matches": recent,
+        "settlement_engine": {
+            "engine": settlement_engine.engine,
+            "legacy_mode": settlement_engine.legacy_mode,
+        },
     })
 }
 

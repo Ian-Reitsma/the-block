@@ -1,7 +1,10 @@
 use std::collections::{BTreeSet, VecDeque};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::simple_db;
+use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     COMPUTE_SLA_VIOLATIONS_TOTAL, SETTLE_APPLIED_TOTAL, SETTLE_FAILED_TOTAL,
@@ -11,31 +14,20 @@ use bincode;
 use ledger::utxo_account::AccountLedger;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-#[cfg(feature = "storage-rocksdb")]
-use rocksdb::{Options, DB};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-#[cfg(feature = "storage-rocksdb")]
-use tempfile::TempDir;
 #[cfg(feature = "telemetry")]
 use tracing::error;
 
 const AUDIT_CAP: usize = 256;
 const ROOT_HISTORY: usize = 32;
 
-#[cfg(feature = "storage-rocksdb")]
-const KEY_LEDGER_CT: &[u8] = b"ledger_ct";
-#[cfg(feature = "storage-rocksdb")]
-const KEY_LEDGER_IT: &[u8] = b"ledger_it";
-#[cfg(feature = "storage-rocksdb")]
-const KEY_MODE: &[u8] = b"mode";
-#[cfg(feature = "storage-rocksdb")]
-const KEY_METADATA: &[u8] = b"metadata";
-#[cfg(feature = "storage-rocksdb")]
-const KEY_AUDIT: &[u8] = b"audit_log";
-#[cfg(feature = "storage-rocksdb")]
-const KEY_ROOTS: &[u8] = b"recent_roots";
-#[cfg(feature = "storage-rocksdb")]
-const KEY_NEXT_SEQ: &[u8] = b"next_seq";
+const KEY_LEDGER_CT: &str = "ledger_ct";
+const KEY_LEDGER_IT: &str = "ledger_it";
+const KEY_MODE: &str = "mode";
+const KEY_METADATA: &str = "metadata";
+const KEY_AUDIT: &str = "audit_log";
+const KEY_ROOTS: &str = "recent_roots";
+const KEY_NEXT_SEQ: &str = "next_seq";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettleMode {
@@ -73,11 +65,14 @@ pub struct BalanceSnapshot {
     pub industrial: u64,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct SettlementEngineInfo {
+    pub engine: String,
+    pub legacy_mode: bool,
+}
+
 struct SettlementState {
-    #[cfg(feature = "storage-rocksdb")]
-    db: DB,
-    #[cfg(feature = "storage-rocksdb")]
-    _ephemeral: Option<TempDir>,
+    db: SimpleDb,
     base: PathBuf,
     mode: SettleMode,
     metadata: Metadata,
@@ -89,15 +84,9 @@ struct SettlementState {
 }
 
 impl SettlementState {
-    #[cfg(feature = "storage-rocksdb")]
-    fn new(base: PathBuf, mut mode: SettleMode, ephemeral: Option<TempDir>) -> Self {
-        std::fs::create_dir_all(&base).unwrap_or_else(|e| panic!("create settlement dir: {e}"));
-        let db_path = base.join("compute_settlement.db");
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        let db = DB::open(&opts, &db_path).unwrap_or_else(|e| panic!("open settlement db: {e}"));
-        let ct = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_CT, || AccountLedger::new());
-        let it = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_IT, || AccountLedger::new());
+    fn new(base: PathBuf, mut mode: SettleMode, db: SimpleDb) -> Self {
+        let ct = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_CT, AccountLedger::new);
+        let it = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_IT, AccountLedger::new);
         let stored_mode = load_or_default::<SettleMode, _>(&db, KEY_MODE, || mode);
         mode = stored_mode;
         let metadata = load_or_default::<Metadata, _>(&db, KEY_METADATA, Metadata::default);
@@ -106,7 +95,6 @@ impl SettlementState {
         let next_seq = load_or_default::<u64, _>(&db, KEY_NEXT_SEQ, || 0u64);
         Self {
             db,
-            _ephemeral: ephemeral,
             base,
             mode,
             metadata,
@@ -115,20 +103,6 @@ impl SettlementState {
             audit,
             roots,
             next_seq,
-        }
-    }
-
-    #[cfg(not(feature = "storage-rocksdb"))]
-    fn new(base: PathBuf, mode: SettleMode) -> Self {
-        Self {
-            base,
-            mode,
-            metadata: Metadata::default(),
-            ct: AccountLedger::new(),
-            it: AccountLedger::new(),
-            audit: VecDeque::new(),
-            roots: VecDeque::new(),
-            next_seq: 0,
         }
     }
 
@@ -213,49 +187,41 @@ impl SettlementState {
             .collect()
     }
 
-    #[cfg(feature = "storage-rocksdb")]
-    fn persist_all(&self) {
-        store_value(&self.db, KEY_LEDGER_CT, &self.ct);
-        store_value(&self.db, KEY_LEDGER_IT, &self.it);
-        store_value(&self.db, KEY_MODE, &self.mode);
-        store_value(&self.db, KEY_METADATA, &self.metadata);
-        store_value(&self.db, KEY_AUDIT, &self.audit);
-        store_value(&self.db, KEY_ROOTS, &self.roots);
-        store_value(&self.db, KEY_NEXT_SEQ, &self.next_seq);
+    fn persist_all(&mut self) {
+        store_value(&mut self.db, KEY_LEDGER_CT, &self.ct);
+        store_value(&mut self.db, KEY_LEDGER_IT, &self.it);
+        store_value(&mut self.db, KEY_MODE, &self.mode);
+        store_value(&mut self.db, KEY_METADATA, &self.metadata);
+        store_value(&mut self.db, KEY_AUDIT, &self.audit);
+        store_value(&mut self.db, KEY_ROOTS, &self.roots);
+        store_value(&mut self.db, KEY_NEXT_SEQ, &self.next_seq);
     }
 
-    #[cfg(not(feature = "storage-rocksdb"))]
-    fn persist_all(&self) {}
-
-    #[cfg(feature = "storage-rocksdb")]
     fn flush(&self) {
         let _ = self.db.flush();
     }
-
-    #[cfg(not(feature = "storage-rocksdb"))]
-    fn flush(&self) {}
 }
 
-#[cfg(feature = "storage-rocksdb")]
-fn load_or_default<T, F>(db: &DB, key: &[u8], default: F) -> T
+fn load_or_default<T, F>(db: &SimpleDb, key: &str, default: F) -> T
 where
     T: DeserializeOwned,
     F: FnOnce() -> T,
 {
-    match db.get(key) {
-        Ok(Some(bytes)) => bincode::deserialize(&bytes).unwrap_or_else(|_| default()),
-        Ok(None) => default(),
-        Err(_) => default(),
-    }
+    db.get(key)
+        .and_then(|bytes| bincode::deserialize(&bytes).ok())
+        .unwrap_or_else(default)
 }
 
-#[cfg(feature = "storage-rocksdb")]
-fn store_value<T: Serialize>(db: &DB, key: &[u8], value: &T) {
+fn store_value<T: Serialize>(db: &mut SimpleDb, key: &str, value: &T) {
     if let Ok(bytes) = bincode::serialize(value) {
-        if let Err(_err) = db.put(key, bytes) {
+        if let Err(err) = db.try_insert(key, bytes) {
             #[cfg(feature = "telemetry")]
             {
-                error!(?_err, "persist settlement state");
+                error!(?err, "persist settlement state");
+            }
+            #[cfg(not(feature = "telemetry"))]
+            {
+                let _ = err;
             }
         }
     }
@@ -307,53 +273,48 @@ pub struct Settlement;
 
 impl Settlement {
     pub fn init(path: &str, mode: SettleMode) {
+        Self::init_with_factory(path, mode, SimpleDb::open_named);
+    }
+
+    pub fn init_with_factory<F>(path: &str, mode: SettleMode, factory: F)
+    where
+        F: Fn(&str, &str) -> SimpleDb,
+    {
         {
             let mut guard = STATE.lock();
-            if let Some(state) = guard.as_ref() {
-                #[cfg(feature = "storage-rocksdb")]
+            if let Some(state) = guard.as_mut() {
                 state.persist_all();
-            }
-            if let Some(state) = guard.take() {
                 state.flush();
             }
+            *guard = None;
         }
+
         let base = if path.is_empty() {
-            #[cfg(feature = "storage-rocksdb")]
-            {
-                let tmp = TempDir::new().expect("create settlement tempdir");
-                let base = tmp.path().to_path_buf();
-                let state = SettlementState::new(base.clone(), mode, Some(tmp));
-                *STATE.lock() = Some(state);
-                return;
-            }
-            #[cfg(not(feature = "storage-rocksdb"))]
-            {
-                std::env::temp_dir()
-            }
+            tempfile::tempdir()
+                .expect("create settlement tempdir")
+                .into_path()
         } else {
             PathBuf::from(path)
         };
-        #[cfg(feature = "storage-rocksdb")]
-        {
-            let state = SettlementState::new(base, mode, None);
-            *STATE.lock() = Some(state);
-        }
-        #[cfg(not(feature = "storage-rocksdb"))]
-        {
-            let state = SettlementState::new(base, mode);
-            *STATE.lock() = Some(state);
-        }
+        fs::create_dir_all(&base).unwrap_or_else(|e| panic!("create settlement dir: {e}"));
+        let db_path = base.join("compute_settlement.db");
+        let db_path_str = db_path
+            .to_str()
+            .unwrap_or_else(|| panic!("non-utf8 settlement db path: {}", db_path.display()));
+        let mut state =
+            SettlementState::new(base, mode, factory(names::COMPUTE_SETTLEMENT, db_path_str));
+        state.persist_all();
+        state.flush();
+        *STATE.lock() = Some(state);
     }
 
     pub fn shutdown() {
         let mut guard = STATE.lock();
-        if let Some(state) = guard.as_ref() {
-            #[cfg(feature = "storage-rocksdb")]
+        if let Some(state) = guard.as_mut() {
             state.persist_all();
-        }
-        if let Some(state) = guard.take() {
             state.flush();
         }
+        *guard = None;
     }
 
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
@@ -432,6 +393,14 @@ impl Settlement {
 
     pub fn balances() -> Vec<BalanceSnapshot> {
         with_state(|state| state.balances())
+    }
+
+    pub fn engine_info() -> SettlementEngineInfo {
+        let engine = with_state(|state| state.db.backend_name().to_string());
+        SettlementEngineInfo {
+            engine,
+            legacy_mode: simple_db::legacy_mode(),
+        }
     }
 
     pub fn spend(provider: &str, event: &str, amount: u64) -> Result<(), ()> {

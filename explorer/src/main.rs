@@ -23,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
     let provider_state = explorer.clone();
     let domain_state = explorer.clone();
     let storage_provider_state = explorer.clone();
+    let storage_manifest_state = explorer.clone();
     let dex_state = explorer.clone();
     let job_state = explorer.clone();
     let trust_state = explorer.clone();
@@ -55,6 +56,10 @@ async fn main() -> anyhow::Result<()> {
     #[derive(Deserialize, Default)]
     struct DidQuery {
         address: Option<String>,
+        limit: Option<usize>,
+    }
+    #[derive(Deserialize, Default)]
+    struct ManifestQuery {
         limit: Option<usize>,
     }
     #[derive(Deserialize, Default)]
@@ -274,6 +279,13 @@ async fn main() -> anyhow::Result<()> {
             get(move || {
                 let state = storage_provider_state.clone();
                 async move { Json(state.provider_storage_stats().unwrap_or_default()) }
+            }),
+        )
+        .route(
+            "/storage/manifests",
+            get(move |Query(query): Query<ManifestQuery>| {
+                let state = storage_manifest_state.clone();
+                async move { Json(state.manifest_listing(query.limit)) }
             }),
         )
         .route(

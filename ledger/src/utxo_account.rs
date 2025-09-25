@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
+
+use storage_engine::{KeyValue, StorageError, StorageResult};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct AccountLedger {
@@ -11,6 +13,25 @@ impl AccountLedger {
         Self {
             balances: HashMap::new(),
         }
+    }
+
+    pub fn load_from_engine<E: KeyValue>(engine: &E, cf: &str, key: &str) -> StorageResult<Self> {
+        engine.ensure_cf(cf)?;
+        match engine.get(cf, key.as_bytes())? {
+            Some(bytes) => deserialize(&bytes),
+            None => Ok(AccountLedger::new()),
+        }
+    }
+
+    pub fn persist_to_engine<E: KeyValue>(
+        &self,
+        engine: &E,
+        cf: &str,
+        key: &str,
+    ) -> StorageResult<()> {
+        engine.ensure_cf(cf)?;
+        let bytes = bincode::serialize(self).map_err(StorageError::backend)?;
+        engine.put_bytes(cf, key.as_bytes(), &bytes)
     }
     pub fn deposit(&mut self, addr: &str, amount: u64) {
         *self.balances.entry(addr.to_string()).or_insert(0) += amount;
@@ -40,6 +61,27 @@ pub struct Utxo {
 #[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct UtxoLedger {
     pub utxos: HashMap<OutPoint, Utxo>,
+}
+
+impl UtxoLedger {
+    pub fn load_from_engine<E: KeyValue>(engine: &E, cf: &str, key: &str) -> StorageResult<Self> {
+        engine.ensure_cf(cf)?;
+        match engine.get(cf, key.as_bytes())? {
+            Some(bytes) => deserialize(&bytes),
+            None => Ok(UtxoLedger::default()),
+        }
+    }
+
+    pub fn persist_to_engine<E: KeyValue>(
+        &self,
+        engine: &E,
+        cf: &str,
+        key: &str,
+    ) -> StorageResult<()> {
+        engine.ensure_cf(cf)?;
+        let bytes = bincode::serialize(self).map_err(StorageError::backend)?;
+        engine.put_bytes(cf, key.as_bytes(), &bytes)
+    }
 }
 
 pub struct UtxoAccountBridge {
@@ -108,4 +150,8 @@ pub fn migrate_accounts(balances: &HashMap<String, u64>) -> UtxoLedger {
         );
     }
     utxo
+}
+
+fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> StorageResult<T> {
+    bincode::deserialize(bytes).map_err(StorageError::backend)
 }

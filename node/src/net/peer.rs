@@ -2112,7 +2112,7 @@ pub fn publish_telemetry_summary(summary: crate::telemetry::summary::TelemetrySu
 }
 
 #[cfg(not(feature = "telemetry"))]
-pub fn publish_telemetry_summary(_summary: crate::telemetry::summary::TelemetrySummary) {}
+pub fn publish_telemetry_summary<T>(_summary: T) {}
 
 fn ban_store_guard() -> std::sync::MutexGuard<'static, ban_store::BanStore> {
     ban_store::store().lock().unwrap_or_else(|e| e.into_inner())

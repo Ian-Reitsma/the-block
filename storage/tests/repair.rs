@@ -1,6 +1,7 @@
 use blake3::Hasher;
 use the_block::storage::erasure;
 use the_block::storage::repair::{self, RepairLog, RepairLogStatus, RepairRequest};
+use the_block::storage::settings;
 use the_block::storage::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy};
 use the_block::SimpleDb;
 
@@ -69,6 +70,12 @@ fn sample_manifest(chunk_bytes: usize) -> (ObjectManifest, Vec<Vec<u8>>) {
         content_key_enc: vec![0u8; 32],
         blake3: [0u8; 32],
         chunk_lens: vec![chunk_plain as u32],
+        chunk_compressed_lens: vec![chunk_plain as u32],
+        chunk_cipher_lens: vec![cipher_len as u32],
+        compression_alg: None,
+        compression_level: None,
+        encryption_alg: None,
+        erasure_alg: None,
         provider_chunks: Vec::<ProviderChunkEntry>::new(),
     };
     (manifest, shards)
@@ -176,8 +183,13 @@ fn applies_backoff_after_repeated_failures() {
 
     #[cfg(feature = "telemetry")]
     {
+        let algorithms = settings::algorithms();
         let failures = the_block::telemetry::STORAGE_REPAIR_FAILURES_TOTAL
-            .with_label_values(&["reconstruct"])
+            .with_label_values(&[
+                "reconstruct",
+                algorithms.erasure(),
+                algorithms.compression(),
+            ])
             .get();
         assert!(failures >= 1);
     }

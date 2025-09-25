@@ -1,6 +1,6 @@
-use crate::trie::MerkleTrie;
+use crate::{audit, trie::MerkleTrie};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -19,6 +19,8 @@ pub enum SnapshotError {
 pub struct Snapshot {
     pub root: [u8; 32],
     pub entries: Vec<(Vec<u8>, Vec<u8>)>,
+    #[serde(default)]
+    pub engine_backend: Option<String>,
 }
 
 impl Snapshot {
@@ -30,6 +32,7 @@ impl Snapshot {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            engine_backend: None,
         }
     }
 
@@ -46,16 +49,28 @@ impl Snapshot {
 pub struct SnapshotManager {
     dir: PathBuf,
     keep: usize,
+    engine_backend: Option<String>,
 }
 
 impl SnapshotManager {
     pub fn new(dir: PathBuf, keep: usize) -> Self {
-        Self { dir, keep }
+        Self::new_with_engine(dir, keep, None)
+    }
+
+    pub fn new_with_engine(dir: PathBuf, keep: usize, engine_backend: Option<String>) -> Self {
+        Self {
+            dir,
+            keep,
+            engine_backend,
+        }
     }
 
     pub fn snapshot(&self, trie: &MerkleTrie) -> Result<PathBuf, SnapshotError> {
         fs::create_dir_all(&self.dir)?;
-        let snap = Snapshot::from_trie(trie);
+        let mut snap = Snapshot::from_trie(trie);
+        if snap.engine_backend.is_none() {
+            snap.engine_backend = self.engine_backend.clone();
+        }
         let path = self.dir.join(format!("{}.bin", hex::encode(snap.root)));
         let mut file = File::create(&path)?;
         let bytes = bincode::serialize(&snap)?;
@@ -69,7 +84,22 @@ impl SnapshotManager {
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
         let snap: Snapshot = bincode::deserialize(&buf)?;
+        if let (Some(created), Some(target)) =
+            (snap.engine_backend.as_ref(), self.engine_backend.as_ref())
+        {
+            if created != target {
+                self.record_engine_migration(created, target)?;
+            }
+        }
         Ok(snap.to_trie())
+    }
+
+    fn record_engine_migration(&self, from: &str, to: &str) -> Result<(), SnapshotError> {
+        let path = self.dir.join("engine_migrations.log");
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        writeln!(file, "migrated snapshot engine from {from} to {to}")?;
+        audit::append_engine_migration(&self.dir, from, to)?;
+        Ok(())
     }
 
     fn prune(&self) -> Result<(), SnapshotError> {

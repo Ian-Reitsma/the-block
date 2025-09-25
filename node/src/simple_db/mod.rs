@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::io;
-use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Once, RwLock};
 
 use ledger::address::ShardId;
 use once_cell::sync::Lazy;
@@ -13,13 +13,14 @@ use storage_engine::rocksdb_engine::RocksDbEngine;
 #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
 use storage_engine::sled_engine::SledEngine;
 use storage_engine::{
-    memory_engine::MemoryEngine, KeyValue, StorageError, StorageMetrics, StorageResult,
+    memory_engine::MemoryEngine, KeyValue, KeyValueIterator, StorageError, StorageMetrics,
+    StorageResult,
 };
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    STORAGE_COMPACTION_TOTAL, STORAGE_DISK_FULL_TOTAL, STORAGE_ENGINE_LEVEL0_FILES,
-    STORAGE_ENGINE_MEMTABLE_BYTES, STORAGE_ENGINE_PENDING_COMPACTIONS,
+    STORAGE_COMPACTION_TOTAL, STORAGE_DISK_FULL_TOTAL, STORAGE_ENGINE_INFO,
+    STORAGE_ENGINE_LEVEL0_FILES, STORAGE_ENGINE_MEMTABLE_BYTES, STORAGE_ENGINE_PENDING_COMPACTIONS,
     STORAGE_ENGINE_RUNNING_COMPACTIONS, STORAGE_ENGINE_SIZE_BYTES, STORAGE_ENGINE_SST_BYTES,
 };
 
@@ -29,6 +30,7 @@ pub type DbDelta = (String, Option<Vec<u8>>);
 pub mod names {
     pub const DEFAULT: &str = "default";
     pub const BRIDGE: &str = "bridge";
+    pub const COMPUTE_SETTLEMENT: &str = "compute_settlement";
     pub const DEX_STORAGE: &str = "dex_storage";
     pub const GATEWAY_DNS: &str = "gateway_dns";
     pub const GOSSIP_RELAY: &str = "gossip_relay";
@@ -64,7 +66,15 @@ impl EngineKind {
         }
     }
 
-    fn is_supported(self) -> bool {
+    pub fn label(self) -> &'static str {
+        match self {
+            EngineKind::Memory => "memory",
+            EngineKind::RocksDb => "rocksdb",
+            EngineKind::Sled => "sled",
+        }
+    }
+
+    pub fn is_available(self) -> bool {
         match self {
             EngineKind::Memory => true,
             EngineKind::RocksDb => {
@@ -117,9 +127,9 @@ impl EngineConfig {
             .get(name)
             .copied()
             .unwrap_or(self.default_engine);
-        if requested.is_supported() {
+        if requested.is_available() {
             requested
-        } else if self.default_engine.is_supported() {
+        } else if self.default_engine.is_available() {
             self.default_engine
         } else {
             EngineKind::default()
@@ -130,8 +140,32 @@ impl EngineConfig {
 static ENGINE_CONFIG: Lazy<RwLock<EngineConfig>> =
     Lazy::new(|| RwLock::new(EngineConfig::default()));
 
+static LEGACY_MODE: AtomicBool = AtomicBool::new(false);
+static LEGACY_WARN_ONCE: Once = Once::new();
+
 pub fn configure_engines(config: EngineConfig) {
     *ENGINE_CONFIG.write().unwrap() = config;
+}
+
+pub fn set_legacy_mode(enabled: bool) {
+    LEGACY_MODE.store(enabled, Ordering::Relaxed);
+    if enabled {
+        LEGACY_WARN_ONCE.call_once(|| {
+            #[cfg(feature = "telemetry")]
+            tracing::warn!(
+                target: "storage_legacy_mode",
+                "storage legacy mode enabled; this toggle will be removed in the next release"
+            );
+            #[cfg(not(feature = "telemetry"))]
+            eprintln!(
+                "warning: storage legacy mode enabled; this toggle will be removed in the next release"
+            );
+        });
+    }
+}
+
+pub fn legacy_mode() -> bool {
+    LEGACY_MODE.load(Ordering::Relaxed)
 }
 
 enum Engine {
@@ -281,7 +315,9 @@ impl SimpleDb {
     }
 
     pub fn open_named(name: &str, path: &str) -> Self {
-        let kind = if cfg!(feature = "lightweight-integration") {
+        let kind = if legacy_mode() {
+            EngineKind::default()
+        } else if cfg!(feature = "lightweight-integration") {
             EngineKind::Memory
         } else {
             ENGINE_CONFIG.read().unwrap().resolve(name)
@@ -477,11 +513,17 @@ impl SimpleDb {
         }
         self.record_metrics_if_enabled();
     }
+
+    pub fn backend_name(&self) -> &'static str {
+        self.engine.backend_name()
+    }
 }
 
 impl Default for SimpleDb {
     fn default() -> Self {
-        let kind = if cfg!(feature = "lightweight-integration") {
+        let kind = if legacy_mode() {
+            EngineKind::default()
+        } else if cfg!(feature = "lightweight-integration") {
             EngineKind::Memory
         } else {
             ENGINE_CONFIG.read().unwrap().resolve(names::DEFAULT)
@@ -535,6 +577,16 @@ impl SimpleDb {
             STORAGE_ENGINE_SIZE_BYTES
                 .with_label_values(labels)
                 .set(to_gauge(metrics.size_on_disk_bytes));
+            for engine in ["memory", "rocksdb", "sled"] {
+                let value = if engine == self.engine.backend_name() {
+                    1
+                } else {
+                    0
+                };
+                STORAGE_ENGINE_INFO
+                    .with_label_values(&[self.name.as_str(), engine])
+                    .set(value);
+            }
         }
     }
 
@@ -555,7 +607,7 @@ fn to_gauge(value: Option<u64>) -> i64 {
 #[cfg(test)]
 impl SimpleDb {
     fn backend_name_for_test(&self) -> &'static str {
-        self.engine.backend_name()
+        self.backend_name()
     }
 }
 

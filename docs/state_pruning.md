@@ -31,6 +31,29 @@ modification time (newest first) and, when timestamps collide, falls back to the
 filename for a deterministic order. Files beyond the configured `keep` count are
 deleted from disk and removed from the checkpoint index.
 
+### Snapshot Engine Migration
+
+Snapshots record the storage engine that produced them via the optional
+`engine_backend` field. When restoring into a node configured for a different
+backend, `SnapshotManager::restore` appends an entry to
+`state/engine_migrations.log` and forwards the event to the audit trail via
+`state::audit::append_engine_migration`. To migrate an existing state
+directory:
+
+1. Stop the node and back up the entire `state/` tree.
+2. Use the `tools/storage_migrate` binary to rewrite the RocksDB/sled
+   directories into the target backend, e.g. `cargo run -p storage_migrate --
+   state state.rocksdb rocksdb`. The tool verifies checksums before writing the
+   destination.
+3. Update `config/default.toml` so the `storage` engine defaults (or overrides
+   for `state`-related handles) point at the new backend. The
+   `storage_legacy_mode` toggle can be set to `true` for one release to retain
+   the previous behaviour, but it is deprecated and the CLI issues warnings when
+   enabled.
+4. Restart the node and confirm the migration with `the-block state status`.
+   Snapshot restores that cross engines emit warnings in the CLI and surface the
+   `storage_engine_info{name="state",engine="rocksdb"}` metric for dashboards.
+
 Every snapshot filename is the BLAKE3 hash of its root state. Restoring a node
 is as simple as reading the snapshot and replaying blocks higher than the
 checkpoint height.

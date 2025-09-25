@@ -66,8 +66,11 @@ struct ShardStore {
 }
 
 impl ShardStore {
-    fn new(path: &str) -> Self {
-        let db = SimpleDb::open_named(names::GOSSIP_RELAY, path);
+    fn with_factory<F>(path: &str, factory: &F) -> Self
+    where
+        F: Fn(&str, &str) -> SimpleDb,
+    {
+        let db = factory(names::GOSSIP_RELAY, path);
         let cache = Mutex::new(Self::load(&db));
         Self {
             db: Mutex::new(db),
@@ -75,16 +78,16 @@ impl ShardStore {
         }
     }
 
+    fn new(path: &str) -> Self {
+        Self::with_factory(path, &SimpleDb::open_named)
+    }
+
     #[cfg(test)]
     fn temporary() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.into_path().join("gossip_store");
-        let db = SimpleDb::open_named(names::GOSSIP_RELAY, path.to_str().unwrap());
-        let cache = Mutex::new(Self::load(&db));
-        Self {
-            db: Mutex::new(db),
-            cache,
-        }
+        let path_str = path.to_string_lossy().to_string();
+        Self::with_factory(&path_str, &SimpleDb::open_named)
     }
 
     fn load(db: &SimpleDb) -> HashMap<ShardId, Vec<PeerId>> {
@@ -205,8 +208,15 @@ pub struct Relay {
 
 impl Relay {
     pub fn new(config: GossipConfig) -> Self {
+        Self::with_engine_factory(config, SimpleDb::open_named)
+    }
+
+    pub fn with_engine_factory<F>(config: GossipConfig, factory: F) -> Self
+    where
+        F: Fn(&str, &str) -> SimpleDb,
+    {
         let settings: GossipSettings = config.into();
-        let shard_store = ShardStore::new(&settings.shard_store_path);
+        let shard_store = ShardStore::with_factory(&settings.shard_store_path, &factory);
         let recent = Mutex::new(LruCache::new(settings.dedup_capacity));
         Self {
             recent,

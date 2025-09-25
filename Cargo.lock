@@ -1273,6 +1273,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "coding",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "tempfile",
@@ -1800,6 +1802,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1"
 dependencies = [
  "thiserror 2.0.16",
+]
+
+[[package]]
+name = "coding"
+version = "0.1.0"
+dependencies = [
+ "chacha20poly1305",
+ "rand 0.8.5",
+ "raptorq",
+ "reed-solomon-erasure",
+ "serde",
+ "thiserror 1.0.69",
+ "toml 0.8.23",
+ "zstd 0.12.4",
 ]
 
 [[package]]
@@ -4711,6 +4727,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "storage_engine",
 ]
 
 [[package]]
@@ -8655,6 +8672,7 @@ dependencies = [
  "hex",
  "rocksdb",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 1.0.69",
 ]
@@ -8702,6 +8720,14 @@ dependencies = [
  "sled",
  "tempfile",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "storage_migrate"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "storage_engine",
 ]
 
 [[package]]
@@ -9027,6 +9053,7 @@ dependencies = [
  "chacha20poly1305",
  "clap",
  "clap_complete",
+ "coding",
  "colored",
  "crc32fast",
  "criterion",
@@ -9072,9 +9099,7 @@ dependencies = [
  "pyo3",
  "rand 0.8.5",
  "rand_core 0.6.4",
- "raptorq",
  "rayon",
- "reed-solomon-erasure",
  "regex",
  "reqwest 0.11.27",
  "ripemd",
@@ -9124,7 +9149,6 @@ dependencies = [
  "wat",
  "x509-parser 0.16.0",
  "xorfilter-rs",
- "zstd 0.12.4",
 ]
 
 [[package]]

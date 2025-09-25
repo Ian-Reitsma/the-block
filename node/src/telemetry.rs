@@ -289,6 +289,27 @@ pub fn sampled_observe(hist: &Histogram, v: f64) {
 }
 
 #[cfg(feature = "telemetry")]
+pub fn sampled_observe_vec(hist: &HistogramVec, labels: &[&str], v: f64) {
+    if should_sample() {
+        hist.with_label_values(labels).observe(v);
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn record_coding_result(stage: &str, algorithm: &str, result: &str) {
+    STORAGE_CODING_OPERATIONS_TOTAL
+        .with_label_values(&[stage, algorithm, result])
+        .inc();
+}
+
+#[cfg(feature = "telemetry")]
+pub fn record_compression_ratio(algorithm: &str, ratio: f64) {
+    STORAGE_COMPRESSION_RATIO
+        .with_label_values(&[algorithm])
+        .observe(ratio);
+}
+
+#[cfg(feature = "telemetry")]
 pub fn set_sample_rate(rate: f64) {
     Lazy::force(&ADAPTIVE_LOOP);
     let scaled = (rate.clamp(0.0, 1.0) * 1_000_000.0) as u64;
@@ -442,6 +463,17 @@ pub fn sampled_inc(_c: &IntCounter) {}
 pub fn sampled_inc_vec(_c: &IntCounterVec, _l: &[&str]) {}
 #[cfg(not(feature = "telemetry"))]
 pub fn sampled_observe(_h: &Histogram, _v: f64) {}
+#[cfg(not(feature = "telemetry"))]
+pub fn sampled_observe_vec(_h: &HistogramVec, _l: &[&str], _v: f64) {}
+
+#[cfg(not(feature = "telemetry"))]
+mod coding_stubs {
+    pub fn record_coding_result(_stage: &str, _algorithm: &str, _result: &str) {}
+    pub fn record_compression_ratio(_algorithm: &str, _ratio: f64) {}
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub use coding_stubs::{record_coding_result, record_compression_ratio};
 #[cfg(not(feature = "telemetry"))]
 pub fn set_sample_rate(_r: f64) {}
 #[cfg(not(feature = "telemetry"))]
@@ -1559,7 +1591,35 @@ pub static STORAGE_CHUNK_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     h
 });
 
-pub static STORAGE_PUT_OBJECT_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static STORAGE_CODING_OPERATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "storage_coding_operations_total",
+            "Storage coding operations by stage, algorithm, and result",
+        ),
+        &["stage", "algorithm", "result"],
+    )
+    .unwrap_or_else(|e| panic!("counter storage coding ops: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage coding ops: {e}"));
+    c
+});
+
+pub static STORAGE_COMPRESSION_RATIO: Lazy<HistogramVec> = Lazy::new(|| {
+    let opts = HistogramOpts::new(
+        "storage_compression_ratio",
+        "Compression ratios achieved per algorithm",
+    );
+    let hv = HistogramVec::new(opts, &["algorithm"])
+        .unwrap_or_else(|e| panic!("histogram storage compression ratio: {e}"));
+    REGISTRY
+        .register(Box::new(hv.clone()))
+        .unwrap_or_else(|e| panic!("registry storage compression ratio: {e}"));
+    hv
+});
+
+pub static STORAGE_PUT_OBJECT_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     let buckets = prometheus::exponential_buckets(0.005, 1.8, 12)
         .unwrap_or_else(|e| panic!("storage put object buckets: {e}"));
     let opts = HistogramOpts::new(
@@ -1567,21 +1627,22 @@ pub static STORAGE_PUT_OBJECT_SECONDS: Lazy<Histogram> = Lazy::new(|| {
         "End-to-end latency for StoragePipeline::put_object",
     )
     .buckets(buckets);
-    let h =
-        Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram storage put object: {e}"));
+    let hv = HistogramVec::new(opts, &["erasure", "compression"])
+        .unwrap_or_else(|e| panic!("histogram storage put object: {e}"));
     REGISTRY
-        .register(Box::new(h.clone()))
+        .register(Box::new(hv.clone()))
         .unwrap_or_else(|e| panic!("registry storage put object: {e}"));
-    h
+    hv
 });
 
-pub static STORAGE_PUT_CHUNK_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+pub static STORAGE_PUT_CHUNK_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
     let opts = HistogramOpts::new("storage_put_chunk_seconds", "Time to put a single chunk");
-    let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
+    let hv = HistogramVec::new(opts, &["erasure", "compression"])
+        .unwrap_or_else(|e| panic!("histogram storage put chunk: {e}"));
     REGISTRY
-        .register(Box::new(h.clone()))
-        .unwrap_or_else(|e| panic!("registry: {e}"));
-    h
+        .register(Box::new(hv.clone()))
+        .unwrap_or_else(|e| panic!("registry storage put chunk: {e}"));
+    hv
 });
 
 pub static STORAGE_PROVIDER_RTT_MS: Lazy<HistogramVec> = Lazy::new(|| {
@@ -1638,7 +1699,7 @@ pub static STORAGE_REPAIR_FAILURES_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
             "storage_repair_failures_total",
             "Total storage repair failures by error category",
         ),
-        &["error"],
+        &["error", "erasure", "compression"],
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY
@@ -1705,6 +1766,21 @@ pub static STORAGE_COMPACTION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry storage_compaction_total: {e}"));
     c
+});
+
+pub static STORAGE_ENGINE_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "storage_engine_info",
+            "Storage engine backend selection (1 for active backend)",
+        ),
+        &["db", "engine"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec storage_engine_info: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_engine_info: {e}"));
+    g
 });
 
 pub static STORAGE_ENGINE_PENDING_COMPACTIONS: Lazy<IntGaugeVec> = Lazy::new(|| {

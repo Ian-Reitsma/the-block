@@ -79,15 +79,12 @@ tungstenite = { version = "0.21", default-features = false, features = ["handsha
 hyper-tungstenite = "0.11"
 x509-parser = "0.16"
 sha1 = "0.10"
-zstd = "0.12"
 state = { path = "../state" }
 notify = "6"
 signal-hook = "0.3"
-reed-solomon-erasure = "6"
 # probabilistic rate-limit filter
 xorfilter-rs = "0.5"
-# fountain coding for repair overlay
-raptorq = "2"
+# fountain coding for repair overlay (via coding crate)
 # linear-algebra routines for governor
 nalgebra = { version = "0.32", features = ["std"] }
 # statistical functions for risk tuning
@@ -106,7 +103,8 @@ storage = { path = "../storage" }
 num_cpus = "1.17"
 # light-client integration
 light-client = { path = "../crates/light-client" }
-storage_engine = { path = "../crates/storage_engine", default-features = false, features = ["sled"] }
+storage_engine = { path = "../crates/storage_engine", default-features = false }
+coding = { path = "../crates/coding" }
 # jittered RPC client
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime
@@ -124,8 +122,9 @@ terminal_size = "0.2"
 wasmtime = "24"
 
 [features]
-default = ["storage-rocksdb"]
+default = ["storage-rocksdb", "sled"]
 storage-rocksdb = ["dep:rocksdb", "storage_engine/rocksdb"]
+sled = ["storage_engine/sled"]
 cli = []
 lightweight-integration = []
 integration-tests = []
@@ -143,6 +142,7 @@ gateway = []
  quic = ["transport"]
 privacy = ["dep:privacy"]
 reentrant_scheduler = []
+s2n-quic = ["quic", "transport/s2n-quic"]
 
 [package.metadata.maturin]
 features = ["pyo3/extension-module", "pyo3/auto-initialize", "telemetry"]

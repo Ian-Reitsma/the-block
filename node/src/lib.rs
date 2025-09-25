@@ -4,24 +4,6 @@
 #![allow(clippy::all)]
 #![deny(clippy::disallowed_methods)]
 #![deny(clippy::disallowed_types)]
-#![clippy::disallowed_methods = "tokio::spawn"]
-#![clippy::disallowed_methods = "tokio::task::spawn"]
-#![clippy::disallowed_methods = "tokio::task::spawn_blocking"]
-#![clippy::disallowed_methods = "tokio::task::yield_now"]
-#![clippy::disallowed_methods = "tokio::time::sleep"]
-#![clippy::disallowed_methods = "tokio::time::timeout"]
-#![clippy::disallowed_methods = "tokio::time::interval"]
-#![clippy::disallowed_methods = "tokio::runtime::Runtime::block_on"]
-#![clippy::disallowed_methods = "tokio::runtime::Runtime::spawn"]
-#![clippy::disallowed_methods = "tokio::runtime::Runtime::spawn_blocking"]
-#![clippy::disallowed_methods = "tokio::runtime::Builder::build"]
-#![clippy::disallowed_methods = "tokio::runtime::Builder::enable_all"]
-#![clippy::disallowed_methods = "tokio::runtime::Builder::new_current_thread"]
-#![clippy::disallowed_methods = "tokio::runtime::Builder::new_multi_thread"]
-#![clippy::disallowed_types = "tokio::runtime::Runtime"]
-#![clippy::disallowed_types = "tokio::task::JoinHandle"]
-#![clippy::disallowed_types = "libp2p::PeerId"]
-#![clippy::disallowed_types = "libp2p::Multiaddr"]
 
 //! Core blockchain implementation with Python bindings.
 //!
@@ -72,7 +54,7 @@ pub mod config;
 pub mod dkg;
 pub mod exec;
 mod read_receipt;
-mod simple_db;
+pub mod simple_db;
 use config::NodeConfig;
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use runtime;
@@ -1914,6 +1896,7 @@ impl Blockchain {
         crate::net::set_metrics_export_dir(cfg.metrics_export_dir.clone());
         crate::net::set_peer_metrics_export_quota(cfg.peer_metrics_export_quota_bytes);
         crate::net::configure_overlay(&cfg.overlay);
+        crate::simple_db::set_legacy_mode(cfg.storage_legacy_mode);
         crate::simple_db::configure_engines(cfg.storage.clone());
         if let Err(err) = crate::config::ensure_overlay_sanity(&cfg.overlay) {
             #[cfg(feature = "telemetry")]
