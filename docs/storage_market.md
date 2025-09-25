@@ -1,5 +1,5 @@
 # Storage Market Design
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Added coding fallback rollout context and telemetry updates for provider monitoring.
 
 This document outlines the incentive-compatible storage market where nodes
 advertise available disk space and accept contracts funded in-chain.
@@ -44,6 +44,36 @@ interface exposes the same data and controls via `storage_provider_profiles` and
 `storage_provider_set_maintenance`.
 
 These counters are emitted directly from the RPC helpers in `node/src/rpc/storage.rs` whenever uploads or challenges complete, and they are only available when the `telemetry` feature flag is enabled. Operators relying on contract or challenge telemetry should ensure telemetry is compiled in and that Prometheus scrapes the node endpoint.
+
+## Coding abstraction and configuration
+
+All encryption, erasure, fountain, and compression primitives flow through the shared
+`coding` crate. The node loads a [`coding::Config`](../crates/coding/src/config.rs) from
+`config/storage.toml`, which exposes the default chunk ladder, Reed–Solomon parity counts,
+fountain settings, and compressor level. Each stored manifest records the active
+algorithms so data can be decoded even after the configuration changes. Operators can
+adjust algorithms or tuning parameters by editing `config/storage.toml` and reloading the
+node configuration; runtime reloads also refresh the coding registry so subsequent uploads
+use the new settings.
+
+- Set `erasure.algorithm = "xor"` to exercise the in-house XOR fallback coder. The
+  pipeline still emits Reed–Solomon metadata in manifests, but the coder records its
+  canonical algorithm (`erasure_alg = "xor"`) so repairs and retrieval know to expect the
+  reduced parity guarantees. The repair worker automatically downgrades expectations when
+  multiple data shards are missing and logs the `algorithm_limited` skip reason instead of
+  repeatedly failing reconstruction.
+- Set `compression.algorithm = "rle"` to switch to the lightweight run-length compressor
+  for environments where zstd cannot be deployed. The compressor reports `algorithm="rle"`
+  in telemetry so dashboards can compare compression ratios across rollout cohorts.
+- Because the configuration lives alongside other storage settings, operators can stage
+  partial rollouts by first updating a canary node's `storage.toml`, validating telemetry,
+  then promoting the change to the wider fleet once confidence is established.
+
+Telemetry surfaces the health of these primitives through
+`storage_coding_operations_total{stage,algorithm,result}` counters and the
+`storage_compression_ratio{algorithm}` histogram. These metrics make it easy to correlate
+success and failure rates across algorithms while tracking real compression effectiveness
+in production.
 
 ## Explorer
 The explorer exposes `/storage/providers` with aggregated provider capacity

@@ -1,5 +1,5 @@
 # Storage Pipeline
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced shard layout, coding config integration, and fallback telemetry with the current implementation.
 
 The storage client splits objects into encrypted chunks before handing them to
 providers. Completed blob roots are queued for on-chain anchoring by the
@@ -45,18 +45,38 @@ constant.
 ## Erasure Coding and Multi-Provider Placement
 
 Each chunk is encrypted with ChaCha20-Poly1305 and then split into data and
-parity shards using Reed–Solomon coding (`1+1` configuration).  Shards are
-round-robined across the provided storage backends, allowing any single shard to
-be lost without data loss.  A manifest records the mapping of shard IDs to
-provider IDs and includes a redundancy hint:
+parity shards via the shared `coding` crate. Defaults come from
+[`config/storage.toml`](../config/storage.toml) and currently request 16 data
+shards and 8 parity shards backed by Reed–Solomon
+(`crates/coding/src/erasure.rs`). A manifest records the mapping of shard IDs to
+provider IDs and stores the active algorithm and counts so repair logic can
+select the matching coder:
 
 ```json
-{"version":1,"chunk_len":1048576,"redundancy":{"ReedSolomon":{"data":1,"parity":1}},...}
+{"version":1,"chunk_len":1048576,"erasure_alg":"reed-solomon","erasure_data":16,"erasure_parity":8,"compression_alg":"zstd",...}
 ```
 
-On retrieval the pipeline loads the manifest, fetches available shards, and
-reconstructs missing data via `reed_solomon_erasure`.  Integration tests cover
-shard loss and recovery under `node/tests/storage_erasure.rs`.
+Operators may opt into the in-house XOR fallback by setting
+`erasure.algorithm = "xor"` and enabling the rollout gate in
+`[rollout]` within `config/storage.toml`. The fallback produces a single parity
+vector (duplicated to satisfy manifest layout), trades redundancy for supply-chain
+independence, and causes the repair loop to log
+`algorithm_limited:<alg>:missing=<n>:parity=<m>` when reconstruction would be
+impossible. Integration coverage exercises both paths in
+`storage/tests/fallback_coder.rs` and `storage/tests/repair.rs`.
+
+Compression choices follow the same configuration path (`compression.algorithm`
+and `rollout.allow_fallback_compressor`) and manifest field so retrieval knows
+whether to invoke zstd or the lightweight RLE fallback.
+
+Shards are round-robined across storage backends so the pipeline tolerates up to
+the configured parity shard loss per chunk. Algorithm choices load through
+`node/src/storage/settings.rs`, and telemetry tags
+`storage_put_object_seconds`, `storage_put_chunk_seconds`, and
+`storage_repair_failures_total` with `erasure`/`compression` labels to make
+rollout dashboards trivial. The bench harness offers a
+`compare-coders` command that benchmarks Reed–Solomon+zstd versus XOR+RLE
+(`tools/bench-harness/src/main.rs`).
 
 ## Provider Catalog Health Checks
 

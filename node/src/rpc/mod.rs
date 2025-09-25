@@ -142,6 +142,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "storage.repair_history",
     "storage.repair_run",
     "storage.repair_chunk",
+    "storage.manifests",
     "pow.submit",
     "inflation.params",
     "compute_market.stats",
@@ -2427,6 +2428,14 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
             storage::challenge(object_id, chunk_idx, proof, current_block)
+        }
+        "storage.manifests" => {
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+            storage::manifest_summaries(limit)
         }
         "storage_provider_profiles" => storage::provider_profiles(),
         "storage_provider_set_maintenance" => {

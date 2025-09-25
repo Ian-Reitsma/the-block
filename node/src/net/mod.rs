@@ -25,7 +25,7 @@ pub mod quic {
 pub mod partition_watch;
 pub mod turbine;
 
-use crate::config::{AggregatorConfig, OverlayBackend, OverlayConfig};
+use crate::config::{OverlayBackend, OverlayConfig};
 use crate::net::peer::pk_from_addr;
 use crate::{
     gossip::relay::{Relay, RelayStatus},
@@ -369,7 +369,7 @@ pub fn overlay_status() -> OverlayStatus {
                 tracing::warn!(reason = %err, "overlay_diagnostics_failed");
             }
             #[cfg(not(feature = "telemetry"))]
-            tracing::warn!(reason = %err, "overlay_diagnostics_failed");
+            eprintln!("overlay_diagnostics_failed: {err}");
             OverlayStatus {
                 backend: "unknown".into(),
                 active_peers: 0,
@@ -719,6 +719,20 @@ fn max_peer_cert_age_secs() -> u64 {
     PEER_CERT_MAX_AGE.load(Ordering::Relaxed)
 }
 
+#[cfg(feature = "quic")]
+fn default_legacy_provider_id() -> String {
+    if cfg!(feature = "s2n-quic") {
+        transport::ProviderKind::S2nQuic.id().to_string()
+    } else {
+        transport::ProviderKind::Quinn.id().to_string()
+    }
+}
+
+#[cfg(not(feature = "quic"))]
+fn default_legacy_provider_id() -> String {
+    "quinn".to_string()
+}
+
 pub fn configure_peer_cert_policy(history: Option<usize>, max_age: Option<u64>) {
     let history = history.unwrap_or(DEFAULT_PEER_CERT_HISTORY);
     let max_age = max_age.unwrap_or(DEFAULT_PEER_CERT_MAX_AGE);
@@ -813,11 +827,7 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
         Ok(data) => match serde_json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
             Ok(entries) => {
                 let mut rebuilt = HashMap::new();
-                let legacy_provider = if cfg!(feature = "s2n-quic") {
-                    transport::ProviderKind::S2nQuic.id().to_string()
-                } else {
-                    transport::ProviderKind::Quinn.id().to_string()
-                };
+                let legacy_provider = default_legacy_provider_id();
                 for entry in entries {
                     if let Ok(bytes) = hex::decode(&entry.peer) {
                         if bytes.len() != 32 {

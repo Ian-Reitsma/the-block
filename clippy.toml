@@ -1,0 +1,24 @@
+# Enforce storage and runtime restrictions consistently across crates.
+disallowed-methods = [
+    "tokio::spawn",
+    "tokio::task::spawn",
+    "tokio::task::spawn_blocking",
+    "tokio::task::yield_now",
+    "tokio::time::sleep",
+    "tokio::time::timeout",
+    "tokio::time::interval",
+    "tokio::runtime::Runtime::block_on",
+    "tokio::runtime::Runtime::spawn",
+    "tokio::runtime::Runtime::spawn_blocking",
+    "tokio::runtime::Builder::build",
+    "tokio::runtime::Builder::enable_all",
+    "tokio::runtime::Builder::new_current_thread",
+    "tokio::runtime::Builder::new_multi_thread",
+]
+
+disallowed-types = [
+    "tokio::runtime::Runtime",
+    "tokio::task::JoinHandle",
+    "libp2p::PeerId",
+    "libp2p::Multiaddr",
+]

@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
-/// Length in bytes of the ChaCha20-Poly1305 nonce stored alongside each chunk.
-pub const CHACHA20_POLY1305_NONCE_LEN: usize = 12;
-/// Authentication tag size emitted by ChaCha20-Poly1305.
-pub const CHACHA20_POLY1305_TAG_LEN: usize = 16;
+pub use coding::CHACHA20_POLY1305_NONCE_LEN;
+pub use coding::CHACHA20_POLY1305_TAG_LEN;
 /// Total overhead added to each encrypted chunk (nonce + tag).
-pub const ENCRYPTED_CHUNK_OVERHEAD: usize = CHACHA20_POLY1305_NONCE_LEN + CHACHA20_POLY1305_TAG_LEN;
+pub const ENCRYPTED_CHUNK_OVERHEAD: usize =
+    coding::CHACHA20_POLY1305_NONCE_LEN + coding::CHACHA20_POLY1305_TAG_LEN;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Redundancy {
@@ -44,6 +43,18 @@ pub struct ObjectManifest {
     pub blake3: [u8; 32],
     #[serde(default)]
     pub chunk_lens: Vec<u32>,
+    #[serde(default)]
+    pub chunk_compressed_lens: Vec<u32>,
+    #[serde(default)]
+    pub chunk_cipher_lens: Vec<u32>,
+    #[serde(default)]
+    pub compression_alg: Option<String>,
+    #[serde(default)]
+    pub compression_level: Option<i32>,
+    #[serde(default)]
+    pub encryption_alg: Option<String>,
+    #[serde(default)]
+    pub erasure_alg: Option<String>,
     #[serde(default)]
     pub provider_chunks: Vec<ProviderChunkEntry>,
 }
@@ -83,7 +94,18 @@ impl ObjectManifest {
 
     /// Ciphertext length (nonce + ciphertext) stored for the `index`-th chunk.
     pub fn chunk_cipher_len(&self, index: usize) -> usize {
+        if !self.chunk_cipher_lens.is_empty() {
+            return self.chunk_cipher_lens.get(index).copied().unwrap_or(0) as usize;
+        }
         self.chunk_plain_len(index) + ENCRYPTED_CHUNK_OVERHEAD
+    }
+
+    /// Compressed length stored for the `index`-th chunk prior to encryption.
+    pub fn chunk_compressed_len(&self, index: usize) -> usize {
+        if !self.chunk_compressed_lens.is_empty() {
+            return self.chunk_compressed_lens.get(index).copied().unwrap_or(0) as usize;
+        }
+        self.chunk_plain_len(index)
     }
 }
 

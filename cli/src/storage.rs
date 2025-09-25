@@ -2,6 +2,7 @@ use clap::Subcommand;
 use storage::{StorageContract, StorageOffer};
 use the_block::{
     generate_keypair, rpc,
+    simple_db::EngineKind,
     transaction::{sign_tx, RawTxPayload},
 };
 
@@ -48,6 +49,13 @@ pub enum StorageCmd {
         chunk: u32,
         #[arg(long)]
         force: bool,
+    },
+    /// List stored manifests and active coding algorithms
+    Manifests {
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -109,6 +117,33 @@ pub fn handle(cmd: StorageCmd) {
             if json {
                 println!("{}", resp);
             } else if let Some(list) = resp.get("profiles").and_then(|v| v.as_array()) {
+                if let Some(engine) = resp.get("engine").and_then(|v| v.as_object()) {
+                    let pipeline = engine
+                        .get("pipeline")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let rent = engine
+                        .get("rent_escrow")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    println!("storage pipeline engine: {pipeline} (rent escrow: {rent})");
+                    let recommended = EngineKind::default_for_build().label();
+                    if pipeline != recommended || rent != recommended {
+                        println!(
+                            "warning: recommended storage engine is {recommended}; consider migrating via tools/storage_migrate"
+                        );
+                    }
+                    if engine
+                        .get("legacy_mode")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        println!(
+                            "warning: storage legacy mode is enabled and will be removed in the next release"
+                        );
+                    }
+                    println!();
+                }
                 println!(
                     "{:>20} {:>12} {:>8} {:>10} {:>8} {:>8} {:>6}",
                     "provider", "quota_bytes", "chunk", "throughput", "loss", "rtt_ms", "maint"
@@ -200,6 +235,99 @@ pub fn handle(cmd: StorageCmd) {
         } => {
             let resp = rpc::storage::repair_chunk(&manifest, chunk, force);
             println!("{}", resp);
+        }
+        StorageCmd::Manifests { limit, json } => {
+            let resp = rpc::storage::manifest_summaries(limit);
+            if json {
+                println!("{}", resp);
+            } else if let Some(entries) = resp.get("manifests").and_then(|v| v.as_array()) {
+                if let Some(policy) = resp.get("policy").and_then(|v| v.as_object()) {
+                    if let Some(erasure) = policy.get("erasure").and_then(|v| v.as_object()) {
+                        let algorithm = erasure
+                            .get("algorithm")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-");
+                        let fallback = erasure
+                            .get("fallback")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let emergency = erasure
+                            .get("emergency")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        println!(
+                            "erasure policy: {algorithm} (fallback={}, emergency={})",
+                            fallback, emergency
+                        );
+                    }
+                    if let Some(compression) = policy.get("compression").and_then(|v| v.as_object())
+                    {
+                        let algorithm = compression
+                            .get("algorithm")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-");
+                        let fallback = compression
+                            .get("fallback")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        let emergency = compression
+                            .get("emergency")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        println!(
+                            "compression policy: {algorithm} (fallback={}, emergency={})",
+                            fallback, emergency
+                        );
+                    }
+                    println!();
+                }
+                println!(
+                    "{:<64} {:<16} {:<16} {:<6} {:<6}",
+                    "manifest", "erasure", "compression", "e_fb", "c_fb"
+                );
+                for entry in entries {
+                    let manifest = entry
+                        .get("manifest")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let erasure = entry.get("erasure").and_then(|v| v.as_str()).unwrap_or("-");
+                    let compression = entry
+                        .get("compression")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let compression_level = entry.get("compression_level").and_then(|v| v.as_i64());
+                    let erasure_fb = entry
+                        .get("erasure_fallback")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let compression_fb = entry
+                        .get("compression_fallback")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let mut erasure_display = erasure.to_string();
+                    if erasure_fb {
+                        erasure_display.push('*');
+                    }
+                    let mut compression_display = if let Some(level) = compression_level {
+                        format!("{compression}({level})")
+                    } else {
+                        compression.to_string()
+                    };
+                    if compression_fb {
+                        compression_display.push('*');
+                    }
+                    println!(
+                        "{:<64} {:<16} {:<16} {:<6} {:<6}",
+                        manifest,
+                        erasure_display,
+                        compression_display,
+                        if erasure_fb { "yes" } else { "no" },
+                        if compression_fb { "yes" } else { "no" }
+                    );
+                }
+            } else {
+                println!("{}", resp);
+            }
         }
     }
 }

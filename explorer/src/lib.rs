@@ -5,6 +5,7 @@ use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
+use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -904,6 +905,27 @@ impl Explorer {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    pub fn manifest_listing(&self, limit: Option<usize>) -> storage_view::ManifestListingView {
+        let path = env::var("TB_STORAGE_PIPELINE_DIR").unwrap_or_else(|_| "blobstore".to_string());
+        let pipeline = the_block::storage::pipeline::StoragePipeline::open(&path);
+        let max_entries = limit.unwrap_or(100).min(1_000);
+        let manifests = pipeline.manifest_summaries(max_entries);
+        let algorithms = the_block::storage::settings::algorithms();
+        let policy = storage_view::ManifestPolicyView {
+            erasure: storage_view::AlgorithmPolicyView {
+                algorithm: algorithms.erasure().to_string(),
+                fallback: algorithms.erasure_fallback(),
+                emergency: algorithms.erasure_emergency(),
+            },
+            compression: storage_view::AlgorithmPolicyView {
+                algorithm: algorithms.compression().to_string(),
+                fallback: algorithms.compression_fallback(),
+                emergency: algorithms.compression_emergency(),
+            },
+        };
+        storage_view::render_manifest_listing(&manifests, policy)
     }
 
     pub fn index_light_proof(&self, proof: &LightProof) -> Result<()> {

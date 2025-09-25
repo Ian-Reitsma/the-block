@@ -82,6 +82,8 @@ pub fn challenge(
 /// Return provider profile snapshots including quotas and recent upload stats.
 pub fn provider_profiles() -> serde_json::Value {
     let pipeline = StoragePipeline::open(&pipeline_path());
+    let engine = pipeline.engine_summary();
+    let legacy_mode = crate::simple_db::legacy_mode();
     let profiles: Vec<serde_json::Value> = pipeline
         .provider_profile_snapshots()
         .into_iter()
@@ -103,7 +105,14 @@ pub fn provider_profiles() -> serde_json::Value {
             })
         })
         .collect();
-    json!({"profiles": profiles})
+    json!({
+        "profiles": profiles,
+        "engine": {
+            "pipeline": engine.pipeline,
+            "rent_escrow": engine.rent_escrow,
+            "legacy_mode": legacy_mode,
+        }
+    })
 }
 
 /// Return recent storage repair log entries.
@@ -190,6 +199,47 @@ pub fn set_provider_maintenance(provider: &str, maintenance: bool) -> serde_json
         }),
         Err(err) => json!({"error": err}),
     }
+}
+
+/// Return manifest metadata including coding algorithm choices for stored objects.
+pub fn manifest_summaries(limit: Option<usize>) -> serde_json::Value {
+    let pipeline = StoragePipeline::open(&pipeline_path());
+    let max_entries = limit.unwrap_or(100).min(1000);
+    let manifests = pipeline.manifest_summaries(max_entries);
+    let algorithms = crate::storage::settings::algorithms();
+    let policy = json!({
+        "erasure": {
+            "algorithm": algorithms.erasure(),
+            "fallback": algorithms.erasure_fallback(),
+            "emergency": algorithms.erasure_emergency(),
+        },
+        "compression": {
+            "algorithm": algorithms.compression(),
+            "fallback": algorithms.compression_fallback(),
+            "emergency": algorithms.compression_emergency(),
+        },
+    });
+    let entries: Vec<_> = manifests
+        .into_iter()
+        .map(|entry| {
+            json!({
+                "manifest": entry.manifest,
+                "total_len": entry.total_len,
+                "chunk_count": entry.chunk_count,
+                "erasure": entry.erasure,
+                "compression": entry.compression,
+                "encryption": entry.encryption,
+                "compression_level": entry.compression_level,
+                "erasure_fallback": entry.erasure_fallback,
+                "compression_fallback": entry.compression_fallback,
+            })
+        })
+        .collect();
+    json!({
+        "status": "ok",
+        "policy": policy,
+        "manifests": entries,
+    })
 }
 
 #[cfg(test)]

@@ -1,13 +1,11 @@
-use super::erasure;
+use super::erasure::{self, ErasureParams};
 use super::fs::RentEscrow;
 use super::placement::{NodeCatalog, NodeHandle};
 use super::repair;
-use super::types::{
-    ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy, StoreReceipt,
-    CHACHA20_POLY1305_NONCE_LEN,
-};
+use super::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy, StoreReceipt};
 use crate::compute_market::settlement::Settlement;
 use crate::simple_db::{names, SimpleDb};
+use crate::storage::settings;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     MemoryComponent, STORAGE_CHUNK_SIZE_BYTES, STORAGE_FINAL_CHUNK_SIZE,
@@ -17,10 +15,7 @@ use crate::telemetry::{
 };
 use crate::transaction::BlobTx;
 use blake3::Hasher;
-use chacha20poly1305::{
-    aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Key, Nonce,
-};
+use coding::{Compressor, EncryptError, Encryptor};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -28,11 +23,12 @@ use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const VERSION: u16 = 1;
-const DEFAULT_CHUNK: u32 = 1024 * 1024; // 1 MiB
-const CHUNK_LADDER: [u32; 5] = [
+const FALLBACK_CHUNK: u32 = 1024 * 1024; // 1 MiB
+const FALLBACK_CHUNK_LADDER: [u32; 5] = [
     256 * 1024,
     512 * 1024,
     1024 * 1024,
@@ -45,6 +41,149 @@ const LOSS_LO: f64 = 0.002; // 0.2%
 pub const RTT_HI_MS: f64 = 200.0;
 const RTT_LO_MS: f64 = 80.0;
 const QUOTA_BYTES_PER_CREDIT: u64 = 1024 * 1024; // 1 credit == 1 MiB logical quota
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ManifestSummary {
+    pub manifest: String,
+    pub total_len: u64,
+    pub chunk_count: u32,
+    pub erasure: String,
+    pub compression: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compression_level: Option<i32>,
+    pub erasure_fallback: bool,
+    pub compression_fallback: bool,
+}
+
+fn chunk_defaults() -> (u32, Vec<u32>) {
+    let (default, ladder) = settings::chunk_defaults();
+    let default = u32::try_from(default).unwrap_or(FALLBACK_CHUNK);
+    let mut converted: Vec<u32> = ladder
+        .into_iter()
+        .filter_map(|step| u32::try_from(step).ok())
+        .collect();
+    if converted.is_empty() {
+        converted.extend_from_slice(&FALLBACK_CHUNK_LADDER);
+    } else {
+        converted.sort_unstable();
+        converted.dedup();
+    }
+    (default, converted)
+}
+
+fn default_chunk_size() -> u32 {
+    chunk_defaults().0
+}
+
+fn chunk_ladder() -> Vec<u32> {
+    chunk_defaults().1
+}
+
+fn clamp_to_ladder(bytes: f64, ladder: &[u32]) -> u32 {
+    let mut chosen = ladder.first().copied().unwrap_or(FALLBACK_CHUNK);
+    for &step in ladder {
+        if step as f64 <= bytes {
+            chosen = step;
+        }
+    }
+    chosen
+}
+
+fn previous_chunk_step(current: usize, ladder: &[u32]) -> usize {
+    if current <= 1 {
+        return 0;
+    }
+    for step in ladder.iter().rev() {
+        if (*step as usize) < current {
+            return *step as usize;
+        }
+    }
+    std::cmp::max(1, current / 2)
+}
+
+fn manifest_encryptor(manifest: &ObjectManifest) -> Result<Box<dyn Encryptor>, String> {
+    let algorithms = settings::algorithms();
+    let algorithm = manifest
+        .encryption_alg
+        .as_deref()
+        .unwrap_or(algorithms.encryptor());
+    if algorithm == algorithms.encryptor() {
+        settings::encryptor(&manifest.content_key_enc).map_err(|e| e.to_string())
+    } else {
+        settings::encryptor_for_algorithm(algorithm, &manifest.content_key_enc)
+            .map_err(|e| e.to_string())
+    }
+}
+
+fn manifest_compressor(manifest: &ObjectManifest) -> Result<Arc<dyn Compressor>, String> {
+    let algorithms = settings::algorithms();
+    let name = manifest
+        .compression_alg
+        .as_deref()
+        .unwrap_or(algorithms.compression());
+    let level = manifest
+        .compression_level
+        .unwrap_or_else(|| settings::compression_level());
+    if name == algorithms.compression() && level == settings::compression_level() {
+        Ok(settings::compressor())
+    } else {
+        settings::compressor_for_algorithm(name, level).map_err(|e| e.to_string())
+    }
+}
+
+fn manifest_erasure_params(manifest: &ObjectManifest) -> Result<ErasureParams, String> {
+    match manifest.redundancy {
+        Redundancy::ReedSolomon { data, parity } => {
+            let algorithm = manifest
+                .erasure_alg
+                .clone()
+                .unwrap_or_else(|| settings::algorithms().erasure().to_string());
+            Ok(ErasureParams::new(
+                algorithm,
+                data as usize,
+                parity as usize,
+            ))
+        }
+        Redundancy::None => Err("no erasure parameters".into()),
+    }
+}
+
+fn decrypt_chunk(encryptor: &dyn Encryptor, blob: &[u8]) -> Result<Vec<u8>, String> {
+    let algorithm = encryptor.algorithm();
+    match encryptor.decrypt(blob) {
+        Ok(bytes) => {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::record_coding_result("decrypt", algorithm, "ok");
+            Ok(bytes)
+        }
+        Err(err) => {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::record_coding_result("decrypt", algorithm, "err");
+            Err(match err {
+                EncryptError::InvalidCiphertext { .. } => "corrupt chunk".to_string(),
+                _ => "decrypt fail".to_string(),
+            })
+        }
+    }
+}
+
+fn decompress_chunk(compressor: &dyn Compressor, data: Vec<u8>) -> Result<Vec<u8>, String> {
+    let algorithm = compressor.algorithm();
+    match compressor.decompress(&data) {
+        Ok(bytes) => {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::record_coding_result("decompress", algorithm, "ok");
+            Ok(bytes)
+        }
+        Err(err) => {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::record_coding_result("decompress", algorithm, "err");
+            Err(err.to_string())
+        }
+    }
+}
 
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
@@ -87,13 +226,19 @@ pub struct ProviderProfileSnapshot {
     pub quota_bytes: u64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct PipelineEngineSummary {
+    pub pipeline: String,
+    pub rent_escrow: String,
+}
+
 impl ProviderProfile {
     fn new() -> Self {
         Self {
             bw_ewma: 0.0,
             rtt_ewma: 0.0,
             loss_ewma: 0.0,
-            preferred_chunk: DEFAULT_CHUNK,
+            preferred_chunk: default_chunk_size(),
             stable_chunks: 0,
             updated_at: 0,
             success_rate_ewma: 0.0,
@@ -108,7 +253,7 @@ impl ProviderProfile {
 
     fn ensure_defaults(&mut self) {
         if self.preferred_chunk == 0 {
-            self.preferred_chunk = DEFAULT_CHUNK;
+            self.preferred_chunk = default_chunk_size();
         }
     }
 
@@ -141,13 +286,16 @@ impl ProviderProfile {
             self.success_rate_ewma = StoragePipeline::ewma(self.success_rate_ewma, 0.0);
             self.recent_failures = self.recent_failures.saturating_add(1);
             self.stable_chunks = 0;
-            if self.preferred_chunk > CHUNK_LADDER[0] {
-                let idx = CHUNK_LADDER
-                    .iter()
-                    .position(|s| *s == self.preferred_chunk)
-                    .unwrap_or(0);
-                let downgraded_idx = idx.saturating_sub(1);
-                self.preferred_chunk = CHUNK_LADDER[downgraded_idx];
+            let ladder = chunk_ladder();
+            if let Some(first) = ladder.first() {
+                if self.preferred_chunk > *first {
+                    let idx = ladder
+                        .iter()
+                        .position(|s| *s == self.preferred_chunk)
+                        .unwrap_or(0);
+                    let downgraded_idx = idx.saturating_sub(1);
+                    self.preferred_chunk = ladder[downgraded_idx];
+                }
             }
         }
         if let Ok(secs) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -156,17 +304,18 @@ impl ProviderProfile {
     }
 
     fn adjust_preferred_chunk(&mut self) {
-        let mut desired = StoragePipeline::clamp_to_ladder(self.bw_ewma * TARGET_TIME_SECS);
+        let ladder = chunk_ladder();
+        let mut desired = clamp_to_ladder(self.bw_ewma * TARGET_TIME_SECS, &ladder);
         let current = self.preferred_chunk;
-        let step_idx = CHUNK_LADDER.iter().position(|s| *s == current).unwrap_or(2);
-        let desired_idx = CHUNK_LADDER
+        let step_idx = ladder.iter().position(|s| *s == current).unwrap_or(0);
+        let desired_idx = ladder
             .iter()
             .position(|s| *s == desired)
             .unwrap_or(step_idx);
         let diff = desired_idx as i32 - step_idx as i32;
 
         if self.loss_ewma > LOSS_HI || self.rtt_ewma > RTT_HI_MS {
-            desired = CHUNK_LADDER[step_idx.saturating_sub(1)];
+            desired = ladder[step_idx.saturating_sub(1)];
         } else if self.loss_ewma < LOSS_LO && self.rtt_ewma < RTT_LO_MS {
             // allow desired as computed
         } else {
@@ -227,11 +376,18 @@ pub struct StoragePipeline {
 
 impl StoragePipeline {
     pub fn open(path: &str) -> Self {
+        Self::open_with_factory(path, &SimpleDb::open_named)
+    }
+
+    pub fn open_with_factory<F>(path: &str, factory: &F) -> Self
+    where
+        F: Fn(&str, &str) -> SimpleDb,
+    {
         super::repair::spawn(path.to_string(), Duration::from_secs(60));
         let repair_log_dir = PathBuf::from(path).join("repair_log");
         Self {
-            db: SimpleDb::open_named(names::STORAGE_PIPELINE, path),
-            rent: RentEscrow::open(&format!("{path}/rent_escrow.db")),
+            db: factory(names::STORAGE_PIPELINE, path),
+            rent: RentEscrow::open_with_factory(&format!("{path}/rent_escrow.db"), factory),
             rent_rate: 0,
             repair_log_dir,
         }
@@ -321,14 +477,11 @@ impl StoragePipeline {
         Ok(())
     }
 
-    fn clamp_to_ladder(bytes: f64) -> u32 {
-        let mut chosen = CHUNK_LADDER[0];
-        for step in CHUNK_LADDER.iter() {
-            if *step as f64 <= bytes {
-                chosen = *step;
-            }
+    pub fn engine_summary(&self) -> PipelineEngineSummary {
+        PipelineEngineSummary {
+            pipeline: self.db.backend_name().to_string(),
+            rent_escrow: self.rent.engine_label().to_string(),
         }
-        chosen
     }
 
     fn ewma(prev: f64, new: f64) -> f64 {
@@ -367,25 +520,14 @@ impl StoragePipeline {
             }
         }
         if best == 0 {
-            remaining.min(DEFAULT_CHUNK as usize)
+            remaining.min(default_chunk_size() as usize)
         } else {
             best
         }
     }
 
     fn previous_chunk_step(current: usize) -> usize {
-        if current <= 1 {
-            return 0;
-        }
-        if let Some(step) = CHUNK_LADDER
-            .iter()
-            .rev()
-            .find(|&&step| (step as usize) < current)
-        {
-            *step as usize
-        } else {
-            std::cmp::max(1, current / 2)
-        }
+        previous_chunk_step(current, &chunk_ladder())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -544,6 +686,11 @@ impl StoragePipeline {
             return Err("ERR_RENT_ESCROW_INSUFFICIENT".into());
         }
 
+        let algorithms = settings::algorithms();
+        let compressor = settings::compressor();
+        let compression_level = settings::compression_level();
+        let erasure_params = erasure::default_params();
+
         let mut data_hasher = Hasher::new();
         data_hasher.update(data);
         let blob_root: [u8; 32] = data_hasher.finalize().into();
@@ -551,8 +698,7 @@ impl StoragePipeline {
         OsRng.fill_bytes(&mut blob_id);
         let mut key_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut key_bytes);
-        let key = Key::from_slice(&key_bytes);
-        let cipher = ChaCha20Poly1305::new(key);
+        let encryptor = settings::encryptor(&key_bytes).map_err(|e| e.to_string())?;
 
         let handles = catalog.ranked_nodes();
         let mut provider_states: Vec<ProviderState> = handles
@@ -581,12 +727,14 @@ impl StoragePipeline {
             let initial = provider_states
                 .first()
                 .map(|p| p.profile.preferred_chunk)
-                .unwrap_or(DEFAULT_CHUNK);
+                .unwrap_or(default_chunk_size());
             STORAGE_INITIAL_CHUNK_SIZE.set(initial as i64);
         }
 
         let mut chunks = Vec::new();
         let mut chunk_lens: Vec<u32> = Vec::new();
+        let mut compressed_lens: Vec<u32> = Vec::new();
+        let mut cipher_lens: Vec<u32> = Vec::new();
         let mut provider_chunk_index: BTreeMap<String, ProviderChunkEntry> = BTreeMap::new();
         let mut provider_keys: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
@@ -602,15 +750,47 @@ impl StoragePipeline {
             while desired > 0 && !dispatched {
                 let end = offset + desired.min(remaining);
                 let chunk = &data[offset..end];
-                let mut nonce_bytes = [0u8; 12];
-                OsRng.fill_bytes(&mut nonce_bytes);
-                let nonce = Nonce::from_slice(&nonce_bytes);
                 #[cfg(feature = "telemetry")]
                 let chunk_start = Instant::now();
-                let ciphertext = cipher.encrypt(nonce, chunk).map_err(|e| e.to_string())?;
-                let mut blob = nonce_bytes.to_vec();
-                blob.extend_from_slice(&ciphertext);
-                let shards = erasure::encode(&blob)?;
+                let compression_algo = compressor.algorithm();
+                let compressed = match compressor.compress(chunk) {
+                    Ok(data) => {
+                        #[cfg(feature = "telemetry")]
+                        {
+                            crate::telemetry::record_coding_result(
+                                "compress",
+                                compression_algo,
+                                "ok",
+                            );
+                            if !chunk.is_empty() {
+                                crate::telemetry::record_compression_ratio(
+                                    compression_algo,
+                                    data.len() as f64 / chunk.len() as f64,
+                                );
+                            }
+                        }
+                        data
+                    }
+                    Err(err) => {
+                        #[cfg(feature = "telemetry")]
+                        crate::telemetry::record_coding_result("compress", compression_algo, "err");
+                        return Err(err.to_string());
+                    }
+                };
+                let encrypt_algo = algorithms.encryptor();
+                let blob = match encryptor.encrypt(&compressed) {
+                    Ok(ciphertext) => {
+                        #[cfg(feature = "telemetry")]
+                        crate::telemetry::record_coding_result("encrypt", encrypt_algo, "ok");
+                        ciphertext
+                    }
+                    Err(err) => {
+                        #[cfg(feature = "telemetry")]
+                        crate::telemetry::record_coding_result("encrypt", encrypt_algo, "err");
+                        return Err(err.to_string());
+                    }
+                };
+                let shards = erasure::encode_with_params(&blob, &erasure_params)?;
 
                 match self.dispatch_shards(
                     provider_states.as_mut_slice(),
@@ -627,9 +807,19 @@ impl StoragePipeline {
                         #[cfg(feature = "telemetry")]
                         {
                             STORAGE_CHUNK_SIZE_BYTES.observe(chunk.len() as f64);
-                            STORAGE_PUT_CHUNK_SECONDS.observe(chunk_start.elapsed().as_secs_f64());
+                            crate::telemetry::sampled_observe_vec(
+                                &STORAGE_PUT_CHUNK_SECONDS,
+                                &[algorithms.erasure(), algorithms.compression()],
+                                chunk_start.elapsed().as_secs_f64(),
+                            );
                         }
-                        chunk_lens.push(chunk.len() as u32);
+                        chunk_lens.push(u32::try_from(chunk.len()).map_err(|_| "chunk too large")?);
+                        compressed_lens.push(
+                            u32::try_from(compressed.len())
+                                .map_err(|_| "compressed chunk too large")?,
+                        );
+                        cipher_lens
+                            .push(u32::try_from(blob.len()).map_err(|_| "cipher chunk too large")?);
                         offset = end;
                         dispatched = true;
                     }
@@ -648,14 +838,15 @@ impl StoragePipeline {
             self.save_profile(state.id(), &state.profile);
         }
 
-        let (rs_data, rs_parity) = erasure::reed_solomon_counts();
+        let rs_data = erasure_params.data_shards;
+        let rs_parity = erasure_params.parity_shards;
         let rs_data_u8 = u8::try_from(rs_data).map_err(|_| "invalid data shard count")?;
         let rs_parity_u8 = u8::try_from(rs_parity).map_err(|_| "invalid parity shard count")?;
 
         let mut manifest = ObjectManifest {
             version: VERSION,
             total_len: data.len() as u64,
-            chunk_len: chunk_lens.first().copied().unwrap_or(DEFAULT_CHUNK) as u32,
+            chunk_len: chunk_lens.first().copied().unwrap_or(default_chunk_size()) as u32,
             chunks,
             redundancy: Redundancy::ReedSolomon {
                 data: rs_data_u8,
@@ -664,6 +855,12 @@ impl StoragePipeline {
             content_key_enc: key_bytes.to_vec(),
             blake3: [0u8; 32],
             chunk_lens,
+            chunk_compressed_lens: compressed_lens,
+            chunk_cipher_lens: cipher_lens,
+            compression_alg: Some(algorithms.compression().to_string()),
+            compression_level: Some(compression_level),
+            encryption_alg: Some(algorithms.encryptor().to_string()),
+            erasure_alg: Some(erasure_params.algorithm.clone()),
             provider_chunks: provider_chunk_index.values().cloned().collect(),
         };
         let mut h = Hasher::new();
@@ -723,8 +920,9 @@ impl StoragePipeline {
         }
         #[cfg(feature = "telemetry")]
         {
-            crate::telemetry::sampled_observe(
+            crate::telemetry::sampled_observe_vec(
                 &STORAGE_PUT_OBJECT_SECONDS,
+                &[algorithms.erasure(), algorithms.compression()],
                 telemetry_start.elapsed().as_secs_f64(),
             );
             crate::telemetry::update_memory_usage(MemoryComponent::Storage);
@@ -737,8 +935,8 @@ impl StoragePipeline {
         let manifest_bytes = self.db.get(&key).ok_or("missing manifest")?;
         let manifest: ObjectManifest =
             bincode::deserialize(&manifest_bytes).map_err(|e| e.to_string())?;
-        let key_bytes = manifest.content_key_enc.clone();
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key_bytes));
+        let encryptor = manifest_encryptor(&manifest)?;
+        let compressor = manifest_compressor(&manifest)?;
         let mut out = Vec::with_capacity(manifest.total_len as usize);
         match manifest.redundancy {
             Redundancy::None => {
@@ -747,14 +945,8 @@ impl StoragePipeline {
                         .db
                         .get(&format!("chunk/{}", hex::encode(ch.id)))
                         .ok_or("missing chunk")?;
-                    if blob.len() < CHACHA20_POLY1305_NONCE_LEN {
-                        return Err("corrupt chunk".into());
-                    }
-                    let (nonce_bytes, ct) = blob.split_at(CHACHA20_POLY1305_NONCE_LEN);
-                    let nonce = Nonce::from_slice(nonce_bytes);
-                    let mut plain = cipher
-                        .decrypt(nonce, ct)
-                        .map_err(|_| "decrypt fail".to_string())?;
+                    let decrypted = decrypt_chunk(&*encryptor, &blob)?;
+                    let mut plain = decompress_chunk(&*compressor, decrypted)?;
                     let expected = manifest.chunk_plain_len(idx);
                     if plain.len() < expected {
                         return Err("corrupt chunk".into());
@@ -764,7 +956,8 @@ impl StoragePipeline {
                 }
             }
             Redundancy::ReedSolomon { .. } => {
-                let shards_per_chunk = erasure::total_shards_per_chunk();
+                let params = manifest_erasure_params(&manifest)?;
+                let shards_per_chunk = erasure::total_shards_for_params(&params);
                 if shards_per_chunk == 0 {
                     return Err("invalid shard layout".into());
                 }
@@ -778,15 +971,9 @@ impl StoragePipeline {
                         shards[slot] = blob;
                     }
                     let expected_cipher = manifest.chunk_cipher_len(chunk_idx);
-                    let blob = erasure::reconstruct(shards, expected_cipher)?;
-                    if blob.len() < CHACHA20_POLY1305_NONCE_LEN {
-                        return Err("corrupt chunk".into());
-                    }
-                    let (nonce_bytes, ct) = blob.split_at(CHACHA20_POLY1305_NONCE_LEN);
-                    let nonce = Nonce::from_slice(nonce_bytes);
-                    let mut plain = cipher
-                        .decrypt(nonce, ct)
-                        .map_err(|_| "decrypt fail".to_string())?;
+                    let blob = erasure::reconstruct_with_params(shards, expected_cipher, &params)?;
+                    let decrypted = decrypt_chunk(&*encryptor, &blob)?;
+                    let mut plain = decompress_chunk(&*compressor, decrypted)?;
                     let expected = manifest.chunk_plain_len(chunk_idx);
                     if plain.len() < expected {
                         return Err("corrupt chunk".into());
@@ -802,6 +989,55 @@ impl StoragePipeline {
             .with_label_values(&["read"])
             .inc_by(out.len() as u64);
         Ok(out)
+    }
+
+    pub fn manifest_summaries(&self, limit: usize) -> Vec<ManifestSummary> {
+        let defaults = settings::algorithms();
+        let mut entries = Vec::new();
+        let keys = self.db.keys_with_prefix("manifest/");
+        for key in keys {
+            if limit > 0 && entries.len() >= limit {
+                break;
+            }
+            let Some(hex_hash) = key.strip_prefix("manifest/") else {
+                continue;
+            };
+            let Ok(raw_hash) = hex::decode(hex_hash) else {
+                continue;
+            };
+            if raw_hash.len() != 32 {
+                continue;
+            }
+            let Some(bytes) = self.db.get(&key) else {
+                continue;
+            };
+            let Ok(manifest) = bincode::deserialize::<ObjectManifest>(&bytes) else {
+                continue;
+            };
+            let Ok(chunk_count) = u32::try_from(manifest.chunk_count()) else {
+                continue;
+            };
+            let erasure = manifest
+                .erasure_alg
+                .clone()
+                .unwrap_or_else(|| defaults.erasure().to_string());
+            let compression = manifest
+                .compression_alg
+                .clone()
+                .unwrap_or_else(|| defaults.compression().to_string());
+            entries.push(ManifestSummary {
+                manifest: hex::encode(&raw_hash),
+                total_len: manifest.total_len,
+                chunk_count,
+                erasure: erasure.clone(),
+                compression: compression.clone(),
+                encryption: manifest.encryption_alg.clone(),
+                compression_level: manifest.compression_level,
+                erasure_fallback: manifest_uses_fallback_erasure(&erasure),
+                compression_fallback: manifest_uses_fallback_compression(&compression),
+            });
+        }
+        entries
     }
 
     pub fn delete_object(&mut self, manifest_hash: &[u8; 32]) -> Result<u64, String> {
@@ -840,6 +1076,14 @@ impl StoragePipeline {
     pub fn repair_log_dir(&self) -> PathBuf {
         self.repair_log_dir.clone()
     }
+}
+
+fn manifest_uses_fallback_erasure(algorithm: &str) -> bool {
+    algorithm.eq_ignore_ascii_case("xor")
+}
+
+fn manifest_uses_fallback_compression(algorithm: &str) -> bool {
+    algorithm.eq_ignore_ascii_case("rle")
 }
 
 #[cfg(test)]

@@ -2,6 +2,7 @@ use crate::rpc::RpcClient;
 use clap::Subcommand;
 use serde_json::json;
 use std::io::{self, Write};
+use the_block::simple_db::EngineKind;
 
 #[derive(Subcommand)]
 pub enum ComputeCmd {
@@ -111,6 +112,30 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
                 if let Ok(text) = resp.text() {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
                         if let Some(res) = val.get("result") {
+                            if let Some(engine) =
+                                res.get("settlement_engine").and_then(|v| v.as_object())
+                            {
+                                let engine_label =
+                                    engine.get("engine").and_then(|v| v.as_str()).unwrap_or("-");
+                                writeln!(out, "settlement engine: {engine_label}")?;
+                                let recommended = EngineKind::default_for_build().label();
+                                if engine_label != recommended {
+                                    writeln!(
+                                        out,
+                                        "warning: recommended settlement engine is {recommended}"
+                                    )?;
+                                }
+                                if engine
+                                    .get("legacy_mode")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false)
+                                {
+                                    writeln!(
+                                        out,
+                                        "warning: storage legacy mode is enabled and will be removed in the next release"
+                                    )?;
+                                }
+                            }
                             let backlog = res
                                 .get("industrial_backlog")
                                 .and_then(|v| v.as_u64())
