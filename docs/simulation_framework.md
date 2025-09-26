@@ -50,6 +50,67 @@ cargo run --package sim -- --scenario sim/cluster-basic.yml --seed 42
 The simulator prints per‑node statistics and writes an event log to
 `sim/out/cluster-basic-42.log`.
 
+## Dependency Fault Harness
+
+Wrapper migrations introduced a dedicated dependency fault harness that lives in
+`sim/src/dependency_fault.rs`. The harness spins up a miniature cluster using the
+runtime, transport, overlay, storage, coding, crypto, and codec wrappers, then
+injects failures to rehearse fallback strategies before rolling out third-party
+swaps.
+
+To run the harness:
+
+```bash
+cargo run -p tb-sim --bin dependency_fault --features dependency-fault \
+  --runtime tokio --transport quinn --overlay libp2p --storage rocksdb \
+  --coding reed-solomon --crypto dalek --codec bincode \
+  --fault transport:timeout --fault coding:panic --duration-secs 10
+```
+
+Key CLI flags:
+
+- `--runtime`, `--transport`, `--overlay`, `--storage`, `--coding`, `--crypto`,
+  and `--codec` toggle between primary and fallback backends.
+- `--fault <target>:<kind>` injects timeouts or panics into the selected wrapper.
+- `--duration-secs` and `--iterations` bound each rehearsal run.
+- `--output-dir` overrides the default `sim/output/dependency_fault/`
+  destination. The harness stores metrics and markdown summaries under
+  `sim/output/dependency_fault/<timestamp>_*`.
+
+Each scenario records a machine-readable `metrics.json`, a human-friendly
+`summary.md`, and (optionally) an `events.log` capturing injected faults and
+recovered operations. Reports enumerate receipts committed by the compute-market
+match loop, transport connection failures, overlay claims, coding throughput,
+and RPC latency so stakeholders can compare third-party providers with the
+fallback stack.
+
+### Adding New Fault Injectors
+
+Fault injectors live under `sim/src/dependency_fault_harness/mod.rs`. To add a new
+injector:
+
+1. Extend `FaultTarget` with a descriptive variant and update the CLI help.
+2. Teach `FaultInjector::new` and `ScenarioMetrics` to record the new target.
+3. Introduce a `run_<target>_probe` helper that exercises the relevant wrapper
+   using mock implementations or in-process node utilities.
+4. Emit metrics to the scenario report and update tests under
+   `sim/tests/dependency_fault.rs` to cover the new path.
+
+### Automation Hooks
+
+Governance and CI can trigger rehearsals via the helper script
+`scripts/run_dependency_fault_sim.sh`, which enables the `dependency-fault`
+feature, plumbs the desired backends, and propagates policy labels as run
+metadata. The script accepts the same CLI flags as the binary so policy changes
+can fan out to multiple fallback combinations in nightly jobs.
+
+### Comparing Runs
+
+Use `scripts/compare_dependency_fault.py` to diff two output directories. The
+script loads `metrics.json` artifacts, calculates deltas for latency, failure
+counts, and codec throughput, and emits a markdown summary suitable for PRs or
+governance artefacts.
+
 ## Deterministic Replay
 
 Each run records a PRNG seed and serializes all events. Re-running with the same

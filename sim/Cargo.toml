@@ -3,6 +3,25 @@ name = "tb-sim"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+runtime-wrapper = ["dep:runtime"]
+transport-wrapper = ["dep:transport"]
+overlay-wrapper = ["dep:p2p_overlay"]
+storage-wrapper = ["dep:storage_engine"]
+coding-wrapper = ["dep:coding"]
+crypto-wrapper = ["dep:crypto_suite"]
+codec-wrapper = ["dep:codec"]
+dependency-fault = [
+    "runtime-wrapper",
+    "transport-wrapper",
+    "overlay-wrapper",
+    "storage-wrapper",
+    "coding-wrapper",
+    "crypto-wrapper",
+    "codec-wrapper",
+]
+
 [dependencies]
 rand = "0.8"
 csv = "1"
@@ -17,12 +36,22 @@ the_block = { path = "../node" }
 ledger = { path = "../ledger" }
 dkg = { path = "../dkg" }
 explorer = { path = "../explorer" }
-crypto_suite = { path = "../crates/crypto_suite" }
 hex = "0.4"
-runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+coding = { path = "../crates/coding", optional = true }
+codec = { path = "../crates/codec", optional = true }
+crypto_suite = { path = "../crates/crypto_suite", optional = true }
+once_cell = "1"
+p2p_overlay = { path = "../crates/p2p_overlay", optional = true }
+runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"], optional = true }
+storage_engine = { path = "../crates/storage_engine", optional = true, default-features = false, features = ["rocksdb", "sled"] }
+transport = { path = "../crates/transport", optional = true }
+tokio-util = "0.7"
+thiserror = "1"
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 serde_yaml = "0.9"
 
 [[bin]]
@@ -44,4 +73,9 @@ path = "mempool_spam.rs"
 [[bin]]
 name = "did"
 path = "did.rs"
+
+[[bin]]
+name = "dependency_fault"
+path = "src/dependency_fault.rs"
+required-features = ["dependency-fault"]
 

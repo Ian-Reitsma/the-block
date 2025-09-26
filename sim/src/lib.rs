@@ -10,8 +10,12 @@ pub mod demand;
 pub mod dex;
 pub mod inflation;
 pub mod liquidity;
+#[cfg(feature = "runtime-wrapper")]
 pub mod mobile_sync;
 pub mod token_model;
+
+#[cfg(feature = "dependency-fault")]
+pub mod dependency_fault_harness;
 
 use bridging::BridgeModel;
 use dashboard::Snapshot;

@@ -8992,7 +8992,11 @@ dependencies = [
 name = "tb-sim"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bincode",
+ "clap",
+ "codec",
+ "coding",
  "crypto_suite",
  "csv",
  "dex",
@@ -9001,6 +9005,8 @@ dependencies = [
  "hex",
  "ledger",
  "light-client",
+ "once_cell",
+ "p2p_overlay",
  "rand 0.8.5",
  "rocksdb",
  "runtime",
@@ -9008,8 +9014,12 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha3",
+ "storage_engine",
  "tempfile",
  "the_block",
+ "thiserror 1.0.69",
+ "tokio-util",
+ "transport",
 ]
 
 [[package]]
