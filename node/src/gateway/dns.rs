@@ -1,7 +1,10 @@
 use super::{mobile_cache, read_receipt};
 use crate::simple_db::{names, SimpleDb};
 use crate::ERR_DNS_SIG_INVALID;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH},
+    Verifier,
+};
 use hex;
 use once_cell::sync::Lazy;
 use serde_json::Value;

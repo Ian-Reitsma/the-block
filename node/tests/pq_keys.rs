@@ -10,7 +10,7 @@ fn pq_key_stored() {
     let dir = tempfile::tempdir().unwrap();
     let mut reg = HandleRegistry::open(dir.path().join("db").to_str().unwrap());
     // Use dummy ed25519 key for address
-    use ed25519_dalek::{Signer, SigningKey};
+    use crypto_suite::signatures::{ed25519::SigningKey, Signer};
     let sk = SigningKey::generate(&mut rand::rngs::OsRng);
     let pk = sk.verifying_key();
     let mut h = blake3::Hasher::new();

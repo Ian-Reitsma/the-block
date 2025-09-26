@@ -1,3 +1,4 @@
+use crate::codec_helpers::json_from_str;
 use anyhow::Result;
 use clap::Subcommand;
 use serde::Deserialize;
@@ -31,7 +32,7 @@ pub fn suggest_config(cfg: &NodeConfig, metrics: &Metrics) -> Vec<String> {
 /// Runs diagnostics from a JSON metrics snapshot.
 pub fn diagnose(path: &str) -> Result<()> {
     let data = std::fs::read_to_string(path)?;
-    let metrics: Metrics = serde_json::from_str(&data)?;
+    let metrics: Metrics = json_from_str(&data)?;
     let cfg = NodeConfig::default();
     for s in suggest_config(&cfg, &metrics) {
         println!("{s}");

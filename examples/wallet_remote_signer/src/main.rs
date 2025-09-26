@@ -3,6 +3,7 @@ use std::thread;
 use tiny_http::{Response, Server};
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletSigner};
 use ledger::crypto::remote_tag;
+use crypto_suite::signatures::Verifier;
 
 fn main() {
     // Start a minimal signer service in the background.
@@ -37,7 +38,9 @@ fn main() {
     let signer = RemoteSigner::connect(&addr).expect("connect");
     let message = b"demo";
     let sig = signer.sign(message).expect("sign");
-    let vk = ed25519_dalek::VerifyingKey::from_bytes(&signer.public_key().to_bytes()).unwrap();
-    vk.verify(&remote_tag(message), &sig).unwrap();
+    signer
+        .public_key()
+        .verify(&remote_tag(message), &sig)
+        .unwrap();
     println!("signature: {}", hex::encode(sig.to_bytes()));
 }

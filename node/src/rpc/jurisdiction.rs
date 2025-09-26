@@ -2,6 +2,7 @@
 
 use super::RpcError;
 use crate::Blockchain;
+use crypto_suite::signatures::ed25519::VerifyingKey;
 use std::sync::{Arc, Mutex};
 
 pub fn status(bc: &Arc<Mutex<Blockchain>>) -> Result<serde_json::Value, RpcError> {
@@ -21,7 +22,7 @@ pub fn status(bc: &Arc<Mutex<Blockchain>>) -> Result<serde_json::Value, RpcError
 pub fn set(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json::Value, RpcError> {
     let pack_res = if path.starts_with("http") {
         // placeholder: use zero key for demo
-        let pk = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
+        let pk = VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
         jurisdiction::fetch_signed(path, &pk)
     } else if std::path::Path::new(path).exists() {
         jurisdiction::PolicyPack::load(path)

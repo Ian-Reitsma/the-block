@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use tempfile::tempdir;
 use the_block::net::{self, Message, Payload, PeerSet, SUPPORTED_VERSION};

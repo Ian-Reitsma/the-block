@@ -1,7 +1,7 @@
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use colored::*;
-use ed25519_dalek::Signer;
+use crypto_suite::signatures::Signer;
 use hex;
 use regex::Regex;
 use reqwest::blocking::Client;

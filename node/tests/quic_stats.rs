@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "quic")]
 
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use serial_test::serial;
 use std::convert::TryInto;

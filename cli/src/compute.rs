@@ -1,4 +1,4 @@
-use crate::rpc::RpcClient;
+use crate::{codec_helpers::json_from_str, rpc::RpcClient};
 use clap::Subcommand;
 use serde_json::json;
 use std::io::{self, Write};
@@ -110,7 +110,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             };
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Ok(val) = json_from_str::<serde_json::Value>(&text) {
                         if let Some(res) = val.get("result") {
                             if let Some(engine) =
                                 res.get("settlement_engine").and_then(|v| v.as_object())
@@ -253,7 +253,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             };
             if let Ok(resp) = client.call(&url, &balance_payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Ok(val) = json_from_str::<serde_json::Value>(&text) {
                         if let Some(providers) = val
                             .get("result")
                             .and_then(|res| res.get("providers"))
@@ -295,7 +295,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             };
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Ok(val) = json_from_str::<serde_json::Value>(&text) {
                         if let Some(res) = val.get("result") {
                             if let Some(pending) = res.get("pending").and_then(|v| v.as_array()) {
                                 for job in pending {

@@ -8,7 +8,10 @@ use contract_cli::light_client::{
 };
 use contract_cli::rpc::RpcClient;
 use contract_cli::tx::{generate_keypair, TxDidAnchor};
-use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, SigningKey, VerifyingKey},
+    Verifier,
+};
 use hex;
 use serde_json::json;
 use tiny_http::{Header, Response, Server};

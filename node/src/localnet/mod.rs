@@ -1,6 +1,9 @@
 use bincode;
 use blake3;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH},
+    Verifier,
+};
 use hex;
 use serde::{Deserialize, Serialize};
 use std::convert::TryInto;

@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};

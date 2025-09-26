@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "s2n-quic")]
+use crypto_suite::signatures::ed25519::SigningKey;
+
 /// Known transport provider implementations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderKind {
@@ -454,15 +457,12 @@ impl S2nAdapter {
 
     pub fn initialize(
         &self,
-        signing_key: &ed25519_dalek::SigningKey,
+        signing_key: &SigningKey,
     ) -> anyhow::Result<s2n_impl::CertAdvertisement> {
         s2n_impl::initialize(signing_key)
     }
 
-    pub fn rotate(
-        &self,
-        signing_key: &ed25519_dalek::SigningKey,
-    ) -> anyhow::Result<s2n_impl::CertAdvertisement> {
+    pub fn rotate(&self, signing_key: &SigningKey) -> anyhow::Result<s2n_impl::CertAdvertisement> {
         s2n_impl::rotate(signing_key)
     }
 
@@ -493,7 +493,7 @@ impl S2nAdapter {
     pub async fn start_server(
         &self,
         addr: SocketAddr,
-        signing_key: &ed25519_dalek::SigningKey,
+        signing_key: &SigningKey,
     ) -> Result<ListenerHandle, Box<dyn std::error::Error>> {
         let server = s2n_impl::start_server(addr, signing_key).await?;
         Ok(ListenerHandle::S2n(server))

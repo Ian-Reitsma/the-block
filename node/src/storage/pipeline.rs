@@ -15,6 +15,7 @@ use crate::telemetry::{
 };
 use crate::transaction::BlobTx;
 use blake3::Hasher;
+use codec::profiles;
 use coding::{Compressor, EncryptError, Encryptor};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -864,11 +865,13 @@ impl StoragePipeline {
             provider_chunks: provider_chunk_index.values().cloned().collect(),
         };
         let mut h = Hasher::new();
-        let manifest_bytes_temp = bincode::serialize(&manifest).map_err(|e| e.to_string())?;
+        let manifest_bytes_temp =
+            codec::serialize(profiles::storage_manifest(), &manifest).map_err(|e| e.to_string())?;
         h.update(&manifest_bytes_temp);
         let man_hash = *h.finalize().as_bytes();
         manifest.blake3 = man_hash;
-        let manifest_bytes = bincode::serialize(&manifest).map_err(|e| e.to_string())?;
+        let manifest_bytes =
+            codec::serialize(profiles::storage_manifest(), &manifest).map_err(|e| e.to_string())?;
         self.db
             .try_insert(
                 &format!("manifest/{}", hex::encode(man_hash)),
@@ -886,7 +889,8 @@ impl StoragePipeline {
             },
             lane: lane.to_string(),
         };
-        let rec_bytes = bincode::serialize(&receipt).map_err(|e| e.to_string())?;
+        let rec_bytes =
+            codec::serialize(profiles::storage_manifest(), &receipt).map_err(|e| e.to_string())?;
         self.db
             .try_insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes)
             .map_err(|e| e.to_string())?;
@@ -934,7 +938,8 @@ impl StoragePipeline {
         let key = format!("manifest/{}", hex::encode(manifest_hash));
         let manifest_bytes = self.db.get(&key).ok_or("missing manifest")?;
         let manifest: ObjectManifest =
-            bincode::deserialize(&manifest_bytes).map_err(|e| e.to_string())?;
+            codec::deserialize(profiles::storage_manifest(), &manifest_bytes)
+                .map_err(|e| e.to_string())?;
         let encryptor = manifest_encryptor(&manifest)?;
         let compressor = manifest_compressor(&manifest)?;
         let mut out = Vec::with_capacity(manifest.total_len as usize);
@@ -1011,7 +1016,9 @@ impl StoragePipeline {
             let Some(bytes) = self.db.get(&key) else {
                 continue;
             };
-            let Ok(manifest) = bincode::deserialize::<ObjectManifest>(&bytes) else {
+            let Ok(manifest) =
+                codec::deserialize::<ObjectManifest>(profiles::storage_manifest(), &bytes)
+            else {
                 continue;
             };
             let Ok(chunk_count) = u32::try_from(manifest.chunk_count()) else {
@@ -1161,7 +1168,7 @@ mod tests {
             let db = pipeline.db();
             db.get(&key).expect("manifest present")
         };
-        bincode::deserialize(&bytes).expect("manifest decode")
+        codec::deserialize(profiles::storage_manifest(), &bytes).expect("manifest decode")
     }
 
     fn sample_blob(len: usize) -> Vec<u8> {

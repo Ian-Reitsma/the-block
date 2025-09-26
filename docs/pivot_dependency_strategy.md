@@ -1,5 +1,5 @@
 # Dependency Sovereignty Pivot
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Updated phase table after codec/crypto wrapper delivery and documented wrapper telemetry/governance integration milestones.
 
 The dependency-sovereignty initiative formalises the founders’ directive to own
 our substrate end-to-end. The registry, wrapper, and governance hooks promoted
@@ -34,16 +34,16 @@ operator, and governance workflow stays aligned.
 | 4 | Runtime adoption & Tokio linting | ✅ Complete | Workspace crates import the wrapper; disallowed Tokio methods enforced in lint configs. |
 | 5 | QUIC transport abstraction (`crates/transport`) | ✅ Complete | Quinn and s2n encapsulated with provider registry, config, and telemetry adapters. |
 | 6 | Provider introspection & handshake wiring | ✅ Complete | Node, CLI, RPC, and telemetry expose provider IDs and rotation metadata; `config/quic.toml` governs selection. |
-| 7 | P2P overlay trait crate | 🚧 In Progress | Discovery/uptime modules mapped out; libp2p adapters next to move. |
-| 8 | Overlay enforcement & diagnostics | ⏳ Planned | Lints and telemetry stubs defined; waiting on phase 7 completion. |
-| 9 | Storage-engine abstraction | 🚧 In Progress | Trait design under review; RocksDB/sled adapters scheduled next sprint. |
-| 10 | Storage migration tooling | ⏳ Planned | Depends on phase 9 shipping. |
-| 11 | Coding crate for erasure/compression | ⏳ Planned | API skeleton drafted; awaiting dependency audit sign-off. |
-| 12 | In-house fallback coder/compressor | ⏳ Planned | Performance benchmarks scoped; requires phase 11. |
-| 13 | Crypto suite consolidation | 🚧 In Progress | Signer/verifier wrappers prototyped; SNARK helpers queued. |
-| 14 | Suite adoption across node/CLI/wallet | ⏳ Planned | Commences after phase 13 lands. |
-| 15 | Codec abstraction for serde/bincode | 🚧 In Progress | Configurable profiles outlined; telemetry hooks pending. |
-| 16 | Wrapper telemetry & dashboards | ⏳ Planned | Metrics schema defined; awaiting phases 7–15. |
+| 7 | P2P overlay trait crate | ✅ Complete | Libp2p and stub backends ship behind `crates/p2p_overlay` with persistence, telemetry, and CLI selection. |
+| 8 | Overlay enforcement & diagnostics | ✅ Complete | Lints block direct libp2p usage; telemetry panels and CLI/RPC stats expose backend health. |
+| 9 | Storage-engine abstraction | ✅ Complete | RocksDB, sled, and in-memory engines wrap the shared trait with config-driven selection. |
+| 10 | Storage migration tooling | 🚧 In Progress | Snapshot tooling stages via temp files; incentive marketplace DHT migrations next. |
+| 11 | Coding crate for erasure/compression | ✅ Complete | `crates/coding` fronts erasure/compression with rollout gates and telemetry labels. |
+| 12 | In-house fallback coder/compressor | ✅ Complete | XOR parity, RLE compression, and bench harness shipped with governance-controlled rollout toggles. |
+| 13 | Crypto suite consolidation | ✅ Complete | `crates/crypto_suite` owns signatures, hashing, KDF, and Groth16 helpers with regression/bench coverage. |
+| 14 | Suite adoption across node/CLI/wallet | ✅ Complete | Node, CLI, explorer, and wallet migrate to the suite with compatibility re-exports. |
+| 15 | Codec abstraction for serde/bincode | ✅ Complete | `crates/codec` exposes named profiles, serde bridging macros, telemetry hooks, and corruption tests. |
+| 16 | Wrapper telemetry & dashboards | ✅ Complete | Prometheus metrics, aggregator `/wrappers` endpoint, and Grafana dashboards chart backend selections and failures. |
 | 17 | Dependency fault simulation harness | ⏳ Planned | Harness scaffolding in `sim/`; awaiting overlay/storage abstractions. |
 | 18 | Governance-managed dependency policy | 🚧 In Progress | Param definitions reviewed; CLI wiring underway. |
 | 19 | Release pipeline vendor syncs | ✅ Complete | Provenance scripts hash vendored trees and archive registry snapshots. |
@@ -90,12 +90,9 @@ To reduce sprawl without losing context:
 
 ## Next Steps
 
-- Finish the overlay, storage-engine, coding, crypto, and codec abstractions,
-  then extend telemetry and governance hooks across each wrapper.
-- Rehearse dependency failure drills once the simulation harness is wired to the
-  new traits.
-- Continue pruning third-party exposures until every critical path has an
-  in-house implementation or a governed fallback.
+- Finalise storage migration automation (phase 10) so RocksDB↔sled swaps replay safely and incentive-backed DHT marketplace hooks can launch without manual intervention.
+- Build and run the dependency fault simulation harness (phase 17) using the completed wrapper traits to rehearse provider outages before production incidents.
+- Complete governance parameter plumbing (phase 18) so backend selection and rollout windows surface as voteable controls with explorer timelines and CLI validations.
 
 Owners should treat this document as the canonical reference when planning work
 or reviewing PRs for dependency-sensitivity. Update it alongside the related

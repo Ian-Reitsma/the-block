@@ -1,4 +1,4 @@
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use explorer::{did_view, Explorer, MetricPoint};
 use hex;
 use std::convert::TryInto;

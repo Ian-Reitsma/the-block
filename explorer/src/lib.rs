@@ -1,5 +1,6 @@
 use anyhow::Result as AnyhowResult;
 use blake3::Hasher;
+use codec::{self, profiles};
 use hex::encode as hex_encode;
 use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
@@ -228,14 +229,14 @@ pub struct Explorer {
 
 impl Explorer {
     fn decode_block(bytes: &[u8]) -> AnyhowResult<Block> {
-        if let Ok(block) = serde_json::from_slice(bytes) {
+        if let Ok(block) = codec::deserialize(profiles::json(), bytes) {
             return Ok(block);
         }
         bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode block: {e}"))
     }
 
     fn decode_tx(bytes: &[u8]) -> AnyhowResult<SignedTransaction> {
-        if let Ok(tx) = serde_json::from_slice(bytes) {
+        if let Ok(tx) = codec::deserialize(profiles::json(), bytes) {
             return Ok(tx);
         }
         bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode tx: {e}"))
@@ -409,7 +410,7 @@ impl Explorer {
 
     pub fn index_block(&self, block: &Block) -> Result<()> {
         let conn = self.conn()?;
-        let data = serde_json::to_vec(block).unwrap();
+        let data = codec::serialize(profiles::json(), block).unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
             params![block.hash, block.index, data],
@@ -418,7 +419,7 @@ impl Explorer {
             let hash = Self::tx_hash(tx);
             let memo = String::from_utf8(tx.payload.memo.clone()).unwrap_or_default();
             let contract = tx.payload.to.clone();
-            let data = serde_json::to_vec(tx).unwrap();
+            let data = codec::serialize(profiles::json(), tx).unwrap();
             conn.execute(
                 "INSERT OR REPLACE INTO txs (hash, block_hash, memo, contract, data) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![hash, block.hash, memo, contract, data],
@@ -1145,7 +1146,7 @@ impl Explorer {
         let path = PathBuf::from("trace").join(format!("{tx_hash}.json"));
         std::fs::read(path)
             .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
+            .and_then(|b| codec::deserialize(profiles::json(), &b).ok())
     }
 
     /// Convert WASM bytecode into a human-readable WAT string.

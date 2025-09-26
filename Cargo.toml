@@ -40,6 +40,8 @@ members = [
   "dkg",
   "governance",
   "tools/dependency_registry",
+  "crates/codec",
+  "crates/crypto_suite",
 ]
 default-members = [
   "node",

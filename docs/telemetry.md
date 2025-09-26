@@ -126,6 +126,15 @@ cluster-wide gauges when compiled with `--features telemetry`:
 - `cluster_peer_active_total{node_id}` – number of active peers per reporting node (cardinality ≈ node count).
 - `aggregator_ingest_total{node_id,result}` – ingestion attempts by node and result (`ok` or `error`), cardinality ≤ node count × 2.
 - `log_correlation_fail_total{metric}` – correlation lookups that returned no rows; paired automation triggers `metrics-aggregator` log dumps into `$TB_LOG_DUMP_DIR` when counts spike.
+- Wrapper metrics exported by the runtime, transport, coding, codec, and crypto wrappers:
+  - `runtime_backend_info{backend,compiled}` toggles to `1` for the active runtime backend and keeps `compiled=true` on backends linked into the binary.
+  - `transport_provider_info{provider,compiled}` gauges the selected QUIC transport implementation, while `transport_provider_connect_total{provider}` accumulates successful dial attempts per provider.
+  - `coding_algorithm_info{component,algorithm,mode}` surfaces the active/fallback/emergency settings for each erasure, fountain, encryption, and compression component.
+  - `codec_payload_bytes{codec,direction,profile,version}`, `codec_serialize_fail_total{codec,profile,version}`, and `codec_deserialize_fail_total{codec,profile,version}` report codec throughput and failures with an explicit `codec::VERSION` label.
+  - `crypto_backend_info{algorithm,backend,version}` identifies the Ed25519 implementation in use, and `crypto_operation_total{algorithm,backend,version,operation,result}` captures success and error counts for signing and verification paths.
+  - `dependency_policy_violation{crate,version,kind,detail,depth}` and `dependency_policy_violation_total` allow alerting on supply-chain policy regressions emitted by the dependency registry tool.
+
+Nodes publish these wrapper samples via the telemetry summary stream. The aggregator exposes them through the `/wrappers` endpoint, returning the latest metrics per node. The CLI mirrors this with `contract-cli system dependencies --aggregator http://<host>:9000`, producing a sorted, human-readable report operators can paste into incident timelines.
 
 Prometheus query examples:
 

@@ -1,3 +1,4 @@
+use crate::codec_helpers::json_from_str;
 use crate::rpc::RpcClient;
 use bridges::{header::PowHeader, light_client::Proof, RelayerProof};
 use clap::Subcommand;
@@ -85,12 +86,12 @@ pub enum BridgeCmd {
 
 fn load_header(path: &str) -> PowHeader {
     let contents = fs::read_to_string(path).expect("read header");
-    serde_json::from_str(&contents).expect("decode header")
+    json_from_str(&contents).expect("decode header")
 }
 
 fn load_proof(path: &str) -> Proof {
     let contents = fs::read_to_string(path).expect("read proof");
-    serde_json::from_str(&contents).expect("decode proof")
+    json_from_str(&contents).expect("decode proof")
 }
 
 fn relayer_proofs(relayers: &[String], user: &str, amount: u64) -> Vec<RelayerProof> {

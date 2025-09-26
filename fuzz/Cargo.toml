@@ -9,8 +9,10 @@ libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
 tempfile = "3"
 hex = "0.4"
+bincode = "1"
 
 the_block = { path = "../node", features = ["fuzzy"] }
+crypto_suite = { path = "../crates/crypto_suite" }
 
 [[bin]]
 name = "wal_fuzz"

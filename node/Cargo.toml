@@ -5,6 +5,7 @@ edition = "2021"
  
 [dependencies]
 crypto = { path = "../crypto" }
+crypto_suite = { path = "../crates/crypto_suite" }
 
 pyo3 = { version = "0.24.2", default-features = false, features = ["macros", "auto-initialize"], optional = false }
 serde = { version = "1.0", features = ["derive"] }
@@ -16,7 +17,6 @@ fs2 = "0.4"
 inflation = { path = "../inflation" }
 bellman_ce = "0.8"
 hex = "0.4"
-ed25519-dalek = { version = "2.2.0", features = ["pkcs8"] }
 rand = "0.8"
 dkg = { path = "../dkg" }
 rand_core = "0.6"
@@ -97,6 +97,8 @@ httparse = "1"
 ledger = { path = "../ledger" }
 dex = { path = "../dex" }
 bridges = { path = "../bridges" }
+# serialization helpers
+codec = { path = "../crates/codec" }
 # storage market primitives
 storage = { path = "../storage" }
 # hardware detection

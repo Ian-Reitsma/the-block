@@ -37,7 +37,7 @@ use base64::Engine;
 use blake3;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use ledger::address::ShardId;
 use once_cell::sync::{Lazy, OnceCell};
@@ -417,6 +417,8 @@ pub fn configure_transport(cfg: &TransportConfig) -> anyhow::Result<()> {
     let factory = TRANSPORT_FACTORY.read().unwrap().clone();
     let registry = factory.create(cfg, &callbacks)?;
     *TRANSPORT_REGISTRY.write().unwrap() = Some(registry);
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::record_transport_backend(cfg.provider.id());
     Ok(())
 }
 
@@ -445,9 +447,14 @@ fn build_transport_callbacks() -> TransportCallbacks {
     let provider_counter: Arc<dyn Fn(&'static str) + Send + Sync + 'static> = {
         let cb = Arc::new(|provider: &'static str| {
             #[cfg(feature = "telemetry")]
-            QUIC_PROVIDER_CONNECT_TOTAL
-                .with_label_values(&[provider])
-                .inc();
+            {
+                crate::telemetry::TRANSPORT_PROVIDER_CONNECT_TOTAL
+                    .with_label_values(&[provider])
+                    .inc();
+                QUIC_PROVIDER_CONNECT_TOTAL
+                    .with_label_values(&[provider])
+                    .inc();
+            }
         });
         cb
     };

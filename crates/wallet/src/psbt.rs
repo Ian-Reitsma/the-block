@@ -1,4 +1,4 @@
-use ed25519_dalek::Signature;
+use crypto_suite::signatures::ed25519::Signature;
 use serde::{Deserialize, Serialize};
 
 /// A minimal partially signed block transaction container used for

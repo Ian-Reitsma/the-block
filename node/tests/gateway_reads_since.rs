@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use serde_json::json;
 use tempfile::tempdir;
 use the_block::gateway::dns::{gateway_policy, publish_record, reads_since};

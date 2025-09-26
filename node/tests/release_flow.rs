@@ -7,7 +7,7 @@ use the_block::governance::{
 };
 use the_block::provenance;
 
-use ed25519_dalek::Signer;
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use rand::rngs::OsRng;
 
 #[test]
@@ -35,8 +35,8 @@ fn release_flow_requires_signature_when_signers_configured() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut rng = OsRng;
-    let sk1 = ed25519_dalek::SigningKey::generate(&mut rng);
-    let sk2 = ed25519_dalek::SigningKey::generate(&mut rng);
+    let sk1 = SigningKey::generate(&mut rng);
+    let sk2 = SigningKey::generate(&mut rng);
     let signer_hex = format!(
         "{},{}",
         hex::encode(sk1.verifying_key().to_bytes()),
@@ -73,8 +73,8 @@ fn release_flow_rejects_missing_signature() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut rng = OsRng;
-    let sk1 = ed25519_dalek::SigningKey::generate(&mut rng);
-    let sk2 = ed25519_dalek::SigningKey::generate(&mut rng);
+    let sk1 = SigningKey::generate(&mut rng);
+    let sk2 = SigningKey::generate(&mut rng);
     let signer_hex = format!(
         "{},{}",
         hex::encode(sk1.verifying_key().to_bytes()),

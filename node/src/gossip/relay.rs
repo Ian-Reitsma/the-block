@@ -4,6 +4,7 @@ use crate::net::peer::{pk_from_addr, PeerMetrics};
 use crate::net::{peer_stats_map, send_msg, send_quic_msg, Message, Transport};
 use crate::simple_db::{names, SimpleDb};
 use blake3::hash;
+use codec::profiles;
 use hex;
 use ledger::address::ShardId;
 use lru::LruCache;
@@ -96,7 +97,9 @@ impl ShardStore {
             if let Some(suffix) = key.strip_prefix("shard:") {
                 if let Ok(shard) = suffix.parse::<ShardId>() {
                     if let Some(bytes) = db.get(&key) {
-                        if let Ok(mut peers) = bincode::deserialize::<Vec<PeerId>>(&bytes) {
+                        if let Ok(mut peers) =
+                            codec::deserialize::<Vec<PeerId>>(profiles::gossip(), &bytes)
+                        {
                             peers.sort();
                             peers.dedup();
                             out.insert(shard, peers);
@@ -119,7 +122,7 @@ impl ShardStore {
         entry.dedup();
         let snapshot = entry.clone();
         drop(cache);
-        if let Ok(bytes) = bincode::serialize(&snapshot) {
+        if let Ok(bytes) = codec::serialize(profiles::gossip(), &snapshot) {
             let key = format!("shard:{shard}");
             let mut db = self.db.lock();
             let _ = db.insert(&key, bytes);
@@ -227,7 +230,7 @@ impl Relay {
     }
 
     fn hash_msg(msg: &Message) -> [u8; 32] {
-        hash(&bincode::serialize(msg).unwrap_or_default()).into()
+        hash(&codec::serialize(profiles::gossip(), msg).unwrap_or_default()).into()
     }
 
     pub fn should_process_at(&self, msg: &Message, now: Instant) -> bool {
@@ -425,7 +428,7 @@ impl Relay {
 
     /// Broadcast a message to a random subset of peers using default sender.
     pub fn broadcast(&self, msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {
-        let serialized = bincode::serialize(msg).unwrap_or_default();
+        let serialized = codec::serialize(profiles::gossip(), msg).unwrap_or_default();
         let large = serialized.len() > 1024;
         self.broadcast_with(msg, peers, |(addr, transport, cert), m| {
             if large {
@@ -576,7 +579,7 @@ impl Default for Relay {
 mod tests {
     use super::*;
     use crate::net::Payload;
-    use ed25519_dalek::SigningKey;
+    use crypto_suite::signatures::ed25519::SigningKey;
 
     fn test_settings() -> GossipSettings {
         GossipSettings::from(GossipConfig {

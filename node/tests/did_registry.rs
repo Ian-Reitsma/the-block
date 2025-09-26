@@ -1,5 +1,8 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, SigningKey, VerifyingKey, SIGNATURE_LENGTH},
+    Signer,
+};
 use std::convert::TryInto;
 use tempfile::tempdir;
 use the_block::generate_keypair;
@@ -104,4 +107,31 @@ fn remote_attestation_accepted() {
 
     std::env::remove_var("TB_RELEASE_SIGNERS");
     the_block::provenance::refresh_release_signers();
+}
+
+#[test]
+fn anchor_signature_roundtrip_bytes() {
+    let dir = tempdir().unwrap();
+    let did_path = dir.path().join("did.db");
+    let mut registry = DidRegistry::open(&did_path);
+    let gov = GovStore::open(dir.path().join("gov.db"));
+
+    let (sk_bytes, _) = generate_keypair();
+    let sk = SigningKey::from_bytes(&sk_bytes.try_into().unwrap());
+    let anchor = build_anchor("{\"id\":4}", 1, &sk);
+
+    let mut sig_bytes = [0u8; SIGNATURE_LENGTH];
+    sig_bytes.copy_from_slice(&anchor.signature);
+    let signature = Signature::from_bytes(&sig_bytes);
+
+    let mut pk_bytes = [0u8; 32];
+    pk_bytes.copy_from_slice(&anchor.public_key);
+    let verifying_key = VerifyingKey::from_bytes(&pk_bytes).expect("verifying key");
+    verifying_key
+        .verify(anchor.owner_digest().as_ref(), &signature)
+        .expect("verify");
+
+    registry
+        .anchor(&anchor, Some(&gov))
+        .expect("anchor persists");
 }

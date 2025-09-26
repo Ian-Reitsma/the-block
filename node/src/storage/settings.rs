@@ -153,6 +153,7 @@ fn shared_from_config(mut config: Config) -> Result<Shared, CodingError> {
                 "storage_compression_fallback_emergency"
             );
         }
+        crate::telemetry::record_coding_algorithms(&algorithms);
     }
     #[cfg(not(feature = "telemetry"))]
     {

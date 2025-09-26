@@ -1,8 +1,8 @@
 #![deny(warnings)]
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
-use ed25519_dalek::Signature;
 use hex::{decode, encode};
 use reqwest::blocking::Client;
 use serde_json::json;

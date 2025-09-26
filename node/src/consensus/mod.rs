@@ -58,16 +58,14 @@ const fn assert_genesis_hash() {
 }
 const _: () = assert_genesis_hash();
 
-use bincode::Options;
+use codec::{profiles, BincodeConfig};
 use std::sync::LazyLock;
+
+use crypto_suite::transactions::domain_tag_for as suite_domain_tag_for;
 
 /// Compute the 16-byte domain separation tag for a given chain ID.
 pub fn domain_tag_for(id: u32) -> [u8; 16] {
-    let mut buf = [0u8; 16];
-    let prefix = b"THE_BLOCKv2|"; // 12 bytes
-    buf[..prefix.len()].copy_from_slice(prefix);
-    buf[prefix.len()..prefix.len() + 4].copy_from_slice(&id.to_le_bytes());
-    buf
+    suite_domain_tag_for(id).into()
 }
 
 /// Returns the 16-byte domain separation tag used in all signing operations.
@@ -77,22 +75,6 @@ pub fn domain_tag() -> &'static [u8] {
 }
 
 /// Canonical bincode configuration shared across the codebase.
-pub fn bincode_config() -> bincode::config::WithOtherEndian<
-    bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>,
-    bincode::config::LittleEndian,
-> {
-    static CFG: LazyLock<
-        bincode::config::WithOtherEndian<
-            bincode::config::WithOtherIntEncoding<
-                bincode::DefaultOptions,
-                bincode::config::FixintEncoding,
-            >,
-            bincode::config::LittleEndian,
-        >,
-    > = LazyLock::new(|| {
-        bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_little_endian()
-    });
-    *CFG
+pub fn bincode_config() -> BincodeConfig {
+    profiles::transaction_config()
 }

@@ -1,4 +1,4 @@
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use crypto_suite::signatures::ed25519::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use rand::RngCore;
 

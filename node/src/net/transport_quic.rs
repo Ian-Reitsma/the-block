@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 
 use anyhow::{anyhow, Result};
 
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 
 use transport::{self, CertAdvertisement, ListenerHandle, LocalCert};
 

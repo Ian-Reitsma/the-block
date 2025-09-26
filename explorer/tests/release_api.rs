@@ -1,4 +1,4 @@
-use ed25519_dalek::Signer;
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use explorer::release_view::{paginated_release_history, ReleaseHistoryFilter};
 use hex;
 use rand::rngs::OsRng;
@@ -14,8 +14,8 @@ fn release_api_paginates_and_filters() {
     let store = GovStore::open(dir.path());
 
     let mut rng = OsRng;
-    let signer_a = ed25519_dalek::SigningKey::generate(&mut rng);
-    let signer_b = ed25519_dalek::SigningKey::generate(&mut rng);
+    let signer_a = SigningKey::generate(&mut rng);
+    let signer_b = SigningKey::generate(&mut rng);
     let signer_env = format!(
         "{},{}",
         hex::encode(signer_a.verifying_key().to_bytes()),

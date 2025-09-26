@@ -90,6 +90,20 @@ struct TelemetrySummaryEntry {
     sample_rate_ppm: u64,
     compaction_secs: u64,
     memory: HashMap<String, MemorySnapshotEntry>,
+    #[serde(default)]
+    wrappers: WrapperSummaryEntry,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+struct WrapperMetricEntry {
+    metric: String,
+    labels: HashMap<String, String>,
+    value: f64,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+struct WrapperSummaryEntry {
+    metrics: Vec<WrapperMetricEntry>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -311,6 +325,21 @@ impl AppState {
             .ok()
             .and_then(|map| map.get(node).cloned())
             .map(|deque| deque.into_iter().collect())
+            .unwrap_or_default()
+    }
+
+    fn wrappers_latest(&self) -> HashMap<String, WrapperSummaryEntry> {
+        self.telemetry
+            .lock()
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(node, deque)| {
+                        deque
+                            .back()
+                            .map(|entry| (node.clone(), entry.wrappers.clone()))
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -778,6 +807,10 @@ async fn telemetry_node(
     Json(state.telemetry_history(&node))
 }
 
+async fn wrappers(State(state): State<AppState>) -> Json<HashMap<String, WrapperSummaryEntry>> {
+    Json(state.wrappers_latest())
+}
+
 async fn metrics() -> String {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
@@ -794,6 +827,7 @@ pub fn router(state: AppState) -> Router {
         .route("/cluster", get(cluster))
         .route("/telemetry", post(telemetry_post).get(telemetry_index))
         .route("/telemetry/:node", get(telemetry_node))
+        .route("/wrappers", get(wrappers))
         .route("/export/all", get(export_all))
         .route("/healthz", get(health))
         .route("/metrics", get(metrics))
@@ -849,6 +883,7 @@ mod tests {
     use super::*;
     use axum::body::{self, Body};
     use axum::http::{Request, StatusCode};
+    use std::collections::HashMap;
     use std::io::Cursor;
     use tempfile::tempdir;
     use tower::ServiceExt; // for `oneshot`
@@ -1065,5 +1100,52 @@ mod tests {
         file.read_to_string(&mut contents).unwrap();
         let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
         assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn wrappers_endpoint_returns_latest_metrics() {
+        let dir = tempdir().unwrap();
+        let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
+        state.record_telemetry(TelemetrySummaryEntry {
+            node_id: "node-a".into(),
+            seq: 1,
+            timestamp: 123,
+            sample_rate_ppm: 1,
+            compaction_secs: 30,
+            memory: HashMap::new(),
+            wrappers: WrapperSummaryEntry {
+                metrics: vec![WrapperMetricEntry {
+                    metric: "codec_serialize_fail_total".into(),
+                    labels: HashMap::from([
+                        ("codec".into(), "json".into()),
+                        ("profile".into(), "none".into()),
+                        ("version".into(), "1.2.3".into()),
+                    ]),
+                    value: 2.0,
+                }],
+            },
+        });
+
+        let app = router(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/wrappers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let parsed: HashMap<String, WrapperSummaryEntry> = serde_json::from_slice(&body).unwrap();
+        let entry = parsed.get("node-a").expect("wrapper entry");
+        assert_eq!(entry.metrics.len(), 1);
+        assert_eq!(entry.metrics[0].metric, "codec_serialize_fail_total");
+        assert_eq!(
+            entry.metrics[0].labels.get("codec").map(String::as_str),
+            Some("json")
+        );
     }
 }

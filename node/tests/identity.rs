@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use tempfile::tempdir;
 use the_block::generate_keypair;
 use the_block::identity::handle_registry::{HandleError, HandleRegistry};

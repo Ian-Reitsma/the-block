@@ -35,6 +35,18 @@ enum BackendHandle {
     Stub(Arc<stub_impl::StubRuntime>),
 }
 
+#[cfg(all(feature = "tokio-backend", feature = "stub-backend"))]
+const COMPILED_BACKENDS: [&str; 2] = ["tokio", "stub"];
+#[cfg(all(feature = "tokio-backend", not(feature = "stub-backend")))]
+const COMPILED_BACKENDS: [&str; 1] = ["tokio"];
+#[cfg(all(not(feature = "tokio-backend"), feature = "stub-backend"))]
+const COMPILED_BACKENDS: [&str; 1] = ["stub"];
+
+/// Returns the set of runtime backends that were compiled into the crate.
+pub fn compiled_backends() -> &'static [&'static str] {
+    &COMPILED_BACKENDS
+}
+
 /// Error returned when a task join fails.
 #[derive(Debug)]
 pub struct JoinError(JoinErrorKind);

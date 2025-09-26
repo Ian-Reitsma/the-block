@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use serial_test::serial;
 use std::sync::{Arc, Mutex};
 use the_block::compute_market::settlement::{SettleMode, Settlement};

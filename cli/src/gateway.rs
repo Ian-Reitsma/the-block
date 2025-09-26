@@ -1,4 +1,7 @@
-use crate::rpc::RpcClient;
+use crate::{
+    codec_helpers::{json_from_str, json_to_string_pretty},
+    rpc::RpcClient,
+};
 use clap::Subcommand;
 
 #[derive(Subcommand)]
@@ -46,9 +49,9 @@ pub fn handle(cmd: GatewayCmd) {
                         Ok(resp) => match resp.text() {
                             Ok(body) => {
                                 if pretty {
-                                    match serde_json::from_str::<serde_json::Value>(&body) {
+                                    match json_from_str::<serde_json::Value>(&body) {
                                         Ok(value) => {
-                                            if let Ok(text) = serde_json::to_string_pretty(&value) {
+                                            if let Ok(text) = json_to_string_pretty(&value) {
                                                 println!("{}", text);
                                             }
                                         }

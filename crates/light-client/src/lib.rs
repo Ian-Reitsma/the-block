@@ -9,7 +9,7 @@ use std::io::Write;
 use std::time::{Duration, UNIX_EPOCH};
 
 use blake3::Hasher;
-use ed25519_dalek::{Signature, VerifyingKey};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use flate2::{write::GzEncoder, Compression};
 
 mod config;
@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn verifies_pos_signature() {
-        use ed25519_dalek::{Signer, SigningKey};
+        use crypto_suite::signatures::{ed25519::SigningKey, Signer};
         use rand::rngs::OsRng;
         let genesis = Header {
             height: 0,

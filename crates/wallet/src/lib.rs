@@ -1,4 +1,4 @@
-use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use sha2::Sha256;
@@ -124,7 +124,7 @@ impl WalletSigner for Wallet {
 }
 
 pub mod hardware {
-    use super::{Signature, Signer, SigningKey, VerifyingKey, WalletError, WalletSigner};
+    use super::{Signature, SigningKey, VerifyingKey, WalletError, WalletSigner};
     use rand::rngs::OsRng;
 
     /// Mock hardware wallet implementing the signer interface.

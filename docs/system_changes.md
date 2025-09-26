@@ -1,7 +1,33 @@
 # System-Wide Economic Changes
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Documented wrapper telemetry rollout, refreshed dependency pivot status, and ensured capped-token references remain purged.
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
+
+## Wrapper Telemetry Integration (2025-09-25)
+
+### Rationale
+
+- **Unified observability:** Runtime, transport, overlay, storage engine, coding, codec, and crypto backends now surface consistent gauges/counters so operators can correlate incidents with dependency switches without grepping logs.
+- **Governance evidence:** Backend selections and dependency policy violations are visible to voters before approving rollouts or escalations.
+- **CLI and automation:** On-call engineers can fetch the exact wrapper mix from production fleets via a single CLI command.
+
+### Implementation Summary
+
+- Extended `node/src/telemetry.rs` with per-wrapper gauges (`runtime_backend_info`, `transport_provider_connect_total{provider}`, `overlay_backend_active`, `storage_engine_backend_info`, `coding_backend_info`, `codec_serialize_fail_total{profile}`, `crypto_suite_signature_fail_total{backend}`) plus size/failure histograms where applicable.
+- Added wrapper snapshots to `metrics-aggregator`, exposing a REST `/wrappers` endpoint, schema docs in `monitoring/metrics.json`, and Grafana dashboards that chart backend selections, failure rates, and policy violation gauges across operator/dev/telemetry views.
+- Landed a `contract-cli system dependencies` subcommand that queries the aggregator and formats wrapper status (provider name, version, commit hash, policy tier) for on-call debugging and change management.
+- Wired the dependency registry tooling to emit a Prometheus `dependency_policy_violation` gauge, enabling alerts when policy drift appears.
+
+### Operator & Governance Impact
+
+- Dashboards and CLI output include provider/codec/crypto labels, making phased rollouts auditable during change windows.
+- Governance proposals gain concrete evidence before ratifying backend swaps or remediating policy drift; registry snapshots remain part of release artifacts.
+- Runbooks now reference wrapper metrics when diagnosing network incidents or signing off on dependency simulations.
+
+### Next Steps
+
+- Extend storage migration tooling so RocksDB↔sled transitions can be rehearsed alongside wrapper telemetry.
+- Feed wrapper summaries into the planned dependency fault simulation harness to rehearse provider outages under controlled chaos scenarios.
 
 ## Dependency Sovereignty Pivot (2025-09-23)
 

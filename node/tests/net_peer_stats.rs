@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use insta::assert_snapshot;
 use rand::{thread_rng, RngCore};
