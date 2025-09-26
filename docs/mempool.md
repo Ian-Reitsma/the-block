@@ -1,5 +1,6 @@
 # Mempool Architecture
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Mempool Architecture guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The mempool admits, prioritizes, and evicts transactions before they enter a
 block.  Implementation details live in [`node/src/lib.rs`](../node/src/lib.rs)

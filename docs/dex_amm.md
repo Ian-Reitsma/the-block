@@ -1,5 +1,6 @@
 # DEX AMM Pools
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced DEX AMM Pools guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This module implements constant-product automated market maker (AMM) pools for CT pairs (CT against a paired asset such as USDC or a synthetic test reserve). Liquidity providers deposit both sides of the pair and receive pool shares representing their claim on the reserves. Swaps maintain the invariant `x * y = k`.
 

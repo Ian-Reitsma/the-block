@@ -1,5 +1,6 @@
 # CHANGELOG
-> **Review (2025-09-25):** Added wrapper telemetry, codec/crypto consolidation notes, and captured the readiness/pillar rescore (98.9/92.0) informed by wrapper adoption evidence; legacy log below remains for audit.
+> **Review (2025-09-25):** Synced CHANGELOG guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## 2025-09-25 — Dependency Wrapper Telemetry Cutover
 
@@ -11,11 +12,11 @@
 - Dependency registry tooling emits a Prometheus `dependency_policy_violation` gauge, and `contract-cli system dependencies` prints wrapper snapshots for operators. Documentation updates landed in `docs/telemetry.md`, `docs/serialization.md`, `docs/pivot_dependency_strategy.md`, and `docs/monitoring.md` to describe interpretation and rollout guidance.
 
 ### Changed
-- Updated `docs/progress.md`, `docs/roadmap.md`, and root readiness figures to reflect the wrapper telemetry milestone (mainnet readiness 98.9/100, vision completion 92.0/100) and adjusted pillar percentages.
+- Updated `docs/progress.md`, `docs/roadmap.md`, and root readiness figures to reflect governance-managed dependency backends, release provenance hashing, and wrapper telemetry (mainnet readiness 99.2/100, vision completion 93.4/100) with refreshed pillar percentages.
 - Consolidated README and AGENTS highlights around the codec/crypto migration so all subsystem guides reference the first-party wrappers instead of direct serde or `ed25519_dalek` usage.
 
 ### Fixed
-- Removed the final references to the deprecated capped 2024 token across documentation and ensured readiness banners reference the September 25, 2025 review date.
+- Removed residual references to the deprecated capped incentive instrument across documentation and ensured readiness banners reference the September 25, 2025 review date.
 
 ---
 

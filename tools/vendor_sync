@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  cat <<USAGE
+usage: $0 [--check] [--manifest-path <path>]
+
+Generate a deterministic cargo vendor snapshot. By default the repository's
+vendor/ directory is updated in-place. Pass --check to verify the committed
+vendor directory already matches the current dependency graph.
+USAGE
+  exit 0
+fi
+
+MODE="update"
+MANIFEST_ARG=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --check)
+      MODE="check"
+      shift
+      ;;
+    --manifest-path)
+      MANIFEST_ARG=("--manifest-path" "$2")
+      shift 2
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+ROOT=$(git rev-parse --show-toplevel)
+STAGING=$(mktemp -d "$ROOT"/vendor.staging.XXXXXX)
+cleanup() {
+  rm -rf "$STAGING"
+}
+trap cleanup EXIT
+
+cargo vendor --locked --versioned-dirs "${MANIFEST_ARG[@]}" "$STAGING" >/dev/null
+
+if [[ "$MODE" == "check" ]]; then
+  if diff -qr "$STAGING" "$ROOT/vendor" >/dev/null; then
+    echo "vendor directory already in sync"
+  else
+    echo "vendor directory drift detected" >&2
+    exit 1
+  fi
+else
+  rsync -a --delete "$STAGING"/ "$ROOT/vendor"/
+fi
+
+HASH=$(cd "$STAGING" && tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 -cf - . | sha256sum | awk '{print $1}')
+echo "vendor tree sha256: $HASH"

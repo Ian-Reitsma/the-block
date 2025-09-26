@@ -1,4 +1,8 @@
 #![cfg(feature = "integration-tests")]
+use governance_spec::{
+    encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,
+};
+use serde_json::json;
 use tempfile::tempdir;
 use the_block::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
@@ -120,5 +124,29 @@ fn proposal_vote_activation_rollback() {
     assert_eq!(
         store.tally_and_queue(pid2, 1).unwrap(),
         ProposalStatus::Rejected
+    );
+}
+
+#[test]
+fn gov_params_includes_dependency_policy() {
+    let runtime_mask = encode_runtime_backend_policy(["tokio", "stub"]).unwrap();
+    let transport_mask = encode_transport_provider_policy(["quinn"]).unwrap();
+    let storage_mask = encode_storage_engine_policy(["rocksdb", "sled"]).unwrap();
+
+    let mut params = Params::default();
+    params.runtime_backend_policy = runtime_mask;
+    params.transport_provider_policy = transport_mask;
+    params.storage_engine_policy = storage_mask;
+
+    let response = the_block::rpc::governance::gov_params(&params, 42).unwrap();
+
+    assert_eq!(response["runtime_backend_mask"], json!(runtime_mask));
+    assert_eq!(response["runtime_backend_policy"], json!(["tokio", "stub"]));
+    assert_eq!(response["transport_provider_mask"], json!(transport_mask));
+    assert_eq!(response["transport_provider_policy"], json!(["quinn"]));
+    assert_eq!(response["storage_engine_mask"], json!(storage_mask));
+    assert_eq!(
+        response["storage_engine_policy"],
+        json!(["rocksdb", "sled"])
     );
 }

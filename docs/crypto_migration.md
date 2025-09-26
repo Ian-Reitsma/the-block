@@ -1,5 +1,6 @@
 # Quantum-Safe Signature Migration
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Quantum-Safe Signature Migration guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This note outlines a phased migration from the current Ed25519 scheme to a dual-key model incorporating Dilithium.
 

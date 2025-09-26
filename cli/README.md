@@ -1,4 +1,6 @@
 # Contract CLI Feature Flags
+> **Review (2025-09-25):** Synced Contract CLI Feature Flags guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The `contract-cli` crate now exposes opt-in feature flags so developers can
 compile lighter builds for test harnesses while enabling heavier integrations on

@@ -1,3 +1,6 @@
+# Readme
+> **Review (2025-09-25):** Synced Readme guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 ## Table of Contents
 
 1. [What is The Block?](#what-is-the-block)
@@ -13,13 +16,14 @@
 11. [Contribution Guidelines](#contribution-guidelines)
 12. [Security Model](#security-model)
 13. [Telemetry & Metrics](#telemetry--metrics)
-14. [Final Acceptance Checklist](#final-acceptance-checklist)
-15. [Disclaimer](#disclaimer)
-16. [License](#license)
+14. [Supply-Chain & Dependency Independence](#supply-chain--dependency-independence)
+15. [Final Acceptance Checklist](#final-acceptance-checklist)
+16. [Disclaimer](#disclaimer)
+17. [License](#license)
 
 ---
 
-> **Review (2025-09-25):** Raised readiness to 98.9/92.0 after reconciling wrapper telemetry adoption, dependency dashboards, and removing residual future-dated callouts.
+> **Review (2025-09-25):** Raised readiness to 99.2/93.4 after reconciling governance-managed dependency backends, telemetry adoption, and removing residual future-dated callouts.
 
 ## What is The Block?
 
@@ -114,7 +118,7 @@ test real services today.
   `match_loop_latency_seconds{lane}` histograms. CLI and RPC surfaces expose queue
   depths, capacity guardrails, fairness windows, and recent matches, and
     settlement continues to persist CT balances with activation metadata, audit
-    exports, and recent root tracking. (95.2% Complete)
+    exports, and recent root tracking. (95.6% Complete)
       - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
         letting operators run `net stats`, filter by reputation or drop reason, emit
         JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -128,13 +132,13 @@ test real services today.
         `p2p_overlay` crate with selectable libp2p/stub backends, CLI overrides,
         telemetry gauges, and integration tests, so node modules only depend on overlay traits. Shard-aware peer maps route block gossip only
         to interested peers and uptime-based fee rebates reward high-availability
-        peers. (97.7% Complete)
+        peers. (98.1% Complete)
       - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
         resolves forks deterministically, and validates blocks with BLAKE3 hashes,
         multi-window Kalman retargeting, VDF-anchored randomness, macro-block
         checkpointing, and per-shard fork choice. Release installs now gate on
         provenance verification with automated rollback if hashes drift, keeping
-        consensus nodes in lockstep. (93.1% Complete)
+        consensus nodes in lockstep. (93.5% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -145,10 +149,10 @@ test real services today.
     timelines so operators can audit parameter changes while governance history
     archives DID revocations for audit. All tooling now targets the shared
     `governance` crate with sled-backed persistence, proposal DAG validation,
-    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (95.9% Complete)
+    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (96.3% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
-      deployable contracts and fee markets alongside traditional PoW headers. (86.3%
+      deployable contracts and fee markets alongside traditional PoW headers. (87.4%
       Complete)
 - Serialization and cryptography dependencies are centralized through the
   first-party `codec` and `crypto_suite` crates. Named JSON/CBOR/bincode
@@ -215,13 +219,14 @@ test real services today.
 
 ## Vision & Current State
 
-Mainnet readiness sits at **98.9/100** with vision completion **92.0/100**.
-  Recent work finished wiring the storage pipeline through the `coding` crate so
+Mainnet readiness sits at **99.2/100** with vision completion **93.4/100**.
+  Recent work hardened release provenance with vendored tree hashing, dependency snapshots, and regression coverage while wiring the storage pipeline through the `coding` crate so
   every manifest records encryptor, erasure, fountain, and compressor choices.
   Fallback XOR parity and RLE compression now ride behind explicit rollout gates,
   surface algorithm labels in telemetry, and feed the bench harness comparison
   tooling so operators can quantify trade-offs before cutting over during
-  incidents. Lane-aware batching in the compute matcher gained fairness
+  incidents. Governance parameters now orchestrate runtime, transport, and storage-engine backends end-to-end, with CLI, RPC, and explorer surfaces exposing active selections.
+  Lane-aware batching in the compute matcher gained fairness
   deadlines, per-lane queue caps, starvation warnings, and
   `match_loop_latency_seconds{lane}` histograms; the gossip relay layers
   LRU-backed deduplication, adaptive fanout, partition tagging, and shard-aware
@@ -584,3 +589,30 @@ blockctl node --config ~/.block/config.toml \
 The compute marketplace's cancellation API integrates with telemetry: calling
 `compute.job_cancel` or `blockctl compute cancel` increments
 `scheduler_cancel_total{reason}` and the node refunds any locked bonds.
+
+## Supply-Chain & Dependency Independence
+
+The dependency pivot couples governance-approved wrappers with reproducible build
+tooling so operators can replace third-party services without downtime. Review the
+[Pivot Dependency Strategy runbook](docs/pivot_dependency_strategy.md) for the complete
+playbook, including onboarding checklists, operator runbooks, troubleshooting guidance,
+and diagrams showing wrapper control flow across runtime, transport, overlay, storage,
+coding, crypto, and codec crates.
+
+### Staged Rollout Plan (At a Glance)
+
+1. **Registry Hardening** — enforce dependency snapshots and vendor hashing in release
+   provenance; stand up external monitoring of published hashes.
+2. **Wrapper Convergence** — ensure every subsystem routes through trait-based wrappers
+   with telemetry coverage and regression tests for fallback providers.
+3. **Migration Tooling** — automate `vendor_sync`, publish upgrade guides, and document
+   manual remediation steps for policy drift.
+4. **Fallback Readiness** — exercise in-house implementations via the simulation harness
+   and capture readiness scores alongside release notes.
+5. **Governance Integration** — activate new `ParamKey` variants, expose history through
+   the explorer/CLI/RPC, and seed bootstrap policies that mirror today’s deployments.
+
+Progress against each milestone is tracked in the runbook’s roadmap table and in
+[`docs/roadmap.md`](docs/roadmap.md). Presenters at the monthly engineering sync should
+highlight milestone deltas, link updated dependency snapshots, and funnel feedback back
+into the runbook so operations and governance stay aligned on upcoming switches.

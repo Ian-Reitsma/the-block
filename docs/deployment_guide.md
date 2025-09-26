@@ -1,5 +1,6 @@
 # Cross-Platform Deployment Guide
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Cross-Platform Deployment Guide guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This guide aggregates the project’s deployment tooling across desktop
 operating systems, containerized environments, and infrastructure-as-code

@@ -15,6 +15,23 @@ pub fn write_registry_json(registry: &DependencyRegistry, out_dir: &Path) -> Res
     Ok(())
 }
 
+pub fn write_snapshot(registry: &DependencyRegistry, snapshot_path: &Path) -> Result<()> {
+    if let Some(parent) = snapshot_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let snapshot = registry.comparison_key();
+    let file = fs::File::create(snapshot_path)
+        .with_context(|| format!("unable to create {}", snapshot_path.display()))?;
+    serde_json::to_writer_pretty(file, &snapshot).with_context(|| {
+        format!(
+            "unable to serialise dependency snapshot to {}",
+            snapshot_path.display()
+        )
+    })?;
+    Ok(())
+}
+
 pub fn write_markdown(registry: &DependencyRegistry, markdown_path: &Path) -> Result<()> {
     if let Some(parent) = markdown_path.parent() {
         fs::create_dir_all(parent)

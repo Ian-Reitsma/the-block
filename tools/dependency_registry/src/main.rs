@@ -30,6 +30,9 @@ fn main() -> Result<()> {
     })?;
 
     output::write_registry_json(&build.registry, &cli.out_dir)?;
+    if let Some(snapshot_path) = &cli.snapshot {
+        output::write_snapshot(&build.registry, snapshot_path)?;
+    }
     let markdown_path = PathBuf::from("docs/dependency_inventory.md");
     output::write_markdown(&build.registry, &markdown_path)?;
     output::write_violations(&build.violations, &cli.out_dir)?;

@@ -1,5 +1,6 @@
 # Hosting Threat Model
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Hosting Threat Model guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## Per-IP Throttling
 Gateways enforce a token-bucket limit for every client IP. The default budget allows roughly twenty requests per second and slowly refills to accommodate bursty traffic. When a client exceeds the bucket, the gateway replies with HTTP 429 and increments the `read_denied_total{reason="rate_limit"}` counter. Operators can tune the limit through governance or environment overrides, but a limit must always exist to bound worst-case amplification.

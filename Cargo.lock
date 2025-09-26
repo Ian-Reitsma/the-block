@@ -7400,6 +7400,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "caf4aa5b0f434c91fe5c7f1ecb6a5ece2130b02ad2a590589dda5146df959001"
 
 [[package]]
+name = "release_notes"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "release_tests"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "remote-signer"
 version = "0.1.0"
 dependencies = [
@@ -9117,6 +9134,7 @@ dependencies = [
  "flate2",
  "fs2",
  "futures",
+ "governance",
  "hdrhistogram",
  "hex",
  "httparse",

@@ -21,7 +21,8 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
+    QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use token::{TokenAction, TokenProposal};
 
@@ -64,4 +65,7 @@ pub enum ParamKey {
     SchedulerWeightGossip,
     SchedulerWeightCompute,
     SchedulerWeightStorage,
+    RuntimeBackend,
+    TransportProvider,
+    StorageEnginePolicy,
 }

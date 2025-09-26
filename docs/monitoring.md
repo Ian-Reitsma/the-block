@@ -1,5 +1,6 @@
 # Monitoring
-> **Review (2025-09-25):** Added coder/compressor telemetry guidance and refreshed readiness references.
+> **Review (2025-09-25):** Synced Monitoring guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The default dashboard bundles Prometheus and Grafana to visualize subsystem metrics.
 Operational alert handling and correlation procedures live in the

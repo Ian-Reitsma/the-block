@@ -56,11 +56,13 @@ Quick Index
 
 > **Read this once, then work as if you wrote it.**  Every expectation, switch, flag, and edge‑case is documented here.  If something is unclear, the failure is in this file—open an issue and patch the spec *before* you patch the code.
 
-Mainnet readiness sits at **98.9/100** with vision completion **92.0/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
+Mainnet readiness sits at **99.2/100** with vision completion **93.4/100**. Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
 Recent additions now include multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards, and the proof-rebate pipeline now persisting receipts that are appended to coinbase outputs during block production. Governance now tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, adaptive gossip fanout with LRU deduplication, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery continue to extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
 
 **Latest highlights:**
 - Overlay discovery, persistence, and uptime accounting now live behind the `p2p_overlay` crate with libp2p and stub backends, bincode-managed peer stores, CLI/RPC selection, telemetry gauges, and integration tests covering both implementations.
+- Governance parameters now steer runtime, transport, and storage-engine backends end-to-end; CLI, RPC, explorer, and telemetry surfaces reflect active selections while bootstrap scripts seed default policies for clusters.
+- Release provenance now stages `cargo vendor` snapshots, records deterministic hashes in `provenance.json`/`checksums.txt`, and blocks tagging in CI unless dependency_registry snapshots pass alongside governance-policy checks.
 - Storage backends route exclusively through the `storage_engine` crate, unifying RocksDB, sled, and in-memory providers with concurrency-safe iterators/batches, temp-dir hygiene, and configuration-driven overrides so `SimpleDb` is a thin adapter.
 - The `coding` crate fronts encryption, erasure, fountain, and compression stacks with runtime-configurable factories; XOR parity and RLE compression fallbacks now sit behind audited rollout gates, surface coder/compressor labels in telemetry, and feed the bench harness comparison tooling so operators can insource dependencies without guesswork.
 - Governance, SDKs, and the CLI continue to consume the shared `governance` crate with sled-backed `GovStore`, proposal DAG validation, Kalman retune helpers, and release quorum enforcement, keeping every integration on the node’s canonical state machine.
@@ -336,7 +338,7 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 
 ## 13. Roadmap
 
-Mainnet readiness: ~98.9/100 · Vision completion: ~92.0/100. Known blockers: finalise treasury disbursement tooling, finish bridge/DEX signer-set documentation, polish multisig UX, complete crypto/coding dependency wrappers, and continue WAN-scale QUIC chaos drills informed by the new transport provider telemetry. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
+Mainnet readiness: ~99.2/100 · Vision completion: ~93.4/100. Known blockers: finalise treasury disbursement tooling, finish bridge/DEX signer-set documentation, extend governance-driven dependency rollout playbooks to third-party operators, and continue WAN-scale QUIC chaos drills informed by the transport provider telemetry. See [docs/roadmap.md](docs/roadmap.md) and [docs/progress.md](docs/progress.md) for evidence and upcoming milestones.
 
 **Recent**
 
@@ -608,60 +610,60 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
   - [x] Inflation governors tune β/γ/κ/λ multipliers
   - [x] Multi-signature release approvals with persisted signer sets, explorer history, and CLI tooling
   - [ ] On-chain treasury and proposal dependencies
-  - Progress: 95.9%
+  - Progress: 96.3%
   - ⚠️ Focus: wire treasury disbursements and dependency visualisations into explorer timelines while finalising external submission workflows.
 - **Consensus & Core Execution** ([node/src/consensus](node/src/consensus))
   - [x] UNL-based PoS finality gadget
   - [x] Validator staking & governance controls
   - [x] Integration tests for fault/rollback
   - [x] Release rollback helper ensures binaries revert when provenance validation fails
-  - Progress: 93.1%
+  - Progress: 93.5%
   - **Networking & Gossip** ([docs/networking.md](docs/networking.md))
     - [x] QUIC transport with TCP fallback
     - [x] Mutual TLS certificate rotation, diagnostics RPC/CLI, provider introspection, and chaos testing harness
     - [x] Per-peer rate-limit telemetry, cluster `metrics-aggregator`, and CLI/RPC introspection
     - [ ] Large-scale WAN chaos testing
-    - Progress: 97.7%
+    - Progress: 98.1%
 - **Storage & Free-Read Hosting** ([docs/storage.md](docs/storage.md))
   - [x] Read acknowledgements, WAL-backed stores, and crash-safe snapshot rewrites that stage via fsync’d temp files before promoting base64 images
   - [ ] Incentive-backed DHT marketplace
-  - Progress: 92.8%
+  - Progress: 93.6%
   - **Compute Marketplace & CBM** ([docs/compute_market.md](docs/compute_market.md))
     - [x] Capability-aware scheduler with reputation weighting and graceful job cancellation
     - [x] Fee floor enforcement with per-sender slot limits, percentile-configurable windows, wallet telemetry, and eviction audit trails
     - [ ] SLA arbitration and heterogeneous payments
-    - Progress: 95.2%
+    - Progress: 95.6%
 - **Smart-Contract VM** ([node/src/vm](node/src/vm))
   - [x] Runtime scaffold & gas accounting
   - [x] Contract deployment/execution
   - [x] Tooling & ABI utils
-  - Progress: 86.3%
+  - Progress: 87.4%
 - **Trust Lines & DEX** ([docs/dex.md](docs/dex.md))
   - [x] Authorization-aware trust lines and order books
   - [ ] Cross-chain settlement proofs
-  - Progress: 84.9%
+  - Progress: 85.8%
 - **Cross-Chain Bridges** ([docs/bridges.md](docs/bridges.md))
   - [x] Lock/unlock mechanism
   - [x] Light client verification
   - [ ] Relayer incentives
-  - Progress: 80.6%
+  - Progress: 81.8%
   - **Wallets** ([docs/wallets.md](docs/wallets.md))
     - [x] CLI enhancements
     - [x] Hardware wallet integration
     - [x] Remote signer workflows
-    - Progress: 96.0%
+    - Progress: 96.4%
     - ⚠️ Focus: round out multisig UX (batched signer discovery, richer operator messaging) and sustain mobile release hardening before tagging the next CLI release.
   - **Monitoring, Debugging & Profiling** ([docs/monitoring.md](docs/monitoring.md))
     - [x] Prometheus/Grafana dashboards and cluster metrics aggregation
     - [x] Metrics-to-logs correlation with automated log dumps on QUIC anomalies
     - [ ] Automated anomaly detection
-    - Progress: 95.1%
+    - Progress: 95.6%
   - **Performance** ([docs/performance.md](docs/performance.md))
     - [x] Consensus benchmarks
     - [ ] VM throughput measurements
     - [x] Profiling harness
     - [x] QUIC loss benchmark comparing TCP vs QUIC under chaos
-    - Progress: 84.5%
+    - Progress: 85.5%
 
 ### Troubleshooting: Missing Tests & Dependencies
 

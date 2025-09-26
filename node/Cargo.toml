@@ -107,6 +107,8 @@ num_cpus = "1.17"
 light-client = { path = "../crates/light-client" }
 storage_engine = { path = "../crates/storage_engine", default-features = false }
 coding = { path = "../crates/coding" }
+# governance parameter helpers
+governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
 reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime

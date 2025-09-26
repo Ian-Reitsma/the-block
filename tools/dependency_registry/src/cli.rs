@@ -56,6 +56,10 @@ pub struct Cli {
     /// Output directory for generated artifacts.
     #[arg(long, value_name = "DIR", default_value = "target")]
     pub out_dir: PathBuf,
+
+    /// Optional path to emit a frozen dependency snapshot for releases.
+    #[arg(long, value_name = "PATH")]
+    pub snapshot: Option<PathBuf>,
 }
 
 impl Cli {

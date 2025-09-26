@@ -5,6 +5,109 @@ use serde_json;
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
+pub const RUNTIME_BACKEND_OPTIONS: [&str; 2] = ["tokio", "stub"];
+pub const TRANSPORT_PROVIDER_OPTIONS: [&str; 2] = ["quinn", "s2n-quic"];
+pub const STORAGE_ENGINE_OPTIONS: [&str; 3] = ["memory", "rocksdb", "sled"];
+
+const RUNTIME_BACKEND_MASK_ALL: i64 = (1 << RUNTIME_BACKEND_OPTIONS.len()) - 1;
+const TRANSPORT_PROVIDER_MASK_ALL: i64 = (1 << TRANSPORT_PROVIDER_OPTIONS.len()) - 1;
+const STORAGE_ENGINE_MASK_ALL: i64 = (1 << STORAGE_ENGINE_OPTIONS.len()) - 1;
+
+pub const DEFAULT_RUNTIME_BACKEND_POLICY: i64 = 1; // tokio
+pub const DEFAULT_TRANSPORT_PROVIDER_POLICY: i64 = 1; // quinn
+pub const DEFAULT_STORAGE_ENGINE_POLICY: i64 = (1 << 1) | (1 << 2); // rocksdb | sled
+
+fn decode_policy(mask: i64, options: &[&str]) -> Vec<String> {
+    let mut allowed = Vec::new();
+    if mask <= 0 {
+        return allowed;
+    }
+    for (idx, name) in options.iter().enumerate() {
+        if mask & (1 << idx) != 0 {
+            allowed.push((*name).to_string());
+        }
+    }
+    allowed
+}
+
+fn encode_policy<I, S>(names: I, options: &[&str]) -> Result<i64, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut mask = 0i64;
+    for name in names {
+        let trimmed = name.as_ref().trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(idx) = options
+            .iter()
+            .position(|opt| opt.eq_ignore_ascii_case(trimmed))
+        {
+            mask |= 1 << idx;
+        } else {
+            return Err(format!("unknown option: {trimmed}"));
+        }
+    }
+    if mask == 0 {
+        return Err("no options supplied".to_string());
+    }
+    Ok(mask)
+}
+
+fn validate_policy(mask: i64, options: &[&str]) -> bool {
+    mask > 0 && (mask & !(((1i64) << options.len()) - 1)) == 0
+}
+
+pub fn encode_runtime_backend_policy<I, S>(names: I) -> Result<i64, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    encode_policy(names, &RUNTIME_BACKEND_OPTIONS)
+}
+
+pub fn encode_transport_provider_policy<I, S>(names: I) -> Result<i64, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    encode_policy(names, &TRANSPORT_PROVIDER_OPTIONS)
+}
+
+pub fn encode_storage_engine_policy<I, S>(names: I) -> Result<i64, String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    encode_policy(names, &STORAGE_ENGINE_OPTIONS)
+}
+
+pub fn decode_runtime_backend_policy(mask: i64) -> Vec<String> {
+    decode_policy(mask, &RUNTIME_BACKEND_OPTIONS)
+}
+
+pub fn decode_transport_provider_policy(mask: i64) -> Vec<String> {
+    decode_policy(mask, &TRANSPORT_PROVIDER_OPTIONS)
+}
+
+pub fn decode_storage_engine_policy(mask: i64) -> Vec<String> {
+    decode_policy(mask, &STORAGE_ENGINE_OPTIONS)
+}
+
+pub fn validate_runtime_backend_policy(mask: i64) -> bool {
+    validate_policy(mask, &RUNTIME_BACKEND_OPTIONS)
+}
+
+pub fn validate_transport_provider_policy(mask: i64) -> bool {
+    validate_policy(mask, &TRANSPORT_PROVIDER_OPTIONS)
+}
+
+pub fn validate_storage_engine_policy(mask: i64) -> bool {
+    validate_policy(mask, &STORAGE_ENGINE_OPTIONS)
+}
+
 /// Adapter trait allowing host applications to update runtime state when
 /// governance parameters activate.
 pub trait RuntimeAdapter {
@@ -21,6 +124,9 @@ pub trait RuntimeAdapter {
     fn set_jurisdiction_region(&mut self, _v: i64) {}
     fn set_ai_diagnostics_enabled(&mut self, _v: bool) {}
     fn set_scheduler_weight(&mut self, _class: ServiceClass, _weight: u64) {}
+    fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
+    fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
+    fn set_storage_engine_policy(&mut self, _allowed: &[String]) {}
     fn fee_floor_policy(&mut self) -> Option<(u64, u64)> {
         None
     }
@@ -88,6 +194,18 @@ impl<'a> Runtime<'a> {
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
         self.adapter.set_scheduler_weight(class, weight);
+    }
+
+    pub fn set_runtime_backend_policy(&mut self, allowed: &[String]) {
+        self.adapter.set_runtime_backend_policy(allowed);
+    }
+
+    pub fn set_transport_provider_policy(&mut self, allowed: &[String]) {
+        self.adapter.set_transport_provider_policy(allowed);
+    }
+
+    pub fn set_storage_engine_policy(&mut self, allowed: &[String]) {
+        self.adapter.set_storage_engine_policy(allowed);
     }
 
     pub fn fee_floor_policy(&mut self) -> Option<(u64, u64)> {
@@ -159,6 +277,12 @@ pub struct Params {
     pub scheduler_weight_gossip: i64,
     pub scheduler_weight_compute: i64,
     pub scheduler_weight_storage: i64,
+    #[serde(default = "default_runtime_backend_policy")]
+    pub runtime_backend_policy: i64,
+    #[serde(default = "default_transport_provider_policy")]
+    pub transport_provider_policy: i64,
+    #[serde(default = "default_storage_engine_policy")]
+    pub storage_engine_policy: i64,
 }
 
 impl Default for Params {
@@ -199,12 +323,27 @@ impl Default for Params {
             scheduler_weight_gossip: 3,
             scheduler_weight_compute: 2,
             scheduler_weight_storage: 1,
+            runtime_backend_policy: default_runtime_backend_policy(),
+            transport_provider_policy: default_transport_provider_policy(),
+            storage_engine_policy: default_storage_engine_policy(),
         }
     }
 }
 
 const fn default_proof_rebate_limit_ct() -> i64 {
     1
+}
+
+const fn default_runtime_backend_policy() -> i64 {
+    DEFAULT_RUNTIME_BACKEND_POLICY
+}
+
+const fn default_transport_provider_policy() -> i64 {
+    DEFAULT_TRANSPORT_PROVIDER_POLICY
+}
+
+const fn default_storage_engine_policy() -> i64 {
+    DEFAULT_STORAGE_ENGINE_POLICY
 }
 
 fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -375,8 +514,32 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_runtime_backend_policy(v: i64, p: &mut Params) -> Result<(), ()> {
+    if !validate_runtime_backend_policy(v) {
+        return Err(());
+    }
+    p.runtime_backend_policy = v;
+    Ok(())
+}
+
+fn apply_transport_provider_policy(v: i64, p: &mut Params) -> Result<(), ()> {
+    if !validate_transport_provider_policy(v) {
+        return Err(());
+    }
+    p.transport_provider_policy = v;
+    Ok(())
+}
+
+fn apply_storage_engine_policy(v: i64, p: &mut Params) -> Result<(), ()> {
+    if !validate_storage_engine_policy(v) {
+        return Err(());
+    }
+    p.storage_engine_policy = v;
+    Ok(())
+}
+
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 29] = [
+    static REGS: [ParamSpec; 32] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -722,6 +885,48 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_scheduler_weight_storage,
             apply_runtime: |v, rt| {
                 rt.set_scheduler_weight(ServiceClass::Storage, v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::RuntimeBackend,
+            default: default_runtime_backend_policy(),
+            min: 1,
+            max: RUNTIME_BACKEND_MASK_ALL,
+            unit: "bitmask",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_runtime_backend_policy,
+            apply_runtime: |v, rt| {
+                let allowed = decode_runtime_backend_policy(v);
+                rt.set_runtime_backend_policy(&allowed);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::TransportProvider,
+            default: default_transport_provider_policy(),
+            min: 1,
+            max: TRANSPORT_PROVIDER_MASK_ALL,
+            unit: "bitmask",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_transport_provider_policy,
+            apply_runtime: |v, rt| {
+                let allowed = decode_transport_provider_policy(v);
+                rt.set_transport_provider_policy(&allowed);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::StorageEnginePolicy,
+            default: default_storage_engine_policy(),
+            min: 1,
+            max: STORAGE_ENGINE_MASK_ALL,
+            unit: "bitmask",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_storage_engine_policy,
+            apply_runtime: |v, rt| {
+                let allowed = decode_storage_engine_policy(v);
+                rt.set_storage_engine_policy(&allowed);
                 Ok(())
             },
         },

@@ -1,5 +1,6 @@
 # Virtual Machine Gas Model
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Virtual Machine Gas Model guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The Block VM uses a minimal stack-based executor with explicit gas
 accounting. Every operation consumes a deterministic amount of gas. The

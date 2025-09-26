@@ -1,7 +1,8 @@
 # Light-Client Synchronization Guide
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Light-Client Synchronization Guide guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
-*Last updated: 2025-09-24*
+*Last updated: 2025-09-25*
 
 The `light-client` crate offers a minimal header verifier intended for mobile
 and resource-constrained environments. It trades full validation for a compact

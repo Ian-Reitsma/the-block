@@ -35,6 +35,11 @@ jobs:
           override: true
       - name: Set build metadata
         run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> $GITHUB_ENV
+      - name: Dependency policy freeze
+        run: |
+          cargo run -p dependency_registry -- --check \
+            --snapshot target/dependency-snapshot-${{ matrix.target }}.json
+          ./tools/vendor_sync --check
       - name: Build
         env:
           RUSTFLAGS: "-C link-arg=-fuse-ld=lld -C link-arg=-Wl,--build-id=sha1"

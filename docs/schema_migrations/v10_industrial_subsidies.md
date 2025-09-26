@@ -1,5 +1,6 @@
 ## Schema v10 – Industrial subsidy fields and fee-split metadata
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced V10 Industrial Subsidies guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Version 10 introduced per-block industrial subsidy fields (`storage_sub_it`, `read_sub_it`, `compute_sub_it`) and recorded fee-split metadata. These legacy columns remain zeroed in production now that CT is the sole transferable token, but they persist in the schema for backward compatibility and replaying historical snapshots.
 Existing snapshots and chain databases are upgraded in-place by zero-filling

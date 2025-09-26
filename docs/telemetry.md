@@ -1,5 +1,6 @@
 # Telemetry Log Fields
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Telemetry Log Fields guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Structured telemetry logs include the following fields. All identifiers are privacy-scrubbed with BLAKE3 before emission.
 

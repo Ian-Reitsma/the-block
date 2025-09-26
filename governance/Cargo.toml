@@ -7,6 +7,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "bootstrap_dependency_policy"
+path = "src/bin/bootstrap_dependency_policy.rs"
+
 [dependencies]
 bincode = "1"
 nalgebra = { version = "0.32", features = ["std"] }

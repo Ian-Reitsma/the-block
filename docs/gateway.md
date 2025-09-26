@@ -1,5 +1,6 @@
 # HTTP Gateway – Zero‑Fee Web Hosting
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced HTTP Gateway – Zero‑Fee Web Hosting guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The HTTP gateway is the public entry point for on‑chain web sites. It maps a
 `SiteManifestTx` domain to its blob assets, executes optional `FuncTx` WASM

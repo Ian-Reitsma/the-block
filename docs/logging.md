@@ -1,5 +1,6 @@
 # Log Correlation and Search
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Log Correlation and Search guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Structured logs include a per-request `correlation_id` field that links
 individual log entries with telemetry metrics and external tooling.

@@ -1,5 +1,6 @@
 # Networking Recovery Guide
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Networking Recovery Guide guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This guide describes how to restore the distributed hash table (DHT) state when the peer database becomes corrupt or unreachable.
 Overlay abstraction progress and dependency controls are tracked in

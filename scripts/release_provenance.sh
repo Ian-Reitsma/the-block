@@ -3,12 +3,33 @@ set -euo pipefail
 TAG=${1:?"usage: $0 <tag>"}
 OUTDIR="releases/$TAG"
 mkdir -p "$OUTDIR"
+SNAPSHOT_PATH="$OUTDIR/dependency-snapshot.json"
+VENDOR_STAGE="$OUTDIR/vendor.staging"
 
 # Ensure reproducible timestamps
 export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0}
 
 # Enforce dependency policy and capture the current registry snapshot.
-cargo run -p dependency_registry -- --check --out-dir "$OUTDIR" config/dependency_policies.toml
+cargo run -p dependency_registry -- --check --out-dir "$OUTDIR" \
+  --snapshot "$SNAPSHOT_PATH" config/dependency_policies.toml
+
+if [ ! -s "$SNAPSHOT_PATH" ]; then
+  echo "dependency snapshot missing; ensure dependency_registry supports --snapshot" >&2
+  exit 1
+fi
+
+# Freeze the vendor tree for provenance and hash it deterministically.
+rm -rf "$VENDOR_STAGE"
+cargo vendor --locked --versioned-dirs "$VENDOR_STAGE" >/dev/null
+if [ ! -d "$VENDOR_STAGE" ]; then
+  echo "cargo vendor failed to populate $VENDOR_STAGE" >&2
+  exit 1
+fi
+VENDOR_HASH=$(cd "$VENDOR_STAGE" && tar --sort=name --owner=0 --group=0 --numeric-owner \
+  --mtime=@"${SOURCE_DATE_EPOCH}" -cf - . | sha256sum | awk '{print $1}')
+rm -rf "$VENDOR_STAGE"
+echo "$VENDOR_HASH" > "$OUTDIR/vendor-sha256.txt"
+SNAPSHOT_HASH=$(sha256sum "$SNAPSHOT_PATH" | awk '{print $1}')
 
 # Build binaries
 cargo build --release
@@ -27,6 +48,7 @@ fi
 
 # Checksums
 ( cd "$OUTDIR" && sha256sum * > checksums.txt )
+printf "vendor-tree  %s\n" "$VENDOR_HASH" >> "$OUTDIR/checksums.txt"
 
 # Collect toolchain metadata
 RUSTC_VER=$(rustc -V)
@@ -40,7 +62,12 @@ cat > "$OUTDIR/provenance.json" <<JSON
   "linker": "$LINKER_VER",
   "commit": "$(git rev-parse HEAD)",
   "repo": "$(git config --get remote.origin.url)",
-  "source_date_epoch": "${SOURCE_DATE_EPOCH}" 
+  "source_date_epoch": "${SOURCE_DATE_EPOCH}",
+  "dependency_snapshot": {
+    "path": "$(basename "$SNAPSHOT_PATH")",
+    "sha256": "$SNAPSHOT_HASH"
+  },
+  "vendor_tree_sha256": "$VENDOR_HASH"
 }
 JSON
 

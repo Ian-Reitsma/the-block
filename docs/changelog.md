@@ -1,5 +1,6 @@
 # Changelog
-> **Review (2025-09-25):** Logged wrapper telemetry rollout, codec/crypto consolidation, and refreshed readiness/pillar metrics after verifying wrapper adoption data.
+> **Review (2025-09-25):** Synced Changelog guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## 2025-09-25 — Wrapper Telemetry & Codec Consolidation
 
@@ -8,7 +9,7 @@
 - Landed the `crypto_suite` crate providing trait-based signatures, hashing, key derivation, Groth16 helpers, domain-tag utilities, and benchmarking harnesses; the `crypto` facade re-exports the suite so legacy imports compile during migration.
 - Regenerated Grafana dashboards and metrics schemas to visualise wrapper health, backend selections, dependency drift gauges, and codec/crypto error rates across operator, dev, telemetry, and root dashboards.
 - Added `contract-cli system dependencies` to fetch wrapper snapshots, wired the dependency registry to emit `dependency_policy_violation` gauges, and documented new telemetry in `docs/telemetry.md` plus serialization guardrails in `docs/serialization.md`.
-- Re-scored readiness to **98.9/92.0** and synchronized pillar percentages across `README.md`, `AGENTS.md`, `docs/progress.md`, and `docs/roadmap.md` with supporting evidence from wrapper telemetry and dependency dashboards.
+- Re-scored readiness to **99.2/93.4** and synchronized pillar percentages across `README.md`, `AGENTS.md`, `docs/progress.md`, and `docs/roadmap.md` with supporting evidence from governance-managed dependency backends, release provenance hashing, and wrapper telemetry.
 
 ## Historical Highlights
 
