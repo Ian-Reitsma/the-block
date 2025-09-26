@@ -1,3 +1,4 @@
+use crate::codec_helpers::json_from_str;
 use clap::Subcommand;
 use futures::{SinkExt, StreamExt};
 use light_client::{load_user_config, LightClientConfig, StateChunk, StateStream};
@@ -23,7 +24,7 @@ pub fn handle(cmd: LightSyncCmd) {
                         while let Some(Ok(msg)) = read.next().await {
                             if msg.is_text() {
                                 if let Ok(chunk) =
-                                    serde_json::from_str::<StateChunk>(msg.to_text().unwrap())
+                                    json_from_str::<StateChunk>(msg.to_text().unwrap())
                                 {
                                     if let Err(err) = stream.apply_chunk(chunk.clone()) {
                                         eprintln!("failed to apply chunk: {err}");

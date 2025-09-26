@@ -19,7 +19,7 @@
 
 ---
 
-> **Review (2025-09-25):** Refreshed readiness metrics and pillar percentages after the fallback coder rollout audit.
+> **Review (2025-09-25):** Raised readiness to 98.9/92.0 after reconciling wrapper telemetry adoption, dependency dashboards, and removing residual future-dated callouts.
 
 ## What is The Block?
 
@@ -87,7 +87,7 @@ test real services today.
     primitives. XOR parity and RLE compression fallbacks sit behind explicit
     rollout gates, emit coder/compressor labels on storage latency/failure
     metrics, and feed a bench harness comparison command so operators can quantify
-    performance before flipping the switch during dependency incidents. (92.0%
+    performance before flipping the switch during dependency incidents. (92.8%
     Complete —
     incentive-marketplace wiring remains the main open track.)
 - The compute marketplace pays nodes for deterministic CPU and GPU work
@@ -114,7 +114,7 @@ test real services today.
   `match_loop_latency_seconds{lane}` histograms. CLI and RPC surfaces expose queue
   depths, capacity guardrails, fairness windows, and recent matches, and
     settlement continues to persist CT balances with activation metadata, audit
-    exports, and recent root tracking. (94.6% Complete)
+    exports, and recent root tracking. (95.2% Complete)
       - Networking exposes per-peer rate-limit telemetry and drop-reason statistics,
         letting operators run `net stats`, filter by reputation or drop reason, emit
         JSON via `--format json`, and paginate large sets with `--all --limit --offset`.
@@ -128,13 +128,13 @@ test real services today.
         `p2p_overlay` crate with selectable libp2p/stub backends, CLI overrides,
         telemetry gauges, and integration tests, so node modules only depend on overlay traits. Shard-aware peer maps route block gossip only
         to interested peers and uptime-based fee rebates reward high-availability
-        peers. (97.3% Complete)
+        peers. (97.7% Complete)
       - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
         resolves forks deterministically, and validates blocks with BLAKE3 hashes,
         multi-window Kalman retargeting, VDF-anchored randomness, macro-block
         checkpointing, and per-shard fork choice. Release installs now gate on
         provenance verification with automated rollback if hashes drift, keeping
-        consensus nodes in lockstep. (92.7% Complete)
+        consensus nodes in lockstep. (93.1% Complete)
   - Governance and subsidy economics use on-chain proposals to retune `beta`,
     `gamma`, `kappa`, and `lambda` multipliers each epoch, keeping inflation under
     two percent while funding service roles. Release upgrades now require
@@ -145,24 +145,31 @@ test real services today.
     timelines so operators can audit parameter changes while governance history
     archives DID revocations for audit. All tooling now targets the shared
     `governance` crate with sled-backed persistence, proposal DAG validation,
-    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (95.3% Complete)
+    and Kalman retune helpers, plus durable proof-rebate receipts wired into coinbase assembly. (95.9% Complete)
     - The smart-contract VM couples a minimal bytecode engine with UTXO and account
       models, adds deterministic WASM execution with a debugger, and enables
-      deployable contracts and fee markets alongside traditional PoW headers. (85.5%
+      deployable contracts and fee markets alongside traditional PoW headers. (86.3%
       Complete)
+- Serialization and cryptography dependencies are centralized through the
+  first-party `codec` and `crypto_suite` crates. Named JSON/CBOR/bincode
+  profiles, serde-bridging macros, telemetry hooks, Ed25519 domain-tag helpers,
+  hashing/KDF modules, and Groth16 utilities ensure every crate—from
+  transactions, gossip, storage manifests, CLI/FFI bindings, explorer APIs, and
+  wallet flows—shares consistent configuration and error handling while feeding
+  wrapper metrics into the aggregator. (Codec/Crypto migrations complete)
 - Trust lines and the decentralized exchange route multi-hop payments through
   cost-based paths and slippage-checked order books, enabling peer-to-peer
   liquidity. On-ledger escrow and partial-payment proofs now lock funds until
   settlements complete, telemetry gauges `dex_escrow_locked`,
     `dex_escrow_pending`, and `dex_escrow_total` track utilisation, and
-    constant-product AMM pools provide fallback liquidity with programmable incentives. (84.1%
+    constant-product AMM pools provide fallback liquidity with programmable incentives. (84.9%
     Complete)
   - Cross-chain bridge primitives track per-asset channels, persist relayer sets,
     enforce multi-signature quorums, and expose challenge windows with slashing for
     invalid proofs. Deposit/withdraw flows carry partition tags, HTLC parsing accepts
     both SHA3 and RIPEMD encodings, and light-client verification guards every transfer.
     CLI/RPC surfaces list pending withdrawals, quorum composition, and dispute history.
-    (79.4% Complete)
+    (80.6% Complete)
 - The decentralized identifier registry anchors DID documents with replay
   protection, optional provenance attestations, and telemetry (`did_anchor_total`).
   Explorer APIs `/dids`, `/identity/dids/:address`, and `/dids/metrics/anchor_rate`
@@ -171,7 +178,7 @@ test real services today.
   export with localized messaging. Governance revocations block misused
   identifiers and are archived alongside anchor history for audit. Explorer pagination
   caches and CLI tooling consume the same data, keeping dashboards aligned with wallet
-  history. (82.7% Complete)
+  history. (83.4% Complete)
     - Wallets, light clients, and optional KYC hooks provide desktop and mobile
       users with secure key management, staking tools, remote signer support,
       session-key derivation, auto-update orchestration, and compliance options as
@@ -182,19 +189,19 @@ test real services today.
       dashboards track warning/override deltas. Wallet binaries now share a single
       `ed25519-dalek 2.2.x` stack, emit escrow hash algorithms, forward
         multisig signer sets end-to-end, and expose remote signer telemetry so explorer tooling can validate threshold
-        staking payloads. (95.4% Complete)
+        staking payloads. (96.0% Complete)
       - Monitoring, debugging, and profiling tools export Prometheus metrics,
         structured traces, readiness endpoints, VM trace counters, partition dashboards,
         and a cluster-wide `metrics-aggregator` for fleet visibility. Correlation IDs
-        now link metrics anomalies to log searches, automated QUIC dumps, and Grafana
-        drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
-        anchor totals land in telemetry so dashboards can trace user choices,
-        anchor velocity, and governance parameter rollbacks from a single pane.
-        Overlay gauges (`overlay_backend_active`, `overlay_peer_total`, persisted counts)
-        now expose backend health alongside transport for quick verification. (94.2%
-        Complete)
+          now link metrics anomalies to log searches, automated QUIC dumps, and Grafana
+          drill-downs for rapid mitigation. Wallet fee-floor overrides and DID
+          anchor totals land in telemetry so dashboards can trace user choices,
+          anchor velocity, and governance parameter rollbacks from a single pane.
+          Overlay gauges (`overlay_backend_active`, `overlay_peer_total`, persisted counts)
+          now expose backend health alongside transport for quick verification. (95.1%
+          Complete)
   - Economic simulation and formal verification suites model inflation scenarios
-    and encode consensus invariants, laying groundwork for provable safety. (42.2%
+  and encode consensus invariants, laying groundwork for provable safety. (43.0%
     Complete)
 - Mobile UX and contribution metrics track background sync, battery impact, and
   subsidy events to make participation feasible on phones. Device heuristics now
@@ -204,11 +211,11 @@ test real services today.
   gating messages alongside persisted overrides in `~/.the_block/light_client.toml`.
   Operators can toggle charging/Wi‑Fi requirements via `contract light-client
   device ...` commands, inspect cached readings, and rely on desktop builds that
-  fall back to configured defaults without stalling sync. (72.6% Complete)
+  fall back to configured defaults without stalling sync. (73.2% Complete)
 
 ## Vision & Current State
 
-  Mainnet readiness sits at **98.3/100** with vision completion **90.4/100**.
+Mainnet readiness sits at **98.9/100** with vision completion **92.0/100**.
   Recent work finished wiring the storage pipeline through the `coding` crate so
   every manifest records encryptor, erasure, fountain, and compressor choices.
   Fallback XOR parity and RLE compression now ride behind explicit rollout gates,

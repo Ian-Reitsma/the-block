@@ -21,5 +21,5 @@ lru = "0.11"
 [dev-dependencies]
 tempfile = "3"
 wat = "1"
-ed25519-dalek = { version = "2.2.0", features = ["std"] }
+crypto_suite = { path = "../crates/crypto_suite" }
 rand = "0.8"

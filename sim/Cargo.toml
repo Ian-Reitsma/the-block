@@ -17,7 +17,7 @@ the_block = { path = "../node" }
 ledger = { path = "../ledger" }
 dkg = { path = "../dkg" }
 explorer = { path = "../explorer" }
-ed25519-dalek = { version = "2.2.0", features = ["std"] }
+crypto_suite = { path = "../crates/crypto_suite" }
 hex = "0.4"
 runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
 

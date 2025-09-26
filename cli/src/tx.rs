@@ -1,8 +1,10 @@
 #![allow(clippy::module_name_repetitions)]
 
-use bincode::Options;
 use blake3::Hasher;
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::ed25519::SigningKey;
+use crypto_suite::transactions::{
+    canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
+};
 use once_cell::sync::Lazy;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -12,8 +14,8 @@ use std::fmt;
 
 #[allow(dead_code)]
 const CHAIN_ID: u32 = 1;
-#[allow(dead_code)]
-const DOMAIN_PREFIX: &[u8; 12] = b"THE_BLOCKv2|";
+
+static SIGNER: Lazy<TransactionSigner> = Lazy::new(|| TransactionSigner::from_chain_id(CHAIN_ID));
 
 /// Signature version for transactions.
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
@@ -184,20 +186,15 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
 #[allow(dead_code)]
 pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransaction> {
     let sk_bytes = to_array_32(sk_bytes)?;
-    let sk = SigningKey::from_bytes(&sk_bytes);
-    let msg = {
-        let mut m = domain_tag().to_vec();
-        m.extend(canonical_payload_bytes(payload));
-        m
-    };
-    let sig = sk.sign(&msg);
+    let payload_bytes = canonical_payload_bytes(payload);
+    let (sig, public_key) = SIGNER.sign_with_secret(&sk_bytes, &payload_bytes);
     let signature = TxSignature {
         ed25519: sig.to_bytes().to_vec(),
         dilithium: Vec::new(),
     };
     Some(SignedTransaction {
         payload: payload.clone(),
-        public_key: sk.verifying_key().to_bytes().to_vec(),
+        public_key: public_key.to_vec(),
         dilithium_public_key: Vec::new(),
         signature,
         tip: 0,
@@ -216,42 +213,5 @@ fn to_array_32(bytes: &[u8]) -> Option<[u8; 32]> {
 
 #[allow(dead_code)]
 fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
-    bincode_config()
-        .serialize(payload)
-        .unwrap_or_else(|e| panic!("serialize: {e}"))
-}
-
-#[allow(dead_code)]
-fn domain_tag() -> &'static [u8] {
-    static TAG: Lazy<[u8; 16]> = Lazy::new(|| domain_tag_for(CHAIN_ID));
-    &*TAG
-}
-
-#[allow(dead_code)]
-fn domain_tag_for(id: u32) -> [u8; 16] {
-    let mut buf = [0u8; 16];
-    buf[..DOMAIN_PREFIX.len()].copy_from_slice(DOMAIN_PREFIX);
-    buf[DOMAIN_PREFIX.len()..DOMAIN_PREFIX.len() + 4].copy_from_slice(&id.to_le_bytes());
-    buf
-}
-
-#[allow(dead_code)]
-fn bincode_config() -> bincode::config::WithOtherEndian<
-    bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>,
-    bincode::config::LittleEndian,
-> {
-    static CFG: Lazy<
-        bincode::config::WithOtherEndian<
-            bincode::config::WithOtherIntEncoding<
-                bincode::DefaultOptions,
-                bincode::config::FixintEncoding,
-            >,
-            bincode::config::LittleEndian,
-        >,
-    > = Lazy::new(|| {
-        bincode::DefaultOptions::new()
-            .with_fixint_encoding()
-            .with_little_endian()
-    });
-    *CFG
+    suite_canonical_payload_bytes(payload)
 }

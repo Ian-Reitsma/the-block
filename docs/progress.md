@@ -1,9 +1,9 @@
 # Project Progress Snapshot
-> **Review (2025-09-25):** Updated readiness metrics, coder/compressor rollout evidence, and telemetry coverage.
+> **Review (2025-09-25):** Recomputed readiness (98.9/92.0) after validating wrapper telemetry adoption, dependency registry output, and scrubbing future-dated roadmap claims.
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **98.3/100** with vision completion **90.4/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share a unified `ed25519-dalek 2.2.x` stack with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence now flow through the trait-based `p2p_overlay` crate with libp2p and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, and the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, finish crypto/coding wrapper migrations, continue WAN-scale QUIC chaos drills, and polish multisig UX. Subsidy multipliers retune each epoch via the one‑dial formula
+Mainnet readiness currently measures **98.9/100** with vision completion **92.0/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries now share the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`) with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence now flow through the trait-based `p2p_overlay` crate with libp2p and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination, and wrapper telemetry now exports runtime/transport/storage/coding/codec/crypto metadata through both node metrics and the aggregator `/wrappers` endpoint. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX.
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -20,10 +20,10 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-09-25T09:10:00Z`)*: 7 strategic crates, 7 replaceable crates, and 847 unclassified dependencies in the resolved workspace DAG.
-- **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
+- **Current inventory** *(generated at `2025-09-25T10:20:00Z`)*: 7 strategic crates, 7 replaceable crates, and 845 unclassified dependencies in the resolved workspace DAG.
+- **Outstanding drift**: 204 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
 
-## 1. Consensus & Core Execution — 92.7 %
+## 1. Consensus & Core Execution — 93.1 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -45,7 +45,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — 97.3 %
+## 2. Networking & Gossip — 97.7 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -72,9 +72,9 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Large-scale WAN chaos experiments remain open; cross-provider failover drills still pending.
 - Bootstrap peer churn analysis missing.
-- Overlay soak tests need long-lived fault injection, and the dependency registry still requires crypto/coding wrappers to reach full swap readiness.
+    - Overlay soak tests need long-lived fault injection, and the dependency registry now focuses on automating storage migration drills plus the upcoming dependency fault simulation harness to certify fallbacks.
 
-## 3. Governance & Subsidy Economy — 95.3 %
+## 3. Governance & Subsidy Economy — 95.9 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -104,7 +104,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — 92.0 %
+## 4. Storage & Free‑Read Hosting — 92.8 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -124,7 +124,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — 85.5 %
+## 5. Smart‑Contract VM & UTXO/PoW — 86.3 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -138,7 +138,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — 94.6 %
+## 6. Compute Marketplace & CBM — 95.2 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -158,7 +158,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrowed payments and automated SLA enforcement remain rudimentary; deadline tracking and slashing heuristics are staged but not yet active.
 
-## 7. Trust Lines & DEX — 84.1 %
+## 7. Trust Lines & DEX — 84.9 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -174,7 +174,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — 95.4 %
+## 8. Wallets, Light Clients & KYC — 96.0 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -188,7 +188,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Telemetry `session_key_issued_total`/`session_key_expired_total` and simulator churn knob (`sim/src/lib.rs`).
 - Release fetch/install tooling verifies provenance, records timestamps, and exposes explorer/CLI history for operator audits (`node/src/update.rs`, `cli/src/gov.rs`, `explorer/src/release_view.rs`).
 - Wallet send flow caches fee-floor lookups, emits localized warnings with auto-bump or `--force` overrides, streams telemetry events back to the node, and exposes JSON mode for automation (`cli/src/wallet.rs`, `docs/mempool_qos.md`).
-- Unified `ed25519-dalek 2.2.x` signature handling ensures remote signer payloads, CLI staking flows, and explorer attestations all share compatible types while forwarding multisig signer arrays and escrow hash algorithms (`crates/wallet`, `node/src/bin/wallet.rs`, `tests/remote_signer_multisig.rs`).
+- Unified crypto suite Ed25519 signature handling (wrapping `ed25519-dalek 2.2.x`) ensures remote signer payloads, CLI staking flows, and explorer attestations all share compatible types while forwarding multisig signer arrays and escrow hash algorithms (`crates/wallet`, `node/src/bin/wallet.rs`, `tests/remote_signer_multisig.rs`).
 - Remote signer metrics (`remote_signer_request_total`, `remote_signer_success_total`, `remote_signer_error_total{reason}`) integrate with wallet QoS counters so dashboards highlight signer outages alongside fee-floor overrides (`crates/wallet/src/remote_signer.rs`, `docs/monitoring.md`).
 - Light-client rebate history and leaderboards exposed via RPC/CLI/explorer (`node/src/rpc/light.rs`, `cli/src/light_client.rs`, `explorer/src/light_client.rs`, `docs/light_client_incentives.md`).
 
@@ -197,7 +197,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 79.4 %
+## 9. Bridges & Cross‑Chain Routing — 80.6 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -209,7 +209,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
 
-## 10. Monitoring, Debugging & Profiling — 94.2 %
+## 10. Monitoring, Debugging & Profiling — 95.1 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
@@ -222,13 +222,14 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
     - Fee-floor policy changes and wallet overrides surface via `fee_floor_window_changed_total`, `fee_floor_warning_total`, and `fee_floor_override_total`, while DID anchors increment `did_anchor_total` for explorer dashboards (`node/src/telemetry.rs`, `monitoring/metrics.json`, `docs/mempool_qos.md`, `docs/identity.md`).
     - Per-lane compute matcher counters (`matches_total{lane}`), latency histograms (`match_loop_latency_seconds{lane}`), starvation warnings, and mobile cache metrics (`mobile_cache_hit_total`, `mobile_cache_stale_total`, `mobile_cache_entry_bytes`, `mobile_cache_queue_bytes`, `mobile_tx_queue_depth`) feed dashboards alongside the `the_block_light_client_device_status{field,freshness}` gauge for background sync diagnostics (`node/src/telemetry.rs`, `docs/telemetry.md`, `docs/mobile_gateway.md`, `docs/light_client.md`).
     - Storage ingest and repair metrics carry `erasure`/`compression` labels so fallback rollouts can be tracked in Grafana, and repair skips log `algorithm_limited` contexts for incident reviews (`node/src/telemetry.rs`, `docs/monitoring.md`, `docs/storage_erasure.md`).
+    - Wrapper telemetry exports runtime/transport/overlay/storage/coding/codec/crypto metadata via `runtime_backend_info`, `transport_provider_connect_total{provider}`, `codec_serialize_fail_total{profile}`, and `crypto_suite_signature_fail_total{backend}`. The `metrics-aggregator` exposes a `/wrappers` endpoint for fleet summaries, Grafana dashboards render backend selections/failure rates, and `contract-cli system dependencies` fetches on-demand snapshots for operators (`node/src/telemetry.rs`, `metrics-aggregator/src/lib.rs`, `monitoring/metrics.json`, `monitoring/grafana/*.json`, `cli/src/system.rs`).
     - Incremental log indexer resumes from offsets, rotates encryption keys, streams over WebSocket, and exposes REST filters (`tools/log_indexer.rs`, `docs/logging.md`).
 
 **Gaps**
 - Bridge and VM metrics are sparse.
 - Automated anomaly detection not in place.
 
-## 11. Identity & Explorer — 82.7 %
+## 11. Identity & Explorer — 83.4 %
 
 **Evidence**
 - DID registry persists anchors with replay protection, governance revocation checks, and optional provenance attestations (`node/src/identity/did.rs`, `state/src/did.rs`).
@@ -241,7 +242,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Revocation alerting and recovery runbooks need explorer/CLI integration.
 - Mobile wallet identity UX and bulk export tooling remain outstanding.
 
-## 12. Economic Simulation & Formal Verification — 42.2 %
+## 12. Economic Simulation & Formal Verification — 43.0 %
 
 **Evidence**
 - Simulation scenarios for inflation/demand/backlog (`sim/src`).
@@ -252,7 +253,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal proofs beyond scaffolding missing.
 - Scenario coverage still thin.
 
-## 13. Mobile UX & Contribution Metrics — 72.6 %
+## 13. Mobile UX & Contribution Metrics — 73.2 %
 
 **Evidence**
 - Background sync respecting battery/network constraints with platform-specific probes, async caching, CLI/RPC gating messages, and persisted overrides (`docs/light_client.md`, `docs/mobile_light_client.md`, `cli/src/light_client.rs`). Device snapshots capture freshness (`fresh|cached|fallback`) labels, stream to `the_block_light_client_device_status`, embed into compressed log uploads, and expose CLI toggles for charging/Wi‑Fi overrides stored in `~/.the_block/light_client.toml`.

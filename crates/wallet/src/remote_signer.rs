@@ -1,5 +1,5 @@
 use crate::{WalletError, WalletSigner};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use hex;
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
@@ -115,7 +115,7 @@ impl RemoteSigner {
         PUBKEY_CACHE
             .lock()
             .unwrap()
-            .insert(endpoint.to_string(), (pubkey, Instant::now()));
+            .insert(endpoint.to_string(), (pubkey.clone(), Instant::now()));
         increment_counter!("remote_signer_key_rotation_total");
         Ok(pubkey)
     }
@@ -204,11 +204,14 @@ impl RemoteSigner {
                     Ok(r) => {
                         let sig_bytes =
                             hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
-                        if sig_bytes.len() != 64 {
+                        if sig_bytes.len() != SIGNATURE_LENGTH {
                             return Err(WalletError::Failure("invalid signature length".into()));
                         }
-                        return Signature::from_slice(&sig_bytes)
-                            .map_err(|e| WalletError::Failure(e.to_string()));
+                        let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| WalletError::Failure("invalid signature".into()))?;
+                        return Ok(Signature::from_bytes(&sig_arr));
                     }
                     Err(e) => {
                         if attempt == self.retries {
@@ -271,7 +274,11 @@ impl RemoteSigner {
         if sig_bytes.len() != 64 {
             return Err(WalletError::Failure("invalid signature length".into()));
         }
-        Signature::from_slice(&sig_bytes).map_err(|e| WalletError::Failure(e.to_string()))
+        let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| WalletError::Failure("invalid signature".into()))?;
+        Ok(Signature::from_bytes(&sig_arr))
     }
 }
 

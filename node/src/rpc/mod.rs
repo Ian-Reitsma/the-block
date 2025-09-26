@@ -17,7 +17,10 @@ use ::storage::{contract::StorageContract, offer::StorageOffer};
 use base64::engine::general_purpose;
 use base64::Engine;
 use bincode;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey},
+    Verifier,
+};
 use hex;
 use once_cell::sync::Lazy;
 use runtime::timeout;

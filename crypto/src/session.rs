@@ -1,4 +1,4 @@
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::ed25519::{SigningKey, SECRET_KEY_LENGTH};
 use rand::{rngs::OsRng, RngCore};
 
 /// Ephemeral session key with expiration timestamp.
@@ -16,7 +16,7 @@ impl SessionKey {
     /// Generate a new session key expiring at `expires_at` (UNIX secs).
     pub fn generate(expires_at: u64) -> Self {
         let mut rng = OsRng;
-        let mut secret_bytes = [0u8; ed25519_dalek::SECRET_KEY_LENGTH];
+        let mut secret_bytes = [0u8; SECRET_KEY_LENGTH];
         rng.fill_bytes(&mut secret_bytes);
         let secret = SigningKey::from_bytes(&secret_bytes);
         let public_key = secret.verifying_key().to_bytes().to_vec();

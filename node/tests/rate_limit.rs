@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use serial_test::serial;
 
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{thread_rng, RngCore};
 use the_block::net::{
     peer_stats, record_ip_drop, set_max_peer_metrics, DropReason, Hello, Message, Payload, PeerSet,

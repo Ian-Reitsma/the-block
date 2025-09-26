@@ -1,6 +1,9 @@
 #[cfg(feature = "pq")]
 use base64::Engine as _;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey},
+    Verifier,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

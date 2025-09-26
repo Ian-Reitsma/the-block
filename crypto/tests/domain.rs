@@ -1,3 +1,4 @@
+#[cfg(feature = "quantum")]
 use crypto::{DILITHIUM_DOMAIN_TAG, ED25519_DOMAIN_TAG};
 
 #[cfg(feature = "quantum")]

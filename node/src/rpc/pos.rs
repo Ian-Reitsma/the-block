@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH},
+    Verifier,
+};
 use once_cell::sync::Lazy;
 use serde_json::Value;
 
@@ -98,10 +101,12 @@ fn parse_signers(params: &Value, id_key: &VerifyingKey) -> Result<SignerPayload,
                 code: -32602,
                 message: "invalid sig",
             })?;
-            let sig = Signature::from_slice(&sig_bytes).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid sig",
-            })?;
+            let arr: [u8; SIGNATURE_LENGTH] =
+                sig_bytes.as_slice().try_into().map_err(|_| RpcError {
+                    code: -32602,
+                    message: "invalid sig",
+                })?;
+            let sig = Signature::from_bytes(&arr);
             approvals.push((pk, sig));
         }
         let threshold = params
@@ -127,16 +132,18 @@ fn parse_signers(params: &Value, id_key: &VerifyingKey) -> Result<SignerPayload,
         })
     } else {
         let sig_bytes = get_sig(params)?;
-        if sig_bytes.len() != 64 {
+        if sig_bytes.len() != SIGNATURE_LENGTH {
             return Err(RpcError {
                 code: -32602,
                 message: "invalid sig",
             });
         }
-        let sig = Signature::from_slice(&sig_bytes).map_err(|_| RpcError {
-            code: -32602,
-            message: "invalid sig",
-        })?;
+        let arr: [u8; SIGNATURE_LENGTH] =
+            sig_bytes.as_slice().try_into().map_err(|_| RpcError {
+                code: -32602,
+                message: "invalid sig",
+            })?;
+        let sig = Signature::from_bytes(&arr);
         Ok(SignerPayload {
             approvals: vec![(id_key.clone(), sig)],
             threshold: 1,
@@ -221,7 +228,7 @@ pub fn role(params: &Value) -> Result<Value, RpcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
+    use crypto_suite::signatures::{ed25519::SigningKey, Signer};
     use serde_json::json;
 
     fn reset_state() {

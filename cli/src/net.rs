@@ -1,4 +1,7 @@
-use crate::rpc::RpcClient;
+use crate::{
+    codec_helpers::{json_from_str, json_to_string_pretty},
+    rpc::RpcClient,
+};
 use clap::{Subcommand, ValueEnum};
 use hex;
 use serde::Deserialize;
@@ -205,7 +208,7 @@ pub fn handle(cmd: NetCmd) {
             new_key,
             url,
         } => {
-            use ed25519_dalek::Signer;
+            use crypto_suite::signatures::Signer;
             let sk = the_block::net::load_net_key();
             let new_bytes = hex::decode(&new_key).expect("invalid new key hex");
             let sig = sk.sign(&new_bytes);
@@ -286,7 +289,7 @@ pub fn handle(cmd: NetCmd) {
                 if let Ok(resp) = client.call(&url, &payload) {
                     if json {
                         if let Ok(data) = resp.json::<Envelope<Vec<PeerCertHistoryEntry>>>() {
-                            if let Ok(text) = serde_json::to_string_pretty(&data.result) {
+                            if let Ok(text) = json_to_string_pretty(&data.result) {
                                 println!("{}", text);
                             }
                         }
@@ -345,7 +348,7 @@ pub fn handle(cmd: NetCmd) {
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(data) = resp.json::<Envelope<Vec<QuicStatsEntry>>>() {
                     if json {
-                        if let Ok(text) = serde_json::to_string_pretty(&data.result) {
+                        if let Ok(text) = json_to_string_pretty(&data.result) {
                             println!("{}", text);
                         }
                     } else {
@@ -372,9 +375,9 @@ pub fn handle(cmd: NetCmd) {
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
                     if json {
-                        if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                        if let Ok(val) = json_from_str::<Value>(&text) {
                             let out = val.get("result").cloned().unwrap_or(val);
-                            if let Ok(pretty) = serde_json::to_string_pretty(&out) {
+                            if let Ok(pretty) = json_to_string_pretty(&out) {
                                 println!("{}", pretty);
                             } else {
                                 println!("{}", text);
@@ -382,7 +385,7 @@ pub fn handle(cmd: NetCmd) {
                         } else {
                             println!("{}", text);
                         }
-                    } else if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                    } else if let Ok(val) = json_from_str::<Value>(&text) {
                         let result = val.get("result").cloned().unwrap_or(val);
                         print_gossip_status(&result);
                     } else {
@@ -417,9 +420,9 @@ pub fn handle(cmd: NetCmd) {
                     });
 
                     if output == OverlayOutputFormat::Json {
-                        if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                        if let Ok(val) = json_from_str::<Value>(&text) {
                             let out = val.get("result").cloned().unwrap_or(val);
-                            if let Ok(pretty) = serde_json::to_string_pretty(&out) {
+                            if let Ok(pretty) = json_to_string_pretty(&out) {
                                 println!("{}", pretty);
                             } else {
                                 println!("{}", text);
@@ -428,7 +431,7 @@ pub fn handle(cmd: NetCmd) {
                             println!("{}", text);
                         }
                     } else {
-                        match serde_json::from_str::<RpcEnvelope<OverlayStatusView>>(&text) {
+                        match json_from_str::<RpcEnvelope<OverlayStatusView>>(&text) {
                             Ok(env) => print_overlay_status(&env.result),
                             Err(_) => println!("{}", text),
                         }

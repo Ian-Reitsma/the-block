@@ -39,3 +39,14 @@ utility also scans workspace sources for forbidden Tokio symbols (e.g.
 the dependency policy gate.  Any violations cause the job to fail, surfacing the
 offending file and line so the call can be rewritten against the shared
 abstraction.
+
+## Serialization guardrails
+
+JSON, CBOR, and bincode payloads now route through the shared `codec` crate.
+Pull requests must use `codec::serialize`/`codec::deserialize` (or the helpers
+in `codec::profiles`) instead of calling `serde_json`, `serde_cbor`, or
+`bincode` directly. The crate exposes `serialize_to_string` and
+`serialize_json_pretty` for human-readable output, while `deserialize_from_str`
+handles textual inputs. Reviewers should reject changes that introduce new
+direct serde calls; see [`docs/serialization.md`](serialization.md) for the
+named profiles, telemetry labels, and the migration checklist.

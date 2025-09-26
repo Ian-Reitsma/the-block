@@ -23,5 +23,7 @@
       "type": "timeseries"
     }
   ],
-  "title": "Partition Dashboard"
+  "schemaVersion": 37,
+  "title": "Partition Dashboard",
+  "version": 1
 }

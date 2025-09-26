@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use serial_test::serial;
 use std::convert::TryInto;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};

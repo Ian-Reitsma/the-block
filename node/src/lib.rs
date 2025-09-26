@@ -20,8 +20,11 @@ use crate::consensus::observer;
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
 use blake3;
+use crypto_suite::signatures::{
+    ed25519::{Signature, SigningKey, VerifyingKey},
+    Signer, Verifier,
+};
 use dashmap::DashMap;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hex;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;

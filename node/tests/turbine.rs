@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use the_block::net::{turbine, Message, Payload};
 use the_block::p2p::handshake::Transport;
 

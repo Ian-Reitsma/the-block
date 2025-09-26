@@ -1,3 +1,4 @@
+use codec::{self, profiles};
 use explorer::Explorer;
 use tempfile::tempdir;
 
@@ -16,7 +17,7 @@ fn load_trace() {
     std::fs::create_dir_all("trace").unwrap();
     std::fs::write(
         "trace/tx1.json",
-        serde_json::to_vec(&vec!["Push", "Halt"]).unwrap(),
+        codec::serialize(profiles::json(), &vec!["Push", "Halt"]).unwrap(),
     )
     .unwrap();
     let db = dir.path().join("explorer.db");

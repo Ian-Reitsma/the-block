@@ -1,5 +1,6 @@
 #![deny(warnings)]
 
+use crate::codec_helpers::json_to_string_pretty;
 use crate::rpc::{RpcClient, WalletQosError, WalletQosEvent};
 use crate::tx::{generate_keypair, sign_tx, FeeLane, RawTxPayload};
 use anyhow::{anyhow, Context, Result};
@@ -228,7 +229,7 @@ pub fn handle(cmd: WalletCmd) {
             ) {
                 Ok(report) => {
                     if json {
-                        match serde_json::to_string_pretty(&report) {
+                        match json_to_string_pretty(&report) {
                             Ok(text) => println!("{}", text),
                             Err(err) => eprintln!("failed to encode json: {err}"),
                         }
@@ -258,8 +259,7 @@ pub fn handle(cmd: WalletCmd) {
                                 );
                                 println!(
                                     "{}",
-                                    serde_json::to_string_pretty(&payload)
-                                        .unwrap_or_else(|_| "{}".into())
+                                    json_to_string_pretty(&payload).unwrap_or_else(|_| "{}".into())
                                 );
                             }
                         }

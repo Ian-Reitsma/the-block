@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 mod util;
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use rand_core::{OsRng, RngCore};
 use serial_test::serial;
 use std::fs;

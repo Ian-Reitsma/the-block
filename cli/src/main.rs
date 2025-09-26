@@ -6,6 +6,7 @@ use std::{fs, io, path::PathBuf};
 
 mod ai;
 mod bridge;
+mod codec_helpers;
 mod compute;
 mod config;
 mod debug_cli;
@@ -25,6 +26,7 @@ mod scheduler;
 mod service_badge;
 mod snark;
 mod storage;
+mod system;
 mod telemetry;
 mod tx;
 mod version;
@@ -48,6 +50,7 @@ use scheduler::SchedulerCmd;
 use service_badge::ServiceBadgeCmd;
 use snark::SnarkCmd;
 use storage::StorageCmd;
+use system::SystemCmd;
 use telemetry::TelemetryCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
 use version::VersionCmd;
@@ -59,7 +62,7 @@ fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
     let engine = wasmtime::Engine::default();
     if let Ok(module) = wasmtime::Module::new(&engine, bytes) {
         let exports: Vec<String> = module.exports().map(|e| e.name().to_string()).collect();
-        serde_json::to_vec(&exports).unwrap_or_default()
+        codec_helpers::json_to_vec(&exports).unwrap_or_default()
     } else {
         Vec::new()
     }
@@ -202,6 +205,11 @@ enum Commands {
         #[command(subcommand)]
         action: LightClientCmd,
     },
+    /// System-level diagnostics
+    System {
+        #[command(subcommand)]
+        action: SystemCmd,
+    },
     /// AI diagnostics
     Ai {
         #[command(subcommand)]
@@ -291,6 +299,7 @@ fn main() {
         Commands::Snark { action } => snark::handle(action),
         Commands::LightSync { action } => light_sync::handle(action),
         Commands::LightClient { action } => light_client::handle(action),
+        Commands::System { action } => system::handle(action),
         Commands::Ai { action } => ai::handle(action),
         Commands::Fees { samples } => {
             let mut est = fee_estimator::RollingMedianEstimator::new(21);

@@ -1,5 +1,8 @@
 use blake3::hash;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH},
+    Verifier,
+};
 use hex;
 use once_cell::sync::Lazy;
 use std::convert::TryInto;

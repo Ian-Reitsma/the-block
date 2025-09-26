@@ -2,7 +2,10 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use blake3::hash;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey},
+    Verifier,
+};
 use hex;
 use ledger::address;
 use serde::{Deserialize, Serialize};

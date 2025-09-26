@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use codec::{self, profiles};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -28,8 +29,8 @@ pub fn fee_floor_policy_history(path: impl AsRef<Path>) -> Result<Vec<FeeFloorPo
     }
     let bytes =
         std::fs::read(&history_file).with_context(|| format!("read {}", history_file.display()))?;
-    let mut records: Vec<FeeFloorPolicyRecord> =
-        serde_json::from_slice(&bytes).with_context(|| "decode fee floor policy history")?;
+    let mut records: Vec<FeeFloorPolicyRecord> = codec::deserialize(profiles::json(), &bytes)
+        .with_context(|| "decode fee floor policy history")?;
     records.sort_by_key(|rec| rec.epoch);
     Ok(records)
 }

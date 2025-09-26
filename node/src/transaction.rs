@@ -3,12 +3,15 @@
 //! Exposes Python bindings for constructing, signing, and verifying
 //! transactions using Ed25519 with domain separation.
 
-use crate::{constants::bincode_config, constants::domain_tag, to_array_32, to_array_64};
-use bincode::Options;
+use crate::{to_array_32, to_array_64};
 use blake3::Hasher;
+use codec::{self, profiles};
 #[cfg(feature = "quantum")]
 use crypto::dilithium;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use crypto_suite::transactions::{
+    canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
+};
 use hex;
 use ledger::address::{self, ShardId};
 use lru::LruCache;
@@ -183,6 +186,9 @@ static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> = Lazy::new(|| {
         NonZeroUsize::new(1024).expect("cache size non-zero"),
     ))
 });
+
+static TX_SIGNER: Lazy<TransactionSigner> =
+    Lazy::new(|| TransactionSigner::from_chain_id(crate::constants::CHAIN_ID));
 
 /// Remote attestation accompanying a DID anchor transaction.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
@@ -582,9 +588,7 @@ impl SignedTransaction {
 
 /// Serialize a [`RawTxPayload`] using the project's canonical bincode settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
-    bincode_config()
-        .serialize(payload)
-        .unwrap_or_else(|e| panic!("serialize: {e}"))
+    suite_canonical_payload_bytes(payload)
 }
 
 /// Determine the shard for a given encoded account address.
@@ -596,13 +600,8 @@ pub fn shard_for_address(addr: &str) -> ShardId {
 /// Returns `None` if the key length is invalid.
 pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransaction> {
     let sk_bytes = to_array_32(sk_bytes)?;
-    let sk = SigningKey::from_bytes(&sk_bytes);
-    let msg = {
-        let mut m = domain_tag().to_vec();
-        m.extend(canonical_payload_bytes(payload));
-        m
-    };
-    let sig = sk.sign(&msg);
+    let payload_bytes = canonical_payload_bytes(payload);
+    let (sig, public_key) = TX_SIGNER.sign_with_secret(&sk_bytes, &payload_bytes);
     let signature = TxSignature {
         ed25519: sig.to_bytes().to_vec(),
         #[cfg(feature = "quantum")]
@@ -610,7 +609,7 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
     };
     Some(SignedTransaction {
         payload: payload.clone(),
-        public_key: sk.verifying_key().to_bytes().to_vec(),
+        public_key: public_key.to_vec(),
         #[cfg(feature = "quantum")]
         dilithium_public_key: Vec::new(),
         signature,
@@ -626,7 +625,7 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
     let key = {
-        let bytes = bincode::serialize(tx).unwrap_or_default();
+        let bytes = codec::serialize(profiles::transaction(), tx).unwrap_or_default();
         let mut h = Hasher::new();
         h.update(&bytes);
         h.finalize().into()
@@ -636,10 +635,7 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
     }
 
     let payload_bytes = canonical_payload_bytes(&tx.payload);
-    let domain = domain_tag();
-    let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());
-    msg.extend_from_slice(domain);
-    msg.extend_from_slice(&payload_bytes);
+    let msg = TX_SIGNER.message(&payload_bytes);
     let res = if !tx.signer_pubkeys.is_empty()
         && !tx.aggregate_signature.is_empty()
         && tx.threshold > 0
@@ -733,8 +729,6 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
 
 /// Batch verify a slice of signed transactions, returning per-transaction results.
 pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
-    use ed25519_dalek::Signature as DalekSig;
-    let domain = domain_tag();
     let mut msgs = Vec::new();
     let mut sigs = Vec::new();
     let mut vks = Vec::new();
@@ -747,11 +741,9 @@ pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
             ) {
                 if let Ok(vk) = VerifyingKey::from_bytes(&pk) {
                     let payload_bytes = canonical_payload_bytes(&tx.payload);
-                    let mut msg = Vec::with_capacity(domain.len() + payload_bytes.len());
-                    msg.extend_from_slice(domain);
-                    msg.extend_from_slice(&payload_bytes);
+                    let msg = TX_SIGNER.message(&payload_bytes);
                     msgs.push(msg);
-                    sigs.push(DalekSig::from_bytes(&sig_bytes));
+                    sigs.push(Signature::from_bytes(&sig_bytes));
                     vks.push(vk);
                     indices.push(i);
                 }
@@ -809,14 +801,14 @@ pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
 ///     ValueError: If ``bytes`` cannot be deserialized.
 #[pyfunction(name = "decode_payload", text_signature = "(bytes)")]
 pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
-    bincode_config()
-        .deserialize(&bytes)
+    codec::deserialize(profiles::transaction(), &bytes)
         .map_err(|e| PyValueError::new_err(format!("decode: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_suite::signatures::ed25519::SIGNATURE_LENGTH;
     use pyo3::{
         types::{IntoPyDict, PyBytes, PyDict, PyModule},
         Py,
@@ -834,6 +826,28 @@ mod tests {
             nonce: 1,
             memo: Vec::new(),
         }
+    }
+
+    #[test]
+    fn sign_tx_roundtrip_verifies_with_suite_types() {
+        let payload = sample_payload();
+        let sk = [7u8; crypto_suite::signatures::ed25519::SECRET_KEY_LENGTH];
+        let signed = sign_tx(&sk, &payload).expect("tx signed");
+
+        let mut pk_bytes = [0u8; 32];
+        pk_bytes.copy_from_slice(&signed.public_key);
+        let verifying_key = VerifyingKey::from_bytes(&pk_bytes).expect("verifying key");
+
+        let mut sig_bytes = [0u8; SIGNATURE_LENGTH];
+        sig_bytes.copy_from_slice(&signed.signature.ed25519);
+        let signature = Signature::from_bytes(&sig_bytes);
+
+        let payload_bytes = canonical_payload_bytes(&payload);
+        let msg = TX_SIGNER.message(&payload_bytes);
+        verifying_key
+            .verify(&msg, &signature)
+            .expect("suite verification");
+        assert!(verify_signed_tx(&signed));
     }
 
     #[test]

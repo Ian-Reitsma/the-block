@@ -7,7 +7,7 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use clap::{Parser, Subcommand};
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use tracing_chrome::ChromeLayerBuilder;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
 
@@ -312,6 +312,8 @@ async fn main() -> std::process::ExitCode {
                 }
             }
             the_block::vm::set_vm_debug_enabled(enable_vm_debug);
+            #[cfg(feature = "telemetry")]
+            the_block::telemetry::init_wrapper_metrics();
             let filter = EnvFilter::new(log_level.join(","));
             let (profiler, _chrome) = if profiling {
                 let (chrome_layer, guard) = ChromeLayerBuilder::new().file("trace.json").build();

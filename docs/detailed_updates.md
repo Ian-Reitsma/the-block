@@ -1,7 +1,27 @@
 # CHANGELOG
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Added wrapper telemetry, codec/crypto consolidation notes, and captured the readiness/pillar rescore (98.9/92.0) informed by wrapper adoption evidence; legacy log below remains for audit.
 
-## Unreleased
+## 2025-09-25 — Dependency Wrapper Telemetry Cutover
+
+### Added
+- Runtime, transport, overlay, storage engine, coding, codec, and crypto wrappers now emit dedicated gauges/counters (`runtime_backend_info`, `transport_provider_connect_total{provider}`, `codec_serialize_fail_total{profile}`, `crypto_suite_signature_fail_total{backend}`, etc.). `node/src/telemetry.rs` centralises label plumbing, and the metrics aggregator exposes a `/wrappers` endpoint with schema snapshots under `monitoring/metrics.json`.
+- New `crates/codec` crate standardises JSON/CBOR/bincode profiles, exposes serde bridging macros, rehosts the canonical bincode config as named profiles (`transaction`, `gossip`, `snapshot`), and instruments serialization failures and payload sizing for telemetry dashboards. CLI, explorer, gossip relay persistence, storage manifests, and PyO3 bindings all call through the wrapper.
+- `crates/crypto_suite` now owns signature, hashing, key-derivation, and Groth16 helpers. It wraps `ed25519-dalek` behind project-specific key types, re-exports through the `crypto` crate, includes regression tests for transaction signing/verification and remote signer flows, and ships benchmarking harnesses plus feature gates for optional algorithms.
+- Grafana dashboards (`monitoring/grafana/*.json`) and schema docs (`monitoring/metrics.json`, `monitoring/README.md`) were regenerated to plot wrapper health, dependency drift gauges, codec/crypto failure rates, and dependency policy violations.
+- Dependency registry tooling emits a Prometheus `dependency_policy_violation` gauge, and `contract-cli system dependencies` prints wrapper snapshots for operators. Documentation updates landed in `docs/telemetry.md`, `docs/serialization.md`, `docs/pivot_dependency_strategy.md`, and `docs/monitoring.md` to describe interpretation and rollout guidance.
+
+### Changed
+- Updated `docs/progress.md`, `docs/roadmap.md`, and root readiness figures to reflect the wrapper telemetry milestone (mainnet readiness 98.9/100, vision completion 92.0/100) and adjusted pillar percentages.
+- Consolidated README and AGENTS highlights around the codec/crypto migration so all subsystem guides reference the first-party wrappers instead of direct serde or `ed25519_dalek` usage.
+
+### Fixed
+- Removed the final references to the deprecated capped 2024 token across documentation and ensured readiness banners reference the September 25, 2025 review date.
+
+---
+
+## Historical Archive (pre-2025-09-25)
+
+> The exhaustive log below captures earlier milestones without modification. New work should append to the dated sections above while retaining this archive for auditors.
 
 ### Added
 - Lane-aware compute matcher with per-`FeeLane` queues, fairness windows,

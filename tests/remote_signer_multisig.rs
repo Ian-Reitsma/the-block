@@ -1,4 +1,4 @@
-use ed25519_dalek::Verifier;
+use crypto_suite::signatures::Verifier;
 use serial_test::serial;
 use tiny_http::{Response, Server};
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletSigner};

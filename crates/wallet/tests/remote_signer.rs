@@ -1,4 +1,4 @@
-use ed25519_dalek::Verifier;
+use crypto_suite::signatures::ed25519::{Signature, SIGNATURE_LENGTH};
 use ledger::crypto::remote_tag;
 use serial_test::serial;
 use std::io::{Read, Write};
@@ -81,6 +81,25 @@ fn remote_signer_roundtrip() {
     let msg = b"hello";
     let sig = signer.sign(msg).expect("sign");
     signer.public_key().verify(&remote_tag(msg), &sig).unwrap();
+    handle.join().unwrap();
+}
+
+#[test]
+#[serial]
+fn remote_signer_signature_roundtrip_bytes() {
+    std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
+    std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
+    std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    let (url, handle) = spawn_mock_signer();
+    let signer = RemoteSigner::connect(&url).expect("connect");
+    let msg = b"suite-bytes";
+    let sig = signer.sign(msg).expect("sign");
+    let sig_bytes: [u8; SIGNATURE_LENGTH] = sig.into();
+    let sig_roundtrip = Signature::from_bytes(&sig_bytes);
+    signer
+        .public_key()
+        .verify(&remote_tag(msg), &sig_roundtrip)
+        .expect("verify");
     handle.join().unwrap();
 }
 

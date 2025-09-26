@@ -1,6 +1,6 @@
 #![cfg(all(feature = "integration-tests", feature = "quic"))]
 
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use serial_test::serial;
 use tempfile::tempdir;
 use the_block::net::{

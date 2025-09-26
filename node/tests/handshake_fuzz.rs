@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use proptest::prelude::*;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;

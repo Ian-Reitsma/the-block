@@ -1,5 +1,9 @@
 use blake3;
 #[cfg(feature = "telemetry")]
+use codec::{self, Codec, Direction};
+#[cfg(feature = "telemetry")]
+use crypto_suite::{self, signatures::ed25519};
+#[cfg(feature = "telemetry")]
 use dashmap::DashMap;
 #[cfg(feature = "telemetry")]
 use hdrhistogram::Histogram as HdrHistogram;
@@ -43,6 +47,28 @@ static SAMPLE_FAIL_EVENTS: AtomicU64 = AtomicU64::new(0);
 static COMPACTION_SECS: AtomicU64 = AtomicU64::new(60);
 #[cfg(feature = "telemetry")]
 static COMPACTOR: Once = Once::new();
+#[cfg(feature = "telemetry")]
+static WRAPPER_INIT: Once = Once::new();
+#[cfg(feature = "telemetry")]
+static CODING_PREVIOUS: Lazy<Mutex<HashMap<&'static str, String>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(feature = "telemetry")]
+const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["tokio", "stub"];
+#[cfg(feature = "telemetry")]
+const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
+#[cfg(feature = "telemetry")]
+const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
+    ("bincode", &["transaction", "gossip", "storage_manifest"]),
+    ("json", &["none"]),
+    ("cbor", &["none"]),
+];
+#[cfg(all(feature = "quic", feature = "s2n-quic"))]
+const COMPILED_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
+#[cfg(all(feature = "quic", not(feature = "s2n-quic")))]
+const COMPILED_TRANSPORT_PROVIDERS: [&str; 1] = ["quinn"];
+#[cfg(not(feature = "quic"))]
+const COMPILED_TRANSPORT_PROVIDERS: [&str; 0] = [];
 
 #[cfg(feature = "telemetry")]
 const ADAPTIVE_MIN_SAMPLE_RATE: u64 = 10_000; // 1%
@@ -146,6 +172,21 @@ impl MemoryHist {
 pub struct ReadStats {
     inner: DashMap<String, ReadStat>,
     memory: DashMap<MemoryComponent, MemoryHist>,
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Clone, Debug, Serialize)]
+pub struct WrapperMetricSample {
+    pub metric: String,
+    pub labels: HashMap<String, String>,
+    pub value: f64,
+}
+
+#[cfg_attr(feature = "telemetry", derive(Serialize))]
+#[derive(Clone, Debug, Default)]
+pub struct WrapperSummary {
+    #[cfg(feature = "telemetry")]
+    pub metrics: Vec<WrapperMetricSample>,
 }
 
 #[cfg(feature = "telemetry")]
@@ -300,6 +341,414 @@ pub fn record_coding_result(stage: &str, algorithm: &str, result: &str) {
     STORAGE_CODING_OPERATIONS_TOTAL
         .with_label_values(&[stage, algorithm, result])
         .inc();
+}
+
+#[cfg(feature = "telemetry")]
+const CODEC_NONE_PROFILE: &str = "none";
+
+#[cfg(feature = "telemetry")]
+fn compiled_transport_providers() -> &'static [&'static str] {
+    &COMPILED_TRANSPORT_PROVIDERS
+}
+
+#[cfg(feature = "telemetry")]
+fn set_coding_metric(component: &str, algorithm: &str, mode: &str, value: i64) {
+    CODING_ALGORITHM_INFO
+        .with_label_values(&[component, algorithm, mode])
+        .set(value);
+}
+
+#[cfg(feature = "telemetry")]
+fn codec_labels(codec: Codec) -> (&'static str, &'static str) {
+    match codec {
+        Codec::Bincode(profile) => ("bincode", profile.as_str()),
+        Codec::Json(_) => ("json", CODEC_NONE_PROFILE),
+        Codec::Cbor(_) => ("cbor", CODEC_NONE_PROFILE),
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn direction_label(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Serialize => "serialize",
+        Direction::Deserialize => "deserialize",
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn reset_coding_component(map: &mut HashMap<&'static str, String>, component: &'static str) {
+    if let Some(prev) = map.get(component) {
+        set_coding_metric(component, prev, "active", 0);
+        set_coding_metric(component, prev, "fallback", 0);
+        set_coding_metric(component, prev, "emergency", 0);
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn push_metric(
+    out: &mut Vec<WrapperMetricSample>,
+    metric: &str,
+    labels: &[(&str, &str)],
+    value: f64,
+) {
+    let mut map = HashMap::new();
+    for (k, v) in labels {
+        map.insert((*k).to_string(), (*v).to_string());
+    }
+    out.push(WrapperMetricSample {
+        metric: metric.to_string(),
+        labels: map,
+        value,
+    });
+}
+
+#[cfg(feature = "telemetry")]
+pub fn init_wrapper_metrics() {
+    WRAPPER_INIT.call_once(|| {
+        if let Err(err) = codec::install_metrics_hook(codec_metrics_hook) {
+            tracing::warn!(reason = %err, "codec_metrics_hook_install_failed");
+        }
+        if let Err(err) = ed25519::install_telemetry_hook(crypto_metrics_hook) {
+            tracing::warn!(reason = %err, "crypto_metrics_hook_install_failed");
+        }
+        record_runtime_backend(crate::runtime::handle().backend_name());
+        record_crypto_backend();
+        record_coding_algorithms(&crate::storage::settings::algorithms());
+    });
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn init_wrapper_metrics() {}
+
+#[cfg(feature = "telemetry")]
+pub fn record_runtime_backend(active: &str) {
+    let compiled = crate::runtime::compiled_backends();
+    for backend in KNOWN_RUNTIME_BACKENDS {
+        let compiled_flag = if compiled.iter().any(|&b| b == *backend) {
+            "true"
+        } else {
+            "false"
+        };
+        let value = if *backend == active { 1 } else { 0 };
+        RUNTIME_BACKEND_INFO
+            .with_label_values(&[backend, compiled_flag])
+            .set(value);
+    }
+    if !KNOWN_RUNTIME_BACKENDS.contains(&active) {
+        RUNTIME_BACKEND_INFO
+            .with_label_values(&[active, "true"])
+            .set(1);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_runtime_backend(_active: &str) {}
+
+#[cfg(feature = "telemetry")]
+pub fn record_transport_backend(active: &str) {
+    let compiled = compiled_transport_providers();
+    for provider in KNOWN_TRANSPORT_PROVIDERS {
+        let compiled_flag = if compiled.iter().any(|&p| p == *provider) {
+            "true"
+        } else {
+            "false"
+        };
+        let value = if *provider == active { 1 } else { 0 };
+        TRANSPORT_PROVIDER_INFO
+            .with_label_values(&[provider, compiled_flag])
+            .set(value);
+    }
+    if !KNOWN_TRANSPORT_PROVIDERS.contains(&active) {
+        TRANSPORT_PROVIDER_INFO
+            .with_label_values(&[active, "true"])
+            .set(1);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_transport_backend(_active: &str) {}
+
+#[cfg(feature = "telemetry")]
+pub fn record_coding_algorithms(algorithms: &crate::storage::settings::Algorithms) {
+    let mut guard = CODING_PREVIOUS.lock().unwrap();
+
+    reset_coding_component(&mut guard, "encryptor");
+    set_coding_metric("encryptor", algorithms.encryptor(), "active", 1);
+    set_coding_metric("encryptor", algorithms.encryptor(), "fallback", 0);
+    set_coding_metric("encryptor", algorithms.encryptor(), "emergency", 0);
+    guard.insert("encryptor", algorithms.encryptor().to_string());
+
+    reset_coding_component(&mut guard, "fountain");
+    set_coding_metric("fountain", algorithms.fountain(), "active", 1);
+    set_coding_metric("fountain", algorithms.fountain(), "fallback", 0);
+    set_coding_metric("fountain", algorithms.fountain(), "emergency", 0);
+    guard.insert("fountain", algorithms.fountain().to_string());
+
+    reset_coding_component(&mut guard, "erasure");
+    let erasure_algo = algorithms.erasure();
+    set_coding_metric("erasure", erasure_algo, "active", 1);
+    set_coding_metric(
+        "erasure",
+        erasure_algo,
+        "fallback",
+        if algorithms.erasure_fallback() { 1 } else { 0 },
+    );
+    set_coding_metric(
+        "erasure",
+        erasure_algo,
+        "emergency",
+        if algorithms.erasure_emergency() { 1 } else { 0 },
+    );
+    guard.insert("erasure", erasure_algo.to_string());
+
+    reset_coding_component(&mut guard, "compression");
+    let compression_algo = algorithms.compression();
+    set_coding_metric("compression", compression_algo, "active", 1);
+    set_coding_metric(
+        "compression",
+        compression_algo,
+        "fallback",
+        if algorithms.compression_fallback() {
+            1
+        } else {
+            0
+        },
+    );
+    set_coding_metric(
+        "compression",
+        compression_algo,
+        "emergency",
+        if algorithms.compression_emergency() {
+            1
+        } else {
+            0
+        },
+    );
+    guard.insert("compression", compression_algo.to_string());
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_coding_algorithms(_algorithms: &crate::storage::settings::Algorithms) {}
+
+#[cfg(feature = "telemetry")]
+pub fn record_crypto_backend() {
+    CRYPTO_BACKEND_INFO
+        .with_label_values(&[
+            ed25519::ALGORITHM,
+            ed25519::BACKEND,
+            ed25519::BACKEND_VERSION,
+        ])
+        .set(1);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_crypto_backend() {}
+
+#[cfg(feature = "telemetry")]
+fn codec_metrics_hook(codec: Codec, direction: Direction, size: Option<usize>) {
+    let (codec_label, profile_label) = codec_labels(codec);
+    let dir_label = direction_label(direction);
+    match size {
+        Some(len) => {
+            CODEC_PAYLOAD_BYTES
+                .with_label_values(&[codec_label, dir_label, profile_label, codec::VERSION])
+                .observe(len as f64);
+        }
+        None => {
+            let labels = [codec_label, profile_label, codec::VERSION];
+            match direction {
+                Direction::Serialize => {
+                    CODEC_SERIALIZE_FAIL_TOTAL.with_label_values(&labels).inc();
+                }
+                Direction::Deserialize => {
+                    CODEC_DESERIALIZE_FAIL_TOTAL
+                        .with_label_values(&labels)
+                        .inc();
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn crypto_metrics_hook(
+    algorithm: &'static str,
+    operation: &'static str,
+    backend: &'static str,
+    success: bool,
+) {
+    let result = if success { "ok" } else { "error" };
+    CRYPTO_OPERATION_TOTAL
+        .with_label_values(&[
+            algorithm,
+            backend,
+            ed25519::BACKEND_VERSION,
+            operation,
+            result,
+        ])
+        .inc();
+}
+
+#[cfg(feature = "telemetry")]
+pub fn wrapper_metrics_snapshot() -> WrapperSummary {
+    let mut metrics = Vec::new();
+
+    let compiled_runtime = crate::runtime::compiled_backends();
+    for backend in KNOWN_RUNTIME_BACKENDS {
+        let compiled_flag = if compiled_runtime.iter().any(|&b| b == *backend) {
+            "true"
+        } else {
+            "false"
+        };
+        if let Ok(gauge) =
+            RUNTIME_BACKEND_INFO.get_metric_with_label_values(&[backend, compiled_flag])
+        {
+            push_metric(
+                &mut metrics,
+                "runtime_backend_info",
+                &[("backend", *backend), ("compiled", compiled_flag)],
+                gauge.get() as f64,
+            );
+        }
+    }
+
+    let compiled_transport = compiled_transport_providers();
+    for provider in KNOWN_TRANSPORT_PROVIDERS {
+        let compiled_flag = if compiled_transport.iter().any(|&p| p == *provider) {
+            "true"
+        } else {
+            "false"
+        };
+        if let Ok(gauge) =
+            TRANSPORT_PROVIDER_INFO.get_metric_with_label_values(&[provider, compiled_flag])
+        {
+            push_metric(
+                &mut metrics,
+                "transport_provider_info",
+                &[("provider", *provider), ("compiled", compiled_flag)],
+                gauge.get() as f64,
+            );
+        }
+        if let Ok(counter) =
+            TRANSPORT_PROVIDER_CONNECT_TOTAL.get_metric_with_label_values(&[provider])
+        {
+            push_metric(
+                &mut metrics,
+                "transport_provider_connect_total",
+                &[("provider", *provider)],
+                counter.get() as f64,
+            );
+        }
+    }
+
+    if let Ok(guard) = CODING_PREVIOUS.lock() {
+        for (component, algorithm) in guard.iter() {
+            for mode in ["active", "fallback", "emergency"] {
+                if let Ok(gauge) = CODING_ALGORITHM_INFO.get_metric_with_label_values(&[
+                    component,
+                    algorithm.as_str(),
+                    mode,
+                ]) {
+                    push_metric(
+                        &mut metrics,
+                        "coding_algorithm_info",
+                        &[
+                            ("component", *component),
+                            ("algorithm", algorithm.as_str()),
+                            ("mode", mode),
+                        ],
+                        gauge.get() as f64,
+                    );
+                }
+            }
+        }
+    }
+
+    for (codec_name, profiles) in KNOWN_CODEC_PROFILES {
+        for profile in *profiles {
+            if let Ok(counter) = CODEC_SERIALIZE_FAIL_TOTAL.get_metric_with_label_values(&[
+                codec_name,
+                profile,
+                codec::VERSION,
+            ]) {
+                push_metric(
+                    &mut metrics,
+                    "codec_serialize_fail_total",
+                    &[
+                        ("codec", *codec_name),
+                        ("profile", *profile),
+                        ("version", codec::VERSION),
+                    ],
+                    counter.get() as f64,
+                );
+            }
+            if let Ok(counter) = CODEC_DESERIALIZE_FAIL_TOTAL.get_metric_with_label_values(&[
+                codec_name,
+                profile,
+                codec::VERSION,
+            ]) {
+                push_metric(
+                    &mut metrics,
+                    "codec_deserialize_fail_total",
+                    &[
+                        ("codec", *codec_name),
+                        ("profile", *profile),
+                        ("version", codec::VERSION),
+                    ],
+                    counter.get() as f64,
+                );
+            }
+        }
+    }
+
+    for operation in ["sign", "verify", "verify_strict"] {
+        for result in ["ok", "error"] {
+            if let Ok(counter) = CRYPTO_OPERATION_TOTAL.get_metric_with_label_values(&[
+                ed25519::ALGORITHM,
+                ed25519::BACKEND,
+                ed25519::BACKEND_VERSION,
+                operation,
+                result,
+            ]) {
+                push_metric(
+                    &mut metrics,
+                    "crypto_operation_total",
+                    &[
+                        ("algorithm", ed25519::ALGORITHM),
+                        ("backend", ed25519::BACKEND),
+                        ("version", ed25519::BACKEND_VERSION),
+                        ("operation", operation),
+                        ("result", result),
+                    ],
+                    counter.get() as f64,
+                );
+            }
+        }
+    }
+
+    if let Ok(gauge) = CRYPTO_BACKEND_INFO.get_metric_with_label_values(&[
+        ed25519::ALGORITHM,
+        ed25519::BACKEND,
+        ed25519::BACKEND_VERSION,
+    ]) {
+        push_metric(
+            &mut metrics,
+            "crypto_backend_info",
+            &[
+                ("algorithm", ed25519::ALGORITHM),
+                ("backend", ed25519::BACKEND),
+                ("version", ed25519::BACKEND_VERSION),
+            ],
+            gauge.get() as f64,
+        );
+    }
+
+    WrapperSummary { metrics }
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn wrapper_metrics_snapshot() -> WrapperSummary {
+    WrapperSummary::default()
 }
 
 #[cfg(feature = "telemetry")]
@@ -898,6 +1347,322 @@ pub static TELEMETRY_ALLOC_BYTES: Lazy<IntGauge> = Lazy::new(|| {
     .unwrap();
     REGISTRY.register(Box::new(g.clone())).unwrap();
     g
+});
+
+pub static RUNTIME_BACKEND_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "runtime_backend_info",
+            "Active async runtime backend (1 active / 0 inactive)",
+        ),
+        &["backend", "compiled"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec runtime_backend_info: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry runtime_backend_info: {e}"));
+    g
+});
+
+pub static TRANSPORT_PROVIDER_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "transport_provider_info",
+            "Transport provider selection (1 active / 0 inactive)",
+        ),
+        &["provider", "compiled"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec transport_provider_info: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry transport_provider_info: {e}"));
+    g
+});
+
+pub static TRANSPORT_PROVIDER_CONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "transport_provider_connect_total",
+            "Successful dial attempts grouped by transport provider",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec transport_provider_connect_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry transport_provider_connect_total: {e}"));
+    c
+});
+
+pub static CODING_ALGORITHM_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "coding_algorithm_info",
+            "Coding component algorithm selection and fallback state",
+        ),
+        &["component", "algorithm", "mode"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec coding_algorithm_info: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry coding_algorithm_info: {e}"));
+    g
+});
+
+pub static CODEC_PAYLOAD_BYTES: Lazy<HistogramVec> = Lazy::new(|| {
+    let buckets = vec![
+        64.0,
+        256.0,
+        1024.0,
+        4096.0,
+        16_384.0,
+        65_536.0,
+        262_144.0,
+        1_048_576.0,
+    ];
+    let opts = HistogramOpts::new(
+        "codec_payload_bytes",
+        "Serialized payload size grouped by codec profile",
+    )
+    .buckets(buckets);
+    let h = HistogramVec::new(opts, &["codec", "direction", "profile", "version"])
+        .unwrap_or_else(|e| panic!("histogram_vec codec_payload_bytes: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry codec_payload_bytes: {e}"));
+    h
+});
+
+pub static CODEC_SERIALIZE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "codec_serialize_fail_total",
+            "Codec serialization failures grouped by profile",
+        ),
+        &["codec", "profile", "version"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec codec_serialize_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry codec_serialize_fail_total: {e}"));
+    c
+});
+
+pub static CODEC_DESERIALIZE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "codec_deserialize_fail_total",
+            "Codec deserialization failures grouped by profile",
+        ),
+        &["codec", "profile", "version"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec codec_deserialize_fail_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry codec_deserialize_fail_total: {e}"));
+    c
+});
+
+pub static CRYPTO_BACKEND_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "crypto_backend_info",
+            "Active cryptographic backends (1 active / 0 inactive)",
+        ),
+        &["algorithm", "backend", "version"],
+    )
+    .unwrap_or_else(|e| panic!("gauge_vec crypto_backend_info: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry crypto_backend_info: {e}"));
+    g
+});
+
+#[cfg(all(test, feature = "telemetry"))]
+mod tests {
+    use super::*;
+    use codec::{BincodeProfile, JsonProfile};
+
+    fn reset_wrapper_metrics() {
+        CODEC_PAYLOAD_BYTES.reset();
+        CODEC_SERIALIZE_FAIL_TOTAL.reset();
+        CODEC_DESERIALIZE_FAIL_TOTAL.reset();
+        CRYPTO_OPERATION_TOTAL.reset();
+        CRYPTO_BACKEND_INFO.reset();
+        RUNTIME_BACKEND_INFO.reset();
+        TRANSPORT_PROVIDER_INFO.reset();
+        TRANSPORT_PROVIDER_CONNECT_TOTAL.reset();
+        CODING_ALGORITHM_INFO.reset();
+        CODING_PREVIOUS.lock().unwrap().clear();
+    }
+
+    fn metric_value(
+        summary: &WrapperSummary,
+        metric: &str,
+        labels: &[(&str, &str)],
+    ) -> Option<f64> {
+        summary.metrics.iter().find_map(|sample| {
+            if sample.metric == metric
+                && labels
+                    .iter()
+                    .all(|(key, value)| sample.labels.get(*key).map(|s| s.as_str()) == Some(*value))
+            {
+                Some(sample.value)
+            } else {
+                None
+            }
+        })
+    }
+
+    #[test]
+    fn codec_hook_records_success_and_failures() {
+        reset_wrapper_metrics();
+
+        codec_metrics_hook(
+            Codec::Json(JsonProfile::Canonical),
+            Direction::Serialize,
+            Some(128),
+        );
+        let hist = CODEC_PAYLOAD_BYTES
+            .get_metric_with_label_values(&[
+                "json",
+                "serialize",
+                CODEC_NONE_PROFILE,
+                codec::VERSION,
+            ])
+            .unwrap();
+        assert_eq!(hist.get_sample_count(), 1);
+
+        codec_metrics_hook(
+            Codec::Bincode(BincodeProfile::Transaction),
+            Direction::Serialize,
+            None,
+        );
+        let serialize_fail = CODEC_SERIALIZE_FAIL_TOTAL
+            .get_metric_with_label_values(&["bincode", "transaction", codec::VERSION])
+            .unwrap();
+        assert_eq!(serialize_fail.get(), 1);
+
+        codec_metrics_hook(
+            Codec::Bincode(BincodeProfile::Transaction),
+            Direction::Deserialize,
+            None,
+        );
+        let deserialize_fail = CODEC_DESERIALIZE_FAIL_TOTAL
+            .get_metric_with_label_values(&["bincode", "transaction", codec::VERSION])
+            .unwrap();
+        assert_eq!(deserialize_fail.get(), 1);
+    }
+
+    #[test]
+    fn crypto_hook_records_operation_results() {
+        reset_wrapper_metrics();
+
+        crypto_metrics_hook(ed25519::ALGORITHM, "sign", ed25519::BACKEND, true);
+        crypto_metrics_hook(ed25519::ALGORITHM, "verify", ed25519::BACKEND, false);
+        record_crypto_backend();
+
+        let ok_counter = CRYPTO_OPERATION_TOTAL
+            .get_metric_with_label_values(&[
+                ed25519::ALGORITHM,
+                ed25519::BACKEND,
+                ed25519::BACKEND_VERSION,
+                "sign",
+                "ok",
+            ])
+            .unwrap();
+        assert_eq!(ok_counter.get(), 1);
+
+        let error_counter = CRYPTO_OPERATION_TOTAL
+            .get_metric_with_label_values(&[
+                ed25519::ALGORITHM,
+                ed25519::BACKEND,
+                ed25519::BACKEND_VERSION,
+                "verify",
+                "error",
+            ])
+            .unwrap();
+        assert_eq!(error_counter.get(), 1);
+
+        let backend_gauge = CRYPTO_BACKEND_INFO
+            .get_metric_with_label_values(&[
+                ed25519::ALGORITHM,
+                ed25519::BACKEND,
+                ed25519::BACKEND_VERSION,
+            ])
+            .unwrap();
+        assert_eq!(backend_gauge.get(), 1);
+    }
+
+    #[test]
+    fn wrapper_snapshot_aggregates_wrapper_metrics() {
+        reset_wrapper_metrics();
+
+        record_runtime_backend("tokio");
+        record_transport_backend("quinn");
+        TRANSPORT_PROVIDER_CONNECT_TOTAL
+            .with_label_values(&["quinn"])
+            .inc();
+        record_coding_algorithms(&crate::storage::settings::algorithms());
+        codec_metrics_hook(
+            Codec::Bincode(BincodeProfile::Transaction),
+            Direction::Serialize,
+            None,
+        );
+        crypto_metrics_hook(ed25519::ALGORITHM, "sign", ed25519::BACKEND, true);
+
+        let summary = wrapper_metrics_snapshot();
+        assert!(summary.metrics.len() > 3);
+
+        let runtime_value = metric_value(&summary, "runtime_backend_info", &["backend", "tokio"]);
+        assert_eq!(runtime_value, Some(1.0));
+
+        let transport_connect = metric_value(
+            &summary,
+            "transport_provider_connect_total",
+            &["provider", "quinn"],
+        )
+        .unwrap();
+        assert_eq!(transport_connect, 1.0);
+
+        let codec_failure = metric_value(
+            &summary,
+            "codec_serialize_fail_total",
+            &["codec", "bincode", "profile", "transaction"],
+        )
+        .unwrap();
+        assert_eq!(codec_failure, 1.0);
+
+        let crypto_counter = metric_value(
+            &summary,
+            "crypto_operation_total",
+            &["operation", "sign", "result", "ok"],
+        )
+        .unwrap();
+        assert_eq!(crypto_counter, 1.0);
+
+        let coding_active = summary.metrics.iter().any(|sample| {
+            sample.metric == "coding_algorithm_info"
+                && sample.labels.get("mode").map(|s| s.as_str()) == Some("active")
+                && sample.value == 1.0
+        });
+        assert!(coding_active);
+    }
+}
+
+pub static CRYPTO_OPERATION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "crypto_operation_total",
+            "Cryptographic operations grouped by backend and result",
+        ),
+        &["algorithm", "backend", "version", "operation", "result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec crypto_operation_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry crypto_operation_total: {e}"));
+    c
 });
 
 pub static INDUSTRIAL_BACKLOG: Lazy<IntGauge> = Lazy::new(|| {

@@ -4,7 +4,7 @@
 The `crates/wallet` crate implements deterministic Ed25519 key management, optional remote signer plumbing, and utilities for building transactions. The command-line interface lives in [`cli/src/wallet.rs`](../cli/src/wallet.rs) and is exposed through the `contract wallet` subcommand.
 
 > **Build status (2025-09-24):** `node/src/bin/wallet.rs` now builds solely
-> against `ed25519-dalek 2.2.x`, forwards multisig signer sets, and passes the
+> against the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`), forwards multisig signer sets, and passes the
 > escrow hash algorithm into `verify_proof`. Focus on polishing multisig UX
 > (batched signer discovery, richer operator messaging) before tagging the next
 > CLI release.
@@ -74,7 +74,7 @@ This keeps older nodes compatible (they continue to read `sig`) while giving upg
 
 ## Ed25519 dependency alignment
 
-Both the wallet crate and the node CLI depend on `ed25519-dalek 2.2.x`. The
+Both the wallet crate and the node CLI depend on the shared crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`). The
 upgrade replaces the legacy `ed25519` re-export with the modern `Signature`
 API, ensuring remote signer payloads, staking flows, and explorer attestations
 all share identical types. When migrating custom tooling, update any

@@ -18,6 +18,7 @@ pub struct TelemetrySummary {
     pub compaction_secs: u64,
     pub node_id: String,
     pub memory: HashMap<String, crate::telemetry::MemorySnapshot>,
+    pub wrappers: crate::telemetry::WrapperSummary,
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -70,6 +71,7 @@ fn build_summary(seq: u64) -> TelemetrySummary {
         compaction_secs: crate::telemetry::compaction_interval_secs(),
         node_id: NODE_LABEL.clone(),
         memory,
+        wrappers: crate::telemetry::wrapper_metrics_snapshot(),
     }
 }
 

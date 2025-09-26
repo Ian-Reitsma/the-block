@@ -78,6 +78,18 @@ pub enum ViolationKind {
     DirectLibp2p,
 }
 
+impl fmt::Display for ViolationKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            ViolationKind::Depth => "depth",
+            ViolationKind::License => "license",
+            ViolationKind::Tier => "tier",
+            ViolationKind::DirectLibp2p => "direct_libp2p",
+        };
+        write!(f, "{}", label)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ViolationReport {
     pub entries: Vec<ViolationEntry>,

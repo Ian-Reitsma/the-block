@@ -3,8 +3,9 @@
 
 This document outlines the strategy for integration and chaos testing in **The-Block**.
 
-> **Current caveats (2025-09-24):** CLI binaries now build cleanly on
-> `ed25519-dalek 2.2.x`, the transport crate re-exports the `quic` feature so
+> **Current caveats (2025-09-24):** CLI binaries now build cleanly on the
+> crypto suite’s Ed25519 backend (powered by `ed25519-dalek 2.2.x`), the
+> transport crate re-exports the `quic` feature so
 > integration harnesses must pass `--features "integration-tests quic"` when
 > selecting providers, and telemetry-gated modules still emit warnings when
 > optional features are disabled. Prefer the `lightweight-integration` feature

@@ -2,11 +2,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use crate::codec_helpers::{json_from_str, json_to_string, json_to_string_pretty};
 use crate::rpc::RpcClient;
 use crate::tx::{TxDidAnchor, TxDidAnchorAttestation};
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Subcommand};
-use ed25519_dalek::{Signer, SigningKey};
+use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use hex;
 use light_client::{self, SyncOptions};
 use serde::{Deserialize, Serialize};
@@ -183,8 +184,8 @@ struct AnchorRecordWire {
 
 impl AnchorRecordWire {
     fn into_record(self) -> AnchorRecord {
-        let doc = serde_json::from_str(&self.document)
-            .unwrap_or_else(|_| Value::String(self.document.clone()));
+        let doc =
+            json_from_str(&self.document).unwrap_or_else(|_| Value::String(self.document.clone()));
         AnchorRecord {
             address: self.address,
             document: doc,
@@ -217,7 +218,7 @@ struct ResolvedDidWire {
 impl ResolvedDidWire {
     fn into_record(self) -> ResolvedDid {
         let document = self.document.and_then(|doc| {
-            serde_json::from_str(&doc)
+            json_from_str(&doc)
                 .map(Some)
                 .unwrap_or_else(|_| Some(Value::String(doc)))
         });
@@ -375,8 +376,7 @@ fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<
     let text = response
         .text()
         .context("failed to read rebate history response")?;
-    let value: Value =
-        serde_json::from_str(&text).context("failed to parse rebate history response")?;
+    let value: Value = json_from_str(&text).context("failed to parse rebate history response")?;
     let envelope: RpcEnvelope<RebateHistoryResult> =
         serde_json::from_value(value.clone()).context("invalid rebate history envelope")?;
     if let Some(err) = envelope.error {
@@ -384,7 +384,7 @@ fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<
     }
     let result = envelope.result.unwrap_or_default();
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&value)?);
+        println!("{}", json_to_string_pretty(&value)?);
         return Ok(());
     }
     if result.receipts.is_empty() {
@@ -416,7 +416,7 @@ fn run_device_status(json: bool) -> Result<()> {
                         .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
                         .map(|g| g.as_str()),
                 });
-                println!("{}", serde_json::to_string_pretty(&payload)?);
+                println!("{}", json_to_string_pretty(&payload)?);
             } else {
                 println!("device probe unavailable: {}", err);
             }
@@ -440,7 +440,7 @@ fn run_device_status(json: bool) -> Result<()> {
             "stale_for_millis": snapshot.stale_for.as_millis(),
             "gating": gating.map(|g| g.as_str()),
         });
-        println!("{}", serde_json::to_string_pretty(&payload)?);
+        println!("{}", json_to_string_pretty(&payload)?);
     } else {
         println!(
             "Wi-Fi: {} (freshness: {:?})",
@@ -496,7 +496,7 @@ fn run_anchor_command(args: DidAnchorArgs) -> Result<()> {
         let payload = serde_json::to_value(&tx).context("serialize anchor payload")?;
         println!(
             "{}",
-            serde_json::to_string_pretty(&payload).context("pretty-print anchor payload")?
+            json_to_string_pretty(&payload).context("pretty-print anchor payload")?
         );
         return Ok(());
     }
@@ -520,7 +520,7 @@ fn run_resolve_command(args: DidResolveArgs) -> Result<()> {
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&record).context("serialize resolve output")?
+            json_to_string_pretty(&record).context("serialize resolve output")?
         );
         return Ok(());
     }
@@ -541,7 +541,7 @@ fn run_resolve_command(args: DidResolveArgs) -> Result<()> {
         Some(doc) => {
             println!(
                 "Document:\n{}",
-                serde_json::to_string_pretty(doc).unwrap_or_else(|_| doc.to_string())
+                json_to_string_pretty(doc).unwrap_or_else(|_| doc.to_string())
             );
         }
         None => println!("Document: <none>"),
@@ -555,7 +555,7 @@ fn run_resolve_command(args: DidResolveArgs) -> Result<()> {
 fn prepare_anchor_inputs(args: &DidAnchorArgs) -> Result<(Value, AnchorKeyMaterial)> {
     let contents = fs::read_to_string(&args.file)
         .with_context(|| format!("failed to read DID document from {}", args.file.display()))?;
-    let document: Value = serde_json::from_str(&contents)
+    let document: Value = json_from_str(&contents)
         .with_context(|| format!("DID document {} is not valid JSON", args.file.display()))?;
 
     let owner_secret = if let Some(secret) = &args.secret {
@@ -613,8 +613,8 @@ fn load_remote_signer(path: &Path) -> Result<(Vec<u8>, Option<String>)> {
             #[serde(default)]
             signer: Option<String>,
         }
-        let parsed: RemoteSignerFile = serde_json::from_str(trimmed)
-            .context("remote signer file must be JSON with 'secret'")?;
+        let parsed: RemoteSignerFile =
+            json_from_str(trimmed).context("remote signer file must be JSON with 'secret'")?;
         let secret = decode_secret(&parsed.secret)?;
         Ok((secret, parsed.signer))
     } else {
@@ -640,7 +640,7 @@ fn key_from_bytes(bytes: &[u8]) -> Result<SigningKey> {
 }
 
 pub fn build_anchor_transaction(doc: &Value, material: &AnchorKeyMaterial) -> Result<TxDidAnchor> {
-    let canonical = serde_json::to_string(doc).context("canonicalize DID document")?;
+    let canonical = json_to_string(doc).context("canonicalize DID document")?;
     if canonical.as_bytes().len() > MAX_DID_DOC_BYTES {
         return Err(anyhow!("DID document exceeds {} bytes", MAX_DID_DOC_BYTES));
     }

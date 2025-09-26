@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "quic")]
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use serial_test::serial;
 use std::io::Read;
 #[cfg(feature = "s2n-quic")]

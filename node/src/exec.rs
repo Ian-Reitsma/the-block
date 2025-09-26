@@ -10,7 +10,10 @@ use crate::compute_market::settlement;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{SUBSIDY_BYTES_TOTAL, SUBSIDY_CPU_MS_TOTAL};
 use blake3::{self, Hasher};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use crypto_suite::signatures::{
+    ed25519::{Signature, VerifyingKey},
+    Verifier,
+};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 

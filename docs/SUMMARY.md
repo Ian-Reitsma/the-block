@@ -1,9 +1,9 @@
 # Summary
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Reordered navigation around the wrapper rollout, added codec/crypto telemetry references, and cross-linked consolidated progress docs.
 
-- [Progress Snapshot](progress.md)
-- [Dependency Sovereignty Pivot](pivot_dependency_strategy.md)
-- [Status & Roadmap](roadmap.md)
+- [Progress Snapshot & Pillar Evidence](progress.md)
+- [Dependency Sovereignty Pivot Plan](pivot_dependency_strategy.md)
+- [Status, Roadmap & Milestones](roadmap.md)
 - [Telemetry](telemetry.md)
 - [Telemetry Operations Runbook](telemetry_ops.md)
 - [Networking](networking.md)
@@ -15,8 +15,9 @@
 - [Sharding](sharding.md)
 - [Compute Market](compute_market.md)
 - [Compute SNARKs](compute_snarks.md)
-- [Monitoring](monitoring.md)
-- [Crypto Migration](crypto_migration.md)
+- [Monitoring & Aggregator Playbooks](monitoring.md)
+- [Crypto Suite Migration](crypto_migration.md)
+- [Codec & Serialization Guardrails](serialization.md)
 - [HTLC Swaps](htlc_swaps.md)
 - [Storage Market](storage_market.md)
 - [Fee Market](fees.md)

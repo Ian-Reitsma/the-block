@@ -4,9 +4,13 @@ use std::net::TcpListener;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
 
+use crypto_suite::signatures::ed25519::SECRET_KEY_LENGTH;
+use crypto_suite::transactions::TransactionSigner;
 use the_block::identity::DidRegistry;
 use the_block::rpc::{fuzz_runtime_config, handle_conn};
 use the_block::rpc::identity::handle_registry::HandleRegistry;
+use the_block::transaction::canonical_payload_bytes;
+use the_block::transaction::RawTxPayload;
 use the_block::Blockchain;
 
 pub fn run(data: &[u8]) {
@@ -30,5 +34,21 @@ pub fn run(data: &[u8]) {
     });
     if let Ok(mut s) = std::net::TcpStream::connect(addr) {
         let _ = s.write_all(data);
+    }
+
+    if data.len() > SECRET_KEY_LENGTH {
+        let mut secret = [0u8; SECRET_KEY_LENGTH];
+        secret.copy_from_slice(&data[..SECRET_KEY_LENGTH]);
+        let payload_bytes = &data[SECRET_KEY_LENGTH..];
+        let signer = TransactionSigner::from_chain_id(the_block::constants::CHAIN_ID);
+        let (sig, public_key) = signer.sign_with_secret(&secret, payload_bytes);
+        let _ = signer.verify_with_public_bytes(&public_key, payload_bytes, &sig);
+
+        // Exercise the canonical serializer with fuzz input to ensure the Python
+        // bindings and RPC helpers remain in lock-step with the suite.
+        if let Ok(payload) = bincode::deserialize::<RawTxPayload>(payload_bytes) {
+            let canonical = canonical_payload_bytes(&payload);
+            let _ = signer.sign_with_secret(&secret, &canonical);
+        }
     }
 }

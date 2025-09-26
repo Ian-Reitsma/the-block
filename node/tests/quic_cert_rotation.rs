@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "quic")]
 
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 use tempfile::tempdir;
 use the_block::net::{
     record_peer_certificate, transport_quic, verify_peer_fingerprint, HandshakeError, Hello,

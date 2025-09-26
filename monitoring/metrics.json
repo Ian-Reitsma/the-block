@@ -568,6 +568,113 @@
     },
     {
       "deprecated": false,
+      "description": "Active async runtime backend (1 active / 0 inactive)",
+      "labels": [
+        "backend",
+        "compiled"
+      ],
+      "name": "runtime_backend_info"
+    },
+    {
+      "deprecated": false,
+      "description": "Active transport provider (1 active / 0 inactive)",
+      "labels": [
+        "provider",
+        "compiled"
+      ],
+      "name": "transport_provider_info"
+    },
+    {
+      "deprecated": false,
+      "description": "Total dial attempts grouped by transport provider",
+      "labels": [
+        "provider"
+      ],
+      "name": "transport_provider_connect_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Coding algorithm selection and fallback state",
+      "labels": [
+        "component",
+        "algorithm",
+        "mode"
+      ],
+      "name": "coding_algorithm_info"
+    },
+    {
+      "deprecated": false,
+      "description": "Serialized payload sizes grouped by codec profile",
+      "labels": [
+        "codec",
+        "direction",
+        "profile",
+        "version"
+      ],
+      "name": "codec_payload_bytes"
+    },
+    {
+      "deprecated": false,
+      "description": "Codec serialization failures grouped by profile",
+      "labels": [
+        "codec",
+        "profile",
+        "version"
+      ],
+      "name": "codec_serialize_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Codec deserialization failures grouped by profile",
+      "labels": [
+        "codec",
+        "profile",
+        "version"
+      ],
+      "name": "codec_deserialize_fail_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Active cryptographic backends (1 active / 0 inactive)",
+      "labels": [
+        "algorithm",
+        "backend",
+        "version"
+      ],
+      "name": "crypto_backend_info"
+    },
+    {
+      "deprecated": false,
+      "description": "Cryptographic operations grouped by backend and result",
+      "labels": [
+        "algorithm",
+        "backend",
+        "version",
+        "operation",
+        "result"
+      ],
+      "name": "crypto_operation_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Policy violations detected by the dependency registry",
+      "labels": [
+        "crate",
+        "version",
+        "kind",
+        "detail",
+        "depth"
+      ],
+      "name": "dependency_policy_violation"
+    },
+    {
+      "deprecated": false,
+      "description": "Total dependency policy violations emitted by the registry",
+      "labels": [],
+      "name": "dependency_policy_violation_total"
+    },
+    {
+      "deprecated": false,
       "description": "Indicator gauge for the active overlay backend (1 active / 0 inactive)",
       "labels": [
         "backend"

@@ -10,7 +10,7 @@ use crate::net::peer::is_throttled_addr;
 use crate::net::peer::ReputationUpdate;
 use crate::net::{record_ip_drop, send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
-use ed25519_dalek::SigningKey;
+use crypto_suite::signatures::ed25519::SigningKey;
 
 /// Deterministic fanout tree inspired by Turbine gossip.
 pub fn broadcast(msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {

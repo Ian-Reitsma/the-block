@@ -1805,6 +1805,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "codec"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "metrics",
+ "serde",
+ "serde_cbor",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "coding"
 version = "0.1.0"
 dependencies = [
@@ -1904,13 +1916,14 @@ dependencies = [
  "clap_complete",
  "criterion",
  "crypto",
+ "crypto_suite",
  "dex",
  "dirs",
  "dkg",
- "ed25519-dalek",
  "futures",
  "governance",
  "hex",
+ "httpmock",
  "light-client",
  "once_cell",
  "rand 0.8.5",
@@ -2327,7 +2340,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 name = "crypto"
 version = "0.1.0"
 dependencies = [
- "ed25519-dalek",
+ "crypto_suite",
  "pqcrypto-dilithium",
  "pqcrypto-traits",
  "rand 0.8.5",
@@ -2342,6 +2355,28 @@ dependencies = [
  "generic-array",
  "rand_core 0.6.4",
  "typenum",
+]
+
+[[package]]
+name = "crypto_suite"
+version = "0.1.0"
+dependencies = [
+ "bellman_ce",
+ "bincode",
+ "blake3",
+ "codec",
+ "criterion",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "rand 0.4.6",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "serde",
+ "sha2",
+ "sha3",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2485,6 +2520,7 @@ dependencies = [
  "indexmap 2.11.1",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "toml 0.8.23",
 ]
@@ -2866,7 +2902,7 @@ dependencies = [
  "axum 0.7.9",
  "bincode",
  "blake3",
- "ed25519-dalek",
+ "crypto_suite",
  "hex",
  "lru 0.11.1",
  "rand 0.8.5",
@@ -4300,8 +4336,8 @@ dependencies = [
 name = "inflation"
 version = "0.1.0"
 dependencies = [
- "bellman_ce",
- "rand 0.4.6",
+ "crypto_suite",
+ "rand 0.8.5",
  "serde",
  "serde_json",
 ]
@@ -4615,7 +4651,7 @@ name = "jurisdiction"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "ed25519-dalek",
+ "crypto_suite",
  "log",
  "once_cell",
  "pqcrypto-kyber",
@@ -5173,8 +5209,8 @@ dependencies = [
  "bincode",
  "blake3",
  "core-foundation 0.9.4",
+ "crypto_suite",
  "dirs",
- "ed25519-dalek",
  "flate2",
  "futures",
  "jni",
@@ -8957,10 +8993,10 @@ name = "tb-sim"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "crypto_suite",
  "csv",
  "dex",
  "dkg",
- "ed25519-dalek",
  "explorer",
  "hex",
  "ledger",
@@ -9030,6 +9066,8 @@ name = "the-block-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
+ "bincode",
+ "crypto_suite",
  "hex",
  "libfuzzer-sys",
  "tempfile",
@@ -9053,17 +9091,18 @@ dependencies = [
  "chacha20poly1305",
  "clap",
  "clap_complete",
+ "codec",
  "coding",
  "colored",
  "crc32fast",
  "criterion",
  "crypto",
+ "crypto_suite",
  "csv",
  "dashmap",
  "dex",
  "dirs",
  "dkg",
- "ed25519-dalek",
  "env_logger",
  "flate2",
  "fs2",
@@ -9717,9 +9756,9 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "blake3",
+ "crypto_suite",
  "dashmap",
  "dirs",
- "ed25519-dalek",
  "hex",
  "once_cell",
  "quinn",
@@ -10143,7 +10182,7 @@ dependencies = [
 name = "wallet"
 version = "0.1.0"
 dependencies = [
- "ed25519-dalek",
+ "crypto_suite",
  "hex",
  "hidapi",
  "hkdf",
