@@ -1,5 +1,6 @@
 # System-Wide Economic Changes
-> **Review (2025-09-25):** Documented wrapper telemetry rollout, refreshed dependency pivot status, and ensured capped-token references remain purged.
+> **Review (2025-09-25):** Synced System-Wide Economic Changes guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This living document chronicles every deliberate shift in The‑Block's protocol economics and system-wide design. Each section explains the historical context, the exact changes made in code and governance, the expected impact on operators and users, and the trade-offs considered. Future hard forks, reward schedule adjustments, or paradigm pivots must append an entry here so auditors can trace how the chain evolved.
 

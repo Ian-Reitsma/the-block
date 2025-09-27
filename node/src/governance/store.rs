@@ -7,6 +7,9 @@ use crate::telemetry::{
     governance_webhook, GOV_ACTIVATION_DELAY_SECONDS, GOV_PROPOSALS_PENDING, GOV_ROLLBACK_TOTAL,
     GOV_VOTES_TOTAL, PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
 };
+use governance_spec::{
+    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+};
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
@@ -40,6 +43,8 @@ struct ParamChangeRecord {
     new_value: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     fee_floor: Option<FeeFloorPolicySnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dependency_policy: Option<DependencyPolicySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +59,20 @@ struct FeeFloorPolicyRecord {
     proposal_id: u64,
     window: i64,
     percentile: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DependencyPolicySnapshot {
+    kind: String,
+    allowed: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyPolicyRecord {
+    pub epoch: u64,
+    pub proposal_id: u64,
+    pub kind: String,
+    pub allowed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +170,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::SchedulerWeightGossip => "scheduler_weight_gossip",
         ParamKey::SchedulerWeightCompute => "scheduler_weight_compute",
         ParamKey::SchedulerWeightStorage => "scheduler_weight_storage",
+        ParamKey::RuntimeBackend => "runtime_backend_policy",
+        ParamKey::TransportProvider => "transport_provider_policy",
+        ParamKey::StorageEnginePolicy => "storage_engine_policy",
     }
 }
 
@@ -204,6 +226,32 @@ impl GovStore {
         }
     }
 
+    fn persist_dependency_policy(
+        &self,
+        hist_dir: &Path,
+        epoch: u64,
+        proposal_id: u64,
+        snapshot: &DependencyPolicySnapshot,
+    ) {
+        let path = hist_dir.join("dependency_policy.json");
+        let mut history: Vec<DependencyPolicyRecord> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        history.push(DependencyPolicyRecord {
+            epoch,
+            proposal_id,
+            kind: snapshot.kind.clone(),
+            allowed: snapshot.allowed.clone(),
+        });
+        if history.len() > PARAM_HISTORY_LIMIT {
+            history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
+        }
+        if let Ok(bytes) = serde_json::to_vec(&history) {
+            let _ = std::fs::write(&path, bytes);
+        }
+    }
+
     fn persist_param_change(
         &self,
         hist_dir: &Path,
@@ -224,6 +272,22 @@ impl GovStore {
             None
         };
 
+        let dependency_snapshot = match key {
+            ParamKey::RuntimeBackend => Some(DependencyPolicySnapshot {
+                kind: "runtime_backend".to_string(),
+                allowed: decode_runtime_backend_policy(params.runtime_backend_policy),
+            }),
+            ParamKey::TransportProvider => Some(DependencyPolicySnapshot {
+                kind: "transport_provider".to_string(),
+                allowed: decode_transport_provider_policy(params.transport_provider_policy),
+            }),
+            ParamKey::StorageEnginePolicy => Some(DependencyPolicySnapshot {
+                kind: "storage_engine".to_string(),
+                allowed: decode_storage_engine_policy(params.storage_engine_policy),
+            }),
+            _ => None,
+        };
+
         let record = ParamChangeRecord {
             key,
             proposal_id,
@@ -231,6 +295,7 @@ impl GovStore {
             old_value,
             new_value,
             fee_floor: fee_snapshot.clone(),
+            dependency_policy: dependency_snapshot.clone(),
         };
 
         let path = hist_dir.join("param_changes.json");
@@ -248,6 +313,10 @@ impl GovStore {
 
         if let Some(snapshot) = fee_snapshot {
             self.persist_fee_floor_policy(hist_dir, epoch, proposal_id, snapshot);
+        }
+
+        if let Some(snapshot) = dependency_snapshot {
+            self.persist_dependency_policy(hist_dir, epoch, proposal_id, &snapshot);
         }
     }
 
@@ -319,6 +388,18 @@ impl GovStore {
         if let Ok(bytes) = std::fs::read(&path) {
             serde_json::from_slice(&bytes).map_err(|e| {
                 sled::Error::Unsupported(format!("de did revocation history: {e}").into())
+            })
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    pub fn dependency_policy_history(&self) -> sled::Result<Vec<DependencyPolicyRecord>> {
+        let hist_dir = self.base_path.join("governance/history");
+        let path = hist_dir.join("dependency_policy.json");
+        if let Ok(bytes) = std::fs::read(&path) {
+            serde_json::from_slice(&bytes).map_err(|e| {
+                sled::Error::Unsupported(format!("de dependency policy history: {e}").into())
             })
         } else {
             Ok(Vec::new())
@@ -799,6 +880,9 @@ impl GovStore {
                                 ParamKey::SchedulerWeightGossip => params.scheduler_weight_gossip,
                                 ParamKey::SchedulerWeightCompute => params.scheduler_weight_compute,
                                 ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
+                                ParamKey::RuntimeBackend => params.runtime_backend_policy,
+                                ParamKey::TransportProvider => params.transport_provider_policy,
+                                ParamKey::StorageEnginePolicy => params.storage_engine_policy,
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -992,6 +1076,9 @@ impl GovStore {
                 ParamKey::SchedulerWeightGossip => params.scheduler_weight_gossip,
                 ParamKey::SchedulerWeightCompute => params.scheduler_weight_compute,
                 ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
+                ParamKey::RuntimeBackend => params.runtime_backend_policy,
+                ParamKey::TransportProvider => params.transport_provider_policy,
+                ParamKey::StorageEnginePolicy => params.storage_engine_policy,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
@@ -1027,6 +1114,9 @@ impl GovStore {
             ParamKey::SchedulerWeightGossip => params.scheduler_weight_gossip,
             ParamKey::SchedulerWeightCompute => params.scheduler_weight_compute,
             ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
+            ParamKey::RuntimeBackend => params.runtime_backend_policy,
+            ParamKey::TransportProvider => params.transport_provider_policy,
+            ParamKey::StorageEnginePolicy => params.storage_engine_policy,
         };
         self.persist_param_change(
             &hist_dir,

@@ -1,5 +1,6 @@
 # SimpleDb – Snapshot-Oriented Key-Value Store
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced SimpleDb – Snapshot-Oriented Key-Value Store guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 `SimpleDb` provides a lightweight, in-memory map with crash-safe snapshot
 persistence for tests and feature-gated builds that do not link RocksDB. The

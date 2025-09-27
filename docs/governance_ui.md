@@ -1,5 +1,6 @@
 # Governance Web UI
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Governance Web UI guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 `gov-ui` serves a minimal web interface for governance proposals.
 Run with `cargo run -p gov-ui` then open `http://localhost:8080`.

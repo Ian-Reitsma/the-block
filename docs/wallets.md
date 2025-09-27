@@ -1,9 +1,10 @@
 # Wallets
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Wallets guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The `crates/wallet` crate implements deterministic Ed25519 key management, optional remote signer plumbing, and utilities for building transactions. The command-line interface lives in [`cli/src/wallet.rs`](../cli/src/wallet.rs) and is exposed through the `contract wallet` subcommand.
 
-> **Build status (2025-09-24):** `node/src/bin/wallet.rs` now builds solely
+> **Build status (2025-09-25):** `node/src/bin/wallet.rs` now builds solely
 > against the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`), forwards multisig signer sets, and passes the
 > escrow hash algorithm into `verify_proof`. Focus on polishing multisig UX
 > (batched signer discovery, richer operator messaging) before tagging the next

@@ -1,5 +1,6 @@
 # Governance Parameters
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Governance Parameters guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The chain exposes a handful of live‑tunable parameters that can be updated via on‑chain governance. Each proposal carries a key, a new value, and bounds. When a proposal passes, the change is queued and activates at the next epoch boundary.
 

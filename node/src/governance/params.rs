@@ -2,12 +2,27 @@ use super::ParamKey;
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
 use bincode;
+use governance_spec::{
+    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+    validate_runtime_backend_policy, validate_storage_engine_policy,
+    validate_transport_provider_policy, DEFAULT_RUNTIME_BACKEND_POLICY,
+    DEFAULT_STORAGE_ENGINE_POLICY, DEFAULT_TRANSPORT_PROVIDER_POLICY, RUNTIME_BACKEND_OPTIONS,
+    STORAGE_ENGINE_OPTIONS, TRANSPORT_PROVIDER_OPTIONS,
+};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 #[cfg(feature = "telemetry")]
 use tracing::info;
+
+const fn mask_all(len: usize) -> i64 {
+    ((1u64 << len) - 1) as i64
+}
+
+const RUNTIME_BACKEND_MASK_ALL: i64 = mask_all(RUNTIME_BACKEND_OPTIONS.len());
+const TRANSPORT_PROVIDER_MASK_ALL: i64 = mask_all(TRANSPORT_PROVIDER_OPTIONS.len());
+const STORAGE_ENGINE_MASK_ALL: i64 = mask_all(STORAGE_ENGINE_OPTIONS.len());
 
 pub struct Runtime<'a> {
     pub bc: &'a mut Blockchain,
@@ -69,6 +84,18 @@ impl<'a> Runtime<'a> {
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
         scheduler::set_weight(class, weight as u32);
+    }
+
+    pub fn set_runtime_backend_policy(&mut self, allowed: &[String]) {
+        crate::config::set_runtime_backend_policy(allowed);
+    }
+
+    pub fn set_transport_provider_policy(&mut self, allowed: &[String]) {
+        crate::config::set_transport_provider_policy(allowed);
+    }
+
+    pub fn set_storage_engine_policy(&mut self, allowed: &[String]) {
+        crate::config::set_storage_engine_policy(allowed);
     }
 }
 
@@ -133,6 +160,12 @@ pub struct Params {
     pub scheduler_weight_gossip: i64,
     pub scheduler_weight_compute: i64,
     pub scheduler_weight_storage: i64,
+    #[serde(default = "default_runtime_backend_policy")]
+    pub runtime_backend_policy: i64,
+    #[serde(default = "default_transport_provider_policy")]
+    pub transport_provider_policy: i64,
+    #[serde(default = "default_storage_engine_policy")]
+    pub storage_engine_policy: i64,
 }
 
 impl Default for Params {
@@ -173,12 +206,27 @@ impl Default for Params {
             scheduler_weight_gossip: 3,
             scheduler_weight_compute: 2,
             scheduler_weight_storage: 1,
+            runtime_backend_policy: default_runtime_backend_policy(),
+            transport_provider_policy: default_transport_provider_policy(),
+            storage_engine_policy: default_storage_engine_policy(),
         }
     }
 }
 
 const fn default_proof_rebate_limit_ct() -> i64 {
     1
+}
+
+const fn default_runtime_backend_policy() -> i64 {
+    DEFAULT_RUNTIME_BACKEND_POLICY
+}
+
+const fn default_transport_provider_policy() -> i64 {
+    DEFAULT_TRANSPORT_PROVIDER_POLICY
+}
+
+const fn default_storage_engine_policy() -> i64 {
+    DEFAULT_STORAGE_ENGINE_POLICY
 }
 
 fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {
@@ -351,8 +399,32 @@ fn apply_heuristic_mu(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_runtime_backend_policy(v: i64, p: &mut Params) -> Result<(), ()> {
+    if !validate_runtime_backend_policy(v) {
+        return Err(());
+    }
+    p.runtime_backend_policy = v;
+    Ok(())
+}
+
+fn apply_transport_provider_policy(v: i64, p: &mut Params) -> Result<(), ()> {
+    if !validate_transport_provider_policy(v) {
+        return Err(());
+    }
+    p.transport_provider_policy = v;
+    Ok(())
+}
+
+fn apply_storage_engine_policy(v: i64, p: &mut Params) -> Result<(), ()> {
+    if !validate_storage_engine_policy(v) {
+        return Err(());
+    }
+    p.storage_engine_policy = v;
+    Ok(())
+}
+
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 29] = [
+    static REGS: [ParamSpec; 32] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -690,6 +762,48 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_scheduler_weight_storage,
             apply_runtime: |v, rt| {
                 rt.set_scheduler_weight(ServiceClass::Storage, v as u64);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::RuntimeBackend,
+            default: default_runtime_backend_policy(),
+            min: 1,
+            max: RUNTIME_BACKEND_MASK_ALL,
+            unit: "bitmask",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_runtime_backend_policy,
+            apply_runtime: |v, rt| {
+                let allowed = decode_runtime_backend_policy(v);
+                rt.set_runtime_backend_policy(&allowed);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::TransportProvider,
+            default: default_transport_provider_policy(),
+            min: 1,
+            max: TRANSPORT_PROVIDER_MASK_ALL,
+            unit: "bitmask",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_transport_provider_policy,
+            apply_runtime: |v, rt| {
+                let allowed = decode_transport_provider_policy(v);
+                rt.set_transport_provider_policy(&allowed);
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::StorageEnginePolicy,
+            default: default_storage_engine_policy(),
+            min: 1,
+            max: STORAGE_ENGINE_MASK_ALL,
+            unit: "bitmask",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_storage_engine_policy,
+            apply_runtime: |v, rt| {
+                let allowed = decode_storage_engine_policy(v);
+                rt.set_storage_engine_policy(&allowed);
                 Ok(())
             },
         },

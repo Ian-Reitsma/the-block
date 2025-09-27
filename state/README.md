@@ -1,4 +1,6 @@
 # State Storage
+> **Review (2025-09-25):** Synced State Storage guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 State persistence uses a RocksDB key-value store located under the path
 supplied to the node via `--db-path` (default `~/.block/db`). Keys are stored

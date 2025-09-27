@@ -1,5 +1,6 @@
 # QUIC Transport Integration
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced QUIC Transport Integration guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the trait-based QUIC transport layer that carries peer-to-peer traffic in The-Block.
 

@@ -1,5 +1,6 @@
 # Governance-Secured Release Flow
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Governance-Secured Release Flow guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the process for approving and installing node
 software releases through on-chain governance. Nodes may only install
@@ -14,6 +15,12 @@ attested by a quorum of release signers.
    controller publishes the hash on chain together with the quorum data.
 3. During startup, nodes fetch the list of approved hashes and refuse
    to run binaries that are not present.
+4. Release provenance now records the staged vendor tree hash and the dependency
+   snapshot referenced in governance proposals. CI refuses to publish tags until
+   `scripts/release_provenance.sh` emits matching digests, and `scripts/verify_release.sh`
+   confirms that the shipped snapshot aligns with the committed policy baseline. Governance
+   proposals should include the vendor digest and snapshot path so operators can cross-check
+   artifacts before voting.
 
 Wallets expose two helper commands:
 
@@ -161,3 +168,8 @@ Documenting the outcome of these drills in change-management systems ensures tha
   telemetry agrees with the staging sanity check.
 - Capture the overlay backend selection in the release notes so operators can
   audit that production nodes match the staged configuration.
+- Run `cargo run -p release_notes -- --state-dir /var/lib/the-block` (or point
+  `--history` at an exported archive) to summarise any runtime, transport, or
+  storage backend switches approved during the cycle; paste the output into the
+  release notes alongside the dependency snapshot digests so operators can
+  confirm governance intent before upgrading.

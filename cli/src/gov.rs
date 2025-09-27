@@ -1,6 +1,7 @@
 use clap::Subcommand;
 use governance::{
-    controller, registry, GovStore, ParamKey, Proposal, ProposalStatus,
+    controller, encode_runtime_backend_policy, encode_storage_engine_policy,
+    encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote, Vote,
     VoteChoice,
 };
@@ -94,7 +95,7 @@ pub enum GovParamCmd {
         /// Parameter key (e.g. `mempool.fee_floor_window`)
         key: String,
         /// Proposed new value
-        value: i64,
+        value: String,
         #[arg(long, default_value = "gov.db")]
         state: String,
         #[arg(long, default_value_t = 0)]
@@ -110,6 +111,9 @@ fn parse_param_key(name: &str) -> Option<ParamKey> {
     match name {
         "mempool.fee_floor_window" | "FeeFloorWindow" => Some(ParamKey::FeeFloorWindow),
         "mempool.fee_floor_percentile" | "FeeFloorPercentile" => Some(ParamKey::FeeFloorPercentile),
+        "runtime.backend" | "RuntimeBackend" => Some(ParamKey::RuntimeBackend),
+        "transport.provider" | "TransportProvider" => Some(ParamKey::TransportProvider),
+        "storage.engine_policy" | "StorageEnginePolicy" => Some(ParamKey::StorageEnginePolicy),
         _ => None,
     }
 }
@@ -271,10 +275,65 @@ pub fn handle(cmd: GovCmd) {
                     eprintln!("parameter not governable: {key}");
                     return;
                 };
-                if value < spec.min || value > spec.max {
+                let new_value = match param_key {
+                    ParamKey::RuntimeBackend => {
+                        let entries: Vec<String> = value
+                            .split(',')
+                            .map(|s| s.trim().to_ascii_lowercase())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect();
+                        match encode_runtime_backend_policy(entries.iter().map(|s| s.as_str())) {
+                            Ok(mask) => mask,
+                            Err(err) => {
+                                eprintln!("invalid runtime backend policy: {err}");
+                                return;
+                            }
+                        }
+                    }
+                    ParamKey::TransportProvider => {
+                        let entries: Vec<String> = value
+                            .split(',')
+                            .map(|s| s.trim().to_ascii_lowercase())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect();
+                        match encode_transport_provider_policy(entries.iter().map(|s| s.as_str())) {
+                            Ok(mask) => mask,
+                            Err(err) => {
+                                eprintln!("invalid transport provider policy: {err}");
+                                return;
+                            }
+                        }
+                    }
+                    ParamKey::StorageEnginePolicy => {
+                        let entries: Vec<String> = value
+                            .split(',')
+                            .map(|s| s.trim().to_ascii_lowercase())
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect();
+                        match encode_storage_engine_policy(entries.iter().map(|s| s.as_str())) {
+                            Ok(mask) => mask,
+                            Err(err) => {
+                                eprintln!("invalid storage engine policy: {err}");
+                                return;
+                            }
+                        }
+                    }
+                    _ => match value.parse::<i64>() {
+                        Ok(v) => v,
+                        Err(err) => {
+                            eprintln!("failed to parse value `{value}`: {err}");
+                            return;
+                        }
+                    },
+                };
+
+                if new_value < spec.min || new_value > spec.max {
                     eprintln!(
                         "value {} out of bounds (min {} max {})",
-                        value, spec.min, spec.max
+                        new_value, spec.min, spec.max
                     );
                     return;
                 }
@@ -282,7 +341,7 @@ pub fn handle(cmd: GovCmd) {
                 let proposal = Proposal {
                     id: 0,
                     key: param_key,
-                    new_value: value,
+                    new_value,
                     min: spec.min,
                     max: spec.max,
                     proposer: proposer.unwrap_or_else(|| "cli".into()),

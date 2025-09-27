@@ -348,6 +348,23 @@ async fn main() -> anyhow::Result<()> {
             }),
         )
         .route(
+            "/governance/dependency_policy",
+            get(move |Query(query): Query<GovHistoryQuery>| {
+                let store_path = query.store.unwrap_or_else(|| {
+                    std::env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into())
+                });
+                async move {
+                    match gov_param_view::dependency_policy_history(&store_path) {
+                        Ok(records) => Json(records),
+                        Err(err) => {
+                            eprintln!("dependency policy history failed: {err}");
+                            Json(Vec::<gov_param_view::DependencyPolicyRecord>::new())
+                        }
+                    }
+                }
+            }),
+        )
+        .route(
             "/network/certs",
             get(move || async move { Json(explorer::net_view::list_peer_certs()) }),
         )

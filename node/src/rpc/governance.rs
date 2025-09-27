@@ -2,6 +2,9 @@ use super::RpcError;
 use crate::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
+use governance_spec::{
+    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+};
 use serde_json::json;
 
 fn parse_key(k: &str) -> Option<ParamKey> {
@@ -191,6 +194,12 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
         "lambda_bytes_out_sub_ct": params.lambda_bytes_out_sub_ct,
         "rent_rate_ct_per_byte": params.rent_rate_ct_per_byte,
         "miner_hysteresis": params.miner_hysteresis,
+        "runtime_backend_mask": params.runtime_backend_policy,
+        "runtime_backend_policy": decode_runtime_backend_policy(params.runtime_backend_policy),
+        "transport_provider_mask": params.transport_provider_policy,
+        "transport_provider_policy": decode_transport_provider_policy(params.transport_provider_policy),
+        "storage_engine_mask": params.storage_engine_policy,
+        "storage_engine_policy": decode_storage_engine_policy(params.storage_engine_policy),
     }))
 }
 

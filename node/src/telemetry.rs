@@ -58,6 +58,8 @@ const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["tokio", "stub"];
 #[cfg(feature = "telemetry")]
 const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
 #[cfg(feature = "telemetry")]
+const KNOWN_STORAGE_ENGINES: [&str; 3] = ["memory", "rocksdb", "sled"];
+#[cfg(feature = "telemetry")]
 const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
     ("bincode", &["transaction", "gossip", "storage_manifest"]),
     ("json", &["none"]),
@@ -441,8 +443,37 @@ pub fn record_runtime_backend(active: &str) {
     }
 }
 
+#[cfg(feature = "telemetry")]
+pub fn record_dependency_policy(kind: &str, allowed: &[String]) {
+    let known = match kind {
+        "runtime" => &KNOWN_RUNTIME_BACKENDS[..],
+        "transport" => &KNOWN_TRANSPORT_PROVIDERS[..],
+        "storage" => &KNOWN_STORAGE_ENGINES[..],
+        _ => return,
+    };
+    for label in known {
+        let value = if allowed
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case(label))
+        {
+            1.0
+        } else {
+            0.0
+        };
+        GOV_DEPENDENCY_POLICY_ALLOWED
+            .with_label_values(&[kind, label])
+            .set(value);
+    }
+    if crate::telemetry::should_log("governance") {
+        tracing::info!(kind, allowed = ?allowed, "dependency_policy_recorded");
+    }
+}
+
 #[cfg(not(feature = "telemetry"))]
 pub fn record_runtime_backend(_active: &str) {}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_dependency_policy(_kind: &str, _allowed: &[String]) {}
 
 #[cfg(feature = "telemetry")]
 pub fn record_transport_backend(active: &str) {
@@ -3261,6 +3292,21 @@ pub static GOV_ACTIVATION_DELAY_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
         .register(Box::new(h.clone()))
         .unwrap_or_else(|e| panic!("registry gov_activation_delay_seconds: {e}"));
     h
+});
+
+pub static GOV_DEPENDENCY_POLICY_ALLOWED: Lazy<GaugeVec> = Lazy::new(|| {
+    let g = GaugeVec::new(
+        Opts::new(
+            "gov_dependency_policy_allowed",
+            "Governance-approved dependency entries (1 allowed / 0 disallowed)",
+        ),
+        &["kind", "label"],
+    )
+    .unwrap_or_else(|e| panic!("gauge gov_dependency_policy_allowed: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry gov_dependency_policy_allowed: {e}"));
+    g
 });
 
 /// Send governance events to an external webhook if `GOV_WEBHOOK_URL` is set.

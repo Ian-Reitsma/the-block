@@ -1,5 +1,6 @@
 # Light-Client Incentives Playbook
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Light-Client Incentives Playbook guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Light-client relayers earn consumer-token (CT) rebates whenever they submit
 valid proofs that are later folded into mined blocks. This guide explains the

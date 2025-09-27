@@ -1,7 +1,12 @@
-use crate::simple_db::EngineConfig;
+use crate::simple_db::{EngineConfig, EngineKind};
 #[cfg(feature = "telemetry")]
-use crate::telemetry::CONFIG_RELOAD_TOTAL;
+use crate::telemetry::{record_dependency_policy, CONFIG_RELOAD_TOTAL};
 use anyhow::{anyhow, Result};
+use governance_spec::{
+    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
+    DEFAULT_RUNTIME_BACKEND_POLICY, DEFAULT_STORAGE_ENGINE_POLICY,
+    DEFAULT_TRANSPORT_PROVIDER_POLICY,
+};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -197,6 +202,183 @@ fn default_retention_secs() -> u64 {
 
 static CONFIG_DIR: Lazy<RwLock<String>> = Lazy::new(|| RwLock::new(String::new()));
 static CURRENT_CONFIG: Lazy<RwLock<NodeConfig>> = Lazy::new(|| RwLock::new(NodeConfig::default()));
+#[derive(Clone)]
+struct DependencyPolicy {
+    runtime_backends: Vec<String>,
+    transport_providers: Vec<String>,
+    storage_engines: Vec<String>,
+}
+
+impl Default for DependencyPolicy {
+    fn default() -> Self {
+        Self {
+            runtime_backends: decode_runtime_backend_policy(DEFAULT_RUNTIME_BACKEND_POLICY),
+            transport_providers: decode_transport_provider_policy(
+                DEFAULT_TRANSPORT_PROVIDER_POLICY,
+            ),
+            storage_engines: decode_storage_engine_policy(DEFAULT_STORAGE_ENGINE_POLICY),
+        }
+    }
+}
+
+static DEP_POLICY: Lazy<RwLock<DependencyPolicy>> =
+    Lazy::new(|| RwLock::new(DependencyPolicy::default()));
+
+fn dependency_policy() -> DependencyPolicy {
+    DEP_POLICY.read().unwrap().clone()
+}
+
+fn normalize_policy(values: &[String]) -> Vec<String> {
+    let mut normalized: Vec<String> = values
+        .iter()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+pub fn set_runtime_backend_policy(allowed: &[String]) {
+    let normalized = normalize_policy(allowed);
+    let updated = {
+        let mut policy = DEP_POLICY.write().unwrap();
+        policy.runtime_backends = if normalized.is_empty() {
+            decode_runtime_backend_policy(DEFAULT_RUNTIME_BACKEND_POLICY)
+        } else {
+            normalized
+        };
+        policy.clone()
+    };
+    enforce_runtime_policy(&updated.runtime_backends);
+    reapply_config_with_policy();
+}
+
+pub fn set_transport_provider_policy(allowed: &[String]) {
+    let normalized = normalize_policy(allowed);
+    {
+        let mut policy = DEP_POLICY.write().unwrap();
+        policy.transport_providers = if normalized.is_empty() {
+            decode_transport_provider_policy(DEFAULT_TRANSPORT_PROVIDER_POLICY)
+        } else {
+            normalized
+        };
+    }
+    reapply_config_with_policy();
+}
+
+pub fn set_storage_engine_policy(allowed: &[String]) {
+    let normalized = normalize_policy(allowed);
+    {
+        let mut policy = DEP_POLICY.write().unwrap();
+        policy.storage_engines = if normalized.is_empty() {
+            decode_storage_engine_policy(DEFAULT_STORAGE_ENGINE_POLICY)
+        } else {
+            normalized
+        };
+    }
+    reapply_config_with_policy();
+}
+
+fn reapply_config_with_policy() {
+    let current = CURRENT_CONFIG.read().unwrap().clone();
+    let mut effective = current.clone();
+    enforce_dependency_policies(&mut effective);
+    apply(&effective);
+    *CURRENT_CONFIG.write().unwrap() = effective;
+}
+
+fn enforce_dependency_policies(cfg: &mut NodeConfig) {
+    let policy = dependency_policy();
+    apply_storage_policy(cfg, &policy.storage_engines);
+    apply_transport_policy(cfg, &policy.transport_providers);
+    enforce_runtime_policy(&policy.runtime_backends);
+    #[cfg(feature = "telemetry")]
+    {
+        record_dependency_policy("transport", &policy.transport_providers);
+        record_dependency_policy("storage", &policy.storage_engines);
+    }
+}
+
+fn allowed_contains(list: &[String], candidate: &str) -> bool {
+    list.iter().any(|item| item.eq_ignore_ascii_case(candidate))
+}
+
+fn parse_engine_kind(name: &str) -> Option<EngineKind> {
+    match name {
+        "memory" => Some(EngineKind::Memory),
+        "rocksdb" => Some(EngineKind::RocksDb),
+        "sled" => Some(EngineKind::Sled),
+        _ => None,
+    }
+}
+
+fn apply_storage_policy(cfg: &mut NodeConfig, allowed: &[String]) {
+    if allowed.is_empty() {
+        return;
+    }
+    let fallback = allowed.iter().find_map(|name| parse_engine_kind(name));
+    let Some(fallback_engine) = fallback else {
+        #[cfg(feature = "telemetry")]
+        tracing::warn!(allowed = ?allowed, "storage_engine_policy_missing_fallback");
+        return;
+    };
+    let mut changed = false;
+    if !allowed_contains(allowed, cfg.storage.default_engine.label()) {
+        cfg.storage.default_engine = fallback_engine;
+        changed = true;
+    }
+    for engine in cfg.storage.overrides.values_mut() {
+        if !allowed_contains(allowed, engine.label()) {
+            *engine = fallback_engine;
+            changed = true;
+        }
+    }
+    if changed {
+        #[cfg(feature = "telemetry")]
+        tracing::warn!(allowed = ?allowed, "storage_engine_policy_enforced");
+    }
+}
+
+fn apply_transport_policy(cfg: &mut NodeConfig, allowed: &[String]) {
+    if allowed.is_empty() {
+        return;
+    }
+    let Some(fallback) = allowed.first().cloned() else {
+        return;
+    };
+    if let Some(quic_cfg) = cfg.quic.as_mut() {
+        let replace = quic_cfg
+            .transport
+            .provider
+            .as_ref()
+            .map(|p| !allowed_contains(allowed, p))
+            .unwrap_or(true);
+        if replace {
+            quic_cfg.transport.provider = Some(fallback);
+            #[cfg(feature = "telemetry")]
+            tracing::warn!(allowed = ?allowed, "transport_provider_policy_enforced");
+        }
+    }
+}
+
+fn enforce_runtime_policy(allowed: &[String]) {
+    if allowed.is_empty() {
+        return;
+    }
+    let active = crate::runtime::handle().backend_name();
+    if !allowed_contains(allowed, active) {
+        #[cfg(feature = "telemetry")]
+        tracing::warn!(active, allowed = ?allowed, "runtime_backend_policy_violation");
+        #[cfg(not(feature = "telemetry"))]
+        eprintln!(
+            "runtime backend `{}` not permitted by governance policy: {:?}",
+            active, allowed
+        );
+    }
+    #[cfg(feature = "telemetry")]
+    record_dependency_policy("runtime", allowed);
+}
 #[derive(Clone)]
 pub struct RateLimitConfig {
     pub p2p_max_per_sec: u32,
@@ -489,14 +671,16 @@ impl Default for RpcConfig {
 impl NodeConfig {
     pub fn load(dir: &str) -> Self {
         let path = format!("{}/default.toml", dir);
-        fs::read_to_string(&path)
+        let mut cfg = fs::read_to_string(&path)
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_else(|| {
                 let cfg = Self::default();
                 let _ = cfg.save(dir);
                 cfg
-            })
+            });
+        enforce_dependency_policies(&mut cfg);
+        cfg
     }
 
     pub fn save(&self, dir: &str) -> std::io::Result<()> {
@@ -511,7 +695,7 @@ impl NodeConfig {
 fn load_file(dir: &str) -> Result<NodeConfig> {
     let path = format!("{}/default.toml", dir);
     let data = fs::read_to_string(&path)?;
-    let cfg: NodeConfig = toml::from_str(&data)?;
+    let mut cfg: NodeConfig = toml::from_str(&data)?;
     #[cfg(feature = "quic")]
     {
         let quic_path = format!("{}/quic.toml", dir);
@@ -522,6 +706,7 @@ fn load_file(dir: &str) -> Result<NodeConfig> {
             }
         }
     }
+    enforce_dependency_policies(&mut cfg);
     crate::storage::settings::configure_from_dir(dir);
     Ok(cfg)
 }

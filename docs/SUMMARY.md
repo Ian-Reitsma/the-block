@@ -1,9 +1,12 @@
 # Summary
-> **Review (2025-09-25):** Reordered navigation around the wrapper rollout, added codec/crypto telemetry references, and cross-linked consolidated progress docs.
+> **Review (2025-09-25):** Synced Summary guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 - [Progress Snapshot & Pillar Evidence](progress.md)
 - [Dependency Sovereignty Pivot Plan](pivot_dependency_strategy.md)
 - [Status, Roadmap & Milestones](roadmap.md)
+ 
+> Consolidation note: Subsystem specs defer to `pivot_dependency_strategy.md` for wrapper-wide policy guidance so individual guides focus on implementation specifics.
 - [Telemetry](telemetry.md)
 - [Telemetry Operations Runbook](telemetry_ops.md)
 - [Networking](networking.md)

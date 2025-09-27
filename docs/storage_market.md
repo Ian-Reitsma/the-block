@@ -1,5 +1,6 @@
 # Storage Market Design
-> **Review (2025-09-25):** Added coding fallback rollout context and telemetry updates for provider monitoring.
+> **Review (2025-09-25):** Synced Storage Market Design guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the incentive-compatible storage market where nodes
 advertise available disk space and accept contracts funded in-chain.

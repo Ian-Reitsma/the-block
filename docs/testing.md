@@ -1,9 +1,10 @@
 # Integration and Chaos Testing
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Integration and Chaos Testing guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the strategy for integration and chaos testing in **The-Block**.
 
-> **Current caveats (2025-09-24):** CLI binaries now build cleanly on the
+> **Current caveats (2025-09-25):** CLI binaries now build cleanly on the
 > crypto suite’s Ed25519 backend (powered by `ed25519-dalek 2.2.x`), the
 > transport crate re-exports the `quic` feature so
 > integration harnesses must pass `--features "integration-tests quic"` when

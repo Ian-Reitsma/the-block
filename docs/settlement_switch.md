@@ -1,5 +1,6 @@
 # Compute Settlement Modes
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Compute Settlement Modes guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The compute marketplace supports a two-phase switch from dry-run to real
 settlement on devnet. Operators can arm the system to start applying real

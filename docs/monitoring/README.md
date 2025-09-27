@@ -1,5 +1,6 @@
 # Monitoring Dashboards
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Monitoring Dashboards guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This directory contains subsystem-specific Grafana dashboards that complement
 the primary telemetry bundle under `monitoring/grafana/`. Each JSON file is

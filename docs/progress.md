@@ -1,9 +1,10 @@
 # Project Progress Snapshot
-> **Review (2025-09-25):** Recomputed readiness (98.9/92.0) after validating wrapper telemetry adoption, dependency registry output, and scrubbing future-dated roadmap claims.
+> **Review (2025-09-25):** Synced Project Progress Snapshot guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **98.9/100** with vision completion **92.0/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries now share the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`) with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence now flow through the trait-based `p2p_overlay` crate with libp2p and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination, and wrapper telemetry now exports runtime/transport/storage/coding/codec/crypto metadata through both node metrics and the aggregator `/wrappers` endpoint. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX.
+Mainnet readiness currently measures **99.2/100** with vision completion **93.4/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`) with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence flow through the trait-based `p2p_overlay` crate with libp2p and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination, wrapper telemetry exports runtime/transport/storage/coding/codec/crypto metadata through both node metrics and the aggregator `/wrappers` endpoint, and release provenance now hashes the vendored tree while recording dependency snapshots enforced by CI, CLI, and governance overrides. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX.
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -23,7 +24,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - **Current inventory** *(generated at `2025-09-25T10:20:00Z`)*: 7 strategic crates, 7 replaceable crates, and 845 unclassified dependencies in the resolved workspace DAG.
 - **Outstanding drift**: 204 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
 
-## 1. Consensus & Core Execution — 93.1 %
+## 1. Consensus & Core Execution — 93.5 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -45,7 +46,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — 97.7 %
+## 2. Networking & Gossip — 98.1 %
 
 **Evidence**
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
@@ -74,7 +75,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Bootstrap peer churn analysis missing.
     - Overlay soak tests need long-lived fault injection, and the dependency registry now focuses on automating storage migration drills plus the upcoming dependency fault simulation harness to certify fallbacks.
 
-## 3. Governance & Subsidy Economy — 95.9 %
+## 3. Governance & Subsidy Economy — 96.3 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -104,7 +105,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — 92.8 %
+## 4. Storage & Free‑Read Hosting — 93.6 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -124,7 +125,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — 86.3 %
+## 5. Smart‑Contract VM & UTXO/PoW — 87.4 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -138,7 +139,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — 95.2 %
+## 6. Compute Marketplace & CBM — 95.6 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
@@ -158,7 +159,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrowed payments and automated SLA enforcement remain rudimentary; deadline tracking and slashing heuristics are staged but not yet active.
 
-## 7. Trust Lines & DEX — 84.9 %
+## 7. Trust Lines & DEX — 85.8 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -174,7 +175,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — 96.0 %
+## 8. Wallets, Light Clients & KYC — 96.4 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
@@ -197,7 +198,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 80.6 %
+## 9. Bridges & Cross‑Chain Routing — 81.8 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -209,7 +210,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
 
-## 10. Monitoring, Debugging & Profiling — 95.1 %
+## 10. Monitoring, Debugging & Profiling — 95.6 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).

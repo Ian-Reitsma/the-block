@@ -1,100 +1,177 @@
-# Dependency Sovereignty Pivot
-> **Review (2025-09-25):** Updated phase table after codec/crypto wrapper delivery and documented wrapper telemetry/governance integration milestones.
+# Pivot Dependency Strategy Runbook
+> **Review (2025-09-25):** Synced Pivot Dependency Strategy Runbook guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
-The dependency-sovereignty initiative formalises the founders’ directive to own
-our substrate end-to-end. The registry, wrapper, and governance hooks promoted
-throughout the handbook guarantee that upstream crates become optional
-accelerants rather than hidden prerequisites. This guide captures the why, the
-sequencing, and the cross-functional expectations so every engineering,
-operator, and governance workflow stays aligned.
+This runbook aligns engineering and operations on the hybrid dependency strategy that
+pairs runtime-selectable wrappers with policy-governed in-house fallbacks. It expands on
+the dependency provenance requirements documented in [`docs/provenance.md`](provenance.md)
+and the governance-controlled backend policies introduced in [`docs/governance.md`](governance.md).
+Release provenance tooling now vendors the workspace into a staging directory, records
+deterministic hashes in `provenance.json` and `checksums.txt`, and blocks tagging unless
+dependency_registry snapshots match policy so this runbook focuses on operational rollout
+coordination rather than hash attestation plumbing.
 
-## Context and Rationale
+## 1. Strategy Overview
 
-- **Risk containment.** More than 800 third-party crates previously dictated our
-  runtime, transport, storage, and cryptography semantics. A single upstream
-  patch could invalidate our safety proofs or stall release cadences. Ownership
-  eliminates that roulette.
-- **Deterministic delivery.** Governance, CLI, explorer, telemetry, and wallet
-  consumers all assume identical behaviour. We can only meet that expectation by
-  controlling the APIs and release tempo of the underlying components.
-- **Strategic leverage.** In-house implementations let us tune performance,
-  telemetry labels, and failure envelopes without negotiating with external
-  maintainers. They also strengthen the IP story and licensing options.
-- **Operator trust.** Stakeholders need crisp answers when backends change.
-  Provider IDs, codec versions, and engine selections now emit through telemetry
-  and CLI/RPC endpoints so rollouts remain observable and reversible.
+* **Hybrid abstraction:** Every critical dependency (runtime, transport, overlay, storage,
+coding, crypto, codec) is accessed through wrapper crates that expose a stable trait
+surface while allowing multiple backend implementations.
+* **Policy guardrails:** Governance parameters (`RuntimeBackend`, `TransportProvider`,
+`StorageEnginePolicy`, etc.) gate which backends can be activated. Operators apply policy
+updates during release provenance checks so deployed binaries always reflect the approved
+matrix.
+* **Fallback readiness:** In-house implementations stay buildable and tested behind the
+same wrappers. Simulation harnesses exercise failover paths and publish readiness
+summaries, letting governance stage cutovers with confidence.
+* **Tooling integration:** Release provenance scripts generate dependency snapshots,
+vendor hashes, and policy attestations. The `tools/vendor_sync` helper keeps the vendored
+tree reproducible, while `tools/dependency_registry` records policy-compliant snapshots
+for auditing.
 
-## Phase Breakdown
+## 2. Wrapper Flow Diagram
 
-| Phase | Scope | Status | Notes |
-|-------|-------|--------|-------|
-| 1 | Inventory & policy via `tools/dependency_registry` | ✅ Complete | Baseline snapshot stored in `docs/dependency_inventory.json`; violations surface in CI and release scripts. |
-| 2 | CI & tooling gates for dependency policy | ✅ Complete | `just dependency-audit` and GitHub Actions enforce policy drift checks. |
-| 3 | Runtime wrapper (`crates/runtime`) | ✅ Complete | Tokio hidden behind first-party traits; stub backend available for tests. |
-| 4 | Runtime adoption & Tokio linting | ✅ Complete | Workspace crates import the wrapper; disallowed Tokio methods enforced in lint configs. |
-| 5 | QUIC transport abstraction (`crates/transport`) | ✅ Complete | Quinn and s2n encapsulated with provider registry, config, and telemetry adapters. |
-| 6 | Provider introspection & handshake wiring | ✅ Complete | Node, CLI, RPC, and telemetry expose provider IDs and rotation metadata; `config/quic.toml` governs selection. |
-| 7 | P2P overlay trait crate | ✅ Complete | Libp2p and stub backends ship behind `crates/p2p_overlay` with persistence, telemetry, and CLI selection. |
-| 8 | Overlay enforcement & diagnostics | ✅ Complete | Lints block direct libp2p usage; telemetry panels and CLI/RPC stats expose backend health. |
-| 9 | Storage-engine abstraction | ✅ Complete | RocksDB, sled, and in-memory engines wrap the shared trait with config-driven selection. |
-| 10 | Storage migration tooling | 🚧 In Progress | Snapshot tooling stages via temp files; incentive marketplace DHT migrations next. |
-| 11 | Coding crate for erasure/compression | ✅ Complete | `crates/coding` fronts erasure/compression with rollout gates and telemetry labels. |
-| 12 | In-house fallback coder/compressor | ✅ Complete | XOR parity, RLE compression, and bench harness shipped with governance-controlled rollout toggles. |
-| 13 | Crypto suite consolidation | ✅ Complete | `crates/crypto_suite` owns signatures, hashing, KDF, and Groth16 helpers with regression/bench coverage. |
-| 14 | Suite adoption across node/CLI/wallet | ✅ Complete | Node, CLI, explorer, and wallet migrate to the suite with compatibility re-exports. |
-| 15 | Codec abstraction for serde/bincode | ✅ Complete | `crates/codec` exposes named profiles, serde bridging macros, telemetry hooks, and corruption tests. |
-| 16 | Wrapper telemetry & dashboards | ✅ Complete | Prometheus metrics, aggregator `/wrappers` endpoint, and Grafana dashboards chart backend selections and failures. |
-| 17 | Dependency fault simulation harness | ⏳ Planned | Harness scaffolding in `sim/`; awaiting overlay/storage abstractions. |
-| 18 | Governance-managed dependency policy | 🚧 In Progress | Param definitions reviewed; CLI wiring underway. |
-| 19 | Release pipeline vendor syncs | ✅ Complete | Provenance scripts hash vendored trees and archive registry snapshots. |
-| 20 | Pivot runbook & onboarding guide | ✅ Complete | This document plus README/AGENTS revisions deliver the narrative. |
+```mermaid
+graph TD
+    subgraph Runtime
+        R[Runtime Wrapper]
+        RB[Runtime Backends]
+    end
+    subgraph Transport
+        T[Transport Wrapper]
+        TB[Quinn | s2n | Mock]
+    end
+    subgraph Overlay
+        O[Overlay Wrapper]
+        OB[Libp2p | Stub]
+    end
+    subgraph Storage
+        S[Storage Engine Wrapper]
+        SB[RocksDB | sled | InMemory]
+    end
+    subgraph Coding
+        C[Coding Wrapper]
+        CB[Erasure | Compression | Encryption]
+    end
+    subgraph Crypto
+        CR[Crypto Wrapper]
+        CRB[dalek | FFI | In-house]
+    end
+    subgraph Codec
+        CO[Codec Wrapper]
+        COB[Binary | JSON | Custom]
+    end
 
-## Operator & Contributor Checklist
+    R --> T --> O --> S
+    R --> C
+    C --> CR
+    CR --> CO
 
-1. **Run the registry audit.** `just dependency-audit` (or `make dependency-check`)
-   must succeed before submitting code or release artifacts.
-2. **Load the new QUIC config.** Copy `config/quic.toml`, select the Quinn or
-   s2n provider, and verify telemetry via `blockctl net quic stats`.
-3. **Track backend metrics.** Dashboards now emit
-   `transport_provider_connect_total{provider}`, `runtime_backend_info`, and
-   other wrapper gauges; alerts should key off these labels, not crate names.
-4. **Reference wrappers only.** Tokio, Quinn, RocksDB, serde/bincode, libp2p,
-   and crypto imports must route through the first-party crates. The lint suite
-   blocks stragglers.
-5. **Stage migrations deliberately.** Use the simulation harness (phase 17) and
-   governance parameters (phase 18) to greenlight backend swaps. Operators should
-   document overrides in runbooks and confirm telemetry before promoting a change.
-6. **Document learnings.** Any deviation discovered while reviewing subsystem docs
-   must be patched both in code and in the relevant guide before closing a task.
+    classDef wrapper fill:#1f2933,stroke:#0ea5e9,stroke-width:2px,color:#f1f5f9;
+    classDef backend fill:#0f172a,stroke:#334155,stroke-width:1px,color:#e2e8f0;
+    class R,T,O,S,C,CR,CO wrapper;
+    class RB,TB,OB,SB,CB,CRB,COB backend;
+```
 
-## Governance & Telemetry Integration
+The arrows show control flow between wrappers. Each wrapper reads governance policy to
+select an allowed backend before providing functionality to downstream crates.
 
-- Dependency policies surface as on-chain parameters with explorer timelines,
-  CLI views (`blockctl gov policy list`), and RPC output for automation.
-- Telemetry exports per-wrapper metrics; Grafana dashboards in `monitoring/`
-  have been updated to chart backend selection, failure rates, and latency.
-- Release provenance includes vendor tree hashes and registry snapshots so
-  downstream consumers can audit the shipped dependency set.
+## 3. Governance & Policy Integration
 
-## Documentation Consolidation
+1. Operators or governance delegates draft proposals using `cli gov dependency-policy`
+   commands. Policies enumerate approved backends and rollout windows.
+2. On-chain voting ratifies changes; the node configuration loader observes overrides via
+   the governance store.
+3. Telemetry events emitted from `node/src/telemetry.rs` (see `docs/telemetry.md`) surface
+   activated backends, divergence warnings, and governance-triggered switches.
+4. Release workflows block tagging until dependency snapshots match policy baselines.
+5. Explorer governance views display history so stakeholders can audit backend evolution.
 
-To reduce sprawl without losing context:
+## 4. Onboarding Checklist for Engineers
 
-- `docs/SUMMARY.md` now funnels subsystem readers to a single pivot guide, and
-  every `.md` in `docs/` carries a unified review banner with the latest audit
-  date.
-- Roadmap, progress, and supply-chain docs cross-link to this runbook so updates
-  propagate from one source of truth.
-- Operator guides point to shared telemetry labels and CLI commands instead of
-  duplicating explanations.
+- [ ] Clone the repository and run `tools/vendor_sync` to populate the vetted vendor
+      tree.
+- [ ] Execute `cargo run -p dependency_registry -- --help` to inspect registry commands
+      and practice generating a local snapshot.
+- [ ] Review `docs/governance.md` (policy lifecycle) and `docs/provenance.md` (release
+      attestation flow).
+- [ ] Study wrapper crates (`runtime`, `transport`, `overlay`, `storage_engine`, `coding`,
+      `crypto`, `codec`) to understand trait contracts and feature flags.
+- [ ] Run the simulation harness (`cargo run -p sim --features wrappers`) to observe
+      fallback activation metrics; compare with guidance in `docs/simulation_framework.md`.
+- [ ] Read `docs/networking.md`, `docs/storage_erasure.md`, and `docs/telemetry.md` for
+      subsystem-specific integration notes.
 
-## Next Steps
+## 5. Operator Runbook for Backend Switches
 
-- Finalise storage migration automation (phase 10) so RocksDB↔sled swaps replay safely and incentive-backed DHT marketplace hooks can launch without manual intervention.
-- Build and run the dependency fault simulation harness (phase 17) using the completed wrapper traits to rehearse provider outages before production incidents.
-- Complete governance parameter plumbing (phase 18) so backend selection and rollout windows surface as voteable controls with explorer timelines and CLI validations.
+1. **Pre-check:**
+   - Confirm governance approval and rollout window (`cli gov status --detail`).
+   - Verify dependency registry snapshot: `dependency_registry --snapshot current.json`.
+   - Compare against published `checksums.txt` and vendor hash from the latest release.
+2. **Activation:**
+   - Update node configuration to reference the approved backend label.
+   - Restart with `--governance-policy` pointing to the fetched snapshot if running in
+     air-gapped environments.
+   - Monitor telemetry dashboards (`/wrappers`, `/governance`) for switch confirmation.
+3. **Validation:**
+   - Call RPC `governance.dependency_policies` to confirm active settings.
+   - Use `cli gov telemetry watch --backend` to stream switch events.
+   - Cross-check external monitoring of vendor hashes (operations maintain the feed per
+     coordination notes in `docs/provenance.md`).
+4. **Rollback:**
+   - Apply the staged fallback policy, restart nodes, and notify governance to log the
+     emergency action.
 
-Owners should treat this document as the canonical reference when planning work
-or reviewing PRs for dependency-sensitivity. Update it alongside the related
-code whenever a wrapper ships, a governance control lands, or an operator
-procedure changes.
+## 6. Troubleshooting
+
+| Symptom | Likely Cause | Diagnostic Steps | Resolution |
+| --- | --- | --- | --- |
+| Backend mismatch warning | Local config diverges from governance snapshot | `cli gov policy diff` | Reapply approved snapshot; rerun provenance checks |
+| Policy violation during release | Snapshot missing or hash mismatch | Inspect `scripts/release_provenance.sh` output; rerun `dependency_registry --snapshot` | Regenerate snapshot, ensure vendor tree is synced, rerun release script |
+| Telemetry silent after switch | Telemetry feature disabled or exporter misconfigured | Confirm `telemetry` feature flag; check `docs/telemetry.md` exporters | Enable telemetry feature and restart exporter |
+| Simulation harness fails fallback readiness | In-house backend drifted | Run `cargo test -p sim -- --ignored fallback` and inspect logs | Patch backend, regenerate registry entry, update roadmap |
+| Governance proposal rejected | Invalid backend identifier | Validate against `governance/src/params.rs` enums | Use approved identifiers, resubmit proposal |
+
+## 7. Simulation Harness Summary
+
+The simulation harness exercises wrapper failover logic under controlled fault injection:
+
+* Run via `cargo run -p sim --features wrappers,fallback-testing`.
+* Outputs readiness scores and drift deltas; interpret using thresholds documented in
+  `docs/simulation_framework.md`.
+* Persisted reports inform governance proposals and release notes. Store artifacts with
+  release provenance for traceability.
+
+## 8. Roadmap & Milestones
+
+| Milestone | Owners | Checklist |
+| --- | --- | --- |
+| Dependency Registry Hardening | Release Eng | Snapshot validation in CI · External hash monitoring online · Registry CLI docs complete |
+| Wrapper Convergence | Runtime/Transport Leads | Trait parity across crates · Telemetry coverage · Integration tests for fallbacks |
+| Migration Tooling | Platform Eng | vendor_sync automation · Upgrade guides in `docs/deployment_guide.md` |
+| Fallback Readiness | Reliability Eng | Simulation harness thresholds met · Incident drills logged |
+| Governance Integration | Governance WG | ParamKey coverage · Explorer visibility · Bootstrap script rolled out |
+
+Track progress in `docs/roadmap.md` and update each checklist during milestone reviews.
+
+## 9. Feedback Loop & Presentation Plan
+
+* Present this runbook at the next engineering sync; capture action items and annotate a
+  feedback log in `docs/pivot_dependency_strategy.md`.
+* File follow-up issues for any blockers uncovered during the presentation.
+* Revisit the runbook monthly to incorporate telemetry insights, new backends, or policy
+  changes.
+
+## 10. Reference Materials
+
+- [`docs/governance.md`](governance.md)
+- [`docs/provenance.md`](provenance.md)
+- [`docs/networking.md`](networking.md)
+- [`docs/storage_erasure.md`](storage_erasure.md)
+- [`docs/telemetry.md`](telemetry.md)
+- [`docs/simulation_framework.md`](simulation_framework.md)
+- [`docs/deployment_guide.md`](deployment_guide.md)
+- [`docs/roadmap.md`](roadmap.md)
+
+Maintaining dependency independence requires cross-team coordination. Keep wrappers
+consistent, policy artifacts auditable, and fallback readiness visible so the pivot stays
+coherent across releases.

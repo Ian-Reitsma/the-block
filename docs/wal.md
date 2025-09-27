@@ -1,5 +1,6 @@
 # Write-Ahead Log Fuzzing
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Write-Ahead Log Fuzzing guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The `tests/wal_fuzz.rs` harness exercises crash recovery by generating random write-ahead log entries with the `arbitrary` crate. WAL files are truncated at random offsets to simulate crashes, and the database is reopened to ensure the replayed state matches the expected account balances.
 

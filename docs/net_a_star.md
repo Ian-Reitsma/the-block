@@ -1,5 +1,6 @@
 # ASN Latency Heuristic Routing
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced ASN Latency Heuristic Routing guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The networking stack exposes an A* router that steers connections toward peers
 with low latency while avoiding unstable nodes.  The implementation lives in

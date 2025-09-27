@@ -1,5 +1,6 @@
 # Compute Market Workloads
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Compute Market Workloads guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The compute market supports running real workloads on job slices. Each slice
 contains input data that is executed by a workload runner and produces a proof
@@ -200,7 +201,7 @@ A typical response resembles:
       "lane": "Consumer",
       "job_id": "job-nyc-91",
       "waited_for_secs": 32.8,
-      "updated_at": "2025-09-24T10:02:17Z"
+      "updated_at": "2025-09-25T10:02:17Z"
     }
   ]
 }

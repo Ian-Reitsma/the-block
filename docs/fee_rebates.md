@@ -1,5 +1,6 @@
 # Network Fee Rebates
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Network Fee Rebates guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Peers with high uptime earn monthly rebate vouchers payable in IT. Nodes track uptime in `net/uptime.rs` and persist per‑peer totals in `peer_metrics_store`. Operators may query eligibility via the `peer.rebate_status` RPC. Eligible peers claim vouchers with `peer.rebate_claim`, which mining nodes include in coinbase transactions.
 

@@ -1,5 +1,6 @@
 # Supply Chain Security
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Supply Chain Security guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This project enables reproducible builds via Nix. The `nix` directory contains a `build.nix` that pins dependencies and produces deterministic binaries. Operators can compare hashes using `nix-build` on multiple machines.
 
@@ -51,6 +52,6 @@ The dependency-sovereignty roadmap in
 replacement order for third-party crates. Wrapper crates (runtime, transport,
 overlay, storage engine, coding, crypto, codec) must be used instead of direct
 imports, and telemetry/CLI now surface active backends so operators can observe
-rollouts. Governance parameters will ultimately gate backend selection; the
-registry, tooling, and release steps here are the guardrails that keep that plan
-on track.
+rollouts. Governance parameters already gate backend selection; the registry,
+tooling, and release steps here keep clusters aligned with those policies while
+CI and provenance scripts refuse tags when dependency snapshots drift.

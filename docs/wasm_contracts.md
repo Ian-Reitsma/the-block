@@ -1,5 +1,6 @@
 # WASM Contracts
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced WASM Contracts guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Smart contracts can now be authored in WebAssembly and executed through a
 Wasmtime interpreter configured for determinism. The engine enables fuel-based

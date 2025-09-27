@@ -1,5 +1,6 @@
 # Governance and Upgrade Path
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Governance and Upgrade Path guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The Block uses service badges to weight votes on protocol changes. Nodes with a
 badge may participate in on-chain governance, proposing and approving feature
@@ -35,15 +36,35 @@ Migration steps:
 The CLI already exercises this path, proving compatibility with the existing
 history directories and proposal snapshots.
 
+### Dependency backend governance parameters
+
+Governance now controls dependency backends directly. Proposals may set
+`RuntimeBackend`, `TransportProvider`, `StorageEnginePolicy`, `CodingBackend`,
+`CryptoSuiteBackend`, and `CodecProfilePolicy` parameters. Each entry maps to the
+wrapper crates that ship first-party implementations (`crates/runtime`,
+`crates/transport`, `crates/storage_engine`, `crates/coding`, `crates/crypto_suite`,
+and `crates/codec`). Policy enforcement occurs during node startup: configuration
+files load defaults, the governance store applies overrides, and the runtime selects
+backends accordingly. CLI commands (`gov submit dependency-backend`,
+`gov vote dependency-backend`, and `gov status dependency-backend`) plus explorer and
+RPC payloads expose active selections so operators can verify cluster consensus on
+approved providers. Telemetry counters (`runtime_backend_info`,
+`transport_provider_connect_total{provider}`, `overlay_backend_active`,
+`storage_engine_info`, `coding_backend_selected`, `crypto_suite_backend_active`, and
+`codec_profile_active`) tag emitted metrics with governance-sourced labels, and
+release provenance scripts refuse to tag artifacts when governance overrides fail the
+dependency registry snapshot check.
+
 ### GovStore persistence & history artifacts
 
 `GovStore::open` seeds a sled database alongside a `governance/history/`
 directory that mirrors every activation. When parameters change,
 `persist_param_change` appends JSON rows to
-`governance/history/param_changes.json` and, for fee-floor updates, mirrors the
-window/percentile pair into `governance/history/fee_floor_policy.json`. DID
-revocations land in `did_revocations.json` with the address, reason, epoch, and
-wall-clock timestamp captured by `revoke_did`. Release approvals populate
+`governance/history/param_changes.json`, mirrors fee-floor updates to
+`governance/history/fee_floor_policy.json`, and snapshots dependency policies to
+`governance/history/dependency_policy.json`. DID revocations land in
+`did_revocations.json` with the address, reason, epoch, and wall-clock
+timestamp captured by `revoke_did`. Release approvals populate
 `approved_releases` in sled while also persisting signer sets, thresholds, and
 install timestamps (`release_installs`) so explorers and dashboards can render
 rollout progress. Every activation snapshot is written to
@@ -101,7 +122,7 @@ which the CLI surfaces when listing the governance queue. Explorer timelines and
 telemetry dashboards consume the same fields so operators can monitor concurrent
 scheduling windows without relying on the removed dependency metadata.
 
-> **Update (2025-09-24):** the CLI now lists `start`/`end` windows alongside vote
+> **Update (2025-09-25):** the CLI now lists `start`/`end` windows alongside vote
 > totals and execution status, replacing the removed dependency field. Capture the
 > new scheduling metadata in explorer dashboards before enabling the `cli`
 > feature for production drills.
@@ -135,6 +156,9 @@ Governance can adjust several runtime knobs without code changes:
 | `scheduler.weight_gossip` | relative ticket weight for gossip scheduler tasks | `scheduler_class_wait_seconds{class="gossip"}` |
 | `scheduler.weight_compute` | relative ticket weight for compute scheduler tasks | `scheduler_class_wait_seconds{class="compute"}` |
 | `scheduler.weight_storage` | relative ticket weight for storage scheduler tasks | `scheduler_class_wait_seconds{class="storage"}` |
+| `runtime.backend_policy` | bitmask defining the allowed async runtime backends | `gov_dependency_policy_allowed{kind="runtime"}` |
+| `transport.provider_policy` | QUIC providers permitted by governance (first entry becomes fallback) | `gov_dependency_policy_allowed{kind="transport"}`, `transport_provider_policy_enforced` |
+| `storage.engine_policy` | allowed storage engines and fallback ordering | `gov_dependency_policy_allowed{kind="storage"}`, `storage_engine_policy_enforced` |
 
 The `contract` CLI provides shortcuts for parameter management and proposal
 crafting:
@@ -159,6 +183,30 @@ targets the fee-floor keys; other parameters require submitting JSON proposals
 manually. DID revocations share the same `GovStore` history; once governance
 revokes an address, `identity.anchor` rejects further updates until the entry is
 cleared, and the explorer surfaces the state via `/identity/dids/:address`.
+
+### Dependency policy rollout & telemetry
+
+Dependency policies give governance the final say over which runtime, transport,
+and storage backends a cluster may activate. Policy proposals encode an
+allow-list bitmask; once activated the node runtime normalizes the list,
+reconfigures local `NodeConfig`, and emits telemetry (`gov_dependency_policy_allowed`) so
+operators can confirm alignment across fleets. Storage and transport policies
+apply fallbacks automatically—if a configured engine or provider is disallowed,
+the node swaps in the first approved option and logs a warning. Runtime
+policies remain advisory but raise telemetry events when a node is outside the
+approved set, keeping observability aligned with governance intent. Explorer
+routes expose dependency history via `/governance/dependency_policy`, and the
+CLI surfaces the same masks when inspecting `gov params`.
+
+Use the bootstrap helper to seed historical records when upgrading an existing
+deployment:
+
+```bash
+cargo run -p governance --bin bootstrap_dependency_policy -- /var/lib/the-block/state
+```
+
+Passing `--force` rewrites existing history snapshots, which is useful when
+migrating between staging environments.
 
 ## Handshake Signaling
 

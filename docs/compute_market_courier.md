@@ -1,5 +1,6 @@
 # Compute-Market Courier and Retry Logic
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Compute-Market Courier and Retry Logic guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The compute market supports a store-and-forward "courier" mode where contributors shuttle data bundles across intermittent links. Each bundle generates a durable receipt that is retried with exponential backoff until an upstream worker acknowledges it. This guide explains the receipt format, storage layout, retry schedule, and operational tooling.
 

@@ -1,5 +1,6 @@
 # Fee Market Reference
-> **Review (2025-09-24):** Validated for the dependency-sovereignty pivot; third-token references removed; align changes with the in-house roadmap.
+> **Review (2025-09-25):** Synced Fee Market Reference guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The Block uses an EIP‑1559 style fee mechanism to balance demand across
 consumer and industrial lanes. Each block carries a `base_fee` that adjusts
