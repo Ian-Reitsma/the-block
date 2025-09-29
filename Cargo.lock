@@ -7618,10 +7618,13 @@ dependencies = [
 name = "runtime"
 version = "0.1.0"
 dependencies = [
+ "crossbeam-deque 0.8.6",
  "futures",
  "futures-util",
  "metrics",
+ "mio 0.8.11",
  "once_cell",
+ "pin-project",
  "pin-project-lite",
  "tokio",
 ]
