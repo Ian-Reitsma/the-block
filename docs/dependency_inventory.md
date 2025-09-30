@@ -294,7 +294,6 @@
 | unclassified | `hyper-rustls` | 0.27.7 | crates.io | Apache-2.0 OR ISC OR MIT | 2 |
 | unclassified | `hyper-tls` | 0.5.0 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `hyper-tls` | 0.6.0 | crates.io | MIT/Apache-2.0 | 2 |
-| unclassified | `hyper-tungstenite` | 0.11.1 | crates.io | BSD-2-Clause | 1 |
 | unclassified | `hyper-util` | 0.1.17 | crates.io | MIT | 2 |
 | unclassified | `iana-time-zone` | 0.1.64 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `iana-time-zone-haiku` | 0.1.2 | crates.io | MIT OR Apache-2.0 | 4 |
@@ -684,8 +683,6 @@
 | unclassified | `tokio-native-tls` | 0.3.1 | crates.io | MIT | 2 |
 | unclassified | `tokio-rustls` | 0.24.1 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `tokio-rustls` | 0.26.2 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `tokio-tungstenite` | 0.20.1 | crates.io | MIT | 2 |
-| unclassified | `tokio-tungstenite` | 0.23.1 | crates.io | MIT | 1 |
 | unclassified | `tokio-util` | 0.7.16 | crates.io | MIT | 1 |
 | unclassified | `toml` | 0.8.23 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `toml_datetime` | 0.6.11 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -709,9 +706,6 @@
 | unclassified | `trust-dns-proto` | 0.23.2 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `trust-dns-resolver` | 0.23.2 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `try-lock` | 0.2.5 | crates.io | MIT | 4 |
-| unclassified | `tungstenite` | 0.20.1 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `tungstenite` | 0.21.0 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `tungstenite` | 0.23.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `typenum` | 1.18.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `uint` | 0.9.5 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `unarray` | 0.1.4 | crates.io | MIT OR Apache-2.0 | 2 |

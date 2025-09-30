@@ -20,14 +20,13 @@ use signal_hook::consts::signal::SIGHUP;
 use signal_hook::iterator::Signals;
 use std::fs;
 
-use futures::{SinkExt, StreamExt};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper::{Body, Request, Response, StatusCode};
-use hyper_tungstenite::tungstenite::Message as WsMessage;
-use hyper_tungstenite::{is_upgrade_request, upgrade};
-use runtime::net::TcpListener;
+use hyper::{Body, Method, Request, Response, StatusCode};
+use runtime::net::{TcpListener, TcpStream};
 use runtime::sync::mpsc;
+use runtime::ws::{self, Message as WsMessage, ServerStream};
+use tokio::net::TcpStream as TokioTcpStream;
 use wasmtime::{Engine, Func, Linker, Module, Store};
 
 use crate::{
@@ -225,33 +224,124 @@ pub fn ip_key(ip: &SocketAddr) -> u64 {
 // SIMD-aware rate limit filter lives in rate_limit.rs
 
 async fn ws_peer_metrics(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    if !is_upgrade_request(&req) {
+    if req.method() != Method::GET {
+        return Ok(Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Body::from("websocket upgrade requires GET"))
+            .unwrap());
+    }
+
+    let headers = req.headers();
+    let upgrade_ok = headers
+        .get("Upgrade")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.eq_ignore_ascii_case("websocket"))
+        .unwrap_or(false);
+    let connection_ok = headers
+        .get("Connection")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_ascii_lowercase().contains("upgrade"))
+        .unwrap_or(false);
+    if !upgrade_ok || !connection_ok {
         return Ok(Response::builder()
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from("websocket upgrade required"))
             .unwrap());
     }
-    let (resp, fut) = upgrade(req, None).unwrap();
+
+    let key = match headers
+        .get("Sec-WebSocket-Key")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(key) => key.to_string(),
+        None => {
+            return Ok(Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(Body::from("missing Sec-WebSocket-Key"))
+                .unwrap())
+        }
+    };
+
+    let version_ok = headers
+        .get("Sec-WebSocket-Version")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v == "13")
+        .unwrap_or(false);
+    if !version_ok {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("unsupported websocket version"))
+            .unwrap());
+    }
+
+    let accept = ws::handshake_accept(&key);
+    let response = Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header("Upgrade", "websocket")
+        .header("Connection", "Upgrade")
+        .header("Sec-WebSocket-Accept", accept)
+        .body(Body::empty())
+        .unwrap();
+
     runtime::spawn(async move {
-        if let Ok(ws) = fut.await {
-            let (mut ws_tx, mut ws_rx) = ws.split();
-            let mut rx = crate::net::peer::subscribe_peer_metrics();
-            loop {
-                runtime::select! {
-                    msg = rx.recv() => {
-                        match msg {
-                            Ok(snap) => {
-                                if ws_tx.send(WsMessage::Text(serde_json::to_string(&snap).unwrap())).await.is_err() { break; }
-                            }
-                            Err(_) => break,
-                        }
+        match hyper::upgrade::on(req).await {
+            Ok(upgraded) => match upgraded.downcast::<TokioTcpStream>() {
+                Ok(stream) => {
+                    if let Err(err) = handle_peer_metrics_ws(stream).await {
+                        warn!(
+                            target: "gateway",
+                            error = %err,
+                            "peer metrics websocket closed with error"
+                        );
                     }
-                    _ = ws_rx.next() => { break; }
                 }
+                Err(_) => {
+                    warn!(
+                        target: "gateway",
+                        "failed to downcast upgraded connection to TcpStream"
+                    );
+                }
+            },
+            Err(err) => {
+                warn!(
+                    target: "gateway",
+                    error = %err,
+                    "websocket upgrade failed"
+                );
             }
         }
     });
-    Ok(resp)
+
+    Ok(response)
+}
+
+async fn handle_peer_metrics_ws(stream: TokioTcpStream) -> std::io::Result<()> {
+    let mut ws = ServerStream::new(TcpStream::from_tokio(stream));
+    let mut rx = crate::net::peer::subscribe_peer_metrics();
+
+    loop {
+        runtime::select! {
+            msg = rx.recv() => {
+                match msg {
+                    Ok(snap) => {
+                        let payload = serde_json::to_string(&snap).unwrap();
+                        ws.send(WsMessage::Text(payload)).await?;
+                    }
+                    Err(_) => break,
+                }
+            }
+            frame = ws.recv() => {
+                match frame {
+                    Ok(Some(WsMessage::Close(_))) | Ok(None) => break,
+                    Ok(Some(WsMessage::Ping(_))) | Ok(Some(WsMessage::Pong(_))) => {}
+                    Ok(Some(_)) => {}
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn handle_static(

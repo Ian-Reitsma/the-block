@@ -1,6 +1,5 @@
-use std::net::SocketAddr;
-
-use the_block::{net::partition_watch::PartitionWatch, partition_recover, Block, Blockchain};
+use the_block::net::partition_watch::PartitionWatch;
+use the_block::{net, partition_recover, Block, Blockchain};
 #[cfg(feature = "telemetry")]
 use the_block::telemetry::{PARTITION_EVENTS_TOTAL, PARTITION_RECOVER_BLOCKS};
 
@@ -42,8 +41,9 @@ fn dummy_block() -> Block {
 #[test]
 fn partition_detection_and_recovery_metrics() {
     let watch = PartitionWatch::new(1);
-    let peer: SocketAddr = "127.0.0.1:1".parse().unwrap();
-    watch.mark_unreachable(peer);
+    let peer_bytes = [1u8; 32];
+    let peer = net::overlay_peer_from_bytes(&peer_bytes).expect("overlay peer");
+    watch.mark_unreachable(peer.clone());
     assert!(watch.is_partitioned());
     #[cfg(feature = "telemetry")]
     assert_eq!(PARTITION_EVENTS_TOTAL.get(), 1);

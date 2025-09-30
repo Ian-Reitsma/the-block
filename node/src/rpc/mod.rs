@@ -247,6 +247,31 @@ impl RpcError {
     }
 }
 
+fn parse_overlay_peer_param(id: &str) -> Result<[u8; 32], RpcError> {
+    if id.is_empty() {
+        return Err(RpcError {
+            code: -32602,
+            message: "invalid params",
+        });
+    }
+    if let Ok(peer) = net::overlay_peer_from_base58(id) {
+        let mut out = [0u8; 32];
+        out.copy_from_slice(peer.as_bytes());
+        return Ok(out);
+    }
+    if let Ok(bytes) = hex::decode(id) {
+        if let Ok(peer) = net::overlay_peer_from_bytes(&bytes) {
+            let mut out = [0u8; 32];
+            out.copy_from_slice(peer.as_bytes());
+            return Ok(out);
+        }
+    }
+    Err(RpcError {
+        code: -32602,
+        message: "invalid params",
+    })
+}
+
 fn io_err_msg(e: &std::io::Error) -> &'static str {
     if e.to_string().contains("peer list changed") {
         "peer list changed"
@@ -360,6 +385,9 @@ pub async fn handle_conn(
     let mut origin = String::new();
     let mut auth: Option<String> = None;
     let mut ws_key: Option<String> = None;
+    let mut ws_upgrade = false;
+    let mut ws_connection_upgrade = false;
+    let mut ws_version: Option<String> = None;
     loop {
         line.clear();
         let read = match timeout(runtime_cfg.request_timeout, reader.read_line(&mut line)).await {
@@ -388,6 +416,16 @@ pub async fn handle_conn(
             auth = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
         } else if lower.starts_with("sec-websocket-key:") {
             ws_key = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
+        } else if let Some(val) = lower.strip_prefix("upgrade:") {
+            if val.trim() == "websocket" {
+                ws_upgrade = true;
+            }
+        } else if let Some(val) = lower.strip_prefix("connection:") {
+            if val.split(',').any(|token| token.trim() == "upgrade") {
+                ws_connection_upgrade = true;
+            }
+        } else if lower.starts_with("sec-websocket-version:") {
+            ws_version = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
         }
     }
 
@@ -435,32 +473,62 @@ pub async fn handle_conn(
     }
 
     if method == "GET" && path.starts_with("/vm/trace") {
-        if let Some(key) = ws_key {
-            let code_hex = path
-                .split('?')
-                .nth(1)
-                .and_then(|q| q.strip_prefix("code="))
-                .unwrap_or("");
-            let code = hex::decode(code_hex).unwrap_or_default();
-            let stream = reader.into_inner();
-            vm_trace::serve_vm_trace(stream, key, code).await;
+        let mut stream = reader.into_inner();
+        let Some(key) = ws_key else {
+            websocket_upgrade_error(&mut stream, "missing Sec-WebSocket-Key").await;
+            let _ = stream.shutdown().await;
+            return;
+        };
+        if let Err(err) =
+            validate_websocket_upgrade(ws_upgrade, ws_connection_upgrade, ws_version.as_deref())
+        {
+            websocket_upgrade_error(&mut stream, err).await;
+            let _ = stream.shutdown().await;
+            return;
         }
+        let code_hex = path
+            .split('?')
+            .nth(1)
+            .and_then(|q| q.strip_prefix("code="))
+            .unwrap_or("");
+        let code = hex::decode(code_hex).unwrap_or_default();
+        vm_trace::serve_vm_trace(stream, key, code).await;
         return;
     } else if method == "GET" && path.starts_with("/logs/search") {
         let stream = reader.into_inner();
         let _ = logs::serve_search(stream, &origin, &runtime_cfg, &path).await;
         return;
     } else if method == "GET" && path.starts_with("/logs/tail") {
-        if let Some(key) = ws_key {
-            let stream = reader.into_inner();
-            logs::serve_tail(stream, key, &path).await;
+        let mut stream = reader.into_inner();
+        let Some(key) = ws_key else {
+            websocket_upgrade_error(&mut stream, "missing Sec-WebSocket-Key").await;
+            let _ = stream.shutdown().await;
+            return;
+        };
+        if let Err(err) =
+            validate_websocket_upgrade(ws_upgrade, ws_connection_upgrade, ws_version.as_deref())
+        {
+            websocket_upgrade_error(&mut stream, err).await;
+            let _ = stream.shutdown().await;
+            return;
         }
+        logs::serve_tail(stream, key, &path).await;
         return;
     } else if method == "GET" && path == "/state_stream" {
-        if let Some(key) = ws_key {
-            let stream = reader.into_inner();
-            state_stream::serve_state_stream(stream, key, Arc::clone(&bc)).await;
+        let mut stream = reader.into_inner();
+        let Some(key) = ws_key else {
+            websocket_upgrade_error(&mut stream, "missing Sec-WebSocket-Key").await;
+            let _ = stream.shutdown().await;
+            return;
+        };
+        if let Err(err) =
+            validate_websocket_upgrade(ws_upgrade, ws_connection_upgrade, ws_version.as_deref())
+        {
+            websocket_upgrade_error(&mut stream, err).await;
+            let _ = stream.shutdown().await;
+            return;
         }
+        state_stream::serve_state_stream(stream, key, Arc::clone(&bc)).await;
         return;
     } else if method == "GET" && path == "/badge/status" {
         let (active, last_mint, last_burn) = {
@@ -1196,24 +1264,7 @@ fn dispatch(
                 .get("peer_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = match hex::decode(id) {
-                Ok(b) => b,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
-            let pk: [u8; 32] = match bytes.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
+            let pk = parse_overlay_peer_param(id)?;
             let m = net::peer_stats(&pk).ok_or(RpcError {
                 code: -32602,
                 message: "unknown peer",
@@ -1248,24 +1299,7 @@ fn dispatch(
                 .get("peer_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = match hex::decode(id) {
-                Ok(b) => b,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
-            let pk: [u8; 32] = match bytes.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
+            let pk = parse_overlay_peer_param(id)?;
             if net::reset_peer_metrics(&pk) {
                 serde_json::json!({"status": "ok"})
             } else {
@@ -1304,24 +1338,7 @@ fn dispatch(
                     .get("peer_id")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let bytes = match hex::decode(id) {
-                    Ok(b) => b,
-                    Err(_) => {
-                        return Err(RpcError {
-                            code: -32602,
-                            message: "invalid params",
-                        })
-                    }
-                };
-                let pk: [u8; 32] = match bytes.try_into() {
-                    Ok(a) => a,
-                    Err(_) => {
-                        return Err(RpcError {
-                            code: -32602,
-                            message: "invalid params",
-                        })
-                    }
-                };
+                let pk = parse_overlay_peer_param(id)?;
                 match net::export_peer_stats(&pk, path) {
                     Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
                     Err(e) => {
@@ -1359,24 +1376,7 @@ fn dispatch(
                 .get("clear")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let bytes = match hex::decode(id) {
-                Ok(b) => b,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
-            let pk: [u8; 32] = match bytes.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
+            let pk = parse_overlay_peer_param(id)?;
             if clear {
                 if net::clear_throttle(&pk) {
                     serde_json::json!({"status": "ok"})
@@ -1397,24 +1397,7 @@ fn dispatch(
                 .get("peer_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = match hex::decode(id) {
-                Ok(b) => b,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
-            let pk: [u8; 32] = match bytes.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
-            };
+            let pk = parse_overlay_peer_param(id)?;
             if net::clear_throttle(&pk) {
                 serde_json::json!({"status": "ok"})
             } else {
@@ -2650,6 +2633,34 @@ fn dispatch(
             })
         }
     })
+}
+
+async fn websocket_upgrade_error(stream: &mut TcpStream, message: &str) {
+    let body = format!("{message}\n");
+    let response = format!(
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = stream.write_all(response.as_bytes()).await;
+    let _ = stream.flush().await;
+}
+
+fn validate_websocket_upgrade(
+    upgrade: bool,
+    connection_upgrade: bool,
+    version: Option<&str>,
+) -> Result<(), &'static str> {
+    if !upgrade {
+        return Err("missing Upgrade: websocket header");
+    }
+    if !connection_upgrade {
+        return Err("Connection: upgrade header required");
+    }
+    match version {
+        Some(v) if v == "13" => Ok(()),
+        _ => Err("unsupported Sec-WebSocket-Version"),
+    }
 }
 
 pub async fn run_rpc_server(

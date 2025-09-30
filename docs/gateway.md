@@ -36,6 +36,20 @@ Security considerations are catalogued under
    `ReadAck {manifest_id, path_hash, bytes, client_ip_hash, ts}` into an in‑memory
    queue for later batching.
 
+### WebSocket peer metrics
+
+- The `/ws/peer_metrics` endpoint now upgrades connections via
+  `runtime::ws::ServerStream`. The gateway inspects the standard
+  `Upgrade: websocket`, `Connection: upgrade`, and `Sec-WebSocket-*` headers,
+  then hands the upgraded socket to the runtime codec.
+- Metrics snapshots are serialized to JSON text frames. The runtime layer
+  automatically responds to incoming ping frames and closes the connection when
+  either side emits a close control frame.
+- CLI consumers should construct the handshake with
+  `runtime::ws::handshake_key`/`read_client_handshake` as demonstrated in
+  `node/src/bin/net.rs`. Existing telemetry (`peer_metrics_active` gauge and
+  send error counters) continues to fire around the new implementation.
+
 ## 2. Receipt Batching & Analytics
 
 - A background task drains queued `ReadAck`s, writes them to CBOR batches, and

@@ -1,13 +1,15 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use crypto_suite::signatures::ed25519::{Signature, SIGNATURE_LENGTH};
 use ledger::crypto::remote_tag;
 use serial_test::serial;
+use sha1::{Digest, Sha1};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tiny_http::{Response, Server};
-use tungstenite::Message;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletError, WalletSigner};
 
 fn spawn_failing_signer() -> (String, thread::JoinHandle<()>) {
@@ -33,6 +35,108 @@ fn spawn_failing_signer() -> (String, thread::JoinHandle<()>) {
         }
     });
     (addr, handle)
+}
+
+fn read_http_request(stream: &mut impl Read) -> std::io::Result<String> {
+    let mut buf = Vec::with_capacity(512);
+    let mut tmp = [0u8; 128];
+    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        let n = stream.read(&mut tmp)?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.len() > 8192 {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).to_string())
+}
+
+fn websocket_accept(key: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(key.as_bytes());
+    hasher.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    BASE64.encode(hasher.finalize())
+}
+
+fn websocket_handshake(stream: &mut impl Write, request: &str) -> std::io::Result<()> {
+    let key = request
+        .lines()
+        .find_map(|line| {
+            if line.to_ascii_lowercase().starts_with("sec-websocket-key:") {
+                line.splitn(2, ':').nth(1).map(|v| v.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "missing websocket key")
+        })?;
+    let accept = websocket_accept(&key);
+    let response = format!(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+    );
+    stream.write_all(response.as_bytes())
+}
+
+fn read_ws_payload(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
+    let mut header = [0u8; 2];
+    stream.read_exact(&mut header)?;
+    let opcode = header[0] & 0x0F;
+    let masked = header[1] & 0x80 != 0;
+    if !masked {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "client frames must be masked",
+        ));
+    }
+    if opcode == 0x8 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::ConnectionAborted,
+            "client closed websocket",
+        ));
+    }
+    if opcode != 0x1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unexpected websocket opcode",
+        ));
+    }
+    let mut len = (header[1] & 0x7F) as u64;
+    if len == 126 {
+        let mut extended = [0u8; 2];
+        stream.read_exact(&mut extended)?;
+        len = u16::from_be_bytes(extended) as u64;
+    } else if len == 127 {
+        let mut extended = [0u8; 8];
+        stream.read_exact(&mut extended)?;
+        len = u64::from_be_bytes(extended);
+    }
+    let mut mask = [0u8; 4];
+    stream.read_exact(&mut mask)?;
+    let mut payload = vec![0u8; len as usize];
+    if len > 0 {
+        stream.read_exact(&mut payload)?;
+        for (i, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[i % 4];
+        }
+    }
+    Ok(payload)
+}
+
+fn write_ws_payload(stream: &mut impl Write, payload: &[u8]) -> std::io::Result<()> {
+    stream.write_all(&[0x81])?;
+    if payload.len() < 126 {
+        stream.write_all(&[payload.len() as u8])?;
+    } else if payload.len() <= u16::MAX as usize {
+        stream.write_all(&[126])?;
+        stream.write_all(&(payload.len() as u16).to_be_bytes())?;
+    } else {
+        stream.write_all(&[127])?;
+        stream.write_all(&(payload.len() as u64).to_be_bytes())?;
+    }
+    stream.write_all(payload)
 }
 
 fn spawn_mock_signer() -> (String, thread::JoinHandle<()>) {
@@ -269,8 +373,7 @@ fn remote_signer_mtls_ws() {
         let (stream, _) = listener.accept().unwrap();
         let conn = rustls::ServerConnection::new(server_cfg_pub.clone()).unwrap();
         let mut tls = rustls::StreamOwned::new(conn, stream);
-        let mut buf = [0u8; 512];
-        let _ = tls.read(&mut buf).unwrap();
+        let _request = read_http_request(&mut tls).unwrap();
         let body = format!("{{\"pubkey\":\"{}\"}}", pk_hex);
         let resp = format!(
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -282,13 +385,11 @@ fn remote_signer_mtls_ws() {
         // Second connection for signing
         let (stream, _) = listener.accept().unwrap();
         let conn = rustls::ServerConnection::new(server_cfg.clone()).unwrap();
-        let tls = rustls::StreamOwned::new(conn, stream);
-        let mut ws = tungstenite::accept(tls).unwrap();
-        let msg = ws.read().unwrap();
-        let txt = match msg {
-            Message::Text(t) => t,
-            _ => panic!(),
-        };
+        let mut tls = rustls::StreamOwned::new(conn, stream);
+        let request = read_http_request(&mut tls).unwrap();
+        websocket_handshake(&mut tls, &request).unwrap();
+        let payload = read_ws_payload(&mut tls).unwrap();
+        let txt = String::from_utf8(payload).unwrap();
         #[derive(serde::Deserialize)]
         struct Req {
             msg: String,
@@ -303,8 +404,8 @@ fn remote_signer_mtls_ws() {
         let resp = Resp {
             sig: hex::encode(sig.to_bytes()),
         };
-        ws.send(Message::Text(serde_json::to_string(&resp).unwrap()))
-            .unwrap();
+        let payload = serde_json::to_vec(&resp).unwrap();
+        write_ws_payload(&mut tls, &payload).unwrap();
     });
 
     // Client signing

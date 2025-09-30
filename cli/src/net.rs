@@ -598,6 +598,16 @@ fn print_gossip_status(value: &Value) {
                 last, cand, score
             );
         }
+        if let Some(selected) = fanout.get("selected_peers").and_then(Value::as_array) {
+            if !selected.is_empty() {
+                println!("  Selected peers:");
+                for peer in selected {
+                    if let Some(id) = peer.as_str() {
+                        println!("    - {}", id);
+                    }
+                }
+            }
+        }
     }
     if let Some(partition) = value.get("partition") {
         let active = partition

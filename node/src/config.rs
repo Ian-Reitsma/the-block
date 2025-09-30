@@ -159,13 +159,13 @@ impl Default for TelemetryConfig {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OverlayBackend {
-    Libp2p,
+    Inhouse,
     Stub,
 }
 
 impl Default for OverlayBackend {
     fn default() -> Self {
-        OverlayBackend::Libp2p
+        OverlayBackend::Inhouse
     }
 }
 
@@ -467,7 +467,8 @@ fn default_overlay_db_path() -> String {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".the_block")
-            .join("overlay_peers.bin")
+            .join("overlay")
+            .join("peers.json")
             .to_string_lossy()
             .into_owned()
     })
@@ -712,14 +713,14 @@ fn load_file(dir: &str) -> Result<NodeConfig> {
 }
 
 pub fn ensure_overlay_sanity(cfg: &OverlayConfig) -> Result<()> {
-    if matches!(cfg.backend, OverlayBackend::Libp2p) && cfg.peer_db_path.trim().is_empty() {
+    if matches!(cfg.backend, OverlayBackend::Inhouse) && cfg.peer_db_path.trim().is_empty() {
         return Err(anyhow!(
-            "overlay peer_db_path must be set when using the libp2p backend"
+            "overlay peer_db_path must be set when using the in-house backend"
         ));
     }
 
     let expected_label = match cfg.backend {
-        OverlayBackend::Libp2p => "libp2p",
+        OverlayBackend::Inhouse => "inhouse",
         OverlayBackend::Stub => "stub",
     };
 
@@ -733,15 +734,15 @@ pub fn ensure_overlay_sanity(cfg: &OverlayConfig) -> Result<()> {
     }
 
     match cfg.backend {
-        OverlayBackend::Libp2p => {
+        OverlayBackend::Inhouse => {
             let runtime_path = status
                 .database_path
                 .ok_or_else(|| anyhow!(
-                    "libp2p overlay did not report a persisted database path. Check `the-block net overlay-status` and configuration before starting the node."
+                    "in-house overlay did not report a persisted database path. Check `the-block net overlay-status` and configuration before starting the node."
                 ))?;
             if Path::new(&runtime_path) != Path::new(&cfg.peer_db_path) {
                 return Err(anyhow!(
-                    "libp2p overlay peer database mismatch: config points to `{}` but diagnostics reported `{runtime_path}`",
+                    "overlay peer database mismatch: config points to `{}` but diagnostics reported `{runtime_path}`",
                     cfg.peer_db_path
                 ));
             }

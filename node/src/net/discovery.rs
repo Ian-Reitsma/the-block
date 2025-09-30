@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-pub use p2p_overlay::libp2p_overlay::{FileOverlayStore, Libp2pMultiaddr as Multiaddr};
 pub use p2p_overlay::Discovery as DiscoveryTrait;
 pub use p2p_overlay::OverlayStore;
+pub use p2p_overlay::PeerEndpoint as Multiaddr;
 pub use p2p_overlay::PeerId as PeerIdTrait;
 
 pub type PeerId = super::OverlayPeerId;

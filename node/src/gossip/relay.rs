@@ -1,7 +1,10 @@
 use crate::gossip::config::{self, GossipConfig};
 use crate::net::partition_watch::PARTITION_WATCH;
 use crate::net::peer::{pk_from_addr, PeerMetrics};
-use crate::net::{peer_stats_map, send_msg, send_quic_msg, Message, Transport};
+use crate::net::{
+    overlay_peer_from_base58, overlay_peer_from_bytes, overlay_peer_to_base58, peer_stats_map,
+    send_msg, send_quic_msg, Message, OverlayPeerId, Transport,
+};
 use crate::simple_db::{names, SimpleDb};
 use blake3::hash;
 use codec::profiles;
@@ -25,8 +28,6 @@ use crate::telemetry::{
 };
 
 use crate::range_boost;
-
-type PeerId = [u8; 32];
 
 #[derive(Clone)]
 struct GossipSettings {
@@ -63,7 +64,7 @@ impl From<GossipConfig> for GossipSettings {
 
 struct ShardStore {
     db: Mutex<SimpleDb>,
-    cache: Mutex<HashMap<ShardId, Vec<PeerId>>>,
+    cache: Mutex<HashMap<ShardId, Vec<OverlayPeerId>>>,
 }
 
 impl ShardStore {
@@ -91,16 +92,16 @@ impl ShardStore {
         Self::with_factory(&path_str, &SimpleDb::open_named)
     }
 
-    fn load(db: &SimpleDb) -> HashMap<ShardId, Vec<PeerId>> {
+    fn load(db: &SimpleDb) -> HashMap<ShardId, Vec<OverlayPeerId>> {
         let mut out = HashMap::new();
         for key in db.keys_with_prefix("shard:") {
             if let Some(suffix) = key.strip_prefix("shard:") {
                 if let Ok(shard) = suffix.parse::<ShardId>() {
                     if let Some(bytes) = db.get(&key) {
                         if let Ok(mut peers) =
-                            codec::deserialize::<Vec<PeerId>>(profiles::gossip(), &bytes)
+                            codec::deserialize::<Vec<OverlayPeerId>>(profiles::gossip(), &bytes)
                         {
-                            peers.sort();
+                            peers.sort_by(|a, b| a.to_bytes().cmp(&b.to_bytes()));
                             peers.dedup();
                             out.insert(shard, peers);
                         }
@@ -111,14 +112,14 @@ impl ShardStore {
         out
     }
 
-    fn register(&self, shard: ShardId, peer: PeerId) {
+    fn register(&self, shard: ShardId, peer: OverlayPeerId) {
         let mut cache = self.cache.lock();
         let entry = cache.entry(shard).or_default();
         if entry.contains(&peer) {
             return;
         }
         entry.push(peer);
-        entry.sort();
+        entry.sort_by(|a, b| a.to_bytes().cmp(&b.to_bytes()));
         entry.dedup();
         let snapshot = entry.clone();
         drop(cache);
@@ -129,11 +130,11 @@ impl ShardStore {
         }
     }
 
-    fn peers(&self, shard: ShardId) -> Vec<PeerId> {
+    fn peers(&self, shard: ShardId) -> Vec<OverlayPeerId> {
         self.cache.lock().get(&shard).cloned().unwrap_or_default()
     }
 
-    fn snapshot(&self) -> HashMap<ShardId, Vec<PeerId>> {
+    fn snapshot(&self) -> HashMap<ShardId, Vec<OverlayPeerId>> {
         self.cache.lock().clone()
     }
 }
@@ -144,6 +145,7 @@ struct RelayMetrics {
     last_candidates: Option<usize>,
     avg_score: Option<f64>,
     last_updated: Option<Instant>,
+    last_selected: Option<Vec<OverlayPeerId>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -159,6 +161,8 @@ pub struct FanoutStatus {
     pub avg_score: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub millis_since_update: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_peers: Option<Vec<String>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -193,6 +197,7 @@ struct PeerCandidate {
     score: f64,
     latency_ms: Option<f64>,
     peer_kind: CandidateKind,
+    peer_id: OverlayPeerId,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -301,21 +306,32 @@ impl Relay {
         let mut skipped_partition = 0usize;
         let stats = peer_stats_map(None, None)
             .into_iter()
-            .filter_map(|(id, metrics)| hex::decode(id).ok().map(|bytes| (bytes, metrics)))
-            .filter(|(pk, _)| pk.len() == 32)
-            .map(|(pk, metrics)| {
-                let mut peer = [0u8; 32];
-                peer.copy_from_slice(&pk);
-                (peer, metrics)
+            .filter_map(|(id, metrics)| {
+                overlay_peer_from_base58(&id)
+                    .ok()
+                    .map(|peer| (peer, metrics.clone()))
+                    .or_else(|| {
+                        hex::decode(&id)
+                            .ok()
+                            .and_then(|bytes| overlay_peer_from_bytes(&bytes).ok())
+                            .map(|peer| (peer, metrics.clone()))
+                    })
             })
-            .collect::<HashMap<PeerId, PeerMetrics>>();
+            .collect::<HashMap<OverlayPeerId, PeerMetrics>>();
         for (addr, transport, cert) in peers.iter() {
-            if PARTITION_WATCH.is_isolated(addr) {
+            let peer_id = pk_from_addr(addr).and_then(|pk| overlay_peer_from_bytes(&pk).ok());
+            if let Some(peer) = peer_id.as_ref() {
+                if PARTITION_WATCH.is_isolated(peer) {
+                    skipped_partition += 1;
+                    continue;
+                }
+            }
+            if peer_id.is_none() {
                 skipped_partition += 1;
                 continue;
             }
-            let peer_id = pk_from_addr(addr);
-            let metrics = peer_id.and_then(|pk| stats.get(&pk));
+            let peer_id = peer_id.unwrap();
+            let metrics = stats.get(&peer_id);
             let latency = range_boost::peer_latency(addr)
                 .map(|l| l as f64)
                 .or_else(|| metrics.map(|m| m.last_handshake_ms as f64));
@@ -327,6 +343,7 @@ impl Relay {
                 score,
                 latency_ms: latency,
                 peer_kind: kind,
+                peer_id: peer_id.clone(),
             });
         }
         #[cfg(feature = "telemetry")]
@@ -414,12 +431,18 @@ impl Relay {
         (selected, total, avg_score)
     }
 
-    fn update_metrics(&self, fanout: usize, candidates: usize, avg_score: f64) {
+    fn update_metrics(&self, selected: &[OverlayPeerId], candidates: usize, avg_score: f64) {
         let mut guard = self.metrics.lock();
+        let fanout = selected.len();
         guard.last_fanout = Some(fanout);
         guard.last_candidates = Some(candidates);
         guard.avg_score = Some(avg_score);
         guard.last_updated = Some(Instant::now());
+        guard.last_selected = if selected.is_empty() {
+            None
+        } else {
+            Some(selected.to_vec())
+        };
         #[cfg(feature = "telemetry")]
         {
             GOSSIP_FANOUT_GAUGE.set(fanout as i64);
@@ -453,7 +476,7 @@ impl Relay {
     }
 
     /// Broadcast a message to peers belonging to a specific shard.
-    pub fn register_peer(&self, shard: ShardId, peer: PeerId) {
+    pub fn register_peer(&self, shard: ShardId, peer: OverlayPeerId) {
         self.shard_store.register(shard, peer);
     }
 
@@ -461,7 +484,7 @@ impl Relay {
         &self,
         shard: ShardId,
         msg: &Message,
-        peers: &HashMap<PeerId, (SocketAddr, Transport, Option<Vec<u8>>)>,
+        peers: &HashMap<OverlayPeerId, (SocketAddr, Transport, Option<Vec<u8>>)>,
     ) {
         let ids = self.shard_store.peers(shard);
         let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = if ids.is_empty() {
@@ -488,15 +511,17 @@ impl Relay {
             .map(|v| v == "all")
             .unwrap_or(false);
         let candidates = self.gather_candidates(peers);
-        let (selected, candidate_len, avg_score) = self.adaptive_selection(candidates, fanout_all);
-        self.update_metrics(selected.len(), candidate_len, avg_score);
+        let (mut selected, candidate_len, avg_score) =
+            self.adaptive_selection(candidates, fanout_all);
+        let selected_ids: Vec<OverlayPeerId> = selected.iter().map(|c| c.peer_id.clone()).collect();
+        self.update_metrics(&selected_ids, candidate_len, avg_score);
         if selected.is_empty() {
             return;
         }
         let partition_marker = PARTITION_WATCH.current_marker();
         let mut marked = msg.clone();
         marked.partition = partition_marker;
-        for candidate in selected {
+        for candidate in selected.drain(..) {
             #[cfg(feature = "telemetry")]
             if let Some(latency) = candidate.latency_ms {
                 GOSSIP_LATENCY_BUCKETS.observe(latency / 1_000.0);
@@ -538,6 +563,12 @@ impl Relay {
                 millis_since_update: guard
                     .last_updated
                     .map(|inst| inst.elapsed().as_millis() as u64),
+                selected_peers: guard.last_selected.as_ref().map(|peers| {
+                    peers
+                        .iter()
+                        .map(|peer| overlay_peer_to_base58(peer))
+                        .collect()
+                }),
             }
         };
         let shard_affinity = self
@@ -546,7 +577,10 @@ impl Relay {
             .into_iter()
             .map(|(shard, peers)| ShardAffinity {
                 shard,
-                peers: peers.into_iter().map(hex::encode).collect(),
+                peers: peers
+                    .into_iter()
+                    .map(|peer| overlay_peer_to_base58(&peer))
+                    .collect(),
             })
             .collect();
         let partition = PartitionStatus {
@@ -555,7 +589,7 @@ impl Relay {
             isolated_peers: PARTITION_WATCH
                 .isolated_peers()
                 .into_iter()
-                .map(|addr| addr.to_string())
+                .map(|peer| overlay_peer_to_base58(&peer))
                 .collect(),
         };
         RelayStatus {
@@ -664,5 +698,19 @@ mod tests {
             relay.recent.lock().clear();
         }
         assert!(first_hits.len() > 1);
+    }
+
+    #[test]
+    fn relay_status_surfaces_selected_peers_as_base58() {
+        let relay = relay_for_tests();
+        let peer = crate::net::overlay_peer_from_bytes(&[9u8; 32]).expect("overlay peer");
+        relay.update_metrics(&[peer.clone()], 3, 1.4);
+
+        let status = relay.status();
+        let selected = status
+            .fanout
+            .selected_peers
+            .expect("selected peers present");
+        assert_eq!(selected, vec![crate::net::overlay_peer_to_base58(&peer)]);
     }
 }

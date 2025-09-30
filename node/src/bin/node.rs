@@ -98,14 +98,14 @@ struct Cli {
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 enum OverlayBackendArg {
-    Libp2p,
+    Inhouse,
     Stub,
 }
 
 impl From<OverlayBackendArg> for OverlayBackend {
     fn from(arg: OverlayBackendArg) -> Self {
         match arg {
-            OverlayBackendArg::Libp2p => OverlayBackend::Libp2p,
+            OverlayBackendArg::Inhouse => OverlayBackend::Inhouse,
             OverlayBackendArg::Stub => OverlayBackend::Stub,
         }
     }

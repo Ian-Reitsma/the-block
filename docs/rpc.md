@@ -67,6 +67,31 @@ to confirm the exponential multiplier caps at the documented `2^30` ceiling and
 that clamped `TB_RPC_FAULT_RATE` values never panic `gen_bool` during chaos
 testing.
 
+### WebSocket surfaces
+
+All RPC WebSocket endpoints now run on the in-house
+[`runtime::ws`](../crates/runtime/src/ws/mod.rs) stack. The server side wraps
+upgraded sockets in `runtime::ws::ServerStream`, so `/logs/tail`,
+`/state/stream`, and `/vm.trace` negotiate RFC 6455 handshakes without relying
+on `tokio_tungstenite`. Frames follow the same semantics across endpoints:
+
+- Text messages carry JSON payloads (`Vec<LogEntry>` for log tails,
+  `StateChunk` for state streaming, and execution steps for VM traces).
+- Binary frames remain reserved for future compression support. Callers should
+  treat them as UTF‑8 JSON for now (the CLI client already attempts a UTF‑8
+  decode before deserialising).
+- Ping/Pong frames are handled automatically by the server. Applications may
+  still send `Ping` to measure liveness; the runtime codec replies with
+  `Pong` and surfaces the incoming `Ping` message to callers.
+- Close frames trigger a graceful shutdown. `ServerStream::recv` returns
+  `Ok(None)` once the handshake completes, and telemetry counters continue to
+  increment around the new stream type.
+
+Clients can reuse `runtime::ws::ClientStream` to drive upgrades: generate a
+`Sec-WebSocket-Key` with `ws::handshake_key`, issue the GET upgrade, and verify
+`ws::read_client_handshake` against the expected accept string. The CLI and
+integration tests illustrate this flow end-to-end.
+
 ## Compute-market error codes
 
 | Code   | Meaning           |

@@ -8,8 +8,8 @@ peer_metrics_sample_rate = 1
 metrics_export_dir = "state"
 peer_metrics_export_quota_bytes = 10485760
 [overlay]
-backend = "libp2p"
-peer_db_path = "state/overlay_peers.bin"
+backend = "inhouse"
+peer_db_path = "state/overlay/peers.json"
 
 [storage]
 default_engine = "rocksdb"

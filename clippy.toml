@@ -19,6 +19,4 @@ disallowed-methods = [
 disallowed-types = [
     "tokio::runtime::Runtime",
     "tokio::task::JoinHandle",
-    "libp2p::PeerId",
-    "libp2p::Multiaddr",
 ]

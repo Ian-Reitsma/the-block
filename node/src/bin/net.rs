@@ -5,6 +5,11 @@ use crypto_suite::signatures::Signer;
 use hex;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method};
 use regex::Regex;
+use runtime::net::TcpStream;
+use runtime::{
+    self,
+    ws::{self, ClientStream, Message as WsMessage},
+};
 use serde_json::json;
 use std::fs::File;
 use std::io::Write;
@@ -12,7 +17,7 @@ use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_size::{terminal_size, Width};
 use the_block::net::load_net_key;
-use tungstenite::{connect, protocol::Message as WsMessage};
+use url::Url;
 
 #[derive(Copy, Clone, ValueEnum)]
 enum OutputFormat {
@@ -99,7 +104,7 @@ enum Command {
 enum StatsCmd {
     /// Show per-peer rate-limit metrics
     Show {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: Option<String>,
         /// Return stats for all peers
         #[arg(long)]
@@ -140,7 +145,7 @@ enum StatsCmd {
     },
     /// Reset metrics for a peer
     Reset {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
@@ -148,7 +153,7 @@ enum StatsCmd {
     },
     /// Show reputation score for a peer
     Reputation {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
@@ -156,7 +161,7 @@ enum StatsCmd {
     },
     /// Export metrics for a peer to a file
     Export {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: Option<String>,
         /// Export all peers
         #[arg(long)]
@@ -188,7 +193,7 @@ enum StatsCmd {
     },
     /// Throttle or clear throttle for a peer
     Throttle {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: String,
         /// Clear existing throttle
         #[arg(long)]
@@ -199,7 +204,7 @@ enum StatsCmd {
     },
     /// Show handshake failure reasons for a peer
     Failures {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
@@ -207,7 +212,7 @@ enum StatsCmd {
     },
     /// Stream live metrics over WebSocket
     Watch {
-        /// Hex-encoded peer id to filter; if omitted all peers are shown
+        /// Base58-check overlay peer id to filter; if omitted all peers are shown
         peer_id: Option<String>,
         /// WebSocket endpoint
         #[arg(long, default_value = "ws://127.0.0.1:3030/ws/peer_metrics")]
@@ -219,7 +224,7 @@ enum StatsCmd {
 enum BackpressureCmd {
     /// Clear backpressure for a peer
     Clear {
-        /// Hex-encoded peer id
+        /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
         #[arg(long, default_value = "http://127.0.0.1:3030")]
@@ -283,6 +288,53 @@ fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, Htt
         .json(&req)?
         .send()?
         .json()
+}
+
+async fn connect_peer_metrics_ws(url: &str) -> Result<ClientStream, String> {
+    let parsed = Url::parse(url).map_err(|e| e.to_string())?;
+    if parsed.scheme() != "ws" {
+        return Err(format!("unsupported scheme {}", parsed.scheme()));
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "missing host in websocket url".to_string())?;
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let mut addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| e.to_string())?;
+    let addr = addrs
+        .next()
+        .ok_or_else(|| "no addresses resolved for websocket host".to_string())?;
+    let mut stream = TcpStream::connect(addr).await.map_err(|e| e.to_string())?;
+
+    let key = ws::handshake_key();
+    let mut path = parsed.path().to_string();
+    if path.is_empty() {
+        path.push('/');
+    }
+    if let Some(query) = parsed.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+    let default_port = 80;
+    let host_header = if port == default_port {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
+    };
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    let expected_accept = ws::handshake_accept(&key);
+    ws::read_client_handshake(&mut stream, &expected_accept)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(ClientStream::new(stream))
 }
 
 fn main() {
@@ -770,25 +822,37 @@ fn main() {
                     Err(e) => eprintln!("request error: {e}"),
                 }
             }
-            StatsCmd::Watch { peer_id, ws } => match connect(&ws) {
-                Ok((mut socket, _)) => loop {
-                    match socket.read() {
-                        Ok(WsMessage::Text(txt)) => {
-                            if let Ok(snap) = serde_json::from_str::<serde_json::Value>(&txt) {
-                                if peer_id
-                                    .as_ref()
-                                    .map_or(true, |p| snap["peer_id"].as_str() == Some(p))
-                                {
-                                    println!("{}", txt);
+            StatsCmd::Watch { peer_id, ws } => {
+                runtime::block_on(async move {
+                    match connect_peer_metrics_ws(&ws).await {
+                        Ok(mut socket) => {
+                            loop {
+                                match socket.recv().await {
+                                    Ok(Some(WsMessage::Text(txt))) => {
+                                        if let Ok(snap) =
+                                            serde_json::from_str::<serde_json::Value>(&txt)
+                                        {
+                                            if peer_id.as_ref().map_or(true, |p| {
+                                                snap["peer_id"].as_str() == Some(p)
+                                            }) {
+                                                println!("{}", txt);
+                                            }
+                                        }
+                                    }
+                                    Ok(Some(WsMessage::Close(_))) | Ok(None) => break,
+                                    Ok(Some(_)) => {}
+                                    Err(err) => {
+                                        eprintln!("ws error: {err}");
+                                        break;
+                                    }
                                 }
                             }
+                            let _ = socket.close().await;
                         }
-                        Ok(_) => {}
-                        Err(_) => break,
+                        Err(err) => eprintln!("ws connect error: {err}"),
                     }
-                },
-                Err(e) => eprintln!("ws connect error: {e}"),
-            },
+                });
+            }
         },
         Command::Backpressure { action } => match action {
             BackpressureCmd::Clear { peer_id, rpc } => {

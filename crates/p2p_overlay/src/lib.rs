@@ -97,5 +97,10 @@ pub struct OverlayDiagnostics {
     pub database_path: Option<PathBuf>,
 }
 
-pub mod libp2p_overlay;
+pub mod inhouse_overlay;
 pub mod stub;
+pub mod uptime;
+
+pub use inhouse_overlay::{InhouseOverlay, InhouseOverlayStore, InhousePeerId, PeerEndpoint};
+pub use stub::{MemoryOverlayStore, StubOverlay};
+pub use uptime::{InMemoryUptimeStore, UptimeTracker};

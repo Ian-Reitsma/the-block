@@ -163,6 +163,13 @@ impl TcpStream {
         ))
     }
 
+    #[cfg(feature = "tokio-backend")]
+    pub fn from_tokio(stream: tokio::net::TcpStream) -> Self {
+        Self {
+            inner: TcpStreamInner::Tokio(stream),
+        }
+    }
+
     pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &mut self.inner {
             #[cfg(feature = "inhouse-backend")]

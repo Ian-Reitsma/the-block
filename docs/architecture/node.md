@@ -1,6 +1,6 @@
 # Node Dependency Tree
 > **Review (2025-09-25):** Synced Node Dependency Tree guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25). Runtime-native WebSockets (`runtime::ws`) now back `/logs/tail`, `/state/stream`, `/vm.trace`, the gateway peer-metrics feed, and CLI consumers, eliminating the `tokio-tungstenite`/`hyper-tungstenite` stack across the workspace (2025-10-02).
 
 This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.
 
@@ -293,196 +293,11 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       └── autocfg v1.5.0
 ├── hex v0.4.3
 ├── httparse v1.10.1
-├── hyper-tungstenite v0.11.1
-│   ├── hyper v0.14.32
-│   │   ├── bytes v1.10.1
-│   │   ├── futures-channel v0.3.31 (*)
-│   │   ├── futures-core v0.3.31
-│   │   ├── futures-util v0.3.31 (*)
-│   │   ├── h2 v0.3.27
-│   │   │   ├── bytes v1.10.1
-│   │   │   ├── fnv v1.0.7
-│   │   │   ├── futures-core v0.3.31
-│   │   │   ├── futures-sink v0.3.31
-│   │   │   ├── futures-util v0.3.31 (*)
-│   │   │   ├── http v0.2.12
-│   │   │   │   ├── bytes v1.10.1
-│   │   │   │   ├── fnv v1.0.7
-│   │   │   │   └── itoa v1.0.15
-│   │   │   ├── indexmap v2.11.1
-│   │   │   │   ├── equivalent v1.0.2
-│   │   │   │   └── hashbrown v0.15.5
-│   │   │   ├── slab v0.4.11
-│   │   │   ├── tokio v1.47.1
-│   │   │   │   ├── bytes v1.10.1
-│   │   │   │   ├── libc v0.2.175
-│   │   │   │   ├── mio v1.0.4
-│   │   │   │   │   └── libc v0.2.175
-│   │   │   │   ├── pin-project-lite v0.2.16
-│   │   │   │   ├── socket2 v0.6.0
-│   │   │   │   │   └── libc v0.2.175
-│   │   │   │   └── tokio-macros v2.5.0 (proc-macro)
-│   │   │   │       ├── proc-macro2 v1.0.101 (*)
-│   │   │   │       ├── quote v1.0.40 (*)
-│   │   │   │       └── syn v2.0.106 (*)
-│   │   │   ├── tokio-util v0.7.16
-│   │   │   │   ├── bytes v1.10.1
-│   │   │   │   ├── futures-core v0.3.31
-│   │   │   │   ├── futures-sink v0.3.31
-│   │   │   │   ├── pin-project-lite v0.2.16
-│   │   │   │   └── tokio v1.47.1 (*)
-│   │   │   └── tracing v0.1.41
-│   │   │       ├── log v0.4.28
-│   │   │       │   └── value-bag v1.11.1
-│   │   │       ├── pin-project-lite v0.2.16
-│   │   │       ├── tracing-attributes v0.1.30 (proc-macro)
-│   │   │       │   ├── proc-macro2 v1.0.101 (*)
-│   │   │       │   ├── quote v1.0.40 (*)
-│   │   │       │   └── syn v2.0.106 (*)
-│   │   │       └── tracing-core v0.1.34
-│   │   │           └── once_cell v1.21.3
-│   │   ├── http v0.2.12 (*)
-│   │   ├── http-body v0.4.6
-│   │   │   ├── bytes v1.10.1
-│   │   │   ├── http v0.2.12 (*)
-│   │   │   └── pin-project-lite v0.2.16
-│   │   ├── httparse v1.10.1
-│   │   ├── httpdate v1.0.3
-│   │   ├── itoa v1.0.15
-│   │   ├── pin-project-lite v0.2.16
-│   │   ├── socket2 v0.5.10
-│   │   │   └── libc v0.2.175
-│   │   ├── tokio v1.47.1 (*)
-│   │   ├── tower-service v0.3.3
-│   │   ├── tracing v0.1.41 (*)
-│   │   └── want v0.3.1
-│   │       └── try-lock v0.2.5
-│   ├── pin-project-lite v0.2.16
-│   ├── tokio v1.47.1 (*)
-│   ├── tokio-tungstenite v0.20.1
-│   │   ├── futures-util v0.3.31 (*)
-│   │   ├── log v0.4.28 (*)
-│   │   ├── tokio v1.47.1 (*)
-│   │   └── tungstenite v0.20.1
-│   │       ├── byteorder v1.5.0
-│   │       ├── bytes v1.10.1
-│   │       ├── data-encoding v2.9.0
-│   │       ├── http v0.2.12 (*)
-│   │       ├── httparse v1.10.1
-│   │       ├── log v0.4.28 (*)
-│   │       ├── native-tls v0.2.14
-│   │       │   ├── log v0.4.28 (*)
-│   │       │   ├── openssl v0.10.73
-│   │       │   │   ├── bitflags v2.9.4
-│   │       │   │   ├── cfg-if v1.0.3
-│   │       │   │   ├── foreign-types v0.3.2
-│   │       │   │   │   └── foreign-types-shared v0.1.1
-│   │       │   │   ├── libc v0.2.175
-│   │       │   │   ├── once_cell v1.21.3
-│   │       │   │   ├── openssl-macros v0.1.1 (proc-macro)
-│   │       │   │   │   ├── proc-macro2 v1.0.101 (*)
-│   │       │   │   │   ├── quote v1.0.40 (*)
-│   │       │   │   │   └── syn v2.0.106 (*)
-│   │       │   │   └── openssl-sys v0.9.109
-│   │       │   │       └── libc v0.2.175
-│   │       │   │       [build-dependencies]
-│   │       │   │       ├── cc v1.2.36 (*)
-│   │       │   │       ├── pkg-config v0.3.32
-│   │       │   │       └── vcpkg v0.2.15
-│   │       │   ├── openssl-probe v0.1.6
-│   │       │   └── openssl-sys v0.9.109 (*)
-│   │       ├── rand v0.8.5
-│   │       │   ├── libc v0.2.175
-│   │       │   ├── rand_chacha v0.3.1
-│   │       │   │   ├── ppv-lite86 v0.2.21
-│   │       │   │   │   └── zerocopy v0.8.27
-│   │       │   │   └── rand_core v0.6.4 (*)
-│   │       │   └── rand_core v0.6.4 (*)
-│   │       ├── sha1 v0.10.6
-│   │       │   ├── cfg-if v1.0.3
-│   │       │   ├── cpufeatures v0.2.17
-│   │       │   └── digest v0.10.7 (*)
-│   │       ├── thiserror v1.0.69
-│   │       │   └── thiserror-impl v1.0.69 (proc-macro)
-│   │       │       ├── proc-macro2 v1.0.101 (*)
-│   │       │       ├── quote v1.0.40 (*)
-│   │       │       └── syn v2.0.106 (*)
-│   │       ├── url v2.5.7
-│   │       │   ├── form_urlencoded v1.2.2
-│   │       │   │   └── percent-encoding v2.3.2
-│   │       │   ├── idna v1.1.0
-│   │       │   │   ├── idna_adapter v1.2.1
-│   │       │   │   │   ├── icu_normalizer v2.0.0
-│   │       │   │   │   │   ├── displaydoc v0.2.5 (proc-macro)
-│   │       │   │   │   │   │   ├── proc-macro2 v1.0.101 (*)
-│   │       │   │   │   │   │   ├── quote v1.0.40 (*)
-│   │       │   │   │   │   │   └── syn v2.0.106 (*)
-│   │       │   │   │   │   ├── icu_collections v2.0.0
-│   │       │   │   │   │   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │       │   │   │   │   │   ├── potential_utf v0.1.3
-│   │       │   │   │   │   │   │   └── zerovec v0.11.4
-│   │       │   │   │   │   │   │       ├── yoke v0.8.0
-│   │       │   │   │   │   │   │       │   ├── stable_deref_trait v1.2.0
-│   │       │   │   │   │   │   │       │   ├── yoke-derive v0.8.0 (proc-macro)
-│   │       │   │   │   │   │   │       │   │   ├── proc-macro2 v1.0.101 (*)
-│   │       │   │   │   │   │   │       │   │   ├── quote v1.0.40 (*)
-│   │       │   │   │   │   │   │       │   │   ├── syn v2.0.106 (*)
-│   │       │   │   │   │   │   │       │   │   └── synstructure v0.13.2
-│   │       │   │   │   │   │   │       │   │       ├── proc-macro2 v1.0.101 (*)
-│   │       │   │   │   │   │   │       │   │       ├── quote v1.0.40 (*)
-│   │       │   │   │   │   │   │       │   │       └── syn v2.0.106 (*)
-│   │       │   │   │   │   │   │       │   └── zerofrom v0.1.6
-│   │       │   │   │   │   │   │       │       └── zerofrom-derive v0.1.6 (proc-macro)
-│   │       │   │   │   │   │   │       │           ├── proc-macro2 v1.0.101 (*)
-│   │       │   │   │   │   │   │       │           ├── quote v1.0.40 (*)
-│   │       │   │   │   │   │   │       │           ├── syn v2.0.106 (*)
-│   │       │   │   │   │   │   │       │           └── synstructure v0.13.2 (*)
-│   │       │   │   │   │   │   │       ├── zerofrom v0.1.6 (*)
-│   │       │   │   │   │   │   │       └── zerovec-derive v0.11.1 (proc-macro)
-│   │       │   │   │   │   │   │           ├── proc-macro2 v1.0.101 (*)
-│   │       │   │   │   │   │   │           ├── quote v1.0.40 (*)
-│   │       │   │   │   │   │   │           └── syn v2.0.106 (*)
-│   │       │   │   │   │   │   ├── yoke v0.8.0 (*)
-│   │       │   │   │   │   │   ├── zerofrom v0.1.6 (*)
-│   │       │   │   │   │   │   └── zerovec v0.11.4 (*)
-│   │       │   │   │   │   ├── icu_normalizer_data v2.0.0
-│   │       │   │   │   │   ├── icu_provider v2.0.0
-│   │       │   │   │   │   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │       │   │   │   │   │   ├── icu_locale_core v2.0.0
-│   │       │   │   │   │   │   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │       │   │   │   │   │   │   ├── litemap v0.8.0
-│   │       │   │   │   │   │   │   ├── tinystr v0.8.1
-│   │       │   │   │   │   │   │   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │       │   │   │   │   │   │   │   └── zerovec v0.11.4 (*)
-│   │       │   │   │   │   │   │   ├── writeable v0.6.1
-│   │       │   │   │   │   │   │   └── zerovec v0.11.4 (*)
-│   │       │   │   │   │   │   ├── stable_deref_trait v1.2.0
-│   │       │   │   │   │   │   ├── tinystr v0.8.1 (*)
-│   │       │   │   │   │   │   ├── writeable v0.6.1
-│   │       │   │   │   │   │   ├── yoke v0.8.0 (*)
-│   │       │   │   │   │   │   ├── zerofrom v0.1.6 (*)
-│   │       │   │   │   │   │   ├── zerotrie v0.2.2
-│   │       │   │   │   │   │   │   ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │       │   │   │   │   │   │   ├── yoke v0.8.0 (*)
-│   │       │   │   │   │   │   │   └── zerofrom v0.1.6 (*)
-│   │       │   │   │   │   │   └── zerovec v0.11.4 (*)
-│   │       │   │   │   │   ├── smallvec v1.15.1
-│   │       │   │   │   │   └── zerovec v0.11.4 (*)
-│   │       │   │   │   └── icu_properties v2.0.1
-│   │       │   │   │       ├── displaydoc v0.2.5 (proc-macro) (*)
-│   │       │   │   │       ├── icu_collections v2.0.0 (*)
-│   │       │   │   │       ├── icu_locale_core v2.0.0 (*)
-│   │       │   │   │       ├── icu_properties_data v2.0.1
-│   │       │   │   │       ├── icu_provider v2.0.0 (*)
-│   │       │   │   │       ├── potential_utf v0.1.3 (*)
-│   │       │   │   │       ├── zerotrie v0.2.2 (*)
-│   │       │   │   │       └── zerovec v0.11.4 (*)
-│   │       │   │   ├── smallvec v1.15.1
-│   │       │   │   └── utf8_iter v1.0.4
-│   │       │   ├── percent-encoding v2.3.2
-│   │       │   └── serde v1.0.219 (*)
-│   │       └── utf-8 v0.7.6
-│   └── tungstenite v0.20.1 (*)
+├── runtime::ws (workspace WebSocket stack)
+│   ├── base64 v0.21.7
+│   ├── rand v0.8.5
+│   └── sha1 v0.10.6
+
 ├── indexmap v2.11.1 (*)
 ├── inflation v0.1.0 (/workspace/the-block/inflation)
 │   ├── bellman_ce v0.8.0 (*)
@@ -1143,24 +958,11 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       └── linux-raw-sys v0.3.8
 ├── thiserror v1.0.69 (*)
 ├── tokio v1.47.1 (*)
-├── tokio-tungstenite v0.23.1
-│   ├── futures-util v0.3.31 (*)
-│   ├── log v0.4.28 (*)
-│   ├── tokio v1.47.1 (*)
-│   └── tungstenite v0.23.0
-│       ├── byteorder v1.5.0
-│       ├── bytes v1.10.1
-│       ├── data-encoding v2.9.0
-│       ├── http v1.3.1
-│       │   ├── bytes v1.10.1
-│       │   ├── fnv v1.0.7
-│       │   └── itoa v1.0.15
-│       ├── httparse v1.10.1
-│       ├── log v0.4.28 (*)
-│       ├── rand v0.8.5 (*)
-│       ├── sha1 v0.10.6 (*)
-│       ├── thiserror v1.0.69 (*)
-│       └── utf-8 v0.7.6
+├── runtime::ws (workspace WebSocket stack)
+│   ├── base64 v0.21.7
+│   ├── rand v0.8.5
+│   └── sha1 v0.10.6
+
 ├── tokio-util v0.7.16 (*)
 ├── toml v0.8.23
 │   ├── serde v1.0.219 (*)
@@ -1250,35 +1052,11 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       ├── tokio v1.47.1 (*)
 │       ├── tracing v0.1.41 (*)
 │       └── url v2.5.7 (*)
-├── tungstenite v0.21.0
-│   ├── byteorder v1.5.0
-│   ├── bytes v1.10.1
-│   ├── data-encoding v2.9.0
-│   ├── http v1.3.1 (*)
-│   ├── httparse v1.10.1
-│   ├── log v0.4.28 (*)
-│   ├── rand v0.8.5 (*)
-│   ├── rustls v0.22.4
-│   │   ├── log v0.4.28 (*)
-│   │   ├── ring v0.17.14 (*)
-│   │   ├── rustls-pki-types v1.12.0
-│   │   │   └── zeroize v1.8.1 (*)
-│   │   ├── rustls-webpki v0.102.8
-│   │   │   ├── ring v0.17.14 (*)
-│   │   │   ├── rustls-pki-types v1.12.0 (*)
-│   │   │   └── untrusted v0.9.0
-│   │   ├── subtle v2.6.1
-│   │   └── zeroize v1.8.1 (*)
-│   ├── rustls-native-certs v0.7.3
-│   │   ├── openssl-probe v0.1.6
-│   │   ├── rustls-pemfile v2.2.0
-│   │   │   └── rustls-pki-types v1.12.0 (*)
-│   │   └── rustls-pki-types v1.12.0 (*)
-│   ├── rustls-pki-types v1.12.0 (*)
-│   ├── sha1 v0.10.6 (*)
-│   ├── thiserror v1.0.69 (*)
-│   ├── url v2.5.7 (*)
-│   └── utf-8 v0.7.6
+├── runtime::ws (workspace WebSocket stack)
+│   ├── base64 v0.21.7
+│   ├── rand v0.8.5
+│   └── sha1 v0.10.6
+
 ├── unicode-normalization v0.1.24 (*)
 ├── wallet v0.1.0 (/workspace/the-block/crates/wallet)
 │   ├── ed25519-dalek v1.0.1
@@ -1323,7 +1101,7 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── subtle v2.6.1
 │   ├── thiserror v1.0.69 (*)
 │   ├── tracing v0.1.41 (*)
-│   ├── tungstenite v0.20.1 (*)
+│   ├── runtime::ws (workspace WebSocket stack)
 │   ├── url v2.5.7 (*)
 │   └── uuid v1.18.1 (*)
 ├── xorfilter-rs v0.5.1

@@ -2,14 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use base64::engine::general_purpose;
-use base64::Engine;
-use futures::SinkExt;
 use runtime::net::TcpStream;
+use runtime::ws::{self, Message as WsMessage, ServerStream};
 use serde::Serialize;
 use serde_json::json;
-use tokio_tungstenite::tungstenite::{protocol::Role, Message};
-use tokio_tungstenite::WebSocketStream;
 use url::form_urlencoded;
 
 use super::RpcRuntimeConfig;
@@ -67,7 +63,7 @@ pub async fn serve_tail(mut stream: TcpStream, key: String, path: &str) {
                 log_tail_handshake_failure(&e);
                 return;
             }
-            let ws_stream = WebSocketStream::from_raw_socket(stream, Role::Server, None).await;
+            let ws_stream = ServerStream::new(stream);
             run_tail(ws_stream, cfg).await;
         }
         Err(err) => {
@@ -251,19 +247,10 @@ fn log_tail_handshake_failure(err: &std::io::Error) {
 }
 
 async fn handshake(stream: &mut TcpStream, key: &str) -> std::io::Result<()> {
-    use sha1::{Digest, Sha1};
-    let mut h = Sha1::new();
-    h.update(key.as_bytes());
-    h.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
-    let accept_key = general_purpose::STANDARD.encode(h.finalize());
-    let resp = format!(
-        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {}\r\n\r\n",
-        accept_key
-    );
-    stream.write_all(resp.as_bytes()).await
+    ws::write_server_handshake(stream, key, &[]).await
 }
 
-async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
+async fn run_tail(mut ws: ServerStream, cfg: TailConfig) {
     let mut last_id = cfg.filter.after_id.unwrap_or(0);
     loop {
         let mut filter = cfg.filter.clone();
@@ -275,7 +262,9 @@ async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
             Err(e) => {
                 log_query_failure(&e);
                 if let Err(err) = ws
-                    .send(Message::Text(json!({"error": "query failed"}).to_string()))
+                    .send(WsMessage::Text(
+                        json!({"error": "query failed"}).to_string(),
+                    ))
                     .await
                 {
                     log_tail_send_failure(&err);
@@ -294,7 +283,7 @@ async fn run_tail(mut ws: WebSocketStream<TcpStream>, cfg: TailConfig) {
                     "[]".to_string()
                 }
             };
-            if let Err(err) = ws.send(Message::Text(payload)).await {
+            if let Err(err) = ws.send(WsMessage::Text(payload)).await {
                 log_tail_send_failure(&err);
                 break;
             }
@@ -314,12 +303,12 @@ fn log_serialization_failure(err: &serde_json::Error) {
 }
 
 #[cfg(feature = "telemetry")]
-fn log_tail_send_failure(err: &tokio_tungstenite::tungstenite::Error) {
+fn log_tail_send_failure(err: &std::io::Error) {
     warn!(target: "rpc.logs", error = %err, "websocket send failed");
 }
 
 #[cfg(not(feature = "telemetry"))]
-fn log_tail_send_failure(err: &tokio_tungstenite::tungstenite::Error) {
+fn log_tail_send_failure(err: &std::io::Error) {
     eprintln!("rpc.logs: websocket send failed: {err}");
 }
 

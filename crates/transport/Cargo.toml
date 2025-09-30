@@ -5,6 +5,14 @@ edition = "2021"
 
 [features]
 default = []
+inhouse = [
+    "dep:anyhow",
+    "dep:blake3",
+    "dep:rand",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:runtime",
+]
 quinn = [
     "dep:anyhow",
     "dep:blake3",

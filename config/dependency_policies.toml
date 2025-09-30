@@ -7,7 +7,7 @@ max_depth = 3
 [tiers]
 strategic = [
   "tokio",
-  "libp2p",
+  "inhouse",
   "quinn",
   "rustls",
   "ed25519-dalek",
