@@ -1,11 +1,44 @@
 # RPC
-> **Review (2025-09-25):** Synced RPC guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-09-29):** Captured the runtime HTTP client rollout, noted the bespoke server still in place, and refreshed readiness + token hygiene notes.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
 ## Client configuration
 
-The CLI and internal tooling use `node/src/rpc/client.rs`, which reads several
-environment variables. Operators can tune request behaviour with:
+All outbound RPC traffic now routes through the in-house
+[`httpd`](../crates/httpd) crate. The async `HttpClient` powers node sidecar
+work (telemetry uploads, peer pings, etc.) while the CLI, wallet, probe, and
+auxiliary binaries invoke the synchronous `BlockingClient` wrapper that simply
+delegates to the shared runtime handle. Both surfaces expose the same request
+builder API:
+
+```rust
+let client = httpd::HttpClient::default();
+let response = client
+    .request(httpd::Method::Post, "http://127.0.0.1:26658")?
+    .timeout(Duration::from_secs(5))
+    .json(&payload)?
+    .send()
+    .await?;
+let envelope: RpcEnvelope<_> = response.json()?;
+```
+
+Blocking contexts swap `HttpClient` for `BlockingClient` and remove the `.await`
+while retaining every other call. Responses provide `json`, `text`, and
+`decode` helpers backed by the canonical codec profiles, and `ClientError`
+offers `is_timeout()` for parity with the legacy `reqwest` checks.
+
+> **TLS note:** The client currently supports `http://` endpoints. HTTPS
+> integration will land alongside the in-house TLS stack (tracked under the
+> runtime roadmap) and the docs will be updated once the transport hooks are in
+> place. Remote signer deployments that rely on HTTPS should retain their
+> existing TLS termination layer (e.g. stunnel or nginx) until then.
+
+The CLI and internal tooling continue to use `node/src/rpc/client.rs`, which
+reads several environment variables. Operators can tune request behaviour with:
+
+## Server runtime
+
+The node continues to serve JSON-RPC over the bespoke request parser in [`node/src/rpc/mod.rs`](../node/src/rpc/mod.rs). It reads from `runtime::net::TcpListener` and `runtime::io::BufferedTcpStream`, enforces timeouts with `runtime::timeout`, and manually routes method tables while fault-injection hooks fire before payload dispatch. The metrics aggregator and gateway still expose their REST/JSON-RPC endpoints through `axum`/`hyper`. Migrating those services onto the shared [`crates/httpd`](../crates/httpd) router—and deleting the ad-hoc parser—remains a tracked task in `docs/roadmap.md`. When the router lands, handlers will inherit codec, telemetry, and keep-alive semantics from `httpd::ServerConfig`; until then, add new endpoints by extending the existing match arms and tests under `node/tests/`.
 
 - `TB_RPC_TIMEOUT_MS` – base timeout in milliseconds (default `5000`).
 - `TB_RPC_TIMEOUT_JITTER_MS` – extra random jitter added to the timeout

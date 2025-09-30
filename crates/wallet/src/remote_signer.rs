@@ -1,12 +1,12 @@
 use crate::{WalletError, WalletSigner};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use hex;
+use httpd::{BlockingClient, Method};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
 use native_tls::{Certificate as NativeCertificate, Identity, TlsConnector};
 use once_cell::sync::Lazy;
 use rand::Rng;
-use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -45,7 +45,7 @@ struct SignResp {
 /// multisignature aggregation.
 pub struct RemoteSigner {
     endpoints: Vec<String>,
-    client: Client,
+    client: BlockingClient,
     tls: Option<TlsConnector>,
     pubkeys: Vec<VerifyingKey>,
     timeout: Duration,
@@ -81,7 +81,7 @@ impl RemoteSigner {
         out
     }
 
-    fn fetch_pubkey(client: &Client, endpoint: &str) -> Result<VerifyingKey, WalletError> {
+    fn fetch_pubkey(client: &BlockingClient, endpoint: &str) -> Result<VerifyingKey, WalletError> {
         {
             let cache = PUBKEY_CACHE.lock().unwrap();
             if let Some((pk, ts)) = cache.get(endpoint) {
@@ -98,7 +98,9 @@ impl RemoteSigner {
             endpoint.to_string()
         };
         let resp = client
-            .get(format!("{url}/pubkey"))
+            .request(Method::Get, &format!("{url}/pubkey"))
+            .map_err(|e| WalletError::Failure(e.to_string()))?
+            .timeout(Duration::from_secs(5))
             .send()
             .map_err(|e| WalletError::Failure(e.to_string()))?;
         let pk: PubKeyResp = resp
@@ -130,7 +132,7 @@ impl RemoteSigner {
             .and_then(|v| v.parse().ok())
             .unwrap_or(5_000);
         let timeout = Duration::from_millis(timeout_ms);
-        let mut builder = Client::builder().timeout(timeout);
+        let client = BlockingClient::default();
         let mut tls = None;
         if let (Ok(cert_path), Ok(key_path)) = (
             std::env::var("REMOTE_SIGNER_TLS_CERT"),
@@ -150,21 +152,12 @@ impl RemoteSigner {
                     .map_err(|e| WalletError::Failure(e.to_string()))?;
                 tls_builder.add_root_certificate(ca_cert);
                 tls_builder.danger_accept_invalid_certs(true);
-                builder = builder
-                    .add_root_certificate(
-                        reqwest::Certificate::from_pem(&ca_bytes)
-                            .map_err(|e| WalletError::Failure(e.to_string()))?,
-                    )
-                    .danger_accept_invalid_certs(true);
             }
             let connector = tls_builder
                 .build()
                 .map_err(|e| WalletError::Failure(e.to_string()))?;
             tls = Some(connector);
         }
-        let client = builder
-            .build()
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
         let mut pubkeys = Vec::new();
         for ep in endpoints {
             pubkeys.push(Self::fetch_pubkey(&client, ep)?);
@@ -195,9 +188,11 @@ impl RemoteSigner {
             info!(%payload.trace, attempt, "remote sign request");
             let res = self
                 .client
-                .post(format!("{endpoint}/sign"))
-                .json(payload)
+                .request(Method::Post, &format!("{endpoint}/sign"))
+                .map_err(|e| WalletError::Failure(e.to_string()))?
                 .timeout(self.timeout)
+                .json(payload)
+                .map_err(|e| WalletError::Failure(e.to_string()))?
                 .send();
             match res {
                 Ok(resp) => match resp.json::<SignResp>() {

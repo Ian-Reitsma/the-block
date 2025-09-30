@@ -1,6 +1,6 @@
 use crate::governance::{self, ReleaseAttestation};
 use crate::provenance;
-use reqwest::blocking::Client;
+use httpd::{BlockingClient, Method};
 use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
@@ -61,25 +61,20 @@ pub fn fetch_release(
     }
     let base = std::env::var("TB_RELEASE_SOURCE_URL").map_err(|_| UpdateError::MissingSource)?;
     let url = format!("{}/{normalized}.bin", base.trim_end_matches('/'));
-    let client = Client::builder()
+    let response = BlockingClient::default()
+        .request(Method::Get, &url)
+        .map_err(|e| UpdateError::Network(e.to_string()))?
         .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| UpdateError::Network(e.to_string()))?;
-    let response = client
-        .get(&url)
         .send()
         .map_err(|e| UpdateError::Network(e.to_string()))?;
     if !response.status().is_success() {
         return Err(UpdateError::Network(format!(
             "{} returned {}",
             url,
-            response.status()
+            response.status().as_u16()
         )));
     }
-    let bytes = response
-        .bytes()
-        .map_err(|e| UpdateError::Network(e.to_string()))?
-        .to_vec();
+    let bytes = response.into_body();
     let actual = blake3::hash(&bytes).to_hex().to_string();
     if actual != normalized {
         return Err(UpdateError::HashMismatch {

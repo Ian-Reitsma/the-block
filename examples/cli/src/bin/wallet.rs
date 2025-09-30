@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use httpd::{BlockingClient, Method};
 use wallet::{Wallet, WalletSigner};
 
 #[derive(Parser)]
@@ -66,8 +67,12 @@ fn main() {
                     "threshold": 1,
                 }
             });
-            let client = reqwest::blocking::Client::new();
-            match client.post(&url).json(&body).send() {
+            let client = BlockingClient::default();
+            match client
+                .request(Method::Post, &url)
+                .and_then(|builder| builder.json(&body))
+                .and_then(|builder| builder.send())
+            {
                 Ok(resp) => match resp.json::<serde_json::Value>() {
                     Ok(v) => println!("{}", v["result"].to_string()),
                     Err(e) => eprintln!("parse error: {e}"),
@@ -82,8 +87,12 @@ fn main() {
                 "method": "rent.escrow.balance",
                 "params": {"id": account},
             });
-            let client = reqwest::blocking::Client::new();
-            match client.post(&url).json(&payload).send() {
+            let client = BlockingClient::default();
+            match client
+                .request(Method::Post, &url)
+                .and_then(|builder| builder.json(&payload))
+                .and_then(|builder| builder.send())
+            {
                 Ok(resp) => match resp.json::<serde_json::Value>() {
                     Ok(v) => println!("{}", v["result"].as_u64().unwrap_or(0)),
                     Err(e) => eprintln!("parse error: {e}"),

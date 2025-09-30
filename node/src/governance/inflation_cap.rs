@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
-use bellman_ce::bn256::Bn256;
-use bellman_ce::groth16::PreparedVerifyingKey;
 use blake3::Hasher;
+#[cfg(test)]
+use crypto_suite::zk::groth16::Groth16Bn256;
+use crypto_suite::zk::groth16::PreparedVerifyingKey;
 use inflation::proof::{verify as verify_proof, InflationProof};
 use serde::Serialize;
 
@@ -49,14 +50,13 @@ pub fn merkle_root(weeks: &[WeekTuple]) -> [u8; 32] {
 }
 
 /// Verify and submit a quarterly inflation-cap proof.
-pub fn submit_proof(proof: &InflationProof, pvk: &PreparedVerifyingKey<Bn256>) -> bool {
+pub fn submit_proof(proof: &InflationProof, pvk: &PreparedVerifyingKey) -> bool {
     verify_proof(proof, pvk)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bellman_ce::groth16::prepare_verifying_key;
     use inflation::proof::{prove, setup};
 
     #[test]
@@ -75,8 +75,8 @@ mod tests {
 
     #[test]
     fn submits_proof() {
-        let params = setup();
-        let pvk = prepare_verifying_key(&params.vk);
+        let params = setup().expect("parameters");
+        let pvk = Groth16Bn256::prepare_verifying_key(&params);
         let proof = prove(&params, 100, 200).unwrap();
         assert!(submit_proof(&proof, &pvk));
     }

@@ -1,6 +1,6 @@
 # Readme
-> **Review (2025-09-25):** Synced Readme guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-09-29):** Tightened readiness to 98.3/93.3 after re-checking that the aggregator and gateway servers still run on `axum`/`hyper` while `crates/httpd` remains client-only.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 ## Table of Contents
 
 1. [What is The Block?](#what-is-the-block)
@@ -23,7 +23,7 @@
 
 ---
 
-> **Review (2025-09-25):** Raised readiness to 99.2/93.4 after reconciling governance-managed dependency backends, telemetry adoption, and removing residual future-dated callouts.
+> **Review (2025-09-29):** Tightened readiness to 98.3/93.3 after re-checking that the aggregator and gateway servers still run on `axum`/`hyper` while `crates/httpd` remains client-only.
 
 ## What is The Block?
 
@@ -219,7 +219,7 @@ test real services today.
 
 ## Vision & Current State
 
-Mainnet readiness sits at **99.2/100** with vision completion **93.4/100**.
+Mainnet readiness sits at **98.3/100** with vision completion **93.3/100**.
   Recent work hardened release provenance with vendored tree hashing, dependency snapshots, and regression coverage while wiring the storage pipeline through the `coding` crate so
   every manifest records encryptor, erasure, fountain, and compressor choices.
   Fallback XOR parity and RLE compression now ride behind explicit rollout gates,
@@ -235,7 +235,7 @@ Mainnet readiness sits at **99.2/100** with vision completion **93.4/100**.
   wallet telemetry, and the resilient RPC client continue to anchor the ecosystem
   on the shared state machine while the bridge stack enforces multi-signature
   quorums, challenge windows, and relayer slashing. Current focus areas: deliver
-  treasury disbursement tooling, wire SLA slashing dashboards on top of the new
+  treasury disbursement tooling, finish the in-house HTTP server migration for the aggregator and gateway stacks, wire SLA slashing dashboards on top of the new
   matcher, finish the remaining crypto/coding wrapper migrations, continue
   WAN-scale QUIC chaos drills with mitigation playbooks, polish multisig wallet
   UX, and expand bridge/DEX docs with signer-set payloads before the next release
@@ -427,6 +427,20 @@ Subsidy multipliers are governed on-chain via `inflation.params` proposals.
 CI path-gates monitoring lint on `monitoring/**` changes.
 
 ## Node CLI and JSON-RPC
+
+RPC tooling now relies on the workspace-owned [`httpd`](crates/httpd) crate
+instead of `reqwest`. The CLI and wallet call the synchronous
+`httpd::BlockingClient`, while daemon-side helpers reuse the async
+`httpd::HttpClient` in combination with the runtime handle. Both surfaces expose
+identical request builders (`.header()`, `.json()`, `.timeout()`, `.send()`),
+so client code only needed the transport swap. Timeouts and retry strategy
+remain driven by the environment variables documented in
+[`docs/rpc.md`](docs/rpc.md). HTTPS endpoints continue to require a separate
+terminator until the in-house TLS hooks land; keep existing proxies in place if
+remote signers expect TLS. The node still serves JSON-RPC through its bespoke
+parser (`node/src/rpc/mod.rs`), and the metrics aggregator and gateway keep
+using `axum`/`hyper` for HTTP endpoints while the in-house server is developed
+(`metrics-aggregator/src/lib.rs`, `node/src/web/gateway.rs`).
 
 Lane-tagged transaction via RPC:
 

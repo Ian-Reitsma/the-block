@@ -5,9 +5,8 @@ use base64::engine::general_purpose;
 use base64::Engine;
 use futures::SinkExt;
 use light_client::{account_state_value, AccountChunk, StateChunk};
+use runtime::net::TcpStream;
 use state::MerkleTrie;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::{protocol::Role, Message};
 use tokio_tungstenite::WebSocketStream;
 

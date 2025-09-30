@@ -10,13 +10,14 @@ use the_block::{
     config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
 };
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use runtime::{io::read_to_end, net::TcpStream};
+use std::net::SocketAddr;
 use util::timeout::expect_timeout;
 
 mod util;
 
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
+    let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let mut req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
@@ -31,7 +32,9 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let body = &resp[body_idx + 4..];
@@ -66,6 +69,7 @@ async fn rpc_smoke() {
         tx,
     ));
     let addr = expect_timeout(rx).await.unwrap();
+    let addr_socket: SocketAddr = addr.parse().unwrap();
 
     // metrics endpoint
     let val = expect_timeout(rpc(&addr, r#"{"method":"metrics"}"#, None)).await;
@@ -383,7 +387,10 @@ async fn rpc_error_responses() {
     let addr = expect_timeout(rx).await.unwrap();
 
     // malformed JSON
-    let mut stream = expect_timeout(TcpStream::connect(&addr)).await.unwrap();
+    let addr_socket: SocketAddr = addr.parse().unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr_socket))
+        .await
+        .unwrap();
     let bad = "{\"method\":\"balance\""; // missing closing brace
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
@@ -394,7 +401,9 @@ async fn rpc_error_responses() {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let body = String::from_utf8(resp).unwrap();
     let body = body.split("\r\n\r\n").nth(1).unwrap();
     let val: Value = serde_json::from_str(body).unwrap();
@@ -438,13 +447,13 @@ async fn rpc_fragmented_request() {
         body.len(),
         body
     );
-    let mut stream = TcpStream::connect(&addr).await.unwrap();
+    let mut stream = TcpStream::connect(addr_socket).await.unwrap();
     let mid = req.len() / 2;
     stream.write_all(&req.as_bytes()[..mid]).await.unwrap();
     the_block::sleep(Duration::from_millis(5)).await;
     stream.write_all(&req.as_bytes()[mid..]).await.unwrap();
     let mut resp = Vec::new();
-    stream.read_to_end(&mut resp).await.unwrap();
+    read_to_end(&mut stream, &mut resp).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let val: Value = serde_json::from_str(&resp[body_idx + 4..]).unwrap();

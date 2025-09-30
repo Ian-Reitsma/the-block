@@ -3,11 +3,11 @@ use clap_complete::Shell;
 use colored::*;
 use crypto_suite::signatures::Signer;
 use hex;
+use httpd::{BlockingClient, ClientError as HttpClientError, Method};
 use regex::Regex;
-use reqwest::blocking::Client;
 use serde_json::json;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_size::{terminal_size, Width};
@@ -274,14 +274,13 @@ enum ConfigCmd {
     },
 }
 
-fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, reqwest::Error> {
-    Client::builder()
+fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, HttpClientError> {
+    BlockingClient::default()
+        .request(Method::Post, rpc)?
         .timeout(Duration::from_secs(5))
-        .build()?
-        .post(rpc)
-        .header(reqwest::header::HOST, "localhost")
-        .header(reqwest::header::CONNECTION, "close")
-        .json(&req)
+        .header("host", "localhost")
+        .header("connection", "close")
+        .json(&req)?
         .send()?
         .json()
 }
@@ -669,35 +668,20 @@ fn main() {
                     } else if let Some(pass) = openssl_pass {
                         url.push_str(&format!("?password={pass}"));
                     }
-                    match Client::builder().timeout(Duration::from_secs(30)).build() {
-                        Ok(client) => match client.get(&url).send() {
-                            Ok(mut resp) => {
+                    match BlockingClient::default().request(Method::Get, &url) {
+                        Ok(builder) => match builder.timeout(Duration::from_secs(30)).send() {
+                            Ok(resp) => {
                                 if resp.status().is_success() {
-                                    if let Ok(mut file) = File::create(&path) {
-                                        let total = resp.content_length().unwrap_or(0);
-                                        let mut buf = [0u8; 8192];
-                                        let mut downloaded = 0u64;
-                                        loop {
-                                            match resp.read(&mut buf) {
-                                                Ok(0) => break,
-                                                Ok(n) => {
-                                                    downloaded += n as u64;
-                                                    let _ = file.write_all(&buf[..n]);
-                                                    if total > 0 {
-                                                        let pct = downloaded * 100 / total;
-                                                        eprint!("\r{}%", pct);
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("read error: {e}");
-                                                    break;
-                                                }
+                                    match File::create(&path) {
+                                        Ok(mut file) => {
+                                            let body = resp.into_body();
+                                            if file.write_all(&body).is_ok() {
+                                                println!("exported");
+                                            } else {
+                                                eprintln!("failed to write file");
                                             }
                                         }
-                                        eprintln!("");
-                                        println!("exported");
-                                    } else {
-                                        eprintln!("failed to write file");
+                                        Err(e) => eprintln!("failed to create file: {e}"),
                                     }
                                 } else {
                                     eprintln!("export failed");
@@ -705,7 +689,7 @@ fn main() {
                             }
                             Err(e) => eprintln!("request error: {e}"),
                         },
-                        Err(e) => eprintln!("client error: {e}"),
+                        Err(e) => eprintln!("request error: {e}"),
                     }
                 } else if peer_id.is_none() {
                     eprintln!("{}", gettext("peer_id required unless --all is specified"));

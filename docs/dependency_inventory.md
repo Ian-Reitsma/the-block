@@ -550,6 +550,10 @@
 | unclassified | `regex` | 1.11.2 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `regex-automata` | 0.4.10 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `regex-syntax` | 0.8.6 | crates.io | MIT OR Apache-2.0 | 2 |
+> **Update (2025-11-05):** `reqwest` has been removed from the workspace in
+> favour of the in-house `httpd` crate. The table below still lists the old
+> versions from the previous export and will be pruned during the next automated
+> refresh.
 | unclassified | `reqwest` | 0.11.27 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `reqwest` | 0.12.23 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `resolv-conf` | 0.7.5 | crates.io | MIT OR Apache-2.0 | 2 |

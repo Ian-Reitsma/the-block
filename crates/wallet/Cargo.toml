@@ -7,7 +7,7 @@ edition = "2021"
 crypto_suite = { path = "../crypto_suite" }
 rand = "0.8"
 thiserror = "1"
-reqwest = { version = "0.11", features = ["blocking", "json"] }
+httpd = { path = "../httpd" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"

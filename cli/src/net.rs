@@ -23,7 +23,7 @@ struct OverlayStatusView {
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
-enum OverlayOutputFormat {
+pub enum OverlayOutputFormat {
     Plain,
     Json,
 }
@@ -208,7 +208,6 @@ pub fn handle(cmd: NetCmd) {
             new_key,
             url,
         } => {
-            use crypto_suite::signatures::Signer;
             let sk = the_block::net::load_net_key();
             let new_bytes = hex::decode(&new_key).expect("invalid new key hex");
             let sig = sk.sign(&new_bytes);

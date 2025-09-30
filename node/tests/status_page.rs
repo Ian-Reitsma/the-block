@@ -1,6 +1,9 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "gateway")]
 
+use httpd::{HttpClient, Method};
+use runtime::net::TcpListener;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tempfile;
 use the_block::web::status;
@@ -12,12 +15,21 @@ async fn status_returns_height() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.block_height = 42;
     let bc = Arc::new(Mutex::new(bc));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let listener = TcpListener::bind(bind_addr).await.unwrap();
     let addr = listener.local_addr().unwrap();
+    drop(listener);
     the_block::spawn(async move {
         status::run(addr, bc).await.unwrap();
     });
     let url = format!("http://{}", addr);
-    let body = reqwest::get(url).await.unwrap().text().await.unwrap();
+    let body = HttpClient::default()
+        .request(Method::Get, &url)
+        .unwrap()
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .unwrap();
     assert!(body.contains("42"));
 }

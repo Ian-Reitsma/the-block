@@ -79,9 +79,9 @@ mod sqlite {
     use blake3::derive_key;
     use chacha20poly1305::aead::{Aead, KeyInit};
     use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
+    use httpd::{BlockingClient, Method};
     use rand::rngs::OsRng;
     use rand::RngCore;
-    use reqwest::blocking::Client as HttpClient;
     use rpassword::prompt_password;
     use rusqlite::{params, params_from_iter, Connection, Row};
     use serde::Deserialize;
@@ -163,13 +163,16 @@ mod sqlite {
                 rows,
                 passphrase,
             } => {
-                let client = HttpClient::new();
+                let client = BlockingClient::default();
                 let url = format!(
                     "{}/correlations/{}",
                     aggregator.trim_end_matches('/'),
                     metric
                 );
-                let response = match client.get(&url).send() {
+                let response = match client
+                    .request(Method::Get, &url)
+                    .and_then(|builder| builder.send())
+                {
                     Ok(resp) => resp,
                     Err(err) => {
                         eprintln!("failed to query aggregator: {err}");
@@ -177,7 +180,10 @@ mod sqlite {
                     }
                 };
                 if !response.status().is_success() {
-                    eprintln!("aggregator responded with status {}", response.status());
+                    eprintln!(
+                        "aggregator responded with status {}",
+                        response.status().as_u16()
+                    );
                     return;
                 }
                 let mut records: Vec<AggregatorCorrelation> = match response.json() {

@@ -1,15 +1,16 @@
 #![cfg(feature = "integration-tests")]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
+use runtime::{io::read_to_end, net::TcpStream};
 use serde_json::Value;
+use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use util::timeout::expect_timeout;
 
 mod util;
 
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
+    let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let mut req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
@@ -24,7 +25,9 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     serde_json::from_str(&resp[body_idx + 4..]).unwrap()
@@ -54,14 +57,19 @@ async fn rpc_auth_and_host_filters() {
     let addr = expect_timeout(rx).await.unwrap();
 
     // host filter
-    let mut stream = expect_timeout(TcpStream::connect(&addr)).await.unwrap();
+    let addr_socket: SocketAddr = addr.parse().unwrap();
+    let mut stream = expect_timeout(TcpStream::connect(addr_socket))
+        .await
+        .unwrap();
     expect_timeout(
         stream.write_all(b"POST / HTTP/1.1\r\nHost: evil.com\r\nContent-Length: 0\r\n\r\n"),
     )
     .await
     .unwrap();
     let mut buf = Vec::new();
-    expect_timeout(stream.read_to_end(&mut buf)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut buf))
+        .await
+        .unwrap();
     let resp = String::from_utf8(buf).unwrap();
     assert!(resp.starts_with("HTTP/1.1 403"));
 

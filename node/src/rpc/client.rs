@@ -1,5 +1,5 @@
+use httpd::{ClientError as HttpClientError, ClientResponse, HttpClient, Method};
 use rand::Rng;
-use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::thread::sleep;
@@ -12,7 +12,7 @@ const MAX_BACKOFF_EXPONENT: u32 = 30;
 /// Simple JSON-RPC client with jittered timeouts and retry backoff.
 #[derive(Clone)]
 pub struct RpcClient {
-    http: Client,
+    http: HttpClient,
     base_timeout: Duration,
     jitter: Duration,
     max_retries: u32,
@@ -46,7 +46,7 @@ impl RpcClient {
             .map(|v| v.clamp(0.0, 1.0))
             .unwrap_or(0.0);
         Self {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(base),
             jitter: Duration::from_millis(jitter),
             max_retries: retries,
@@ -83,23 +83,26 @@ impl RpcClient {
     }
 
     /// Perform a JSON-RPC call to `url` with `payload`, retrying on timeout.
-    pub fn call<T: Serialize>(&self, url: &str, payload: &T) -> Result<Response, RpcClientError> {
+    pub fn call<T: Serialize>(
+        &self,
+        url: &str,
+        payload: &T,
+    ) -> Result<ClientResponse, RpcClientError> {
         let mut attempt = 0;
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
             self.maybe_inject_fault()?;
-            let res = self
-                .http
-                .post(url)
-                .json(payload)
-                .timeout(timeout)
-                .send()
-                .map_err(RpcClientError::from);
+            let res = runtime::block_on(async {
+                let builder = self.http.request(Method::Post, url)?;
+                let builder = builder.json(payload)?;
+                builder.timeout(timeout).send().await
+            })
+            .map_err(RpcClientError::from);
             match res {
                 Ok(r) => return Ok(r),
-                Err(RpcClientError::Transport(e))
-                    if attempt < self.max_retries && e.is_timeout() =>
+                Err(RpcClientError::Transport(HttpClientError::Timeout))
+                    if attempt < self.max_retries =>
                 {
                     attempt += 1;
                     let delay = self.backoff_with_jitter(attempt);
@@ -116,7 +119,7 @@ impl RpcClient {
 
 #[derive(Debug)]
 pub enum RpcClientError {
-    Transport(reqwest::Error),
+    Transport(HttpClientError),
     InjectedFault,
 }
 
@@ -138,8 +141,8 @@ impl std::error::Error for RpcClientError {
     }
 }
 
-impl From<reqwest::Error> for RpcClientError {
-    fn from(err: reqwest::Error) -> Self {
+impl From<HttpClientError> for RpcClientError {
+    fn from(err: HttpClientError) -> Self {
         RpcClientError::Transport(err)
     }
 }
@@ -524,7 +527,7 @@ mod tests {
     #[test]
     fn backoff_with_jitter_matches_legacy_for_small_attempts() {
         let client = RpcClient {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(25),
             jitter: Duration::from_millis(0),
             max_retries: 3,
@@ -540,7 +543,7 @@ mod tests {
 
     fn assert_backoff_saturates_for_large_attempts() {
         let client = RpcClient {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(10),
             jitter: Duration::from_millis(0),
             max_retries: 100,
@@ -570,7 +573,7 @@ mod tests {
     #[test]
     fn backoff_with_jitter_is_monotonic() {
         let client = RpcClient {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(5),
             jitter: Duration::from_millis(0),
             max_retries: 100,
@@ -591,7 +594,7 @@ mod tests {
     #[test]
     fn timeout_jitter_within_bounds() {
         let client = RpcClient {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(100),
             jitter: Duration::from_millis(50),
             max_retries: 1,
@@ -625,7 +628,7 @@ mod tests {
         });
 
         let client = RpcClient {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(100),
             jitter: Duration::from_millis(0),
             max_retries: 0,
@@ -656,7 +659,7 @@ mod tests {
     #[test]
     fn call_returns_fault_injection_error() {
         let client = RpcClient {
-            http: Client::new(),
+            http: HttpClient::default(),
             base_timeout: Duration::from_millis(10),
             jitter: Duration::from_millis(0),
             max_retries: 0,

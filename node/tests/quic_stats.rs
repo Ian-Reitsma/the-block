@@ -3,6 +3,7 @@
 
 use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
+use runtime::{io::read_to_end, net::TcpStream};
 use serial_test::serial;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -30,7 +31,8 @@ fn init_env() -> tempfile::TempDir {
 }
 
 async fn rpc(addr: &str, body: &str) -> serde_json::Value {
-    let mut stream = util::timeout::expect_timeout(tokio::net::TcpStream::connect(addr))
+    let addr: SocketAddr = addr.parse().unwrap();
+    let mut stream = util::timeout::expect_timeout(TcpStream::connect(addr))
         .await
         .unwrap();
     let req = format!(
@@ -42,15 +44,13 @@ async fn rpc(addr: &str, body: &str) -> serde_json::Value {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    util::timeout::expect_timeout(stream.read_to_end(&mut resp))
+    util::timeout::expect_timeout(read_to_end(&mut stream, &mut resp))
         .await
         .unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     serde_json::from_str(&resp[body_idx + 4..]).unwrap()
 }
-
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]
 #[serial]
