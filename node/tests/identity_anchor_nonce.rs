@@ -1,12 +1,12 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use runtime::{io::read_to_end, net::TcpStream};
 use serial_test::serial;
 use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tempfile::tempdir;
 use the_block::{generate_keypair, rpc::run_rpc_server, transaction::TxDidAnchor, Blockchain};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use util::timeout::expect_timeout;
 
 mod util;
@@ -35,6 +35,7 @@ impl Drop for EnvVarGuard {
 }
 
 async fn rpc_request(addr: &str, body: &serde_json::Value) -> serde_json::Value {
+    let addr: SocketAddr = addr.parse().expect("valid socket address");
     let mut stream = expect_timeout(TcpStream::connect(addr))
         .await
         .expect("connect to RPC server");
@@ -48,7 +49,7 @@ async fn rpc_request(addr: &str, body: &serde_json::Value) -> serde_json::Value 
         .await
         .expect("send request");
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp))
+    expect_timeout(read_to_end(&mut stream, &mut resp))
         .await
         .expect("read response");
     let resp = String::from_utf8(resp).expect("response is utf8");

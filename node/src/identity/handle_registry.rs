@@ -144,7 +144,7 @@ impl HandleRegistry {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
-            attest_sig: sig.to_vec(),
+            attest_sig: sig.to_bytes().to_vec(),
             nonce,
             version: 1,
             #[cfg(feature = "pq-crypto")]

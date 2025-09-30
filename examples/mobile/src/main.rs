@@ -1,6 +1,6 @@
 use light_client::{sync_background, upload_compressed_logs, Header, LightClient, SyncOptions};
 use wallet::remote_signer::RemoteSigner;
-use reqwest::blocking::Client;
+use httpd::{BlockingClient, Method};
 use std::fs::File;
 use std::io::Read;
 use std::thread;
@@ -85,11 +85,11 @@ fn main() {
 }
 
 fn notify_tx(id: &str) {
-    let client = Client::new();
+    let client = BlockingClient::default();
     let _ = client
-        .post("http://localhost:8080/push")
-        .json(&serde_json::json!({"tx": id}))
-        .send();
+        .request(Method::Post, "http://localhost:8080/push")
+        .and_then(|builder| builder.json(&serde_json::json!({"tx": id})))
+        .and_then(|builder| builder.send());
     println!("push notification: tx {id}");
 }
 

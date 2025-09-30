@@ -33,6 +33,7 @@ nix = { version = "0.27", default-features = false, features = ["user"] }
 wallet = { path = "../crates/wallet" }
 # Async runtime facade
 runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
+httpd = { path = "../crates/httpd" }
 # Region policy packs
 jurisdiction = { path = "../crates/jurisdiction" }
 p2p_overlay = { path = "../crates/p2p_overlay" }
@@ -65,7 +66,7 @@ clap_complete = "4"
 base64 = "0.22"
 base64ct = "1.6.0"
 dirs = "5"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "test-util", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "test-util", "fs"] }
 sled = { version = "0.34" }
 rocksdb = { version = "0.21", optional = true }
 rusqlite = { version = "0.30", features = ["bundled"] }
@@ -110,7 +111,6 @@ coding = { path = "../crates/coding" }
 # governance parameter helpers
 governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
-reqwest = { version = "0.11", features = ["json", "blocking"] }
 # parallel execution runtime
 rayon = "1"
 # webhook alerts

@@ -1,5 +1,5 @@
 use clap::Parser;
-use reqwest::blocking::Client;
+use httpd::{BlockingClient, Method};
 use serde::Deserialize;
 
 #[derive(Parser)]
@@ -18,10 +18,10 @@ struct Summary {
 fn main() {
     let cli = Cli::parse();
     let body = serde_json::json!({"method":"settlement.audit"});
-    let res: serde_json::Value = Client::new()
-        .post(&cli.rpc)
-        .json(&body)
-        .send()
+    let res: serde_json::Value = BlockingClient::default()
+        .request(Method::Post, &cli.rpc)
+        .and_then(|builder| builder.json(&body))
+        .and_then(|builder| builder.send())
         .expect("rpc")
         .json()
         .expect("json");

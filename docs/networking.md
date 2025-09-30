@@ -403,3 +403,86 @@ for a full walkthrough and operational guidance.
 ## Tie-Break Algorithms and Fork-Injection Fixtures
 
 The gossip layer resolves competing blocks using a deterministic longest-chain rule. Candidates with greater height win; equal-height forks compare cumulative weight and finally the lexicographically smallest tip hash to guarantee convergence. The chaos harness described in [`docs/gossip_chaos.md`](gossip_chaos.md) exercises this logic under 15 % packet loss and 200 ms jitter. Regression tests use the [`node/tests/util/fork.rs`](../node/tests/util/fork.rs) fixture to inject divergent chains and validate that the tie-breaker selects the expected head.
+
+## Appendix · Runtime Socket Examples
+
+The runtime facade exposes first-party TCP/UDP primitives so node components,
+CLI tools, and tests can share the same async networking layer regardless of
+backend. The API mirrors familiar Tokio ergonomics while remaining backend
+agnostic.
+
+### TCP server accepting JSON-RPC requests
+
+```rust
+use runtime::net::TcpListener;
+use runtime::io::BufferedTcpStream;
+use runtime::spawn;
+use std::net::SocketAddr;
+
+async fn serve(addr: SocketAddr) -> std::io::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    loop {
+        let (stream, _peer) = listener.accept().await?;
+        spawn(async move {
+            let mut framed = BufferedTcpStream::new(stream);
+            let mut line = String::new();
+            if framed.read_line(&mut line).await.is_ok() {
+                // handle request line and body reads here
+            }
+        });
+    }
+}
+```
+
+`BufferedTcpStream` keeps any bytes read ahead during header parsing so body
+reads can reuse the buffer without additional syscalls. The helper behaves like
+`tokio::io::BufReader` but is implemented entirely on top of the runtime socket
+layer.
+
+### Length-prefixed framing
+
+Use the framing helpers when exchanging binary messages. Frames are encoded as a
+big-endian u32 length followed by the payload and integrate with the buffered
+reader for efficiency.
+
+```rust
+use runtime::io::{read_length_prefixed, write_length_prefixed};
+use runtime::net::TcpStream;
+
+async fn echo(mut stream: TcpStream) -> std::io::Result<()> {
+    while let Some(frame) = read_length_prefixed(&mut stream, 64 * 1024).await? {
+        write_length_prefixed(&mut stream, &frame).await?;
+    }
+    Ok(())
+}
+```
+
+`read_length_prefixed` returns `Ok(None)` when the peer closes the connection
+cleanly. Both helpers enforce size limits and surface `UnexpectedEof` errors
+when a peer truncates a frame.
+
+### UDP round trips
+
+```rust
+use runtime::net::UdpSocket;
+use std::net::SocketAddr;
+
+async fn udp_echo() -> std::io::Result<()> {
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let mut server = UdpSocket::bind(addr).await?;
+    let server_addr = server.local_addr()?;
+
+    let client = UdpSocket::bind("127.0.0.1:0".parse().unwrap()).await?;
+    client.send_to(b"ping", server_addr).await?;
+
+    let mut buf = [0u8; 8];
+    let (len, peer) = server.recv_from(&mut buf).await?;
+    server.send_to(&buf[..len], peer).await?;
+    Ok(())
+}
+```
+
+The sockets register with the in-house reactor automatically and work across all
+compiled backends (`inhouse`, `tokio`, or the stub fallback). These examples
+double as smoke tests when developing new runtime backends or adjusting the
+polling integration.

@@ -21,11 +21,13 @@ use signal_hook::iterator::Signals;
 use std::fs;
 
 use futures::{SinkExt, StreamExt};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Body, Request, Response, StatusCode};
 use hyper_tungstenite::tungstenite::Message as WsMessage;
 use hyper_tungstenite::{is_upgrade_request, upgrade};
-use tokio::sync::mpsc;
+use runtime::net::TcpListener;
+use runtime::sync::mpsc;
 use wasmtime::{Engine, Func, Linker, Module, Store};
 
 use crate::{
@@ -34,6 +36,7 @@ use crate::{
     tx::web::{FuncTx, SiteManifestTx},
     ReadAck, StakeTable,
 };
+use tracing::warn;
 
 /// Simple token bucket for per-IP throttling.
 struct Bucket {
@@ -62,27 +65,41 @@ pub async fn run(
     stake: Arc<dyn StakeTable + Send + Sync>,
     read_tx: mpsc::Sender<ReadAck>,
 ) -> anyhow::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
     let buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>> = Arc::new(Mutex::new(HashMap::new()));
     let filter = Arc::clone(&IP_FILTER);
-    let make = make_service_fn(move |conn: &hyper::server::conn::AddrStream| {
-        let ip = conn.remote_addr();
+    loop {
+        let (stream, remote_addr) = listener.accept().await?;
         let buckets = Arc::clone(&buckets);
         let stake = Arc::clone(&stake);
+        let filter = Arc::clone(&filter);
         let read_tx = read_tx.clone();
-        async move {
-            Ok::<_, hyper::Error>(service_fn(move |req| {
+        runtime::spawn(async move {
+            let service = service_fn(move |req| {
                 handle(
                     req,
-                    ip,
+                    remote_addr,
                     Arc::clone(&buckets),
                     Arc::clone(&filter),
                     Arc::clone(&stake),
                     read_tx.clone(),
                 )
-            }))
-        }
-    });
-    Server::bind(&addr).serve(make).await?;
+            });
+            if let Err(err) = http1::Builder::new()
+                .serve_connection(stream, service)
+                .with_upgrades()
+                .await
+            {
+                warn!(
+                    target: "gateway",
+                    addr = %remote_addr,
+                    error = %err,
+                    "connection closed with error"
+                );
+            }
+        });
+    }
+    #[allow(unreachable_code)]
     Ok(())
 }
 

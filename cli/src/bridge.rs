@@ -2,6 +2,7 @@ use crate::codec_helpers::json_from_str;
 use crate::rpc::RpcClient;
 use bridges::{header::PowHeader, light_client::Proof, RelayerProof};
 use clap::Subcommand;
+use httpd::ClientResponse;
 use serde_json::json;
 use std::fs;
 
@@ -101,7 +102,7 @@ fn relayer_proofs(relayers: &[String], user: &str, amount: u64) -> Vec<RelayerPr
         .collect()
 }
 
-fn print_response(resp: reqwest::blocking::Response) {
+fn print_response(resp: ClientResponse) {
     if let Ok(text) = resp.text() {
         println!("{}", text);
     }

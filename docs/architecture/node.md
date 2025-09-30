@@ -4,6 +4,11 @@
 
 This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.
 
+> **Update (2025-11-05):** The workspace now relies on the first-party
+> `httpd` crate for outbound HTTP/JSON traffic. The tables below still show
+> legacy `reqwest` entries from the previous capture; treat them as historical
+> until the next tree export lands.
+
 ```
 the_block v0.1.0 (/workspace/the-block/node)
 ├── anyhow v1.0.99

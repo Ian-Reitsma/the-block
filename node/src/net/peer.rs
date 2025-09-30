@@ -23,6 +23,7 @@ use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::TryInto;
 use std::fs;
 use std::future::Future;
 use std::io::Write;
@@ -385,10 +386,11 @@ impl PeerSet {
             Ok(p) => p,
             Err(_) => return,
         };
-        let sig = match Signature::from_slice(&msg.signature) {
-            Ok(s) => s,
+        let sig_bytes: [u8; 64] = match msg.signature.as_slice().try_into() {
+            Ok(bytes) => bytes,
             Err(_) => return,
         };
+        let sig = Signature::from_bytes(&sig_bytes);
         if pk.verify(&bytes, &sig).is_err() {
             return;
         }
@@ -1827,7 +1829,8 @@ mod tests {
             }
         };
         let app = Router::new().route("/ingest", post(handler));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = runtime::net::TcpListener::bind(bind_addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
         runtime::spawn(async move {
             axum::serve(listener, app.into_make_service())
@@ -2045,7 +2048,7 @@ static METRIC_TX: Lazy<broadcast::Sender<PeerSnapshot>> = Lazy::new(|| {
 struct AggregatorClient {
     urls: Vec<String>,
     token: String,
-    client: reqwest::Client,
+    client: httpd::HttpClient,
     idx: Arc<AtomicUsize>,
     handle: runtime::RuntimeHandle,
 }
@@ -2055,7 +2058,7 @@ impl AggregatorClient {
         Self {
             urls,
             token,
-            client: reqwest::Client::new(),
+            client: httpd::HttpClient::default(),
             idx: Arc::new(AtomicUsize::new(0)),
             handle: runtime::handle(),
         }
@@ -2083,16 +2086,23 @@ impl AggregatorClient {
         for i in 0..self.urls.len() {
             let idx = (self.idx.load(Ordering::Relaxed) + i) % self.urls.len();
             let url = &self.urls[idx];
-            let res = self
+            let request = match self
                 .client
-                .post(format!("{}/{}", url, path))
-                .header("x-auth-token", self.token.clone())
-                .json(&body)
-                .send()
-                .await;
-            if res.is_ok() {
-                self.idx.store(idx, Ordering::Relaxed);
-                break;
+                .request(httpd::Method::Post, &format!("{}/{}", url, path))
+            {
+                Ok(builder) => builder.header("x-auth-token", self.token.clone()),
+                Err(_) => continue,
+            };
+            let request = match request.json(&body) {
+                Ok(builder) => builder,
+                Err(_) => continue,
+            };
+            match request.send().await {
+                Ok(_) => {
+                    self.idx.store(idx, Ordering::Relaxed);
+                    break;
+                }
+                Err(_) => continue,
             }
         }
     }

@@ -18,6 +18,10 @@ mod stub_impl;
 #[cfg(feature = "tokio-backend")]
 mod tokio_impl;
 
+pub mod io;
+pub mod net;
+pub mod sync;
+
 #[cfg(not(any(
     feature = "tokio-backend",
     feature = "stub-backend",
@@ -418,6 +422,50 @@ impl RuntimeHandle {
             #[cfg(feature = "stub-backend")]
             BackendHandle::Stub(_) => stub_impl::yield_now().await,
         }
+    }
+
+    #[cfg(all(
+        feature = "inhouse-backend",
+        any(feature = "tokio-backend", feature = "stub-backend")
+    ))]
+    pub(crate) fn inhouse_runtime(&self) -> Option<Arc<inhouse::InHouseRuntime>> {
+        if let BackendHandle::InHouse(rt) = &self.inner {
+            Some(Arc::clone(rt))
+        } else {
+            None
+        }
+    }
+
+    #[cfg(all(
+        feature = "inhouse-backend",
+        not(any(feature = "tokio-backend", feature = "stub-backend"))
+    ))]
+    pub(crate) fn inhouse_runtime(&self) -> Option<Arc<inhouse::InHouseRuntime>> {
+        Some(match &self.inner {
+            BackendHandle::InHouse(rt) => Arc::clone(rt),
+        })
+    }
+
+    #[cfg(all(
+        feature = "tokio-backend",
+        any(feature = "inhouse-backend", feature = "stub-backend")
+    ))]
+    pub(crate) fn tokio_runtime(&self) -> Option<Arc<tokio_impl::TokioRuntime>> {
+        if let BackendHandle::Tokio(rt) = &self.inner {
+            Some(Arc::clone(rt))
+        } else {
+            None
+        }
+    }
+
+    #[cfg(all(
+        feature = "tokio-backend",
+        not(any(feature = "inhouse-backend", feature = "stub-backend"))
+    ))]
+    pub(crate) fn tokio_runtime(&self) -> Option<Arc<tokio_impl::TokioRuntime>> {
+        Some(match &self.inner {
+            BackendHandle::Tokio(rt) => Arc::clone(rt),
+        })
     }
 
     pub async fn timeout<F, T>(&self, duration: Duration, future: F) -> Result<T, TimeoutError>

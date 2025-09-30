@@ -4,7 +4,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
 use hex::{decode, encode};
-use reqwest::blocking::Client;
+use httpd::{BlockingClient, Method};
 use serde_json::json;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
@@ -244,8 +244,12 @@ fn main() {
                     "threshold": threshold_value,
                 }
             });
-            let client = Client::new();
-            match client.post(&url).json(&body).send() {
+            let client = BlockingClient::default();
+            match client
+                .request(Method::Post, &url)
+                .and_then(|builder| builder.json(&body))
+                .and_then(|builder| builder.send())
+            {
                 Ok(resp) => match resp.json::<serde_json::Value>() {
                     Ok(v) => println!("{}", v["result"].to_string()),
                     Err(e) => eprintln!("parse error: {e}"),
@@ -260,8 +264,12 @@ fn main() {
                 "method": "rent.escrow.balance",
                 "params": {"id": account},
             });
-            let client = Client::new();
-            match client.post(&url).json(&payload).send() {
+            let client = BlockingClient::default();
+            match client
+                .request(Method::Post, &url)
+                .and_then(|builder| builder.json(&payload))
+                .and_then(|builder| builder.send())
+            {
                 Ok(resp) => match resp.json::<serde_json::Value>() {
                     Ok(v) => println!("{}", v["result"].as_u64().unwrap_or(0)),
                     Err(e) => eprintln!("parse error: {e}"),
@@ -276,8 +284,12 @@ fn main() {
                 "method": "dex.escrow_release",
                 "params": {"id": id, "amount": amount},
             });
-            let client = Client::new();
-            match client.post(&url).json(&payload).send() {
+            let client = BlockingClient::default();
+            match client
+                .request(Method::Post, &url)
+                .and_then(|builder| builder.json(&payload))
+                .and_then(|builder| builder.send())
+            {
                 Ok(resp) => match resp.json::<serde_json::Value>() {
                     Ok(v) => {
                         if let Some(res) = v.get("result") {

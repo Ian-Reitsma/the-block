@@ -1,7 +1,6 @@
 #![cfg(feature = "integration-tests")]
-use reqwest::error::Kind as ReqwestKind;
 use serde_json::Value;
-use the_block::rpc::client::RpcClient;
+use the_block::rpc::client::{RpcClient, RpcClientError};
 
 #[test]
 fn env_fault_rate_triggers_request_errors() {
@@ -11,5 +10,5 @@ fn env_fault_rate_triggers_request_errors() {
     let err = client
         .call("http://localhost:1", &Value::Null)
         .expect_err("fault injection should error");
-    assert!(matches!(err.kind(), ReqwestKind::Request));
+    assert!(matches!(err, RpcClientError::InjectedFault));
 }

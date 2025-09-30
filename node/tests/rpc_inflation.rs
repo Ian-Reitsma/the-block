@@ -13,8 +13,10 @@ mod util;
 use util::timeout::expect_timeout;
 
 async fn rpc(addr: &str, body: &str) -> serde_json::Value {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
+    use runtime::io::read_to_end;
+    use runtime::net::TcpStream;
+    use std::net::SocketAddr;
+    let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
@@ -25,7 +27,9 @@ async fn rpc(addr: &str, body: &str) -> serde_json::Value {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let body = &resp[body_idx + 4..];

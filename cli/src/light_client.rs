@@ -7,7 +7,7 @@ use crate::rpc::RpcClient;
 use crate::tx::{TxDidAnchor, TxDidAnchorAttestation};
 use anyhow::{anyhow, Context, Result};
 use clap::{ArgGroup, Args, Subcommand};
-use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use light_client::{self, SyncOptions};
 use serde::{Deserialize, Serialize};

@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use reqwest::blocking::Client;
+use httpd::{BlockingClient, Method};
 use serde_json::Value;
 use std::collections::VecDeque;
 
@@ -51,10 +51,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("pruned {total}");
         }
         Command::Telemetry { url } => {
-            let client = Client::new();
-            let resp = client.get(format!("{}/telemetry", url)).send()?;
+            let client = BlockingClient::default();
+            let resp = client
+                .request(Method::Get, &format!("{}/telemetry", url))?
+                .send()?;
             if !resp.status().is_success() {
-                eprintln!("telemetry request failed: {}", resp.status());
+                eprintln!("telemetry request failed: {}", resp.status().as_u16());
             }
             let body = resp.text()?;
             println!("{}", body);

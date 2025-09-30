@@ -23,29 +23,27 @@ use crypto_suite::signatures::{
 };
 use hex;
 use once_cell::sync::Lazy;
+use runtime::io::BufferedTcpStream;
+use runtime::net::{TcpListener, TcpStream};
+use runtime::sync::{oneshot, semaphore::Semaphore};
 use runtime::timeout;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
 use subtle::ConstantTimeEq;
-use tokio::sync::Semaphore;
 
 pub mod ledger;
 pub mod limiter;
 pub mod scheduler;
 use limiter::{ClientState, RpcClientErrorCode};
-
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::oneshot;
 
 #[cfg(feature = "telemetry")]
 pub mod analytics;
@@ -341,7 +339,7 @@ pub async fn handle_conn(
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
 ) {
-    let mut reader = BufReader::new(stream);
+    let mut reader = BufferedTcpStream::new(stream);
     let peer_ip = reader.get_ref().peer_addr().ok().map(|a| a.ip());
 
     // Read request line with timeout to avoid hanging connections.
@@ -2661,7 +2659,13 @@ pub async fn run_rpc_server(
     cfg: RpcConfig,
     ready: oneshot::Sender<String>,
 ) -> std::io::Result<()> {
-    let listener = TcpListener::bind(&addr).await?;
+    let bind_addr: SocketAddr = addr.parse().map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid rpc bind address {addr}: {err}"),
+        )
+    })?;
+    let listener = TcpListener::bind(bind_addr).await?;
     let local = listener.local_addr()?.to_string();
     let _ = ready.send(local);
     let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));

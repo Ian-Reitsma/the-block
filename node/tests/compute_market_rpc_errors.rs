@@ -2,16 +2,18 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
+use runtime::io::read_to_end;
+use runtime::net::TcpStream;
 use serde_json::Value;
 use serial_test::serial;
+use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use util::timeout::expect_timeout;
 
 mod util;
 
 async fn rpc(addr: &str, body: &str) -> Value {
+    let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
@@ -21,10 +23,12 @@ async fn rpc(addr: &str, body: &str) -> Value {
     expect_timeout(stream.write_all(req.as_bytes()))
         .await
         .unwrap();
-    let mut resp = vec![0u8; 1024];
-    let n = expect_timeout(stream.read(&mut resp)).await.unwrap();
+    let mut resp = Vec::with_capacity(1024);
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-    serde_json::from_slice(&resp[body_idx + 4..n]).unwrap()
+    serde_json::from_slice(&resp[body_idx + 4..]).unwrap()
 }
 
 #[tokio::test]

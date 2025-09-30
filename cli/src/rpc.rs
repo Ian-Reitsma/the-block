@@ -1,8 +1,7 @@
 #![allow(clippy::module_name_repetitions)]
 
+use httpd::{BlockingClient, ClientError as HttpClientError, ClientResponse, Method};
 use rand::Rng;
-use reqwest::blocking::{Client, Response};
-use reqwest::header::AUTHORIZATION;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
@@ -16,7 +15,7 @@ const MAX_BACKOFF_EXPONENT: u32 = 30;
 /// Simple JSON-RPC client with configurable timeouts and retry backoff.
 #[derive(Clone)]
 pub struct RpcClient {
-    http: Client,
+    http: BlockingClient,
     base_timeout: Duration,
     jitter: Duration,
     max_retries: u32,
@@ -36,7 +35,7 @@ impl RpcClient {
             .map(|v| v.clamp(0.0, 1.0))
             .unwrap_or(0.0);
         Self {
-            http: Client::new(),
+            http: BlockingClient::default(),
             base_timeout: Duration::from_millis(base),
             jitter: Duration::from_millis(jitter),
             max_retries: retries,
@@ -69,7 +68,11 @@ impl RpcClient {
     }
 
     /// Perform a JSON-RPC call to `url` with `payload`, retrying on timeout.
-    pub fn call<T: Serialize>(&self, url: &str, payload: &T) -> Result<Response, RpcClientError> {
+    pub fn call<T: Serialize>(
+        &self,
+        url: &str,
+        payload: &T,
+    ) -> Result<ClientResponse, RpcClientError> {
         self.call_with_auth(url, payload, None)
     }
 
@@ -79,16 +82,23 @@ impl RpcClient {
         url: &str,
         payload: &T,
         auth: Option<&str>,
-    ) -> Result<Response, RpcClientError> {
+    ) -> Result<ClientResponse, RpcClientError> {
         let mut attempt = 0;
         loop {
             let timeout = self.timeout_with_jitter();
             let start = Instant::now();
             self.maybe_inject_fault()?;
-            let mut request = self.http.post(url).timeout(timeout).json(payload);
-            if let Some(token) = auth {
-                request = request.header(AUTHORIZATION, token);
-            }
+            let request = self
+                .http
+                .request(Method::Post, url)
+                .map_err(RpcClientError::from)?
+                .timeout(timeout);
+            let request = if let Some(token) = auth {
+                request.header("authorization", token)
+            } else {
+                request
+            };
+            let request = request.json(payload).map_err(RpcClientError::from)?;
             let result = request.send().map_err(RpcClientError::from);
             match result {
                 Ok(resp) => return Ok(resp),
@@ -214,7 +224,7 @@ fn env_var<T: std::str::FromStr>(key: &str, default: T) -> T {
 
 #[derive(Debug)]
 pub enum RpcClientError {
-    Transport(reqwest::Error),
+    Transport(HttpClientError),
     InjectedFault,
 }
 
@@ -236,8 +246,8 @@ impl std::error::Error for RpcClientError {
     }
 }
 
-impl From<reqwest::Error> for RpcClientError {
-    fn from(err: reqwest::Error) -> Self {
+impl From<HttpClientError> for RpcClientError {
+    fn from(err: HttpClientError) -> Self {
         RpcClientError::Transport(err)
     }
 }

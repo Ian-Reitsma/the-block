@@ -3,6 +3,7 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use insta::assert_snapshot;
 use rand::{thread_rng, RngCore};
+use runtime::{io::read_to_end, net::TcpStream};
 use serial_test::serial;
 use std::convert::TryInto;
 use std::net::SocketAddr;
@@ -18,8 +19,6 @@ use the_block::{
     rpc::run_rpc_server,
     Blockchain,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use util::timeout::expect_timeout;
 
 mod util;
@@ -41,6 +40,7 @@ fn init_env() -> tempfile::TempDir {
 }
 
 async fn rpc(addr: &str, body: &str) -> serde_json::Value {
+    let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
@@ -51,7 +51,9 @@ async fn rpc(addr: &str, body: &str) -> serde_json::Value {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     serde_json::from_str(&resp[body_idx + 4..]).unwrap()

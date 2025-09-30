@@ -1,6 +1,6 @@
 # Monitoring
-> **Review (2025-09-25):** Synced Monitoring guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-09-29):** Reaffirmed runtime HTTP client coverage, noted the aggregator/gateway server migration outstanding, and reconfirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
 The default dashboard bundles Prometheus and Grafana to visualize subsystem metrics.
 Operational alert handling and correlation procedures live in the
@@ -94,9 +94,11 @@ simple archive and restore helpers for the database directory.
 #### Behaviour and resilience
 
 If the aggregator restarts or becomes unreachable, nodes queue updates
-in memory and retry with backoff until the service recovers. Aggregated
+in memory and retry with backoff until the service recovers. The current ingestion
+pipeline still relies on `axum`/`tokio`; only outbound log-correlation calls share the
+in-house `httpd::HttpClient` (`metrics-aggregator/src/lib.rs`). Aggregated
 snapshots deduplicate on peer ID so multiple nodes reporting the same
-peer collapse into a single record.
+peer collapse into a single record. The runtime-backed ingestion rewrite remains on the roadmap.
 
 ### High-availability deployment
 
@@ -117,7 +119,7 @@ the aggregator itself and the node exporters. Alert when
 
 ### Metrics-to-logs correlation
 
-The aggregator ingests Prometheus labels that include `correlation_id` and caches the most recent values per metric. When a counter such as `quic_handshake_fail_total{peer="…"}` spikes, the service issues a REST query against the node's `/logs/search` endpoint, saves the matching payload under `$TB_LOG_DUMP_DIR`, and increments `log_correlation_fail_total` when no records are found. Operators can retrieve cached mappings via `GET /correlations/<metric>` or the CLI:
+The aggregator ingests Prometheus labels that include `correlation_id` and caches the most recent values per metric. When a counter such as `quic_handshake_fail_total{peer="…"}` spikes, the service issues a REST query against the node's `/logs/search` endpoint, saves the matching payload under `$TB_LOG_DUMP_DIR`, and increments `log_correlation_fail_total` when no records are found. These outbound fetches now run through the shared `httpd::HttpClient`, giving the service the same timeout and backoff behaviour as the node’s JSON-RPC client without pulling in `reqwest`. Operators can retrieve cached mappings via `GET /correlations/<metric>` or the CLI:
 
 ```bash
 contract logs correlate-metric --metric quic_handshake_fail_total \

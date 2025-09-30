@@ -8,6 +8,7 @@ where
     codec::deserialize_from_str(profiles::json(), input)
 }
 
+#[cfg(feature = "wasm-metadata")]
 pub fn json_to_vec<T>(value: &T) -> codec::Result<Vec<u8>>
 where
     T: Serialize,

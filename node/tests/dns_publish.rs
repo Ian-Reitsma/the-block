@@ -1,8 +1,10 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
+use runtime::{io::read_to_end, net::TcpStream};
 use serde_json::Value;
 use serial_test::serial;
 use std::convert::TryInto;
+use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
@@ -11,13 +13,12 @@ use the_block::{
     rpc::run_rpc_server,
     Blockchain,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use util::{temp::temp_dir, timeout::expect_timeout};
 
 mod util;
 
 async fn rpc(addr: &str, body: &str) -> Value {
+    let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
@@ -28,7 +29,9 @@ async fn rpc(addr: &str, body: &str) -> Value {
         .await
         .unwrap();
     let mut resp = Vec::new();
-    expect_timeout(stream.read_to_end(&mut resp)).await.unwrap();
+    expect_timeout(read_to_end(&mut stream, &mut resp))
+        .await
+        .unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let body_idx = resp.find("\r\n\r\n").unwrap();
     let body = &resp[body_idx + 4..];

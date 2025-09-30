@@ -1,10 +1,10 @@
 # Project Progress Snapshot
-> **Review (2025-09-25):** Synced Project Progress Snapshot guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-09-29):** Tightened readiness to 98.3/93.3 after re-checking that the aggregator and gateway servers still rely on `axum`/`hyper` and that `crates/httpd` currently serves outbound clients only.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 
-Mainnet readiness currently measures **99.2/100** with vision completion **93.4/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`) with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence flow through the trait-based `p2p_overlay` crate with libp2p and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination, wrapper telemetry exports runtime/transport/storage/coding/codec/crypto metadata through both node metrics and the aggregator `/wrappers` endpoint, and release provenance now hashes the vendored tree while recording dependency snapshots enforced by CI, CLI, and governance overrides. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, wire compute-market SLA slashing dashboards atop the new matcher, extend bridge/DEX docs with signer-set payloads and release-verifier guidance, continue WAN-scale QUIC chaos drills, and polish multisig UX.
+Mainnet readiness currently measures **98.3/100** with vision completion **93.3/100**. Subsidy accounting now lives solely in the unified CT ledger; see `docs/system_changes.md` for migration notes. The standalone `governance` crate mirrors the node state machine for CLI/SDK use, the compute marketplace enforces lane-aware batching with fairness deadlines, starvation telemetry, and per-lane persistence, the mobile gateway cache persists encrypted responses with TTL hygiene plus CLI/RPC/telemetry visibility, wallet binaries share the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`) with multisig signer telemetry, the RPC client clamps `TB_RPC_FAULT_RATE` while saturating exponential backoff, overlay discovery/uptime/persistence flow through the trait-based `p2p_overlay` crate with libp2p and stub backends, the storage engine abstraction unifies RocksDB, sled, and memory providers via `crates/storage_engine`, the coding crate gates XOR parity and RLE compression fallbacks behind audited rollout policy while tagging storage telemetry and powering the bench-harness comparison mode, the gossip relay couples an LRU-backed dedup cache with adaptive fanout and partition tagging, the proof-rebate tracker persists receipts that land in coinbase assembly with explorer/CLI pagination, wrapper telemetry exports runtime/transport/storage/coding/codec/crypto metadata through both node metrics and the aggregator `/wrappers` endpoint, release provenance now hashes the vendored tree while recording dependency snapshots enforced by CI, CLI, and governance overrides, and the runtime-backed HTTP client now covers node/CLI surfaces while the aggregator and gateway servers still ride `axum`. The dependency-sovereignty pivot is documented in [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md) and reflected across every subsystem guide. Remaining focus areas: deliver treasury disbursement tooling, complete the in-house HTTP server rollout (aggregator + gateway), extend bridge/DEX docs with signer-set payloads and release-verifier guidance, wire compute-market SLA slashing dashboards atop the new matcher, continue WAN-scale QUIC chaos drills, and polish multisig UX.
 
 \[
 \text{multiplier}_x = \frac{\phi_x I_{\text{target}} S / 365}{U_x / \text{epoch\_secs}}
@@ -21,10 +21,10 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-09-25T10:20:00Z`)*: 7 strategic crates, 7 replaceable crates, and 845 unclassified dependencies in the resolved workspace DAG.
+- **Current inventory** *(generated at `2025-09-29T08:45:00Z`)*: 7 strategic crates, 7 replaceable crates, and 845 unclassified dependencies in the resolved workspace DAG.
 - **Outstanding drift**: 204 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
 
-## 1. Consensus & Core Execution — 93.5 %
+## 1. Consensus & Core Execution — 93.6 %
 
 **Evidence**
 - Hybrid PoW/PoS chain: `node/src/consensus/pow.rs` embeds PoS checkpoints and `node/src/consensus/fork_choice.rs` prefers finalized chains.
@@ -46,9 +46,10 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — 98.1 %
+## 2. Networking & Gossip — 98.3 %
 
 **Evidence**
+- Runtime-owned TCP/UDP reactor now backs the node RPC client/server plumbing (`crates/runtime/src/net.rs`, `node/src/rpc/client.rs`), while gateway and metrics-aggregator endpoints still rely on `hyper`/`axum` pending their migration. Buffered IO helpers live in `crates/runtime/src/io.rs` with integration coverage in `crates/runtime/tests/net.rs`.
 - Deterministic gossip with partition tests: `node/tests/net_gossip.rs` and docs in `docs/networking.md`.
 - QUIC transport with mutual-TLS certificate rotation, cached diagnostics, TCP fallback, provider introspection, and mixed-transport fanout; integration covered in `node/tests/net_quic.rs`, `crates/transport/src/lib.rs`, `crates/transport/src/quinn_backend.rs`, `crates/transport/src/s2n_backend.rs`, and `docs/quic.md`, with telemetry via `quic_cert_rotation_total`, `quic_provider_connect_total{provider}`, and per-peer `quic_retransmit_total`/`quic_handshake_fail_total` counters.
 - Overlay abstraction via `crates/p2p_overlay` with libp2p and stub backends, configuration toggles, CLI overrides, persistence managed via bincode, integration tests exercising both backends, and telemetry gauges (`overlay_backend_active`, `overlay_peer_total`, persisted counts) exposed through `node/src/telemetry.rs`, `cli/src/net.rs`, and `node/src/rpc/peer.rs`.
@@ -75,7 +76,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Bootstrap peer churn analysis missing.
     - Overlay soak tests need long-lived fault injection, and the dependency registry now focuses on automating storage migration drills plus the upcoming dependency fault simulation harness to certify fallbacks.
 
-## 3. Governance & Subsidy Economy — 96.3 %
+## 3. Governance & Subsidy Economy — 96.4 %
 
 **Evidence**
 - Subsidy multiplier proposals surfaced via `node/src/rpc/governance.rs` and web UI (`tools/gov-ui`).
@@ -105,7 +106,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - No on‑chain treasury or proposal dependency system.
 - Governance rollback simulation incomplete.
 
-## 4. Storage & Free‑Read Hosting — 93.6 %
+## 4. Storage & Free‑Read Hosting — 93.8 %
 
 **Evidence**
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
@@ -118,6 +119,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - `crates/coding` fronts encryption, erasure, fountain, and compression primitives; XOR parity and RLE fallback compressors respect `config/storage.toml` rollout gates, emit coder/compressor labels on storage latency and failure metrics, log `algorithm_limited` repair skips, and feed the `bench-harness compare-coders` mode for performance baselining (`crates/coding/src`, `node/src/storage/settings.rs`, `tools/bench-harness/src/main.rs`).
 - Base64 snapshots stage through `NamedTempFile::persist` plus `sync_all`, with legacy dumps removed only after durable rename (`node/src/simple_db/memory.rs`, `node/tests/simple_db/memory_tests.rs`).
 - Rent escrow metrics (`rent_escrow_locked_ct_total`, etc.) exposed in `docs/monitoring.md` with alert thresholds.
+- Metrics aggregator ingestion still runs on `axum`/`tokio`; only the outbound log correlation calls use the shared `httpd::HttpClient` (`metrics-aggregator/src/lib.rs`). Runtime-backed ingestion and retention rework remain outstanding.
 - Mobile gateway cache persists ChaCha20-Poly1305–encrypted responses and queued transactions to sled with TTL sweeping, eviction guardrails, telemetry counters, CLI `mobile-cache status|flush` commands, RPC inspection endpoints, and invalidation hooks (`node/src/gateway/mobile_cache.rs`, `node/src/rpc/gateway.rs`, `cli/src/gateway.rs`, `docs/mobile_gateway.md`). A min-heap of expirations drives sweep cadence, persistence snapshots reconstruct queues on restart, encryption keys derive from `TB_MOBILE_CACHE_KEY_HEX`/`TB_NODE_KEY_HEX`, and status responses expose per-entry age/expiry plus queue bytes so operators can tune TTL windows and capacity.
 - Reputation-weighted Lagrange allocation and proof-of-retrievability challenges secure storage contracts (`node/src/gateway/storage_alloc.rs`, `storage/src/contract.rs`).
 
@@ -125,7 +127,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Incentive‑backed DHT storage marketplace still conceptual.
 - Offline escrow reconciliation absent.
 
-## 5. Smart‑Contract VM & UTXO/PoW — 87.4 %
+## 5. Smart‑Contract VM & UTXO/PoW — 87.5 %
 
 **Evidence**
 - Persistent `ContractStore` with CLI deploy/call flows (`state/src/contracts`, `cli/src/main.rs`).
@@ -134,15 +136,17 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Planned dynamic gas fee market (`node/src/fees.rs` roadmap) anchors eventual EIP-1559 adaptation.
 - Deterministic WASM runtime with fuel-based metering and ABI helpers (`node/src/vm/wasm/mod.rs`, `node/src/vm/wasm/gas.rs`).
 - Interactive debugger and trace export (`node/src/vm/debugger.rs`, `docs/vm_debugging.md`).
+- VM trace WebSocket streaming now rides the in-house runtime sockets (`node/src/rpc/vm_trace.rs`, `crates/runtime/src/net.rs`), keeping debugger tooling aligned with the dependency-sovereignty goals.
 
 **Gaps**
 - Instruction set remains minimal; no formal VM spec or audits.
 - Developer SDK and security tooling pending.
 
-## 6. Compute Marketplace & CBM — 95.6 %
+## 6. Compute Marketplace & CBM — 95.8 %
 
 **Evidence**
 - Deterministic GPU/CPU hash runners (`node/src/compute_market/workloads`).
+- Compute marketplace RPC endpoints still run through the bespoke parser backed by `runtime::net::TcpListener` in `node/src/rpc/mod.rs`; the `crates/httpd` router remains unused on the server side, so the dependency risk persists until that migration lands (`node/tests/compute_market_rpc_errors.rs`).
 - `compute.job_cancel` RPC releases resources and refunds bonds (`node/src/rpc/compute_market.rs`).
 - Capability-aware scheduler matches CPU/GPU workloads, weights offers by provider reputation, and handles cancellations (`node/src/compute_market/scheduler.rs`).
 - Price board persistence with metrics (`docs/compute_market.md`).
@@ -159,7 +163,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrowed payments and automated SLA enforcement remain rudimentary; deadline tracking and slashing heuristics are staged but not yet active.
 
-## 7. Trust Lines & DEX — 85.8 %
+## 7. Trust Lines & DEX — 85.9 %
 
 **Evidence**
 - Persistent order books via `node/src/dex/storage.rs` and restart tests (`node/tests/dex_persistence.rs`).
@@ -175,11 +179,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 **Gaps**
 - Escrow for cross‑chain DEX routes absent.
 
-## 8. Wallets, Light Clients & KYC — 96.4 %
+## 8. Wallets, Light Clients & KYC — 96.6 %
 
 **Evidence**
 - CLI + hardware wallet support (`crates/wallet`).
 - Remote signer workflows (`crates/wallet/src/remote_signer.rs`, `docs/wallets.md`).
+- Remote signer HTTP calls now rely on the blocking wrapper in `crates/httpd`, eliminating external clients while keeping retry/backoff semantics intact (`crates/wallet/src/remote_signer.rs`, `crates/httpd/src/blocking.rs`).
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
 - Device status probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, emit `the_block_light_client_device_status{field,freshness}` telemetry, persist overrides in `~/.the_block/light_client.toml`, surface CLI/RPC gating messages, and embed annotated snapshots in compressed log uploads (`crates/light-client`, `cli/src/light_client.rs`, `docs/light_client.md`, `docs/mobile_light_client.md`).
@@ -198,7 +203,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Surface multisig signer history in explorer/CLI output for auditability.
 - Production‑grade mobile apps not yet shipped.
 
-## 9. Bridges & Cross‑Chain Routing — 81.8 %
+## 9. Bridges & Cross‑Chain Routing — 81.9 %
 
 **Evidence**
 - Per-asset bridge channels with relayer sets, pending withdrawals, and bond ledgers persisted via `SimpleDb` (`node/src/bridge/mod.rs`).
@@ -206,17 +211,19 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Challenge windows and slashing logic (`bridge.challenge_withdrawal`, `bridges/src/relayer.rs`) debit collateral and emit telemetry `BRIDGE_CHALLENGES_TOTAL`/`BRIDGE_SLASHES_TOTAL`.
 - Partition markers propagate through deposit events and withdrawal routing so relayers avoid isolated shards (`node/src/net/partition_watch.rs`, `docs/bridges.md`).
 - CLI/RPC surfaces for quorum composition, pending withdrawals, history, and slash logs (`cli/src/bridge.rs`, `node/src/rpc/bridge.rs`).
+- Bridge RPC endpoints continue to rely on the bespoke JSON-RPC loop in `node/src/rpc/mod.rs`; the planned `crates/httpd` server integration has not shipped yet, so quorum tooling still depends on the legacy routing until that swap completes.
 
 **Gaps**
 - Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain.
 
-## 10. Monitoring, Debugging & Profiling — 95.6 %
+## 10. Monitoring, Debugging & Profiling — 95.8 %
 
 **Evidence**
   - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
   - Service badge tracker exports uptime metrics and RPC status (`node/src/service_badge.rs`, `node/tests/service_badge.rs`). See `docs/service_badge.md`.
   - Monitoring stack via `make monitor` and docs in `docs/monitoring/README.md`.
     - Cluster metrics aggregation with disk-backed retention (`metrics-aggregator` crate).
+    - Aggregator ingestion still depends on `hyper`/`axum`; runtime-backed archive streaming is pending. Outbound correlations now share the node’s HTTP client (`metrics-aggregator/src/lib.rs`).
     - Metrics-to-logs correlation links Prometheus anomalies to targeted log dumps and exposes `log_correlation_fail_total` for missed lookups (`metrics-aggregator/src/lib.rs`, `node/src/rpc/logs.rs`, `cli/src/logs.rs`).
     - VM trace counters and partition dashboards (`node/src/telemetry.rs`, `monitoring/templates/partition.json`).
     - Settlement audit CI job (`.github/workflows/ci.yml`).
@@ -267,4 +274,4 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 
 ---
 
-*Last updated: 2025‑09‑24*
+*Last updated: 2025‑09‑29*

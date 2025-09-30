@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::fs::File;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::path::Path;
 
 use tempfile::tempdir;
@@ -56,8 +57,7 @@ fn search_filters_and_decryption() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tail_streams_indexed_rows() -> Result<()> {
     use futures::StreamExt;
-    use tokio::io::AsyncReadExt;
-    use tokio::net::{TcpListener, TcpStream};
+    use runtime::net::{TcpListener, TcpStream};
     use tokio_tungstenite::{client_async, tungstenite::Message};
 
     let dir = tempdir()?;
@@ -79,7 +79,8 @@ async fn tail_streams_indexed_rows() -> Result<()> {
 
     std::env::set_var("TB_LOG_DB_PATH", db_path.to_string_lossy().to_string());
 
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let bind_addr: SocketAddr = "127.0.0.1:0".parse()?;
+    let listener = TcpListener::bind(bind_addr).await?;
     let addr = listener.local_addr()?;
     let server = the_block::spawn(async move {
         let (mut stream, _) = listener.accept().await.expect("accept connection");

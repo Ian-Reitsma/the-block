@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use reqwest::blocking::Client;
+use httpd::{BlockingClient, Method};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -46,7 +46,7 @@ enum Command {
 #[derive(Error, Debug)]
 enum ProbeError {
     #[error("request failed: {0}")]
-    Reqwest(String),
+    Http(String),
     #[error("timeout")]
     Timeout,
     #[error("missing height in metrics output")]
@@ -92,17 +92,14 @@ fn main() {
 }
 
 fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, ProbeError> {
-    let client = Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?;
+    let client = BlockingClient::default();
     let start = Instant::now();
     let req = serde_json::json!({"jsonrpc":"2.0","id":0,"method":"metrics","params":{}});
     client
-        .post(url)
-        .json(&req)
-        .send()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?;
+        .request(Method::Post, url)
+        .and_then(|builder| builder.timeout(timeout).json(&req))
+        .and_then(|builder| builder.send())
+        .map_err(|e| ProbeError::Http(e.to_string()))?;
     let elapsed = start.elapsed();
     if expect_ms > 0 && elapsed > Duration::from_millis(expect_ms) {
         return Err(ProbeError::Timeout);
@@ -110,21 +107,21 @@ fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, Pr
     Ok(elapsed)
 }
 
-fn fetch_height(url: &str, client: &Client) -> Result<u64, ProbeError> {
+fn fetch_height(url: &str, client: &BlockingClient, timeout: Duration) -> Result<u64, ProbeError> {
     let req = serde_json::json!({"jsonrpc":"2.0","id":0,"method":"metrics","params":{}});
     let text = client
-        .post(url)
-        .json(&req)
-        .send()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?
+        .request(Method::Post, url)
+        .and_then(|builder| builder.timeout(timeout).json(&req))
+        .and_then(|builder| builder.send())
+        .map_err(|e| ProbeError::Http(e.to_string()))?
         .text()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?;
+        .map_err(|e| ProbeError::Http(e.to_string()))?;
     for line in text.lines() {
         if let Some(val) = line.strip_prefix("block_height ") {
             return val
                 .trim()
                 .parse::<u64>()
-                .map_err(|e| ProbeError::Reqwest(e.to_string()));
+                .map_err(|e| ProbeError::Http(e.to_string()));
         }
     }
     Err(ProbeError::NoHeight)
@@ -136,37 +133,38 @@ fn mine_one(
     timeout: Duration,
     expect_delta: u64,
 ) -> Result<Duration, ProbeError> {
-    let client = Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?;
-    let start_height = fetch_height(url, &client)?;
+    let client = BlockingClient::default();
+    let start_height = fetch_height(url, &client, timeout)?;
     let req = serde_json::json!({"jsonrpc":"2.0","id":0,"method":"start_mining","params":{"miner":miner}});
     client
-        .post(url)
-        .json(&req)
-        .send()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?;
+        .request(Method::Post, url)
+        .and_then(|builder| builder.timeout(timeout).json(&req))
+        .and_then(|builder| builder.send())
+        .map_err(|e| ProbeError::Http(e.to_string()))?;
     let start = Instant::now();
     loop {
         std::thread::sleep(Duration::from_millis(200));
-        let h = fetch_height(url, &client)?;
+        let h = fetch_height(url, &client, timeout)?;
         if h >= start_height + expect_delta.max(1) {
             let _ = client
-                .post(url)
-                .json(
-                    &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"stop_mining","params":{}}),
-                )
-                .send();
+                .request(Method::Post, url)
+                .and_then(|builder| {
+                    builder.timeout(timeout).json(&serde_json::json!({
+                        "jsonrpc":"2.0","id":1,"method":"stop_mining","params":{}
+                    }))
+                })
+                .and_then(|builder| builder.send());
             return Ok(start.elapsed());
         }
         if start.elapsed() > timeout {
             let _ = client
-                .post(url)
-                .json(
-                    &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"stop_mining","params":{}}),
-                )
-                .send();
+                .request(Method::Post, url)
+                .and_then(|builder| {
+                    builder.timeout(timeout).json(&serde_json::json!({
+                        "jsonrpc":"2.0","id":1,"method":"stop_mining","params":{}
+                    }))
+                })
+                .and_then(|builder| builder.send());
             return Err(ProbeError::Timeout);
         }
     }
@@ -188,11 +186,8 @@ fn gossip_check(addr: &str, timeout: Duration) -> Result<Duration, ProbeError> {
 }
 
 fn tip(url: &str, expect: u64, timeout: Duration) -> Result<Duration, ProbeError> {
-    let client = Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| ProbeError::Reqwest(e.to_string()))?;
-    let h = fetch_height(url, &client)?;
+    let client = BlockingClient::default();
+    let h = fetch_height(url, &client, timeout)?;
     if expect > 0 && h < expect {
         return Err(ProbeError::Timeout);
     }

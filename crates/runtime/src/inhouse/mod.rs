@@ -15,8 +15,11 @@ use futures::channel::oneshot;
 use futures::task::{waker_ref, ArcWake};
 use futures::FutureExt;
 use metrics::{gauge, histogram};
-use mio::{Events, Poll as MioPoll, Token, Waker as MioWaker};
+use mio::{event::Source, Events, Interest, Poll as MioPoll, Token, Waker as MioWaker};
 use pin_project_lite::pin_project;
+use std::io;
+
+pub(crate) mod net;
 
 const SPAWN_LATENCY_METRIC: &str = "runtime_spawn_latency_seconds";
 const PENDING_TASKS_METRIC: &str = "runtime_pending_tasks";
@@ -155,6 +158,10 @@ impl InHouseRuntime {
 
     pub(crate) fn interval(&self, duration: Duration) -> InHouseInterval {
         InHouseInterval::new(Arc::clone(&self.inner.reactor), duration)
+    }
+
+    pub(crate) fn reactor(&self) -> Arc<ReactorInner> {
+        Arc::clone(&self.inner.reactor)
     }
 }
 
@@ -625,10 +632,11 @@ impl TimerRegistration {
     }
 }
 
-struct ReactorInner {
+pub(crate) struct ReactorInner {
     poll: Mutex<MioPoll>,
     waker: MioWaker,
     timers: Mutex<TimerState>,
+    io: Mutex<IoState>,
     next_token: AtomicU64,
     shutdown: AtomicBool,
     thread: Mutex<Option<thread::JoinHandle<()>>>,
@@ -643,6 +651,7 @@ impl ReactorInner {
             poll: Mutex::new(poll),
             waker,
             timers: Mutex::new(TimerState::new()),
+            io: Mutex::new(IoState::new()),
             next_token: AtomicU64::new(0),
             shutdown: AtomicBool::new(false),
             thread: Mutex::new(None),
@@ -667,7 +676,9 @@ impl ReactorInner {
             for event in events.iter() {
                 if event.token() == REACTOR_WAKER_TOKEN {
                     // drain wake-up notification
+                    continue;
                 }
+                self.dispatch_io_event(event);
             }
             self.fire_due_timers();
         }
@@ -692,6 +703,122 @@ impl ReactorInner {
                 None => break,
             }
         }
+    }
+
+    fn dispatch_io_event(&self, event: &mio::event::Event) {
+        let token_index = event.token().0;
+        let mut wake_read = None;
+        let mut wake_write = None;
+
+        {
+            let mut state = self.io.lock().expect("reactor io mutex poisoned");
+            if let Some(entry) = state.entries.get_mut(&token_index) {
+                if event.is_readable()
+                    || event.is_read_closed()
+                    || event.is_error()
+                    || event.is_priority()
+                {
+                    entry.read_ready = true;
+                    wake_read = entry.read_waker.take();
+                }
+                if event.is_writable()
+                    || event.is_write_closed()
+                    || event.is_error()
+                    || event.is_priority()
+                {
+                    entry.write_ready = true;
+                    wake_write = entry.write_waker.take();
+                }
+            }
+        }
+
+        if let Some(waker) = wake_read {
+            waker.wake();
+        }
+        if let Some(waker) = wake_write {
+            waker.wake();
+        }
+    }
+
+    fn register_source(&self, source: &mut impl Source, interest: Interest) -> io::Result<Token> {
+        let token_value = self.next_token.fetch_add(1, AtomicOrdering::SeqCst) as usize;
+        let token = Token(token_value);
+        let _ = self.waker.wake();
+        let poll = loop {
+            if let Ok(poll) = self.poll.try_lock() {
+                break poll;
+            }
+            let _ = self.waker.wake();
+            thread::yield_now();
+        };
+        poll.registry().register(source, token, interest)?;
+        {
+            let mut state = self.io.lock().expect("reactor io mutex poisoned");
+            state.insert(token);
+        }
+        Ok(token)
+    }
+
+    fn deregister_source(&self, source: &mut impl Source, token: Token) -> io::Result<()> {
+        let _ = self.waker.wake();
+        let poll = loop {
+            if let Ok(poll) = self.poll.try_lock() {
+                break poll;
+            }
+            let _ = self.waker.wake();
+            thread::yield_now();
+        };
+        poll.registry().deregister(source)?;
+        let mut state = self.io.lock().expect("reactor io mutex poisoned");
+        state.remove(token);
+        Ok(())
+    }
+
+    fn poll_io_ready(
+        &self,
+        token: Token,
+        direction: IoDirection,
+        cx: &Context<'_>,
+    ) -> Poll<io::Result<()>> {
+        {
+            let mut state = self.io.lock().expect("reactor io mutex poisoned");
+            let entry = match state.entries.get_mut(&token.0) {
+                Some(entry) => entry,
+                None => {
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "io registration missing",
+                    )))
+                }
+            };
+
+            match direction {
+                IoDirection::Read => {
+                    if entry.read_ready {
+                        entry.read_ready = false;
+                        return Poll::Ready(Ok(()));
+                    }
+                    entry.read_waker = Some(cx.waker().clone());
+                }
+                IoDirection::Write => {
+                    if entry.write_ready {
+                        entry.write_ready = false;
+                        return Poll::Ready(Ok(()));
+                    }
+                    entry.write_waker = Some(cx.waker().clone());
+                }
+            }
+        }
+
+        Poll::Pending
+    }
+
+    fn poll_read_ready(&self, token: Token, cx: &Context<'_>) -> Poll<io::Result<()>> {
+        self.poll_io_ready(token, IoDirection::Read, cx)
+    }
+
+    fn poll_write_ready(&self, token: Token, cx: &Context<'_>) -> Poll<io::Result<()>> {
+        self.poll_io_ready(token, IoDirection::Write, cx)
     }
 
     fn register_timer(
@@ -741,6 +868,78 @@ impl ReactorInner {
 struct TimerState {
     heap: BinaryHeap<TimerHeapEntry>,
     entries: HashMap<u64, TimerEntry>,
+}
+
+struct IoState {
+    entries: HashMap<usize, IoEntry>,
+}
+
+impl IoState {
+    fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, token: Token) {
+        self.entries.insert(token.0, IoEntry::new());
+    }
+
+    fn remove(&mut self, token: Token) {
+        self.entries.remove(&token.0);
+    }
+}
+
+struct IoEntry {
+    read_ready: bool,
+    write_ready: bool,
+    read_waker: Option<Waker>,
+    write_waker: Option<Waker>,
+}
+
+impl IoEntry {
+    fn new() -> Self {
+        Self {
+            read_ready: false,
+            write_ready: false,
+            read_waker: None,
+            write_waker: None,
+        }
+    }
+}
+
+enum IoDirection {
+    Read,
+    Write,
+}
+
+#[derive(Clone)]
+pub(crate) struct IoRegistration {
+    reactor: Arc<ReactorInner>,
+    token: Token,
+}
+
+impl IoRegistration {
+    pub(crate) fn new(
+        reactor: Arc<ReactorInner>,
+        source: &mut impl Source,
+        interest: Interest,
+    ) -> io::Result<Self> {
+        let token = reactor.register_source(source, interest)?;
+        Ok(Self { reactor, token })
+    }
+
+    pub(crate) fn poll_read_ready(&self, cx: &Context<'_>) -> Poll<io::Result<()>> {
+        self.reactor.poll_read_ready(self.token, cx)
+    }
+
+    pub(crate) fn poll_write_ready(&self, cx: &Context<'_>) -> Poll<io::Result<()>> {
+        self.reactor.poll_write_ready(self.token, cx)
+    }
+
+    pub(crate) fn deregister(&self, source: &mut impl Source) -> io::Result<()> {
+        self.reactor.deregister_source(source, self.token)
+    }
 }
 
 impl TimerState {
