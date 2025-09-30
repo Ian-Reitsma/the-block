@@ -129,8 +129,8 @@ test real services today.
         fingerprints, exposes cached diagnostics over the `net.quic_stats` RPC / CLI,
         and leverages a chaos harness to publish retransmit counters, keeping
         operators ahead of packet loss while the transport layer advertises provider metadata, per-provider connect counters, and mockable adapters for tests. Overlay discovery, uptime tracking, and persistence now flow through the
-        `p2p_overlay` crate with selectable libp2p/stub backends, CLI overrides,
-        telemetry gauges, and integration tests, so node modules only depend on overlay traits. Shard-aware peer maps route block gossip only
+        `p2p_overlay` crate with selectable in-house/stub backends, CLI overrides,
+        telemetry gauges, and integration tests, so node modules only depend on overlay traits. Base58-check peer IDs are surfaced end-to-end, CLI gossip introspection prints the most recent fanout set in base58, and shard-aware peer maps route block gossip only
         to interested peers and uptime-based fee rebates reward high-availability
         peers. (98.1% Complete)
       - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,

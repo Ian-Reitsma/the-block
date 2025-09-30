@@ -53,7 +53,7 @@ pub enum TransportBackendChoice {
 /// Overlay service choices.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
 pub enum OverlayBackendChoice {
-    Libp2p,
+    Inhouse,
     Stub,
 }
 
@@ -145,7 +145,7 @@ impl Default for BackendSelections {
         Self {
             runtime: RuntimeBackendChoice::Tokio,
             transport: TransportBackendChoice::Quinn,
-            overlay: OverlayBackendChoice::Libp2p,
+            overlay: OverlayBackendChoice::Inhouse,
             storage: StorageBackendChoice::RocksDb,
             coding: CodingBackendChoice::ReedSolomon,
             crypto: CryptoBackendChoice::Dalek,
@@ -930,7 +930,7 @@ impl SimulatedOverlay {
     fn diagnostics(&self) -> Result<OverlayDiagnostics> {
         Ok(OverlayDiagnostics {
             label: match self.backend {
-                OverlayBackendChoice::Libp2p => "libp2p",
+                OverlayBackendChoice::Inhouse => "inhouse",
                 OverlayBackendChoice::Stub => "stub",
             },
             active_peers: self.peers.len(),
@@ -1071,7 +1071,7 @@ impl OverlayService for MockOverlayService<'_> {
     fn diagnostics(&self) -> OverlayResult<OverlayDiagnostics> {
         Ok(OverlayDiagnostics {
             label: match self.backend {
-                OverlayBackendChoice::Libp2p => "libp2p",
+                OverlayBackendChoice::Inhouse => "inhouse",
                 OverlayBackendChoice::Stub => "stub",
             },
             active_peers: 0,
@@ -1353,7 +1353,7 @@ impl TransportBackendChoice {
 impl OverlayBackendChoice {
     fn as_str(&self) -> &'static str {
         match self {
-            OverlayBackendChoice::Libp2p => "libp2p",
+            OverlayBackendChoice::Inhouse => "inhouse",
             OverlayBackendChoice::Stub => "stub",
         }
     }

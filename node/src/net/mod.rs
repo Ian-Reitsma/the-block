@@ -41,10 +41,9 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use ledger::address::ShardId;
 use once_cell::sync::{Lazy, OnceCell};
-use p2p_overlay::libp2p_overlay::{Libp2pMultiaddr, Libp2pOverlay, Libp2pPeerId};
-use p2p_overlay::stub::{StubOverlay, StubPeerId};
 use p2p_overlay::{
-    Discovery, OverlayDiagnostics, OverlayError, OverlayResult, OverlayService, UptimeHandle,
+    Discovery, InhouseOverlay, InhouseOverlayStore, InhousePeerId, OverlayDiagnostics,
+    OverlayError, OverlayResult, OverlayService, PeerEndpoint, StubOverlay, UptimeHandle,
     UptimeMetrics,
 };
 use rand::Rng;
@@ -96,18 +95,18 @@ pub use peer::{
 
 pub use peer::simulate_handshake_fail;
 
-pub type OverlayPeerId = Libp2pPeerId;
-pub type OverlayAddress = Libp2pMultiaddr;
+pub type OverlayPeerId = InhousePeerId;
+pub type OverlayAddress = PeerEndpoint;
 
 type DynOverlayService = Arc<dyn OverlayService<Peer = OverlayPeerId, Address = OverlayAddress>>;
 
 static OVERLAY_SERVICE: Lazy<RwLock<DynOverlayService>> = Lazy::new(|| {
     let path = default_overlay_path();
-    RwLock::new(build_libp2p_overlay(path))
+    RwLock::new(build_inhouse_overlay(path))
 });
 
 #[cfg(feature = "telemetry")]
-const OVERLAY_BACKENDS: [&str; 2] = ["libp2p", "stub"];
+const OVERLAY_BACKENDS: [&str; 2] = ["inhouse", "stub"];
 
 #[cfg(feature = "telemetry")]
 fn overlay_metric_value(value: usize) -> i64 {
@@ -172,14 +171,14 @@ fn update_overlay_metrics() {
 #[cfg(not(feature = "telemetry"))]
 fn update_overlay_metrics() {}
 
-fn build_libp2p_overlay(path: PathBuf) -> DynOverlayService {
+fn build_inhouse_overlay(path: PathBuf) -> DynOverlayService {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     #[cfg(feature = "telemetry")]
-    let overlay = Libp2pOverlay::with_metrics(path.clone(), uptime::Metrics);
+    let overlay = InhouseOverlay::with_metrics(path.clone(), uptime::Metrics);
     #[cfg(not(feature = "telemetry"))]
-    let overlay = Libp2pOverlay::new(path.clone());
+    let overlay = InhouseOverlay::new(path.clone());
     Arc::new(overlay)
 }
 
@@ -188,120 +187,7 @@ fn build_stub_overlay() -> DynOverlayService {
     let overlay = StubOverlay::with_metrics(uptime::Metrics);
     #[cfg(not(feature = "telemetry"))]
     let overlay = StubOverlay::new();
-    Arc::new(StubOverlayAdapter::new(overlay))
-}
-
-struct StubDiscoveryAdapter {
-    inner: Box<dyn Discovery<Peer = StubPeerId, Address = Vec<u8>> + Send>,
-}
-
-impl StubDiscoveryAdapter {
-    fn new(inner: Box<dyn Discovery<Peer = StubPeerId, Address = Vec<u8>> + Send>) -> Self {
-        Self { inner }
-    }
-}
-
-impl Discovery for StubDiscoveryAdapter {
-    type Peer = Libp2pPeerId;
-    type Address = Libp2pMultiaddr;
-
-    fn add_peer(&mut self, peer: Self::Peer, address: Self::Address) {
-        let stub_peer = StubPeerId::new(peer.to_bytes());
-        self.inner.add_peer(stub_peer, address.to_vec());
-    }
-
-    fn has_peer(&self, peer: &Self::Peer) -> bool {
-        let stub_peer = StubPeerId::new(peer.to_bytes());
-        self.inner.has_peer(&stub_peer)
-    }
-
-    fn persist(&self) {
-        self.inner.persist();
-    }
-}
-
-struct StubUptimeAdapter {
-    inner: Arc<dyn UptimeHandle<Peer = StubPeerId>>,
-}
-
-impl StubUptimeAdapter {
-    fn new(inner: Arc<dyn UptimeHandle<Peer = StubPeerId>>) -> Self {
-        Self { inner }
-    }
-}
-
-impl UptimeHandle for StubUptimeAdapter {
-    type Peer = Libp2pPeerId;
-
-    fn note_seen(&self, peer: Self::Peer) {
-        self.inner.note_seen(StubPeerId::new(peer.to_bytes()));
-    }
-
-    fn eligible(&self, peer: &Self::Peer, threshold: u64, epoch: u64) -> bool {
-        let stub_peer = StubPeerId::new(peer.to_bytes());
-        self.inner.eligible(&stub_peer, threshold, epoch)
-    }
-
-    fn claim(&self, peer: Self::Peer, threshold: u64, epoch: u64, reward: u64) -> Option<u64> {
-        self.inner
-            .claim(StubPeerId::new(peer.to_bytes()), threshold, epoch, reward)
-    }
-}
-
-struct StubOverlayAdapter<M>
-where
-    M: UptimeMetrics,
-{
-    inner: StubOverlay<M>,
-}
-
-impl<M> StubOverlayAdapter<M>
-where
-    M: UptimeMetrics,
-{
-    fn new(inner: StubOverlay<M>) -> Self {
-        Self { inner }
-    }
-}
-
-impl<M> OverlayService for StubOverlayAdapter<M>
-where
-    M: UptimeMetrics,
-{
-    type Peer = Libp2pPeerId;
-    type Address = Libp2pMultiaddr;
-
-    fn peer_from_bytes(&self, bytes: &[u8]) -> OverlayResult<Self::Peer> {
-        Libp2pPeerId::from_bytes(bytes).map_err(|err| -> OverlayError { Box::new(err) })
-    }
-
-    fn peer_to_bytes(&self, peer: &Self::Peer) -> Vec<u8> {
-        peer.to_bytes()
-    }
-
-    fn discovery(
-        &self,
-        local: Self::Peer,
-    ) -> Box<dyn Discovery<Peer = Self::Peer, Address = Self::Address> + Send> {
-        let stub_local = StubPeerId::new(local.to_bytes());
-        let inner = self.inner.discovery(stub_local);
-        Box::new(StubDiscoveryAdapter::new(inner))
-    }
-
-    fn uptime(&self) -> Arc<dyn UptimeHandle<Peer = Self::Peer>> {
-        let inner = self.inner.uptime();
-        Arc::new(StubUptimeAdapter::new(inner))
-    }
-
-    fn diagnostics(&self) -> OverlayResult<OverlayDiagnostics> {
-        let snapshot = self.inner.snapshot();
-        Ok(OverlayDiagnostics {
-            label: snapshot.label,
-            active_peers: snapshot.active_peers,
-            persisted_peers: snapshot.persisted_peers,
-            database_path: snapshot.database_path,
-        })
-    }
+    Arc::new(overlay)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -320,7 +206,8 @@ fn default_overlay_path() -> PathBuf {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
-                .join("overlay_peers.bin")
+                .join("overlay")
+                .join("peers.json")
         })
 }
 
@@ -337,9 +224,9 @@ pub fn overlay_service() -> DynOverlayService {
 
 pub fn configure_overlay(cfg: &OverlayConfig) {
     match cfg.backend {
-        OverlayBackend::Libp2p => {
+        OverlayBackend::Inhouse => {
             let path = PathBuf::from(&cfg.peer_db_path);
-            install_overlay(build_libp2p_overlay(path));
+            install_overlay(build_inhouse_overlay(path));
         }
         OverlayBackend::Stub => {
             install_overlay(build_stub_overlay());
@@ -386,6 +273,14 @@ pub fn overlay_peer_from_bytes(bytes: &[u8]) -> OverlayResult<OverlayPeerId> {
 
 pub fn overlay_peer_to_bytes(peer: &OverlayPeerId) -> Vec<u8> {
     overlay_service().peer_to_bytes(peer)
+}
+
+pub fn overlay_peer_from_base58(value: &str) -> OverlayResult<OverlayPeerId> {
+    InhousePeerId::from_base58(value)
+}
+
+pub fn overlay_peer_to_base58(peer: &OverlayPeerId) -> String {
+    peer.to_base58()
 }
 
 #[cfg(feature = "quic")]
@@ -547,6 +442,31 @@ fn build_transport_callbacks() -> TransportCallbacks {
         }));
     }
 
+    {
+        let inhouse = &mut callbacks.inhouse;
+        #[cfg(feature = "inhouse")]
+        {
+            inhouse.provider_connect = Some(provider_counter.clone());
+            inhouse.handshake_success = Some(Arc::new(|addr: SocketAddr| {
+                if let Some(pk) = pk_from_addr(&addr) {
+                    quic_stats::record_address(&pk, addr);
+                }
+            }));
+            inhouse.handshake_failure = Some(Arc::new(|addr: SocketAddr, reason: &str| {
+                if let Some(pk) = pk_from_addr(&addr) {
+                    quic_stats::record_handshake_failure(&pk);
+                }
+                #[cfg(feature = "telemetry")]
+                {
+                    let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
+                    QUIC_HANDSHAKE_FAIL_TOTAL
+                        .with_label_values(&[peer_label.as_str(), reason])
+                        .inc();
+                }
+            }));
+        }
+    }
+
     callbacks
 }
 
@@ -646,7 +566,11 @@ pub fn gossip_status() -> Option<RelayStatus> {
         .map(|relay| relay.status())
 }
 
-pub fn register_shard_peer(shard: ShardId, peer: [u8; 32]) {
+pub fn gossip_selected_peers() -> Option<Vec<String>> {
+    gossip_status().and_then(|status| status.fanout.selected_peers)
+}
+
+pub fn register_shard_peer(shard: ShardId, peer: OverlayPeerId) {
     if let Some(relay) = GOSSIP_RELAY.read().unwrap().as_ref() {
         relay.register_peer(shard, peer);
     }
@@ -1602,11 +1526,13 @@ impl Node {
             return;
         }
         if let Payload::Block(shard, _) = &msg.body {
-            let mut map: HashMap<[u8; 32], (SocketAddr, Transport, Option<Vec<u8>>)> =
+            let mut map: HashMap<OverlayPeerId, (SocketAddr, Transport, Option<Vec<u8>>)> =
                 HashMap::new();
             for (addr, t, c) in peers {
                 if let Some(pk) = pk_from_addr(&addr) {
-                    map.insert(pk, (addr, t, c));
+                    if let Ok(peer) = overlay_peer_from_bytes(&pk) {
+                        map.insert(peer, (addr, t, c));
+                    }
                 }
             }
             self.relay.broadcast_shard(*shard as ShardId, msg, &map);

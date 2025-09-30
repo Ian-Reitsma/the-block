@@ -1,35 +1,11 @@
-use crate::libp2p_overlay::UptimeTracker;
+use crate::inhouse_overlay::{InhousePeerId, PeerEndpoint};
+use crate::uptime::{InMemoryUptimeStore, UptimeTracker};
 use crate::{
     Discovery, NoopMetrics, OverlayDiagnostics, OverlayResult, OverlayService, OverlayStore,
-    PeerId, UptimeHandle, UptimeInfo, UptimeMetrics, UptimeStore,
+    PeerId, UptimeHandle, UptimeMetrics,
 };
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct StubPeerId(Vec<u8>);
-
-impl StubPeerId {
-    pub fn new(bytes: impl Into<Vec<u8>>) -> Self {
-        Self(bytes.into())
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl PeerId for StubPeerId {
-    fn from_bytes(bytes: &[u8]) -> OverlayResult<Self> {
-        Ok(Self(bytes.to_vec()))
-    }
-
-    fn to_bytes(&self) -> Vec<u8> {
-        self.0.clone()
-    }
-}
 
 #[derive(Clone)]
 pub struct MemoryOverlayStore<P, A> {
@@ -41,10 +17,6 @@ impl<P, A> MemoryOverlayStore<P, A> {
         Self {
             inner: Arc::new(Mutex::new(Vec::new())),
         }
-    }
-
-    pub fn shared(inner: Arc<Mutex<Vec<(P, A)>>>) -> Self {
-        Self { inner }
     }
 
     pub fn snapshot(&self) -> Vec<(P, A)>
@@ -64,7 +36,7 @@ impl<P, A> Default for MemoryOverlayStore<P, A> {
 
 impl<P, A> OverlayStore<P, A> for MemoryOverlayStore<P, A>
 where
-    P: PeerId,
+    P: PeerId + Clone,
     A: Clone,
 {
     fn load(&self) -> OverlayResult<Vec<(P, A)>> {
@@ -79,35 +51,28 @@ where
     }
 }
 
-pub struct StubDiscovery<P, A>
-where
-    P: PeerId,
-    A: Clone + Send + Sync + 'static,
-{
-    peers: HashMap<P, A>,
-    store: MemoryOverlayStore<P, A>,
+pub struct StubDiscovery {
+    peers: HashMap<InhousePeerId, PeerEndpoint>,
+    store: MemoryOverlayStore<InhousePeerId, PeerEndpoint>,
 }
 
-impl<P, A> StubDiscovery<P, A>
-where
-    P: PeerId,
-    A: Clone + Send + Sync + 'static,
-{
-    pub fn new(store: MemoryOverlayStore<P, A>) -> Self {
+impl StubDiscovery {
+    pub fn new(store: MemoryOverlayStore<InhousePeerId, PeerEndpoint>) -> Self {
         let peers = store.load().unwrap_or_default().into_iter().collect();
         Self { peers, store }
     }
+
+    pub fn peers(&self) -> HashMap<InhousePeerId, PeerEndpoint> {
+        self.peers.clone()
+    }
 }
 
-impl<P, A> Discovery for StubDiscovery<P, A>
-where
-    P: PeerId,
-    A: Clone + Send + Sync + 'static,
-{
-    type Peer = P;
-    type Address = A;
+impl Discovery for StubDiscovery {
+    type Peer = InhousePeerId;
+    type Address = PeerEndpoint;
 
-    fn add_peer(&mut self, peer: Self::Peer, address: Self::Address) {
+    fn add_peer(&mut self, peer: Self::Peer, mut address: Self::Address) {
+        address.touch();
         self.peers.insert(peer, address);
     }
 
@@ -119,43 +84,9 @@ where
         let entries: Vec<_> = self
             .peers
             .iter()
-            .map(|(p, a)| (p.clone(), a.clone()))
+            .map(|(peer, endpoint)| (peer.clone(), endpoint.clone()))
             .collect();
         let _ = self.store.persist(&entries);
-    }
-}
-
-pub struct StubUptimeStore<P> {
-    inner: Mutex<HashMap<P, UptimeInfo>>,
-}
-
-impl<P> StubUptimeStore<P>
-where
-    P: PeerId,
-{
-    pub fn new() -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-        }
-    }
-}
-
-impl<P> Default for StubUptimeStore<P>
-where
-    P: PeerId,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<P> UptimeStore<P> for StubUptimeStore<P>
-where
-    P: PeerId,
-{
-    fn with_map<R>(&self, f: impl FnOnce(&mut HashMap<P, UptimeInfo>) -> R) -> R {
-        let mut guard = self.inner.lock().unwrap();
-        f(&mut guard)
     }
 }
 
@@ -163,9 +94,8 @@ pub struct StubOverlay<M = NoopMetrics>
 where
     M: UptimeMetrics,
 {
-    store: MemoryOverlayStore<StubPeerId, Vec<u8>>,
-    uptime: Arc<UptimeTracker<StubPeerId, StubUptimeStore<StubPeerId>, M>>,
-    _metrics: PhantomData<M>,
+    store: MemoryOverlayStore<InhousePeerId, PeerEndpoint>,
+    uptime: Arc<UptimeTracker<InhousePeerId, InMemoryUptimeStore<InhousePeerId>, M>>,
 }
 
 impl StubOverlay<NoopMetrics> {
@@ -180,17 +110,20 @@ where
 {
     pub fn with_metrics(metrics: M) -> Self {
         let store = MemoryOverlayStore::new();
-        let uptime_store = StubUptimeStore::new();
+        let uptime_store = InMemoryUptimeStore::new();
         let tracker = Arc::new(UptimeTracker::with_metrics(uptime_store, metrics));
         Self {
             store,
             uptime: tracker,
-            _metrics: PhantomData,
         }
     }
 
-    pub fn store(&self) -> MemoryOverlayStore<StubPeerId, Vec<u8>> {
+    pub fn store(&self) -> MemoryOverlayStore<InhousePeerId, PeerEndpoint> {
         self.store.clone()
+    }
+
+    pub fn discovery(&self, _local: InhousePeerId) -> StubDiscovery {
+        StubDiscovery::new(self.store.clone())
     }
 
     pub fn snapshot(&self) -> OverlayDiagnostics {
@@ -207,11 +140,11 @@ impl<M> OverlayService for StubOverlay<M>
 where
     M: UptimeMetrics,
 {
-    type Peer = StubPeerId;
-    type Address = Vec<u8>;
+    type Peer = InhousePeerId;
+    type Address = PeerEndpoint;
 
     fn peer_from_bytes(&self, bytes: &[u8]) -> OverlayResult<Self::Peer> {
-        Ok(StubPeerId::new(bytes))
+        InhousePeerId::from_bytes(bytes)
     }
 
     fn peer_to_bytes(&self, peer: &Self::Peer) -> Vec<u8> {
@@ -220,13 +153,13 @@ where
 
     fn discovery(
         &self,
-        _local: Self::Peer,
+        local: Self::Peer,
     ) -> Box<dyn Discovery<Peer = Self::Peer, Address = Self::Address> + Send> {
-        Box::new(StubDiscovery::new(self.store.clone()))
+        Box::new(self.discovery(local))
     }
 
     fn uptime(&self) -> Arc<dyn UptimeHandle<Peer = Self::Peer>> {
-        self.uptime.clone()
+        self.uptime.handle()
     }
 
     fn diagnostics(&self) -> OverlayResult<OverlayDiagnostics> {

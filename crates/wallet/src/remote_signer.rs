@@ -1,4 +1,6 @@
 use crate::{WalletError, WalletSigner};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use hex;
 use httpd::{BlockingClient, Method};
@@ -6,16 +8,16 @@ use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
 use native_tls::{Certificate as NativeCertificate, Identity, TlsConnector};
 use once_cell::sync::Lazy;
-use rand::Rng;
+use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::UdpSocket;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
-use tungstenite::{client::IntoClientRequest, Message};
 use url::Url;
 use uuid::Uuid;
 
@@ -51,6 +53,219 @@ pub struct RemoteSigner {
     timeout: Duration,
     retries: u8,
     threshold: usize,
+}
+
+const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+struct Frame {
+    opcode: u8,
+    fin: bool,
+    payload: Vec<u8>,
+}
+
+enum StreamKind {
+    Plain(std::net::TcpStream),
+    Tls(native_tls::TlsStream<std::net::TcpStream>),
+}
+
+impl StreamKind {
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        match self {
+            StreamKind::Plain(stream) => stream.write_all(buf),
+            StreamKind::Tls(stream) => stream.write_all(buf),
+        }
+    }
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        match self {
+            StreamKind::Plain(stream) => stream.read_exact(buf),
+            StreamKind::Tls(stream) => stream.read_exact(buf),
+        }
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            StreamKind::Plain(stream) => stream.read(buf),
+            StreamKind::Tls(stream) => stream.read(buf),
+        }
+    }
+}
+
+struct BlockingWebSocket {
+    stream: StreamKind,
+}
+
+impl BlockingWebSocket {
+    fn plain(stream: std::net::TcpStream) -> Self {
+        Self {
+            stream: StreamKind::Plain(stream),
+        }
+    }
+
+    fn tls(stream: native_tls::TlsStream<std::net::TcpStream>) -> Self {
+        Self {
+            stream: StreamKind::Tls(stream),
+        }
+    }
+
+    fn handshake(&mut self, host: &str, path: &str) -> io::Result<()> {
+        let mut key_bytes = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut key_bytes);
+        let key = BASE64.encode(key_bytes);
+        let request = format!(
+            "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
+        );
+        self.stream.write_all(request.as_bytes())?;
+        self.read_handshake_response(&key)
+    }
+
+    fn read_handshake_response(&mut self, key: &str) -> io::Result<()> {
+        let expected_accept = handshake_accept(key);
+        let mut buf = Vec::with_capacity(512);
+        let mut tmp = [0u8; 128];
+        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            let read = self.stream.read(&mut tmp)?;
+            if read == 0 {
+                return Err(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "websocket handshake ended prematurely",
+                ));
+            }
+            buf.extend_from_slice(&tmp[..read]);
+            if buf.len() > 8192 {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "websocket handshake headers too large",
+                ));
+            }
+        }
+        let text = String::from_utf8(buf)
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "invalid utf8 in handshake"))?;
+        if !text.starts_with("HTTP/1.1 101") {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "server declined websocket upgrade",
+            ));
+        }
+        for line in text.lines() {
+            if let Some(value) = line.strip_prefix("Sec-WebSocket-Accept: ") {
+                if value.trim() == expected_accept {
+                    return Ok(());
+                }
+            }
+        }
+        Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "websocket accept key mismatch",
+        ))
+    }
+
+    fn send_text(&mut self, text: &str) -> io::Result<()> {
+        self.write_frame(0x1, text.as_bytes())
+    }
+
+    fn read_text(&mut self) -> io::Result<String> {
+        loop {
+            let frame = self.read_frame()?;
+            if !frame.fin {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "fragmented frames are not supported",
+                ));
+            }
+            match frame.opcode {
+                0x1 => {
+                    return String::from_utf8(frame.payload).map_err(|_| {
+                        io::Error::new(ErrorKind::InvalidData, "invalid utf8 payload")
+                    });
+                }
+                0x8 => {
+                    return Err(io::Error::new(
+                        ErrorKind::ConnectionAborted,
+                        "websocket connection closed",
+                    ));
+                }
+                0x9 => {
+                    self.write_frame(0xA, &frame.payload)?;
+                }
+                0xA => {}
+                _ => {}
+            }
+        }
+    }
+
+    fn write_frame(&mut self, opcode: u8, payload: &[u8]) -> io::Result<()> {
+        let mut header = Vec::with_capacity(10);
+        header.push(0x80 | (opcode & 0x0F));
+        let len = payload.len() as u64;
+        if len < 126 {
+            header.push(0x80 | len as u8);
+        } else if len <= u16::MAX as u64 {
+            header.push(0xFE);
+            header.extend_from_slice(&(len as u16).to_be_bytes());
+        } else {
+            header.push(0xFF);
+            header.extend_from_slice(&(len as u64).to_be_bytes());
+        }
+        let mut mask = [0u8; 4];
+        rand::thread_rng().fill_bytes(&mut mask);
+        header.extend_from_slice(&mask);
+        self.stream.write_all(&header)?;
+        if !payload.is_empty() {
+            let mut masked = payload.to_vec();
+            for (i, byte) in masked.iter_mut().enumerate() {
+                *byte ^= mask[i % 4];
+            }
+            self.stream.write_all(&masked)?;
+        }
+        Ok(())
+    }
+
+    fn read_frame(&mut self) -> io::Result<Frame> {
+        let mut header = [0u8; 2];
+        self.stream.read_exact(&mut header)?;
+        let fin = header[0] & 0x80 != 0;
+        let opcode = header[0] & 0x0F;
+        let masked = header[1] & 0x80 != 0;
+        if masked {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "server frames must not be masked",
+            ));
+        }
+        let mut len = (header[1] & 0x7F) as u64;
+        if len == 126 {
+            let mut extended = [0u8; 2];
+            self.stream.read_exact(&mut extended)?;
+            len = u16::from_be_bytes(extended) as u64;
+        } else if len == 127 {
+            let mut extended = [0u8; 8];
+            self.stream.read_exact(&mut extended)?;
+            len = u64::from_be_bytes(extended);
+        }
+        if len > (1 << 31) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "websocket frame exceeds 2 GiB limit",
+            ));
+        }
+        let mut payload = vec![0u8; len as usize];
+        if len > 0 {
+            self.stream.read_exact(&mut payload)?;
+        }
+        Ok(Frame {
+            opcode,
+            fin,
+            payload,
+        })
+    }
+}
+
+fn handshake_accept(key: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(key.as_bytes());
+    hasher.update(WS_GUID.as_bytes());
+    BASE64.encode(hasher.finalize())
 }
 
 impl RemoteSigner {
@@ -232,41 +447,47 @@ impl RemoteSigner {
     fn sign_ws(&self, endpoint: &str, payload: &SignReq) -> Result<Signature, WalletError> {
         let url = format!("{endpoint}/sign");
         let url = Url::parse(&url).map_err(|e| WalletError::Failure(e.to_string()))?;
-        let req = url
-            .into_client_request()
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
-        let host = req
-            .uri()
-            .host()
+        let host = url
+            .host_str()
             .ok_or_else(|| WalletError::Failure("missing host".into()))?;
-        let port = req.uri().port_u16().unwrap_or(443);
+        let port = url.port_or_known_default().unwrap_or(443);
         let addr = format!("{host}:{port}");
         let tcp =
             std::net::TcpStream::connect(&addr).map_err(|e| WalletError::Failure(e.to_string()))?;
-        let stream = if let Some(connector) = &self.tls {
+        let mut ws = if let Some(connector) = &self.tls {
             let tls_stream = connector
                 .connect(host, tcp)
                 .map_err(|e| WalletError::Failure(e.to_string()))?;
-            tungstenite::stream::MaybeTlsStream::NativeTls(tls_stream)
+            BlockingWebSocket::tls(tls_stream)
         } else {
-            tungstenite::stream::MaybeTlsStream::Plain(tcp)
+            BlockingWebSocket::plain(tcp)
         };
-        let (mut socket, _) = tungstenite::client::client(req, stream)
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
-        socket
-            .send(Message::Text(serde_json::to_string(payload).unwrap()))
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
-        let msg = socket
-            .read()
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
-        let txt = match msg {
-            Message::Text(t) => t,
-            _ => return Err(WalletError::Failure("invalid ws response".into())),
+
+        let mut path = url.path().to_string();
+        if path.is_empty() {
+            path.push('/');
+        }
+        if let Some(query) = url.query() {
+            path.push('?');
+            path.push_str(query);
+        }
+        let host_header = if let Some(port) = url.port() {
+            format!("{host}:{port}")
+        } else {
+            host.to_string()
         };
+
+        ws.handshake(&host_header, &path)
+            .map_err(|e| WalletError::Failure(e.to_string()))?;
+        ws.send_text(&serde_json::to_string(payload).unwrap())
+            .map_err(|e| WalletError::Failure(e.to_string()))?;
+        let txt = ws
+            .read_text()
+            .map_err(|e| WalletError::Failure(e.to_string()))?;
         let r: SignResp =
             serde_json::from_str(&txt).map_err(|e| WalletError::Failure(e.to_string()))?;
         let sig_bytes = hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
-        if sig_bytes.len() != 64 {
+        if sig_bytes.len() != SIGNATURE_LENGTH {
             return Err(WalletError::Failure("invalid signature length".into()));
         }
         let sig_arr: [u8; SIGNATURE_LENGTH] = sig_bytes

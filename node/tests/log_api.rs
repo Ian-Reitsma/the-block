@@ -56,9 +56,8 @@ fn search_filters_and_decryption() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tail_streams_indexed_rows() -> Result<()> {
-    use futures::StreamExt;
     use runtime::net::{TcpListener, TcpStream};
-    use tokio_tungstenite::{client_async, tungstenite::Message};
+    use runtime::ws::{self, ClientStream, Message as WsMessage};
 
     let dir = tempdir()?;
     let log_path = dir.path().join("events.json");
@@ -124,23 +123,27 @@ async fn tail_streams_indexed_rows() -> Result<()> {
         Ok::<(), Box<dyn std::error::Error>>(())
     });
 
-    let stream = TcpStream::connect(addr).await?;
-    let url = format!("ws://{}/logs/tail?passphrase=secret", addr);
-    let (mut ws, _) = client_async(url, stream).await?;
-    let message = ws
-        .next()
-        .await
-        .expect("websocket message")
-        .expect("message result");
+    let mut stream = TcpStream::connect(addr).await?;
+    let key = ws::handshake_key();
+    let path = format!("/logs/tail?passphrase=secret");
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        host = addr
+    );
+    stream.write_all(request.as_bytes()).await?;
+    let expected_accept = ws::handshake_accept(&key);
+    ws::read_client_handshake(&mut stream, &expected_accept).await?;
+    let mut ws = ClientStream::new(stream);
+    let message = ws.recv().await?.expect("websocket message");
     match message {
-        Message::Text(text) => {
+        WsMessage::Text(text) => {
             let rows: Vec<the_block::log_indexer::LogEntry> = serde_json::from_str(&text)?;
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].message, "ready");
         }
         other => panic!("unexpected message: {other:?}"),
     }
-    ws.close(None).await?;
+    ws.close().await?;
     drop(ws);
     server.await.expect("server task")?;
     std::env::remove_var("TB_LOG_DB_PATH");

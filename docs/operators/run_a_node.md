@@ -160,6 +160,10 @@ net stats --format json --drop-reason rate_limit --min-reputation 0.8
 net stats --all --limit 50
 ```
 
+Peer identifiers now use base58-check overlay IDs. The values printed by `net`
+and returned from the RPC surfaces match the strings emitted by the gossip
+relay and overlay diagnostics.
+
 The CLI honours `peer_metrics_export` and `max_peer_metrics` configuration
 limits. See [docs/gossip.md](../gossip.md) for protocol details and additional
 RPC examples.
@@ -171,6 +175,32 @@ grows exponentially on repeated breaches. Clear a peer's throttle state with:
 ```bash
 net backpressure clear <peer_id>
 ```
+
+### Migrating overlay peer stores
+
+Nodes that previously persisted overlay peers in `~/.the_block/overlay_peers.json`
+should migrate to the new JSON store under `~/.the_block/overlay/peers.json`
+before upgrading. Run the bundled helper to perform a lossless conversion:
+
+```bash
+cargo run --bin migrate_overlay_store --release -- \
+  ~/.the_block/overlay_peers.json ~/.the_block/overlay/peers.json
+```
+
+The script accepts optional source/target paths and canonicalises every peer ID
+to the base58-check representation. Existing directories are created on demand,
+and the timestamp for each entry is set to the migration time so uptime probes
+continue without manual edits.
+
+After migrating, confirm the overlay database contents and CLI output:
+
+```bash
+net overlay_status --format json | jq '.database_path'
+net gossip_status
+```
+
+Both commands should report the new base58 peer identifiers and the target path
+`~/.the_block/overlay/peers.json`.
 
 Generate shell completions with:
 

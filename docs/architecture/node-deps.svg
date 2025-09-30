@@ -505,7 +505,7 @@
 <g id="node26" class="node">
 <title>n323</title>
 <ellipse fill="none" stroke="black" cx="3184.74" cy="-234" rx="128.08" ry="18"/>
-<text text-anchor="middle" x="3184.74" y="-230.3" font-family="Times,serif" font-size="14.00">tokio&#45;tungstenite v0.20.1</text>
+<text text-anchor="middle" x="3184.74" y="-230.3" font-family="Times,serif" font-size="14.00">runtime::ws</text>
 </g>
 <!-- n324&#45;&gt;n38 -->
 <g id="edge53" class="edge">

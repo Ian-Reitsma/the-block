@@ -39,3 +39,11 @@ pub fn claim(peer: PeerId, threshold: u64, epoch: u64, reward: u64) -> Option<u6
 pub fn peer_from_bytes(bytes: &[u8]) -> OverlayResult<PeerId> {
     super::overlay_service().peer_from_bytes(bytes)
 }
+
+pub fn peer_from_base58(value: &str) -> OverlayResult<PeerId> {
+    super::overlay_peer_from_base58(value)
+}
+
+pub fn peer_to_base58(peer: &PeerId) -> String {
+    super::overlay_peer_to_base58(peer)
+}

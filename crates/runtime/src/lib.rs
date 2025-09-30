@@ -21,6 +21,7 @@ mod tokio_impl;
 pub mod io;
 pub mod net;
 pub mod sync;
+pub mod ws;
 
 #[cfg(not(any(
     feature = "tokio-backend",

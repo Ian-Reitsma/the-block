@@ -145,6 +145,14 @@ fn verify_certificate_with_provider(
             }
         }
     }
+    #[cfg(feature = "inhouse")]
+    if let transport::ProviderKind::Inhouse = kind {
+        if let Some(registry) = crate::net::transport_registry() {
+            if let Some(adapter) = registry.inhouse() {
+                return adapter.verify_remote_certificate(peer_key, cert);
+            }
+        }
+    }
     transport::verify_remote_certificate_for(provider_id, peer_key, cert)
 }
 

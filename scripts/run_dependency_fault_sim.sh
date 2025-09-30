@@ -11,7 +11,7 @@ args=()
 if [[ $# -eq 0 ]]; then
   args+=("--runtime" "tokio")
   args+=("--transport" "quinn")
-  args+=("--overlay" "libp2p")
+  args+=("--overlay" "inhouse")
   args+=("--storage" "rocksdb")
   args+=("--coding" "reed-solomon")
   args+=("--crypto" "dalek")

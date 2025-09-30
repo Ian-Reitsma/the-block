@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 libfuzzer-sys = "0.4"
-libp2p = { version = "0.52", default-features = false, features = ["kad"] }
+p2p_overlay = { path = "../../crates/p2p_overlay" }
 
 [package.metadata]
 cargo-fuzz = true

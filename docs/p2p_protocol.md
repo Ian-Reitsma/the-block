@@ -12,21 +12,22 @@ Discovery, peer persistence, and uptime accounting live behind the
 `crates/p2p_overlay` crate. The crate defines `PeerId`, `OverlayStore`,
 `Discovery`, and `OverlayService` traits so the node can talk to any overlay
 backend that can serialize peer identifiers and addresses. The default
-`Libp2pOverlay` wraps the existing libp2p behaviour, while `StubOverlay`
-provides an in-memory implementation that never touches libp2p and is handy for
-unit tests or smoke tests.
+`InhouseOverlay` implements the runtime-native discovery layer, persisting peer
+records to `quic_peer_certs.json`, reassembling routing tables, and emitting
+uptime data. `StubOverlay` provides an in-memory implementation that never
+touches disk and is handy for unit tests or smoke tests.
 
 Swapping implementations does not require touching the networking stack. Update
 `overlay.backend` in the node configuration to switch backends:
 
 ```toml
 [overlay]
-backend = "stub"   # or "libp2p" (default)
-peer_db_path = "state/overlay_peers.bin"
+backend = "inhouse"   # or "stub" for smoke tests
+peer_db_path = "state/overlay/peers.json"
 ```
 
 Operators can also override the backend at launch with the CLI. The `Run`
-subcommand accepts `--overlay-backend libp2p|stub`, allowing one-off runs with
+subcommand accepts `--overlay-backend inhouse|stub`, allowing one-off runs with
 the stub overlay without rewriting configuration files:
 
 ```bash
@@ -35,10 +36,9 @@ the-block node run --overlay-backend stub
 
 Under the hood, the node injects whichever overlay implementation is selected
 into discovery and uptime tracking via `OverlayService`, so higher-level code
-only touches the trait methods and serialized peer identifiers rather than
-libp2p-specific types. This keeps the node in control of persistence (via
-bincode) and leaves room to drop in an in-house overlay in the future without
-rewriting discovery logic.
+only touches the trait methods and serialized peer identifiers. This keeps the
+node in control of persistence (via JSON) and lets the in-house overlay evolve
+without rewrites in gossip or uptime logic.
 
 ## Message Flow
 

@@ -7,11 +7,16 @@ use std::time::Duration;
 #[cfg(feature = "s2n-quic")]
 use crypto_suite::signatures::ed25519::SigningKey;
 
+#[cfg(feature = "inhouse")]
+use crate::inhouse_backend as inhouse_impl;
+
 /// Known transport provider implementations.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ProviderKind {
     Quinn,
     S2nQuic,
+    #[cfg(feature = "inhouse")]
+    Inhouse,
 }
 
 impl ProviderKind {
@@ -37,6 +42,8 @@ impl ProviderKind {
                     "s2n-quic"
                 }
             }
+            #[cfg(feature = "inhouse")]
+            ProviderKind::Inhouse => inhouse_impl::PROVIDER_ID,
         }
     }
 }
@@ -122,7 +129,7 @@ impl Default for Config {
     }
 }
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 use anyhow::{anyhow, Result as AnyResult};
 
 #[cfg(feature = "quinn")]
@@ -150,6 +157,18 @@ pub struct QuinnCallbacks {
 #[derive(Clone, Default)]
 pub struct QuinnCallbacks;
 
+#[cfg(feature = "inhouse")]
+#[derive(Clone, Default)]
+pub struct InhouseCallbacks {
+    pub handshake_success: Option<Arc<dyn Fn(SocketAddr) + Send + Sync + 'static>>,
+    pub handshake_failure: Option<Arc<dyn Fn(SocketAddr, &str) + Send + Sync + 'static>>,
+    pub provider_connect: Option<Arc<dyn Fn(&'static str) + Send + Sync + 'static>>,
+}
+
+#[cfg(not(feature = "inhouse"))]
+#[derive(Clone, Default)]
+pub struct InhouseCallbacks;
+
 /// Callback hooks for s2n-quic providers.
 #[derive(Clone, Default)]
 pub struct S2nCallbacks {
@@ -163,21 +182,22 @@ pub struct S2nCallbacks {
 #[derive(Clone, Default)]
 pub struct TransportCallbacks {
     pub quinn: QuinnCallbacks,
+    pub inhouse: InhouseCallbacks,
     pub s2n: S2nCallbacks,
 }
 
 /// Factory responsible for constructing provider registries.
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 pub trait TransportFactory: Send + Sync {
     fn create(&self, cfg: &Config, callbacks: &TransportCallbacks) -> AnyResult<ProviderRegistry>;
 }
 
 /// Default factory wiring the concrete backend implementations.
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 #[derive(Clone, Default)]
 pub struct DefaultFactory;
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 impl TransportFactory for DefaultFactory {
     fn create(&self, cfg: &Config, callbacks: &TransportCallbacks) -> AnyResult<ProviderRegistry> {
         let instance = match cfg.provider {
@@ -201,6 +221,8 @@ impl TransportFactory for DefaultFactory {
                     return Err(anyhow!("s2n-quic provider not compiled"));
                 }
             }
+            #[cfg(feature = "inhouse")]
+            ProviderKind::Inhouse => ProviderInstance::new_inhouse(cfg, &callbacks.inhouse)?,
         };
         Ok(ProviderRegistry {
             inner: Arc::new(instance),
@@ -208,13 +230,13 @@ impl TransportFactory for DefaultFactory {
     }
 }
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 #[derive(Clone)]
 pub struct ProviderRegistry {
     inner: Arc<ProviderInstance>,
 }
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 impl ProviderRegistry {
     pub fn kind(&self) -> ProviderKind {
         self.inner.kind()
@@ -246,6 +268,8 @@ impl ProviderRegistry {
             ProviderInstance::Quinn(adapter) => Some(adapter.clone()),
             #[cfg(feature = "s2n-quic")]
             ProviderInstance::S2n(_) => None,
+            #[cfg(feature = "inhouse")]
+            ProviderInstance::Inhouse(_) => None,
         }
     }
 
@@ -257,18 +281,30 @@ impl ProviderRegistry {
             None
         }
     }
+
+    #[cfg(feature = "inhouse")]
+    #[allow(irrefutable_let_patterns)]
+    pub fn inhouse(&self) -> Option<InhouseAdapter> {
+        if let ProviderInstance::Inhouse(adapter) = self.inner.as_ref() {
+            Some(adapter.clone())
+        } else {
+            None
+        }
+    }
 }
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 #[derive(Clone)]
 enum ProviderInstance {
     #[cfg(feature = "quinn")]
     Quinn(QuinnAdapter),
     #[cfg(feature = "s2n-quic")]
     S2n(S2nAdapter),
+    #[cfg(feature = "inhouse")]
+    Inhouse(InhouseAdapter),
 }
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 impl ProviderInstance {
     #[cfg(feature = "quinn")]
     fn new_quinn(cfg: &Config, callbacks: &QuinnCallbacks) -> AnyResult<Self> {
@@ -280,12 +316,20 @@ impl ProviderInstance {
         S2nAdapter::new(cfg, callbacks).map(Self::S2n)
     }
 
+    #[cfg(feature = "inhouse")]
+    fn new_inhouse(cfg: &Config, callbacks: &InhouseCallbacks) -> AnyResult<Self> {
+        let adapter = InhouseAdapter::new(cfg, callbacks)?;
+        Ok(Self::Inhouse(adapter))
+    }
+
     fn kind(&self) -> ProviderKind {
         match self {
             #[cfg(feature = "quinn")]
             ProviderInstance::Quinn(_) => ProviderKind::Quinn,
             #[cfg(feature = "s2n-quic")]
             ProviderInstance::S2n(_) => ProviderKind::S2nQuic,
+            #[cfg(feature = "inhouse")]
+            ProviderInstance::Inhouse(_) => ProviderKind::Inhouse,
         }
     }
 
@@ -303,6 +347,8 @@ impl ProviderInstance {
                 id: s2n_impl::PROVIDER_ID,
                 capabilities: s2n_impl::CAPABILITIES,
             },
+            #[cfg(feature = "inhouse")]
+            ProviderInstance::Inhouse(adapter) => adapter.metadata(),
         }
     }
 
@@ -312,6 +358,8 @@ impl ProviderInstance {
             ProviderInstance::Quinn(_) => quinn_impl::CAPABILITIES,
             #[cfg(feature = "s2n-quic")]
             ProviderInstance::S2n(_) => s2n_impl::CAPABILITIES,
+            #[cfg(feature = "inhouse")]
+            ProviderInstance::Inhouse(_) => inhouse_impl::CAPABILITIES,
         }
     }
 }
@@ -425,6 +473,116 @@ impl QuinnAdapter {
     }
 }
 
+#[cfg(feature = "inhouse")]
+#[derive(Clone)]
+pub struct InhouseAdapter(Arc<InhouseAdapterInner>);
+
+#[cfg(feature = "inhouse")]
+struct InhouseAdapterInner {
+    backend: inhouse_impl::Adapter,
+    retry: RetryPolicy,
+}
+
+#[cfg(feature = "inhouse")]
+impl InhouseAdapter {
+    fn new(cfg: &Config, callbacks: &InhouseCallbacks) -> AnyResult<Self> {
+        let mut backend_callbacks = inhouse_impl::InhouseEventCallbacks::default();
+        backend_callbacks.handshake_success = callbacks.handshake_success.clone();
+        backend_callbacks.handshake_failure = callbacks.handshake_failure.clone();
+        backend_callbacks.provider_connect = callbacks.provider_connect.clone();
+        let adapter = inhouse_impl::Adapter::new(cfg.retry.clone(), &backend_callbacks)?;
+        Ok(Self(Arc::new(InhouseAdapterInner {
+            backend: adapter,
+            retry: cfg.retry.clone(),
+        })))
+    }
+
+    pub fn metadata(&self) -> ProviderMetadata {
+        self.0.backend.metadata()
+    }
+
+    pub fn retry_policy(&self) -> RetryPolicy {
+        self.0.retry.clone()
+    }
+
+    pub async fn listen(&self, addr: SocketAddr) -> AnyResult<(ListenerHandle, CertificateHandle)> {
+        let (endpoint, cert) = self.0.backend.listen(addr).await?;
+        Ok((
+            ListenerHandle::Inhouse(endpoint),
+            CertificateHandle::Inhouse(cert),
+        ))
+    }
+
+    pub async fn connect(
+        &self,
+        addr: SocketAddr,
+        cert: &CertificateHandle,
+    ) -> AnyResult<ConnectionHandle> {
+        let cert = match cert {
+            CertificateHandle::Inhouse(cert) => cert,
+            #[cfg(feature = "quinn")]
+            CertificateHandle::Quinn(_) => {
+                return Err(anyhow!("certificate incompatible with inhouse provider"));
+            }
+        };
+        let conn = self.0.backend.connect(addr, cert).await?;
+        Ok(ConnectionHandle::Inhouse(conn))
+    }
+
+    pub async fn connect_insecure(&self, addr: SocketAddr) -> AnyResult<ConnectionHandle> {
+        let conn = self.0.backend.connect_insecure(addr).await?;
+        Ok(ConnectionHandle::Inhouse(conn))
+    }
+
+    pub fn drop_connection(&self, addr: &SocketAddr) {
+        self.0.backend.drop_connection(addr);
+    }
+
+    pub fn connection_stats(&self) -> Vec<(SocketAddr, inhouse_impl::ConnectionStatsSnapshot)> {
+        self.0.backend.connection_stats()
+    }
+
+    pub async fn send(&self, conn: &ConnectionHandle, data: &[u8]) -> AnyResult<()> {
+        match conn {
+            ConnectionHandle::Inhouse(conn) => {
+                self.0.backend.send(conn, data).await?;
+                Ok(())
+            }
+            #[cfg(feature = "quinn")]
+            ConnectionHandle::Quinn(_) => {
+                Err(anyhow!("connection incompatible with inhouse provider"))
+            }
+        }
+    }
+
+    pub async fn recv(&self, conn: &ConnectionHandle) -> Option<Vec<u8>> {
+        match conn {
+            ConnectionHandle::Inhouse(conn) => self.0.backend.recv(conn).await,
+            #[cfg(feature = "quinn")]
+            ConnectionHandle::Quinn(_) => None,
+        }
+    }
+
+    pub fn verify_remote_certificate(
+        &self,
+        peer_key: &[u8; 32],
+        cert: &[u8],
+    ) -> AnyResult<[u8; 32]> {
+        Ok(self.0.backend.verify_remote_certificate(peer_key, cert)?)
+    }
+
+    pub fn certificate_from_der(&self, cert: Vec<u8>) -> CertificateHandle {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&cert);
+        let mut fingerprint = [0u8; 32];
+        fingerprint.copy_from_slice(hasher.finalize().as_bytes());
+        CertificateHandle::Inhouse(inhouse_impl::Certificate {
+            fingerprint,
+            der: cert,
+        })
+    }
+}
+
 #[cfg(feature = "s2n-quic")]
 #[derive(Clone)]
 pub struct S2nAdapter(Arc<S2nAdapterInner>);
@@ -512,25 +670,33 @@ impl S2nAdapter {
     }
 }
 
-#[cfg(feature = "quinn")]
+#[cfg(any(feature = "quinn", feature = "inhouse"))]
 #[derive(Clone)]
 pub enum ConnectionHandle {
+    #[cfg(feature = "quinn")]
     Quinn(quinn::Connection),
+    #[cfg(feature = "inhouse")]
+    Inhouse(Arc<inhouse_impl::Connection>),
 }
 
-#[cfg(feature = "quinn")]
+#[cfg(any(feature = "quinn", feature = "inhouse"))]
 #[derive(Clone)]
 pub enum CertificateHandle {
+    #[cfg(feature = "quinn")]
     Quinn(quinn_impl::Certificate),
+    #[cfg(feature = "inhouse")]
+    Inhouse(inhouse_impl::Certificate),
 }
 
-#[cfg(any(feature = "quinn", feature = "s2n-quic"))]
+#[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 #[derive(Clone)]
 pub enum ListenerHandle {
     #[cfg(feature = "quinn")]
     Quinn(quinn::Endpoint),
     #[cfg(feature = "s2n-quic")]
     S2n(Arc<s2n_impl::Server>),
+    #[cfg(feature = "inhouse")]
+    Inhouse(inhouse_impl::Endpoint),
 }
 
 #[cfg(feature = "quinn")]
@@ -541,6 +707,15 @@ pub use quinn_impl::{
 #[cfg(feature = "s2n-quic")]
 pub use s2n_impl::{
     fingerprint, fingerprint_history, verify_remote_certificate, CertAdvertisement, LocalCert,
+};
+
+#[cfg(feature = "inhouse")]
+pub use inhouse_impl::{
+    certificate_store as inhouse_certificate_store, fingerprint as inhouse_fingerprint,
+    fingerprint_history as inhouse_fingerprint_history,
+    verify_remote_certificate as inhouse_verify_remote_certificate,
+    Advertisement as InhouseAdvertisement,
+    ConnectionStatsSnapshot as InhouseConnectionStatsSnapshot,
 };
 
 #[cfg(all(feature = "quinn", not(feature = "s2n-quic")))]
@@ -567,12 +742,17 @@ pub use s2n_impl::PROVIDER_ID as S2N_PROVIDER_ID;
 #[cfg(feature = "quinn")]
 pub use quinn_impl::PROVIDER_ID as QUINN_PROVIDER_ID;
 
+#[cfg(feature = "inhouse")]
+pub use inhouse_impl::PROVIDER_ID as INHOUSE_PROVIDER_ID;
+
 pub fn provider_kind_from_id(id: &str) -> Option<ProviderKind> {
     match id {
         #[cfg(feature = "quinn")]
         x if x.eq_ignore_ascii_case(quinn_impl::PROVIDER_ID) => Some(ProviderKind::Quinn),
         #[cfg(feature = "s2n-quic")]
         x if x.eq_ignore_ascii_case(s2n_impl::PROVIDER_ID) => Some(ProviderKind::S2nQuic),
+        #[cfg(feature = "inhouse")]
+        x if x.eq_ignore_ascii_case(inhouse_impl::PROVIDER_ID) => Some(ProviderKind::Inhouse),
         _ => None,
     }
 }
@@ -591,6 +771,12 @@ pub fn available_providers() -> Vec<ProviderMetadata> {
         id: s2n_impl::PROVIDER_ID,
         capabilities: s2n_impl::CAPABILITIES,
     });
+    #[cfg(feature = "inhouse")]
+    providers.push(ProviderMetadata {
+        kind: ProviderKind::Inhouse,
+        id: inhouse_impl::PROVIDER_ID,
+        capabilities: inhouse_impl::CAPABILITIES,
+    });
     providers
 }
 
@@ -604,6 +790,8 @@ pub fn verify_remote_certificate_for(
     match provider_kind_from_id(provider_id) {
         #[cfg(feature = "s2n-quic")]
         Some(ProviderKind::S2nQuic) => Ok(s2n_impl::verify_remote_certificate(peer_key, cert)?),
+        #[cfg(feature = "inhouse")]
+        Some(ProviderKind::Inhouse) => Ok(inhouse_impl::verify_remote_certificate(peer_key, cert)?),
         #[cfg(feature = "quinn")]
         Some(ProviderKind::Quinn) => Err(anyhow!("quinn provider does not validate certificates")),
         _ => Err(anyhow!("unknown quic provider: {provider_id}")),
@@ -614,6 +802,8 @@ pub fn fingerprint_history_for(provider_id: &str) -> Option<Vec<[u8; 32]>> {
     match provider_kind_from_id(provider_id) {
         #[cfg(feature = "s2n-quic")]
         Some(ProviderKind::S2nQuic) => Some(s2n_impl::fingerprint_history()),
+        #[cfg(feature = "inhouse")]
+        Some(ProviderKind::Inhouse) => Some(inhouse_impl::fingerprint_history()),
         _ => None,
     }
 }
@@ -623,3 +813,6 @@ pub mod quinn_backend;
 
 #[cfg(feature = "s2n-quic")]
 pub mod s2n_backend;
+
+#[cfg(feature = "inhouse")]
+pub mod inhouse_backend;

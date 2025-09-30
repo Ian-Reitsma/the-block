@@ -20,7 +20,9 @@ pub fn list_peer_certs() -> Vec<CertRecord> {
     the_block::net::peer_cert_snapshot()
         .into_iter()
         .map(|entry| CertRecord {
-            peer_id: hex::encode(entry.peer),
+            peer_id: the_block::net::overlay_peer_from_bytes(&entry.peer)
+                .map(|peer| the_block::net::overlay_peer_to_base58(&peer))
+                .unwrap_or_else(|_| hex::encode(entry.peer)),
             fingerprint: hex::encode(entry.fingerprint),
             updated_at: entry.updated_at,
         })

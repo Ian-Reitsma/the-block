@@ -70,14 +70,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 sled = { version = "0.34" }
 rocksdb = { version = "0.21", optional = true }
 rusqlite = { version = "0.30", features = ["bundled"] }
-libp2p = { version = "0.52", default-features = false, features = ["tcp", "tokio", "noise", "yamux", "kad"] }
 futures = "0.3"
 unicode-normalization = "0.1"
 tokio-util = "0.7"
-tokio-tungstenite = "0.23"
 url = "2"
-tungstenite = { version = "0.21", default-features = false, features = ["handshake", "rustls-tls-native-roots"] }
-hyper-tungstenite = "0.11"
 x509-parser = "0.16"
 sha1 = "0.10"
 state = { path = "../state" }
@@ -258,5 +254,10 @@ test = false
 name = "wallet"
 path = "src/bin/wallet.rs"
 required-features = ["cli"]
+test = false
+
+[[bin]]
+name = "migrate_overlay_store"
+path = "../scripts/migrate_overlay_store.rs"
 test = false
 

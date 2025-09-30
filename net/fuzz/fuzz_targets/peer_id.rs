@@ -1,12 +1,12 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use libp2p::PeerId;
+use p2p_overlay::InhousePeerId;
 use std::str::from_utf8;
 
 fuzz_target!(|data: &[u8]| {
     if let Ok(s) = from_utf8(data) {
-        if let Ok(id) = s.parse::<PeerId>() {
-            let round = id.to_string().parse::<PeerId>().expect("roundtrip");
+        if let Ok(id) = InhousePeerId::from_base58(s) {
+            let round = InhousePeerId::from_base58(&id.to_base58()).expect("roundtrip");
             assert_eq!(id, round);
         }
     }
