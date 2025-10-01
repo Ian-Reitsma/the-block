@@ -52,7 +52,7 @@ mod telemetry {
         let counter = IntCounter::with_opts(
             Opts::new(
                 "light_state_snapshot_decompress_errors_total",
-                "Total zstd decompression failures for light-client snapshots",
+                "Total lz77-rle decompression failures for light-client snapshots",
             )
             .namespace("the_block"),
         )
@@ -90,7 +90,7 @@ pub struct StateChunk {
     pub accounts: Vec<AccountChunk>,
     /// Merkle root of the accounts in this chunk.
     pub root: [u8; 32],
-    /// Indicates if this chunk is a full snapshot compressed with zstd.
+    /// Indicates if this chunk is a full snapshot compressed with `lz77-rle`.
     pub compressed: bool,
 }
 
@@ -465,7 +465,7 @@ impl StateStream {
         Ok(())
     }
 
-    /// Apply a full snapshot, optionally compressed with zstd.
+    /// Apply a full snapshot, optionally compressed with `lz77-rle`.
     pub fn apply_snapshot(
         &mut self,
         data: &[u8],
@@ -480,8 +480,15 @@ impl StateStream {
         let bytes = if compressed {
             #[cfg(feature = "telemetry")]
             LIGHT_STATE_SNAPSHOT_COMPRESSED_BYTES.inc_by(data.len() as u64);
-            match zstd::decode_all(data) {
-                Ok(decoded) => decoded,
+            match coding::compressor_for("lz77-rle", 4) {
+                Ok(compressor) => match compressor.decompress(data) {
+                    Ok(decoded) => decoded,
+                    Err(err) => {
+                        #[cfg(feature = "telemetry")]
+                        LIGHT_STATE_SNAPSHOT_DECOMPRESS_ERRORS_TOTAL.inc();
+                        return Err(StateStreamError::SnapshotDecode(err.to_string()));
+                    }
+                },
                 Err(err) => {
                     #[cfg(feature = "telemetry")]
                     LIGHT_STATE_SNAPSHOT_DECOMPRESS_ERRORS_TOTAL.inc();

@@ -1,5 +1,5 @@
 # Storage Pipeline
-> **Review (2025-09-25):** Synced Storage Pipeline guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Documented in-house ChaCha20/LZ77 rollout across pipeline configuration and telemetry.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The storage client splits objects into encrypted chunks before handing them to
@@ -45,7 +45,7 @@ constant.
 
 ## Erasure Coding and Multi-Provider Placement
 
-Each chunk is encrypted with ChaCha20-Poly1305 and then split into data and
+Each chunk is encrypted with the in-house ChaCha20-Poly1305 implementation and then split into data and
 parity shards via the shared `coding` crate. Defaults come from
 [`config/storage.toml`](../config/storage.toml) and currently request 16 data
 shards and 8 parity shards backed by Reed–Solomon
@@ -54,7 +54,7 @@ provider IDs and stores the active algorithm and counts so repair logic can
 select the matching coder:
 
 ```json
-{"version":1,"chunk_len":1048576,"erasure_alg":"reed-solomon","erasure_data":16,"erasure_parity":8,"compression_alg":"zstd",...}
+{"version":1,"chunk_len":1048576,"erasure_alg":"reed-solomon","erasure_data":16,"erasure_parity":8,"compression_alg":"lz77-rle",...}
 ```
 
 Operators may opt into the in-house XOR fallback by setting
@@ -68,7 +68,7 @@ impossible. Integration coverage exercises both paths in
 
 Compression choices follow the same configuration path (`compression.algorithm`
 and `rollout.allow_fallback_compressor`) and manifest field so retrieval knows
-whether to invoke zstd or the lightweight RLE fallback.
+whether to invoke the hybrid lz77-rle compressor or the lightweight RLE fallback.
 
 Shards are round-robined across storage backends so the pipeline tolerates up to
 the configured parity shard loss per chunk. Algorithm choices load through
@@ -76,7 +76,7 @@ the configured parity shard loss per chunk. Algorithm choices load through
 `storage_put_object_seconds`, `storage_put_chunk_seconds`, and
 `storage_repair_failures_total` with `erasure`/`compression` labels to make
 rollout dashboards trivial. The bench harness offers a
-`compare-coders` command that benchmarks Reed–Solomon+zstd versus XOR+RLE
+`compare-coders` command that benchmarks Reed–Solomon+lz77-rle versus XOR+RLE
 (`tools/bench-harness/src/main.rs`).
 
 ## Provider Catalog Health Checks

@@ -28,6 +28,7 @@ use crate::telemetry::{
 };
 
 use crate::range_boost;
+use p2p_overlay::PeerId;
 
 #[derive(Clone)]
 struct GossipSettings {
@@ -87,7 +88,10 @@ impl ShardStore {
     #[cfg(test)]
     fn temporary() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.into_path().join("gossip_store");
+        let base = dir
+            .keep()
+            .unwrap_or_else(|(_, err)| panic!("preserve gossip tempdir: {err}"));
+        let path = base.join("gossip_store");
         let path_str = path.to_string_lossy().to_string();
         Self::with_factory(&path_str, &SimpleDb::open_named)
     }

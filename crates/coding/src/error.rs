@@ -42,6 +42,8 @@ pub enum ErasureError {
     InvalidShardCount { expected: usize, actual: usize },
     #[error("invalid shard index {index} for total {total}")]
     InvalidShardIndex { index: usize, total: usize },
+    #[error("insufficient shards: expected {expected}, available {available}")]
+    InsufficientShards { expected: usize, available: usize },
     #[error("erasure encoding failed: {0}")]
     EncodingFailed(String),
     #[error("erasure reconstruction failed: {0}")]
@@ -50,6 +52,10 @@ pub enum ErasureError {
 
 #[derive(Debug, Error)]
 pub enum FountainError {
+    #[error("invalid fountain symbol size: {size}")]
+    InvalidSymbolSize { size: u16 },
+    #[error("invalid fountain rate: {rate}")]
+    InvalidRate { rate: f32 },
     #[error("fountain encode failed: {0}")]
     Encode(String),
     #[error("fountain decode failed: {0}")]

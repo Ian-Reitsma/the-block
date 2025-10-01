@@ -153,6 +153,9 @@ fn manifest_erasure_params(manifest: &ObjectManifest) -> Result<ErasureParams, S
 
 fn decrypt_chunk(encryptor: &dyn Encryptor, blob: &[u8]) -> Result<Vec<u8>, String> {
     let algorithm = encryptor.algorithm();
+    if cfg!(not(feature = "telemetry")) {
+        let _ = &algorithm;
+    }
     match encryptor.decrypt(blob) {
         Ok(bytes) => {
             #[cfg(feature = "telemetry")]
@@ -172,6 +175,9 @@ fn decrypt_chunk(encryptor: &dyn Encryptor, blob: &[u8]) -> Result<Vec<u8>, Stri
 
 fn decompress_chunk(compressor: &dyn Compressor, data: Vec<u8>) -> Result<Vec<u8>, String> {
     let algorithm = compressor.algorithm();
+    if cfg!(not(feature = "telemetry")) {
+        let _ = &algorithm;
+    }
     match compressor.decompress(&data) {
         Ok(bytes) => {
             #[cfg(feature = "telemetry")]
@@ -754,6 +760,9 @@ impl StoragePipeline {
                 #[cfg(feature = "telemetry")]
                 let chunk_start = Instant::now();
                 let compression_algo = compressor.algorithm();
+                if cfg!(not(feature = "telemetry")) {
+                    let _ = &compression_algo;
+                }
                 let compressed = match compressor.compress(chunk) {
                     Ok(data) => {
                         #[cfg(feature = "telemetry")]
@@ -779,6 +788,9 @@ impl StoragePipeline {
                     }
                 };
                 let encrypt_algo = algorithms.encryptor();
+                if cfg!(not(feature = "telemetry")) {
+                    let _ = &encrypt_algo;
+                }
                 let blob = match encryptor.encrypt(&compressed) {
                     Ok(ciphertext) => {
                         #[cfg(feature = "telemetry")]

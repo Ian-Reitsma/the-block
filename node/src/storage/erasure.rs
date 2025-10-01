@@ -78,6 +78,9 @@ pub fn encode_with_params(chunk: &[u8], params: &ErasureParams) -> Result<Vec<Ve
             return Err(err.to_string());
         }
     };
+    if cfg!(not(feature = "telemetry")) {
+        let _ = &algo;
+    }
     let shards: Vec<Vec<u8>> = batch.shards.into_iter().map(|shard| shard.bytes).collect();
     Ok(overlay_fountain(shards))
 }
@@ -106,6 +109,9 @@ pub fn reconstruct_with_params(
         base.push(iter.next().unwrap_or(None));
     }
     let overlays: Vec<Option<Vec<u8>>> = iter.collect();
+    if cfg!(not(feature = "telemetry")) {
+        let _ = &algo;
+    }
     if base.get(0).map(|s| s.is_none()).unwrap_or(false)
         || base.get(1).map(|s| s.is_none()).unwrap_or(false)
     {

@@ -178,7 +178,7 @@ fn default_parity_shards() -> usize {
 }
 
 fn default_fountain_algorithm() -> String {
-    "raptorq".to_string()
+    "lt-inhouse".to_string()
 }
 
 fn default_symbol_size() -> u16 {
@@ -190,7 +190,7 @@ fn default_fountain_rate() -> f32 {
 }
 
 fn default_compression_algorithm() -> String {
-    "zstd".to_string()
+    "lz77-rle".to_string()
 }
 
 fn default_compression_level() -> i32 {

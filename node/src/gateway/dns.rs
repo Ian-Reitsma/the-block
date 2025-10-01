@@ -1,9 +1,8 @@
 use super::{mobile_cache, read_receipt};
 use crate::simple_db::{names, SimpleDb};
 use crate::ERR_DNS_SIG_INVALID;
-use crypto_suite::signatures::{
-    ed25519::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH},
-    Verifier,
+use crypto_suite::signatures::ed25519::{
+    Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use hex;
 use once_cell::sync::Lazy;

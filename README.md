@@ -1,5 +1,5 @@
 # Readme
-> **Review (2025-09-29):** Tightened readiness to 98.3/93.3 after re-checking that the aggregator and gateway servers still run on `axum`/`hyper` while `crates/httpd` remains client-only.
+> **Review (2025-09-30):** Documented in-house encryption/compression rollout and refreshed navigation policy pointers.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 ## Table of Contents
 
@@ -21,9 +21,14 @@
 16. [Disclaimer](#disclaimer)
 17. [License](#license)
 
+> **Documentation note:** `docs/book.toml` sets `src = "."`, so `docs/SUMMARY.md`
+> remains the single canonical table of contents. Keep the repository root free
+> of a duplicate `SUMMARY.md`; mdBook will compile correctly as long as the
+> `docs/` tree stays in sync.
+
 ---
 
-> **Review (2025-09-29):** Tightened readiness to 98.3/93.3 after re-checking that the aggregator and gateway servers still run on `axum`/`hyper` while `crates/httpd` remains client-only.
+> **Review (2025-09-30):** Highlighted overlay peer-store migrator across operator release docs.
 
 ## What is The Block?
 
@@ -132,7 +137,7 @@ test real services today.
         `p2p_overlay` crate with selectable in-house/stub backends, CLI overrides,
         telemetry gauges, and integration tests, so node modules only depend on overlay traits. Base58-check peer IDs are surfaced end-to-end, CLI gossip introspection prints the most recent fanout set in base58, and shard-aware peer maps route block gossip only
         to interested peers and uptime-based fee rebates reward high-availability
-        peers. (98.1% Complete)
+        peers. Operator release notes and operator runbooks now call out the bundled `migrate_overlay_store` helper—see [`docs/governance_release.md`](docs/governance_release.md) and [`docs/operators/run_a_node.md`](docs/operators/run_a_node.md#migrating-overlay-peer-stores)—so peer databases can be upgraded without manual edits. (98.1% Complete)
       - Hybrid proof-of-work and proof-of-stake consensus schedules leaders by stake,
         resolves forks deterministically, and validates blocks with BLAKE3 hashes,
         multi-window Kalman retargeting, VDF-anchored randomness, macro-block
@@ -313,7 +318,7 @@ Mainnet readiness sits at **98.3/100** with vision completion **93.3/100**.
   before clients honor them. See [docs/gateway_dns.md](docs/gateway_dns.md).
 - Durable compute courier records bundles with exponential backoff retries; see [docs/compute_market_courier.md](docs/compute_market_courier.md).
 - Macro-block checkpoints capture per-shard roots and inter-shard queue proofs for cross-shard ordering; see [docs/macro_block.md](docs/macro_block.md).
-- Real-time state streaming over WebSockets keeps light clients current with zstd-compressed snapshots; see [docs/light_client_stream.md](docs/light_client_stream.md).
+- Real-time state streaming over WebSockets keeps light clients current with hybrid-compressed (lz77-rle) snapshots; see [docs/light_client_stream.md](docs/light_client_stream.md).
 - SNARK-verified compute receipts tie payments to Groth16 proofs generated from small WASM tasks; see [docs/compute_snarks.md](docs/compute_snarks.md).
 - Reputation-weighted, Lagrange-coded storage allocation with proof-of-retrievability challenges; see [docs/storage_market.md](docs/storage_market.md).
 - Constant-product AMM pools with epoch-based liquidity mining incentives; see [docs/dex_amm.md](docs/dex_amm.md).

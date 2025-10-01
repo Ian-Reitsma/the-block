@@ -1,7 +1,6 @@
 use blake3::hash;
-use crypto_suite::signatures::{
-    ed25519::{Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH},
-    Verifier,
+use crypto_suite::signatures::ed25519::{
+    Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use hex;
 use once_cell::sync::Lazy;

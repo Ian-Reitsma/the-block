@@ -129,16 +129,16 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
 
     let rs = erasure_coder_for("reed-solomon", data, parity)?;
     let xor = erasure_coder_for("xor", data, parity)?;
-    let zstd = compressor_for("zstd", 0)?;
+    let hybrid = compressor_for("lz77-rle", 4)?;
     let rle = compressor_for("rle", 0)?;
 
     let mut rs_encode = Duration::ZERO;
     let mut rs_decode = Duration::ZERO;
     let mut xor_encode = Duration::ZERO;
     let mut xor_decode = Duration::ZERO;
-    let mut zstd_compress = Duration::ZERO;
-    let mut zstd_decompress = Duration::ZERO;
-    let mut zstd_bytes = 0usize;
+    let mut hybrid_compress = Duration::ZERO;
+    let mut hybrid_decompress = Duration::ZERO;
+    let mut hybrid_bytes = 0usize;
     let mut rle_compress = Duration::ZERO;
     let mut rle_decompress = Duration::ZERO;
     let mut rle_bytes = 0usize;
@@ -175,13 +175,13 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
         assert_eq!(xor_recovered, payload);
 
         let start = Instant::now();
-        let zstd_buf = zstd.compress(&payload)?;
-        zstd_compress += start.elapsed();
-        zstd_bytes += zstd_buf.len();
+        let hybrid_buf = hybrid.compress(&payload)?;
+        hybrid_compress += start.elapsed();
+        hybrid_bytes += hybrid_buf.len();
         let start = Instant::now();
-        let zstd_plain = zstd.decompress(&zstd_buf)?;
-        zstd_decompress += start.elapsed();
-        assert_eq!(zstd_plain, payload);
+        let hybrid_plain = hybrid.decompress(&hybrid_buf)?;
+        hybrid_decompress += start.elapsed();
+        assert_eq!(hybrid_plain, payload);
 
         let start = Instant::now();
         let rle_buf = rle.compress(&payload)?;
@@ -196,9 +196,14 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
     let total_bytes = bytes as f64 * iterations as f64;
 
     println!("== Erasure coding benchmark ==");
-    print_timing("reed-solomon encode", rs_encode, iterations, total_bytes);
     print_timing(
-        "reed-solomon reconstruct",
+        "inhouse reed-solomon encode",
+        rs_encode,
+        iterations,
+        total_bytes,
+    );
+    print_timing(
+        "inhouse reed-solomon reconstruct",
         rs_decode,
         iterations,
         total_bytes,
@@ -206,13 +211,18 @@ fn compare_coders(bytes: usize, data: usize, parity: usize, iterations: u32) -> 
     print_timing("xor encode", xor_encode, iterations, total_bytes);
     print_timing("xor reconstruct", xor_decode, iterations, total_bytes);
 
-    let zstd_ratio = zstd_bytes as f64 / (iterations as f64 * bytes as f64);
+    let hybrid_ratio = hybrid_bytes as f64 / (iterations as f64 * bytes as f64);
     let rle_ratio = rle_bytes as f64 / (iterations as f64 * bytes as f64);
 
     println!("\n== Compression benchmark ==");
-    print_timing("zstd compress", zstd_compress, iterations, total_bytes);
-    print_timing("zstd decompress", zstd_decompress, iterations, total_bytes);
-    println!("zstd average ratio: {:.3}", zstd_ratio);
+    print_timing("hybrid compress", hybrid_compress, iterations, total_bytes);
+    print_timing(
+        "hybrid decompress",
+        hybrid_decompress,
+        iterations,
+        total_bytes,
+    );
+    println!("hybrid average ratio: {:.3}", hybrid_ratio);
     print_timing("rle compress", rle_compress, iterations, total_bytes);
     print_timing("rle decompress", rle_decompress, iterations, total_bytes);
     println!("rle average ratio: {:.3}", rle_ratio);

@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use coding::{ChaCha20Poly1305Encryptor, Encryptor, CHACHA20_POLY1305_NONCE_LEN};
 use once_cell::sync::Lazy;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -220,7 +219,7 @@ pub struct CacheQueueStatus {
 
 pub struct MobileCache {
     config: MobileCacheConfig,
-    cipher: ChaCha20Poly1305,
+    cipher: ChaCha20Poly1305Encryptor,
     db: sled::Db,
     responses: sled::Tree,
     queue_tree: sled::Tree,
@@ -240,7 +239,8 @@ pub struct MobileCache {
 
 impl MobileCache {
     pub fn open(config: MobileCacheConfig) -> Result<Self, MobileCacheError> {
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&config.encryption_key));
+        let cipher = ChaCha20Poly1305Encryptor::new(&config.encryption_key)
+            .map_err(|_| MobileCacheError::InvalidKeyLength)?;
         let mut sled_cfg = sled::Config::default().path(&config.db_path);
         if config.temporary {
             sled_cfg = sled_cfg.temporary(true);
@@ -375,26 +375,17 @@ impl MobileCache {
     }
 
     fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, MobileCacheError> {
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let mut out = self
-            .cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|_| MobileCacheError::Encryption)?;
-        let mut combined = nonce_bytes.to_vec();
-        combined.append(&mut out);
-        Ok(combined)
+        self.cipher
+            .encrypt(plaintext)
+            .map_err(|_| MobileCacheError::Encryption)
     }
 
     fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>, MobileCacheError> {
-        if ciphertext.len() <= 12 {
+        if ciphertext.len() <= CHACHA20_POLY1305_NONCE_LEN {
             return Err(MobileCacheError::Decryption);
         }
-        let (nonce_bytes, body) = ciphertext.split_at(12);
-        let nonce = Nonce::from_slice(nonce_bytes);
         self.cipher
-            .decrypt(nonce, body)
+            .decrypt(ciphertext)
             .map_err(|_| MobileCacheError::Decryption)
     }
 

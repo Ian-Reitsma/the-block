@@ -1,5 +1,4 @@
 use crate::net::uptime;
-use hex;
 use jsonrpc_core::{BoxFuture, Params, Result};
 
 pub fn rebate_status(params: Params) -> Result<BoxFuture<Result<String>>> {

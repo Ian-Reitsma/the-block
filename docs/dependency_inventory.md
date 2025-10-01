@@ -545,6 +545,7 @@
 | unclassified | `redox_syscall` | 0.5.17 | crates.io | MIT | 3 |
 | unclassified | `redox_users` | 0.4.6 | crates.io | MIT | 3 |
 | unclassified | `reed-solomon-erasure` | 6.0.0 | crates.io | MIT | 1 |
+> **Update (2025-09-30):** `raptorq` and `reed-solomon-erasure` were replaced by in-house coders; the next automated export will drop them from this inventory.
 | unclassified | `regalloc2` | 0.9.3 | crates.io | Apache-2.0 WITH LLVM-exception | 4 |
 | unclassified | `regex` | 1.11.2 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `regex-automata` | 0.4.10 | crates.io | MIT OR Apache-2.0 | 2 |

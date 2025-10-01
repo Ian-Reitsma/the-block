@@ -1,5 +1,5 @@
 # State Pruning and Compaction Guide
-> **Review (2025-09-25):** Synced State Pruning and Compaction Guide guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Updated guidance for the in-house LSM engine and refreshed migration flow.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 State grows monotonically as blocks commit new key/value pairs. To keep disk usage
@@ -38,22 +38,39 @@ Snapshots record the storage engine that produced them via the optional
 `engine_backend` field. When restoring into a node configured for a different
 backend, `SnapshotManager::restore` appends an entry to
 `state/engine_migrations.log` and forwards the event to the audit trail via
-`state::audit::append_engine_migration`. To migrate an existing state
-directory:
+`state::audit::append_engine_migration`. The in-house engine stores manifests,
+WALs, and SSTs under `state/<cf>/`, so migrations now ensure these directories
+exist before replaying snapshots. To migrate an existing state directory:
 
 1. Stop the node and back up the entire `state/` tree.
-2. Use the `tools/storage_migrate` binary to rewrite the RocksDB/sled
-   directories into the target backend, e.g. `cargo run -p storage_migrate --
-   state state.rocksdb rocksdb`. The tool verifies checksums before writing the
-   destination.
+2. Use the `tools/storage_migrate` binary to rewrite the RocksDB or sled
+   directories into the new format, e.g.:
+
+   ```
+   cargo run -p storage-migrate -- state/rocksdb state/inhouse
+   ```
+
+   The tool streams column families into the in-house engine and verifies SST
+   checksums before finalizing the manifest.
 3. Update `config/default.toml` so the `storage` engine defaults (or overrides
-   for `state`-related handles) point at the new backend. The
+   for `state`-related handles) point at the `inhouse` backend. The
    `storage_legacy_mode` toggle can be set to `true` for one release to retain
    the previous behaviour, but it is deprecated and the CLI issues warnings when
    enabled.
 4. Restart the node and confirm the migration with `the-block state status`.
    Snapshot restores that cross engines emit warnings in the CLI and surface the
-   `storage_engine_info{name="state",engine="rocksdb"}` metric for dashboards.
+   `storage_engine_info{name="state",engine="inhouse"}` metric for dashboards.
+
+### In-house compaction cadence
+
+- `simple_db flush-wal --all` ensures every column family truncates its WAL and
+  fsyncs before snapshots run.
+- `storage.compact_all` rewrites each column family’s SST set, folding
+  tombstones and superseded keys while the memtable stays online.
+- Telemetry exposes `storage_engine_memtable_bytes` and
+  `storage_engine_sst_bytes`; operators should alert when memtable bytes exceed
+  75 % of the configured limit or SST bytes grow faster than compactions retire
+  files.
 
 Every snapshot filename is the BLAKE3 hash of its root state. Restoring a node
 is as simple as reading the snapshot and replaying blocks higher than the

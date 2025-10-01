@@ -8,12 +8,12 @@ data_shards = 16
 parity_shards = 8
 
 [fountain]
-algorithm = "raptorq"
+algorithm = "lt-inhouse"
 symbol_size = 1024
 rate = 1.2
 
 [compression]
-algorithm = "zstd"
+algorithm = "lz77-rle"
 # Set to `"rle"` to use the lightweight run-length fallback compressor.
 level = 0
 

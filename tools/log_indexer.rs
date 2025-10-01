@@ -7,11 +7,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
 use blake3::derive_key;
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{Key, XChaCha20Poly1305, XNonce};
 use clap::{Parser, Subcommand};
-use rand::rngs::OsRng;
-use rand::RngCore;
+use coding::{
+    decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor,
+    CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
+};
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
@@ -227,33 +227,43 @@ fn update_ingest_offset(tx: &rusqlite::Transaction<'_>, source: &str, offset: u6
     Ok(())
 }
 
-fn encrypt_message(key: &Key, message: &str) -> Result<(String, Vec<u8>)> {
-    let cipher = XChaCha20Poly1305::new(key);
-    let mut nonce_bytes = [0u8; 24];
-    OsRng.fill_bytes(&mut nonce_bytes);
-    let nonce = XNonce::from_slice(&nonce_bytes);
-    let ciphertext = cipher
-        .encrypt(nonce, message.as_bytes())
+fn encrypt_message(
+    key: &[u8; CHACHA20_POLY1305_KEY_LEN],
+    message: &str,
+) -> Result<(String, Vec<u8>)> {
+    let payload = encrypt_xchacha20_poly1305(key, message.as_bytes())
         .map_err(|e| LogIndexerError::Encryption(format!("encrypt: {e}")))?;
-    Ok((
-        general_purpose::STANDARD.encode(ciphertext),
-        nonce_bytes.to_vec(),
-    ))
+    let (nonce, body) = payload.split_at(XCHACHA20_POLY1305_NONCE_LEN);
+    Ok((general_purpose::STANDARD.encode(body), nonce.to_vec()))
 }
 
-fn decrypt_message(key: &Key, data: &str, nonce: &[u8]) -> Option<String> {
-    let cipher = XChaCha20Poly1305::new(key);
-    let nonce = XNonce::from_slice(nonce);
-    let bytes = general_purpose::STANDARD.decode(data).ok()?;
-    cipher
-        .decrypt(nonce, bytes.as_ref())
-        .ok()
-        .and_then(|plain| String::from_utf8(plain).ok())
+fn decrypt_message(
+    key: &[u8; CHACHA20_POLY1305_KEY_LEN],
+    data: &str,
+    nonce: &[u8],
+) -> Option<String> {
+    let body = general_purpose::STANDARD.decode(data).ok()?;
+    if nonce.is_empty() {
+        return decrypt_xchacha20_poly1305(key, &body)
+            .ok()
+            .and_then(|plain| String::from_utf8(plain).ok());
+    }
+    let mut payload = Vec::with_capacity(nonce.len() + body.len());
+    payload.extend_from_slice(nonce);
+    payload.extend_from_slice(&body);
+    let plaintext = match nonce.len() {
+        XCHACHA20_POLY1305_NONCE_LEN => decrypt_xchacha20_poly1305(key, &payload).ok(),
+        CHACHA20_POLY1305_NONCE_LEN => {
+            let encryptor = ChaCha20Poly1305Encryptor::new(key.as_ref()).ok()?;
+            encryptor.decrypt(&payload).ok()
+        }
+        _ => None,
+    }?;
+    String::from_utf8(plaintext).ok()
 }
 
-fn derive_encryption_key(passphrase: &str) -> Key {
-    let key_bytes = derive_key("the-block-log-indexer", passphrase.as_bytes());
-    Key::clone_from_slice(&key_bytes)
+fn derive_encryption_key(passphrase: &str) -> [u8; CHACHA20_POLY1305_KEY_LEN] {
+    derive_key("the-block-log-indexer", passphrase.as_bytes())
 }
 
 #[cfg(feature = "telemetry")]
@@ -281,7 +291,7 @@ fn increment_indexed_metric(correlation_id: &str) {
 #[cfg(not(feature = "telemetry"))]
 fn increment_indexed_metric(_correlation_id: &str) {}
 
-fn row_to_entry(row: &Row<'_>, key: Option<&Key>) -> Result<LogEntry> {
+fn row_to_entry(row: &Row<'_>, key: Option<&[u8; CHACHA20_POLY1305_KEY_LEN]>) -> Result<LogEntry> {
     let encrypted: i64 = row.get("encrypted")?;
     let nonce: Option<Vec<u8>> = row.get("nonce")?;
     let stored_msg: String = row.get("message")?;

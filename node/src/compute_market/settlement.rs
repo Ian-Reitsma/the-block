@@ -1,10 +1,11 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::simple_db;
-use crate::simple_db::{names, SimpleDb};
+use crate::simple_db::{names, SimpleDb, SimpleDbBatch};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     COMPUTE_SLA_VIOLATIONS_TOTAL, SETTLE_APPLIED_TOTAL, SETTLE_FAILED_TOTAL,
@@ -188,13 +189,28 @@ impl SettlementState {
     }
 
     fn persist_all(&mut self) {
-        store_value(&mut self.db, KEY_LEDGER_CT, &self.ct);
-        store_value(&mut self.db, KEY_LEDGER_IT, &self.it);
-        store_value(&mut self.db, KEY_MODE, &self.mode);
-        store_value(&mut self.db, KEY_METADATA, &self.metadata);
-        store_value(&mut self.db, KEY_AUDIT, &self.audit);
-        store_value(&mut self.db, KEY_ROOTS, &self.roots);
-        store_value(&mut self.db, KEY_NEXT_SEQ, &self.next_seq);
+        let mut batch = self.db.batch();
+        let mut encode = || -> io::Result<()> {
+            enqueue_value(&mut batch, KEY_LEDGER_CT, &self.ct)?;
+            enqueue_value(&mut batch, KEY_LEDGER_IT, &self.it)?;
+            enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
+            enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
+            enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
+            enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
+            enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
+            Ok(())
+        };
+
+        if let Err(err) = encode().and_then(|_| self.db.write_batch(batch)) {
+            #[cfg(feature = "telemetry")]
+            {
+                error!(?err, "persist settlement state");
+            }
+            #[cfg(not(feature = "telemetry"))]
+            {
+                let _ = err;
+            }
+        }
     }
 
     fn flush(&self) {
@@ -212,19 +228,10 @@ where
         .unwrap_or_else(default)
 }
 
-fn store_value<T: Serialize>(db: &mut SimpleDb, key: &str, value: &T) {
-    if let Ok(bytes) = bincode::serialize(value) {
-        if let Err(err) = db.try_insert(key, bytes) {
-            #[cfg(feature = "telemetry")]
-            {
-                error!(?err, "persist settlement state");
-            }
-            #[cfg(not(feature = "telemetry"))]
-            {
-                let _ = err;
-            }
-        }
-    }
+fn enqueue_value<T: Serialize>(batch: &mut SimpleDbBatch, key: &str, value: &T) -> io::Result<()> {
+    let bytes = bincode::serialize(value)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+    batch.put(key, &bytes)
 }
 
 fn compute_root(ct: &AccountLedger, it: &AccountLedger) -> [u8; 32] {
@@ -292,7 +299,8 @@ impl Settlement {
         let base = if path.is_empty() {
             tempfile::tempdir()
                 .expect("create settlement tempdir")
-                .into_path()
+                .keep()
+                .unwrap_or_else(|(_, err)| panic!("preserve settlement tempdir: {err}"))
         } else {
             PathBuf::from(path)
         };

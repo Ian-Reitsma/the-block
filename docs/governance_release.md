@@ -1,5 +1,5 @@
 # Governance-Secured Release Flow
-> **Review (2025-09-25):** Synced Governance-Secured Release Flow guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Documented overlay peer-store migration helper in release prep checklist.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the process for approving and installing node
@@ -21,6 +21,27 @@ attested by a quorum of release signers.
    confirms that the shipped snapshot aligns with the committed policy baseline. Governance
    proposals should include the vendor digest and snapshot path so operators can cross-check
    artifacts before voting.
+
+Prior to rolling out a release that upgrades the in-house overlay backend, run the bundled
+peer-store migrator so persisted peer IDs land in the new canonical path. Nodes that still
+store peers in `~/.the_block/overlay_peers.json` should execute:
+
+```
+cargo run --bin migrate_overlay_store --release -- \
+  ~/.the_block/overlay_peers.json ~/.the_block/overlay/peers.json
+```
+
+For bespoke layouts, supply explicit source and destination paths:
+
+```
+cargo run --bin migrate_overlay_store --release -- \
+  /srv/the-block/overlay_peers.json /var/lib/the-block/overlay/peers.json
+```
+
+The helper canonicalises every peer ID to base58-check form and stamps the migration timestamp
+so uptime probes immediately recognise the refreshed entries. See
+[`docs/operators/run_a_node.md`](operators/run_a_node.md#migrating-overlay-peer-stores) for
+additional validation commands.
 
 Wallets expose two helper commands:
 

@@ -1,5 +1,5 @@
 # Run a node
-> **Review (2025-09-25):** Synced Run a node guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Added telemetry verification after overlay migration.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## Hardware
@@ -187,10 +187,20 @@ cargo run --bin migrate_overlay_store --release -- \
   ~/.the_block/overlay_peers.json ~/.the_block/overlay/peers.json
 ```
 
+To migrate from a bespoke directory layout, pass explicit source and destination
+paths:
+
+```bash
+cargo run --bin migrate_overlay_store --release -- \
+  /var/lib/the-block/legacy_peers.json /srv/the-block/overlay/peers.json
+```
+
 The script accepts optional source/target paths and canonicalises every peer ID
 to the base58-check representation. Existing directories are created on demand,
 and the timestamp for each entry is set to the migration time so uptime probes
-continue without manual edits.
+continue without manual edits. Governance release prep checklists in
+[`docs/governance_release.md`](../governance_release.md) require completing this
+step before staging overlay upgrades for quorum approval.
 
 After migrating, confirm the overlay database contents and CLI output:
 
@@ -201,6 +211,19 @@ net gossip_status
 
 Both commands should report the new base58 peer identifiers and the target path
 `~/.the_block/overlay/peers.json`.
+
+After the CLI checks, confirm the telemetry probes picked up the refreshed
+store. On nodes exposing the metrics endpoint (default `127.0.0.1:9898`), run:
+
+```bash
+curl -s http://127.0.0.1:9898/metrics | rg 'overlay_peer_(total|persisted_total)'
+```
+
+The `overlay_peer_total{backend="inhouse"}` and
+`overlay_peer_persisted_total{backend="inhouse"}` gauges should reflect the new
+peer count. Metrics-aggregator dashboards consume the same series, so a non-zero
+value there is the final confirmation that rebate tracking and gossip fanout are
+using the migrated data.
 
 Generate shell completions with:
 

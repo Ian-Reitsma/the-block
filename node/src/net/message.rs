@@ -1,6 +1,6 @@
 use crate::net::peer::ReputationUpdate;
 use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
-use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use crypto_suite::signatures::ed25519::SigningKey;
 use ledger::address::ShardId;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;

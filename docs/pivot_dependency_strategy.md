@@ -1,5 +1,5 @@
 # Pivot Dependency Strategy Runbook
-> **Review (2025-09-25):** Synced Pivot Dependency Strategy Runbook guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Captured the in-house Reed–Solomon/LT fountain rollout and refreshed coding wrapper notes.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This runbook aligns engineering and operations on the hybrid dependency strategy that
@@ -27,6 +27,7 @@ summaries, letting governance stage cutovers with confidence.
 vendor hashes, and policy attestations. The `tools/vendor_sync` helper keeps the vendored
 tree reproducible, while `tools/dependency_registry` records policy-compliant snapshots
 for auditing.
+Recent updates removed third-party Reed–Solomon and RaptorQ dependencies in favour of the in-house `coding` crate implementations; wrapper telemetry and policy rollout now track the `lt-inhouse` fountain and GF(256) Reed–Solomon identifiers so governance can audit the swap.
 
 ## 2. Wrapper Flow Diagram
 
