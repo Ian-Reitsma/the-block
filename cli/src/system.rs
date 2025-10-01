@@ -102,7 +102,7 @@ mod tests {
                     metric: "crypto_backend_info".to_string(),
                     labels: BTreeMap::from([
                         ("algorithm".to_string(), "ed25519".to_string()),
-                        ("backend".to_string(), "ed25519-dalek".to_string()),
+                        ("backend".to_string(), "inhouse".to_string()),
                         ("version".to_string(), "0.1.0".to_string()),
                     ]),
                     value: 1.0,
@@ -141,7 +141,7 @@ mod tests {
     fn render_dependencies_sorts_nodes_and_metrics() {
         let output = render_dependencies(sample_summary());
         let expected = "\
-node: node-a\n  codec_deserialize_fail_total{codec=\"json\",profile=\"none\",version=\"0.1.0\"} 2.000\n  codec_serialize_fail_total{codec=\"json\",profile=\"none\",version=\"0.1.0\"} 1.000\n\nnode: node-b\n  crypto_backend_info{algorithm=\"ed25519\",backend=\"ed25519-dalek\",version=\"0.1.0\"} 1.000\n\n";
+node: node-a\n  codec_deserialize_fail_total{codec=\"json\",profile=\"none\",version=\"0.1.0\"} 2.000\n  codec_serialize_fail_total{codec=\"json\",profile=\"none\",version=\"0.1.0\"} 1.000\n\nnode: node-b\n  crypto_backend_info{algorithm=\"ed25519\",backend=\"inhouse\",version=\"0.1.0\"} 1.000\n\n";
         assert_eq!(output, expected);
     }
 

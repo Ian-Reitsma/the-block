@@ -1,5 +1,5 @@
 # Security & Cryptography
-> **Review (2025-09-25):** Synced Security & Cryptography guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-10-01):** Documented the first-party Ed25519 backend (field/scalar/point math + RFC8032 coverage) and refreshed testing notes.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## Crypto Suite Overview
@@ -14,7 +14,8 @@ The suite exposes the following modules:
 - `signatures` — project-specific Ed25519 wrappers with PKCS#8 helpers.
 - `transactions` — canonical bincode serialisation, domain-tag management, and
   signing/verifying utilities shared across binaries.
-- `hashing` — BLAKE3 by default with an optional SHA3 fallback.
+- `hashing` — In-house sponge hash (`TBH32`) by default with an optional SHA3
+  fallback.
 - `key_derivation` — HKDF-based key derivation helpers used by wallet/session
   code.
 - `zk` — Groth16 conveniences that wrap `bellman_ce` behind a stable API.
@@ -31,22 +32,29 @@ Feature flags keep optional algorithms modular:
 ### Signatures & Transaction Domains
 
 Ed25519 signing now flows through `crypto_suite::signatures::ed25519`, which
-wraps `ed25519-dalek` while hiding crate-specific types. The `transactions`
-module owns the 16-byte domain tag (`TRANSACTION_DOMAIN_PREFIX`) and provides a
+wraps the new first-party arithmetic implemented under
+`signatures::ed25519_inhouse::{field, point, scalar}`. Keys expand via the
+vendored SHA-512 helper, clamp into canonical scalars, and multiply against the
+curve base point without relying on `ed25519-dalek`. The `transactions` module
+owns the 16-byte domain tag (`TRANSACTION_DOMAIN_PREFIX`) and provides a
 `TransactionSigner` that prepends the chain-specific domain before signing or
 verifying.
 
 Compatibility tests under `crates/crypto_suite/tests/transactions.rs` guarantee
-that suite signatures match direct `ed25519-dalek` output and that domain tags
-reject cross-chain replays. The same test module exercises Groth16 verification
-against the raw `bellman_ce` API.
+that suite signatures follow the documented deterministic construction and that
+domain tags reject cross-chain replays. `crates/crypto_suite/tests/inhouse_crypto.rs`
+adds RFC8032 known-answer vectors, PKCS#8 round-trips, and strict failure cases
+for non-canonical scalars, small-order points, and malformed encodings. The
+same test module exercises Groth16 verification against the raw `bellman_ce`
+API.
 
 ### Hashing & Commitments
 
-BLAKE3 remains the primary hashing algorithm and now lives behind
-`crypto_suite::hashing`. Enabling the `sha3-fallback` feature swaps in SHA3-256
-for deployments where BLAKE3 is disallowed. Commitment schemes in the DEX stack
-still record the hash algorithm used so clients can verify proofs off-chain.
+The default hash (`crypto_suite::hashing::inhouse`) implements the TBH32 sponge
+construction with a 32-byte output. Enabling the `sha3-fallback` feature swaps
+in the in-house Keccak-style fallback (`sha3` module) for deployments that
+require NIST-aligned primitives. Commitment schemes in the DEX stack still
+record the hash algorithm used so clients can verify proofs off-chain.
 
 ### Key Derivation
 
@@ -80,13 +88,8 @@ Run the suite’s unit tests with:
 cargo test -p crypto_suite
 ```
 
-This includes signature compatibility, domain-separation, and Groth16 parity
-checks. The `ed25519` Criterion benchmark compares suite signing performance
-against direct `ed25519_dalek` calls:
-
-```bash
-cargo bench -p crypto_suite --bench ed25519
-```
+This includes RFC8032 vectors, negative signature checks, signature
+determinism/domain separation, and Groth16 parity checks.
 
 ## Adding New Algorithms
 

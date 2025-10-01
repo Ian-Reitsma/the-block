@@ -1,17 +1,22 @@
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
-use ed25519_dalek::{self, pkcs8, Signer as DalekSigner, Verifier as DalekVerifier};
 use rand_core::{CryptoRng, RngCore};
 use thiserror::Error;
 
 use crate::signatures::{Signer, Verifier};
 
+use super::ed25519_inhouse as backend;
+
+pub use backend::{
+    SignatureError, KEYPAIR_LENGTH, PUBLIC_KEY_LENGTH, SECRET_KEY_LENGTH, SIGNATURE_LENGTH,
+};
+
 #[cfg(feature = "telemetry")]
 use std::sync::OnceLock;
 
 pub const ALGORITHM: &str = "ed25519";
-pub const BACKEND: &str = "ed25519-dalek";
+pub const BACKEND: &str = "inhouse";
 pub const BACKEND_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(feature = "telemetry")]
@@ -41,29 +46,33 @@ fn record(operation: &'static str, success: bool) {
     }
 }
 
-pub const PUBLIC_KEY_LENGTH: usize = ed25519_dalek::PUBLIC_KEY_LENGTH;
-pub const SECRET_KEY_LENGTH: usize = ed25519_dalek::SECRET_KEY_LENGTH;
-pub const KEYPAIR_LENGTH: usize = ed25519_dalek::KEYPAIR_LENGTH;
-pub const SIGNATURE_LENGTH: usize = ed25519_dalek::SIGNATURE_LENGTH;
-
 #[derive(Clone)]
-pub struct SigningKey(ed25519_dalek::SigningKey);
+pub struct SigningKey(backend::SigningKey);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Signature(ed25519_dalek::Signature);
+pub struct Signature(backend::Signature);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct VerifyingKey(ed25519_dalek::VerifyingKey);
+pub struct VerifyingKey(backend::VerifyingKey);
 
 #[derive(Debug, Error)]
 pub enum KeyEncodingError {
-    #[error("pkcs8 encoding failed: {0}")]
-    Encoding(pkcs8::Error),
-    #[error("pkcs8 decoding failed: {0}")]
-    Decoding(pkcs8::Error),
+    #[error("pkcs8 encoding failed")]
+    Encoding,
+    #[error("pkcs8 decoding failed")]
+    Decoding,
 }
 
-pub type SignatureError = ed25519_dalek::SignatureError;
+#[derive(Clone)]
+pub struct SecretDocument {
+    bytes: Vec<u8>,
+}
+
+impl SecretDocument {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
 
 /// Legacy type aliases retained while downstream crates migrate off the
 /// previous `crypto::ed25519::*` exports.
@@ -79,15 +88,15 @@ impl SigningKey {
     where
         R: CryptoRng + RngCore,
     {
-        Self(ed25519_dalek::SigningKey::generate(rng))
+        Self(backend::SigningKey::generate(rng))
     }
 
     pub fn from_bytes(bytes: &[u8; SECRET_KEY_LENGTH]) -> Self {
-        Self(ed25519_dalek::SigningKey::from_bytes(bytes))
+        Self(backend::SigningKey::from_bytes(bytes))
     }
 
     pub fn from_keypair_bytes(bytes: &[u8; KEYPAIR_LENGTH]) -> Result<Self, SignatureError> {
-        ed25519_dalek::SigningKey::from_keypair_bytes(bytes).map(Self)
+        backend::SigningKey::from_keypair_bytes(bytes).map(Self)
     }
 
     pub fn to_bytes(&self) -> [u8; SECRET_KEY_LENGTH] {
@@ -103,26 +112,18 @@ impl SigningKey {
     }
 
     pub fn sign(&self, message: &[u8]) -> Signature {
-        let sig = Signature(DalekSigner::sign(&self.0, message));
+        let sig = Signature(self.0.sign(message));
         #[cfg(feature = "telemetry")]
         record("sign", true);
         sig
     }
 
-    pub fn to_pkcs8_der(&self) -> Result<pkcs8::SecretDocument, KeyEncodingError> {
-        use ed25519_dalek::pkcs8::EncodePrivateKey;
-        self.0.to_pkcs8_der().map_err(KeyEncodingError::Encoding)
+    pub fn to_pkcs8_der(&self) -> Result<SecretDocument, KeyEncodingError> {
+        encode_pkcs8(self)
     }
 
     pub fn from_pkcs8_der(bytes: &[u8]) -> Result<Self, KeyEncodingError> {
-        use ed25519_dalek::pkcs8::DecodePrivateKey;
-        ed25519_dalek::SigningKey::from_pkcs8_der(bytes)
-            .map(Self)
-            .map_err(KeyEncodingError::Decoding)
-    }
-
-    pub fn secret_bytes(&self) -> [u8; SECRET_KEY_LENGTH] {
-        self.to_bytes()
+        decode_pkcs8(bytes).map(Self)
     }
 }
 
@@ -136,21 +137,11 @@ impl Signer for SigningKey {
 
 impl Signature {
     pub fn from_bytes(bytes: &[u8; SIGNATURE_LENGTH]) -> Self {
-        Self(ed25519_dalek::Signature::from_bytes(bytes))
+        Self(backend::Signature::from_bytes(bytes))
     }
 
     pub fn to_bytes(&self) -> [u8; SIGNATURE_LENGTH] {
         self.0.to_bytes()
-    }
-
-    pub fn as_bytes(&self) -> [u8; SIGNATURE_LENGTH] {
-        self.0.to_bytes()
-    }
-}
-
-impl From<ed25519_dalek::Signature> for Signature {
-    fn from(value: ed25519_dalek::Signature) -> Self {
-        Self(value)
     }
 }
 
@@ -176,21 +167,19 @@ impl fmt::Debug for Signature {
 
 impl Hash for Signature {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let bytes = self.0.to_bytes();
-        state.write(&bytes);
+        state.write(&self.0.to_bytes());
     }
 }
 
 impl Hash for VerifyingKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        let bytes = self.0.to_bytes();
-        state.write(&bytes);
+        state.write(&self.0.to_bytes());
     }
 }
 
 impl VerifyingKey {
     pub fn from_bytes(bytes: &[u8; PUBLIC_KEY_LENGTH]) -> Result<Self, SignatureError> {
-        ed25519_dalek::VerifyingKey::from_bytes(bytes).map(Self)
+        backend::VerifyingKey::from_bytes(bytes).map(Self)
     }
 
     pub fn to_bytes(&self) -> [u8; PUBLIC_KEY_LENGTH] {
@@ -198,7 +187,7 @@ impl VerifyingKey {
     }
 
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
-        let result = DalekVerifier::verify(&self.0, message, &signature.0);
+        let result = self.0.verify(message, &signature.0);
         #[cfg(feature = "telemetry")]
         record("verify", result.is_ok());
         result
@@ -221,6 +210,30 @@ impl Verifier<Signature> for VerifyingKey {
 
     fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Self::Error> {
         VerifyingKey::verify(self, message, signature)
+    }
+}
+
+impl From<Signature> for backend::Signature {
+    fn from(value: Signature) -> Self {
+        value.0
+    }
+}
+
+impl From<backend::Signature> for Signature {
+    fn from(value: backend::Signature) -> Self {
+        Signature(value)
+    }
+}
+
+impl From<VerifyingKey> for backend::VerifyingKey {
+    fn from(value: VerifyingKey) -> Self {
+        value.0
+    }
+}
+
+impl From<backend::VerifyingKey> for VerifyingKey {
+    fn from(value: backend::VerifyingKey) -> Self {
+        VerifyingKey(value)
     }
 }
 
@@ -276,4 +289,58 @@ mod serde_impls {
             VerifyingKey::from_bytes(&arr).map_err(|e| serde::de::Error::custom(e.to_string()))
         }
     }
+}
+
+const PKCS8_HEADER: [u8; 16] = [
+    0x30, 0x53, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+];
+
+const PKCS8_PUBLIC_PREFIX: [u8; 5] = [0xA1, 0x23, 0x03, 0x21, 0x00];
+
+fn encode_pkcs8(signing_key: &SigningKey) -> Result<SecretDocument, KeyEncodingError> {
+    let secret = signing_key.to_bytes();
+    let public = signing_key.verifying_key().to_bytes();
+    let capacity =
+        PKCS8_HEADER.len() + SECRET_KEY_LENGTH + PKCS8_PUBLIC_PREFIX.len() + PUBLIC_KEY_LENGTH;
+    let mut encoded = Vec::with_capacity(capacity);
+    encoded.extend_from_slice(&PKCS8_HEADER);
+    encoded.extend_from_slice(&secret);
+    encoded.extend_from_slice(&PKCS8_PUBLIC_PREFIX);
+    encoded.extend_from_slice(&public);
+    Ok(SecretDocument { bytes: encoded })
+}
+
+fn decode_pkcs8(bytes: &[u8]) -> Result<backend::SigningKey, KeyEncodingError> {
+    let expected_len =
+        PKCS8_HEADER.len() + SECRET_KEY_LENGTH + PKCS8_PUBLIC_PREFIX.len() + PUBLIC_KEY_LENGTH;
+
+    if bytes.len() != expected_len {
+        return Err(KeyEncodingError::Decoding);
+    }
+    if bytes[..PKCS8_HEADER.len()] != PKCS8_HEADER {
+        return Err(KeyEncodingError::Decoding);
+    }
+    let secret_start = PKCS8_HEADER.len();
+    let secret_end = secret_start + SECRET_KEY_LENGTH;
+    let mut secret = [0u8; SECRET_KEY_LENGTH];
+    secret.copy_from_slice(&bytes[secret_start..secret_end]);
+
+    let public_prefix_start = secret_end;
+    let public_prefix_end = public_prefix_start + PKCS8_PUBLIC_PREFIX.len();
+
+    if bytes[public_prefix_start..public_prefix_end] != PKCS8_PUBLIC_PREFIX {
+        return Err(KeyEncodingError::Decoding);
+    }
+
+    let public_start = public_prefix_end;
+    let public_end = public_start + PUBLIC_KEY_LENGTH;
+    let mut provided_public = [0u8; PUBLIC_KEY_LENGTH];
+    provided_public.copy_from_slice(&bytes[public_start..public_end]);
+
+    let signing = backend::SigningKey::from_bytes(&secret);
+    if signing.verifying_key().to_bytes() != provided_public {
+        return Err(KeyEncodingError::Decoding);
+    }
+
+    Ok(signing)
 }

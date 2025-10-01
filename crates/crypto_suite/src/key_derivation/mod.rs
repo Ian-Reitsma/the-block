@@ -1,5 +1,5 @@
-pub mod blake3;
 pub mod hkdf;
+pub mod inhouse;
 
 use thiserror::Error;
 

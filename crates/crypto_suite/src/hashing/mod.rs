@@ -1,4 +1,4 @@
-pub mod blake3;
+pub mod inhouse;
 pub mod sha3;
 
 use core::fmt;
@@ -84,7 +84,7 @@ pub trait HashEngine {
 }
 
 #[cfg(not(feature = "sha3-fallback"))]
-pub use blake3::{hash as default_hash, Hasher as DefaultHasher};
+pub use inhouse::{hash as default_hash, Hasher as DefaultHasher};
 
 #[cfg(feature = "sha3-fallback")]
 pub use sha3::{hash as default_hash, Hasher as DefaultHasher};

@@ -1,4 +1,5 @@
 pub mod ed25519;
+mod ed25519_inhouse;
 
 /// Trait implemented by signing keys capable of producing detached signatures.
 pub trait Signer {
