@@ -11,18 +11,17 @@ threshold = []
 telemetry = []
 
 [dependencies]
-blake3 = "1"
 bellman_ce = "0.8"
-ed25519-dalek = { version = "2.2.0", features = ["pkcs8", "rand_core", "zeroize"] }
 hkdf = "0.12"
 rand_core = "0.6"
 rand = "0.8"
 rand04 = { package = "rand", version = "0.4" }
 sha2 = "0.10"
-sha3 = "0.10"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 hex = "0.4"
+num-bigint = { version = "0.4", features = ["std"] }
+num-traits = "0.2"
 bincode = "1.3"
 codec = { path = "../codec" }
 

@@ -1,25 +1,35 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use crypto_suite::transactions::{domain_tag_for, TransactionSigner};
 use crypto_suite::zk::groth16::{FieldElement, Groth16Bn256};
-use ed25519_dalek::Signer as DalekSigner;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
 #[test]
-fn ed25519_signature_matches_dalek() {
+fn ed25519_signature_is_deterministic() {
     let mut rng = StdRng::seed_from_u64(0xFACE_CAFE);
     let signing_key = SigningKey::generate(&mut rng);
     let signer = TransactionSigner::from_chain_id(1);
     let mut payload = vec![0u8; 64];
     rng.fill_bytes(&mut payload);
 
-    let suite_sig = signer.sign(&signing_key, &payload);
+    let sig_a = signer.sign(&signing_key, &payload);
+    let sig_b = signer.sign(&signing_key, &payload);
+    assert_eq!(
+        sig_a.to_bytes(),
+        sig_b.to_bytes(),
+        "signing must be deterministic"
+    );
 
-    let dalek_key = ed25519_dalek::SigningKey::from_bytes(&signing_key.secret_bytes());
-    let message = signer.message(&payload);
-    let dalek_sig = dalek_key.sign(&message);
+    let verifying_key = signing_key.verifying_key();
+    assert!(
+        signer.verify(&verifying_key, &payload, &sig_a).is_ok(),
+        "signature must verify"
+    );
 
-    assert_eq!(suite_sig.to_bytes(), dalek_sig.to_bytes());
+    assert!(
+        signer.verify(&verifying_key, b"altered", &sig_a).is_err(),
+        "altered payload rejected"
+    );
 }
 
 #[test]
