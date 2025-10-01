@@ -1,5 +1,5 @@
 # Project Progress Snapshot
-> **Review (2025-09-29):** Tightened readiness to 98.3/93.3 after re-checking that the aggregator and gateway servers still rely on `axum`/`hyper` and that `crates/httpd` currently serves outbound clients only.
+> **Review (2025-09-30):** Logged hybrid crypto rollout and queued next dependency snapshot.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
@@ -21,8 +21,9 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## Dependency posture
 
 - **Policy source**: [`config/dependency_policies.toml`](../config/dependency_policies.toml) enforces a depth limit of 3, assigns risk tiers, and blocks AGPL/SSPL transitively.  The registry snapshot is materialised via `cargo run -p dependency_registry -- --check config/dependency_policies.toml` and stored at [`docs/dependency_inventory.json`](dependency_inventory.json).
-- **Current inventory** *(generated at `2025-09-29T08:45:00Z`)*: 7 strategic crates, 7 replaceable crates, and 845 unclassified dependencies in the resolved workspace DAG.
-- **Outstanding drift**: 204 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
+- **Current inventory** *(generated at `2025-09-30T12:54:59.759213+00:00`)*: 7 strategic crates, 7 replaceable crates, and 841 unclassified dependencies in the resolved workspace DAG.
+- **Outstanding drift**: 210 dependencies currently breach policy depth and are tracked in [`docs/dependency_inventory.violations.json`](dependency_inventory.violations.json).  CI now uploads the generated registry and policy violations for each pull request and posts a summary so reviewers can block regressions quickly.
+- **Next refresh**: Run `./scripts/dependency_snapshot.sh` on **2025-10-01** after the explorer `codec` link lands to capture the updated workspace DAG and refresh these metrics.
 
 ## 1. Consensus & Core Execution — 93.6 %
 
@@ -46,7 +47,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Formal safety/liveness proofs under `formal/` still stubbed.
 - No large‑scale network rollback simulation.
 
-## 2. Networking & Gossip — 98.3 %
+## 2. Networking & Gossip — 98.4 %
 
 **Evidence**
 - Runtime-owned TCP/UDP reactor now backs the node RPC client/server plumbing (`crates/runtime/src/net.rs`, `node/src/rpc/client.rs`), while gateway and metrics-aggregator endpoints still rely on `hyper`/`axum` pending their migration. Buffered IO helpers live in `crates/runtime/src/io.rs` with integration coverage in `crates/runtime/tests/net.rs`.
@@ -112,7 +113,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Read acknowledgement batching and audit flow documented in `docs/read_receipts.md` and `docs/storage_pipeline.md`.
 - Disk‑full metrics and recovery tests (`node/tests/storage_disk_full.rs`).
 - Gateway HTTP parsing fuzz harness (`gateway/fuzz`).
-- RaptorQ progressive fountain overlay for BLE repair (`node/src/storage/repair.rs`, `docs/storage/repair.md`, `node/tests/raptorq_repair.rs`).
+- In-house LT fountain overlay for BLE repair (`node/src/storage/repair.rs`, `docs/storage/repair.md`, `node/tests/fountain_repair.rs`).
 - Thread-safe `ReadStats` telemetry and analytics RPC (`node/src/telemetry.rs`, `node/tests/analytics.rs`).
 - WAL-backed `SimpleDb` design in `docs/simple_db.md` underpins DNS cache, chunk gossip, and DEX storage.
 - Unified `storage_engine` crate wraps RocksDB, sled, and in-memory engines with shared traits, concurrency-safe batches, crash-tested temp dirs, and configuration-driven overrides (`crates/storage_engine`, `node/src/simple_db/mod.rs`).
@@ -188,7 +189,7 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 - Mobile light client with push notification hooks (`examples/mobile`, `docs/mobile_light_client.md`).
 - Light-client synchronization and header verification documented in `docs/light_client.md`.
 - Device status probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, emit `the_block_light_client_device_status{field,freshness}` telemetry, persist overrides in `~/.the_block/light_client.toml`, surface CLI/RPC gating messages, and embed annotated snapshots in compressed log uploads (`crates/light-client`, `cli/src/light_client.rs`, `docs/light_client.md`, `docs/mobile_light_client.md`).
-- Real-time state streaming over WebSockets with zstd snapshots (`docs/light_client_stream.md`, `node/src/rpc/state_stream.rs`).
+- Real-time state streaming over WebSockets with hybrid (lz77-rle) snapshots (`docs/light_client_stream.md`, `node/src/rpc/state_stream.rs`).
 - Optional KYC provider wiring (`docs/kyc.md`).
 - Session-key issuance and meta-transaction tooling (`crypto/src/session.rs`, `cli/src/wallet.rs`, `docs/account_abstraction.md`).
 - Telemetry `session_key_issued_total`/`session_key_expired_total` and simulator churn knob (`sim/src/lib.rs`).

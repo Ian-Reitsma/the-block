@@ -1,5 +1,5 @@
 # On-Chain Blob Storage Flow
-> **Review (2025-09-25):** Synced On-Chain Blob Storage Flow guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Documented the in-house LSM engine plus Reed–Solomon/LT coding defaults and tuning knobs.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document describes the end‑to‑end lifecycle of a file that is uploaded
@@ -10,18 +10,53 @@ referencing external context.
 ## 0. Storage Engine Abstraction
 
 Persistent components in the node now route all key-value access through the
-`crates/storage_engine` crate. This crate defines a `KeyValue` trait with
-associated batching, iterators, and telemetry methods so RocksDB, sled, and the
-in-memory engine expose a single API surface. Every subsystem opens its
-database via `SimpleDb::open_named(<name>, <path>)`, which looks up the desired
-backend in `[storage]` within `config/default.toml`. Operators can override the
-`default_engine` or specific handles such as `gossip_relay`,
-`net_peer_chunks`, and `gateway_dns` to pin light-weight stores to sled or the
-in-memory backend while keeping the ledger on RocksDB. The storage engine layer
-also surfaces health metrics (`storage_engine_*` gauges) so dashboards can track
-pending compactions, SST growth, and memtable pressure regardless of the chosen
-backend. Introducing a new engine requires implementing the trait and hooking it
-into the registry; no call sites outside `SimpleDb` need to change.
+`crates/storage_engine` crate. The crate defines a `KeyValue` trait with
+batched writes, prefix iterators, and telemetry hooks so every backend exposes a
+uniform surface. `SimpleDb::open_named(<name>, <path>)` looks up the configured
+engine in `[storage]` within `config/default.toml` and defaults to the
+in-house LSM implementation. Operators can still override specific handles such
+as `gossip_relay`, `net_peer_chunks`, and `gateway_dns` to force an in-memory
+store for integration tests. The storage engine layer reports
+`storage_engine_*` gauges so dashboards can track memtable pressure, SST growth,
+and compaction activity regardless of the configured backend. Introducing a new
+engine requires implementing the trait and registering it inside `SimpleDb`;
+call sites outside the module stay unchanged.
+
+### 0.1 In-house LSM tree
+
+- **Memtable + WAL.** Each column family keeps a BTreeMap memtable mirrored to a
+  JSONL write-ahead log. Updates allocate a monotonically increasing sequence
+  number so crash recovery can replay operations deterministically.
+- **SSTables.** When the memtable crosses the configured byte limit (default
+  8 MiB) it is written to an immutable SST file under
+  `<db>/<cf>/sst-<id>.bin`. Files store `(key, sequence, value|tombstone)`
+  tuples serialized with `bincode`.
+- **Compaction.** Background compaction rewrites all SSTs for a column family
+  into a single sorted file, dropping superseded entries and persisted
+  tombstones. Every compaction resets the WAL and advances the manifest’s file
+  id counter.
+- **Column families.** Each CF lives under its own directory with an isolated
+  WAL and manifest (`manifest.json`). `SimpleDb::ensure_cf` guarantees the
+  directory exists before use, so higher-level code keeps the legacy
+  `ensure_cf` semantics without special cases.
+- **Tuning knobs.** `SimpleDb::set_byte_limit` delegates to the engine’s
+  `set_byte_limit` to adjust the per-CF memtable ceiling. Operators can push the
+  limit up for throughput-heavy stores or shrink it on low-memory hosts.
+
+### 0.2 Migration helper
+
+`tools/storage_migrate` reads legacy RocksDB or sled directories and rewrites
+their column families into the in-house format. The tool walks each CF, streams
+entries into the new engine, and writes tombstones for missing keys so deletes
+are preserved. Invoke it with:
+
+```
+cargo run -p storage-migrate -- <legacy-path> <inhouse-path>
+```
+
+The command is idempotent—re-running the migration compacts existing SSTs and
+replays the WAL so operators can stage migrations safely before switching the
+node configuration.
 
 ## 1. Local Chunking & Hashing
 
@@ -29,9 +64,9 @@ into the registry; no call sites outside `SimpleDb` need to change.
 2. The wallet opens a local `StoragePipeline` (default `./blobstore`) and
    registers a dummy provider for demonstration purposes.
 3. The file is chunked into ~1 MiB pieces; each chunk is encrypted with
-   ChaCha20‑Poly1305 and encoded using a Local Reconstruction Code with
-   \((k,r,h)=(16,5,3)\), then overlaid with a Progressive Fountain layer
-   \((k'=2,n'=5)\) so single‑shard losses repair over BLE.
+   ChaCha20‑Poly1305 and encoded using the in-house Reed–Solomon coder with
+   \((k=16, p=8)\), then overlaid with three deterministic LT fountain shards
+   so single‑shard losses repair over BLE.
 4. Every shard is stored locally and referenced in an `ObjectManifest`. The
    manifest itself is hashed with BLAKE3 to produce a deterministic
    `manifest_hash`.

@@ -5,16 +5,15 @@ use std::path::Path;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rocksdb::{checkpoint::Checkpoint, DB};
-use zstd::stream::{decode_all, encode_all};
-
-/// Create a zstd-compressed snapshot of a RocksDB database.
+/// Create a hybrid-compressed snapshot of a RocksDB database.
 pub fn create_snapshot(db_path: &Path, out_path: &Path) -> Result<()> {
     let db = DB::open_default(db_path)?;
     let checkpoint = Checkpoint::new(&db)?;
     checkpoint.create_checkpoint(".snapshot_tmp")?;
     let mut buf = Vec::new();
     File::open(".snapshot_tmp")?.read_to_end(&mut buf)?;
-    let encoded = encode_all(&buf[..], 0)?;
+    let compressor = coding::compressor_for("lz77-rle", 4)?;
+    let encoded = compressor.compress(&buf)?;
     fs::write(out_path, &encoded)?;
     #[cfg(feature = "telemetry")]
     metrics::increment_counter!("snapshot_created_total");
@@ -25,7 +24,8 @@ pub fn create_snapshot(db_path: &Path, out_path: &Path) -> Result<()> {
 /// Restore a snapshot into a RocksDB directory.
 pub fn restore_snapshot(archive_path: &Path, db_path: &Path) -> Result<()> {
     let bytes = fs::read(archive_path)?;
-    let decoded = decode_all(&bytes[..])?;
+    let compressor = coding::compressor_for("lz77-rle", 4)?;
+    let decoded = compressor.decompress(&bytes)?;
     fs::write(db_path, &decoded)?;
     Ok(())
 }

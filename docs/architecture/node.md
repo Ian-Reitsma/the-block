@@ -722,7 +722,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   └── pyo3-build-config v0.24.2 (*)
 ├── rand v0.8.5 (*)
 ├── rand_core v0.6.4 (*)
-├── raptorq v2.0.0
 ├── rayon v1.11.0
 │   ├── either v1.15.0
 │   └── rayon-core v1.13.0
@@ -731,25 +730,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       │   │   └── crossbeam-utils v0.8.21
 │       │   └── crossbeam-utils v0.8.21
 │       └── crossbeam-utils v0.8.21
-├── reed-solomon-erasure v6.0.0
-│   ├── libm v0.2.15
-│   ├── lru v0.7.8
-│   │   └── hashbrown v0.12.3
-│   │       └── ahash v0.7.8
-│   │           ├── getrandom v0.2.16 (*)
-│   │           └── once_cell v1.21.3
-│   │           [build-dependencies]
-│   │           └── version_check v0.9.5
-│   ├── parking_lot v0.11.2
-│   │   ├── instant v0.1.13 (*)
-│   │   ├── lock_api v0.4.13 (*)
-│   │   └── parking_lot_core v0.8.6
-│   │       ├── cfg-if v1.0.3
-│   │       ├── instant v0.1.13 (*)
-│   │       ├── libc v0.2.175
-│   │       └── smallvec v1.15.1
-│   ├── smallvec v1.15.1
-│   └── spin v0.9.8
 ├── regex v1.11.2
 │   ├── aho-corasick v1.1.3
 │   │   └── memchr v2.7.5

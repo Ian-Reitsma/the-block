@@ -3,6 +3,7 @@
 mod error;
 pub use error::{StorageError, StorageResult};
 
+pub mod inhouse_engine;
 pub mod memory_engine;
 #[cfg(feature = "rocksdb")]
 pub mod rocksdb_engine;

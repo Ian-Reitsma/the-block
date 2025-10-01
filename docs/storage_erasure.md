@@ -1,5 +1,5 @@
 # Storage Erasure Coding and Reconstruction
-> **Review (2025-09-25):** Synced Storage Erasure Coding and Reconstruction guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Documented the in-house Reed–Solomon and LT fountain rollout plus telemetry labels.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The storage pipeline protects blobs with local-reconstruction codes (LRC) and a
@@ -8,20 +8,20 @@ Implementation lives in `node/src/storage/erasure.rs`.
 
 ## Parameters
 
-The encoder splits each chunk into **K = 16** data shards and adds **R = 5**
-local parities plus **H = 3** global parities for a total of **24** Reed–Solomon
-shards. A fountain overlay then contributes **3** additional XOR shards derived
-from the first two data shards, bringing the per-chunk total to **27**. The
-defaults live in [`config/storage.toml`](../config/storage.toml) and load
-through [`coding::Config`](../crates/coding/src/config.rs) so operators can tune
-the ladder without patching source. The current constants are defined at the top
-of [`node/src/storage/erasure.rs`](../node/src/storage/erasure.rs#L3-L32).
+The encoder splits each chunk into **K = 16** data shards and derives **P = 8**
+parity shards using the in-house GF(256) Reed–Solomon implementation. A fountain
+overlay then contributes **3** deterministic LT-style shards derived from the
+first two data shards, bringing the per-chunk total to **27** (16 data + 8 parity
++ 3 overlay). The defaults live in [`config/storage.toml`](../config/storage.toml)
+and load through [`coding::Config`](../crates/coding/src/config.rs) so operators
+can tune the ladder without patching source. The current constants are defined
+at the top of [`node/src/storage/erasure.rs`](../node/src/storage/erasure.rs#L3-L32).
 
 ```text
 K (data) = 16
-R (local parity) = 5
-H (global parity) = 3
-PARITY = R + H = 8
+P (parity) = 8
+OVERLAY = 3
+TOTAL = K + P + OVERLAY = 27
 ```
 
 After Reed–Solomon encoding, a lightweight fountain overlay combines the first
@@ -79,7 +79,7 @@ fallback is permitted, and whether it is riding on the emergency switch).
 Telemetry now tags latency and failure metrics with the coder and compressor
 labels so dashboards can pivot on the rollout state:
 
-- `storage_put_object_seconds{erasure="reed-solomon",compression="zstd"}`
+- `storage_put_object_seconds{erasure="reed-solomon",compression="lz77-rle"}`
   captures the end-to-end ingest latency per algorithm pair.
 - `storage_put_chunk_seconds{…}` mirrors this for individual chunk dispatches.
 - `storage_repair_failures_total{error="reconstruct",erasure="xor",compression="rle"}`
@@ -94,8 +94,16 @@ cargo run -p bench-harness -- compare-coders --bytes 1048576 --data 16 --parity 
 ```
 
 The command prints average encode/decode latencies and throughput for the
-default Reed–Solomon/Zstd stack versus the XOR/RLE fallback so incident teams
+default Reed–Solomon/`lz77-rle` stack versus the XOR/RLE fallback so incident teams
 can make informed trade-offs during dependency incidents.
+
+### Security review and rollout checklist
+
+- **Cipher implementation** – The new in-house ChaCha20-Poly1305 lives in `crates/coding/src/encrypt/inhouse.rs`. It derives a Poly1305 key per nonce, reuses the coding crate’s RNG for nonce generation, and rejects tampered payloads in constant time. Property tests in `crates/coding/tests/inhouse_props.rs` flip every ciphertext byte to ensure authentication failures surface consistently.
+- **Compressor implementation** – The hybrid LZ77/RLE compressor is located in `crates/coding/src/compression/inhouse.rs` with streaming encoders/decoders and integration tests that exercise both high-entropy and repeated data. `default_compressor()` now returns the hybrid backend, while `bench-harness` compares Reed–Solomon+lz77-rle against XOR+RLE for visibility.
+- **Erasure and fountain coders** – The GF(256) Reed–Solomon engine lives in `crates/coding/src/erasure/inhouse.rs` and exposes matrix-inversion unit tests plus loss-pattern property tests in `crates/coding/tests/inhouse_props.rs`. The LT-style fountain coder in `crates/coding/src/fountain/inhouse.rs` reuses deterministic seeds so repair tooling can peel packets without third-party crates; `node/src/storage/repair.rs` exercises it via `fountain_repair_roundtrip`.
+- **Rollout gates** – `config/storage.toml` exposes `compression.algorithm` (`"lz77-rle"` by default) and `rollout.allow_fallback_compressor` so operators can canary the change. Telemetry tags `storage_coding_operations_total{algorithm}` and `storage_compression_ratio{algorithm}` provide immediate feedback during the rollout.
+- **Migration tooling** – `tools/snapshot.rs` and the light-client stream now consume the same hybrid compressor, so archived snapshots and WebSocket updates remain interoperable after the switchover. The operator runbook documents the verification commands in `docs/operators/run_a_node.md`.
 
 ## Encoding
 

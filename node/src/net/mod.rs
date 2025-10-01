@@ -35,22 +35,20 @@ use anyhow::anyhow;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use blake3;
-use chacha20poly1305::aead::{Aead, KeyInit};
-use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use coding::default_encryptor;
 use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use ledger::address::ShardId;
 use once_cell::sync::{Lazy, OnceCell};
+#[cfg(feature = "telemetry")]
+use p2p_overlay::OverlayDiagnostics;
 use p2p_overlay::{
-    Discovery, InhouseOverlay, InhouseOverlayStore, InhousePeerId, OverlayDiagnostics,
-    OverlayError, OverlayResult, OverlayService, PeerEndpoint, StubOverlay, UptimeHandle,
-    UptimeMetrics,
+    InhouseOverlay, InhousePeerId, OverlayResult, OverlayService, PeerEndpoint, StubOverlay,
 };
 use rand::Rng;
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
-use std::convert::TryFrom;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -558,6 +556,25 @@ pub fn set_gossip_relay(relay: std::sync::Arc<Relay>) {
     *GOSSIP_RELAY.write().unwrap() = Some(relay);
 }
 
+/// Restores the previous gossip relay when dropped.
+pub struct GossipRelayGuard {
+    previous: Option<std::sync::Arc<Relay>>,
+}
+
+impl Drop for GossipRelayGuard {
+    fn drop(&mut self) {
+        let mut slot = GOSSIP_RELAY.write().unwrap();
+        *slot = self.previous.take();
+    }
+}
+
+/// Install a temporary gossip relay, restoring the prior instance when the guard is dropped.
+pub fn scoped_gossip_relay(relay: std::sync::Arc<Relay>) -> GossipRelayGuard {
+    let mut slot = GOSSIP_RELAY.write().unwrap();
+    let previous = slot.replace(relay);
+    GossipRelayGuard { previous }
+}
+
 pub fn gossip_status() -> Option<RelayStatus> {
     GOSSIP_RELAY
         .read()
@@ -712,14 +729,10 @@ fn encrypt_cert_blob(cert: &[u8]) -> Option<String> {
         return None;
     }
     if let Some(key) = peer_cert_encryption_key() {
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
-        let mut nonce = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce);
-        if let Ok(mut ciphertext) = cipher.encrypt(Nonce::from_slice(&nonce), cert) {
-            let mut payload = Vec::with_capacity(nonce.len() + ciphertext.len());
-            payload.extend_from_slice(&nonce);
-            payload.append(&mut ciphertext);
-            return Some(format!("{}{}", CERT_BLOB_PREFIX, B64.encode(payload)));
+        if let Ok(encryptor) = default_encryptor(&key) {
+            if let Ok(ciphertext) = encryptor.encrypt(cert) {
+                return Some(format!("{}{}", CERT_BLOB_PREFIX, B64.encode(ciphertext)));
+            }
         }
     }
     Some(B64.encode(cert))
@@ -728,13 +741,9 @@ fn encrypt_cert_blob(cert: &[u8]) -> Option<String> {
 fn decrypt_cert_blob(data: &str) -> Option<Vec<u8>> {
     if data.starts_with(CERT_BLOB_PREFIX) {
         let payload = B64.decode(data[CERT_BLOB_PREFIX.len()..].as_bytes()).ok()?;
-        if payload.len() < 12 {
-            return None;
-        }
-        let (nonce, ciphertext) = payload.split_at(12);
         let key = peer_cert_encryption_key()?;
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
-        cipher.decrypt(Nonce::from_slice(nonce), ciphertext).ok()
+        let encryptor = default_encryptor(&key).ok()?;
+        encryptor.decrypt(&payload).ok()
     } else {
         B64.decode(data.as_bytes()).ok()
     }

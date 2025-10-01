@@ -63,6 +63,42 @@ fn relay_broadcast_records_selected_peers() {
 }
 
 #[test]
+fn shard_affinity_emits_sorted_peers_per_shard() {
+    let mut cfg = GossipConfig::default();
+    let dir = tempdir().unwrap();
+    cfg.shard_store_path = dir.path().join("sorted").to_string_lossy().into_owned();
+    let relay = Relay::with_engine_factory(cfg, |name, path| SimpleDb::open_named(name, path));
+    let relay = Arc::new(relay);
+    let _guard = net::scoped_gossip_relay(Arc::clone(&relay));
+
+    let peers = vec![
+        net::overlay_peer_from_bytes(&[3u8; 32]).expect("peer"),
+        net::overlay_peer_from_bytes(&[1u8; 32]).expect("peer"),
+        net::overlay_peer_from_bytes(&[2u8; 32]).expect("peer"),
+    ];
+
+    for peer in &peers {
+        net::register_shard_peer(7, peer.clone());
+    }
+
+    let status = net::gossip_status().expect("relay status available");
+    let shard_entry = status
+        .shard_affinity
+        .into_iter()
+        .find(|entry| entry.shard == 7)
+        .expect("shard entry present");
+
+    let mut expected = peers
+        .iter()
+        .map(|peer| net::overlay_peer_to_base58(peer))
+        .collect::<Vec<_>>();
+    expected.sort();
+
+    assert_eq!(shard_entry.peers, expected);
+    drop(relay);
+}
+
+#[test]
 fn overlay_swap_end_to_end() {
     let previous = net::overlay_service();
     let _restore = OverlayRestore(previous);

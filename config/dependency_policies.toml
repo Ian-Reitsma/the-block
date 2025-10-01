@@ -17,9 +17,6 @@ replaceable = [
   "rocksdb",
   "serde",
   "bincode",
-  "zstd",
-  "reed-solomon",
-  "raptorq",
 ]
 forbidden = [
 ]

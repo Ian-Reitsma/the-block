@@ -1,8 +1,5 @@
 use blake3::Hasher;
-use crypto_suite::signatures::{
-    ed25519::{Signature, VerifyingKey},
-    Verifier,
-};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_bytes;
 

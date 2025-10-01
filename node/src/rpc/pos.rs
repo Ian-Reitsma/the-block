@@ -1,10 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use crypto_suite::signatures::{
-    ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH},
-    Verifier,
-};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use once_cell::sync::Lazy;
 use serde_json::Value;
 

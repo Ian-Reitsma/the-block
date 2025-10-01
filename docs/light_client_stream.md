@@ -1,5 +1,5 @@
 # Light Client State Streaming Protocol
-> **Review (2025-09-25):** Synced Light Client State Streaming Protocol guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Documented hybrid snapshot compression and updated telemetry strings.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 Light clients maintain an up-to-date account view by subscribing to the
@@ -14,8 +14,8 @@ state stream exposed over WebSockets. Each `StateChunk` carries:
   - `proof` – Merkle proof (`state::trie::Proof`) attesting to the tuple
     `(balance, account_seq)` under the supplied root.
 - `root` – Merkle root for the account entries in the chunk.
-- `compressed` – flag indicating whether the payload was zstd-compressed by the
-  sender (currently `false` for live diffs).
+- `compressed` – flag indicating whether the payload was compressed with the
+  in-house `lz77-rle` codec by the sender (currently `false` for live diffs).
 
 ## Chunk Processing
 

@@ -7,7 +7,6 @@ use std::sync::{
 use once_cell::sync::Lazy;
 
 use super::OverlayPeerId;
-
 #[cfg(feature = "telemetry")]
 use crate::telemetry::PARTITION_EVENTS_TOTAL;
 
@@ -162,6 +161,30 @@ mod tests {
         assert_eq!(isolated[0].as_bytes(), overlay.as_bytes());
 
         watch.mark_reachable(overlay);
+        assert!(!watch.is_partitioned());
+        assert!(watch.isolated_peers().is_empty());
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    #[test]
+    fn threshold_reset_without_telemetry_never_sets_marker() {
+        let watch = PartitionWatch::new(3);
+        let a = peer(11);
+        let b = peer(22);
+
+        watch.mark_unreachable(a.clone());
+        assert!(!watch.is_partitioned());
+        assert_eq!(watch.current_marker(), None);
+
+        watch.mark_unreachable(b.clone());
+        assert!(!watch.is_partitioned());
+        assert_eq!(watch.current_marker(), None);
+
+        watch.mark_reachable(b);
+        assert!(!watch.is_partitioned());
+        assert_eq!(watch.current_marker(), None);
+
+        watch.mark_reachable(a);
         assert!(!watch.is_partitioned());
         assert!(watch.isolated_peers().is_empty());
     }

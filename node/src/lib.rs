@@ -20,10 +20,7 @@ use crate::consensus::observer;
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
 use blake3;
-use crypto_suite::signatures::{
-    ed25519::{Signature, SigningKey, VerifyingKey},
-    Signer, Verifier,
-};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use dashmap::DashMap;
 use hex;
 use ledger::address::{self, ShardId};

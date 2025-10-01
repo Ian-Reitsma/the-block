@@ -1,9 +1,6 @@
 #[cfg(feature = "pq")]
 use base64::Engine as _;
-use crypto_suite::signatures::{
-    ed25519::{Signature, VerifyingKey},
-    Verifier,
-};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;

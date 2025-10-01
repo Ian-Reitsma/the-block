@@ -1,5 +1,5 @@
 # Storage Market Design
-> **Review (2025-09-25):** Synced Storage Market Design guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-09-30):** Captured in-house crypto/erasure/fountain defaults and refreshed rollout guidance.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the incentive-compatible storage market where nodes
@@ -63,9 +63,11 @@ use the new settings.
   reduced parity guarantees. The repair worker automatically downgrades expectations when
   multiple data shards are missing and logs the `algorithm_limited` skip reason instead of
   repeatedly failing reconstruction.
+- Adjust `fountain.symbol_size` or `fountain.rate` to tune the in-house LT coder. The
+  default `algorithm = "lt-inhouse"` seeds packets deterministically so `storage::repair::fountain_repair_roundtrip` and the node tests can peel losses without extra metadata.
 - Set `compression.algorithm = "rle"` to switch to the lightweight run-length compressor
-  for environments where zstd cannot be deployed. The compressor reports `algorithm="rle"`
-  in telemetry so dashboards can compare compression ratios across rollout cohorts.
+  when the default hybrid `lz77-rle` backend must be avoided. Telemetry reports
+  `algorithm="rle"` so dashboards can compare compression ratios across rollout cohorts.
 - Because the configuration lives alongside other storage settings, operators can stage
   partial rollouts by first updating a canary node's `storage.toml`, validating telemetry,
   then promoting the change to the wider fleet once confidence is established.

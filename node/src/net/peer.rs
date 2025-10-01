@@ -10,10 +10,7 @@ use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::Transport;
 use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
-use crypto_suite::signatures::{
-    ed25519::{Signature, VerifyingKey},
-    Verifier,
-};
+use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use fs2::FileExt;
 use hex;
 use indexmap::IndexMap;

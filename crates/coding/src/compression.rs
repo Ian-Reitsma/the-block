@@ -1,4 +1,4 @@
-use std::io::Cursor;
+mod inhouse;
 
 use crate::error::{CodingError, CompressionError};
 
@@ -10,7 +10,7 @@ pub trait Compressor: Send + Sync {
 
 pub fn compressor_for(name: &str, level: i32) -> Result<Box<dyn Compressor>, CodingError> {
     match name {
-        "" | "zstd" => Ok(Box::new(ZstdCompressor::new(level))),
+        "" | "lz77" | "lz77-rle" | "hybrid" => Ok(Box::new(InhouseHybrid::new(level))),
         "noop" | "identity" => Ok(Box::new(NoopCompressor::default())),
         "rle" | "run_length" | "run-length" => Ok(Box::new(RleCompressor::default())),
         other => Err(CodingError::UnsupportedAlgorithm {
@@ -20,35 +20,33 @@ pub fn compressor_for(name: &str, level: i32) -> Result<Box<dyn Compressor>, Cod
 }
 
 pub fn default_compressor() -> Box<dyn Compressor> {
-    Box::new(ZstdCompressor::new(0))
+    Box::new(InhouseHybrid::new(4))
 }
 
 #[derive(Clone, Debug)]
-pub struct ZstdCompressor {
-    level: i32,
+pub struct InhouseHybrid {
+    inner: inhouse::HybridCompressor,
 }
 
-impl ZstdCompressor {
+impl InhouseHybrid {
     pub fn new(level: i32) -> Self {
-        Self { level }
+        Self {
+            inner: inhouse::HybridCompressor::new(level),
+        }
     }
 }
 
-impl Compressor for ZstdCompressor {
+impl Compressor for InhouseHybrid {
     fn algorithm(&self) -> &'static str {
-        "zstd"
+        "lz77-rle"
     }
 
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>, CompressionError> {
-        let cursor = Cursor::new(data);
-        zstd::stream::encode_all(cursor, self.level)
-            .map_err(|e| CompressionError::Compress(e.to_string()))
+        self.inner.compress(data)
     }
 
     fn decompress(&self, data: &[u8]) -> Result<Vec<u8>, CompressionError> {
-        let mut cursor = Cursor::new(data);
-        zstd::stream::decode_all(&mut cursor)
-            .map_err(|e| CompressionError::Decompress(e.to_string()))
+        self.inner.decompress(data)
     }
 }
 

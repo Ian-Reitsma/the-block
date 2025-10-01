@@ -49,6 +49,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
 
 fn archive_metrics(blob: &str) {
     if let Ok(path) = std::env::var("TB_METRICS_ARCHIVE") {
@@ -64,6 +65,7 @@ fn archive_metrics(blob: &str) {
 
 const MAX_CORRELATIONS_PER_METRIC: usize = 64;
 const TELEMETRY_WINDOW: usize = 120;
+const METRICS_CF: &str = "peer_metrics";
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerStat {
@@ -124,7 +126,7 @@ pub struct AppState {
     pub data: Arc<Mutex<HashMap<String, VecDeque<(u64, serde_json::Value)>>>>,
     pub token: Arc<RwLock<String>>,
     token_path: Option<PathBuf>,
-    db: sled::Db,
+    store: Arc<InhouseEngine>,
     retention_secs: u64,
     max_export_peers: usize,
     wal: Option<Arc<Wal>>,
@@ -145,14 +147,19 @@ impl AppState {
         retention_secs: u64,
         wal: Option<PathBuf>,
     ) -> Self {
-        let db = sled::open(path).expect("open db");
+        let db_path = path.as_ref().to_path_buf();
+        let store = Arc::new(
+            InhouseEngine::open(&db_path.to_string_lossy()).expect("open inhouse metrics store"),
+        );
+        store.ensure_cf(METRICS_CF).expect("ensure cf");
         let mut data = HashMap::new();
-        for item in db.iter() {
-            if let Ok((k, v)) = item {
+        let mut iter = store
+            .prefix_iterator(METRICS_CF, &[])
+            .expect("scan metrics store");
+        while let Some((k, v)) = iter.next().expect("iterate metrics store") {
+            if let Ok(key) = String::from_utf8(k) {
                 if let Ok(deque) = serde_json::from_slice(&v) {
-                    if let Ok(key) = String::from_utf8(k.to_vec()) {
-                        data.insert(key, deque);
-                    }
+                    data.insert(key, deque);
                 }
             }
         }
@@ -161,7 +168,7 @@ impl AppState {
             data: Arc::new(Mutex::new(data)),
             token: Arc::new(RwLock::new(token)),
             token_path,
-            db,
+            store,
             retention_secs,
             max_export_peers: 1000,
             wal,
@@ -174,7 +181,7 @@ impl AppState {
     }
 
     fn persist(&self) {
-        let _ = self.db.flush();
+        let _ = self.store.flush();
     }
 
     fn prune(&self) -> u64 {
@@ -191,17 +198,18 @@ impl AppState {
                 let after = deque.len();
                 removed += (before - after) as u64;
                 if after == 0 {
-                    let _ = self.db.remove(peer);
+                    let _ = self.store.delete(METRICS_CF, peer.as_bytes());
                     false
                 } else {
-                    let _ = self.db.insert(peer, serde_json::to_vec(deque).unwrap());
+                    let value = serde_json::to_vec(deque).unwrap();
+                    let _ = self.store.put_bytes(METRICS_CF, peer.as_bytes(), &value);
                     true
                 }
             });
         }
         if removed > 0 {
             RETENTION_PRUNED_TOTAL.inc_by(removed);
-            let _ = self.db.flush();
+            let _ = self.store.flush();
         }
         removed
     }
@@ -578,9 +586,10 @@ async fn ingest(
             if let Some((ts, last)) = entry.back_mut() {
                 if *ts == now {
                     merge(last, &stat.metrics);
+                    let value = serde_json::to_vec(entry).unwrap();
                     let _ = state
-                        .db
-                        .insert(&stat.peer_id, serde_json::to_vec(entry).unwrap());
+                        .store
+                        .put_bytes(METRICS_CF, stat.peer_id.as_bytes(), &value);
                     let correlations = collect_correlations(&stat.metrics);
                     for raw in correlations {
                         let record = CorrelationRecord {
@@ -602,9 +611,10 @@ async fn ingest(
             if entry.len() > 1024 {
                 entry.pop_front();
             }
+            let value = serde_json::to_vec(entry).unwrap();
             let _ = state
-                .db
-                .insert(&stat.peer_id, serde_json::to_vec(entry).unwrap());
+                .store
+                .put_bytes(METRICS_CF, stat.peer_id.as_bytes(), &value);
             if let Some((_, metrics_value)) = entry.back() {
                 let correlations = collect_correlations(metrics_value);
                 for raw in correlations {
@@ -887,11 +897,47 @@ mod tests {
     use axum::body::{self, Body};
     use axum::http::{Request, StatusCode};
     use std::collections::HashMap;
+    use std::fs;
     use std::future::Future;
-    use std::io::Cursor;
-    use tempfile::tempdir;
+    use std::io::{self, Cursor};
+    use std::path::{Path, PathBuf};
     use tower::ServiceExt; // for `oneshot`
     use zip::ZipArchive;
+
+    struct TestTempDir {
+        path: PathBuf,
+    }
+
+    impl TestTempDir {
+        fn new() -> io::Result<Self> {
+            let mut base = std::env::temp_dir();
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?
+                .as_nanos();
+            base.push(format!(
+                "metrics-aggregator-test-{}-{}",
+                std::process::id(),
+                nanos
+            ));
+            fs::create_dir_all(&base)?;
+            Ok(Self { path: base })
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestTempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn tempdir() -> io::Result<TestTempDir> {
+        TestTempDir::new()
+    }
 
     fn run_async<T>(future: impl Future<Output = T>) -> T {
         runtime::block_on(future)

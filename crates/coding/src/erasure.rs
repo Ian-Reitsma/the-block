@@ -1,9 +1,12 @@
-use reed_solomon_erasure::galois_8::ReedSolomon;
-
-const ALG_REED_SOLOMON: &str = "reed-solomon";
-const ALG_XOR: &str = "xor";
+pub mod inhouse;
 
 use crate::error::{CodingError, ErasureError};
+
+pub use self::inhouse::InhouseReedSolomon;
+
+const ALG_REED_SOLOMON: &str = "reed-solomon";
+const ALG_INHOUSE: &str = "inhouse-reed-solomon";
+const ALG_XOR: &str = "xor";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErasureShardKind {
@@ -47,11 +50,12 @@ pub fn erasure_coder_for(
     data_shards: usize,
     parity_shards: usize,
 ) -> Result<Box<dyn ErasureCoder>, CodingError> {
-    match name {
-        "" | ALG_REED_SOLOMON | "reed_solomon" | "rs" => Ok(Box::new(
-            ReedSolomonErasureCoder::new(data_shards, parity_shards)?,
-        )),
-        ALG_XOR | "xor_parity" | "xor-parity" => {
+    match canonical_algorithm_label(name).as_str() {
+        ALG_REED_SOLOMON | ALG_INHOUSE | "rs" => Ok(Box::new(InhouseReedSolomon::new(
+            data_shards,
+            parity_shards,
+        )?)),
+        ALG_XOR | "xor-parity" | "xor_parity" => {
             Ok(Box::new(XorCoder::new(data_shards, parity_shards)?))
         }
         other => Err(CodingError::UnsupportedAlgorithm {
@@ -65,126 +69,6 @@ pub fn default_erasure_coder(
     parity_shards: usize,
 ) -> Result<Box<dyn ErasureCoder>, CodingError> {
     erasure_coder_for(ALG_REED_SOLOMON, data_shards, parity_shards)
-}
-
-pub struct ReedSolomonErasureCoder {
-    data: usize,
-    parity: usize,
-    rs: ReedSolomon,
-}
-
-impl ReedSolomonErasureCoder {
-    pub fn new(data_shards: usize, parity_shards: usize) -> Result<Self, ErasureError> {
-        if data_shards == 0 {
-            return Err(ErasureError::InvalidShardCount {
-                expected: 1,
-                actual: 0,
-            });
-        }
-        let rs = ReedSolomon::new(data_shards, parity_shards)
-            .map_err(|e| ErasureError::EncodingFailed(e.to_string()))?;
-        Ok(Self {
-            data: data_shards,
-            parity: parity_shards,
-            rs,
-        })
-    }
-
-    fn total(&self) -> usize {
-        self.data + self.parity
-    }
-}
-
-impl ErasureCoder for ReedSolomonErasureCoder {
-    fn algorithm(&self) -> &'static str {
-        ALG_REED_SOLOMON
-    }
-
-    fn encode(&self, data: &[u8]) -> Result<ErasureBatch, ErasureError> {
-        let shard_len = if data.is_empty() {
-            0
-        } else {
-            (data.len() + self.data - 1) / self.data
-        };
-        let total = self.total();
-        let mut shards: Vec<Vec<u8>> = (0..total)
-            .map(|idx| {
-                if idx < self.data {
-                    let start = idx * shard_len;
-                    let end = usize::min(start + shard_len, data.len());
-                    let mut shard = vec![0u8; shard_len];
-                    if start < end {
-                        shard[..end - start].copy_from_slice(&data[start..end]);
-                    }
-                    shard
-                } else {
-                    vec![0u8; shard_len]
-                }
-            })
-            .collect();
-        if shard_len > 0 {
-            self.rs
-                .encode(&mut shards)
-                .map_err(|e| ErasureError::EncodingFailed(e.to_string()))?;
-        }
-        let metadata = ErasureMetadata {
-            data_shards: self.data,
-            parity_shards: self.parity,
-            shard_len,
-            original_len: data.len(),
-        };
-        let mut out = Vec::with_capacity(total);
-        for (idx, shard) in shards.into_iter().enumerate() {
-            let kind = if idx < self.data {
-                ErasureShardKind::Data
-            } else {
-                ErasureShardKind::Parity
-            };
-            out.push(ErasureShard {
-                index: idx,
-                kind,
-                bytes: shard,
-            });
-        }
-        Ok(ErasureBatch {
-            metadata,
-            shards: out,
-        })
-    }
-
-    fn reconstruct(
-        &self,
-        metadata: &ErasureMetadata,
-        shards: &[Option<ErasureShard>],
-    ) -> Result<Vec<u8>, ErasureError> {
-        let total = metadata.data_shards + metadata.parity_shards;
-        if shards.len() != total {
-            return Err(ErasureError::InvalidShardCount {
-                expected: total,
-                actual: shards.len(),
-            });
-        }
-        let mut buffers: Vec<Option<Vec<u8>>> = vec![None; total];
-        for entry in shards.iter().flatten() {
-            if entry.index >= total {
-                return Err(ErasureError::InvalidShardIndex {
-                    index: entry.index,
-                    total,
-                });
-            }
-            buffers[entry.index] = Some(entry.bytes.clone());
-        }
-        self.rs
-            .reconstruct(&mut buffers)
-            .map_err(|e| ErasureError::ReconstructionFailed(e.to_string()))?;
-        let mut recovered = Vec::with_capacity(metadata.original_len);
-        for shard in buffers.into_iter().take(metadata.data_shards) {
-            let shard = shard.unwrap_or_default();
-            recovered.extend_from_slice(&shard);
-        }
-        recovered.truncate(metadata.original_len);
-        Ok(recovered)
-    }
 }
 
 pub struct XorCoder {
@@ -400,6 +284,8 @@ pub fn canonical_algorithm_label(raw: &str) -> String {
     match normalized.as_str() {
         "rs" => ALG_REED_SOLOMON.to_string(),
         "reed-solomon" => ALG_REED_SOLOMON.to_string(),
+        ALG_INHOUSE => ALG_REED_SOLOMON.to_string(),
+        "rs-inhouse" => ALG_REED_SOLOMON.to_string(),
         "xor" => ALG_XOR.to_string(),
         "xor-parity" => ALG_XOR.to_string(),
         other => other.to_string(),

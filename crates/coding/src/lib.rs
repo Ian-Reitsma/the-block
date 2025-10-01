@@ -6,27 +6,28 @@ mod error;
 mod fountain;
 
 pub use compression::{
-    compressor_for, default_compressor, Compressor, NoopCompressor, RleCompressor, ZstdCompressor,
+    compressor_for, default_compressor, Compressor, InhouseHybrid, NoopCompressor, RleCompressor,
 };
 pub use config::{
     ChunkConfig, CompressionConfig, Config, EncryptionConfig, ErasureConfig, FountainConfig,
     RolloutConfig, DEFAULT_FALLBACK_EMERGENCY_ENV,
 };
 pub use encrypt::{
-    default_encryptor, encryptor_for, ChaCha20Poly1305Encryptor, Encryptor,
+    decrypt_xchacha20_poly1305, default_encryptor, encrypt_xchacha20_poly1305,
+    encrypt_xchacha20_poly1305_with_nonce, encryptor_for, ChaCha20Poly1305Encryptor, Encryptor,
     CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, CHACHA20_POLY1305_TAG_LEN,
+    XCHACHA20_POLY1305_NONCE_LEN,
 };
 pub use erasure::{
     canonical_algorithm_label, default_erasure_coder, erasure_coder_for, ErasureBatch,
-    ErasureCoder, ErasureMetadata, ErasureShard, ErasureShardKind, ReedSolomonErasureCoder,
-    XorCoder,
+    ErasureCoder, ErasureMetadata, ErasureShard, ErasureShardKind, InhouseReedSolomon, XorCoder,
 };
 pub use error::{
     CodingError, CompressionError, ConfigError, EncryptError, ErasureError, FountainError,
 };
 pub use fountain::{
     default_fountain_coder, fountain_coder_for, FountainBatch, FountainCoder, FountainMetadata,
-    FountainPacket, RaptorqFountainCoder,
+    FountainPacket, InhouseLtFountain,
 };
 
 #[cfg(test)]
@@ -81,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn zstd_compression_reduces_size() {
+    fn hybrid_compression_reduces_size() {
         let cfg = Config::default();
         let compressor = cfg.compressor().expect("compressor");
         let data = vec![b'a'; 16 * 1024];

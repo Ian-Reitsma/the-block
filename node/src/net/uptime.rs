@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use p2p_overlay::{OverlayResult, UptimeMetrics};
+use p2p_overlay::OverlayResult;
+#[cfg(feature = "telemetry")]
+use p2p_overlay::UptimeMetrics;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{REBATE_CLAIMS_TOTAL, REBATE_ISSUED_TOTAL};

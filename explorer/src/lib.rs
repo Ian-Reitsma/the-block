@@ -1,16 +1,13 @@
 use anyhow::Result as AnyhowResult;
 use blake3::Hasher;
-use codec::{self, profiles};
 use hex::encode as hex_encode;
 use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
-use serde::{Deserialize, Serialize};
-use std::convert::TryFrom;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use storage;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
@@ -44,6 +41,14 @@ pub fn qos_tiers() -> Vec<(String, u64)> {
 pub use ai_summary::summarize_block;
 pub mod dkg_view;
 pub mod jurisdiction_view;
+
+pub(crate) fn decode_json<T: DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
+    serde_json::from_slice(bytes)
+}
+
+fn encode_json<T: Serialize>(value: &T) -> serde_json::Result<Vec<u8>> {
+    serde_json::to_vec(value)
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptRecord {
     pub key: String,
@@ -229,14 +234,14 @@ pub struct Explorer {
 
 impl Explorer {
     fn decode_block(bytes: &[u8]) -> AnyhowResult<Block> {
-        if let Ok(block) = codec::deserialize(profiles::json(), bytes) {
+        if let Ok(block) = decode_json(bytes) {
             return Ok(block);
         }
         bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode block: {e}"))
     }
 
     fn decode_tx(bytes: &[u8]) -> AnyhowResult<SignedTransaction> {
-        if let Ok(tx) = codec::deserialize(profiles::json(), bytes) {
+        if let Ok(tx) = decode_json(bytes) {
             return Ok(tx);
         }
         bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode tx: {e}"))
@@ -410,7 +415,7 @@ impl Explorer {
 
     pub fn index_block(&self, block: &Block) -> Result<()> {
         let conn = self.conn()?;
-        let data = codec::serialize(profiles::json(), block).unwrap();
+        let data = encode_json(block).unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
             params![block.hash, block.index, data],
@@ -419,7 +424,7 @@ impl Explorer {
             let hash = Self::tx_hash(tx);
             let memo = String::from_utf8(tx.payload.memo.clone()).unwrap_or_default();
             let contract = tx.payload.to.clone();
-            let data = codec::serialize(profiles::json(), tx).unwrap();
+            let data = encode_json(tx).unwrap();
             conn.execute(
                 "INSERT OR REPLACE INTO txs (hash, block_hash, memo, contract, data) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![hash, block.hash, memo, contract, data],
@@ -1144,9 +1149,7 @@ impl Explorer {
     /// Load opcode trace for a transaction from `trace/<hash>.json`.
     pub fn opcode_trace(&self, tx_hash: &str) -> Option<Vec<String>> {
         let path = PathBuf::from("trace").join(format!("{tx_hash}.json"));
-        std::fs::read(path)
-            .ok()
-            .and_then(|b| codec::deserialize(profiles::json(), &b).ok())
+        std::fs::read(path).ok().and_then(|b| decode_json(&b).ok())
     }
 
     /// Convert WASM bytecode into a human-readable WAT string.

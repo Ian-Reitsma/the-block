@@ -307,6 +307,7 @@ fn allowed_contains(list: &[String], candidate: &str) -> bool {
 fn parse_engine_kind(name: &str) -> Option<EngineKind> {
     match name {
         "memory" => Some(EngineKind::Memory),
+        "inhouse" => Some(EngineKind::Inhouse),
         "rocksdb" => Some(EngineKind::RocksDb),
         "sled" => Some(EngineKind::Sled),
         _ => None,

@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Once, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ledger::address::ShardId;
 use once_cell::sync::Lazy;
@@ -13,8 +16,8 @@ use storage_engine::rocksdb_engine::RocksDbEngine;
 #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
 use storage_engine::sled_engine::SledEngine;
 use storage_engine::{
-    memory_engine::MemoryEngine, KeyValue, KeyValueIterator, StorageError, StorageMetrics,
-    StorageResult,
+    inhouse_engine::InhouseEngine, memory_engine::MemoryEngine, KeyValue, KeyValueIterator,
+    StorageError, StorageMetrics, StorageResult,
 };
 
 #[cfg(feature = "telemetry")]
@@ -49,6 +52,7 @@ pub mod names {
 #[serde(rename_all = "snake_case")]
 pub enum EngineKind {
     Memory,
+    Inhouse,
     RocksDb,
     Sled,
 }
@@ -57,18 +61,15 @@ impl EngineKind {
     pub fn default_for_build() -> Self {
         if cfg!(feature = "lightweight-integration") {
             EngineKind::Memory
-        } else if cfg!(feature = "storage-rocksdb") {
-            EngineKind::RocksDb
-        } else if cfg!(feature = "sled") {
-            EngineKind::Sled
         } else {
-            EngineKind::Memory
+            EngineKind::Inhouse
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             EngineKind::Memory => "memory",
+            EngineKind::Inhouse => "inhouse",
             EngineKind::RocksDb => "rocksdb",
             EngineKind::Sled => "sled",
         }
@@ -77,6 +78,7 @@ impl EngineKind {
     pub fn is_available(self) -> bool {
         match self {
             EngineKind::Memory => true,
+            EngineKind::Inhouse => true,
             EngineKind::RocksDb => {
                 cfg!(all(
                     not(feature = "lightweight-integration"),
@@ -170,16 +172,51 @@ pub fn legacy_mode() -> bool {
 
 enum Engine {
     Memory(MemoryEngine),
+    Inhouse(InhouseEngine),
     #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
     RocksDb(RocksDbEngine),
     #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
     Sled(SledEngine),
 }
 
+enum EngineBatch {
+    Memory(<MemoryEngine as KeyValue>::Batch),
+    Inhouse(<InhouseEngine as KeyValue>::Batch),
+    #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
+    RocksDb(<RocksDbEngine as KeyValue>::Batch),
+    #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
+    Sled(<SledEngine as KeyValue>::Batch),
+}
+
+impl EngineBatch {
+    fn put(&mut self, cf: &str, key: &[u8], value: &[u8]) -> StorageResult<()> {
+        match self {
+            EngineBatch::Memory(inner) => inner.put(cf, key, value),
+            EngineBatch::Inhouse(inner) => inner.put(cf, key, value),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
+            EngineBatch::RocksDb(inner) => inner.put(cf, key, value),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
+            EngineBatch::Sled(inner) => inner.put(cf, key, value),
+        }
+    }
+
+    fn delete(&mut self, cf: &str, key: &[u8]) -> StorageResult<()> {
+        match self {
+            EngineBatch::Memory(inner) => inner.delete(cf, key),
+            EngineBatch::Inhouse(inner) => inner.delete(cf, key),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
+            EngineBatch::RocksDb(inner) => inner.delete(cf, key),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
+            EngineBatch::Sled(inner) => inner.delete(cf, key),
+        }
+    }
+}
+
 macro_rules! dispatch {
     ($engine:expr, $inner:ident, $body:expr) => {{
         match $engine {
             Engine::Memory($inner) => $body,
+            Engine::Inhouse($inner) => $body,
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             Engine::RocksDb($inner) => $body,
             #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
@@ -189,9 +226,22 @@ macro_rules! dispatch {
 }
 
 impl Engine {
+    fn unique_temp_dir(prefix: &str) -> StorageResult<PathBuf> {
+        let mut base = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| StorageError::backend(err))?
+            .as_nanos();
+        let suffix = format!("the-block-{prefix}-{}-{}", std::process::id(), nanos);
+        base.push(suffix);
+        fs::create_dir_all(&base).map_err(StorageError::from)?;
+        Ok(base)
+    }
+
     fn open(kind: EngineKind, path: &str) -> StorageResult<Self> {
         match kind {
             EngineKind::Memory => MemoryEngine::open(path).map(Engine::Memory),
+            EngineKind::Inhouse => InhouseEngine::open(path).map(Engine::Inhouse),
             EngineKind::RocksDb => {
                 #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
                 {
@@ -221,6 +271,10 @@ impl Engine {
     fn temporary(kind: EngineKind) -> StorageResult<Self> {
         match kind {
             EngineKind::Memory => Ok(Engine::Memory(MemoryEngine::default())),
+            EngineKind::Inhouse => {
+                let dir = Self::unique_temp_dir("inhouse")?;
+                InhouseEngine::open(&dir.to_string_lossy()).map(Engine::Inhouse)
+            }
             EngineKind::RocksDb => {
                 #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
                 {
@@ -249,6 +303,30 @@ impl Engine {
 
     fn ensure_cf(&self, cf: &str) -> StorageResult<()> {
         dispatch!(self, engine, engine.ensure_cf(cf))
+    }
+
+    fn make_batch(&self) -> EngineBatch {
+        match self {
+            Engine::Memory(engine) => EngineBatch::Memory(engine.make_batch()),
+            Engine::Inhouse(engine) => EngineBatch::Inhouse(engine.make_batch()),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
+            Engine::RocksDb(engine) => EngineBatch::RocksDb(engine.make_batch()),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
+            Engine::Sled(engine) => EngineBatch::Sled(engine.make_batch()),
+        }
+    }
+
+    fn write_batch(&self, batch: EngineBatch) -> StorageResult<()> {
+        match (self, batch) {
+            (Engine::Memory(engine), EngineBatch::Memory(batch)) => engine.write_batch(batch),
+            (Engine::Inhouse(engine), EngineBatch::Inhouse(batch)) => engine.write_batch(batch),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
+            (Engine::RocksDb(engine), EngineBatch::RocksDb(batch)) => engine.write_batch(batch),
+            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
+            (Engine::Sled(engine), EngineBatch::Sled(batch)) => engine.write_batch(batch),
+            #[allow(unreachable_patterns)]
+            _ => Err(StorageError::backend("mismatched engine batch")),
+        }
     }
 
     fn get(&self, cf: &str, key: &[u8]) -> StorageResult<Option<Vec<u8>>> {
@@ -287,13 +365,22 @@ impl Engine {
         dispatch!(self, engine, engine.set_byte_limit(limit))
     }
 
+    #[cfg(feature = "telemetry")]
     fn metrics(&self) -> StorageResult<StorageMetrics> {
         dispatch!(self, engine, engine.metrics())
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    fn metrics(&self) -> StorageResult<StorageMetrics> {
+        Err(StorageError::backend(
+            "storage metrics are unavailable without the telemetry feature",
+        ))
     }
 
     fn backend_name(&self) -> &'static str {
         match self {
             Engine::Memory(_) => "memory",
+            Engine::Inhouse(_) => "inhouse",
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             Engine::RocksDb(_) => "rocksdb",
             #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
@@ -306,6 +393,37 @@ impl Engine {
 pub struct SimpleDb {
     name: String,
     engine: Engine,
+}
+
+pub struct SimpleDbBatch {
+    inner: EngineBatch,
+    column_families: HashSet<String>,
+}
+
+impl SimpleDbBatch {
+    pub fn put(&mut self, key: &str, value: &[u8]) -> io::Result<()> {
+        self.put_cf("default", key, value)
+    }
+
+    pub fn put_cf(&mut self, cf: &str, key: &str, value: &[u8]) -> io::Result<()> {
+        self.column_families.insert(cf.to_string());
+        self.inner
+            .put(cf, key.as_bytes(), value)
+            .map_err(to_io_error)
+    }
+
+    pub fn delete(&mut self, key: &str) -> io::Result<()> {
+        self.delete_cf("default", key)
+    }
+
+    pub fn delete_cf(&mut self, cf: &str, key: &str) -> io::Result<()> {
+        self.column_families.insert(cf.to_string());
+        self.inner.delete(cf, key.as_bytes()).map_err(to_io_error)
+    }
+
+    fn into_inner(self) -> (EngineBatch, HashSet<String>) {
+        (self.inner, self.column_families)
+    }
 }
 
 impl SimpleDb {
@@ -331,6 +449,23 @@ impl SimpleDb {
         };
         db.record_metrics_if_enabled();
         db
+    }
+
+    pub fn batch(&self) -> SimpleDbBatch {
+        SimpleDbBatch {
+            inner: self.engine.make_batch(),
+            column_families: HashSet::new(),
+        }
+    }
+
+    pub fn write_batch(&self, batch: SimpleDbBatch) -> io::Result<()> {
+        let (inner, cfs) = batch.into_inner();
+        for cf in cfs {
+            self.engine.ensure_cf(&cf).map_err(to_io_error)?;
+        }
+        self.engine.write_batch(inner).map_err(to_io_error)?;
+        self.record_metrics_if_enabled();
+        Ok(())
     }
 
     /// Flush outstanding WAL entries to SST files.
@@ -596,7 +731,9 @@ impl SimpleDb {
     }
 
     #[cfg(not(feature = "telemetry"))]
-    fn record_metrics_if_enabled(&self) {}
+    fn record_metrics_if_enabled(&self) {
+        let _ = self.engine.metrics();
+    }
 }
 
 #[cfg(feature = "telemetry")]
@@ -628,6 +765,7 @@ mod tests {
     fn engine_kind_label(kind: EngineKind) -> &'static str {
         match kind {
             EngineKind::Memory => "memory",
+            EngineKind::Inhouse => "inhouse",
             EngineKind::RocksDb => "rocksdb",
             EngineKind::Sled => "sled",
         }

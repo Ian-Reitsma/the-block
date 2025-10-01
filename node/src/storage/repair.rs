@@ -40,6 +40,8 @@ pub fn spawn(path: String, period: Duration) {
         let log = RepairLog::new(Path::new(&path).join("repair_log"));
         loop {
             if let Err(err) = run_once(&mut db, &log, RepairRequest::default()) {
+                #[cfg(not(feature = "telemetry"))]
+                let _ = &err;
                 #[cfg(feature = "telemetry")]
                 {
                     let algorithms = settings::algorithms();
@@ -891,9 +893,9 @@ fn current_timestamp() -> i64 {
     OffsetDateTime::now_utc().unix_timestamp()
 }
 
-/// Encodes `data` into RaptorQ packets with the BLE-tuned parameters and decodes
+/// Encodes `data` into fountain packets with the BLE-tuned parameters and decodes
 /// them after dropping a single packet, returning the recovered bytes.
-pub fn raptorq_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
+pub fn fountain_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
     let coder = settings::fountain();
     let batch = coder.encode(data).map_err(|e| e.to_string())?;
     let (metadata, mut packets) = batch.into_parts();

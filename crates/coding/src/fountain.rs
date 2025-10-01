@@ -1,6 +1,8 @@
-use raptorq::{Decoder, Encoder, EncodingPacket, ObjectTransmissionInformation};
+pub mod inhouse;
 
 use crate::error::{CodingError, FountainError};
+
+pub use self::inhouse::InhouseLtFountain;
 
 #[derive(Clone, Debug)]
 pub struct FountainPacket {
@@ -23,24 +25,37 @@ impl FountainPacket {
 
 #[derive(Clone, Debug)]
 pub struct FountainMetadata {
-    inner: FountainMetadataInner,
-}
-
-#[derive(Clone, Debug)]
-struct FountainMetadataInner {
-    oti: ObjectTransmissionInformation,
+    symbol_size: u16,
+    symbol_count: usize,
     original_len: usize,
 }
 
 impl FountainMetadata {
-    fn new(oti: ObjectTransmissionInformation, original_len: usize) -> Self {
+    pub fn new(symbol_size: u16, original_len: usize) -> Self {
+        let count = if symbol_size == 0 {
+            0
+        } else if original_len == 0 {
+            0
+        } else {
+            (original_len + symbol_size as usize - 1) / symbol_size as usize
+        };
         Self {
-            inner: FountainMetadataInner { oti, original_len },
+            symbol_size,
+            symbol_count: count,
+            original_len,
         }
     }
 
+    pub fn symbol_size(&self) -> u16 {
+        self.symbol_size
+    }
+
+    pub fn symbol_count(&self) -> usize {
+        self.symbol_count
+    }
+
     pub fn original_len(&self) -> usize {
-        self.inner.original_len
+        self.original_len
     }
 }
 
@@ -79,8 +94,10 @@ pub fn fountain_coder_for(
     symbol_size: u16,
     rate: f32,
 ) -> Result<Box<dyn FountainCoder>, CodingError> {
-    match name {
-        "" | "raptorq" | "raptor-q" => Ok(Box::new(RaptorqFountainCoder::new(symbol_size, rate))),
+    match name.trim().to_ascii_lowercase().as_str() {
+        "" | "lt-inhouse" | "lt" | "fountain" => {
+            Ok(Box::new(InhouseLtFountain::new(symbol_size, rate)?))
+        }
         other => Err(CodingError::UnsupportedAlgorithm {
             algorithm: other.to_string(),
         }),
@@ -91,62 +108,5 @@ pub fn default_fountain_coder(
     symbol_size: u16,
     rate: f32,
 ) -> Result<Box<dyn FountainCoder>, CodingError> {
-    fountain_coder_for("raptorq", symbol_size, rate)
-}
-
-pub struct RaptorqFountainCoder {
-    symbol_size: u16,
-    rate: f32,
-}
-
-impl RaptorqFountainCoder {
-    pub fn new(symbol_size: u16, rate: f32) -> Self {
-        Self { symbol_size, rate }
-    }
-
-    fn packet_count(&self, len: usize) -> u32 {
-        let symbols = (len as f32 / f32::from(self.symbol_size)).ceil();
-        let repair = ((symbols * (self.rate - 1.0)).ceil()).max(0.0) as u32;
-        symbols as u32 + repair
-    }
-}
-
-impl FountainCoder for RaptorqFountainCoder {
-    fn algorithm(&self) -> &'static str {
-        "raptorq"
-    }
-
-    fn encode(&self, data: &[u8]) -> Result<FountainBatch, FountainError> {
-        let oti = ObjectTransmissionInformation::with_defaults(data.len() as u64, self.symbol_size);
-        let encoder = Encoder::new(data, oti.clone());
-        let total = self.packet_count(data.len());
-        let packets = encoder
-            .get_encoded_packets(total)
-            .into_iter()
-            .map(|packet| FountainPacket::new(packet.serialize()))
-            .collect();
-        Ok(FountainBatch {
-            metadata: FountainMetadata::new(oti, data.len()),
-            packets,
-        })
-    }
-
-    fn decode(
-        &self,
-        metadata: &FountainMetadata,
-        packets: &[FountainPacket],
-    ) -> Result<Vec<u8>, FountainError> {
-        let mut decoder = Decoder::new(metadata.inner.oti.clone());
-        for packet in packets {
-            let bytes = packet.as_bytes();
-            if bytes.len() < 4 {
-                return Err(FountainError::PacketTruncated { len: bytes.len() });
-            }
-            let encoding = EncodingPacket::deserialize(bytes);
-            decoder.decode(encoding);
-        }
-        decoder
-            .get_result()
-            .ok_or(FountainError::InsufficientPackets)
-    }
+    fountain_coder_for("lt-inhouse", symbol_size, rate)
 }

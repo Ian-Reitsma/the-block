@@ -1,14 +1,11 @@
-use chacha20poly1305::{
-    aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Key, Nonce,
-};
-use rand::{rngs::OsRng, RngCore};
+mod inhouse;
 
 use crate::error::{CodingError, EncryptError};
 
-pub const CHACHA20_POLY1305_KEY_LEN: usize = 32;
-pub const CHACHA20_POLY1305_NONCE_LEN: usize = 12;
-pub const CHACHA20_POLY1305_TAG_LEN: usize = 16;
+pub const CHACHA20_POLY1305_KEY_LEN: usize = inhouse::KEY_LEN;
+pub const CHACHA20_POLY1305_NONCE_LEN: usize = inhouse::NONCE_LEN;
+pub const CHACHA20_POLY1305_TAG_LEN: usize = inhouse::TAG_LEN;
+pub const XCHACHA20_POLY1305_NONCE_LEN: usize = inhouse::XNONCE_LEN;
 
 pub trait Encryptor: Send + Sync {
     fn algorithm(&self) -> &'static str;
@@ -34,9 +31,44 @@ pub fn default_encryptor(key: &[u8]) -> Result<Box<dyn Encryptor>, CodingError> 
     encryptor_for("chacha20-poly1305", key)
 }
 
+fn key_array(key: &[u8]) -> Result<[u8; CHACHA20_POLY1305_KEY_LEN], EncryptError> {
+    if key.len() != CHACHA20_POLY1305_KEY_LEN {
+        return Err(EncryptError::InvalidKeyLength {
+            expected: CHACHA20_POLY1305_KEY_LEN,
+            actual: key.len(),
+        });
+    }
+    let mut buf = [0u8; CHACHA20_POLY1305_KEY_LEN];
+    buf.copy_from_slice(key);
+    Ok(buf)
+}
+
+pub fn encrypt_xchacha20_poly1305(key: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, EncryptError> {
+    let key = key_array(key)?;
+    inhouse::encrypt_xchacha(&key, plaintext)
+}
+
+pub fn encrypt_xchacha20_poly1305_with_nonce(
+    key: &[u8],
+    nonce: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, EncryptError> {
+    let key = key_array(key)?;
+    if nonce.len() != XCHACHA20_POLY1305_NONCE_LEN {
+        return Err(EncryptError::InvalidCiphertext { len: nonce.len() });
+    }
+    let mut arr = [0u8; XCHACHA20_POLY1305_NONCE_LEN];
+    arr.copy_from_slice(nonce);
+    inhouse::encrypt_xchacha_with_nonce(&key, &arr, plaintext)
+}
+
+pub fn decrypt_xchacha20_poly1305(key: &[u8], payload: &[u8]) -> Result<Vec<u8>, EncryptError> {
+    let key = key_array(key)?;
+    inhouse::decrypt_xchacha(&key, payload)
+}
+
 pub struct ChaCha20Poly1305Encryptor {
-    cipher: ChaCha20Poly1305,
-    key: Vec<u8>,
+    key: [u8; CHACHA20_POLY1305_KEY_LEN],
 }
 
 impl ChaCha20Poly1305Encryptor {
@@ -47,11 +79,9 @@ impl ChaCha20Poly1305Encryptor {
                 actual: key.len(),
             });
         }
-        let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
-        Ok(Self {
-            cipher,
-            key: key.to_vec(),
-        })
+        let mut buf = [0u8; CHACHA20_POLY1305_KEY_LEN];
+        buf.copy_from_slice(key);
+        Ok(Self { key: buf })
     }
 }
 
@@ -73,26 +103,10 @@ impl Encryptor for ChaCha20Poly1305Encryptor {
     }
 
     fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, EncryptError> {
-        let mut nonce_bytes = [0u8; CHACHA20_POLY1305_NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-        let mut output = nonce_bytes.to_vec();
-        let ciphertext = self
-            .cipher
-            .encrypt(nonce, plaintext)
-            .map_err(|_| EncryptError::EncryptionFailed)?;
-        output.extend_from_slice(&ciphertext);
-        Ok(output)
+        inhouse::encrypt(&self.key, plaintext)
     }
 
     fn decrypt(&self, payload: &[u8]) -> Result<Vec<u8>, EncryptError> {
-        if payload.len() < CHACHA20_POLY1305_NONCE_LEN {
-            return Err(EncryptError::InvalidCiphertext { len: payload.len() });
-        }
-        let (nonce_bytes, ciphertext) = payload.split_at(CHACHA20_POLY1305_NONCE_LEN);
-        let nonce = Nonce::from_slice(nonce_bytes);
-        self.cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| EncryptError::DecryptionFailed)
+        inhouse::decrypt(&self.key, payload)
     }
 }

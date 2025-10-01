@@ -58,7 +58,7 @@ const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["tokio", "stub"];
 #[cfg(feature = "telemetry")]
 const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
 #[cfg(feature = "telemetry")]
-const KNOWN_STORAGE_ENGINES: [&str; 3] = ["memory", "rocksdb", "sled"];
+const KNOWN_STORAGE_ENGINES: [&str; 4] = ["memory", "inhouse", "rocksdb", "sled"];
 #[cfg(feature = "telemetry")]
 const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
     ("bincode", &["transaction", "gossip", "storage_manifest"]),
