@@ -46,7 +46,7 @@ impl StorageContract {
 
     /// Deterministically derive the expected proof for a given chunk index.
     pub fn expected_proof(&self, chunk_idx: u64) -> [u8; 32] {
-        use blake3::Hasher;
+        use crypto_suite::hashing::blake3::Hasher;
         let mut h = Hasher::new();
         h.update(self.object_id.as_bytes());
         h.update(&chunk_idx.to_le_bytes());

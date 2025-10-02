@@ -1,11 +1,11 @@
 # Integration and Chaos Testing
-> **Review (2025-09-25):** Synced Integration and Chaos Testing guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-10-01):** Captured first-party Ed25519 backend requirement across CLI integration harnesses.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 This document outlines the strategy for integration and chaos testing in **The-Block**.
 
-> **Current caveats (2025-09-25):** CLI binaries now build cleanly on the
-> crypto suite’s Ed25519 backend (powered by `ed25519-dalek 2.2.x`), the
+> **Current caveats (2025-10-01):** CLI binaries now build cleanly on the
+> crypto suite’s first-party Ed25519 backend, the
 > transport crate re-exports the `quic` feature so
 > integration harnesses must pass `--features "integration-tests quic"` when
 > selecting providers, and telemetry-gated modules still emit warnings when

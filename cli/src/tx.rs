@@ -1,6 +1,6 @@
 #![allow(clippy::module_name_repetitions)]
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::signatures::ed25519::SigningKey;
 use crypto_suite::transactions::{
     canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,

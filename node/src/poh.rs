@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 
 /// Proof-of-history tick generator using a sequential hash chain.
 #[derive(Clone)]

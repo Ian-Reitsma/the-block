@@ -6,8 +6,8 @@ use crate::net::{
     send_msg, send_quic_msg, Message, OverlayPeerId, Transport,
 };
 use crate::simple_db::{names, SimpleDb};
-use blake3::hash;
 use codec::profiles;
+use crypto_suite::hashing::blake3::hash;
 use hex;
 use ledger::address::ShardId;
 use lru::LruCache;

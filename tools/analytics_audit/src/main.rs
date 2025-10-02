@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use serde::Deserialize;
 use std::{env, fs::File, io::BufReader};
 

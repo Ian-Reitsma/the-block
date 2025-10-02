@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use std::collections::HashMap;
 
 pub mod script;

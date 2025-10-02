@@ -1,4 +1,4 @@
-use blake3;
+use crypto_suite::hashing::blake3;
 use dex::escrow::{verify_proof, Escrow};
 
 #[test]

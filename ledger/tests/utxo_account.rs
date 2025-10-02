@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use ledger::utxo_account::{AccountLedger, OutPoint, Utxo, UtxoAccountBridge, UtxoLedger};
 use storage_engine::memory_engine::MemoryEngine;
 

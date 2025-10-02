@@ -1,11 +1,10 @@
 #![forbid(unsafe_code)]
 
 #[allow(unused_imports)]
+use crypto_suite::hashing::sha3::Sha3_256;
+#[allow(unused_imports)]
 use ripemd::Digest as _;
 use ripemd::Ripemd160;
-#[allow(unused_imports)]
-use sha3::Digest as _;
-use sha3::Sha3_256;
 
 /// Hash algorithms supported by the HTLC contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

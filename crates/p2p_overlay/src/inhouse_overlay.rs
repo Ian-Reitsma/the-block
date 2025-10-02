@@ -3,7 +3,7 @@ use crate::{
     Discovery, NoopMetrics, OverlayDiagnostics, OverlayError, OverlayResult, OverlayService,
     OverlayStore, PeerId, UptimeHandle, UptimeMetrics,
 };
-use blake3::hash;
+use crypto_suite::hashing::blake3::hash;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

@@ -3,13 +3,13 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry::BRIDGE_CHALLENGES_TOTAL;
 use crate::{governance, simple_db::names, SimpleDb};
-use blake3::Hasher;
 use bridges::relayer::RelayerSet;
 use bridges::{
     header::PowHeader,
     light_client::{header_hash, Header as LightHeader, Proof},
     Bridge as ExternalBridge, BridgeConfig, PendingWithdrawal, RelayerBundle, TokenBridge,
 };
+use crypto_suite::hashing::blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;

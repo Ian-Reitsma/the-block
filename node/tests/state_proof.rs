@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use the_block::Blockchain;
 
 mod util;

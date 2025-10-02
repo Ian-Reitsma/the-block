@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+use crypto_suite::hashing::blake3;
 use std::{collections::HashMap, fs};
 use the_block::transaction::{TxSignature, TxVersion};
 use the_block::{

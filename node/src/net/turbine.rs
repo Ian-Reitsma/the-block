@@ -2,7 +2,7 @@ use parking_lot::Mutex;
 use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use once_cell::sync::Lazy;
 
 use crate::net::message::BlobChunk;

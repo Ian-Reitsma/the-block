@@ -11,6 +11,7 @@ use axum::{
     Json, Router,
 };
 use bytes::Bytes;
+use crypto_suite::hashing::blake3;
 #[cfg(feature = "etcd-client")]
 use etcd_client::Client;
 use futures::StreamExt;

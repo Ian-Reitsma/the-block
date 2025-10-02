@@ -34,8 +34,8 @@ use crate::{
 use anyhow::anyhow;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use blake3;
 use coding::default_encryptor;
+use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use ledger::address::ShardId;

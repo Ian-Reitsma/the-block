@@ -10,6 +10,7 @@ use thiserror::Error;
 #[cfg(feature = "telemetry")]
 use metrics::{histogram, increment_counter};
 
+pub mod inhouse;
 pub mod macros;
 pub mod profiles;
 

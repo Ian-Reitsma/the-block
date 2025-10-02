@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-blake3 = "1"
+crypto_suite = { path = "../crates/crypto_suite" }
 
 [features]
 # Compile when privacy layer is enabled

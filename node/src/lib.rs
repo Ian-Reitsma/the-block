@@ -19,7 +19,7 @@ use crate::consensus::observer;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
-use blake3;
+use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use dashmap::DashMap;
 use hex;

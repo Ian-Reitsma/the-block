@@ -45,6 +45,7 @@ members = [
   "crates/codec",
   "crates/crypto_suite",
   "crates/httpd",
+  "crates/cli_core",
 ]
 default-members = [
   "node",

@@ -1,24 +1,28 @@
-use hkdf::Hkdf;
-use sha2::Sha256;
+use super::{inhouse, KeyDerivationError, KeyDeriver};
 
-use super::{KeyDerivationError, KeyDeriver};
+#[derive(Clone, Default)]
+pub struct HkdfSha256 {
+    inner: inhouse::InhouseKeyDeriver,
+}
 
-#[derive(Default)]
-pub struct HkdfSha256;
+impl HkdfSha256 {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_salt<S: AsRef<[u8]>>(salt: S) -> Self {
+        Self {
+            inner: inhouse::InhouseKeyDeriver::with_salt(salt),
+        }
+    }
+}
 
 impl KeyDeriver for HkdfSha256 {
     fn derive_key(&self, context: &[u8], material: &[u8]) -> Result<[u8; 32], KeyDerivationError> {
-        let hkdf = Hkdf::<Sha256>::new(None, material);
-        let mut okm = [0u8; 32];
-        hkdf.expand(context, &mut okm)
-            .map_err(|_| KeyDerivationError::DerivationFailed)?;
-        Ok(okm)
+        self.inner.derive_key(context, material)
     }
 }
 
 pub fn derive_key(master: &[u8], info: &[u8]) -> [u8; 32] {
-    let hkdf = Hkdf::<Sha256>::new(None, master);
-    let mut okm = [0u8; 32];
-    hkdf.expand(info, &mut okm).expect("hkdf expand");
-    okm
+    inhouse::derive_key_with_info(info, master)
 }

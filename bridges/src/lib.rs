@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};

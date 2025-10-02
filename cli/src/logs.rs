@@ -1,5 +1,37 @@
 use clap::Subcommand;
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchOptions {
+    pub db: String,
+    pub peer: Option<String>,
+    pub tx: Option<String>,
+    pub block: Option<u64>,
+    pub correlation: Option<String>,
+    pub level: Option<String>,
+    pub since: Option<u64>,
+    pub until: Option<u64>,
+    pub after_id: Option<u64>,
+    pub passphrase: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RotateKeyOptions {
+    pub db: String,
+    pub old_passphrase: Option<String>,
+    pub new_passphrase: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CorrelateMetricOptions {
+    pub aggregator: String,
+    pub metric: String,
+    pub db: Option<String>,
+    pub max_correlations: usize,
+    pub rows: usize,
+    pub passphrase: Option<String>,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum LogCmd {
     /// Search indexed logs stored in SQLite.
@@ -71,16 +103,66 @@ pub enum LogCmd {
     },
 }
 
+pub fn run_search(options: SearchOptions) {
+    run_search_impl(options);
+}
+
+pub fn run_rotate_key(options: RotateKeyOptions) {
+    run_rotate_key_impl(options);
+}
+
+pub fn run_correlate_metric(options: CorrelateMetricOptions) {
+    run_correlate_metric_impl(options);
+}
+
+#[cfg(feature = "sqlite-storage")]
+fn run_search_impl(options: SearchOptions) {
+    sqlite::run_search(options);
+}
+
+#[cfg(not(feature = "sqlite-storage"))]
+fn run_search_impl(_options: SearchOptions) {
+    emit_missing_sqlite_feature();
+}
+
+#[cfg(feature = "sqlite-storage")]
+fn run_rotate_key_impl(options: RotateKeyOptions) {
+    sqlite::run_rotate_key(options);
+}
+
+#[cfg(not(feature = "sqlite-storage"))]
+fn run_rotate_key_impl(_options: RotateKeyOptions) {
+    emit_missing_sqlite_feature();
+}
+
+#[cfg(feature = "sqlite-storage")]
+fn run_correlate_metric_impl(options: CorrelateMetricOptions) {
+    sqlite::run_correlate_metric(options);
+}
+
+#[cfg(not(feature = "sqlite-storage"))]
+fn run_correlate_metric_impl(_options: CorrelateMetricOptions) {
+    emit_missing_sqlite_feature();
+}
+
+#[cfg(not(feature = "sqlite-storage"))]
+fn emit_missing_sqlite_feature() {
+    eprintln!(
+        "log database commands require the `sqlite-storage` feature. Rebuild contract-cli with `--features sqlite-storage` or `--features full`.",
+    );
+    std::process::exit(1);
+}
+
 #[cfg(feature = "sqlite-storage")]
 mod sqlite {
     use super::LogCmd;
     use anyhow::{anyhow, Result as AnyResult};
     use base64::{engine::general_purpose, Engine as _};
-    use blake3::derive_key;
     use coding::{
         decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor,
         CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
     };
+    use crypto_suite::hashing::blake3::derive_key;
     use httpd::{BlockingClient, Method};
     use rpassword::prompt_password;
     use rusqlite::{params, params_from_iter, Connection, Row};
@@ -96,149 +178,144 @@ mod sqlite {
         timestamp: u64,
     }
 
-    pub fn handle(cmd: LogCmd) {
-        match cmd {
-            LogCmd::Search {
-                db,
-                peer,
-                tx,
-                block,
-                correlation,
-                level,
-                since,
-                until,
-                after_id,
-                passphrase,
-                limit,
-            } => {
-                let passphrase = prompt_optional_passphrase(
-                    passphrase,
-                    "Log passphrase (leave blank for none): ",
-                );
-                if let Err(e) = search(
-                    db,
-                    peer,
-                    tx,
-                    block,
-                    correlation,
-                    level,
-                    since,
-                    until,
-                    after_id,
-                    passphrase,
-                    limit,
-                ) {
-                    eprintln!("log search failed: {e}");
+    pub fn run_search(options: SearchOptions) {
+        let SearchOptions {
+            db,
+            peer,
+            tx,
+            block,
+            correlation,
+            level,
+            since,
+            until,
+            after_id,
+            passphrase,
+            limit,
+        } = options;
+
+        let passphrase =
+            prompt_optional_passphrase(passphrase, "Log passphrase (leave blank for none): ");
+        if let Err(e) = search(
+            db,
+            peer,
+            tx,
+            block,
+            correlation,
+            level,
+            since,
+            until,
+            after_id,
+            passphrase,
+            limit,
+        ) {
+            eprintln!("log search failed: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    pub fn run_rotate_key(options: RotateKeyOptions) {
+        let RotateKeyOptions {
+            db,
+            old_passphrase,
+            new_passphrase,
+        } = options;
+
+        let old = prompt_optional_passphrase(
+            old_passphrase,
+            "Current passphrase (leave blank for none): ",
+        );
+        let new_pass =
+            match prompt_optional_passphrase(new_passphrase, "New passphrase (required): ") {
+                Some(p) => p,
+                None => {
+                    eprintln!("new passphrase required");
                     std::process::exit(1);
                 }
+            };
+        if let Err(e) = rotate_key(db, old, new_pass) {
+            eprintln!("rotate failed: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    pub fn run_correlate_metric(options: CorrelateMetricOptions) {
+        let CorrelateMetricOptions {
+            aggregator,
+            metric,
+            db,
+            max_correlations,
+            rows,
+            passphrase,
+        } = options;
+
+        let client = BlockingClient::default();
+        let url = format!(
+            "{}/correlations/{}",
+            aggregator.trim_end_matches('/'),
+            metric
+        );
+        let response = match client
+            .request(Method::Get, &url)
+            .and_then(|builder| builder.send())
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                eprintln!("failed to query aggregator: {err}");
+                return;
             }
-            LogCmd::RotateKey {
-                db,
-                old_passphrase,
-                new_passphrase,
-            } => {
-                let old = prompt_optional_passphrase(
-                    old_passphrase,
-                    "Current passphrase (leave blank for none): ",
-                );
-                let new_pass =
-                    match prompt_optional_passphrase(new_passphrase, "New passphrase (required): ")
-                    {
-                        Some(p) => p,
-                        None => {
-                            eprintln!("new passphrase required");
-                            std::process::exit(1);
-                        }
-                    };
-                if let Err(e) = rotate_key(db, old, new_pass) {
-                    eprintln!("rotate failed: {e}");
-                    std::process::exit(1);
-                }
+        };
+        if !response.status().is_success() {
+            eprintln!(
+                "aggregator responded with status {}",
+                response.status().as_u16()
+            );
+            return;
+        }
+        let mut records: Vec<AggregatorCorrelation> = match response.json() {
+            Ok(records) => records,
+            Err(err) => {
+                eprintln!("failed to decode aggregator response: {err}");
+                return;
             }
-            LogCmd::CorrelateMetric {
-                aggregator,
-                metric,
-                db,
-                max_correlations,
-                rows,
-                passphrase,
-            } => {
-                let client = BlockingClient::default();
-                let url = format!(
-                    "{}/correlations/{}",
-                    aggregator.trim_end_matches('/'),
-                    metric
-                );
-                let response = match client
-                    .request(Method::Get, &url)
-                    .and_then(|builder| builder.send())
-                {
-                    Ok(resp) => resp,
-                    Err(err) => {
-                        eprintln!("failed to query aggregator: {err}");
-                        return;
-                    }
-                };
-                if !response.status().is_success() {
-                    eprintln!(
-                        "aggregator responded with status {}",
-                        response.status().as_u16()
-                    );
-                    return;
-                }
-                let mut records: Vec<AggregatorCorrelation> = match response.json() {
-                    Ok(records) => records,
-                    Err(err) => {
-                        eprintln!("failed to decode aggregator response: {err}");
-                        return;
-                    }
-                };
-                if records.is_empty() {
-                    eprintln!("no correlations recorded for metric {metric}");
-                    return;
-                }
-                records.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                let db_path = match db.or_else(|| env::var("TB_LOG_DB_PATH").ok()) {
-                    Some(path) => path,
-                    None => {
-                        eprintln!("--db must be provided or TB_LOG_DB_PATH set");
-                        return;
-                    }
-                };
-                let passphrase = prompt_optional_passphrase(
-                    passphrase,
-                    "Log passphrase (leave blank for none): ",
-                );
-                let limit = max_correlations.max(1);
-                for record in records.into_iter().take(limit) {
-                    let value_str = record
-                        .value
-                        .map(|v| v.to_string())
-                        .unwrap_or_else(|| "<none>".into());
-                    println!(
-                        "\nmetric={} correlation={} peer={} value={} timestamp={}",
-                        record.metric,
-                        record.correlation_id,
-                        record.peer_id,
-                        value_str,
-                        record.timestamp
-                    );
-                    if let Err(err) = search(
-                        db_path.clone(),
-                        None,
-                        None,
-                        None,
-                        Some(record.correlation_id.clone()),
-                        None,
-                        None,
-                        None,
-                        None,
-                        passphrase.clone(),
-                        Some(rows),
-                    ) {
-                        eprintln!("log search failed: {err}");
-                    }
-                }
+        };
+        if records.is_empty() {
+            eprintln!("no correlations recorded for metric {metric}");
+            return;
+        }
+        records.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        let db_path = match db.or_else(|| env::var("TB_LOG_DB_PATH").ok()) {
+            Some(path) => path,
+            None => {
+                eprintln!("--db must be provided or TB_LOG_DB_PATH set");
+                return;
+            }
+        };
+        let passphrase =
+            prompt_optional_passphrase(passphrase, "Log passphrase (leave blank for none): ");
+        let limit = max_correlations.max(1);
+        for record in records.into_iter().take(limit) {
+            let value_str = record
+                .value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "<none>".into());
+            println!(
+                "\nmetric={} correlation={} peer={} value={} timestamp={}",
+                record.metric, record.correlation_id, record.peer_id, value_str, record.timestamp
+            );
+            if let Err(err) = search(
+                db_path.clone(),
+                None,
+                None,
+                None,
+                Some(record.correlation_id.clone()),
+                None,
+                None,
+                None,
+                None,
+                passphrase.clone(),
+                Some(rows),
+            ) {
+                eprintln!("log search failed: {err}");
             }
         }
     }
@@ -444,17 +521,62 @@ mod sqlite {
     }
 }
 
-#[cfg(feature = "sqlite-storage")]
-pub use sqlite::handle;
-
-#[cfg(not(feature = "sqlite-storage"))]
 pub fn handle(cmd: LogCmd) {
     match cmd {
-        LogCmd::Search { .. } | LogCmd::RotateKey { .. } | LogCmd::CorrelateMetric { .. } => {
-            eprintln!(
-                "log database commands require the `sqlite-storage` feature. Rebuild contract-cli with `--features sqlite-storage` or `--features full`.",
-            );
-            std::process::exit(1);
+        LogCmd::Search {
+            db,
+            peer,
+            tx,
+            block,
+            correlation,
+            level,
+            since,
+            until,
+            after_id,
+            passphrase,
+            limit,
+        } => {
+            run_search(SearchOptions {
+                db,
+                peer,
+                tx,
+                block,
+                correlation,
+                level,
+                since,
+                until,
+                after_id,
+                passphrase,
+                limit,
+            });
+        }
+        LogCmd::RotateKey {
+            db,
+            old_passphrase,
+            new_passphrase,
+        } => {
+            run_rotate_key(RotateKeyOptions {
+                db,
+                old_passphrase,
+                new_passphrase,
+            });
+        }
+        LogCmd::CorrelateMetric {
+            aggregator,
+            metric,
+            db,
+            max_correlations,
+            rows,
+            passphrase,
+        } => {
+            run_correlate_metric(CorrelateMetricOptions {
+                aggregator,
+                metric,
+                db,
+                max_correlations,
+                rows,
+                passphrase,
+            });
         }
     }
 }

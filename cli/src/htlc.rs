@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
 use clap::Subcommand;
+use crypto_suite::hashing::sha3::Sha3_256;
 use hex::{decode, encode};
 use ripemd::{Digest as RipemdDigest, Ripemd160};
-use sha3::{Digest as ShaDigest, Sha3_256};
 use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 #[derive(Subcommand)]
@@ -43,8 +43,8 @@ pub fn handle(cmd: HtlcCmd) {
                 }
                 _ => {
                     let mut h = Sha3_256::new();
-                    ShaDigest::update(&mut h, &bytes);
-                    (ShaDigest::finalize(h).to_vec(), HashAlgo::Sha3)
+                    h.update(&bytes);
+                    (h.finalize().to_vec(), HashAlgo::Sha3)
                 }
             };
             let htlc = Htlc::new(hash, algo, timeout);

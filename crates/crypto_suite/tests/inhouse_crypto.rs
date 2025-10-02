@@ -1,4 +1,7 @@
+use crypto_suite::hashing::{blake3, sha3::Sha3_256};
+use crypto_suite::key_derivation::inhouse as kdf_inhouse;
 use crypto_suite::signatures::ed25519::{Signature, SignatureError, SigningKey, VerifyingKey};
+use crypto_suite::signatures::internal::Sha512;
 
 const L_BYTES: [u8; 32] = [
     0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
@@ -143,4 +146,105 @@ fn pkcs8_roundtrip_matches() {
         restored.verifying_key().to_bytes(),
         signing_key.verifying_key().to_bytes()
     );
+}
+
+#[test]
+fn sha512_rfc6234_empty() {
+    let digest = Sha512::digest(b"");
+    assert_eq!(
+        hex::encode(digest),
+        "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"
+    );
+}
+
+#[test]
+fn sha512_rfc6234_abc() {
+    let digest = Sha512::digest(b"abc");
+    assert_eq!(
+        hex::encode(digest),
+        "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
+    );
+}
+
+#[test]
+fn hkdf_matches_rfc5869_case1() {
+    let ikm = [0x0bu8; 22];
+    let salt = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+    ];
+    let info = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9];
+    let mut okm = [0u8; 42];
+    kdf_inhouse::derive_key_material(Some(&salt), &info, &ikm, &mut okm);
+    assert_eq!(
+        hex::encode(okm),
+        "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
+    );
+}
+
+#[test]
+fn blake3_vectors_match_spec() {
+    let mut input = vec![0u8; 0];
+    let cases = [
+        (
+            0usize,
+            "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+        ),
+        (
+            1,
+            "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213",
+        ),
+        (
+            64,
+            "4eed7141ea4a5cd4b788606bd23f46e212af9cacebacdc7d1f4c6dc7f2511b98",
+        ),
+        (
+            1024,
+            "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7",
+        ),
+    ];
+    for (len, expected) in cases {
+        input.resize(len, 0);
+        for i in 0..len {
+            input[i] = (i % 251) as u8;
+        }
+        let digest = blake3::hash(&input);
+        assert_eq!(hex::encode(digest.as_bytes()), expected);
+    }
+
+    let key_bytes: [u8; blake3::KEY_LEN] = *b"whats the Elvish word for friend";
+    let keyed = blake3::keyed_hash(&key_bytes, b"");
+    assert_eq!(
+        hex::encode(keyed.as_bytes()),
+        "92b2b75604ed3c761f9d6f62392c8a9227ad0ea3f09573e783f1498a4ed60d26"
+    );
+
+    let derived = blake3::derive_key("BLAKE3 2019-12-27 16:29:52 test vectors context", b"");
+    assert_eq!(
+        hex::encode(derived),
+        "2cc39783c223154fea8dfb7c1b1660f2ac2dcbd1c1de8277b0b0dd39b7e50d7d"
+    );
+}
+
+#[test]
+fn sha3_vectors_match_spec() {
+    let cases: &[(&[u8], &str)] = &[
+        (
+            &b""[..],
+            "a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a",
+        ),
+        (
+            &b"abc"[..],
+            "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532",
+        ),
+        (
+            &b"The quick brown fox jumps over the lazy dog"[..],
+            "69070dda01975c8c120c3aada1b282394e7f032fa9cf32f4cb2259a0897dfc04",
+        ),
+    ];
+    for &(message, expected) in cases {
+        let mut hasher = Sha3_256::new();
+        hasher.update(message);
+        let digest = hasher.finalize();
+        assert_eq!(hex::encode(digest.as_slice()), expected);
+    }
 }

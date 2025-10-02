@@ -1,5 +1,5 @@
 use super::scheduler::{self, Capability};
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rand::RngCore;

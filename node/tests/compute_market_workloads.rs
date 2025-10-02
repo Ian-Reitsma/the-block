@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+use crypto_suite::hashing::blake3;
 use proptest::prelude::*;
 use the_block::compute_market::{Workload, WorkloadRunner};
 

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use clap::Subcommand;
 use httpd::{BlockingClient, Method};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Subcommand, Debug)]
 pub enum SystemCmd {
@@ -14,14 +14,14 @@ pub enum SystemCmd {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WrapperMetric {
     metric: String,
     labels: BTreeMap<String, String>,
     value: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct WrapperSummary {
     #[serde(default)]
     metrics: Vec<WrapperMetric>,

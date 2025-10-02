@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use crypto_suite::zk::groth16::{
-    BellmanCircuit, BellmanConstraintSystem, Bn256, FieldElement, Groth16Bn256, Groth16Error,
-    Parameters, PreparedVerifyingKey, Proof, SynthesisError,
+    BellmanConstraintSystem, Bn256, Circuit, FieldElement, Groth16Bn256, Groth16Error, Parameters,
+    PreparedVerifyingKey, Proof, SynthesisError,
 };
 use rand::thread_rng;
 
@@ -20,7 +20,7 @@ struct InflationCircuit {
     slack: Option<FieldElement>,
 }
 
-impl BellmanCircuit<Bn256> for InflationCircuit {
+impl Circuit for InflationCircuit {
     fn synthesize<CS: BellmanConstraintSystem<Bn256>>(
         self,
         cs: &mut CS,
@@ -32,35 +32,20 @@ impl BellmanCircuit<Bn256> for InflationCircuit {
         } = self;
 
         let minted = cs.alloc_input(
-            || "minted",
-            || {
-                minted
-                    .clone()
-                    .ok_or(SynthesisError::AssignmentMissing)
-                    .map(|fe| fe.clone_inner())
-            },
+            || "minted".to_string(),
+            || minted.clone().ok_or(SynthesisError::AssignmentMissing),
         )?;
         let bound = cs.alloc_input(
-            || "bound",
-            || {
-                bound
-                    .clone()
-                    .ok_or(SynthesisError::AssignmentMissing)
-                    .map(|fe| fe.clone_inner())
-            },
+            || "bound".to_string(),
+            || bound.clone().ok_or(SynthesisError::AssignmentMissing),
         )?;
         let slack = cs.alloc(
-            || "slack",
-            || {
-                slack
-                    .clone()
-                    .ok_or(SynthesisError::AssignmentMissing)
-                    .map(|fe| fe.clone_inner())
-            },
+            || "slack".to_string(),
+            || slack.clone().ok_or(SynthesisError::AssignmentMissing),
         )?;
         // minted + slack = bound
         cs.enforce(
-            || "minted plus slack equals bound",
+            || "minted plus slack equals bound".to_string(),
             |lc| lc + minted + slack,
             |lc| lc + CS::one(),
             |lc| lc + bound,
@@ -86,9 +71,9 @@ pub fn prove(params: &Parameters, minted: u64, bound: u64) -> Result<InflationPr
     }
     let slack = bound - minted;
     let circuit = InflationCircuit {
-        minted: Some(FieldElement::from_str(&minted.to_string()).unwrap()),
-        bound: Some(FieldElement::from_str(&bound.to_string()).unwrap()),
-        slack: Some(FieldElement::from_str(&slack.to_string()).unwrap()),
+        minted: Some(FieldElement::from_u64(minted)),
+        bound: Some(FieldElement::from_u64(bound)),
+        slack: Some(FieldElement::from_u64(slack)),
     };
     let mut rng = thread_rng();
     let proof = Groth16Bn256::prove(params, circuit, &mut rng).map_err(|_| "prove")?;
@@ -104,8 +89,8 @@ pub fn prove(params: &Parameters, minted: u64, bound: u64) -> Result<InflationPr
 /// the inequality.
 pub fn verify(proof: &InflationProof, pvk: &PreparedVerifyingKey) -> bool {
     let inputs = [
-        FieldElement::from_str(&proof.minted.to_string()).unwrap(),
-        FieldElement::from_str(&proof.bound.to_string()).unwrap(),
+        FieldElement::from_u64(proof.minted),
+        FieldElement::from_u64(proof.bound),
     ];
     Groth16Bn256::verify(pvk, &proof.proof, &inputs).unwrap_or(false)
 }

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 
 /// Generate a deterministic pseudo-proof for a workload and output hash.
 pub fn prove(wasm: &[u8], output: &[u8]) -> Vec<u8> {

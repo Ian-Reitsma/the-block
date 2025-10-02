@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 #[cfg(test)]
 use crypto_suite::zk::groth16::Groth16Bn256;
 use crypto_suite::zk::groth16::PreparedVerifyingKey;

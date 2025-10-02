@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use ledger::address::ShardId;
 use lru::LruCache;
 use std::collections::VecDeque;

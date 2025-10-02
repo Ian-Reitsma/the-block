@@ -7,7 +7,7 @@ use crate::compute_market::settlement;
 use crate::exec;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::SUBSIDY_BYTES_TOTAL;
-use blake3;
+use crypto_suite::hashing::blake3;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

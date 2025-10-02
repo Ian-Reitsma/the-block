@@ -11,12 +11,9 @@ threshold = []
 telemetry = []
 
 [dependencies]
-bellman_ce = "0.8"
-hkdf = "0.12"
 rand_core = "0.6"
 rand = "0.8"
 rand04 = { package = "rand", version = "0.4" }
-sha2 = "0.10"
 thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 hex = "0.4"
@@ -24,6 +21,7 @@ num-bigint = { version = "0.4", features = ["std"] }
 num-traits = "0.2"
 bincode = "1.3"
 codec = { path = "../codec" }
+once_cell = "1"
 
 [dev-dependencies]
 rand_chacha = "0.3"

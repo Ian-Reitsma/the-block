@@ -1,9 +1,9 @@
 use super::constants::DIFFICULTY_WINDOW;
 use super::difficulty;
 use crate::range_boost;
-use blake3::Hasher;
 #[cfg(feature = "quantum")]
 use crypto::dilithium;
+use crypto_suite::hashing::blake3::Hasher;
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};

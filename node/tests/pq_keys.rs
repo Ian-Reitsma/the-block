@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "pq-crypto")]
+use crypto_suite::hashing::blake3;
 use pqcrypto_dilithium::dilithium2;
 use the_block::identity::handle_registry::HandleRegistry;
 

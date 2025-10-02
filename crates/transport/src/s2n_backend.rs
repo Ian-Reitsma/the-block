@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use std::collections::VecDeque;
 use std::fs;
 use std::net::SocketAddr;

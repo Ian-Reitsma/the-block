@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::io;
@@ -299,8 +300,7 @@ impl Settlement {
         let base = if path.is_empty() {
             tempfile::tempdir()
                 .expect("create settlement tempdir")
-                .keep()
-                .unwrap_or_else(|(_, err)| panic!("preserve settlement tempdir: {err}"))
+                .into_path()
         } else {
             PathBuf::from(path)
         };

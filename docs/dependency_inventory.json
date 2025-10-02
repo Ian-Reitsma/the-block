@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-09-30T12:54:59.759213+00:00",
+  "generated_at": "2025-10-01T00:00:00+00:00",
   "workspace_root": "/workspace/the-block",
   "root_packages": [
     "analytics_audit",
@@ -817,10 +817,6 @@
         {
           "name": "basic-toml",
           "version": "0.1.10"
-        },
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
         },
         {
           "name": "bench-harness",
@@ -1946,10 +1942,6 @@
       "depth": 2,
       "dependencies": [],
       "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
         {
           "name": "blake3",
           "version": "1.8.2"
@@ -3576,90 +3568,6 @@
       ]
     },
     {
-      "name": "bellman_ce",
-      "version": "0.8.0",
-      "tier": "unclassified",
-      "origin": "crates.io",
-      "license": "MIT/Apache-2.0",
-      "depth": 1,
-      "dependencies": [
-        {
-          "name": "arrayvec",
-          "version": "0.7.6"
-        },
-        {
-          "name": "bit-vec",
-          "version": "0.6.3"
-        },
-        {
-          "name": "blake2s_const",
-          "version": "0.8.0"
-        },
-        {
-          "name": "blake2s_simd",
-          "version": "0.5.11"
-        },
-        {
-          "name": "byteorder",
-          "version": "1.5.0"
-        },
-        {
-          "name": "cfg-if",
-          "version": "1.0.3"
-        },
-        {
-          "name": "crossbeam",
-          "version": "0.7.3"
-        },
-        {
-          "name": "futures",
-          "version": "0.3.31"
-        },
-        {
-          "name": "hex",
-          "version": "0.4.3"
-        },
-        {
-          "name": "lazy_static",
-          "version": "1.5.0"
-        },
-        {
-          "name": "num_cpus",
-          "version": "1.17.0"
-        },
-        {
-          "name": "pairing_ce",
-          "version": "0.28.6"
-        },
-        {
-          "name": "rand",
-          "version": "0.4.6"
-        },
-        {
-          "name": "serde",
-          "version": "1.0.224"
-        },
-        {
-          "name": "smallvec",
-          "version": "1.15.1"
-        },
-        {
-          "name": "tiny-keccak",
-          "version": "1.5.0"
-        }
-      ],
-      "dependents": [
-        {
-          "name": "inflation",
-          "version": "0.1.0"
-        },
-        {
-          "name": "the_block",
-          "version": "0.1.0"
-        }
-      ]
-    },
-    {
       "name": "bindgen",
       "version": "0.65.1",
       "tier": "unclassified",
@@ -3849,10 +3757,6 @@
         }
       ],
       "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
         {
           "name": "bit-set",
           "version": "0.5.3"
@@ -4061,12 +3965,7 @@
           "version": "0.1.5"
         }
       ],
-      "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        }
-      ]
+      "dependents": []
     },
     {
       "name": "blake2s_simd",
@@ -4089,12 +3988,7 @@
           "version": "0.1.5"
         }
       ],
-      "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        }
-      ]
+      "dependents": []
     },
     {
       "name": "blake3",
@@ -4253,7 +4147,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -4419,10 +4312,6 @@
       "depth": 2,
       "dependencies": [],
       "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
         {
           "name": "curve25519-dalek",
           "version": "3.2.0"
@@ -4906,10 +4795,6 @@
         {
           "name": "backtrace",
           "version": "0.3.75"
-        },
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
         },
         {
           "name": "blake3",
@@ -6516,12 +6401,7 @@
           "version": "0.7.2"
         }
       ],
-      "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        }
-      ]
+      "dependents": []
     },
     {
       "name": "crossbeam",
@@ -6922,7 +6802,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -7489,7 +7368,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -7820,7 +7698,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -8315,7 +8192,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 2,
       "dependencies": [
         {
@@ -9097,10 +8973,6 @@
         }
       ],
       "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
         {
           "name": "contract-cli",
           "version": "0.1.0"
@@ -10715,10 +10587,6 @@
         {
           "name": "analytics_audit",
           "version": "0.1.0"
-        },
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
         },
         {
           "name": "bridges",
@@ -12560,13 +12428,8 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
         {
           "name": "rand",
           "version": "0.4.6"
@@ -13316,7 +13179,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -13557,10 +13419,6 @@
           "version": "0.9.3"
         },
         {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
-        {
           "name": "bindgen",
           "version": "0.65.1"
         },
@@ -13688,7 +13546,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -15445,7 +15302,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -17771,10 +17627,6 @@
       ],
       "dependents": [
         {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
-        {
           "name": "futures-executor",
           "version": "0.3.31"
         },
@@ -18355,12 +18207,7 @@
           "version": "1.0.224"
         }
       ],
-      "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        }
-      ]
+      "dependents": []
     },
     {
       "name": "parking",
@@ -19717,7 +19564,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 0,
       "dependencies": [
         {
@@ -20898,10 +20744,6 @@
         }
       ],
       "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
         {
           "name": "ff_ce",
           "version": "0.14.3"
@@ -24590,10 +24432,6 @@
       ],
       "dependents": [
         {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        },
-        {
           "name": "cranelift-codegen",
           "version": "0.111.4"
         },
@@ -24956,7 +24794,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 0,
       "dependencies": [
         {
@@ -25083,7 +24920,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -25924,7 +25760,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -26223,7 +26058,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 0,
       "dependencies": [
         {
@@ -26245,10 +26079,6 @@
         {
           "name": "base64ct",
           "version": "1.8.0"
-        },
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
         },
         {
           "name": "bincode",
@@ -27134,12 +26964,7 @@
           "version": "0.2.4"
         }
       ],
-      "dependents": [
-        {
-          "name": "bellman_ce",
-          "version": "0.8.0"
-        }
-      ]
+      "dependents": []
     },
     {
       "name": "tiny-keccak",
@@ -29257,7 +29082,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 1,
       "dependencies": [
         {
@@ -32777,7 +32601,6 @@
       "version": "0.1.0",
       "tier": "unclassified",
       "origin": "workspace",
-      "license": null,
       "depth": 0,
       "dependencies": [
         {

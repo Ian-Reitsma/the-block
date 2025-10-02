@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use the_block::storage::erasure;
 use the_block::storage::repair::{self, RepairLog, RepairLogStatus, RepairRequest};
 use the_block::storage::settings;

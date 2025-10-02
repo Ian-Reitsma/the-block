@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use blake3::hash;
+use crypto_suite::hashing::blake3::hash;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use hex;
 use ledger::address;

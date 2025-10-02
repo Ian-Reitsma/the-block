@@ -16,8 +16,8 @@ use storage_engine::rocksdb_engine::RocksDbEngine;
 #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
 use storage_engine::sled_engine::SledEngine;
 use storage_engine::{
-    inhouse_engine::InhouseEngine, memory_engine::MemoryEngine, KeyValue, KeyValueIterator,
-    StorageError, StorageMetrics, StorageResult,
+    inhouse_engine::InhouseEngine, memory_engine::MemoryEngine, KeyValue, KeyValueBatch,
+    KeyValueIterator, StorageError, StorageMetrics, StorageResult,
 };
 
 #[cfg(feature = "telemetry")]

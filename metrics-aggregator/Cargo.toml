@@ -16,7 +16,7 @@ thiserror = "1"
 hyper = "0.14"
 runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
 zip = "0.6"
-blake3 = "1"
+crypto_suite = { path = "../crates/crypto_suite" }
 bytes = "1"
 etcd-client = { version = "0.11", optional = true }
 notify = "6"

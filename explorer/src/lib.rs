@@ -1,5 +1,5 @@
 use anyhow::Result as AnyhowResult;
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use hex::encode as hex_encode;
 use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};

@@ -1,11 +1,11 @@
 # Wallets
-> **Review (2025-09-25):** Synced Wallets guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-10-01):** Documented the first-party Ed25519 backend across CLI and wallet flows.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 The `crates/wallet` crate implements deterministic Ed25519 key management, optional remote signer plumbing, and utilities for building transactions. The command-line interface lives in [`cli/src/wallet.rs`](../cli/src/wallet.rs) and is exposed through the `contract wallet` subcommand.
 
-> **Build status (2025-09-25):** `node/src/bin/wallet.rs` now builds solely
-> against the crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`), forwards multisig signer sets, and passes the
+> **Build status (2025-10-01):** `node/src/bin/wallet.rs` now builds solely
+> against the crypto suite’s in-house Ed25519 backend, forwards multisig signer sets, and passes the
 > escrow hash algorithm into `verify_proof`. Focus on polishing multisig UX
 > (batched signer discovery, richer operator messaging) before tagging the next
 > CLI release.
@@ -75,14 +75,16 @@ This keeps older nodes compatible (they continue to read `sig`) while giving upg
 
 ## Ed25519 dependency alignment
 
-Both the wallet crate and the node CLI depend on the shared crypto suite’s Ed25519 backend (wrapping `ed25519-dalek 2.2.x`). The
+Both the wallet crate and the node CLI depend on the shared crypto suite’s
+first-party Ed25519 backend (`crypto_suite::signatures::ed25519_inhouse`). The
 upgrade replaces the legacy `ed25519` re-export with the modern `Signature`
 API, ensuring remote signer payloads, staking flows, and explorer attestations
-all share identical types. When migrating custom tooling, update any
-`Signature::from_bytes` usage to `Signature::from_slice` (which now returns a
-`Result`) and drop imports from the deprecated `ed25519` crate. The wallet CLI
-also forwards the escrow `HashAlgo` when invoking `verify_proof`, so third-party
-clients should include the same field when constructing release proofs.
+all share identical types without relying on `ed25519-dalek`. When migrating
+custom tooling, update any `Signature::from_bytes` usage to
+`Signature::from_slice` (which now returns a `Result`) and drop imports from the
+deprecated `ed25519` crate. The wallet CLI also forwards the escrow `HashAlgo`
+when invoking `verify_proof`, so third-party clients should include the same
+field when constructing release proofs.
 
 ## Telemetry & monitoring
 

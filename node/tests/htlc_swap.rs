@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use sha3::{Digest, Sha3_256};
+use crypto_suite::hashing::sha3::Sha3_256;
 use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 #[test]

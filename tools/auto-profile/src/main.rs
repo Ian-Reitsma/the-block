@@ -1,4 +1,5 @@
 use criterion::{black_box, Criterion};
+use crypto_suite::hashing::blake3;
 use pprof::ProfilerGuard;
 use std::fs::File;
 

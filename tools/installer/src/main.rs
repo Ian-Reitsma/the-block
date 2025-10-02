@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use crypto_suite::hashing::blake3;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::PathBuf;

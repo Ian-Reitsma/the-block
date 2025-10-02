@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 #[cfg(feature = "pq-crypto")]
 use once_cell::sync::Lazy;
 #[cfg(feature = "pq-crypto")]
