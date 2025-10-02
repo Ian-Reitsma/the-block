@@ -1,5 +1,5 @@
 # Dependency Inventory
-> **Review (2025-10-01):** Logged first-party Ed25519, BLAKE3, SHA3, and Groth16 swaps removing the external crates.
+> **Review (2025-10-02):** Highlighted outstanding clap/toml removal ahead of cli_core rollout across toolchains.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 | Tier | Crate | Version | Origin | License | Depth |
@@ -123,6 +123,11 @@
 | unclassified | `clap_complete` | 4.5.57 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `clap_derive` | 4.5.47 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `clap_lex` | 0.7.5 | crates.io | MIT OR Apache-2.0 | 3 |
+| unclassified | `serde` | 1.0.224 | crates.io | MIT OR Apache-2.0 | 1 |
+| unclassified | `serde_derive` | 1.0.224 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `serde_json` | 1.0.145 | crates.io | MIT OR Apache-2.0 | 1 |
+
+> **Action:** Replace the clap/serde/bincode/toml surfaces above with `cli_core` + the JSON codec during the CLI/node/tooling migration. Track progress in `docs/roadmap.md#tooling-migrations`.
 | unclassified | `cmake` | 0.1.54 | crates.io | MIT OR Apache-2.0 | 5 |
 | unclassified | `cobs` | 0.3.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `colorchoice` | 1.0.4 | crates.io | MIT OR Apache-2.0 | 3 |

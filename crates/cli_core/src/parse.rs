@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     arg::{ArgSpec, PositionalSpec},
-    command::Command,
+    command::{Command, CommandPath},
     value::ParsedValue,
 };
 
@@ -19,7 +19,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&self, args: &[String]) -> Result<Matches, ParseError> {
-        parse_command(self.command, args)
+        parse_command(self.command, args, &mut CommandPath::new(self.command.name))
     }
 }
 
@@ -76,7 +76,11 @@ impl Matches {
     }
 }
 
-fn parse_command(command: &Command, args: &[String]) -> Result<Matches, ParseError> {
+fn parse_command(
+    command: &Command,
+    args: &[String],
+    path: &mut CommandPath<'_>,
+) -> Result<Matches, ParseError> {
     let mut matches = Matches::new();
     let positional_specs: Vec<&PositionalSpec> = command
         .args
@@ -91,6 +95,23 @@ fn parse_command(command: &Command, args: &[String]) -> Result<Matches, ParseErr
 
     while index < args.len() {
         let token = &args[index];
+
+        if token == "--help" || token == "-h" {
+            return Err(ParseError::HelpRequested(path.display()));
+        }
+
+        if token == "help" {
+            let requested = if index + 1 < args.len() {
+                args[index + 1].clone()
+            } else {
+                command.name.to_string()
+            };
+            let mut requested_path = path.display();
+            if requested != command.name {
+                requested_path = format!("{} {}", requested_path, requested);
+            }
+            return Err(ParseError::HelpRequested(requested_path));
+        }
 
         if token.starts_with("--") {
             parse_option_token(command, args, &mut index, &mut matches)?;
@@ -116,7 +137,9 @@ fn parse_command(command: &Command, args: &[String]) -> Result<Matches, ParseErr
             .find(|cmd| cmd.name == token.as_str())
         {
             let rest = &args[index + 1..];
-            let sub_matches = parse_command(subcommand, rest)?;
+            path.segments.push(subcommand.name);
+            let sub_matches = parse_command(subcommand, rest, path)?;
+            path.segments.pop();
             matches.subcommand = Some((subcommand.name.to_string(), Box::new(sub_matches)));
             break;
         }
@@ -269,4 +292,6 @@ pub enum ParseError {
     MissingOption(String),
     #[error("missing positional argument '{0}'")]
     MissingPositional(String),
+    #[error("help requested for '{0}'")]
+    HelpRequested(String),
 }

@@ -1,26 +1,76 @@
+use crate::parse_utils::{optional_path, take_string};
 use crate::rpc::RpcClient;
 use anyhow::{anyhow, Context, Result};
-use clap::Subcommand;
-use cli_core::ConfigReader;
+use cli_core::{
+    arg::{ArgSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+    ConfigReader,
+};
 use serde_json::json;
 use std::{path::PathBuf, process};
 
-#[derive(Subcommand)]
 pub enum ConfigCmd {
     /// Trigger config reload
-    Reload {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Reload { url: String },
     /// Display configuration values parsed by the in-house reader
     Show {
         /// Optional configuration file path (defaults to ~/.the_block/config.cfg)
-        #[arg(long)]
         file: Option<PathBuf>,
         /// Restrict output to a single key
-        #[arg(long)]
         key: Option<String>,
     },
+}
+
+impl ConfigCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("config"), "config", "Config utilities")
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("config.reload"),
+                    "reload",
+                    "Trigger config reload",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(CommandId("config.show"), "show", "Display configuration")
+                    .arg(ArgSpec::Option(OptionSpec::new(
+                        "file",
+                        "file",
+                        "Configuration file path",
+                    )))
+                    .arg(ArgSpec::Option(OptionSpec::new(
+                        "key",
+                        "key",
+                        "Restrict output to a single key",
+                    )))
+                    .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'config'".to_string())?;
+
+        match name {
+            "reload" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(ConfigCmd::Reload { url })
+            }
+            "show" => Ok(ConfigCmd::Show {
+                file: optional_path(sub_matches, "file"),
+                key: take_string(sub_matches, "key"),
+            }),
+            other => Err(format!("unknown subcommand '{other}'")),
+        }
+    }
 }
 
 pub fn handle(cmd: ConfigCmd) {

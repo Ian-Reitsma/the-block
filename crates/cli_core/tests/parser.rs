@@ -2,7 +2,7 @@ use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandId},
     config::ConfigReader,
-    parse::Parser,
+    parse::{ParseError, Parser},
 };
 
 fn sample_command() -> Command {
@@ -93,6 +93,17 @@ fn rejects_unknown_options() {
     let parser = Parser::new(&command);
     let args = vec!["--unknown".to_string()];
     assert!(parser.parse(&args).is_err());
+}
+
+#[test]
+fn reports_help_requests() {
+    let command = sample_command();
+    let parser = Parser::new(&command);
+    let args = vec!["--help".to_string()];
+    match parser.parse(&args).unwrap_err() {
+        ParseError::HelpRequested(path) => assert_eq!(path, "root"),
+        other => panic!("unexpected error: {:?}", other),
+    }
 }
 
 #[test]

@@ -1,40 +1,140 @@
-use crate::{codec_helpers::json_from_str, rpc::RpcClient};
-use clap::Subcommand;
+use crate::{codec_helpers::json_from_str, parse_utils::take_string, rpc::RpcClient};
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use serde_json::json;
 use std::io::{self, Write};
 use the_block::simple_db::EngineKind;
 
-#[derive(Subcommand)]
 pub enum ComputeCmd {
     /// Cancel an in-flight compute job
-    Cancel {
-        job_id: String,
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Cancel { job_id: String, url: String },
     /// List job cancellations
-    List {
-        #[arg(long)]
-        preempted: bool,
-    },
+    List { preempted: bool },
     /// Show compute market stats
     Stats {
-        #[arg(long, default_value = "http://localhost:26658")]
         url: String,
-        #[arg(long)]
         accelerator: Option<String>,
     },
     /// Show scheduler queue with aged priorities
-    Queue {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Queue { url: String },
     /// Show status for a job
-    Status {
-        job_id: String,
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Status { job_id: String, url: String },
+}
+
+impl ComputeCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("compute"),
+            "compute",
+            "Compute marketplace utilities",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("compute.cancel"),
+                "cancel",
+                "Cancel an in-flight compute job",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "job_id",
+                "Job identifier",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(CommandId("compute.list"), "list", "List job cancellations")
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "preempted",
+                    "preempted",
+                    "Only show preempted jobs",
+                )))
+                .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("compute.stats"),
+                "stats",
+                "Show compute market stats",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "accelerator",
+                "accelerator",
+                "Filter by accelerator",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(CommandId("compute.queue"), "queue", "Show scheduler queue")
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("compute.status"),
+                "status",
+                "Show status for a job",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "job_id",
+                "Job identifier",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> std::result::Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'compute'".to_string())?;
+
+        match name {
+            "cancel" => {
+                let job_id = sub_matches
+                    .get_positional("job_id")
+                    .and_then(|vals| vals.first().cloned())
+                    .ok_or_else(|| "missing positional argument 'job_id'".to_string())?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(ComputeCmd::Cancel { job_id, url })
+            }
+            "list" => Ok(ComputeCmd::List {
+                preempted: sub_matches.get_flag("preempted"),
+            }),
+            "stats" => Ok(ComputeCmd::Stats {
+                url: take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                accelerator: take_string(sub_matches, "accelerator"),
+            }),
+            "queue" => Ok(ComputeCmd::Queue {
+                url: take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string()),
+            }),
+            "status" => {
+                let job_id = sub_matches
+                    .get_positional("job_id")
+                    .and_then(|vals| vals.first().cloned())
+                    .ok_or_else(|| "missing positional argument 'job_id'".to_string())?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(ComputeCmd::Status { job_id, url })
+            }
+            other => Err(format!("unknown subcommand '{other}'")),
+        }
+    }
 }
 
 pub fn handle(cmd: ComputeCmd) {

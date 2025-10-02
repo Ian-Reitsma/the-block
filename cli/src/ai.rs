@@ -1,6 +1,10 @@
-use crate::codec_helpers::json_from_str;
+use crate::{codec_helpers::json_from_str, parse_utils::take_string};
 use anyhow::Result;
-use clap::Subcommand;
+use cli_core::{
+    arg::{ArgSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use serde::Deserialize;
 
 /// Minimal snapshot of metrics for diagnostics.
@@ -40,13 +44,39 @@ pub fn diagnose(path: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Subcommand)]
 pub enum AiCmd {
     /// Run diagnostics from a metrics snapshot
-    Diagnose {
-        #[arg(long, default_value = "metrics.json")]
-        snapshot: String,
-    },
+    Diagnose { snapshot: String },
+}
+
+impl AiCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("ai"), "ai", "AI diagnostics")
+            .subcommand(
+                CommandBuilder::new(CommandId("ai.diagnose"), "diagnose", "Run diagnostics")
+                    .arg(ArgSpec::Option(
+                        OptionSpec::new("snapshot", "snapshot", "Metrics snapshot path")
+                            .default("metrics.json"),
+                    ))
+                    .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> std::result::Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'ai'".to_string())?;
+
+        match name {
+            "diagnose" => {
+                let snapshot = take_string(sub_matches, "snapshot")
+                    .unwrap_or_else(|| "metrics.json".to_string());
+                Ok(AiCmd::Diagnose { snapshot })
+            }
+            other => Err(format!("unknown subcommand '{other}'")),
+        }
+    }
 }
 
 pub fn handle(cmd: AiCmd) {
