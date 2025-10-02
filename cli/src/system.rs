@@ -1,17 +1,55 @@
 use std::collections::BTreeMap;
 
-use clap::Subcommand;
+use cli_core::{
+    arg::{ArgSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use httpd::{BlockingClient, Method};
 use serde::{Deserialize, Serialize};
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug)]
 pub enum SystemCmd {
     /// Fetch wrapper dependency metrics from the metrics aggregator.
     Dependencies {
         /// Metrics aggregator base URL.
-        #[arg(long, default_value = "http://localhost:9000")]
         aggregator: String,
     },
+}
+
+impl SystemCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("system"), "system", "System-level diagnostics")
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("system.dependencies"),
+                    "dependencies",
+                    "Fetch wrapper dependency metrics",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("aggregator", "aggregator", "Metrics aggregator base URL")
+                        .default("http://localhost:9000"),
+                ))
+                .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> std::result::Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'system'".to_string())?;
+
+        match name {
+            "dependencies" => {
+                let aggregator = sub_matches
+                    .get_string("aggregator")
+                    .unwrap_or_else(|| "http://localhost:9000".to_string());
+                Ok(SystemCmd::Dependencies { aggregator })
+            }
+            other => Err(format!("unknown subcommand '{other}'")),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
