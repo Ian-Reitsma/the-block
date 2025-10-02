@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};

@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+use crypto_suite::hashing::blake3;
 use std::fs;
 use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};

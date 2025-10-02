@@ -152,7 +152,8 @@ pub fn reconstruct_with_params(
             Ok(recovered)
         }
         Err(ErasureError::InvalidShardCount { .. })
-        | Err(ErasureError::InvalidShardIndex { .. }) => {
+        | Err(ErasureError::InvalidShardIndex { .. })
+        | Err(ErasureError::InsufficientShards { .. }) => {
             #[cfg(feature = "telemetry")]
             crate::telemetry::record_coding_result("erasure_reconstruct", algo, "err");
             Err("invalid shard layout".into())

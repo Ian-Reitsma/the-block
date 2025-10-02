@@ -9,6 +9,7 @@ use once_cell::sync::Lazy;
 use super::OverlayPeerId;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::PARTITION_EVENTS_TOTAL;
+use p2p_overlay::PeerId;
 
 /// Tracks peer reachability and detects network partitions.
 pub struct PartitionWatch {

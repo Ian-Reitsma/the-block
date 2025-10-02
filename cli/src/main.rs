@@ -2,7 +2,7 @@
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf, process};
 
 mod ai;
 mod bridge;
@@ -17,6 +17,7 @@ mod fee_estimator;
 mod gateway;
 mod gov;
 mod htlc;
+mod inhouse;
 mod light_client;
 mod light_sync;
 mod logs;
@@ -235,7 +236,17 @@ enum Commands {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let args: Vec<String> = std::env::args().collect();
+    match inhouse::dispatch(&args[1..]) {
+        inhouse::Dispatch::Handled | inhouse::Dispatch::HelpDisplayed => return,
+        inhouse::Dispatch::Unhandled => {}
+        inhouse::Dispatch::Error(err) => {
+            eprintln!("{err}");
+            process::exit(2);
+        }
+    }
+
+    let cli = Cli::parse_from(args);
     match cli.cmd {
         Commands::Deploy { code, wasm, state } => {
             let path = PathBuf::from(state);

@@ -1,6 +1,8 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use crypto_suite::transactions::{domain_tag_for, TransactionSigner};
-use crypto_suite::zk::groth16::{FieldElement, Groth16Bn256};
+use crypto_suite::zk::groth16::{
+    BellmanConstraintSystem, Bn256, Circuit, FieldElement, Groth16Bn256, SynthesisError,
+};
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
@@ -52,20 +54,16 @@ fn domain_separation_differs_across_chains() {
 }
 
 #[test]
-fn groth16_verification_matches_bellman() {
-    use bellman_ce::pairing::bn256::{Bn256, Fr};
-    use bellman_ce::pairing::ff::{Field, PrimeField};
-    use bellman_ce::{Circuit, ConstraintSystem, SynthesisError};
-
+fn groth16_inhouse_verifies_constraints() {
     #[derive(Clone)]
     struct MulCircuit {
-        left: Option<Fr>,
-        right: Option<Fr>,
-        product: Option<Fr>,
+        left: Option<FieldElement>,
+        right: Option<FieldElement>,
+        product: Option<FieldElement>,
     }
 
-    impl Circuit<Bn256> for MulCircuit {
-        fn synthesize<CS: ConstraintSystem<Bn256>>(
+    impl Circuit for MulCircuit {
+        fn synthesize<CS: BellmanConstraintSystem<Bn256>>(
             self,
             cs: &mut CS,
         ) -> Result<(), SynthesisError> {
@@ -73,12 +71,12 @@ fn groth16_verification_matches_bellman() {
             let right_val = self.right.ok_or(SynthesisError::AssignmentMissing)?;
             let product_val = self.product.ok_or(SynthesisError::AssignmentMissing)?;
 
-            let left_var = cs.alloc(|| "left", || Ok(left_val))?;
-            let right_var = cs.alloc(|| "right", || Ok(right_val))?;
-            let prod_var = cs.alloc_input(|| "product", || Ok(product_val))?;
+            let left_var = cs.alloc(|| "left".to_string(), || Ok(left_val.clone()))?;
+            let right_var = cs.alloc(|| "right".to_string(), || Ok(right_val.clone()))?;
+            let prod_var = cs.alloc_input(|| "product".to_string(), || Ok(product_val.clone()))?;
 
             cs.enforce(
-                || "left * right = product",
+                || "left * right = product".to_string(),
                 |lc| lc + left_var,
                 |lc| lc + right_var,
                 |lc| lc + prod_var,
@@ -89,27 +87,28 @@ fn groth16_verification_matches_bellman() {
     }
 
     let mut rng = StdRng::seed_from_u64(42);
-    let left = Fr::from_str("3").expect("left");
-    let right = Fr::from_str("4").expect("right");
-    let mut product = left;
-    product.mul_assign(&right);
+    let left = FieldElement::from_u64(3);
+    let right = FieldElement::from_u64(4);
+    let product = FieldElement::from_u64(12);
     let circuit = MulCircuit {
-        left: Some(left),
-        right: Some(right),
-        product: Some(product),
+        left: Some(left.clone()),
+        right: Some(right.clone()),
+        product: Some(product.clone()),
     };
 
     let params = Groth16Bn256::setup(circuit.clone(), &mut rng).expect("setup");
     let proof = Groth16Bn256::prove(&params, circuit.clone(), &mut rng).expect("prove");
     let pvk = Groth16Bn256::prepare_verifying_key(&params);
-    let inputs = vec![FieldElement::from(product)];
+    let inputs = vec![product.clone()];
 
     let suite_ok = Groth16Bn256::verify(&pvk, &proof, &inputs).expect("suite verify");
-
-    let raw_inputs: Vec<_> = inputs.iter().map(|f| f.clone_inner()).collect();
-    let direct_ok = bellman_ce::groth16::verify_proof(pvk.inner(), proof.inner(), &raw_inputs)
-        .expect("direct verify");
-
-    assert_eq!(suite_ok, direct_ok);
     assert!(suite_ok);
+
+    let wrong_inputs = vec![FieldElement::from_u64(11)];
+    let suite_bad = Groth16Bn256::verify(&pvk, &proof, &wrong_inputs).expect("suite verify");
+    assert!(!suite_bad);
+
+    let (public_inputs, aux) = proof.inner();
+    assert_eq!(public_inputs, &[product]);
+    assert_eq!(aux.len(), 2);
 }

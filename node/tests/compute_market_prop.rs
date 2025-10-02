@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use proptest::prelude::*;
 use the_block::compute_market::{scheduler, *};
 

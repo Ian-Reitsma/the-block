@@ -5,8 +5,7 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-blake3 = "1"
-sha3 = "0.10"
+crypto_suite = { path = "../crates/crypto_suite" }
 subtle = "2"
 hex = "0.4"
 

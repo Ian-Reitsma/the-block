@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use std::collections::HashSet;
 use std::env;
 use std::fs;

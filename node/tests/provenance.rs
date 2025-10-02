@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+use crypto_suite::hashing::blake3;
 use std::fs::File;
 use std::io::Write;
 

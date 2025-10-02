@@ -6,4 +6,4 @@ edition = "2021"
 [dependencies]
 criterion = { version = "0.5", default-features = false }
 pprof = { version = "0.11", features = ["flamegraph"] }
-blake3 = "1"
+crypto_suite = { path = "../../crates/crypto_suite" }

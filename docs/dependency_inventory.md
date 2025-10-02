@@ -1,10 +1,12 @@
 # Dependency Inventory
-> **Review (2025-09-25):** Synced Dependency Inventory guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-10-01):** Logged first-party Ed25519, BLAKE3, SHA3, and Groth16 swaps removing the external crates.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |
-| strategic | `ed25519-dalek` | 2.2.0 | crates.io | BSD-3-Clause | 1 |
+| strategic | `crypto_suite::signatures::ed25519_inhouse` | — | workspace | project-internal | 0 |
+| strategic | `crypto_suite::hashing::blake3` | — | workspace | project-internal | 0 |
+| strategic | `crypto_suite::hashing::sha3` | — | workspace | project-internal | 0 |
 | strategic | `libp2p` | 0.52.4 | crates.io | MIT | 1 |
 | strategic | `quinn` | 0.10.2 | crates.io | MIT OR Apache-2.0 | 3 |
 | strategic | `rustls` | 0.21.12 | crates.io | Apache-2.0 OR ISC OR MIT | 1 |
@@ -80,7 +82,7 @@
 | unclassified | `base64` | 0.22.1 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `base64ct` | 1.8.0 | crates.io | Apache-2.0 OR MIT | 1 |
 | unclassified | `basic-cookies` | 0.1.5 | crates.io | MIT | 3 |
-| unclassified | `bellman_ce` | 0.8.0 | crates.io | MIT/Apache-2.0 | 1 |
+| strategic | `crypto_suite::zk::groth16_inhouse` | — | workspace | project-internal | 0 |
 | unclassified | `bindgen` | 0.65.1 | crates.io | BSD-3-Clause | 3 |
 | unclassified | `bindgen` | 0.72.1 | crates.io | BSD-3-Clause | 4 |
 | unclassified | `bit-set` | 0.5.3 | crates.io | MIT/Apache-2.0 | 5 |
@@ -92,7 +94,6 @@
 | unclassified | `blake2` | 0.10.6 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `blake2s_const` | 0.8.0 | crates.io | MIT | 2 |
 | unclassified | `blake2s_simd` | 0.5.11 | crates.io | MIT | 2 |
-| unclassified | `blake3` | 1.8.2 | crates.io | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | 1 |
 | unclassified | `block-buffer` | 0.10.4 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `blocking` | 1.6.2 | crates.io | Apache-2.0 OR MIT | 5 |
 | unclassified | `bridges` | 0.1.0 | workspace | — | 1 |
@@ -611,7 +612,6 @@
 | unclassified | `serial_test_derive` | 3.2.0 | crates.io | MIT | 2 |
 | unclassified | `sha1` | 0.10.6 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `sha2` | 0.10.9 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `sha3` | 0.10.8 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `sharded-slab` | 0.1.7 | crates.io | MIT | 2 |
 | unclassified | `shlex` | 1.3.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `signal-hook` | 0.3.18 | crates.io | Apache-2.0/MIT | 1 |

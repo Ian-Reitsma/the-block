@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use crypto_suite::hashing::blake3;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;

@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-blake3 = "1"
+crypto_suite = { path = "../../crates/crypto_suite" }
 storage_engine = { path = "../../crates/storage_engine", features = ["rocksdb", "sled"] }

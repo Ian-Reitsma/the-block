@@ -70,7 +70,7 @@ encoder = BlockEncoder{
   vdf_output: [0;32],
   vdf_proof: [],
 }
-GENESIS_HASH = blake3(encode(encoder))
+GENESIS_HASH = crypto_suite::hashing::blake3::hash(encode(encoder))
 ```
 
 ## Versioning

@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use std::cell::Cell;
 
 #[cfg(test)]

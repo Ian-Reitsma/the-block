@@ -1,5 +1,5 @@
 use bincode;
-use blake3;
+use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{
     Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };

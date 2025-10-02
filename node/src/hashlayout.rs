@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 
 pub trait HashEncoder {
     fn encode(&self, h: &mut Hasher);

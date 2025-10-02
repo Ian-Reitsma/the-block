@@ -14,9 +14,9 @@ use crate::telemetry::{
     SUBSIDY_BYTES_TOTAL,
 };
 use crate::transaction::BlobTx;
-use blake3::Hasher;
 use codec::profiles;
 use coding::{Compressor, EncryptError, Encryptor};
+use crypto_suite::hashing::blake3::Hasher;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;

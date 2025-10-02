@@ -1,4 +1,4 @@
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use std::{env, fs, path::Path, process::Command};
 
 fn main() {

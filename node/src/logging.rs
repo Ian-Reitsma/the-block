@@ -1,3 +1,5 @@
+use crypto_suite::hashing::blake3;
+
 /// Derive a short correlation ID from a block height.
 pub fn corr_id_height(height: u64) -> String {
     format!("{:016x}", height)

@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;

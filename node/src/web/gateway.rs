@@ -7,6 +7,7 @@
 
 #![deny(warnings)]
 
+use crypto_suite::hashing::blake3;
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},

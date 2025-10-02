@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use anyhow::{anyhow, Context, Result};
-use blake3::{hash, Hasher};
+use crypto_suite::hashing::blake3::{hash, Hasher};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 

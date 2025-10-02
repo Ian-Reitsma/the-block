@@ -1,5 +1,5 @@
+use crypto_suite::hashing::sha3::Sha3_256;
 use ripemd::{Digest as RipemdDigest, Ripemd160};
-use sha3::{Digest, Sha3_256};
 use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 fn hash_sha3(data: &[u8]) -> Vec<u8> {

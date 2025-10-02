@@ -6,7 +6,7 @@ use crate::storage::settings;
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use rayon::ThreadPool;

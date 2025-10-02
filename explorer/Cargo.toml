@@ -13,7 +13,7 @@ axum = { version = "0.7", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 anyhow = "1"
 the_block = { path = "../node" }
-blake3 = "1"
+crypto_suite = { path = "../crates/crypto_suite" }
 storage = { path = "../storage" }
 serde_json = "1"
 wasmprinter = "0.2"
@@ -22,5 +22,4 @@ lru = "0.11"
 [dev-dependencies]
 tempfile = "3"
 wat = "1"
-crypto_suite = { path = "../crates/crypto_suite" }
 rand = "0.8"

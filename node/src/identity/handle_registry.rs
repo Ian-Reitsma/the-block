@@ -1,5 +1,5 @@
 use crate::{simple_db::names, SimpleDb};
-use blake3::Hasher;
+use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};

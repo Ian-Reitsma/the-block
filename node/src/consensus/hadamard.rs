@@ -1,5 +1,5 @@
 use crate::consensus::committee::topk::topk as sketch_topk;
-use blake3;
+use crypto_suite::hashing::blake3;
 
 pub fn unruh_extract(vrf: &[u8], prev_block: &[u8]) -> [u8; 32] {
     let mut h = blake3::Hasher::new();

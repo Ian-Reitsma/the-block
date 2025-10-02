@@ -1,5 +1,6 @@
 use crate::governance::{self, ReleaseAttestation};
 use crate::provenance;
+use crypto_suite::hashing::blake3;
 use httpd::{BlockingClient, Method};
 use std::collections::HashSet;
 use std::fs;

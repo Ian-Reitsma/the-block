@@ -1,5 +1,5 @@
 # CHANGELOG
-> **Review (2025-09-25):** Synced CHANGELOG guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
+> **Review (2025-10-01):** Recorded first-party Ed25519 backend adoption and kept wrapper telemetry notes current.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## 2025-09-25 — Dependency Wrapper Telemetry Cutover
@@ -7,7 +7,7 @@
 ### Added
 - Runtime, transport, overlay, storage engine, coding, codec, and crypto wrappers now emit dedicated gauges/counters (`runtime_backend_info`, `transport_provider_connect_total{provider}`, `codec_serialize_fail_total{profile}`, `crypto_suite_signature_fail_total{backend}`, etc.). `node/src/telemetry.rs` centralises label plumbing, and the metrics aggregator exposes a `/wrappers` endpoint with schema snapshots under `monitoring/metrics.json`.
 - New `crates/codec` crate standardises JSON/CBOR/bincode profiles, exposes serde bridging macros, rehosts the canonical bincode config as named profiles (`transaction`, `gossip`, `snapshot`), and instruments serialization failures and payload sizing for telemetry dashboards. CLI, explorer, gossip relay persistence, storage manifests, and PyO3 bindings all call through the wrapper.
-- `crates/crypto_suite` now owns signature, hashing, key-derivation, and Groth16 helpers. It wraps `ed25519-dalek` behind project-specific key types, re-exports through the `crypto` crate, includes regression tests for transaction signing/verification and remote signer flows, and ships benchmarking harnesses plus feature gates for optional algorithms.
+- `crates/crypto_suite` now owns signature, hashing, key-derivation, and Groth16 helpers. It implements a first-party Ed25519 backend behind project-specific key types, re-exports through the `crypto` crate, includes regression tests for transaction signing/verification and remote signer flows, and ships benchmarking harnesses plus feature gates for optional algorithms.
 - Grafana dashboards (`monitoring/grafana/*.json`) and schema docs (`monitoring/metrics.json`, `monitoring/README.md`) were regenerated to plot wrapper health, dependency drift gauges, codec/crypto failure rates, and dependency policy violations.
 - Dependency registry tooling emits a Prometheus `dependency_policy_violation` gauge, and `contract-cli system dependencies` prints wrapper snapshots for operators. Documentation updates landed in `docs/telemetry.md`, `docs/serialization.md`, `docs/pivot_dependency_strategy.md`, and `docs/monitoring.md` to describe interpretation and rollout guidance.
 

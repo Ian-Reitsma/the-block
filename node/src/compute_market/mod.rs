@@ -662,7 +662,7 @@ impl PriceBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blake3::Hasher;
+    use crypto_suite::hashing::blake3::Hasher;
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

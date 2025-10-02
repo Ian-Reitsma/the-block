@@ -6,7 +6,7 @@ use hex;
 use httpd::{BlockingClient, Method};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
-use native_tls::{Certificate as NativeCertificate, Identity, TlsConnector};
+use native_tls::{Certificate as NativeCertificate, HandshakeError, Identity, TlsConnector};
 use once_cell::sync::Lazy;
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,9 @@ use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
-use std::net::UdpSocket;
+use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::Mutex;
+use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use url::Url;
@@ -296,7 +297,11 @@ impl RemoteSigner {
         out
     }
 
-    fn fetch_pubkey(client: &BlockingClient, endpoint: &str) -> Result<VerifyingKey, WalletError> {
+    fn fetch_pubkey(
+        client: &BlockingClient,
+        endpoint: &str,
+        tls: Option<&TlsConnector>,
+    ) -> Result<VerifyingKey, WalletError> {
         {
             let cache = PUBKEY_CACHE.lock().unwrap();
             if let Some((pk, ts)) = cache.get(endpoint) {
@@ -305,22 +310,39 @@ impl RemoteSigner {
                 }
             }
         }
-        let url = if endpoint.starts_with("ws") {
-            endpoint
-                .replacen("wss://", "https://", 1)
-                .replacen("ws://", "http://", 1)
+        let mut url = Url::parse(endpoint)
+            .map_err(|err| WalletError::Failure(format!("invalid signer url: {err}")))?;
+        match url.scheme() {
+            "ws" => {
+                url.set_scheme("http")
+                    .map_err(|_| WalletError::Failure("invalid ws url".into()))?;
+            }
+            "wss" => {
+                url.set_scheme("https")
+                    .map_err(|_| WalletError::Failure("invalid wss url".into()))?;
+            }
+            "http" | "https" => {}
+            scheme => {
+                return Err(WalletError::Failure(format!(
+                    "unsupported signer scheme: {scheme}"
+                )));
+            }
+        }
+        let pubkey_url = url
+            .join("pubkey")
+            .map_err(|err| WalletError::Failure(err.to_string()))?;
+        let pk: PubKeyResp = if pubkey_url.scheme() == "https" {
+            fetch_pubkey_https(&pubkey_url, tls)?
         } else {
-            endpoint.to_string()
+            let resp = client
+                .request(Method::Get, pubkey_url.as_str())
+                .map_err(|e| WalletError::Failure(e.to_string()))?
+                .timeout(Duration::from_secs(5))
+                .send()
+                .map_err(|e| WalletError::Failure(e.to_string()))?;
+            resp.json()
+                .map_err(|e| WalletError::Failure(e.to_string()))?
         };
-        let resp = client
-            .request(Method::Get, &format!("{url}/pubkey"))
-            .map_err(|e| WalletError::Failure(e.to_string()))?
-            .timeout(Duration::from_secs(5))
-            .send()
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
-        let pk: PubKeyResp = resp
-            .json()
-            .map_err(|e| WalletError::Failure(e.to_string()))?;
         let bytes = hex::decode(pk.pubkey).map_err(|e| WalletError::Failure(e.to_string()))?;
         if bytes.len() != 32 {
             return Err(WalletError::Failure("invalid pubkey length".into()));
@@ -375,7 +397,7 @@ impl RemoteSigner {
         }
         let mut pubkeys = Vec::new();
         for ep in endpoints {
-            pubkeys.push(Self::fetch_pubkey(&client, ep)?);
+            pubkeys.push(Self::fetch_pubkey(&client, ep, tls.as_ref())?);
         }
         Ok(Self {
             endpoints: endpoints.to_vec(),
@@ -495,6 +517,133 @@ impl RemoteSigner {
             .try_into()
             .map_err(|_| WalletError::Failure("invalid signature".into()))?;
         Ok(Signature::from_bytes(&sig_arr))
+    }
+}
+
+fn fetch_pubkey_https(url: &Url, tls: Option<&TlsConnector>) -> Result<PubKeyResp, WalletError> {
+    use std::net::TcpStream as StdTcpStream;
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| WalletError::Failure("missing host".into()))?;
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addr = format!("{host}:{port}");
+    let timeout = Duration::from_secs(5);
+    let mut addrs = addr
+        .to_socket_addrs()
+        .map_err(|err| WalletError::Failure(err.to_string()))?;
+    let socket = addrs
+        .next()
+        .ok_or_else(|| WalletError::Failure("no socket addresses".into()))?;
+    let stream = StdTcpStream::connect_timeout(&socket, timeout)
+        .map_err(|err| WalletError::Failure(err.to_string()))?;
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+
+    let connector = if let Some(conn) = tls {
+        conn.clone()
+    } else {
+        TlsConnector::builder()
+            .build()
+            .map_err(|err| WalletError::Failure(err.to_string()))?
+    };
+
+    let mut tls_stream = match connector.connect(host, stream) {
+        Ok(stream) => stream,
+        Err(HandshakeError::WouldBlock(mut mid)) => loop {
+            match mid.handshake() {
+                Ok(stream) => break stream,
+                Err(HandshakeError::WouldBlock(next)) => {
+                    mid = next;
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(HandshakeError::Failure(err)) => {
+                    return Err(WalletError::Failure(err.to_string()));
+                }
+            }
+        },
+        Err(HandshakeError::Failure(err)) => {
+            return Err(WalletError::Failure(err.to_string()));
+        }
+    };
+
+    let mut path = url.path().to_string();
+    if path.is_empty() {
+        path.push('/');
+    }
+    if let Some(query) = url.query() {
+        path.push('?');
+        path.push_str(query);
+    }
+
+    let host_header = if port == 443 {
+        host.to_string()
+    } else {
+        format!("{host}:{port}")
+    };
+    let request = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"
+    );
+    tls_stream
+        .write_all(request.as_bytes())
+        .map_err(|err| WalletError::Failure(err.to_string()))?;
+
+    let mut response = Vec::new();
+    let mut header_end = None;
+    let mut buf = [0u8; 1024];
+    while header_end.is_none() {
+        let read = tls_stream
+            .read(&mut buf)
+            .map_err(|err| map_tls_error(err))?;
+        if read == 0 {
+            return Err(WalletError::Failure("unexpected eof in headers".into()));
+        }
+        response.extend_from_slice(&buf[..read]);
+        if response.len() > 64 * 1024 {
+            return Err(WalletError::Failure("header too large".into()));
+        }
+        if let Some(pos) = response.windows(4).position(|w| w == b"\r\n\r\n") {
+            header_end = Some(pos + 4);
+        }
+    }
+    let header_end = header_end.expect("header_end captured");
+    let headers = String::from_utf8(response[..header_end].to_vec())
+        .map_err(|_| WalletError::Failure("invalid utf8 in headers".into()))?;
+    if !headers.starts_with("HTTP/1.1 200") {
+        return Err(WalletError::Failure("unexpected status".into()));
+    }
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            if line.to_ascii_lowercase().starts_with("content-length:") {
+                line.split_once(':')
+                    .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| WalletError::Failure("missing content-length".into()))?;
+
+    let mut body = response[header_end..].to_vec();
+    while body.len() < content_length {
+        let read = tls_stream
+            .read(&mut buf)
+            .map_err(|err| map_tls_error(err))?;
+        if read == 0 {
+            return Err(WalletError::Failure("unexpected eof in body".into()));
+        }
+        body.extend_from_slice(&buf[..read]);
+    }
+    body.truncate(content_length);
+    let body_text = String::from_utf8(body).map_err(|err| WalletError::Failure(err.to_string()))?;
+    serde_json::from_str(&body_text).map_err(|err| WalletError::Failure(err.to_string()))
+}
+
+fn map_tls_error(err: io::Error) -> WalletError {
+    match err.kind() {
+        ErrorKind::WouldBlock | ErrorKind::TimedOut => WalletError::Timeout,
+        _ => WalletError::Failure(err.to_string()),
     }
 }
 

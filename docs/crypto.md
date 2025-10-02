@@ -1,5 +1,5 @@
 # Security & Cryptography
-> **Review (2025-10-01):** Documented the first-party Ed25519 backend (field/scalar/point math + RFC8032 coverage) and refreshed testing notes.
+> **Review (2025-10-01):** Added coverage of the in-house Groth16 backend replacing prior bellman_ce usage.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
 ## Crypto Suite Overview
@@ -14,11 +14,11 @@ The suite exposes the following modules:
 - `signatures` — project-specific Ed25519 wrappers with PKCS#8 helpers.
 - `transactions` — canonical bincode serialisation, domain-tag management, and
   signing/verifying utilities shared across binaries.
-- `hashing` — In-house sponge hash (`TBH32`) by default with an optional SHA3
+- `hashing` — First-party BLAKE3-compatible tree hash plus an in-house SHA3-256
   fallback.
 - `key_derivation` — HKDF-based key derivation helpers used by wallet/session
   code.
-- `zk` — Groth16 conveniences that wrap `bellman_ce` behind a stable API.
+- `zk` — Groth16 conveniences powered by the first-party BN254 R1CS engine.
 
 Feature flags keep optional algorithms modular:
 
@@ -45,16 +45,20 @@ that suite signatures follow the documented deterministic construction and that
 domain tags reject cross-chain replays. `crates/crypto_suite/tests/inhouse_crypto.rs`
 adds RFC8032 known-answer vectors, PKCS#8 round-trips, and strict failure cases
 for non-canonical scalars, small-order points, and malformed encodings. The
-same test module exercises Groth16 verification against the raw `bellman_ce`
-API.
+same test module now exercises Groth16 verification against the in-house
+constraint solver to ensure recorded circuits reject tampered inputs.
 
 ### Hashing & Commitments
 
-The default hash (`crypto_suite::hashing::inhouse`) implements the TBH32 sponge
-construction with a 32-byte output. Enabling the `sha3-fallback` feature swaps
-in the in-house Keccak-style fallback (`sha3` module) for deployments that
-require NIST-aligned primitives. Commitment schemes in the DEX stack still
-record the hash algorithm used so clients can verify proofs off-chain.
+The default hash (`crypto_suite::hashing::blake3`) implements a fully
+tree-parallel BLAKE3-compatible construction with streaming, keyed hashing, and
+derive-key helpers. All call sites previously importing the third-party crate
+now route through the suite so remote signer payloads, ledger migrations, the
+DEX, storage repair, and trie commitments share the same audited implementation.
+An optional SHA3-256 fallback lives under `crypto_suite::hashing::sha3` for
+deployments requiring the NIST sponge; it exposes identical APIs and shares the
+same RFC 6234 vectors. Commitment proofs still record the algorithm so clients
+can validate Merkle branches off-chain.
 
 ### Key Derivation
 
@@ -64,10 +68,11 @@ to avoid timing leaks.
 
 ### Zero-Knowledge Proofs
 
-`crypto_suite::zk::groth16` wraps the `bellman_ce` Groth16 implementation. The
-suite exposes parameter/proof wrappers, prepared verifying keys, and a legacy
-RNG shim for compatibility with older `rand` versions. Tests assert parity with
-direct `bellman_ce::groth16::verify_proof` calls.
+`crypto_suite::zk::groth16` now fronts the first-party Groth16 implementation
+under `zk::groth16_inhouse`. The suite retains the familiar parameter/proof
+wrappers and legacy RNG shim while delegating constraint evaluation to the
+BN254 engine shipped in-tree. Tests assert deterministic witness generation and
+ensure verification fails when public inputs are tampered with.
 
 ### RPC Authentication
 
@@ -89,7 +94,7 @@ cargo test -p crypto_suite
 ```
 
 This includes RFC8032 vectors, negative signature checks, signature
-determinism/domain separation, and Groth16 parity checks.
+determinism/domain separation, and Groth16 witness/verification checks.
 
 ## Adding New Algorithms
 

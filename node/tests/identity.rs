@@ -1,4 +1,5 @@
 #![cfg(feature = "integration-tests")]
+use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use tempfile::tempdir;
 use the_block::generate_keypair;

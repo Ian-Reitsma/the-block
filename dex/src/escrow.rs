@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
+use crypto_suite::hashing::{blake3, sha3::Sha3_256};
 use serde::{Deserialize, Serialize};
-use sha3::{Digest, Sha3_256};
 use std::collections::BTreeMap;
 use subtle::ConstantTimeEq;
 

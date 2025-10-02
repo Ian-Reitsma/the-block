@@ -1,3 +1,4 @@
+use crypto_suite::hashing::blake3;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 

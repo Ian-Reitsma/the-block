@@ -6,12 +6,12 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
-use blake3::derive_key;
 use clap::{Parser, Subcommand};
 use coding::{
-    decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor,
+    decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor, Encryptor,
     CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
 };
+use crypto_suite::hashing::blake3::derive_key;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 

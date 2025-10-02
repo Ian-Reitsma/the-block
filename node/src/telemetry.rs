@@ -1,6 +1,6 @@
-use blake3;
 #[cfg(feature = "telemetry")]
 use codec::{self, Codec, Direction};
+use crypto_suite::hashing::blake3;
 #[cfg(feature = "telemetry")]
 use crypto_suite::{self, signatures::ed25519};
 #[cfg(feature = "telemetry")]

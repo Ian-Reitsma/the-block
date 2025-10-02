@@ -1,4 +1,5 @@
 use super::{gas, opcodes::OpCode};
+use crypto_suite::hashing::blake3;
 
 /// Execute raw bytecode with optional storage hooks.
 /// `load` returns the current storage value and `store` persists a value.

@@ -27,7 +27,7 @@ struct Header {
     chain_id: String,
     height: u64,
     merkle_root: [u8;32],
-    signature: [u8;32], // blake3(chain_id || height || merkle_root)
+    signature: [u8;32], // crypto_suite::hashing::blake3::hash(chain_id || height || merkle_root)
 }
 
 struct Proof {

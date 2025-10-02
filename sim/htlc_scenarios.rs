@@ -1,5 +1,5 @@
+use crypto_suite::hashing::sha3::Sha3_256;
 use dex::htlc_router::{HtlcIntent, HtlcRouter};
-use sha3::{Digest, Sha3_256};
 
 fn main() {
     let mut router = HtlcRouter::new();

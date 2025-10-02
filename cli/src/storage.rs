@@ -103,7 +103,7 @@ pub fn handle(cmd: StorageCmd) {
             chunk,
             block,
         } => {
-            use blake3::Hasher;
+            use crypto_suite::hashing::blake3::Hasher;
             let mut h = Hasher::new();
             h.update(object_id.as_bytes());
             h.update(&chunk.to_le_bytes());

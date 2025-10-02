@@ -7,6 +7,7 @@
 // Integration tests covering chain invariants and edge cases.
 
 use base64::Engine;
+use crypto_suite::hashing::blake3;
 use proptest::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
