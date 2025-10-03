@@ -3053,6 +3053,42 @@ pub static COMPUTE_SLA_VIOLATIONS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static COMPUTE_SLA_PENDING_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "compute_sla_pending_total",
+        "Number of compute jobs with active SLA tracking",
+    )
+    .unwrap_or_else(|e| panic!("gauge compute_sla_pending_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry compute_sla_pending_total: {e}"));
+    g
+});
+
+pub static COMPUTE_SLA_NEXT_DEADLINE_TS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "compute_sla_next_deadline_ts",
+        "Unix timestamp of the next pending compute SLA deadline",
+    )
+    .unwrap_or_else(|e| panic!("gauge compute_sla_next_deadline_ts: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry compute_sla_next_deadline_ts: {e}"));
+    g
+});
+
+pub static COMPUTE_SLA_AUTOMATED_SLASH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "compute_sla_automated_slash_total",
+        "Count of SLA penalties applied automatically by the settlement engine",
+    )
+    .unwrap_or_else(|e| panic!("counter compute_sla_automated_slash_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry compute_sla_automated_slash_total: {e}"));
+    c
+});
+
 pub static COMPUTE_PROVIDER_UPTIME: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
         Opts::new(

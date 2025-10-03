@@ -3,17 +3,26 @@
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
 Mainnet readiness: 98.3/100 · Vision completion: 93.3/100.
-The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI stacks, while the aggregator and gateway servers still run on `axum`/`hyper` until the in-house router lands. Tracking that migration, alongside the TLS layer, keeps the dependency-sovereignty
+The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI stacks, and the aggregator, gateway, explorer, and indexer surfaces all serve via the in-house `httpd` router. Tracking that migration, alongside the TLS layer, keeps the dependency-sovereignty
 pivot and wrapper rollout plan are central to every
 milestone; see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
 for the canonical phase breakdown referenced by subsystem guides.
-Known focus areas: deliver treasury disbursement tooling with explorer
-timelines, wire SLA slashing dashboards atop the lane-aware matcher, extend
+Known focus areas: surface treasury disbursements in explorer dashboards and aggregator alerts,
+integrate compute-market SLA metrics with automated alerting, extend
 governance-driven dependency rollout reporting for third-party operators,
 complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale
 QUIC chaos drills with published mitigation guides, extend bridge/DEX docs with
 multisig signer-set payloads plus release-verifier walkthroughs, stand up the
 dependency fault simulation harness, and finish the multisig wallet UX polish.
+
+### Tooling migrations
+
+- Explorer now binds through the first-party `httpd` stack with optional TLS and
+  mutual-auth support, enabling downstream crates to exercise handlers via the
+  in-process request builder (`explorer/src/main.rs`, `explorer/src/lib.rs`).
+- The indexer CLI has moved from Clap/Axum to `cli_core` plus `httpd`, reusing
+  the shared router helpers and optional TLS wiring for the serve subcommand
+  (`tools/indexer/src/main.rs`, `tools/indexer/src/lib.rs`).
 Downstream tooling now targets the shared
 `governance` crate, compute settlement and the matcher enforce per-lane fairness
 with staged seeding, fairness deadlines, starvation warnings, and per-lane
@@ -55,12 +64,12 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 | Pillar | % Complete | Highlights | Gaps |
 | --- | --- | --- | --- |
-| **Governance & Subsidy Economy** | **96.4 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, durable proof-rebate receipts, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. The shared `governance` crate exports sled persistence, proposal DAG validation, and Kalman helpers for all downstream tooling. | Expand explorer timelines with treasury disbursements and dependency metadata before opening external submissions. |
+| **Governance & Subsidy Economy** | **96.4 %** | Inflation governors tune β/γ/κ/λ multipliers and rent rate; multi-signature release approvals, attested fetch/install tooling, fee-floor policy timelines, durable proof-rebate receipts, and DID revocation history are archived in `GovStore` alongside CLI telemetry with rollback support. The shared `governance` crate exports sled persistence, proposal DAG validation, and Kalman helpers for all downstream tooling. | Wire treasury disbursement timelines into explorer dashboards and publish dependency metadata before opening external submissions. |
 | **Consensus & Core Execution** | 93.6 % | Stake-weighted leader rotation, deterministic tie-breaks, multi-window Kalman difficulty retune, release rollback helpers, coinbase rebate integration, and the parallel executor guard against replay collisions. | Formal proofs still absent. |
 | **Smart-Contract VM & UTXO/PoW** | 87.5 % | Persistent contract store, deterministic WASM runtime with debugger, and EIP-1559-style fee tracker with BLAKE3 PoW headers. | Opcode library parity and formal VM spec outstanding. |
 | **Storage & Free-Read Hosting** | **93.8 %** | Receipt-only logging, hourly batching, L1 anchoring, `gateway.reads_since` analytics, crash-safe `SimpleDb` snapshot rewrites, a unified `storage_engine` crate that abstracts RocksDB/sled/memory providers, the shared `coding` crate with XOR parity and RLE compression fallbacks behind audited rollout policy plus telemetry/bench-harness validation, and a sled-backed, ChaCha20-Poly1305–encrypted mobile cache with TTL min-heap sweeping, restart replay, entry/queue guardrails, CLI/RPC observability, and invalidation hooks keep reads free yet auditable and durable across restarts. | Incentive-backed DHT storage and offline reconciliation remain prototypes. |
-| **Networking & Gossip** | 98.3 % | QUIC mutual-TLS rotation with diagnostics/chaos harnesses, cluster `metrics-aggregator`, partition watch with gossip markers, LRU-backed deduplication with adaptive fanout, shard-affinity persistence, CLI/RPC metrics via `net.peer_stats`/`net gossip-status`, and a selectable `p2p_overlay` backend with libp2p/stub implementations plus telemetry gauges. Gateway REST and metrics-aggregator HTTP stacks still depend on `hyper`/`axum`, keeping the server migration open. | Large-scale WAN chaos tests outstanding; long-lived overlay soak tests and dependency registry crypto/coding wrappers still open. |
-| **Compute Marketplace & CBM** | 95.8 % | Capability-aware scheduler weights offers by reputation, lane-aware matching enforces per-`FeeLane` batching with fairness windows and deadlines, starvation detection, staged seeding, batch throttling, and persisted lane-tagged receipts, settlement tracks CT balances with activation metadata, and telemetry/CLI/RPC surfaces expose queue depths, wait ages, latency histograms, and fee floors. | Escrowed payments and automated SLA enforcement remain rudimentary. |
+| **Networking & Gossip** | 98.3 % | QUIC mutual-TLS rotation with diagnostics/chaos harnesses, cluster `metrics-aggregator`, partition watch with gossip markers, LRU-backed deduplication with adaptive fanout, shard-affinity persistence, CLI/RPC metrics via `net.peer_stats`/`net gossip-status`, and a selectable `p2p_overlay` backend with libp2p/stub implementations plus telemetry gauges. Gateway REST, metrics-aggregator HTTP, explorer, and CLI tooling now run on the shared `httpd` router, eliminating the `hyper`/`axum` stack from production and test harnesses. | Large-scale WAN chaos tests outstanding; long-lived overlay soak tests and dependency registry crypto/coding wrappers still open. |
+| **Compute Marketplace & CBM** | 95.8 % | Capability-aware scheduler weights offers by reputation, lane-aware matching enforces per-`FeeLane` batching with fairness windows and deadlines, starvation detection, staged seeding, batch throttling, and persisted lane-tagged receipts, settlement tracks CT balances with activation metadata, and telemetry/CLI/RPC surfaces expose queue depths, wait ages, latency histograms, and fee floors. | Finish wiring SLA telemetry into Prometheus/Grafana alerts and surface automated resolutions in explorer timelines. |
 | **Trust Lines & DEX** | 85.9 % | Authorization-aware trust lines, cost-based multi-hop routing, slippage-checked order books, and on-ledger escrow with partial-payment proofs. Telemetry gauges `dex_escrow_locked`/`dex_escrow_pending`/`dex_escrow_total` track utilisation (total aggregates all escrowed funds). | Cross-chain settlement proofs and advanced routing features outstanding. |
 | **Cross-Chain Bridges** | 81.9 % | Per-asset channel persistence via `SimpleDb`, multi-signature relayer quorums, challenge windows with slashing, partition-aware deposits, telemetry (`BRIDGE_CHALLENGES_TOTAL`, `BRIDGE_SLASHES_TOTAL`), and expanded CLI/RPC surfaces for pending withdrawals, relayer sets, and dispute logs. | Multi-asset wrapping, external settlement proofs, and long-horizon dispute audits remain. |
 | **Wallets, Light Clients & KYC** | 96.6 % | CLI and hardware wallet support, remote signer workflows, mobile light-client SDKs, session-key delegation, auto-update orchestration, fee-floor caching with localized warnings/JSON output, telemetry-backed QoS overrides, and pluggable KYC hooks. Wallets now consume the shared crypto suite’s first-party Ed25519 backend, propagate escrow hash algorithms and multisig signer sets, export remote signer metrics, integrate platform-specific device probes with telemetry/overrides/log uploads, and now surface rebate history/leaderboards across CLI and explorer. | Polish multisig UX, harden production mobile distributions, and document signer-history exports. |
@@ -73,7 +82,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 - **Run fleet-scale QUIC chaos drills** – invoke `scripts/chaos.sh --quic-loss 0.15 --quic-dup 0.03` across multi-region clusters, harvest retransmit deltas via `sim/quic_chaos_summary.rs`, and extend `docs/networking.md` with mitigation guidance pulled from the new telemetry traces.
 - **Document multisig signer payloads and release verification** – extend `docs/dex.md` and `docs/bridges.md` with the expanded signer-set schema, add release-verifier walkthroughs, update explorer guides, and ensure CLI examples mirror the JSON payload emitted by the wallet.
-- **Ship governance treasury disbursements** – wire ledger tables for queued payouts, expose explorer timelines, surface treasury balances in RPC/CLI outputs, and capture the operational playbook in `docs/governance.md`.
+- **Publish treasury dashboard alerts** – render queued/executed disbursements in explorer widgets, feed the aggregator with treasury metrics, and document operator response workflows in `docs/governance.md`.
 - **Automate release rollout alerting** – add explorer jobs that reconcile `release_history` installs against the signer threshold, publish Grafana panels for stale nodes, and raise alerts when `release_quorum_fail_total` moves without a corresponding signer update.
 - **Stand up anomaly heuristics in the aggregator** – feed correlation caches into preliminary anomaly scoring, auto-request log dumps on clustered `quic_handshake_fail_total{peer}` spikes, and document the response workflow in `docs/monitoring.md`.
 - **Ship operator rollback drills** – expand `docs/governance_release.md` with staged rollback exercises that rehearse `update::rollback_failed_startup`, including guidance for restoring prior binaries and verifying provenance signatures after a revert.
@@ -81,7 +90,7 @@ For a subsystem-by-subsystem breakdown with evidence and remaining gaps, see
 
 ## Near Term
 
-- **Industrial lane SLA enforcement and dashboard surfacing** – enforce deadline slashing for tardy providers, track ETAs and on-time percentages, visualize payout caps, and ship operator remediation guides tied into the new settlement ledger.
+- **Operationalize SLA telemetry alerts** – wire `COMPUTE_SLA_PENDING_TOTAL`, `COMPUTE_SLA_NEXT_DEADLINE_TS`, and resolution feeds into Prometheus/Grafana alerts, surface automated outcomes in explorer timelines, and publish remediation guides for providers.
 - **Range-boost mesh trials and mobile energy heuristics** – prototype BLE/Wi-Fi Direct relays, tune lighthouse multipliers via field energy usage, log mobile battery/CPU metrics, and publish developer heuristics.
 - **Economic simulator runs for emission/fee policy** – parameterize inflation/demand scenarios, run Monte Carlo batches via bench-harness, report top results to governance, and version-control scenarios.
 - **Compute-backed money and instant-app groundwork** – define redeem curves for CBM, prototype local instant-app execution hooks, record resource metrics for redemption, test edge cases, and expose CLI plumbing.

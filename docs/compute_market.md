@@ -87,6 +87,30 @@ skip the arming delay.
   a negative delta, and increments `SLASHING_BURN_CT_TOTAL` plus
   `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}` to highlight SLA breaches.
 
+### SLA Automation & Dashboards
+
+Settlement now maintains an explicit SLA queue so overdue jobs are swept
+automatically without relying on manual operator intervention. Every call to
+`Settlement::track_sla` persists the provider/consumer bonds, deadline, and the
+submission timestamp. A background sweep (`Settlement::sweep_overdue`) or any
+job lifecycle transition inside `Market` enforces deadlines by burning the
+provider bond, refunding the consumer bond, and appending a structured
+`SlaResolution` record for dashboards to consume.
+
+Telemetry exposes the live queue via:
+
+- `COMPUTE_SLA_PENDING_TOTAL` – gauge of queued SLA records.
+- `COMPUTE_SLA_NEXT_DEADLINE_TS` – unix timestamp of the next deadline so
+  Grafana panels can show time-to-breach.
+- `COMPUTE_SLA_AUTOMATED_SLASH_TOTAL` – counter of automated slashes triggered
+  by the sweep.
+
+The settlement JSON audit log records the last violation in
+`metadata.last_sla_violation`, and CLI/RPC surfaces surface the same state so
+operators can correlate burned CT with job identifiers. Dashboards should plot
+the pending gauge alongside `SLASHING_BURN_CT_TOTAL` to ensure the automatic
+enforcement path remains healthy.
+
 Sample RPC calls (adjust the node URL as needed):
 
 ```bash

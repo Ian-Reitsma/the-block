@@ -1,3 +1,4 @@
+use httpd::{HttpError, Request, Response, Router, StatusCode};
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -149,9 +150,22 @@ impl Indexer {
     }
 }
 
+pub fn router(state: Indexer) -> Router<Indexer> {
+    Router::new(state).get("/blocks", list_blocks)
+}
+
+async fn list_blocks(request: Request<Indexer>) -> Result<Response, HttpError> {
+    let indexer = request.state().clone();
+    let blocks = indexer
+        .all_blocks()
+        .map_err(|err| HttpError::Handler(err.to_string()))?;
+    Response::new(StatusCode::OK).json(&blocks)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpd::StatusCode;
 
     #[test]
     fn index_and_query() {
@@ -183,5 +197,30 @@ mod tests {
         };
         idx.index_receipt(&rec).unwrap();
         assert_eq!(idx.all_receipts().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn router_lists_blocks() {
+        runtime::block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let db = dir.path().join("idx.db");
+            let idx = Indexer::open(&db).unwrap();
+            let rec = BlockRecord {
+                hash: "abc".into(),
+                height: 1,
+                timestamp: 42,
+            };
+            idx.index_block(&rec).unwrap();
+
+            let app = router(idx.clone());
+            let response = app
+                .handle(app.request_builder().path("/blocks").build())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let blocks: Vec<BlockRecord> = serde_json::from_slice(response.body()).unwrap();
+            assert_eq!(blocks.len(), 1);
+            assert_eq!(blocks[0].hash, "abc");
+        });
     }
 }

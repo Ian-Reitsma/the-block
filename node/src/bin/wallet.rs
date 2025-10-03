@@ -1,6 +1,5 @@
 #![deny(warnings)]
 
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
 use hex::{decode, encode};
@@ -11,36 +10,36 @@ use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 use the_block::storage::placement::NodeCatalog;
 
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command as CliCommand, CommandBuilder, CommandId},
+    parse::Matches,
+};
+
+mod cli_support;
+use cli_support::{collect_args, parse_matches, print_root_help};
+
+const DEFAULT_RPC_URL: &str = "http://127.0.0.1:8545";
+const DEFAULT_ESCROW_RELEASE_URL: &str = "http://127.0.0.1:26658";
+
 /// Simple CLI for wallet operations.
-#[derive(Parser)]
-#[command(name = "wallet")]
+#[derive(Debug)]
 struct Cli {
-    #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum Commands {
     /// Generate a new wallet and print the public key as hex.
     Generate,
     /// Sign a message given a hex-encoded seed and print the signature as hex.
     Sign {
-        #[arg(long, help = "32-byte seed in hex", conflicts_with = "remote_signer")]
         seed: Option<String>,
         message: String,
-        #[arg(
-            long = "remote-signer",
-            help = "remote signer endpoint (repeatable)",
-            conflicts_with = "seed"
-        )]
         remote_signer: Vec<String>,
-        #[arg(long, help = "client TLS certificate (PEM)", requires = "signer_key")]
         signer_cert: Option<String>,
-        #[arg(long, help = "client TLS private key (PEM)", requires = "signer_cert")]
         signer_key: Option<String>,
-        #[arg(long, help = "CA certificate for remote signer")]
         signer_ca: Option<String>,
-        #[arg(long, default_value_t = 1)]
         threshold: usize,
     },
     /// Sign a message using a mock hardware wallet.
@@ -49,47 +48,21 @@ enum Commands {
     /// `threshold` field so the staking RPC can validate multi-party
     /// approvals.
     StakeRole {
-        #[arg(value_enum)]
         role: Role,
         amount: u64,
-        #[arg(
-            long,
-            help = "32-byte seed in hex",
-            required_unless_present = "remote_signer"
-        )]
         seed: Option<String>,
-        #[arg(
-            long = "remote-signer",
-            help = "remote signer endpoint (repeatable)",
-            required_unless_present = "seed"
-        )]
         remote_signer: Vec<String>,
-        #[arg(long, help = "client TLS certificate (PEM)", requires = "signer_key")]
         signer_cert: Option<String>,
-        #[arg(long, help = "client TLS private key (PEM)", requires = "signer_cert")]
         signer_key: Option<String>,
-        #[arg(long, help = "CA certificate for remote signer")]
         signer_ca: Option<String>,
-        #[arg(long, help = "withdraw instead of bond")]
         withdraw: bool,
-        #[arg(long, default_value = "http://127.0.0.1:8545")]
         url: String,
-        #[arg(long, default_value_t = 1)]
         threshold: usize,
     },
     /// Query rent-escrow balance for an account
-    EscrowBalance {
-        account: String,
-        #[arg(long, default_value = "http://127.0.0.1:8545")]
-        url: String,
-    },
+    EscrowBalance { account: String, url: String },
     /// Release funds from a DEX escrow, verifying the provided proof
-    EscrowRelease {
-        id: u64,
-        amount: u64,
-        #[arg(long, default_value = "http://127.0.0.1:26658")]
-        url: String,
-    },
+    EscrowRelease { id: u64, amount: u64, url: String },
     /// Chunk a file and build a BlobTx, printing the blob root
     BlobPut { file: String, owner: String },
     /// Retrieve a blob by its manifest hash and write to an output file
@@ -98,11 +71,214 @@ enum Commands {
     Help,
 }
 
-#[derive(Copy, Clone, Debug, ValueEnum)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum Role {
     Gateway,
     Storage,
     Exec,
+}
+
+impl std::str::FromStr for Role {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "gateway" => Ok(Role::Gateway),
+            "storage" => Ok(Role::Storage),
+            "exec" => Ok(Role::Exec),
+            other => Err(format!("invalid role '{other}'")),
+        }
+    }
+}
+
+fn build_command() -> CliCommand {
+    CommandBuilder::new(CommandId("wallet"), "wallet", "Wallet operations")
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.generate"),
+                "generate",
+                "Generate a new wallet",
+            )
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(CommandId("wallet.sign"), "sign", "Sign a message")
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "seed",
+                    "seed",
+                    "32-byte seed in hex",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "message",
+                    "Message to sign",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "remote_signer",
+                        "remote-signer",
+                        "Remote signer endpoint (repeatable)",
+                    )
+                    .multiple(true),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "signer_cert",
+                    "signer-cert",
+                    "Client TLS certificate (PEM)",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "signer_key",
+                    "signer-key",
+                    "Client TLS private key (PEM)",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "signer_ca",
+                    "signer-ca",
+                    "CA certificate for remote signer",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("threshold", "threshold", "Remote signer threshold")
+                        .default("1"),
+                ))
+                .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.sign_hw"),
+                "sign-hw",
+                "Sign a message using a mock hardware wallet",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "message",
+                "Message to sign",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.stake_role"),
+                "stake-role",
+                "Stake CT for a service role",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "role",
+                "Service role (gateway|storage|exec)",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "amount",
+                "Amount to stake",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "seed",
+                "seed",
+                "32-byte seed in hex",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new(
+                    "remote_signer",
+                    "remote-signer",
+                    "Remote signer endpoint (repeatable)",
+                )
+                .multiple(true),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "signer_cert",
+                "signer-cert",
+                "Client TLS certificate (PEM)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "signer_key",
+                "signer-key",
+                "Client TLS private key (PEM)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "signer_ca",
+                "signer-ca",
+                "CA certificate for remote signer",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "withdraw",
+                "withdraw",
+                "Withdraw instead of bond",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "Wallet RPC endpoint").default(DEFAULT_RPC_URL),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("threshold", "threshold", "Remote signer threshold").default("1"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.escrow_balance"),
+                "escrow-balance",
+                "Query rent-escrow balance for an account",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "account",
+                "Account identifier",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "Wallet RPC endpoint").default(DEFAULT_RPC_URL),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.escrow_release"),
+                "escrow-release",
+                "Release funds from a DEX escrow",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Escrow identifier",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "amount",
+                "Amount to release",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "DEX escrow endpoint")
+                    .default(DEFAULT_ESCROW_RELEASE_URL),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.blob_put"),
+                "blob-put",
+                "Chunk a file and build a BlobTx",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "file",
+                "File to upload",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "owner",
+                "Owner account",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.blob_get"),
+                "blob-get",
+                "Retrieve a blob by its manifest hash",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "blob_id",
+                "Blob manifest hash",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "out",
+                "Output file",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(CommandId("wallet.help"), "help", "Show help information").build(),
+        )
+        .build()
 }
 
 struct DummyProvider {
@@ -115,8 +291,153 @@ impl Provider for DummyProvider {
     }
 }
 
+fn build_cli(matches: Matches) -> Result<Cli, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing subcommand".to_string())?;
+
+    let command = match sub {
+        "generate" => Commands::Generate,
+        "sign" => parse_sign(sub_matches)?,
+        "sign-hw" => Commands::SignHw {
+            message: require_positional(sub_matches, "message")?,
+        },
+        "stake-role" => parse_stake_role(sub_matches)?,
+        "escrow-balance" => Commands::EscrowBalance {
+            account: require_positional(sub_matches, "account")?,
+            url: sub_matches
+                .get_string("url")
+                .unwrap_or_else(|| DEFAULT_RPC_URL.to_string()),
+        },
+        "escrow-release" => Commands::EscrowRelease {
+            id: parse_u64(&require_positional(sub_matches, "id")?, "id")?,
+            amount: parse_u64(&require_positional(sub_matches, "amount")?, "amount")?,
+            url: sub_matches
+                .get_string("url")
+                .unwrap_or_else(|| DEFAULT_ESCROW_RELEASE_URL.to_string()),
+        },
+        "blob-put" => Commands::BlobPut {
+            file: require_positional(sub_matches, "file")?,
+            owner: require_positional(sub_matches, "owner")?,
+        },
+        "blob-get" => Commands::BlobGet {
+            blob_id: require_positional(sub_matches, "blob_id")?,
+            out: require_positional(sub_matches, "out")?,
+        },
+        "help" => Commands::Help,
+        other => return Err(format!("unknown subcommand '{other}'")),
+    };
+
+    Ok(Cli { command })
+}
+
+fn parse_sign(matches: &Matches) -> Result<Commands, String> {
+    let seed = matches.get_string("seed");
+    let remote_signer = matches.get_strings("remote_signer");
+    if seed.is_some() && !remote_signer.is_empty() {
+        return Err("--seed cannot be used with --remote-signer".to_string());
+    }
+
+    if remote_signer.is_empty() && matches.get_string("signer_cert").is_some() {
+        return Err("--signer-cert requires --remote-signer".to_string());
+    }
+    if remote_signer.is_empty() && matches.get_string("signer_key").is_some() {
+        return Err("--signer-key requires --remote-signer".to_string());
+    }
+
+    let signer_cert = matches.get_string("signer_cert");
+    let signer_key = matches.get_string("signer_key");
+    if signer_cert.is_some() ^ signer_key.is_some() {
+        return Err("--signer-cert and --signer-key must be provided together".to_string());
+    }
+
+    let threshold = matches
+        .get_string("threshold")
+        .unwrap_or_else(|| "1".to_string())
+        .parse::<usize>()
+        .map_err(|err| format!("invalid threshold: {err}"))?;
+
+    Ok(Commands::Sign {
+        seed,
+        message: require_positional(matches, "message")?,
+        remote_signer,
+        signer_cert,
+        signer_key,
+        signer_ca: matches.get_string("signer_ca"),
+        threshold,
+    })
+}
+
+fn parse_stake_role(matches: &Matches) -> Result<Commands, String> {
+    let seed = matches.get_string("seed");
+    let remote_signer = matches.get_strings("remote_signer");
+
+    if seed.is_none() && remote_signer.is_empty() {
+        return Err("either --seed or --remote-signer must be provided".to_string());
+    }
+    if seed.is_some() && !remote_signer.is_empty() {
+        return Err("--seed cannot be combined with --remote-signer".to_string());
+    }
+
+    let signer_cert = matches.get_string("signer_cert");
+    let signer_key = matches.get_string("signer_key");
+    if signer_cert.is_some() ^ signer_key.is_some() {
+        return Err("--signer-cert and --signer-key must be provided together".to_string());
+    }
+
+    let role = require_positional(matches, "role")?.parse::<Role>()?;
+    let amount = parse_u64(&require_positional(matches, "amount")?, "amount")?;
+    let threshold = matches
+        .get_string("threshold")
+        .unwrap_or_else(|| "1".to_string())
+        .parse::<usize>()
+        .map_err(|err| format!("invalid threshold: {err}"))?;
+
+    Ok(Commands::StakeRole {
+        role,
+        amount,
+        seed,
+        remote_signer,
+        signer_cert,
+        signer_key,
+        signer_ca: matches.get_string("signer_ca"),
+        withdraw: matches.get_flag("withdraw"),
+        url: matches
+            .get_string("url")
+            .unwrap_or_else(|| DEFAULT_RPC_URL.to_string()),
+        threshold,
+    })
+}
+
+fn require_positional(matches: &Matches, name: &str) -> Result<String, String> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+        .ok_or_else(|| format!("missing argument '{name}'"))
+}
+
+fn parse_u64(value: &str, name: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .map_err(|err| format!("invalid {name}: {err}"))
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let command = build_command();
+    let (bin, args) = collect_args("wallet");
+    let matches = match parse_matches(&command, &bin, args) {
+        Some(matches) => matches,
+        None => return,
+    };
+
+    let cli = match build_cli(matches) {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(2);
+        }
+    };
+
     match cli.command {
         Commands::Generate => {
             let wallet = Wallet::generate();
@@ -336,7 +657,7 @@ fn main() {
             }
         }
         Commands::Help => {
-            Cli::command().print_help().expect("print help");
+            print_root_help(&command, &bin);
         }
     }
 }

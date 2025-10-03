@@ -129,7 +129,29 @@ fn render_dependencies(mut summaries: BTreeMap<String, WrapperSummary>) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpmock::prelude::*;
+    use httpd::{Response, Router, ServerConfig, StatusCode};
+    use runtime::{self, net::TcpListener};
+
+    fn start_wrappers_server(body: String) -> (String, runtime::JoinHandle<std::io::Result<()>>) {
+        runtime::block_on(async move {
+            let router = Router::new(body).get("/wrappers", |req| {
+                let state = req.state().clone();
+                async move {
+                    Ok(Response::new(StatusCode::OK)
+                        .with_header("content-type", "application/json")
+                        .with_body(state.as_ref().as_bytes().to_vec()))
+                }
+            });
+            let listener = TcpListener::bind("127.0.0.1:0".parse().unwrap())
+                .await
+                .expect("bind test listener");
+            let addr = format!("http://{}", listener.local_addr().expect("listener addr"));
+            let handle = runtime::spawn(async move {
+                httpd::serve(listener, router, ServerConfig::default()).await
+            });
+            (addr, handle)
+        })
+    }
 
     fn sample_summary() -> BTreeMap<String, WrapperSummary> {
         let mut summaries = BTreeMap::new();
@@ -191,18 +213,12 @@ node: node-a\n  codec_deserialize_fail_total{codec=\"json\",profile=\"none\",ver
 
     #[test]
     fn fetch_dependencies_parses_response() {
-        let server = MockServer::start();
         let body = serde_json::to_string(&sample_summary()).unwrap();
-        let _mock = server.mock(|when, then| {
-            when.method(GET).path("/wrappers");
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(body);
-        });
-
-        let report = fetch_dependencies(&server.base_url()).expect("report");
+        let (url, handle) = start_wrappers_server(body);
+        let report = fetch_dependencies(&url).expect("report");
         assert!(report.starts_with("node: node-a"));
         assert!(report.contains("codec_serialize_fail_total"));
         assert!(report.contains("node: node-b"));
+        handle.abort();
     }
 }

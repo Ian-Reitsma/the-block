@@ -9,9 +9,9 @@ wallet = { path = "../../crates/wallet" }
 hex = "0.4"
 serde = { version = "1", features=["derive"] }
 serde_json = "1"
-tiny_http = "0.12"
 the_block = { path = "../../node" }
 httpd = { path = "../../crates/httpd" }
+runtime = { path = "../../crates/runtime" }
 
 [[bin]]
 name = "mesh"

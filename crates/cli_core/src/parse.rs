@@ -182,43 +182,116 @@ fn parse_option_token(
             *index += 1;
         }
         ArgSpec::Option(option) => {
-            let mut value = inline_value;
-            if value.is_none() {
-                if option.takes_value {
-                    *index += 1;
-                    value = args.get(*index).cloned();
-                    if value.is_none() {
+            let mut consumed = 1;
+            let mut raw_values: Vec<String> = Vec::new();
+
+            if option.takes_value {
+                let mut first = inline_value;
+                if first.is_none() {
+                    let next_index = *index + consumed;
+                    first = args.get(next_index).cloned();
+                    if first.is_none() {
                         return Err(ParseError::MissingValue(key.to_string()));
                     }
-                } else {
-                    value = Some(String::new());
+                    consumed += 1;
                 }
-            }
 
-            let value = value.expect("value present");
-            if let Some(allowed) = option.value_enum {
-                if !allowed.contains(&value.as_str()) {
-                    return Err(ParseError::InvalidChoice {
-                        option: key.to_string(),
-                        value,
-                    });
+                if let Some(value) = first {
+                    raw_values.push(value);
                 }
-            }
 
-            let parsed = if let Some(delim) = option.value_delimiter {
-                ParsedValue::Many(
-                    value
-                        .split(delim)
-                        .filter(|segment| !segment.is_empty())
-                        .map(|segment| segment.trim().to_string())
-                        .collect(),
-                )
+                if let Some(required) = option.required_values {
+                    while raw_values.len() < required {
+                        let next_index = *index + consumed;
+                        if let Some(value) = args.get(next_index).cloned() {
+                            raw_values.push(value);
+                            consumed += 1;
+                        } else {
+                            return Err(ParseError::MissingValue(key.to_string()));
+                        }
+                    }
+                }
+            } else if let Some(value) = inline_value {
+                raw_values.push(value);
             } else {
+                raw_values.push(String::new());
+            }
+
+            let mut values: Vec<String> = Vec::new();
+            if let Some(delim) = option.value_delimiter {
+                for raw in raw_values {
+                    values.extend(
+                        raw.split(delim)
+                            .filter(|segment| !segment.is_empty())
+                            .map(|segment| segment.trim().to_string()),
+                    );
+                }
+            } else {
+                values = raw_values;
+            }
+
+            if let Some(required) = option.required_values {
+                if values.len() < required {
+                    return Err(ParseError::MissingValue(key.to_string()));
+                }
+            }
+
+            if let Some(allowed) = option.value_enum {
+                for value in &values {
+                    if !allowed.contains(&value.as_str()) {
+                        return Err(ParseError::InvalidChoice {
+                            option: key.to_string(),
+                            value: value.clone(),
+                        });
+                    }
+                }
+            }
+
+            let parsed = if option.value_delimiter.is_some() {
+                ParsedValue::Many(values)
+            } else if option.multiple || values.len() > 1 {
+                ParsedValue::Many(values)
+            } else if let Some(value) = values.into_iter().next() {
                 ParsedValue::Single(value)
+            } else {
+                ParsedValue::None
             };
 
-            matches.values.insert(option.name, parsed);
-            *index += 1;
+            if option.multiple {
+                matches
+                    .values
+                    .entry(option.name)
+                    .and_modify(|existing| match (existing.clone(), parsed.clone()) {
+                        (ParsedValue::Many(mut left), ParsedValue::Many(right)) => {
+                            left.extend(right);
+                            *existing = ParsedValue::Many(left);
+                        }
+                        (ParsedValue::Many(mut left), ParsedValue::Single(right)) => {
+                            left.push(right);
+                            *existing = ParsedValue::Many(left);
+                        }
+                        (ParsedValue::Single(left), ParsedValue::Many(mut right)) => {
+                            let mut collected = vec![left];
+                            collected.append(&mut right);
+                            *existing = ParsedValue::Many(collected);
+                        }
+                        (ParsedValue::Single(left), ParsedValue::Single(right)) => {
+                            *existing = ParsedValue::Many(vec![left, right]);
+                        }
+                        (_, ParsedValue::None) => {}
+                        (ParsedValue::None, other) => {
+                            *existing = other;
+                        }
+                        _ => {
+                            *existing = parsed.clone();
+                        }
+                    })
+                    .or_insert(parsed);
+            } else {
+                matches.values.insert(option.name, parsed);
+            }
+
+            *index += consumed;
         }
         ArgSpec::Positional(_) => unreachable!("positional spec matched as option"),
     }

@@ -1,14 +1,21 @@
 use codec::{self, JsonProfile};
-use runtime::io::BufferedTcpStream;
 use runtime::net::{TcpListener, TcpStream};
+use runtime::ws::{self, ServerStream};
 use runtime::{spawn, timeout};
+use rustls::crypto::{self, CryptoProvider};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::server::WebPkiClientVerifier;
+use rustls::{RootCertStore, ServerConfig as RustlsServerConfig, ServerConnection};
+use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::fmt;
+use std::fs::File;
 use std::future::Future;
-use std::io;
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +30,195 @@ pub use client::{Client as HttpClient, ClientConfig, ClientError, ClientResponse
 pub use jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcRouter};
 
 pub(crate) const JSON_CODEC: codec::Codec = codec::Codec::Json(JsonProfile::Canonical);
+
+/// Asynchronous IO abstraction allowing the HTTP server to operate over raw
+/// TCP streams as well as TLS sessions that decrypt into an in-memory
+/// plaintext transport.
+pub trait ConnectionIo: Send + 'static {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, usize>;
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> IoFuture<'a, usize>;
+    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()>;
+    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()>;
+}
+
+pub trait UpgradeIo: ConnectionIo + Sized {
+    type WebSocket: ws::WebSocketIo;
+    fn supports_websocket(&self) -> bool;
+    fn into_websocket(self) -> Result<Self::WebSocket, HttpError>;
+}
+
+/// Minimal buffering layer used by the HTTP parser. The implementation mirrors
+/// `runtime::io::BufferedTcpStream` but operates on any transport satisfying the
+/// [`ConnectionIo`] contract.
+struct BufferedStream<S> {
+    inner: S,
+    buffer: Vec<u8>,
+    consumed: usize,
+}
+
+impl<S> BufferedStream<S>
+where
+    S: ConnectionIo,
+{
+    fn new(inner: S) -> Self {
+        Self {
+            inner,
+            buffer: Vec::with_capacity(1024),
+            consumed: 0,
+        }
+    }
+
+    async fn read_line(&mut self, line: &mut String) -> io::Result<usize> {
+        let initial_len = line.len();
+        loop {
+            if let Some(pos) = self.available().iter().position(|&b| b == b'\n') {
+                let end = pos + 1;
+                {
+                    let available = self.available();
+                    self.push_chunk(line, &available[..end])?;
+                }
+                self.consume(end);
+                return Ok(line.len() - initial_len);
+            }
+
+            let mut temp = [0u8; 1024];
+            let read = self.inner.read(&mut temp).await?;
+            if read == 0 {
+                if self.available().is_empty() {
+                    return Ok(0);
+                }
+                let consumed = {
+                    let available = self.available();
+                    self.push_chunk(line, available)?;
+                    available.len()
+                };
+                self.consume(consumed);
+                return Ok(line.len() - initial_len);
+            }
+            self.buffer.extend_from_slice(&temp[..read]);
+        }
+    }
+
+    async fn read_exact(&mut self, buf: &mut [u8]) -> io::Result<()> {
+        let mut offset = 0usize;
+        if !self.available().is_empty() {
+            let to_copy = {
+                let available = self.available();
+                let to_copy = buf.len().min(available.len());
+                buf[..to_copy].copy_from_slice(&available[..to_copy]);
+                to_copy
+            };
+            self.consume(to_copy);
+            offset += to_copy;
+        }
+        while offset < buf.len() {
+            let read = self.inner.read(&mut buf[offset..]).await?;
+            if read == 0 {
+                return Err(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "connection closed before filling buffer",
+                ));
+            }
+            offset += read;
+        }
+        Ok(())
+    }
+
+    async fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
+        while !buf.is_empty() {
+            let written = self.inner.write(buf).await?;
+            if written == 0 {
+                return Err(io::Error::new(
+                    ErrorKind::WriteZero,
+                    "connection failed to write remaining bytes",
+                ));
+            }
+            buf = &buf[written..];
+        }
+        self.inner.flush().await
+    }
+
+    async fn shutdown(&mut self) -> io::Result<()> {
+        self.inner.shutdown().await
+    }
+
+    fn into_inner(self) -> S {
+        self.inner
+    }
+
+    fn inner_ref(&self) -> &S {
+        &self.inner
+    }
+
+    fn available(&self) -> &[u8] {
+        &self.buffer[self.consumed..]
+    }
+
+    fn consume(&mut self, amount: usize) {
+        debug_assert!(amount <= self.available().len());
+        self.consumed += amount;
+        self.recycle_buffer();
+    }
+
+    fn recycle_buffer(&mut self) {
+        if self.consumed == 0 {
+            return;
+        }
+        if self.consumed >= self.buffer.len() {
+            self.buffer.clear();
+            self.consumed = 0;
+            return;
+        }
+        if self.consumed > self.buffer.len() / 2 || self.buffer.len() > 4096 {
+            let remaining = self.buffer.len() - self.consumed;
+            self.buffer.copy_within(self.consumed.., 0);
+            self.buffer.truncate(remaining);
+            self.consumed = 0;
+        }
+    }
+
+    fn push_chunk(&self, line: &mut String, chunk: &[u8]) -> io::Result<()> {
+        match std::str::from_utf8(chunk) {
+            Ok(part) => {
+                line.push_str(part);
+                Ok(())
+            }
+            Err(err) => Err(io::Error::new(ErrorKind::InvalidData, err)),
+        }
+    }
+}
+
+impl ConnectionIo for TcpStream {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, usize> {
+        Box::pin(async move { TcpStream::read(self, buf).await })
+    }
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> IoFuture<'a, usize> {
+        Box::pin(async move { TcpStream::write(self, buf).await })
+    }
+
+    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()> {
+        Box::pin(async move { TcpStream::flush(self).await })
+    }
+
+    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()> {
+        Box::pin(async move { TcpStream::shutdown(self).await })
+    }
+}
+
+impl UpgradeIo for TcpStream {
+    type WebSocket = TcpStream;
+
+    fn supports_websocket(&self) -> bool {
+        true
+    }
+
+    fn into_websocket(self) -> Result<Self::WebSocket, HttpError> {
+        Ok(self)
+    }
+}
+
+type IoFuture<'a, T> = Pin<Box<dyn Future<Output = io::Result<T>> + Send + 'a>>;
 
 /// HTTP method enumeration supporting the subset of verbs required by the node
 /// and metrics aggregator stacks.
@@ -73,12 +269,14 @@ impl StatusCode {
     pub const CREATED: StatusCode = StatusCode(201);
     pub const ACCEPTED: StatusCode = StatusCode(202);
     pub const NO_CONTENT: StatusCode = StatusCode(204);
+    pub const SWITCHING_PROTOCOLS: StatusCode = StatusCode(101);
     pub const BAD_REQUEST: StatusCode = StatusCode(400);
     pub const UNAUTHORIZED: StatusCode = StatusCode(401);
     pub const FORBIDDEN: StatusCode = StatusCode(403);
     pub const NOT_FOUND: StatusCode = StatusCode(404);
     pub const METHOD_NOT_ALLOWED: StatusCode = StatusCode(405);
     pub const CONFLICT: StatusCode = StatusCode(409);
+    pub const TOO_MANY_REQUESTS: StatusCode = StatusCode(429);
     pub const PAYLOAD_TOO_LARGE: StatusCode = StatusCode(413);
     pub const UNSUPPORTED_MEDIA_TYPE: StatusCode = StatusCode(415);
     pub const INTERNAL_SERVER_ERROR: StatusCode = StatusCode(500);
@@ -96,6 +294,7 @@ impl StatusCode {
             404 => "Not Found",
             405 => "Method Not Allowed",
             409 => "Conflict",
+            429 => "Too Many Requests",
             413 => "Payload Too Large",
             415 => "Unsupported Media Type",
             500 => "Internal Server Error",
@@ -139,6 +338,156 @@ impl Default for ServerConfig {
     }
 }
 
+/// TLS configuration wrapper that loads certificates and keys while keeping the
+/// underlying `rustls` configuration shareable across connection tasks.
+#[derive(Clone)]
+pub struct ServerTlsConfig {
+    config: Arc<RustlsServerConfig>,
+}
+
+impl ServerTlsConfig {
+    /// Creates a TLS configuration from an existing `rustls` server config.
+    pub fn new(config: RustlsServerConfig) -> io::Result<Self> {
+        ensure_crypto_provider()?;
+        Ok(Self {
+            config: Arc::new(config),
+        })
+    }
+
+    /// Loads certificate and private key PEM files into a `rustls` server
+    /// configuration with no client authentication requirements.
+    pub fn from_pem_files(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let certs = load_certs(cert_path)?;
+        let key = load_private_key(key_path)?;
+        let config = RustlsServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+        Self::new(config)
+    }
+
+    /// Loads certificates, keys, and a client CA to enforce mutual TLS.
+    pub fn from_pem_files_with_client_auth(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+        client_ca_path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let config = build_server_config_with_client_auth(
+            cert_path,
+            key_path,
+            client_ca_path,
+            ClientAuthMode::Required,
+        )?;
+        Self::new(config)
+    }
+
+    /// Loads certificates, keys, and a client CA while allowing optional client
+    /// authentication.
+    pub fn from_pem_files_with_optional_client_auth(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+        client_ca_path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let config = build_server_config_with_client_auth(
+            cert_path,
+            key_path,
+            client_ca_path,
+            ClientAuthMode::Optional,
+        )?;
+        Self::new(config)
+    }
+
+    /// Returns a clone of the underlying `rustls` configuration.
+    pub fn config(&self) -> Arc<RustlsServerConfig> {
+        self.config.clone()
+    }
+}
+
+fn ensure_crypto_provider() -> io::Result<()> {
+    if CryptoProvider::get_default().is_none() {
+        if let Err(err) = crypto::ring::default_provider().install_default() {
+            if CryptoProvider::get_default().is_none() {
+                return Err(io::Error::new(
+                    ErrorKind::Other,
+                    format!("failed to install rustls crypto provider: {err:?}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn load_certs(path: impl AsRef<Path>) -> io::Result<Vec<CertificateDer<'static>>> {
+    let mut reader = io::BufReader::new(File::open(path)?);
+    certs(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
+}
+
+fn load_private_key(path: impl AsRef<Path>) -> io::Result<PrivateKeyDer<'static>> {
+    let path = path.as_ref();
+    let mut reader = io::BufReader::new(File::open(path)?);
+    let mut keys = pkcs8_private_keys(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+    if let Some(key) = keys.pop() {
+        return Ok(PrivateKeyDer::from(key));
+    }
+    let mut reader = io::BufReader::new(File::open(path)?);
+    let mut keys = rsa_private_keys(&mut reader)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+    keys.pop()
+        .map(PrivateKeyDer::from)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "missing private key"))
+}
+
+fn load_root_store(path: impl AsRef<Path>) -> io::Result<RootCertStore> {
+    let ca_certs = load_certs(path)?;
+    if ca_certs.is_empty() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "client CA bundle is empty",
+        ));
+    }
+    let mut store = RootCertStore::empty();
+    for cert in ca_certs {
+        store
+            .add(cert)
+            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+    }
+    Ok(store)
+}
+
+enum ClientAuthMode {
+    Required,
+    Optional,
+}
+
+fn build_server_config_with_client_auth(
+    cert_path: impl AsRef<Path>,
+    key_path: impl AsRef<Path>,
+    client_ca_path: impl AsRef<Path>,
+    mode: ClientAuthMode,
+) -> io::Result<RustlsServerConfig> {
+    let certs = load_certs(cert_path)?;
+    let key = load_private_key(key_path)?;
+    let store = load_root_store(client_ca_path)?;
+    let builder = WebPkiClientVerifier::builder(Arc::new(store));
+    let verifier = match mode {
+        ClientAuthMode::Required => builder.build(),
+        ClientAuthMode::Optional => builder.allow_unauthenticated().build(),
+    }
+    .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+    RustlsServerConfig::builder()
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(certs, key)
+        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
+}
+
 /// Error type returned by the HTTP server implementation.
 #[derive(Debug, Error)]
 pub enum HttpError {
@@ -162,6 +511,10 @@ pub enum HttpError {
     Handler(String),
     #[error("codec error: {0}")]
     Codec(#[from] codec::Error),
+    #[error("websocket upgrade failed: {0}")]
+    WebSocketUpgrade(&'static str),
+    #[error("websocket upgrades are not supported over tls listeners")]
+    WebSocketTlsUnsupported,
 }
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -169,10 +522,28 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 type Handler<State> =
     Arc<dyn Fn(Request<State>) -> BoxFuture<'static, Result<Response, HttpError>> + Send + Sync>;
 
+type UpgradeHandler<State> = Arc<
+    dyn Fn(
+            Request<State>,
+            WebSocketRequest,
+        ) -> BoxFuture<'static, Result<WebSocketResponse, HttpError>>
+        + Send
+        + Sync,
+>;
+
+type UpgradeCallback =
+    Box<dyn FnOnce(ServerStream) -> BoxFuture<'static, Result<(), HttpError>> + Send + 'static>;
+
 struct Route<State> {
     method: Method,
     pattern: RoutePattern,
     handler: Handler<State>,
+}
+
+struct UpgradeRoute<State> {
+    method: Method,
+    pattern: RoutePattern,
+    handler: UpgradeHandler<State>,
 }
 
 struct RoutePattern {
@@ -182,9 +553,180 @@ struct RoutePattern {
 enum Segment {
     Literal(String),
     Param(String),
+    Wildcard(Option<String>),
+}
+
+struct TlsStream {
+    stream: TcpStream,
+    connection: ServerConnection,
+    eof: bool,
+    write_buf: Vec<u8>,
+}
+
+impl TlsStream {
+    async fn accept(stream: TcpStream, config: Arc<RustlsServerConfig>) -> io::Result<Self> {
+        let connection = ServerConnection::new(config)
+            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+        let mut this = Self {
+            stream,
+            connection,
+            eof: false,
+            write_buf: Vec::with_capacity(2048),
+        };
+        this.complete_handshake().await?;
+        Ok(this)
+    }
+
+    async fn complete_handshake(&mut self) -> io::Result<()> {
+        while self.connection.is_handshaking() {
+            if self.connection.wants_write() {
+                self.flush_tls().await?;
+            }
+            if self.connection.wants_read() {
+                self.read_tls_frame().await?;
+            } else {
+                // Even if no read is requested we still need to process any
+                // outstanding handshake messages before re-checking state.
+                self.process_new_packets().await?;
+            }
+        }
+        self.flush_tls().await
+    }
+
+    async fn read_plain(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        loop {
+            {
+                let mut reader = self.connection.reader();
+                match reader.read(buf) {
+                    Ok(0) => {}
+                    Ok(n) => return Ok(n),
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => {}
+                    Err(err) => return Err(io::Error::new(ErrorKind::InvalidData, err)),
+                }
+            }
+            if self.eof {
+                return Ok(0);
+            }
+            self.read_tls_frame().await?;
+        }
+    }
+
+    async fn write_plain(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let written = {
+            let mut writer = self.connection.writer();
+            writer
+                .write(buf)
+                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?
+        };
+        self.flush_tls().await?;
+        Ok(written)
+    }
+
+    async fn shutdown_plain(&mut self) -> io::Result<()> {
+        self.connection.send_close_notify();
+        self.flush_tls().await?;
+        self.stream.shutdown().await
+    }
+
+    async fn flush_tls(&mut self) -> io::Result<()> {
+        while self.connection.wants_write() {
+            self.write_buf.clear();
+            self.connection
+                .write_tls(&mut self.write_buf)
+                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+            if self.write_buf.is_empty() {
+                break;
+            }
+            self.stream.write_all(&self.write_buf).await?;
+        }
+        self.stream.flush().await
+    }
+
+    async fn read_tls_frame(&mut self) -> io::Result<()> {
+        let mut buf = [0u8; 2048];
+        let read = self.stream.read(&mut buf).await?;
+        if read == 0 {
+            self.eof = true;
+        } else {
+            let mut cursor = io::Cursor::new(&buf[..read]);
+            self.connection
+                .read_tls(&mut cursor)
+                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
+        }
+        self.process_new_packets().await
+    }
+
+    async fn process_new_packets(&mut self) -> io::Result<()> {
+        match self.connection.process_new_packets() {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                let io_err = io::Error::new(ErrorKind::InvalidData, err);
+                let _ = self.flush_tls().await;
+                Err(io_err)
+            }
+        }
+    }
+}
+
+impl ConnectionIo for TlsStream {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, usize> {
+        Box::pin(async move { self.read_plain(buf).await })
+    }
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> IoFuture<'a, usize> {
+        Box::pin(async move { self.write_plain(buf).await })
+    }
+
+    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()> {
+        Box::pin(async move { self.flush_tls().await })
+    }
+
+    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()> {
+        Box::pin(async move { self.shutdown_plain().await })
+    }
+}
+
+impl UpgradeIo for TlsStream {
+    type WebSocket = Self;
+
+    fn supports_websocket(&self) -> bool {
+        true
+    }
+
+    fn into_websocket(self) -> Result<Self::WebSocket, HttpError> {
+        Ok(self)
+    }
+}
+
+impl ws::WebSocketIo for TlsStream {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> ws::IoFuture<'a, usize> {
+        Box::pin(async move { self.read_plain(buf).await })
+    }
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> ws::IoFuture<'a, usize> {
+        Box::pin(async move { self.write_plain(buf).await })
+    }
+
+    fn flush<'a>(&'a mut self) -> ws::IoFuture<'a, ()> {
+        Box::pin(async move { self.flush_tls().await })
+    }
+
+    fn shutdown<'a>(&'a mut self) -> ws::IoFuture<'a, ()> {
+        Box::pin(async move { self.shutdown_plain().await })
+    }
 }
 
 impl<State> Clone for Route<State> {
+    fn clone(&self) -> Self {
+        Self {
+            method: self.method,
+            pattern: self.pattern.clone(),
+            handler: self.handler.clone(),
+        }
+    }
+}
+
+impl<State> Clone for UpgradeRoute<State> {
     fn clone(&self) -> Self {
         Self {
             method: self.method,
@@ -207,48 +749,79 @@ impl Clone for Segment {
         match self {
             Segment::Literal(val) => Segment::Literal(val.clone()),
             Segment::Param(val) => Segment::Param(val.clone()),
+            Segment::Wildcard(name) => Segment::Wildcard(name.clone()),
         }
     }
 }
 
 impl RoutePattern {
     fn parse(pattern: &str) -> Self {
-        let segments = pattern
-            .trim_start_matches('/')
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .map(|segment| {
-                if let Some(name) = segment.strip_prefix(':') {
-                    Segment::Param(name.to_string())
+        let mut segments = Vec::new();
+        let mut saw_wildcard = false;
+        for segment in pattern.trim_start_matches('/').split('/') {
+            if segment.is_empty() {
+                continue;
+            }
+            if saw_wildcard {
+                break;
+            }
+            if let Some(name) = segment.strip_prefix(':') {
+                segments.push(Segment::Param(name.to_string()));
+                continue;
+            }
+            if let Some(name) = segment.strip_prefix('*') {
+                let wildcard_name = if name.is_empty() {
+                    None
                 } else {
-                    Segment::Literal(segment.to_string())
-                }
-            })
-            .collect();
+                    Some(name.to_string())
+                };
+                segments.push(Segment::Wildcard(wildcard_name));
+                saw_wildcard = true;
+                continue;
+            }
+            segments.push(Segment::Literal(segment.to_string()));
+        }
         Self { segments }
     }
 
     fn matches(&self, path: &str, params: &mut HashMap<String, String>) -> bool {
         let mut param_buf = HashMap::new();
-        let segs: Vec<&str> = path
+        let segments: Vec<&str> = path
             .trim_start_matches('/')
             .split('/')
             .filter(|s| !s.is_empty())
             .collect();
-        if segs.len() != self.segments.len() {
-            return false;
-        }
-        for (expected, actual) in self.segments.iter().zip(segs.iter()) {
-            match expected {
+        let mut index = 0usize;
+        for segment in &self.segments {
+            match segment {
                 Segment::Literal(lit) => {
+                    let Some(actual) = segments.get(index) else {
+                        return false;
+                    };
                     if lit != actual {
                         return false;
                     }
+                    index += 1;
                 }
                 Segment::Param(name) => {
+                    let Some(actual) = segments.get(index) else {
+                        return false;
+                    };
                     param_buf.insert(name.clone(), (*actual).to_string());
+                    index += 1;
+                }
+                Segment::Wildcard(name) => {
+                    let remainder = segments[index..].join("/");
+                    if let Some(key) = name {
+                        param_buf.insert(key.clone(), remainder);
+                    }
+                    params.extend(param_buf);
+                    return true;
                 }
             }
+        }
+        if index != segments.len() {
+            return false;
         }
         params.extend(param_buf);
         true
@@ -324,6 +897,10 @@ impl<State> Request<State> {
         &self.query
     }
 
+    pub fn query_param(&self, name: &str) -> Option<&str> {
+        self.query.get(name).map(|s| s.as_str())
+    }
+
     pub fn headers(&self) -> &HashMap<String, String> {
         &self.headers
     }
@@ -358,6 +935,193 @@ impl<State> Request<State> {
 
     fn set_params(&mut self, params: HashMap<String, String>) {
         self.params = params;
+    }
+}
+
+/// Builder used to construct [`Request`] values for unit tests and direct
+/// handler invocation without a socket.
+pub struct RequestBuilder<State> {
+    method: Method,
+    path: String,
+    query: Vec<(String, String)>,
+    headers: HashMap<String, String>,
+    body: Vec<u8>,
+    state: Arc<State>,
+    remote_addr: SocketAddr,
+    keep_alive: bool,
+    version: String,
+}
+
+impl<State> RequestBuilder<State> {
+    fn new(state: Arc<State>) -> Self {
+        Self {
+            method: Method::Get,
+            path: "/".to_string(),
+            query: Vec::new(),
+            headers: HashMap::new(),
+            body: Vec::new(),
+            state,
+            remote_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
+            keep_alive: true,
+            version: "HTTP/1.1".to_string(),
+        }
+    }
+
+    pub fn method(mut self, method: Method) -> Self {
+        self.method = method;
+        self
+    }
+
+    pub fn path(mut self, path: impl Into<String>) -> Self {
+        let path = path.into();
+        self.path = if path.is_empty() {
+            "/".to_string()
+        } else {
+            path
+        };
+        self
+    }
+
+    pub fn query_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.query.push((key.into(), value.into()));
+        self
+    }
+
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers
+            .insert(name.into().to_ascii_lowercase(), value.into());
+        self
+    }
+
+    pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
+        self.body = body.into();
+        self
+    }
+
+    pub fn json<T: Serialize>(mut self, value: &T) -> Result<Self, HttpError> {
+        self.body = codec::serialize(JSON_CODEC, value)?;
+        self.headers
+            .insert("content-type".into(), "application/json".into());
+        Ok(self)
+    }
+
+    pub fn remote_addr(mut self, remote: SocketAddr) -> Self {
+        self.remote_addr = remote;
+        self
+    }
+
+    pub fn keep_alive(mut self, keep_alive: bool) -> Self {
+        self.keep_alive = keep_alive;
+        self
+    }
+
+    pub fn version(mut self, version: impl Into<String>) -> Self {
+        self.version = version.into();
+        self
+    }
+
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.headers.insert("host".into(), host.into());
+        self
+    }
+
+    pub fn build(self) -> Request<State> {
+        let mut headers = self.headers;
+        if !headers.contains_key("host") {
+            headers.insert("host".into(), "localhost".into());
+        }
+        let mut target = if self.path.is_empty() {
+            "/".to_string()
+        } else {
+            self.path
+        };
+        if !self.query.is_empty() {
+            let mut serializer = form_urlencoded::Serializer::new(String::new());
+            for (key, value) in &self.query {
+                serializer.append_pair(key, value);
+            }
+            target.push('?');
+            target.push_str(&serializer.finish());
+        }
+        Request::new(
+            self.method,
+            target,
+            self.version,
+            headers,
+            self.body,
+            HashMap::new(),
+            self.state,
+            self.remote_addr,
+            self.keep_alive,
+        )
+    }
+}
+
+/// Metadata extracted from a WebSocket upgrade request.
+pub struct WebSocketRequest {
+    key: String,
+    protocols: Vec<String>,
+}
+
+impl WebSocketRequest {
+    fn new(key: String, protocols: Vec<String>) -> Self {
+        Self { key, protocols }
+    }
+
+    /// Returns the Sec-WebSocket-Accept value derived from the client key.
+    fn accept_value(&self) -> String {
+        ws::handshake_accept(&self.key)
+    }
+
+    /// Returns the list of requested subprotocols in the order supplied by
+    /// the client.
+    pub fn protocols(&self) -> &[String] {
+        &self.protocols
+    }
+
+    /// Returns `true` when the client advertised the provided subprotocol.
+    pub fn has_protocol(&self, protocol: &str) -> bool {
+        self.protocols
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(protocol))
+    }
+}
+
+/// Decision returned by WebSocket upgrade handlers.
+pub enum WebSocketResponse {
+    Upgrade {
+        headers: Vec<(String, String)>,
+        on_upgrade: UpgradeCallback,
+    },
+    Reject(Response),
+}
+
+impl WebSocketResponse {
+    pub fn accept<F, Fut>(on_upgrade: F) -> Self
+    where
+        F: FnOnce(ServerStream) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), HttpError>> + Send + 'static,
+    {
+        Self::Upgrade {
+            headers: Vec::new(),
+            on_upgrade: Box::new(move |stream| Box::pin(on_upgrade(stream))),
+        }
+    }
+
+    pub fn reject(response: Response) -> Self {
+        Self::Reject(response)
+    }
+
+    pub fn with_protocol(mut self, protocol: impl Into<String>) -> Self {
+        self = self.with_header("sec-websocket-protocol", protocol);
+        self
+    }
+
+    pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        if let Self::Upgrade { headers, .. } = &mut self {
+            headers.push((name.into().to_ascii_lowercase(), value.into()));
+        }
+        self
     }
 }
 
@@ -413,6 +1177,16 @@ impl Response {
     pub fn is_keep_alive(&self) -> bool {
         self.keep_alive
     }
+
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(|s| s.as_str())
+    }
+
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
 }
 
 impl Clone for Response {
@@ -429,6 +1203,7 @@ impl Clone for Response {
 /// Router structure used to dispatch requests to handlers.
 pub struct Router<State> {
     routes: Arc<Vec<Route<State>>>,
+    upgrades: Arc<Vec<UpgradeRoute<State>>>,
     state: Arc<State>,
 }
 
@@ -439,15 +1214,29 @@ where
     pub fn new(state: State) -> Self {
         Self {
             routes: Arc::new(Vec::new()),
+            upgrades: Arc::new(Vec::new()),
             state: Arc::new(state),
         }
     }
 
-    fn with_routes(state: Arc<State>, routes: Vec<Route<State>>) -> Self {
+    fn with_routes(
+        state: Arc<State>,
+        routes: Vec<Route<State>>,
+        upgrades: Vec<UpgradeRoute<State>>,
+    ) -> Self {
         Self {
             routes: Arc::new(routes),
+            upgrades: Arc::new(upgrades),
             state,
         }
+    }
+
+    pub fn request_builder(&self) -> RequestBuilder<State> {
+        RequestBuilder::new(self.state.clone())
+    }
+
+    pub async fn handle(&self, request: Request<State>) -> Result<Response, HttpError> {
+        self.dispatch(request).await
     }
 
     pub fn get<F, Fut>(self, pattern: &str, handler: F) -> Self
@@ -489,7 +1278,25 @@ where
             pattern: RoutePattern::parse(pattern),
             handler,
         });
-        Router::with_routes(self.state.clone(), routes)
+        Router::with_routes(self.state.clone(), routes, (*self.upgrades).clone())
+    }
+
+    pub fn upgrade<F, Fut>(self, pattern: &str, handler: F) -> Self
+    where
+        F: Fn(Request<State>, WebSocketRequest) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<WebSocketResponse, HttpError>> + Send + 'static,
+    {
+        let handler: UpgradeHandler<State> = Arc::new(move |req, upgrade| {
+            let fut = handler(req, upgrade);
+            Box::pin(fut)
+        });
+        let mut upgrades = (*self.upgrades).clone();
+        upgrades.push(UpgradeRoute {
+            method: Method::Get,
+            pattern: RoutePattern::parse(pattern),
+            handler,
+        });
+        Router::with_routes(self.state.clone(), (*self.routes).clone(), upgrades)
     }
 
     async fn dispatch(&self, request: Request<State>) -> Result<Response, HttpError> {
@@ -506,12 +1313,29 @@ where
         }
         Ok(Response::new(StatusCode::NOT_FOUND).with_body(Vec::new()))
     }
+
+    fn match_upgrade(
+        &self,
+        request: &Request<State>,
+    ) -> Option<(UpgradeHandler<State>, HashMap<String, String>)> {
+        for route in self.upgrades.iter() {
+            if route.method != request.method() {
+                continue;
+            }
+            let mut params = HashMap::new();
+            if route.pattern.matches(request.path(), &mut params) {
+                return Some((route.handler.clone(), params));
+            }
+        }
+        None
+    }
 }
 
 impl<State> Clone for Router<State> {
     fn clone(&self) -> Self {
         Self {
             routes: self.routes.clone(),
+            upgrades: self.upgrades.clone(),
             state: self.state.clone(),
         }
     }
@@ -538,16 +1362,48 @@ where
     }
 }
 
-async fn handle_connection<State>(
-    stream: TcpStream,
+/// Serves HTTPS traffic by completing TLS handshakes before dispatching to the
+/// HTTP request loop.
+pub async fn serve_tls<State>(
+    listener: TcpListener,
+    router: Router<State>,
+    config: ServerConfig,
+    tls: ServerTlsConfig,
+) -> io::Result<()>
+where
+    State: Send + Sync + 'static,
+{
+    loop {
+        let (stream, remote) = listener.accept().await?;
+        let router = router.clone();
+        let config = config.clone();
+        let tls = tls.clone();
+        spawn(async move {
+            match TlsStream::accept(stream, tls.config()).await {
+                Ok(tls_stream) => {
+                    if let Err(err) = handle_connection(tls_stream, remote, router, config).await {
+                        tracing::debug!(?err, "http tls connection error");
+                    }
+                }
+                Err(err) => {
+                    tracing::debug!(?err, "tls handshake failed");
+                }
+            }
+        });
+    }
+}
+
+async fn handle_connection<State, S>(
+    stream: S,
     remote: SocketAddr,
     router: Router<State>,
     config: ServerConfig,
 ) -> Result<(), HttpError>
 where
     State: Send + Sync + 'static,
+    S: ConnectionIo + UpgradeIo,
 {
-    let mut stream = BufferedTcpStream::new(stream);
+    let mut stream = BufferedStream::new(stream);
     let mut idle_deadline = config.request_timeout;
     loop {
         let request = match timeout(
@@ -568,9 +1424,94 @@ where
             return Ok(());
         };
         idle_deadline = config.request_timeout;
+        let mut request = request;
         let keep_alive = request.keep_alive();
         let keep_alive_allowed = keep_alive && !config.keep_alive.is_zero();
-        let mut response = router.dispatch(request).await?;
+        if let Some((upgrade_handler, params)) = router.match_upgrade(&request) {
+            request.set_params(params);
+            let handshake = match parse_websocket_request(&request) {
+                Ok(info) => info,
+                Err(err) => {
+                    let response = Response::new(StatusCode::BAD_REQUEST)
+                        .with_body(err.to_string().into_bytes())
+                        .close();
+                    timeout(config.request_timeout, async {
+                        stream.write_all(&serialize_response(&response)?).await
+                    })
+                    .await
+                    .map_err(|_| HttpError::Timeout)??;
+                    stream.shutdown().await?;
+                    return Ok(());
+                }
+            };
+            if !stream.inner_ref().supports_websocket() {
+                let response = Response::new(StatusCode::BAD_REQUEST)
+                    .with_body(b"websocket upgrades require plaintext listeners".to_vec())
+                    .close();
+                timeout(config.request_timeout, async {
+                    stream.write_all(&serialize_response(&response)?).await
+                })
+                .await
+                .map_err(|_| HttpError::Timeout)??;
+                stream.shutdown().await?;
+                return Ok(());
+            }
+            let accept_header = handshake.accept_value();
+            let decision = (upgrade_handler)(request, handshake).await?;
+            match decision {
+                WebSocketResponse::Reject(mut response) => {
+                    if !keep_alive_allowed {
+                        response = response.close();
+                    } else if response.is_keep_alive() {
+                        if config.keep_alive.as_secs() > 0 {
+                            response = response.with_header(
+                                "keep-alive",
+                                format!("timeout={}", config.keep_alive.as_secs()),
+                            );
+                        }
+                        response = response.with_connection(true);
+                    }
+                    timeout(config.request_timeout, async {
+                        stream.write_all(&serialize_response(&response)?).await
+                    })
+                    .await
+                    .map_err(|_| HttpError::Timeout)??;
+                    if !response.is_keep_alive() {
+                        stream.shutdown().await?;
+                        break;
+                    }
+                    if keep_alive_allowed {
+                        idle_deadline = config.keep_alive;
+                    }
+                    continue;
+                }
+                WebSocketResponse::Upgrade {
+                    headers,
+                    on_upgrade,
+                } => {
+                    let mut response = Response::new(StatusCode::SWITCHING_PROTOCOLS)
+                        .with_header("upgrade", "websocket")
+                        .with_header("connection", "Upgrade")
+                        .with_header("sec-websocket-accept", accept_header);
+                    for (name, value) in headers {
+                        response = response.with_header(name, value);
+                    }
+                    timeout(config.request_timeout, async {
+                        stream.write_all(&serialize_response(&response)?).await
+                    })
+                    .await
+                    .map_err(|_| HttpError::Timeout)??;
+                    let raw_stream = stream.into_inner().into_websocket()?;
+                    spawn(async move {
+                        if let Err(err) = on_upgrade(ServerStream::from_io(raw_stream)).await {
+                            tracing::debug!(?err, "websocket handler error");
+                        }
+                    });
+                    return Ok(());
+                }
+            }
+        }
+        let mut response = router.handle(request).await?;
         if !keep_alive_allowed {
             response = response.close();
         } else if response.is_keep_alive() {
@@ -588,6 +1529,7 @@ where
         .await
         .map_err(|_| HttpError::Timeout)??;
         if !response.is_keep_alive() {
+            stream.shutdown().await?;
             break;
         }
         if keep_alive_allowed {
@@ -606,10 +1548,12 @@ fn serialize_response(response: &Response) -> io::Result<Vec<u8>> {
     .into_bytes();
     let mut headers = response.headers.clone();
     headers.insert("content-length".into(), response.body.len().to_string());
-    if response.keep_alive {
-        headers.insert("connection".into(), "keep-alive".into());
-    } else {
-        headers.insert("connection".into(), "close".into());
+    if !headers.contains_key("connection") {
+        if response.keep_alive {
+            headers.insert("connection".into(), "keep-alive".into());
+        } else {
+            headers.insert("connection".into(), "close".into());
+        }
     }
     for (name, value) in headers.iter() {
         head.extend_from_slice(name.as_bytes());
@@ -622,14 +1566,60 @@ fn serialize_response(response: &Response) -> io::Result<Vec<u8>> {
     Ok(head)
 }
 
-async fn read_request<State>(
-    stream: &mut BufferedTcpStream,
+fn parse_websocket_request<State>(request: &Request<State>) -> Result<WebSocketRequest, HttpError> {
+    if request.method() != Method::Get {
+        return Err(HttpError::WebSocketUpgrade(
+            "websocket upgrades require GET",
+        ));
+    }
+    let Some(upgrade) = request.header("upgrade") else {
+        return Err(HttpError::WebSocketUpgrade("missing upgrade header"));
+    };
+    if !upgrade.eq_ignore_ascii_case("websocket") {
+        return Err(HttpError::WebSocketUpgrade(
+            "upgrade header must be websocket",
+        ));
+    }
+    let connection = request
+        .header("connection")
+        .unwrap_or("")
+        .split(',')
+        .any(|token| token.trim().eq_ignore_ascii_case("upgrade"));
+    if !connection {
+        return Err(HttpError::WebSocketUpgrade(
+            "connection header must include upgrade",
+        ));
+    }
+    let Some(key) = request.header("sec-websocket-key") else {
+        return Err(HttpError::WebSocketUpgrade("missing Sec-WebSocket-Key"));
+    };
+    let version = request.header("sec-websocket-version").unwrap_or("13");
+    if version != "13" {
+        return Err(HttpError::WebSocketUpgrade("unsupported websocket version"));
+    }
+    let protocols = request
+        .header("sec-websocket-protocol")
+        .map(|value| {
+            value
+                .split(',')
+                .map(|p| p.trim())
+                .filter(|p| !p.is_empty())
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(WebSocketRequest::new(key.to_string(), protocols))
+}
+
+async fn read_request<State, S>(
+    stream: &mut BufferedStream<S>,
     remote: SocketAddr,
     state: Arc<State>,
     max_body: usize,
 ) -> Result<Option<Request<State>>, HttpError>
 where
     State: Send + Sync + 'static,
+    S: ConnectionIo,
 {
     let mut line = String::new();
     let read = stream.read_line(&mut line).await?;

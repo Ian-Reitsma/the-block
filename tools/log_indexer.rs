@@ -6,7 +6,12 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose, Engine as _};
-use clap::{Parser, Subcommand};
+use cli_core::{
+    arg::{ArgSpec, OptionSpec, PositionalSpec},
+    command::{Command as CliCommand, CommandBuilder, CommandId},
+    help::HelpGenerator,
+    parse::{Matches, ParseError, Parser},
+};
 use coding::{
     decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor, Encryptor,
     CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
@@ -389,108 +394,247 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
     Ok(out)
 }
 
-#[derive(Parser, Debug)]
-#[command(about = "Index and query structured logs", version)]
-struct Args {
-    #[command(subcommand)]
-    cmd: Command,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Index a JSON log file into SQLite
-    Index {
-        /// Path to the JSON log file
-        log: String,
-        /// Destination SQLite database file
-        db: String,
-        /// Optional passphrase for encrypting log messages at rest
-        #[arg(long)]
-        passphrase: Option<String>,
-    },
-    /// Query previously indexed logs
-    Search {
-        /// SQLite database file produced by `index`
-        db: String,
-        #[arg(long)]
-        peer: Option<String>,
-        #[arg(long)]
-        tx: Option<String>,
-        #[arg(long)]
-        block: Option<u64>,
-        #[arg(long)]
-        correlation: Option<String>,
-        #[arg(long)]
-        level: Option<String>,
-        #[arg(long)]
-        since: Option<u64>,
-        #[arg(long)]
-        until: Option<u64>,
-        #[arg(long = "after-id")]
-        after_id: Option<u64>,
-        /// Passphrase required to decrypt encrypted log messages
-        #[arg(long)]
-        passphrase: Option<String>,
-        /// Maximum number of rows to return
-        #[arg(long)]
-        limit: Option<usize>,
-    },
+#[derive(Debug)]
+enum CliError {
+    Usage(String),
+    Failure(LogIndexerError),
 }
 
 #[cfg(not(test))]
 fn main() {
-    let args = Args::parse();
-    match args.cmd {
-        Command::Index {
-            log,
-            db,
-            passphrase,
-        } => {
-            let opts = IndexOptions { passphrase };
-            if let Err(e) = index_logs_with_options(Path::new(&log), Path::new(&db), opts) {
-                eprintln!("{e}");
+    if let Err(err) = run_cli() {
+        match err {
+            CliError::Usage(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+            CliError::Failure(err) => {
+                eprintln!("{err}");
                 std::process::exit(1);
             }
         }
-        Command::Search {
-            db,
-            peer,
-            tx,
-            block,
-            correlation,
-            level,
-            since,
-            until,
-            after_id,
-            passphrase,
-            limit,
-        } => {
-            let filter = LogFilter {
-                peer,
-                tx,
-                block,
-                correlation,
-                level,
-                since,
-                until,
-                after_id,
-                limit,
-                passphrase,
-            };
-            match search_logs(Path::new(&db), &filter) {
-                Ok(results) => {
-                    for entry in results {
-                        println!(
-                            "{} [{}] {} :: {}",
-                            entry.timestamp, entry.level, entry.correlation_id, entry.message
-                        );
-                    }
-                }
-                Err(e) => {
-                    eprintln!("{e}");
-                    std::process::exit(1);
-                }
+    }
+}
+
+fn run_cli() -> Result<(), CliError> {
+    let mut argv = std::env::args();
+    let bin = argv.next().unwrap_or_else(|| "log-indexer".to_string());
+    let args: Vec<String> = argv.collect();
+
+    let command = build_command();
+    if args.is_empty() {
+        print_root_help(&command, &bin);
+        return Ok(());
+    }
+
+    let parser = Parser::new(&command);
+    let matches = match parser.parse(&args) {
+        Ok(matches) => matches,
+        Err(ParseError::HelpRequested(path)) => {
+            print_help_for_path(&command, &path);
+            return Ok(());
+        }
+        Err(err) => return Err(CliError::Usage(err.to_string())),
+    };
+
+    match matches
+        .subcommand()
+        .ok_or_else(|| CliError::Usage("missing subcommand".into()))?
+    {
+        ("index", sub_matches) => handle_index(sub_matches),
+        ("search", sub_matches) => handle_search(sub_matches),
+        (other, _) => Err(CliError::Usage(format!("unknown subcommand '{other}'"))),
+    }
+}
+
+fn build_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("log-indexer"),
+        "log-indexer",
+        "Index and query structured logs",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("log-indexer.index"),
+            "index",
+            "Index a JSON log file into SQLite",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "log",
+            "Path to the JSON log file",
+        )))
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "db",
+            "Destination SQLite database file",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "passphrase",
+            "passphrase",
+            "Optional passphrase for encrypting log messages at rest",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("log-indexer.search"),
+            "search",
+            "Query previously indexed logs",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "db",
+            "SQLite database file produced by 'index'",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "peer",
+            "peer",
+            "Filter by peer identifier",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "tx",
+            "tx",
+            "Filter by transaction identifier",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "block",
+            "block",
+            "Filter by block height",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "correlation",
+            "correlation",
+            "Filter by correlation identifier",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "level",
+            "level",
+            "Filter by log level",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "since",
+            "since",
+            "Only include entries after this timestamp",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "until",
+            "until",
+            "Only include entries before this timestamp",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "after-id",
+            "after-id",
+            "Only include entries after this database id",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "passphrase",
+            "passphrase",
+            "Passphrase required to decrypt encrypted log messages",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "limit",
+            "limit",
+            "Maximum number of rows to return",
+        )))
+        .build(),
+    )
+    .build()
+}
+
+fn handle_index(matches: &Matches) -> Result<(), CliError> {
+    let log = positional(matches, "log")?;
+    let db = positional(matches, "db")?;
+    let passphrase = matches.get_string("passphrase");
+    let opts = IndexOptions { passphrase };
+    index_logs_with_options(Path::new(&log), Path::new(&db), opts).map_err(CliError::Failure)
+}
+
+fn handle_search(matches: &Matches) -> Result<(), CliError> {
+    let db = positional(matches, "db")?;
+    let filter = LogFilter {
+        peer: matches.get_string("peer"),
+        tx: matches.get_string("tx"),
+        block: parse_option_u64(matches, "block")?,
+        correlation: matches.get_string("correlation"),
+        level: matches.get_string("level"),
+        since: parse_option_u64(matches, "since")?,
+        until: parse_option_u64(matches, "until")?,
+        after_id: parse_option_u64(matches, "after-id")?,
+        limit: parse_option_usize(matches, "limit")?,
+        passphrase: matches.get_string("passphrase"),
+    };
+
+    match search_logs(Path::new(&db), &filter) {
+        Ok(results) => {
+            for entry in results {
+                println!(
+                    "{} [{}] {} :: {}",
+                    entry.timestamp, entry.level, entry.correlation_id, entry.message
+                );
             }
+            Ok(())
+        }
+        Err(err) => Err(CliError::Failure(err)),
+    }
+}
+
+fn positional(matches: &Matches, name: &str) -> Result<String, CliError> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+        .ok_or_else(|| CliError::Usage(format!("missing '{name}' argument")))
+}
+
+fn parse_option_u64(matches: &Matches, name: &str) -> Result<Option<u64>, CliError> {
+    matches
+        .get(name)
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|err| CliError::Usage(err.to_string()))
+        })
+        .transpose()
+}
+
+fn parse_option_usize(matches: &Matches, name: &str) -> Result<Option<usize>, CliError> {
+    matches
+        .get(name)
+        .map(|value| {
+            value
+                .parse::<usize>()
+                .map_err(|err| CliError::Usage(err.to_string()))
+        })
+        .transpose()
+}
+
+fn print_root_help(command: &CliCommand, bin: &str) {
+    let generator = HelpGenerator::new(command);
+    println!("{}", generator.render());
+    println!("\nRun '{bin} <subcommand> --help' for details on a command.");
+}
+
+fn print_help_for_path(root: &CliCommand, path: &str) {
+    let segments: Vec<&str> = path.split_whitespace().collect();
+    if let Some(cmd) = find_command(root, &segments) {
+        let generator = HelpGenerator::new(cmd);
+        println!("{}", generator.render());
+    }
+}
+
+fn find_command<'a>(root: &'a CliCommand, path: &[&str]) -> Option<&'a CliCommand> {
+    if path.is_empty() {
+        return Some(root);
+    }
+
+    let mut current = root;
+    for segment in path.iter().skip(1) {
+        if let Some(next) = current
+            .subcommands
+            .iter()
+            .find(|command| command.name == *segment)
+        {
+            current = next;
+        } else {
+            return None;
         }
     }
+    Some(current)
 }

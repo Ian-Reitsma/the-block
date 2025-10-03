@@ -1,0 +1,17 @@
+[req]
+distinguished_name = dn
+prompt = no
+x509_extensions = v3_ca
+
+[dn]
+C = US
+ST = CA
+L = SF
+O = TheBlock
+OU = Dev
+CN = Test CA
+
+[v3_ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash

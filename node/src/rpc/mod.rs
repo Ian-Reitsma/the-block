@@ -19,11 +19,16 @@ use base64::Engine;
 use bincode;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use hex;
+use httpd::{
+    serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
+    WebSocketRequest, WebSocketResponse,
+};
 use once_cell::sync::Lazy;
-use runtime::io::BufferedTcpStream;
-use runtime::net::{TcpListener, TcpStream};
-use runtime::sync::{oneshot, semaphore::Semaphore};
-use runtime::timeout;
+use runtime::net::TcpListener;
+use runtime::sync::{
+    oneshot,
+    semaphore::{OwnedSemaphorePermit, Semaphore},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -36,6 +41,7 @@ use std::sync::{
 };
 use std::time::Duration;
 use subtle::ConstantTimeEq;
+use url::form_urlencoded;
 
 pub mod ledger;
 pub mod limiter;
@@ -69,6 +75,103 @@ static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_LOCALNET_DB_PATH").unwrap_or_else(|_| "localnet_db".into());
     Mutex::new(SimpleDb::open_named(names::LOCALNET_RECEIPTS, &path))
 });
+
+struct RpcState {
+    bc: Arc<Mutex<Blockchain>>,
+    mining: Arc<AtomicBool>,
+    nonces: Arc<Mutex<HashSet<(String, u64)>>>,
+    handles: Arc<Mutex<HandleRegistry>>,
+    dids: Arc<Mutex<DidRegistry>>,
+    runtime_cfg: Arc<RpcRuntimeConfig>,
+    clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    tokens_per_sec: f64,
+    ban_secs: u64,
+    client_timeout: u64,
+    concurrent: Arc<Semaphore>,
+}
+
+impl RpcState {
+    async fn acquire(&self) -> Result<OwnedSemaphorePermit, HttpError> {
+        self.concurrent
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| HttpError::Handler("rpc semaphore closed".into()))
+    }
+
+    fn check_rate_limit(&self, remote: SocketAddr) -> Option<Response> {
+        match limiter::check_client(
+            &remote.ip(),
+            &self.clients,
+            self.tokens_per_sec,
+            self.ban_secs,
+            self.client_timeout,
+        ) {
+            Ok(_) => None,
+            Err(code) => {
+                telemetry_rpc_error(code);
+                let err = RpcError {
+                    code: code.rpc_code(),
+                    message: code.message(),
+                };
+                let resp = RpcResponse::Error {
+                    jsonrpc: "2.0",
+                    error: err,
+                    id: None,
+                };
+                let response = Response::new(StatusCode::TOO_MANY_REQUESTS)
+                    .json(&resp)
+                    .unwrap_or_else(|_| {
+                        Response::new(StatusCode::TOO_MANY_REQUESTS).with_body(b"{}".to_vec())
+                    })
+                    .close();
+                Some(response)
+            }
+        }
+    }
+
+    fn apply_cors(&self, mut response: Response, origin: Option<&str>) -> Response {
+        if let Some(origin) = origin {
+            if self
+                .runtime_cfg
+                .cors_allow_origins
+                .iter()
+                .any(|allowed| allowed == origin)
+            {
+                response = response.with_header("access-control-allow-origin", origin);
+            }
+        }
+        response
+    }
+
+    fn is_host_allowed(&self, host: Option<&str>) -> bool {
+        let Some(host) = host else {
+            return false;
+        };
+        self.runtime_cfg
+            .allowed_hosts
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(host.trim()))
+    }
+
+    fn runtime(&self) -> Arc<RpcRuntimeConfig> {
+        Arc::clone(&self.runtime_cfg)
+    }
+}
+
+fn render_request_path(request: &Request<RpcState>) -> String {
+    if request.query().is_empty() {
+        request.path().to_string()
+    } else {
+        let mut serializer = form_urlencoded::Serializer::new(String::new());
+        let mut pairs: Vec<_> = request.query().iter().collect();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        for (key, value) in pairs {
+            serializer.append_pair(key, value);
+        }
+        format!("{}?{}", request.path(), serializer.finish())
+    }
+}
 
 pub struct RpcRuntimeConfig {
     allowed_hosts: Vec<String>,
@@ -352,457 +455,352 @@ fn check_nonce(
     Ok(())
 }
 
-pub async fn handle_conn(
-    stream: TcpStream,
-    bc: Arc<Mutex<Blockchain>>,
-    mining: Arc<AtomicBool>,
-    nonces: Arc<Mutex<HashSet<(String, u64)>>>,
-    handles: Arc<Mutex<HandleRegistry>>,
-    dids: Arc<Mutex<DidRegistry>>,
-    runtime_cfg: Arc<RpcRuntimeConfig>,
-) {
-    let mut reader = BufferedTcpStream::new(stream);
-    let peer_ip = reader.get_ref().peer_addr().ok().map(|a| a.ip());
-
-    // Read request line with timeout to avoid hanging connections.
-    let mut line = String::new();
-    match timeout(runtime_cfg.request_timeout, reader.read_line(&mut line)).await {
-        Ok(Ok(_)) => {}
-        _ => return,
-    }
-
-    let mut parts = line.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
-    let path = parts.next().unwrap_or("").to_string();
-
-    // Parse headers. Accept both CRLF and LF-only terminators.
-    let mut content_len = 0usize;
-    let mut expect_continue = false;
-    let mut host = String::new();
-    let mut origin = String::new();
-    let mut auth: Option<String> = None;
-    let mut ws_key: Option<String> = None;
-    let mut ws_upgrade = false;
-    let mut ws_connection_upgrade = false;
-    let mut ws_version: Option<String> = None;
-    loop {
-        line.clear();
-        let read = match timeout(runtime_cfg.request_timeout, reader.read_line(&mut line)).await {
-            Ok(Ok(n)) => n,
-            _ => return,
-        };
-        if read == 0 {
-            // EOF before headers complete
-            break;
+fn execute_rpc(
+    state: &RpcState,
+    request: RpcRequest,
+    auth: Option<&str>,
+    peer_ip: Option<IpAddr>,
+) -> RpcResponse {
+    let runtime_cfg = state.runtime();
+    let id = request.id.clone();
+    let method_str = request.method.as_str();
+    let authorized = match runtime_cfg.admin_token.as_ref() {
+        Some(token) => {
+            let expected = format!("Bearer {token}");
+            auth.map(|h| {
+                let a = h.as_bytes();
+                let b = expected.as_bytes();
+                a.len() == b.len() && a.ct_eq(b).into()
+            })
+            .unwrap_or(false)
         }
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        let lower = line.to_lowercase();
-        if let Some(val) = lower.strip_prefix("content-length:") {
-            content_len = val.trim().parse().unwrap_or(0);
-        } else if let Some(val) = lower.strip_prefix("expect:") {
-            if val.trim().starts_with("100-continue") {
-                expect_continue = true;
-            }
-        } else if let Some(val) = lower.strip_prefix("host:") {
-            host = val.trim().to_string();
-        } else if let Some(val) = lower.strip_prefix("origin:") {
-            origin = val.trim().to_string();
-        } else if lower.starts_with("authorization:") {
-            auth = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
-        } else if lower.starts_with("sec-websocket-key:") {
-            ws_key = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
-        } else if let Some(val) = lower.strip_prefix("upgrade:") {
-            if val.trim() == "websocket" {
-                ws_upgrade = true;
-            }
-        } else if let Some(val) = lower.strip_prefix("connection:") {
-            if val.split(',').any(|token| token.trim() == "upgrade") {
-                ws_connection_upgrade = true;
-            }
-        } else if lower.starts_with("sec-websocket-version:") {
-            ws_version = Some(line.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
-        }
-    }
-
-    // If the client sent 'Expect: 100-continue', acknowledge it to unblock senders.
-    if expect_continue {
-        let stream = reader.get_mut();
-        let _ = stream.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await;
-        let _ = stream.flush().await;
-    }
-
-    if method == "OPTIONS" {
-        let mut stream = reader.into_inner();
-        if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
-            let resp = format!("HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: {origin}\r\nAccess-Control-Allow-Methods: POST\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\n\r\n");
-            let _ = stream.write_all(resp.as_bytes()).await;
-        } else {
-            let _ = stream
-                .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
-                .await;
-        }
-        let _ = stream.shutdown().await;
-        return;
-    }
-
-    if !runtime_cfg
-        .allowed_hosts
-        .iter()
-        .any(|h| h.eq_ignore_ascii_case(host.trim()))
-    {
-        let mut stream = reader.into_inner();
-        let _ = stream
-            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
-            .await;
-        let _ = stream.shutdown().await;
-        return;
-    }
-
-    if content_len > runtime_cfg.max_body_bytes {
-        let mut stream = reader.into_inner();
-        let _ = stream
-            .write_all(b"HTTP/1.1 413 Payload Too Large\r\nContent-Length: 0\r\n\r\n")
-            .await;
-        let _ = stream.shutdown().await;
-        return;
-    }
-
-    if method == "GET" && path.starts_with("/vm/trace") {
-        let mut stream = reader.into_inner();
-        let Some(key) = ws_key else {
-            websocket_upgrade_error(&mut stream, "missing Sec-WebSocket-Key").await;
-            let _ = stream.shutdown().await;
-            return;
-        };
-        if let Err(err) =
-            validate_websocket_upgrade(ws_upgrade, ws_connection_upgrade, ws_version.as_deref())
-        {
-            websocket_upgrade_error(&mut stream, err).await;
-            let _ = stream.shutdown().await;
-            return;
-        }
-        let code_hex = path
-            .split('?')
-            .nth(1)
-            .and_then(|q| q.strip_prefix("code="))
-            .unwrap_or("");
-        let code = hex::decode(code_hex).unwrap_or_default();
-        vm_trace::serve_vm_trace(stream, key, code).await;
-        return;
-    } else if method == "GET" && path.starts_with("/logs/search") {
-        let stream = reader.into_inner();
-        let _ = logs::serve_search(stream, &origin, &runtime_cfg, &path).await;
-        return;
-    } else if method == "GET" && path.starts_with("/logs/tail") {
-        let mut stream = reader.into_inner();
-        let Some(key) = ws_key else {
-            websocket_upgrade_error(&mut stream, "missing Sec-WebSocket-Key").await;
-            let _ = stream.shutdown().await;
-            return;
-        };
-        if let Err(err) =
-            validate_websocket_upgrade(ws_upgrade, ws_connection_upgrade, ws_version.as_deref())
-        {
-            websocket_upgrade_error(&mut stream, err).await;
-            let _ = stream.shutdown().await;
-            return;
-        }
-        logs::serve_tail(stream, key, &path).await;
-        return;
-    } else if method == "GET" && path == "/state_stream" {
-        let mut stream = reader.into_inner();
-        let Some(key) = ws_key else {
-            websocket_upgrade_error(&mut stream, "missing Sec-WebSocket-Key").await;
-            let _ = stream.shutdown().await;
-            return;
-        };
-        if let Err(err) =
-            validate_websocket_upgrade(ws_upgrade, ws_connection_upgrade, ws_version.as_deref())
-        {
-            websocket_upgrade_error(&mut stream, err).await;
-            let _ = stream.shutdown().await;
-            return;
-        }
-        state_stream::serve_state_stream(stream, key, Arc::clone(&bc)).await;
-        return;
-    } else if method == "GET" && path == "/badge/status" {
-        let (active, last_mint, last_burn) = {
-            let mut chain = bc.lock().unwrap_or_else(|e| e.into_inner());
-            chain.check_badges();
-            chain.badge_status()
-        };
-        let body = format!(
-            "{{\"active\":{},\"last_mint\":{},\"last_burn\":{}}}",
-            active,
-            last_mint.map_or("null".into(), |v| v.to_string()),
-            last_burn.map_or("null".into(), |v| v.to_string())
-        );
-        let mut headers = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
-            body.len()
-        );
-        if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
-            headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
-        }
-        headers.push_str("\r\n");
-        let resp = format!("{}{}", headers, body);
-        let mut stream = reader.into_inner();
-        let _ = stream.write_all(resp.as_bytes()).await;
-        let _ = stream.shutdown().await;
-        return;
-    }
-    if method == "GET" && path == "/dashboard" {
-        let body = include_str!("../../../dashboard/index.html");
-        let mut headers = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n",
-            body.len()
-        );
-        if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
-            headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
-        }
-        headers.push_str("\r\n");
-        let resp = format!("{}{}", headers, body);
-        let mut stream = reader.into_inner();
-        let _ = stream.write_all(resp.as_bytes()).await;
-        let _ = stream.shutdown().await;
-        return;
-    }
-
-    // Read body (if any) with timeout; default to empty on missing Content-Length.
-    let mut body_bytes = vec![0u8; content_len];
-    if content_len > 0 {
-        if timeout(
-            runtime_cfg.request_timeout,
-            reader.read_exact(&mut body_bytes),
-        )
-        .await
-        .ok()
-        .is_none()
-        {
-            return;
-        }
-    }
-    let body = String::from_utf8_lossy(&body_bytes);
-
-    let req: Result<RpcRequest, _> = serde_json::from_str(&body);
-    let resp = match req {
-        Ok(r) => {
-            let id = r.id.clone();
-            let method_str = r.method.as_str();
-            let authorized = match runtime_cfg.admin_token.as_ref() {
-                Some(t) => {
-                    let expected = format!("Bearer {t}");
-                    match auth.as_deref() {
-                        Some(h) => {
-                            let a = h.as_bytes();
-                            let b = expected.as_bytes();
-                            a.len() == b.len() && a.ct_eq(b).into()
-                        }
-                        None => false,
-                    }
-                }
-                None => false,
-            };
-            if DEBUG_METHODS.contains(&method_str) {
-                if !runtime_cfg.enable_debug || !authorized {
-                    RpcResponse::Error {
-                        jsonrpc: "2.0",
-                        error: RpcError {
-                            code: -32601,
-                            message: "method not found",
-                        },
-                        id,
-                    }
-                } else {
-                    match dispatch(
-                        &r,
-                        Arc::clone(&bc),
-                        Arc::clone(&mining),
-                        Arc::clone(&nonces),
-                        Arc::clone(&handles),
-                        Arc::clone(&dids),
-                        Arc::clone(&runtime_cfg),
-                    ) {
-                        Ok(v) => RpcResponse::Result {
-                            jsonrpc: "2.0",
-                            result: v,
-                            id,
-                        },
-                        Err(e) => RpcResponse::Error {
-                            jsonrpc: "2.0",
-                            error: e,
-                            id,
-                        },
-                    }
-                }
-            } else if ADMIN_METHODS.contains(&method_str) {
-                if !authorized {
-                    RpcResponse::Error {
-                        jsonrpc: "2.0",
-                        error: RpcError {
-                            code: -32601,
-                            message: "method not found",
-                        },
-                        id,
-                    }
-                } else {
-                    match dispatch(
-                        &r,
-                        Arc::clone(&bc),
-                        Arc::clone(&mining),
-                        Arc::clone(&nonces),
-                        Arc::clone(&handles),
-                        Arc::clone(&dids),
-                        Arc::clone(&runtime_cfg),
-                    ) {
-                        Ok(v) => RpcResponse::Result {
-                            jsonrpc: "2.0",
-                            result: v,
-                            id,
-                        },
-                        Err(e) => RpcResponse::Error {
-                            jsonrpc: "2.0",
-                            error: e,
-                            id,
-                        },
-                    }
-                }
-            } else if PUBLIC_METHODS.contains(&method_str) {
-                if matches!(
-                    method_str,
-                    "net.peer_stats"
-                        | "net.peer_stats_all"
-                        | "net.peer_stats_reset"
-                        | "net.peer_stats_export"
-                        | "net.peer_stats_export_all"
-                        | "net.peer_throttle"
-                        | "net.backpressure_clear"
-                ) {
-                    let local = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
-                    if !local {
-                        RpcResponse::Error {
-                            jsonrpc: "2.0",
-                            error: RpcError {
-                                code: -32601,
-                                message: "method not found",
-                            },
-                            id,
-                        }
-                    } else {
-                        if method_str == "net.peer_stats_export" {
-                            if let Some(_path) = r.params.get("path").and_then(|v| v.as_str()) {
-                                #[cfg(feature = "telemetry")]
-                                log::info!(
-                                    "peer_stats_export operator={:?} path={}",
-                                    peer_ip,
-                                    _path
-                                );
-                            } else {
-                                #[cfg(feature = "telemetry")]
-                                log::info!("peer_stats_export operator={:?}", peer_ip);
-                            }
-                        } else if method_str == "net.peer_stats_export_all" {
-                            #[cfg(feature = "telemetry")]
-                            log::info!("peer_stats_export_all operator={:?}", peer_ip);
-                        } else if method_str == "net.peer_throttle" {
-                            let _clear = r
-                                .params
-                                .get("clear")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-                            #[cfg(feature = "telemetry")]
-                            log::info!("peer_throttle operator={:?} clear={}", peer_ip, _clear);
-                        } else if method_str == "net.backpressure_clear" {
-                            #[cfg(feature = "telemetry")]
-                            log::info!("backpressure_clear operator={:?}", peer_ip);
-                        }
-
-                        match dispatch(
-                            &r,
-                            Arc::clone(&bc),
-                            Arc::clone(&mining),
-                            Arc::clone(&nonces),
-                            Arc::clone(&handles),
-                            Arc::clone(&dids),
-                            Arc::clone(&runtime_cfg),
-                        ) {
-                            Ok(v) => RpcResponse::Result {
-                                jsonrpc: "2.0",
-                                result: v,
-                                id,
-                            },
-                            Err(e) => RpcResponse::Error {
-                                jsonrpc: "2.0",
-                                error: e,
-                                id,
-                            },
-                        }
-                    }
-                } else {
-                    match dispatch(
-                        &r,
-                        Arc::clone(&bc),
-                        Arc::clone(&mining),
-                        Arc::clone(&nonces),
-                        Arc::clone(&handles),
-                        Arc::clone(&dids),
-                        Arc::clone(&runtime_cfg),
-                    ) {
-                        Ok(v) => RpcResponse::Result {
-                            jsonrpc: "2.0",
-                            result: v,
-                            id,
-                        },
-                        Err(e) => RpcResponse::Error {
-                            jsonrpc: "2.0",
-                            error: e,
-                            id,
-                        },
-                    }
-                }
-            } else {
-                RpcResponse::Error {
-                    jsonrpc: "2.0",
-                    error: RpcError {
-                        code: -32601,
-                        message: "method not found",
-                    },
-                    id,
-                }
-            }
-        }
-        Err(_) => RpcResponse::Error {
-            jsonrpc: "2.0",
-            error: RpcError {
-                code: -32700,
-                message: "parse error",
-            },
-            id: None,
-        },
+        None => false,
     };
 
-    let body = serde_json::to_string(&resp).unwrap_or_else(|e| {
-        serde_json::json!({
-            "jsonrpc": "2.0",
-            "error": { "code": -32603, "message": e.to_string() },
-            "id": serde_json::Value::Null
+    let dispatch_result = || {
+        dispatch(
+            &request,
+            Arc::clone(&state.bc),
+            Arc::clone(&state.mining),
+            Arc::clone(&state.nonces),
+            Arc::clone(&state.handles),
+            Arc::clone(&state.dids),
+            Arc::clone(&runtime_cfg),
+        )
+    };
+
+    let response = if DEBUG_METHODS.contains(&method_str) {
+        if !runtime_cfg.enable_debug || !authorized {
+            Err(RpcError {
+                code: -32601,
+                message: "method not found",
+            })
+        } else {
+            dispatch_result()
+        }
+    } else if ADMIN_METHODS.contains(&method_str) {
+        if !authorized {
+            Err(RpcError {
+                code: -32601,
+                message: "method not found",
+            })
+        } else {
+            dispatch_result()
+        }
+    } else if PUBLIC_METHODS.contains(&method_str) {
+        if matches!(
+            method_str,
+            "net.peer_stats"
+                | "net.peer_stats_all"
+                | "net.peer_stats_reset"
+                | "net.peer_stats_export"
+                | "net.peer_stats_export_all"
+                | "net.peer_throttle"
+                | "net.backpressure_clear"
+        ) {
+            let local = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+            if !local {
+                Err(RpcError {
+                    code: -32601,
+                    message: "method not found",
+                })
+            } else {
+                if method_str == "net.peer_stats_export" {
+                    if let Some(path) = request.params.get("path").and_then(|v| v.as_str()) {
+                        #[cfg(feature = "telemetry")]
+                        log::info!("peer_stats_export operator={peer_ip:?} path={path}");
+                    } else {
+                        #[cfg(feature = "telemetry")]
+                        log::info!("peer_stats_export operator={peer_ip:?}");
+                    }
+                } else if method_str == "net.peer_stats_export_all" {
+                    #[cfg(feature = "telemetry")]
+                    log::info!("peer_stats_export_all operator={peer_ip:?}");
+                } else if method_str == "net.peer_throttle" {
+                    let clear = request
+                        .params
+                        .get("clear")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    #[cfg(feature = "telemetry")]
+                    log::info!("peer_throttle operator={peer_ip:?} clear={clear}");
+                } else if method_str == "net.backpressure_clear" {
+                    #[cfg(feature = "telemetry")]
+                    log::info!("backpressure_clear operator={peer_ip:?}");
+                }
+                dispatch_result()
+            }
+        } else {
+            dispatch_result()
+        }
+    } else {
+        Err(RpcError {
+            code: -32601,
+            message: "method not found",
         })
-        .to_string()
-    });
-    let mut stream = reader.into_inner();
-    let mut headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n",
-        body.len()
-    );
-    if runtime_cfg.cors_allow_origins.iter().any(|o| o == &origin) {
-        headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
+    };
+
+    match response {
+        Ok(value) => RpcResponse::Result {
+            jsonrpc: "2.0",
+            result: value,
+            id,
+        },
+        Err(error) => RpcResponse::Error {
+            jsonrpc: "2.0",
+            error,
+            id,
+        },
     }
-    headers.push_str("\r\n");
-    let response = format!("{}{}", headers, body);
-    let _ = stream.write_all(response.as_bytes()).await;
-    let _ = stream.shutdown().await;
+}
+
+async fn handle_rpc_options(request: Request<RpcState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let _permit = state.acquire().await?;
+    if let Some(response) = state.check_rate_limit(request.remote_addr()) {
+        return Ok(response);
+    }
+    let origin = request.header("origin");
+    let runtime_cfg = state.runtime();
+    let allowed_origin = origin.and_then(|candidate| {
+        if runtime_cfg
+            .cors_allow_origins
+            .iter()
+            .any(|allowed| allowed == candidate)
+        {
+            Some(candidate)
+        } else {
+            None
+        }
+    });
+    if let Some(origin) = allowed_origin {
+        let response = Response::new(StatusCode::NO_CONTENT)
+            .with_header("access-control-allow-methods", "POST")
+            .with_header(
+                "access-control-allow-headers",
+                "content-type, authorization",
+            );
+        Ok(state.apply_cors(response, Some(origin)))
+    } else {
+        Ok(Response::new(StatusCode::FORBIDDEN).close())
+    }
+}
+
+async fn handle_rpc_post(request: Request<RpcState>) -> Result<Response, HttpError> {
+    let mut request = request;
+    let state = Arc::clone(request.state());
+    let _permit = state.acquire().await?;
+    let remote = request.remote_addr();
+    if let Some(mut response) = state.check_rate_limit(remote) {
+        response = state.apply_cors(response, request.header("origin"));
+        return Ok(response);
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(state.apply_cors(response, request.header("origin")));
+    }
+    let auth = request.header("authorization");
+    let peer_ip = Some(remote.ip());
+    let origin = request.header("origin");
+    let rpc_request = match serde_json::from_slice::<RpcRequest>(request.body_bytes()) {
+        Ok(req) => req,
+        Err(_) => {
+            let response = RpcResponse::Error {
+                jsonrpc: "2.0",
+                error: RpcError {
+                    code: -32700,
+                    message: "parse error",
+                },
+                id: None,
+            };
+            let response = Response::new(StatusCode::OK).json(&response)?;
+            return Ok(state.apply_cors(response, origin));
+        }
+    };
+    let rpc_response = execute_rpc(&state, rpc_request, auth, peer_ip);
+    let response = Response::new(StatusCode::OK).json(&rpc_response)?;
+    Ok(state.apply_cors(response, origin))
+}
+
+async fn handle_logs_search(request: Request<RpcState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let _permit = state.acquire().await?;
+    if let Some(mut response) = state.check_rate_limit(request.remote_addr()) {
+        response = state.apply_cors(response, request.header("origin"));
+        return Ok(response);
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(state.apply_cors(response, request.header("origin")));
+    }
+    let path = render_request_path(&request);
+    let (status, body) = logs::search_response(&path);
+    let response = Response::new(status)
+        .with_header("content-type", "application/json")
+        .with_body(body.into_bytes());
+    Ok(state.apply_cors(response, request.header("origin")))
+}
+
+async fn handle_logs_tail(
+    request: Request<RpcState>,
+    _upgrade: WebSocketRequest,
+) -> Result<WebSocketResponse, HttpError> {
+    let state = Arc::clone(request.state());
+    let permit = state.acquire().await?;
+    if let Some(response) = state.check_rate_limit(request.remote_addr()) {
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    let path = render_request_path(&request);
+    match logs::build_tail_config(&path) {
+        Ok(cfg) => Ok(WebSocketResponse::accept(move |stream| {
+            let permit = permit;
+            async move {
+                logs::run_tail(stream, cfg).await;
+                drop(permit);
+                Ok(())
+            }
+        })),
+        Err(err) => {
+            let (status, body) = logs::map_search_error(err);
+            let response = Response::new(status)
+                .with_header("content-type", "application/json")
+                .with_body(body.into_bytes())
+                .close();
+            Ok(WebSocketResponse::Reject(response))
+        }
+    }
+}
+
+async fn handle_vm_trace(
+    request: Request<RpcState>,
+    _upgrade: WebSocketRequest,
+) -> Result<WebSocketResponse, HttpError> {
+    let state = Arc::clone(request.state());
+    let permit = state.acquire().await?;
+    if let Some(response) = state.check_rate_limit(request.remote_addr()) {
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    if !crate::vm::vm_debug_enabled() {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    let code = request
+        .query_param("code")
+        .and_then(|hex| hex::decode(hex).ok())
+        .unwrap_or_default();
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::VM_TRACE_TOTAL.inc();
+    Ok(WebSocketResponse::accept(move |stream| {
+        let permit = permit;
+        let code = code.clone();
+        async move {
+            vm_trace::run_trace(stream, code).await;
+            drop(permit);
+            Ok(())
+        }
+    }))
+}
+
+async fn handle_state_stream(
+    request: Request<RpcState>,
+    _upgrade: WebSocketRequest,
+) -> Result<WebSocketResponse, HttpError> {
+    let state = Arc::clone(request.state());
+    let permit = state.acquire().await?;
+    if let Some(response) = state.check_rate_limit(request.remote_addr()) {
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(WebSocketResponse::Reject(response));
+    }
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::STATE_STREAM_SUBSCRIBERS_TOTAL.inc();
+    let bc = Arc::clone(&state.bc);
+    Ok(WebSocketResponse::accept(move |stream| {
+        let permit = permit;
+        async move {
+            state_stream::run_stream(stream, bc).await;
+            drop(permit);
+            Ok(())
+        }
+    }))
+}
+
+async fn handle_badge_status(request: Request<RpcState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let _permit = state.acquire().await?;
+    if let Some(mut response) = state.check_rate_limit(request.remote_addr()) {
+        response = state.apply_cors(response, request.header("origin"));
+        return Ok(response);
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(state.apply_cors(response, request.header("origin")));
+    }
+    let (active, last_mint, last_burn) = {
+        let mut chain = state.bc.lock().unwrap_or_else(|e| e.into_inner());
+        chain.check_badges();
+        chain.badge_status()
+    };
+    let body = serde_json::json!({
+        "active": active,
+        "last_mint": last_mint,
+        "last_burn": last_burn,
+    })
+    .to_string();
+    let response = Response::new(StatusCode::OK)
+        .with_header("content-type", "application/json")
+        .with_body(body.into_bytes());
+    Ok(state.apply_cors(response, request.header("origin")))
+}
+
+async fn handle_dashboard(request: Request<RpcState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let _permit = state.acquire().await?;
+    if let Some(mut response) = state.check_rate_limit(request.remote_addr()) {
+        response = state.apply_cors(response, request.header("origin"));
+        return Ok(response);
+    }
+    if !state.is_host_allowed(request.header("host")) {
+        let response = Response::new(StatusCode::FORBIDDEN).close();
+        return Ok(state.apply_cors(response, request.header("origin")));
+    }
+    let body = include_str!("../../../dashboard/index.html")
+        .as_bytes()
+        .to_vec();
+    let response = Response::new(StatusCode::OK)
+        .with_header("content-type", "text/html; charset=utf-8")
+        .with_body(body);
+    Ok(state.apply_cors(response, request.header("origin")))
 }
 
 fn dispatch(
@@ -2632,34 +2630,6 @@ fn dispatch(
     })
 }
 
-async fn websocket_upgrade_error(stream: &mut TcpStream, message: &str) {
-    let body = format!("{message}\n");
-    let response = format!(
-        "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    let _ = stream.write_all(response.as_bytes()).await;
-    let _ = stream.flush().await;
-}
-
-fn validate_websocket_upgrade(
-    upgrade: bool,
-    connection_upgrade: bool,
-    version: Option<&str>,
-) -> Result<(), &'static str> {
-    if !upgrade {
-        return Err("missing Upgrade: websocket header");
-    }
-    if !connection_upgrade {
-        return Err("Connection: upgrade header required");
-    }
-    match version {
-        Some(v) if v == "13" => Ok(()),
-        _ => Err("unsupported Sec-WebSocket-Version"),
-    }
-}
-
 pub async fn run_rpc_server(
     bc: Arc<Mutex<Blockchain>>,
     mining: Arc<AtomicBool>,
@@ -2676,6 +2646,7 @@ pub async fn run_rpc_server(
     let listener = TcpListener::bind(bind_addr).await?;
     let local = listener.local_addr()?.to_string();
     let _ = ready.send(local);
+
     let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
     let handles = Arc::new(Mutex::new(HandleRegistry::open("identity_db")));
     let did_path = DidRegistry::default_path();
@@ -2708,50 +2679,35 @@ pub async fn run_rpc_server(
         admin_token,
         relay_only: cfg.relay_only,
     });
-    let global = Arc::new(Semaphore::new(1024));
-    loop {
-        let (mut stream, addr) = listener.accept().await?;
-        let permit = match global.clone().acquire_owned().await {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        if let Err(code) = limiter::check_client(
-            &addr.ip(),
-            &clients,
-            tokens_per_sec,
-            ban_secs,
-            client_timeout,
-        ) {
-            telemetry_rpc_error(code);
-            let err = RpcError {
-                code: code.rpc_code(),
-                message: code.message(),
-            };
-            let body = serde_json::to_string(&RpcResponse::Error {
-                jsonrpc: "2.0",
-                error: err,
-                id: None,
-            })
-            .unwrap_or_else(|e| panic!("serialize RPC error response: {e}"));
-            let response = format!(
-                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
-            );
-            stream.write_all(response.as_bytes()).await?;
-            stream.shutdown().await?;
-            continue;
-        }
-        let bc = Arc::clone(&bc);
-        let mining = Arc::clone(&mining);
-        let nonces = Arc::clone(&nonces);
-        let handles_cl = Arc::clone(&handles);
-        let dids_cl = Arc::clone(&dids);
-        let cfg_cl = Arc::clone(&runtime_cfg);
-        runtime::spawn(async move {
-            let _p = permit;
-            handle_conn(stream, bc, mining, nonces, handles_cl, dids_cl, cfg_cl).await;
-        });
-    }
+
+    let state = RpcState {
+        bc,
+        mining,
+        nonces,
+        handles,
+        dids,
+        runtime_cfg: Arc::clone(&runtime_cfg),
+        clients,
+        tokens_per_sec,
+        ban_secs,
+        client_timeout,
+        concurrent: Arc::new(Semaphore::new(1024)),
+    };
+
+    let router = Router::new(state)
+        .route(Method::Options, "/", handle_rpc_options)
+        .route(Method::Post, "/", handle_rpc_post)
+        .get("/logs/search", handle_logs_search)
+        .upgrade("/logs/tail", handle_logs_tail)
+        .upgrade("/vm/trace", handle_vm_trace)
+        .upgrade("/state_stream", handle_state_stream)
+        .get("/badge/status", handle_badge_status)
+        .get("/dashboard", handle_dashboard);
+
+    let mut server_cfg = ServerConfig::default();
+    server_cfg.request_timeout = runtime_cfg.request_timeout;
+    server_cfg.max_body_bytes = runtime_cfg.max_body_bytes;
+    serve(listener, router, server_cfg).await
 }
 
 #[cfg(test)]

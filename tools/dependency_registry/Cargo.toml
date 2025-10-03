@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 cargo_metadata = "0.18"
-clap = { version = "4", features = ["derive"] }
+cli_core = { path = "../../crates/cli_core" }
 chrono = { version = "0.4", features = ["serde"] }
 camino = "1.1"
 indexmap = { version = "2", features = ["serde"] }

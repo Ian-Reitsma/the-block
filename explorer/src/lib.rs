@@ -1,13 +1,14 @@
 use anyhow::Result as AnyhowResult;
 use crypto_suite::hashing::blake3::Hasher;
 use hex::encode as hex_encode;
+use httpd::{HttpError, Request, Response, Router, StatusCode};
 use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
@@ -37,6 +38,531 @@ pub fn amm_stats() -> Vec<(String, u128, u128)> {
 }
 pub fn qos_tiers() -> Vec<(String, u64)> {
     Vec::new()
+}
+
+#[derive(Clone)]
+pub struct ExplorerHttpState {
+    explorer: Arc<Explorer>,
+}
+
+impl ExplorerHttpState {
+    pub fn new(explorer: Arc<Explorer>) -> Self {
+        Self { explorer }
+    }
+
+    fn explorer(&self) -> &Arc<Explorer> {
+        &self.explorer
+    }
+}
+
+pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
+    Router::new(state)
+        .get("/blocks/:hash", block_by_hash)
+        .get("/blocks/:hash/summary", block_summary)
+        .get("/txs/:hash", transaction_by_hash)
+        .get("/gov/proposals/:id", gov_proposal)
+        .get("/releases", releases_page)
+        .get("/light_client/top_relayers", top_relayers)
+        .get("/light_client/rebate_history", rebate_history)
+        .get("/peers/reputation", peer_reputation)
+        .get("/dkg/validators", dkg_validators)
+        .get("/search/memo/:memo", search_memo)
+        .get("/search/contract/:contract", search_contract)
+        .get("/receipts/provider/:id", receipts_by_provider)
+        .get("/receipts/domain/:id", receipts_by_domain)
+        .get("/identity/dids/:address", did_document)
+        .get("/dids", dids_listing)
+        .get("/dids/metrics/anchor_rate", did_anchor_rate)
+        .get("/storage/providers", storage_providers)
+        .get("/storage/manifests", storage_manifests)
+        .get("/dex/order_book", dex_order_book)
+        .get("/compute/jobs", compute_jobs)
+        .get("/dex/trust_lines", dex_trust_lines)
+        .get("/subsidy/history", subsidy_history)
+        .get("/metrics/:name", metric_points)
+        .get("/mempool/fee_floor", fee_floor_history)
+        .get("/mempool/fee_floor_policy", fee_floor_policy_history)
+        .get("/governance/dependency_policy", dependency_policy_history)
+        .get("/network/certs", network_certs)
+        .get("/network/overlay", network_overlay)
+        .get("/blocks/:hash/proof", block_proof)
+        .get("/peers/handshakes", peer_handshakes)
+        .get("/tokens/supply/:symbol", token_supply)
+        .get("/tokens/bridge/:symbol", bridge_volume)
+        .get("/jurisdiction/:region", jurisdiction_summary)
+}
+
+fn explorer_from(request: &Request<ExplorerHttpState>) -> Arc<Explorer> {
+    Arc::clone(request.state().explorer())
+}
+
+fn log_error(context: &str, err: &dyn std::fmt::Display) {
+    eprintln!("{context}: {err}");
+}
+
+async fn block_by_hash(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(hash) = request.param("hash") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let block = match explorer.get_block(hash) {
+        Ok(block) => block,
+        Err(err) => {
+            log_error("failed to fetch block", &err);
+            None
+        }
+    };
+    Response::new(StatusCode::OK).json(&block)
+}
+
+async fn block_summary(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(hash) = request.param("hash") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let summary = match explorer.get_block(hash) {
+        Ok(Some(block)) => Some(summarize_block(block.index, block.transactions.len())),
+        Ok(None) => None,
+        Err(err) => {
+            log_error("failed to fetch block summary", &err);
+            None
+        }
+    };
+    Response::new(StatusCode::OK).json(&summary)
+}
+
+async fn transaction_by_hash(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(hash) = request.param("hash") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let tx = match explorer.get_tx(hash) {
+        Ok(tx) => tx,
+        Err(err) => {
+            log_error("failed to fetch transaction", &err);
+            None
+        }
+    };
+    Response::new(StatusCode::OK).json(&tx)
+}
+
+async fn gov_proposal(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(id) = request.param("id") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let Ok(id) = id.parse::<u64>() else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let proposal = match explorer.get_gov_proposal(id) {
+        Ok(prop) => prop,
+        Err(err) => {
+            log_error("failed to fetch governance proposal", &err);
+            None
+        }
+    };
+    Response::new(StatusCode::OK).json(&proposal)
+}
+
+async fn releases_page(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let page = request
+        .query_param("page")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page' query parameter".into()))?
+        .unwrap_or(0);
+    let page_size = request
+        .query_param("page_size")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page_size' query parameter".into()))?
+        .unwrap_or(25);
+    let proposer = request.query_param("proposer").map(|s| s.to_string());
+    let start_epoch = request
+        .query_param("start_epoch")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'start_epoch' query parameter".into()))?;
+    let end_epoch = request
+        .query_param("end_epoch")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'end_epoch' query parameter".into()))?;
+
+    let store_path = request
+        .query_param("store")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into()));
+    let filter = release_view::ReleaseHistoryFilter {
+        proposer,
+        start_epoch,
+        end_epoch,
+    };
+    let page_result = release_view::paginated_release_history(&store_path, page, page_size, filter);
+    match page_result {
+        Ok(page) => {
+            if let Err(err) = explorer.record_release_entries(&page.entries) {
+                log_error("failed to cache release entries", &err);
+            }
+            Response::new(StatusCode::OK).json(&page)
+        }
+        Err(err) => {
+            log_error("release history query failed", &err);
+            let empty = release_view::ReleaseHistoryPage {
+                total: 0,
+                page: 0,
+                page_size: 0,
+                entries: Vec::new(),
+            };
+            Response::new(StatusCode::OK).json(&empty)
+        }
+    }
+}
+
+async fn top_relayers(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let db_path = request
+        .query_param("db")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "light_client/proof_rebates".into());
+    let limit = request
+        .query_param("limit")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'limit' query parameter".into()))?
+        .unwrap_or(10);
+    match light_client::top_relayers(&db_path, limit) {
+        Ok(entries) => Response::new(StatusCode::OK).json(&entries),
+        Err(err) => {
+            log_error("top relayer query failed", &err);
+            let empty: Vec<light_client::RelayerLeaderboardEntry> = Vec::new();
+            Response::new(StatusCode::OK).json(&empty)
+        }
+    }
+}
+
+async fn rebate_history(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let db_path = request
+        .query_param("db")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "light_client/proof_rebates".into());
+    let relayer = request.query_param("relayer").map(|s| s.to_string());
+    let cursor = request
+        .query_param("cursor")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'cursor' query parameter".into()))?;
+    let limit = request
+        .query_param("limit")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'limit' query parameter".into()))?
+        .unwrap_or(25);
+
+    match light_client::recent_rebate_history(&db_path, relayer.as_deref(), cursor, limit) {
+        Ok(page) => Response::new(StatusCode::OK).json(&page),
+        Err(err) => {
+            log_error("rebate history query failed", &err);
+            let empty = light_client::RebateHistoryPage {
+                receipts: Vec::new(),
+                next: None,
+            };
+            Response::new(StatusCode::OK).json(&empty)
+        }
+    }
+}
+
+async fn peer_reputation(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let reputations = match explorer.peer_reputations() {
+        Ok(list) => list,
+        Err(err) => {
+            log_error("failed to load peer reputations", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&reputations)
+}
+
+async fn dkg_validators(_request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let shares = dkg_view::list_shares();
+    Response::new(StatusCode::OK).json(&shares)
+}
+
+async fn search_memo(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(memo) = request.param("memo") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let entries = match explorer.search_memo(memo) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log_error("memo search failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&entries)
+}
+
+async fn search_contract(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(contract) = request.param("contract") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let entries = match explorer.search_contract(contract) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log_error("contract search failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&entries)
+}
+
+async fn receipts_by_provider(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(id) = request.param("id") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let receipts = match explorer.receipts_by_provider(id) {
+        Ok(rows) => rows,
+        Err(err) => {
+            log_error("provider receipt query failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&receipts)
+}
+
+async fn receipts_by_domain(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(id) = request.param("id") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let receipts = match explorer.receipts_by_domain(id) {
+        Ok(rows) => rows,
+        Err(err) => {
+            log_error("domain receipt query failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&receipts)
+}
+
+async fn did_document(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(address) = request.param("address") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let doc = explorer.did_document(address);
+    Response::new(StatusCode::OK).json(&doc)
+}
+
+async fn dids_listing(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    if let Some(address) = request.query_param("address") {
+        match did_view::by_address(&explorer, address) {
+            Ok(rows) => Response::new(StatusCode::OK).json(&rows),
+            Err(err) => {
+                log_error("did history query failed", &err);
+                let empty: Vec<did_view::DidRecordRow> = Vec::new();
+                Response::new(StatusCode::OK).json(&empty)
+            }
+        }
+    } else {
+        let limit = request
+            .query_param("limit")
+            .map(|value| value.parse::<usize>())
+            .transpose()
+            .map_err(|_| HttpError::Handler("invalid 'limit' query parameter".into()))?
+            .unwrap_or(25);
+        match did_view::recent(&explorer, limit) {
+            Ok(rows) => Response::new(StatusCode::OK).json(&rows),
+            Err(err) => {
+                log_error("recent did query failed", &err);
+                let empty: Vec<did_view::DidRecordRow> = Vec::new();
+                Response::new(StatusCode::OK).json(&empty)
+            }
+        }
+    }
+}
+
+async fn did_anchor_rate(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let rates = explorer.did_anchor_rate().unwrap_or_default();
+    Response::new(StatusCode::OK).json(&rates)
+}
+
+async fn storage_providers(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let providers = match explorer.provider_storage_stats() {
+        Ok(rows) => rows,
+        Err(err) => {
+            log_error("storage provider stats failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&providers)
+}
+
+async fn storage_manifests(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let limit = request
+        .query_param("limit")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'limit' query parameter".into()))?;
+    let manifests = explorer.manifest_listing(limit);
+    Response::new(StatusCode::OK).json(&manifests)
+}
+
+async fn dex_order_book(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let book = explorer.order_book().unwrap_or_default();
+    Response::new(StatusCode::OK).json(&book)
+}
+
+async fn compute_jobs(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let jobs = explorer.compute_jobs().unwrap_or_default();
+    Response::new(StatusCode::OK).json(&jobs)
+}
+
+async fn dex_trust_lines(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let trust_lines = explorer.trust_lines().unwrap_or_default();
+    Response::new(StatusCode::OK).json(&trust_lines)
+}
+
+async fn subsidy_history(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let history = explorer.subsidy_history().unwrap_or_default();
+    Response::new(StatusCode::OK).json(&history)
+}
+
+async fn metric_points(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(name) = request.param("name") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let points = explorer.metric_points(name).unwrap_or_default();
+    Response::new(StatusCode::OK).json(&points)
+}
+
+async fn fee_floor_history(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let history = explorer.fee_floor_history().unwrap_or_default();
+    Response::new(StatusCode::OK).json(&history)
+}
+
+async fn fee_floor_policy_history(
+    request: Request<ExplorerHttpState>,
+) -> Result<Response, HttpError> {
+    let store_path = request
+        .query_param("store")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into()));
+    match gov_param_view::fee_floor_policy_history(&store_path) {
+        Ok(records) => Response::new(StatusCode::OK).json(&records),
+        Err(err) => {
+            log_error("fee floor policy history failed", &err);
+            let empty: Vec<gov_param_view::FeeFloorPolicyRecord> = Vec::new();
+            Response::new(StatusCode::OK).json(&empty)
+        }
+    }
+}
+
+async fn dependency_policy_history(
+    request: Request<ExplorerHttpState>,
+) -> Result<Response, HttpError> {
+    let store_path = request
+        .query_param("store")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into()));
+    match gov_param_view::dependency_policy_history(&store_path) {
+        Ok(records) => Response::new(StatusCode::OK).json(&records),
+        Err(err) => {
+            log_error("dependency policy history failed", &err);
+            let empty: Vec<gov_param_view::DependencyPolicyRecord> = Vec::new();
+            Response::new(StatusCode::OK).json(&empty)
+        }
+    }
+}
+
+async fn network_certs(_request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let certs = net_view::list_peer_certs();
+    Response::new(StatusCode::OK).json(&certs)
+}
+
+async fn network_overlay(_request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let overlay = net_view::overlay_status();
+    Response::new(StatusCode::OK).json(&overlay)
+}
+
+async fn block_proof(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(hash) = request.param("hash") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let proof = match explorer.light_proof(hash) {
+        Ok(proof) => proof,
+        Err(err) => {
+            log_error("light proof query failed", &err);
+            None
+        }
+    };
+    Response::new(StatusCode::OK).json(&proof)
+}
+
+async fn peer_handshakes(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let handshakes = match explorer.peer_handshakes() {
+        Ok(list) => list,
+        Err(err) => {
+            log_error("peer handshake query failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&handshakes)
+}
+
+async fn token_supply(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(symbol) = request.param("symbol") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let supply = match explorer.token_supply(symbol) {
+        Ok(rows) => rows,
+        Err(err) => {
+            log_error("token supply query failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&supply)
+}
+
+async fn bridge_volume(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(symbol) = request.param("symbol") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let volume = match explorer.bridge_volume(symbol) {
+        Ok(rows) => rows,
+        Err(err) => {
+            log_error("bridge volume query failed", &err);
+            Vec::new()
+        }
+    };
+    Response::new(StatusCode::OK).json(&volume)
+}
+
+async fn jurisdiction_summary(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let Some(region) = request.param("region") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let explorer = explorer_from(&request);
+    let summary = jurisdiction_view::summary(&explorer, region);
+    Response::new(StatusCode::OK).json(&summary)
 }
 pub use ai_summary::summarize_block;
 pub mod dkg_view;

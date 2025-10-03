@@ -33,36 +33,9 @@ pub fn parse_u64(value: Option<String>, name: &str) -> Result<Option<u64>, Strin
         .transpose()
 }
 
-pub fn parse_i64(value: Option<String>, name: &str) -> Result<Option<i64>, String> {
-    value
-        .map(|raw| {
-            raw.parse::<i64>()
-                .map_err(|_| format!("invalid value '{raw}' for '--{name}'"))
-        })
-        .transpose()
-}
-
 pub fn parse_u64_required(value: Option<String>, name: &str) -> Result<u64, String> {
     match parse_u64(value, name)? {
         Some(parsed) => Ok(parsed),
-        None => Err(format!("missing required option '--{name}'")),
-    }
-}
-
-pub fn parse_u32_required(value: Option<String>, name: &str) -> Result<u32, String> {
-    match value {
-        Some(raw) => raw
-            .parse::<u32>()
-            .map_err(|_| format!("invalid value '{raw}' for '--{name}'")),
-        None => Err(format!("missing required option '--{name}'")),
-    }
-}
-
-pub fn parse_u16_required(value: Option<String>, name: &str) -> Result<u16, String> {
-    match value {
-        Some(raw) => raw
-            .parse::<u16>()
-            .map_err(|_| format!("invalid value '{raw}' for '--{name}'")),
         None => Err(format!("missing required option '--{name}'")),
     }
 }
@@ -94,6 +67,7 @@ pub fn parse_bool(value: Option<String>, default: bool, name: &str) -> Result<bo
     }
 }
 
+#[cfg_attr(not(feature = "quantum"), allow(dead_code))]
 pub fn parse_required<T: std::str::FromStr>(value: Option<String>, name: &str) -> Result<T, String>
 where
     T::Err: std::fmt::Display,

@@ -10,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use clap::ValueEnum;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use tempfile;
@@ -36,29 +35,28 @@ use transport::{ProviderCapability, ProviderKind, ProviderMetadata};
 pub static OUTPUT_ROOT: Lazy<PathBuf> = Lazy::new(|| PathBuf::from("sim/output/dependency_fault"));
 
 /// Runtime backend options.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum RuntimeBackendChoice {
     Tokio,
     Stub,
 }
 
 /// Transport provider options.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum TransportBackendChoice {
     Quinn,
-    #[value(name = "s2n")]
     S2n,
 }
 
 /// Overlay service choices.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum OverlayBackendChoice {
     Inhouse,
     Stub,
 }
 
 /// Storage engine options.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum StorageBackendChoice {
     RocksDb,
     Sled,
@@ -66,21 +64,21 @@ pub enum StorageBackendChoice {
 }
 
 /// Coding backend toggle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum CodingBackendChoice {
     ReedSolomon,
     Xor,
 }
 
 /// Cryptography backend toggle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum CryptoBackendChoice {
     Dalek,
     Fallback,
 }
 
 /// Codec implementation toggle.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum CodecBackendChoice {
     Bincode,
     Json,
@@ -88,7 +86,7 @@ pub enum CodecBackendChoice {
 }
 
 /// Targets that faults can be injected against.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize)]
 pub enum FaultTarget {
     Runtime,
     Transport,
@@ -100,7 +98,7 @@ pub enum FaultTarget {
 }
 
 /// Fault types supported by the harness.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum FaultKind {
     Timeout,
     Panic,
@@ -120,10 +118,12 @@ impl FromStr for FaultSpec {
         let (target, kind) = raw
             .split_once(':')
             .ok_or_else(|| "expected <target>:<kind>".to_string())?;
-        let target = FaultTarget::from_str(target, true)
-            .map_err(|_| format!("unknown fault target: {target}"))?;
-        let kind =
-            FaultKind::from_str(kind, true).map_err(|_| format!("unknown fault kind: {kind}"))?;
+        let target = target
+            .parse::<FaultTarget>()
+            .map_err(|err| format!("unknown fault target: {err}"))?;
+        let kind = kind
+            .parse::<FaultKind>()
+            .map_err(|err| format!("unknown fault kind: {err}"))?;
         Ok(Self { target, kind })
     }
 }
@@ -1329,6 +1329,10 @@ impl KeyValueIterator for MemoryIter {
 }
 
 impl RuntimeBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["tokio", "stub"]
+    }
+
     fn as_env(&self) -> &'static str {
         match self {
             RuntimeBackendChoice::Tokio => "tokio",
@@ -1342,6 +1346,10 @@ impl RuntimeBackendChoice {
 }
 
 impl TransportBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["quinn", "s2n"]
+    }
+
     fn as_str(&self) -> &'static str {
         match self {
             TransportBackendChoice::Quinn => "quinn",
@@ -1351,6 +1359,10 @@ impl TransportBackendChoice {
 }
 
 impl OverlayBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["inhouse", "stub"]
+    }
+
     fn as_str(&self) -> &'static str {
         match self {
             OverlayBackendChoice::Inhouse => "inhouse",
@@ -1360,6 +1372,10 @@ impl OverlayBackendChoice {
 }
 
 impl StorageBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["rocksdb", "sled", "memory"]
+    }
+
     fn as_str(&self) -> &'static str {
         match self {
             StorageBackendChoice::RocksDb => "rocksdb",
@@ -1370,6 +1386,10 @@ impl StorageBackendChoice {
 }
 
 impl CodingBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["reed-solomon", "xor"]
+    }
+
     fn as_str(&self) -> &'static str {
         match self {
             CodingBackendChoice::ReedSolomon => "reed-solomon",
@@ -1379,6 +1399,10 @@ impl CodingBackendChoice {
 }
 
 impl CryptoBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["dalek", "fallback"]
+    }
+
     fn as_str(&self) -> &'static str {
         match self {
             CryptoBackendChoice::Dalek => "dalek",
@@ -1388,11 +1412,130 @@ impl CryptoBackendChoice {
 }
 
 impl CodecBackendChoice {
+    pub const fn variants() -> &'static [&'static str] {
+        &["bincode", "json", "cbor"]
+    }
+
     fn as_str(&self) -> &'static str {
         match self {
             CodecBackendChoice::Bincode => "bincode",
             CodecBackendChoice::Json => "json",
             CodecBackendChoice::Cbor => "cbor",
+        }
+    }
+}
+
+impl std::str::FromStr for RuntimeBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "tokio" => Ok(Self::Tokio),
+            "stub" => Ok(Self::Stub),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for TransportBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "quinn" => Ok(Self::Quinn),
+            "s2n" => Ok(Self::S2n),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for OverlayBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "inhouse" | "libp2p" => Ok(Self::Inhouse),
+            "stub" => Ok(Self::Stub),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for StorageBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "rocksdb" => Ok(Self::RocksDb),
+            "sled" => Ok(Self::Sled),
+            "memory" => Ok(Self::Memory),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for CodingBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "reed-solomon" | "reedsolomon" | "reed_s" => Ok(Self::ReedSolomon),
+            "xor" => Ok(Self::Xor),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for CryptoBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "dalek" => Ok(Self::Dalek),
+            "fallback" => Ok(Self::Fallback),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for CodecBackendChoice {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "bincode" => Ok(Self::Bincode),
+            "json" => Ok(Self::Json),
+            "cbor" => Ok(Self::Cbor),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for FaultTarget {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "runtime" => Ok(Self::Runtime),
+            "transport" => Ok(Self::Transport),
+            "overlay" => Ok(Self::Overlay),
+            "storage" => Ok(Self::Storage),
+            "coding" => Ok(Self::Coding),
+            "crypto" => Ok(Self::Crypto),
+            "codec" => Ok(Self::Codec),
+            other => Err(other.to_string()),
+        }
+    }
+}
+
+impl std::str::FromStr for FaultKind {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "timeout" => Ok(Self::Timeout),
+            "panic" => Ok(Self::Panic),
+            other => Err(other.to_string()),
         }
     }
 }

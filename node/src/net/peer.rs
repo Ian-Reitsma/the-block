@@ -1762,8 +1762,7 @@ struct QuicEndpoint {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::StatusCode;
-    use axum::{routing::post, Router};
+    use httpd::{Method, Response, Router, ServerConfig, StatusCode};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -1832,23 +1831,27 @@ mod tests {
         assert!(matches!(next, PeerErrorCode::Banned));
     }
 
+    #[derive(Clone)]
+    struct TestState {
+        flag: Arc<AtomicBool>,
+    }
+
     #[tokio::test]
     async fn aggregator_failover_selects_next_url() {
         let received = Arc::new(AtomicBool::new(false));
-        let flag = received.clone();
-        let handler = move || {
-            let flag = flag.clone();
-            async move {
-                flag.store(true, Ordering::SeqCst);
-                StatusCode::OK
-            }
-        };
-        let app = Router::new().route("/ingest", post(handler));
+        let router = Router::new(TestState {
+            flag: received.clone(),
+        })
+        .route(Method::Post, "/ingest", |req| async move {
+            let state = req.state().clone();
+            state.flag.store(true, Ordering::SeqCst);
+            Ok(Response::new(StatusCode::OK))
+        });
         let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let listener = runtime::net::TcpListener::bind(bind_addr).await.unwrap();
         let addr = listener.local_addr().unwrap();
-        runtime::spawn(async move {
-            axum::serve(listener, app.into_make_service())
+        let server = runtime::spawn(async move {
+            httpd::serve(listener, router, ServerConfig::default())
                 .await
                 .unwrap();
         });
@@ -1862,6 +1865,7 @@ mod tests {
         };
         client.ingest(vec![snap]).await;
         assert!(received.load(Ordering::SeqCst));
+        server.abort();
     }
 }
 

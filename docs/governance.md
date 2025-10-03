@@ -132,6 +132,27 @@ rollouts by configuring these windows and the global timelock.
 Additionally, a governance treasury collects a configurable percentage of block
 subsidies in a `TreasuryState`, providing funds for future initiatives.
 
+### Treasury Disbursements
+
+Treasury requests are now persisted in
+`governance/treasury_disbursements.json`, with the CLI and explorer consuming
+the same backing store. Operators can manage queued payouts with the new
+first-party commands:
+
+```bash
+contract gov treasury schedule tb1q... 500000 --memo "grants" --epoch 2048
+contract gov treasury execute 1 0xdeadbeef
+contract gov treasury cancel 2 "policy update"
+contract gov treasury list
+```
+
+Each action emits structured JSON describing the disbursement ID, destination,
+amount, memo, scheduled epoch, and status (`Scheduled`, `Executed`, or
+`Cancelled`). Explorer timelines and dashboards should read the same JSON file
+to render pending payouts and historical execution trails. Execution helpers
+record the supplied transaction hash and timestamps so auditors can reconcile
+on-chain movements with governance approval.
+
 ## Proposing an Upgrade
 
 1. Draft a feature flag JSON file under `governance/feature_flags/` describing

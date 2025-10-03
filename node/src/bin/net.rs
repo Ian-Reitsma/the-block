@@ -1,5 +1,3 @@
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
-use clap_complete::Shell;
 use colored::*;
 use crypto_suite::signatures::Signer;
 use hex;
@@ -19,17 +17,73 @@ use terminal_size::{terminal_size, Width};
 use the_block::net::load_net_key;
 use url::Url;
 
-#[derive(Copy, Clone, ValueEnum)]
+use std::process;
+
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command as CliCommand, CommandBuilder, CommandId},
+    parse::Matches,
+};
+
+mod cli_support;
+use cli_support::{collect_args, parse_matches};
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum OutputFormat {
     Table,
     Json,
 }
 
-#[derive(Copy, Clone, ValueEnum)]
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "table" => Ok(Self::Table),
+            "json" => Ok(Self::Json),
+            other => Err(format!("invalid format '{other}'")),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum SortKey {
     Latency,
     DropRate,
     Reputation,
+}
+
+impl std::str::FromStr for SortKey {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "latency" => Ok(Self::Latency),
+            "droprate" | "drop-rate" => Ok(Self::DropRate),
+            "reputation" => Ok(Self::Reputation),
+            other => Err(format!("invalid sort key '{other}'")),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+impl std::str::FromStr for CompletionShell {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "bash" => Ok(Self::Bash),
+            "zsh" => Ok(Self::Zsh),
+            "fish" => Ok(Self::Fish),
+            other => Err(format!("unsupported shell '{other}'")),
+        }
+    }
 }
 
 fn ratio(v: &serde_json::Value) -> f64 {
@@ -45,102 +99,71 @@ fn gettext(s: &str) -> String {
     s.to_string()
 }
 
-#[derive(Parser)]
-#[command(author, version, about = "Network diagnostics utilities")]
+const DEFAULT_RPC: &str = "http://127.0.0.1:3030";
+const DEFAULT_WS: &str = "ws://127.0.0.1:3030/ws/peer_metrics";
+
+#[derive(Debug)]
 struct Cli {
-    #[command(subcommand)]
     cmd: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum Command {
     /// Inspect or reset per-peer metrics via RPC
-    Stats {
-        #[command(subcommand)]
-        action: StatsCmd,
-    },
+    Stats { action: StatsCmd },
     /// Manage backpressure state
-    Backpressure {
-        #[command(subcommand)]
-        action: BackpressureCmd,
-    },
+    Backpressure { action: BackpressureCmd },
     /// Compute marketplace utilities
-    Compute {
-        #[command(subcommand)]
-        action: ComputeCmd,
-    },
+    Compute { action: ComputeCmd },
     /// Reputation utilities
-    Reputation {
-        #[command(subcommand)]
-        action: ReputationCmd,
-    },
+    Reputation { action: ReputationCmd },
     /// Lookup gateway DNS verification status
     DnsLookup {
         /// Domain to query
         domain: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Manage network configuration
-    Config {
-        #[command(subcommand)]
-        action: ConfigCmd,
-    },
+    Config { action: ConfigCmd },
     /// Manage peer keys
-    Key {
-        #[command(subcommand)]
-        action: KeyCmd,
-    },
+    Key { action: KeyCmd },
     /// Generate shell completions
     Completions {
         /// Shell type
-        #[arg(value_enum)]
-        shell: Shell,
+        shell: CompletionShell,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum StatsCmd {
     /// Show per-peer rate-limit metrics
     Show {
         /// Base58-check overlay peer id
         peer_id: Option<String>,
         /// Return stats for all peers
-        #[arg(long)]
         all: bool,
         /// Pagination offset
-        #[arg(long, default_value_t = 0)]
         offset: usize,
         /// Pagination limit
-        #[arg(long, default_value_t = 100)]
         limit: usize,
         /// Output format
-        #[arg(long, value_enum, default_value = "table")]
         format: OutputFormat,
         /// Show only peers with active backpressure
-        #[arg(long)]
         backpressure: bool,
         /// Filter by drop reason
-        #[arg(long)]
         drop_reason: Option<String>,
         /// Minimum reputation to include
-        #[arg(long)]
         min_reputation: Option<f64>,
         /// Sort rows by field
-        #[arg(long, value_enum)]
         sort_by: Option<SortKey>,
         /// Regex filter for peer id or address
-        #[arg(long)]
         filter: Option<String>,
         /// Refresh interval in seconds
-        #[arg(long)]
         watch: Option<u64>,
         /// Print only summary totals
-        #[arg(long)]
         summary: bool,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Reset metrics for a peer
@@ -148,7 +171,6 @@ enum StatsCmd {
         /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Show reputation score for a peer
@@ -156,7 +178,6 @@ enum StatsCmd {
         /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Export metrics for a peer to a file
@@ -164,31 +185,23 @@ enum StatsCmd {
         /// Base58-check overlay peer id
         peer_id: Option<String>,
         /// Export all peers
-        #[arg(long)]
         all: bool,
         /// Destination path
-        #[arg(long)]
         path: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
         /// Minimum reputation to include
-        #[arg(long)]
         min_reputation: Option<f64>,
         /// Only include peers active within this many seconds
-        #[arg(long)]
         active_within: Option<u64>,
         /// Encrypt archive with age recipient
-        #[arg(long)]
         age_recipient: Option<String>,
         /// Encrypt archive with OpenSSL using passphrase
-        #[arg(long)]
         openssl_pass: Option<String>,
     },
     /// Persist metrics to disk
     Persist {
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Throttle or clear throttle for a peer
@@ -196,10 +209,8 @@ enum StatsCmd {
         /// Base58-check overlay peer id
         peer_id: String,
         /// Clear existing throttle
-        #[arg(long)]
         clear: bool,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Show handshake failure reasons for a peer
@@ -207,7 +218,6 @@ enum StatsCmd {
         /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
     /// Stream live metrics over WebSocket
@@ -215,47 +225,42 @@ enum StatsCmd {
         /// Base58-check overlay peer id to filter; if omitted all peers are shown
         peer_id: Option<String>,
         /// WebSocket endpoint
-        #[arg(long, default_value = "ws://127.0.0.1:3030/ws/peer_metrics")]
         ws: String,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum BackpressureCmd {
     /// Clear backpressure for a peer
     Clear {
         /// Base58-check overlay peer id
         peer_id: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum ComputeCmd {
     /// Show scheduler statistics
     Stats {
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
         /// Show only effective price
-        #[arg(long)]
         effective: bool,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum ReputationCmd {
     /// Broadcast local reputation scores to peers
     Sync {
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum KeyCmd {
     /// Rotate the network key
     Rotate {
@@ -264,19 +269,624 @@ enum KeyCmd {
         /// Hex-encoded new public key
         new_key: String,
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum ConfigCmd {
     /// Reload network configuration
     Reload {
         /// RPC server address
-        #[arg(long, default_value = "http://127.0.0.1:3030")]
         rpc: String,
     },
+}
+
+fn build_command() -> CliCommand {
+    CommandBuilder::new(CommandId("net"), "net", "Network diagnostics utilities")
+        .subcommand(build_stats_command())
+        .subcommand(build_backpressure_command())
+        .subcommand(build_compute_command())
+        .subcommand(build_reputation_command())
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("net.dns_lookup"),
+                "dns-lookup",
+                "Lookup gateway DNS verification status",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "domain",
+                "Domain to query",
+            )))
+            .arg(rpc_option("rpc", "rpc"))
+            .build(),
+        )
+        .subcommand(build_config_command())
+        .subcommand(build_key_command())
+        .subcommand(build_completions_command())
+        .build()
+}
+
+fn build_stats_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("net.stats"),
+        "stats",
+        "Inspect or reset per-peer metrics via RPC",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.show"),
+            "show",
+            "Show per-peer rate-limit metrics",
+        )
+        .arg(ArgSpec::Positional(
+            PositionalSpec::new("peer_id", "Base58-check overlay peer id").optional(),
+        ))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "all",
+            "all",
+            "Return stats for all peers",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("offset", "offset", "Pagination offset").default("0"),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("limit", "limit", "Pagination limit").default("100"),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("format", "format", "Output format")
+                .default("table")
+                .value_enum(&["table", "json"]),
+        ))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "backpressure",
+            "backpressure",
+            "Show only peers with active backpressure",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "drop_reason",
+            "drop-reason",
+            "Filter by drop reason",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "min_reputation",
+            "min-reputation",
+            "Minimum reputation to include",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("sort_by", "sort-by", "Sort rows by field").value_enum(&[
+                "latency",
+                "drop-rate",
+                "reputation",
+            ]),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "filter",
+            "filter",
+            "Regex filter for peer id or address",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "watch",
+            "watch",
+            "Refresh interval in seconds",
+        )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "summary",
+            "summary",
+            "Print only summary totals",
+        )))
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.reset"),
+            "reset",
+            "Reset metrics for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer_id",
+            "Base58-check overlay peer id",
+        )))
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.reputation"),
+            "reputation",
+            "Show reputation score for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer_id",
+            "Base58-check overlay peer id",
+        )))
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.export"),
+            "export",
+            "Export metrics for a peer to a file",
+        )
+        .arg(ArgSpec::Positional(
+            PositionalSpec::new("peer_id", "Base58-check overlay peer id").optional(),
+        ))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "all",
+            "all",
+            "Export all peers",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("path", "path", "Destination path").required(true),
+        ))
+        .arg(rpc_option("rpc", "rpc"))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "min_reputation",
+            "min-reputation",
+            "Minimum reputation to include",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "active_within",
+            "active-within",
+            "Only include peers active within this many seconds",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "age_recipient",
+            "age-recipient",
+            "Encrypt archive with age recipient",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "openssl_pass",
+            "openssl-pass",
+            "Encrypt archive with OpenSSL using passphrase",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.persist"),
+            "persist",
+            "Persist metrics to disk",
+        )
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.throttle"),
+            "throttle",
+            "Throttle or clear throttle for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer_id",
+            "Base58-check overlay peer id",
+        )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "clear",
+            "clear",
+            "Clear existing throttle",
+        )))
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.failures"),
+            "failures",
+            "Show handshake failure reasons for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer_id",
+            "Base58-check overlay peer id",
+        )))
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.stats.watch"),
+            "watch",
+            "Stream live metrics over WebSocket",
+        )
+        .arg(ArgSpec::Positional(
+            PositionalSpec::new(
+                "peer_id",
+                "Base58-check overlay peer id to filter; if omitted all peers are shown",
+            )
+            .optional(),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("ws", "ws", "WebSocket endpoint").default(DEFAULT_WS),
+        ))
+        .build(),
+    )
+    .build()
+}
+
+fn build_backpressure_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("net.backpressure"),
+        "backpressure",
+        "Manage backpressure state",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.backpressure.clear"),
+            "clear",
+            "Clear backpressure for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer_id",
+            "Base58-check overlay peer id",
+        )))
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .build()
+}
+
+fn build_compute_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("net.compute"),
+        "compute",
+        "Compute marketplace utilities",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.compute.stats"),
+            "stats",
+            "Show scheduler statistics",
+        )
+        .arg(rpc_option("rpc", "rpc"))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "effective",
+            "effective",
+            "Show only effective price",
+        )))
+        .build(),
+    )
+    .build()
+}
+
+fn build_reputation_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("net.reputation"),
+        "reputation",
+        "Reputation utilities",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.reputation.sync"),
+            "sync",
+            "Broadcast local reputation scores to peers",
+        )
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .build()
+}
+
+fn build_config_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("net.config"),
+        "config",
+        "Manage network configuration",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("net.config.reload"),
+            "reload",
+            "Reload network configuration",
+        )
+        .arg(rpc_option("rpc", "rpc"))
+        .build(),
+    )
+    .build()
+}
+
+fn build_key_command() -> CliCommand {
+    CommandBuilder::new(CommandId("net.key"), "key", "Manage peer keys")
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("net.key.rotate"),
+                "rotate",
+                "Rotate the network key",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "peer_id",
+                "Hex-encoded current peer id",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "new_key",
+                "Hex-encoded new public key",
+            )))
+            .arg(rpc_option("rpc", "rpc"))
+            .build(),
+        )
+        .build()
+}
+
+fn build_completions_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("net.completions"),
+        "completions",
+        "Generate shell completions",
+    )
+    .arg(ArgSpec::Positional(PositionalSpec::new(
+        "shell",
+        "Shell type (bash|zsh|fish)",
+    )))
+    .build()
+}
+
+fn rpc_option(name: &'static str, long: &'static str) -> ArgSpec {
+    ArgSpec::Option(OptionSpec::new(name, long, "RPC server address").default(DEFAULT_RPC))
+}
+
+fn build_cli(matches: Matches) -> Result<Cli, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing subcommand".to_string())?;
+
+    let cmd = match sub {
+        "stats" => Command::Stats {
+            action: parse_stats(sub_matches)?,
+        },
+        "backpressure" => Command::Backpressure {
+            action: parse_backpressure(sub_matches)?,
+        },
+        "compute" => Command::Compute {
+            action: parse_compute(sub_matches)?,
+        },
+        "reputation" => Command::Reputation {
+            action: parse_reputation(sub_matches)?,
+        },
+        "dns-lookup" => Command::DnsLookup {
+            domain: require_positional(sub_matches, "domain")?,
+            rpc: sub_matches
+                .get_string("rpc")
+                .unwrap_or_else(|| DEFAULT_RPC.to_string()),
+        },
+        "config" => Command::Config {
+            action: parse_config(sub_matches)?,
+        },
+        "key" => Command::Key {
+            action: parse_key(sub_matches)?,
+        },
+        "completions" => Command::Completions {
+            shell: require_positional(sub_matches, "shell")?.parse()?,
+        },
+        other => return Err(format!("unknown subcommand '{other}'")),
+    };
+
+    Ok(Cli { cmd })
+}
+
+fn parse_stats(matches: &Matches) -> Result<StatsCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing stats command".to_string())?;
+
+    match sub {
+        "show" => parse_stats_show(sub_matches),
+        "reset" => Ok(StatsCmd::Reset {
+            peer_id: require_positional(sub_matches, "peer_id")?,
+            rpc: rpc_value(sub_matches),
+        }),
+        "reputation" => Ok(StatsCmd::Reputation {
+            peer_id: require_positional(sub_matches, "peer_id")?,
+            rpc: rpc_value(sub_matches),
+        }),
+        "export" => parse_stats_export(sub_matches),
+        "persist" => Ok(StatsCmd::Persist {
+            rpc: rpc_value(sub_matches),
+        }),
+        "throttle" => Ok(StatsCmd::Throttle {
+            peer_id: require_positional(sub_matches, "peer_id")?,
+            clear: sub_matches.get_flag("clear"),
+            rpc: rpc_value(sub_matches),
+        }),
+        "failures" => Ok(StatsCmd::Failures {
+            peer_id: require_positional(sub_matches, "peer_id")?,
+            rpc: rpc_value(sub_matches),
+        }),
+        "watch" => Ok(StatsCmd::Watch {
+            peer_id: optional_positional(sub_matches, "peer_id"),
+            ws: sub_matches
+                .get_string("ws")
+                .unwrap_or_else(|| DEFAULT_WS.to_string()),
+        }),
+        other => Err(format!("unknown stats command '{other}'")),
+    }
+}
+
+fn parse_stats_show(matches: &Matches) -> Result<StatsCmd, String> {
+    let peer_id = optional_positional(matches, "peer_id");
+    let offset = parse_usize(matches, "offset", 0)?;
+    let limit = parse_usize(matches, "limit", 100)?;
+    let format = matches
+        .get_string("format")
+        .unwrap_or_else(|| "table".to_string())
+        .parse::<OutputFormat>()?;
+    let sort_by = matches
+        .get_string("sort_by")
+        .map(|value| value.parse::<SortKey>())
+        .transpose()?;
+    let min_reputation = matches
+        .get_string("min_reputation")
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|err| format!("invalid min-reputation: {err}"))
+        })
+        .transpose()?;
+    let watch = matches
+        .get_string("watch")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|err| format!("invalid watch interval: {err}"))
+        })
+        .transpose()?;
+
+    Ok(StatsCmd::Show {
+        peer_id,
+        all: matches.get_flag("all"),
+        offset,
+        limit,
+        format,
+        backpressure: matches.get_flag("backpressure"),
+        drop_reason: matches.get_string("drop_reason"),
+        min_reputation,
+        sort_by,
+        filter: matches.get_string("filter"),
+        watch,
+        summary: matches.get_flag("summary"),
+        rpc: rpc_value(matches),
+    })
+}
+
+fn parse_stats_export(matches: &Matches) -> Result<StatsCmd, String> {
+    let min_reputation = matches
+        .get_string("min_reputation")
+        .map(|value| {
+            value
+                .parse::<f64>()
+                .map_err(|err| format!("invalid min-reputation: {err}"))
+        })
+        .transpose()?;
+    let active_within = matches
+        .get_string("active_within")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|err| format!("invalid active-within: {err}"))
+        })
+        .transpose()?;
+
+    Ok(StatsCmd::Export {
+        peer_id: optional_positional(matches, "peer_id"),
+        all: matches.get_flag("all"),
+        path: matches
+            .get_string("path")
+            .ok_or_else(|| "missing --path".to_string())?,
+        rpc: rpc_value(matches),
+        min_reputation,
+        active_within,
+        age_recipient: matches.get_string("age_recipient"),
+        openssl_pass: matches.get_string("openssl_pass"),
+    })
+}
+
+fn parse_backpressure(matches: &Matches) -> Result<BackpressureCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing backpressure command".to_string())?;
+
+    match sub {
+        "clear" => Ok(BackpressureCmd::Clear {
+            peer_id: require_positional(sub_matches, "peer_id")?,
+            rpc: rpc_value(sub_matches),
+        }),
+        other => Err(format!("unknown backpressure command '{other}'")),
+    }
+}
+
+fn parse_compute(matches: &Matches) -> Result<ComputeCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing compute command".to_string())?;
+
+    match sub {
+        "stats" => Ok(ComputeCmd::Stats {
+            rpc: rpc_value(sub_matches),
+            effective: sub_matches.get_flag("effective"),
+        }),
+        other => Err(format!("unknown compute command '{other}'")),
+    }
+}
+
+fn parse_reputation(matches: &Matches) -> Result<ReputationCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing reputation command".to_string())?;
+
+    match sub {
+        "sync" => Ok(ReputationCmd::Sync {
+            rpc: rpc_value(sub_matches),
+        }),
+        other => Err(format!("unknown reputation command '{other}'")),
+    }
+}
+
+fn parse_config(matches: &Matches) -> Result<ConfigCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing config command".to_string())?;
+
+    match sub {
+        "reload" => Ok(ConfigCmd::Reload {
+            rpc: rpc_value(sub_matches),
+        }),
+        other => Err(format!("unknown config command '{other}'")),
+    }
+}
+
+fn parse_key(matches: &Matches) -> Result<KeyCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing key command".to_string())?;
+
+    match sub {
+        "rotate" => Ok(KeyCmd::Rotate {
+            peer_id: require_positional(sub_matches, "peer_id")?,
+            new_key: require_positional(sub_matches, "new_key")?,
+            rpc: rpc_value(sub_matches),
+        }),
+        other => Err(format!("unknown key command '{other}'")),
+    }
+}
+
+fn rpc_value(matches: &Matches) -> String {
+    matches
+        .get_string("rpc")
+        .unwrap_or_else(|| DEFAULT_RPC.to_string())
+}
+
+fn require_positional(matches: &Matches, name: &str) -> Result<String, String> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+        .ok_or_else(|| format!("missing argument '{name}'"))
+}
+
+fn optional_positional(matches: &Matches, name: &str) -> Option<String> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+}
+
+fn parse_usize(matches: &Matches, name: &str, default: usize) -> Result<usize, String> {
+    matches
+        .get_string(name)
+        .unwrap_or_else(|| default.to_string())
+        .parse::<usize>()
+        .map_err(|err| format!("invalid {name}: {err}"))
+}
+
+fn top_level_commands() -> Vec<&'static str> {
+    vec![
+        "stats",
+        "backpressure",
+        "compute",
+        "reputation",
+        "dns-lookup",
+        "config",
+        "key",
+        "completions",
+    ]
 }
 
 fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, HttpClientError> {
@@ -338,7 +948,20 @@ async fn connect_peer_metrics_ws(url: &str) -> Result<ClientStream, String> {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let command = build_command();
+    let (bin, args) = collect_args("net");
+    let matches = match parse_matches(&command, &bin, args) {
+        Some(matches) => matches,
+        None => return,
+    };
+
+    let cli = match build_cli(matches) {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("{err}");
+            process::exit(2);
+        }
+    };
     match cli.cmd {
         Command::Stats { action } => match action {
             StatsCmd::Show {
@@ -945,10 +1568,32 @@ fn main() {
                 Err(e) => eprintln!("{e}"),
             }
         }
-        Command::Completions { shell } => {
-            use clap_complete::generate;
-            let mut cmd = Cli::command();
-            generate(shell, &mut cmd, "net", &mut std::io::stdout());
-        }
+        Command::Completions { shell } => match shell {
+            CompletionShell::Bash => {
+                println!("{}_completion() {{", "net");
+                println!("    local cur prev");
+                println!("    COMPREPLY=()");
+                println!("    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"");
+                println!("    prev=\"${{COMP_WORDS[COMP_CWORD-1]}}\"");
+                println!("    if [[ $COMP_CWORD -eq 1 ]]; then");
+                println!(
+                    "        COMPREPLY=( $(compgen -W \"{}\" -- \"$cur\") )",
+                    top_level_commands().join(" "),
+                );
+                println!("    fi");
+                println!("    return 0");
+                println!("}}");
+                println!("complete -F {}_completion net", "net");
+            }
+            CompletionShell::Zsh => {
+                println!("#compdef net");
+                println!("_arguments '1: :({})'", top_level_commands().join(" "));
+            }
+            CompletionShell::Fish => {
+                for name in top_level_commands() {
+                    println!("complete -c net -f -n '__fish_use_subcommand' -a {}", name);
+                }
+            }
+        },
     }
 }

@@ -4,7 +4,7 @@ use std::{env, fs, path::PathBuf, process};
 
 use ai::AiCmd;
 use cli_core::{
-    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    arg::{ArgSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandBuilder, CommandId},
     help::HelpGenerator,
     parse::{Matches, ParseError, Parser},
@@ -17,8 +17,8 @@ use explorer::ExplorerCmd;
 use gateway::GatewayCmd;
 use inhouse::Dispatch as InhouseDispatch;
 use parse_utils::{
-    parse_positional_u64, parse_u64, parse_u64_required, parse_usize, parse_vec_u64,
-    require_positional, require_string, take_string,
+    parse_positional_u64, parse_u64_required, parse_vec_u64, require_positional, require_string,
+    take_string,
 };
 use system::SystemCmd;
 use the_block::vm::{opcodes, ContractTx, Vm, VmType};
@@ -58,6 +58,8 @@ mod version;
 mod wallet;
 
 use ai::handle as handle_ai;
+use bridge::handle as handle_bridge;
+use bridge::BridgeCmd;
 use compute::handle as handle_compute;
 use config::handle as handle_config;
 use debug_cli::run as run_debugger;
@@ -65,35 +67,34 @@ use dex::handle as handle_dex;
 use difficulty::handle as handle_difficulty;
 use explorer::handle as handle_explorer;
 use gateway::handle as handle_gateway;
+use gov::handle as handle_gov;
+use gov::GovCmd;
+use htlc::handle as handle_htlc;
+use htlc::HtlcCmd;
+use light_client::handle as handle_light_client;
+use light_client::LightClientCmd;
+use light_sync::handle as handle_light_sync;
+use light_sync::LightSyncCmd;
+use logs::handle as handle_logs;
 use logs::LogCmd;
+use net::handle as handle_net;
 use net::NetCmd;
+use scheduler::handle as handle_scheduler;
 use scheduler::SchedulerCmd;
+use service_badge::handle as handle_service_badge;
 use service_badge::ServiceBadgeCmd;
+use snark::handle as handle_snark;
 use snark::SnarkCmd;
+use storage::handle as handle_storage;
 use storage::StorageCmd;
 use system::handle as handle_system;
+use telemetry::handle as handle_telemetry;
 use telemetry::TelemetryCmd;
 use version::handle as handle_version;
 #[cfg(feature = "quantum")]
+use wallet::handle as handle_wallet;
+#[cfg(feature = "quantum")]
 use wallet::WalletCmd;
-
-const PORTED_COMMANDS: &[&str] = &[
-    "deploy",
-    "call",
-    "abi",
-    "debug",
-    "fees",
-    "config",
-    "version",
-    "ai",
-    "compute",
-    "dex",
-    "difficulty",
-    "explorer",
-    "gateway",
-    "system",
-    "completions",
-];
 
 #[cfg(feature = "wasm-metadata")]
 fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
@@ -130,80 +131,43 @@ fn main() {
         InhouseDispatch::Unhandled => {}
     }
 
-    match dispatch_cli_core(&bin, &args) {
-        CliCoreOutcome::Handled => {}
-        CliCoreOutcome::HelpPrinted => {}
-        CliCoreOutcome::Error(code) => process::exit(code),
-        CliCoreOutcome::Fallback => {
-            let mut legacy_args = Vec::with_capacity(args.len() + 1);
-            legacy_args.push(bin.clone());
-            legacy_args.extend(args.iter().cloned());
-            let status = legacy::run(&legacy_args);
-            process::exit(status);
-        }
-    }
-}
-
-enum CliCoreOutcome {
-    Handled,
-    HelpPrinted,
-    Fallback,
-    Error(i32),
-}
-
-fn dispatch_cli_core(bin: &str, args: &[String]) -> CliCoreOutcome {
     let command = build_root_command();
     let parser = Parser::new(&command);
 
-    match parser.parse(args) {
-        Ok(matches) => match handle_matches(matches) {
-            Ok(true) => CliCoreOutcome::Handled,
-            Ok(false) => CliCoreOutcome::Fallback,
-            Err(err) => {
+    match parser.parse(&args) {
+        Ok(matches) => {
+            if let Err(err) = handle_matches(matches) {
                 eprintln!("{err}");
-                CliCoreOutcome::Error(2)
+                process::exit(2);
             }
-        },
+        }
         Err(ParseError::HelpRequested(path)) => {
             let tokens: Vec<&str> = path.split_whitespace().collect();
             print_help_for_path(&command, &tokens);
-            CliCoreOutcome::HelpPrinted
         }
         Err(ParseError::UnknownSubcommand(sub)) => {
-            if is_ported(args) {
-                eprintln!("unknown subcommand '{sub}'");
-                CliCoreOutcome::Error(2)
-            } else {
-                CliCoreOutcome::Fallback
-            }
+            eprintln!("unknown subcommand '{sub}'");
+            process::exit(2);
         }
         Err(ParseError::UnknownOption(option)) => {
-            if is_ported(args) {
-                eprintln!("unknown option '--{option}'");
-                CliCoreOutcome::Error(2)
-            } else {
-                CliCoreOutcome::Fallback
-            }
+            eprintln!("unknown option '--{option}'");
+            process::exit(2);
         }
         Err(ParseError::MissingValue(option)) => {
-            if is_ported(args) {
-                eprintln!("missing value for '--{option}'");
-                CliCoreOutcome::Error(2)
-            } else {
-                CliCoreOutcome::Fallback
-            }
+            eprintln!("missing value for '--{option}'");
+            process::exit(2);
         }
         Err(ParseError::MissingOption(name)) => {
             eprintln!("missing required option '--{name}'");
-            CliCoreOutcome::Error(2)
+            process::exit(2);
         }
         Err(ParseError::MissingPositional(name)) => {
             eprintln!("missing positional argument '{name}'");
-            CliCoreOutcome::Error(2)
+            process::exit(2);
         }
         Err(ParseError::InvalidChoice { option, value }) => {
             eprintln!("invalid value '{value}' for '--{option}'");
-            CliCoreOutcome::Error(2)
+            process::exit(2);
         }
         Err(ParseError::InvalidValue {
             option,
@@ -211,99 +175,157 @@ fn dispatch_cli_core(bin: &str, args: &[String]) -> CliCoreOutcome {
             expected,
         }) => {
             eprintln!("invalid value '{value}' for '--{option}': expected {expected}");
-            CliCoreOutcome::Error(2)
+            process::exit(2);
         }
     }
 }
-
-fn is_ported(args: &[String]) -> bool {
-    args.first()
-        .map(|first| PORTED_COMMANDS.contains(&first.as_str()))
-        .unwrap_or(false)
-}
-
-fn handle_matches(matches: Matches) -> Result<bool, String> {
-    let (name, sub_matches) = match matches.subcommand() {
-        Some(pair) => pair,
-        None => return Ok(false),
-    };
+fn handle_matches(matches: Matches) -> Result<(), String> {
+    let (name, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing subcommand".to_string())?;
 
     match name {
         "deploy" => {
             handle_deploy(sub_matches)?;
-            Ok(true)
+            Ok(())
         }
         "call" => {
             handle_call(sub_matches)?;
-            Ok(true)
+            Ok(())
         }
         "abi" => {
             handle_abi(sub_matches)?;
-            Ok(true)
+            Ok(())
         }
         "debug" => {
             handle_debug(sub_matches)?;
-            Ok(true)
+            Ok(())
         }
         "fees" => {
             handle_fees(sub_matches)?;
-            Ok(true)
+            Ok(())
         }
         "config" => {
             let cmd = ConfigCmd::from_matches(sub_matches)?;
             handle_config(cmd);
-            Ok(true)
+            Ok(())
         }
         "version" => {
             let cmd = VersionCmd::from_matches(sub_matches)?;
             handle_version(cmd);
-            Ok(true)
+            Ok(())
         }
         "ai" => {
             let cmd = AiCmd::from_matches(sub_matches)?;
             handle_ai(cmd);
-            Ok(true)
+            Ok(())
         }
         "compute" => {
             let cmd = ComputeCmd::from_matches(sub_matches)?;
             handle_compute(cmd);
-            Ok(true)
+            Ok(())
         }
         "dex" => {
             let cmd = DexCmd::from_matches(sub_matches)?;
             handle_dex(cmd);
-            Ok(true)
+            Ok(())
         }
         "difficulty" => {
             let cmd = DifficultyCmd::from_matches(sub_matches)?;
             handle_difficulty(cmd);
-            Ok(true)
+            Ok(())
         }
         "explorer" => {
             let cmd = ExplorerCmd::from_matches(sub_matches)?;
             handle_explorer(cmd);
-            Ok(true)
+            Ok(())
         }
         "gateway" => {
             let cmd = GatewayCmd::from_matches(sub_matches)?;
             handle_gateway(cmd);
-            Ok(true)
+            Ok(())
         }
         "system" => {
             let cmd = SystemCmd::from_matches(sub_matches)?;
             handle_system(cmd);
-            Ok(true)
+            Ok(())
+        }
+        "bridge" => {
+            let cmd = BridgeCmd::from_matches(sub_matches)?;
+            handle_bridge(cmd);
+            Ok(())
+        }
+        "gov" => {
+            let cmd = GovCmd::from_matches(sub_matches)?;
+            handle_gov(cmd);
+            Ok(())
+        }
+        "htlc" => {
+            let cmd = HtlcCmd::from_matches(sub_matches)?;
+            handle_htlc(cmd);
+            Ok(())
+        }
+        "light-sync" => {
+            let cmd = LightSyncCmd::from_matches(sub_matches)?;
+            handle_light_sync(cmd);
+            Ok(())
+        }
+        "light-client" => {
+            let cmd = LightClientCmd::from_matches(sub_matches)?;
+            handle_light_client(cmd);
+            Ok(())
+        }
+        "logs" => {
+            let cmd = LogCmd::from_matches(sub_matches)?;
+            handle_logs(cmd);
+            Ok(())
+        }
+        "net" => {
+            let cmd = NetCmd::from_matches(sub_matches)?;
+            handle_net(cmd);
+            Ok(())
+        }
+        "scheduler" => {
+            let cmd = SchedulerCmd::from_matches(sub_matches)?;
+            handle_scheduler(cmd);
+            Ok(())
+        }
+        "service-badge" => {
+            let cmd = ServiceBadgeCmd::from_matches(sub_matches)?;
+            handle_service_badge(cmd);
+            Ok(())
+        }
+        "snark" => {
+            let cmd = SnarkCmd::from_matches(sub_matches)?;
+            handle_snark(cmd);
+            Ok(())
+        }
+        "storage" => {
+            let cmd = StorageCmd::from_matches(sub_matches)?;
+            handle_storage(cmd);
+            Ok(())
+        }
+        "telemetry" => {
+            let cmd = TelemetryCmd::from_matches(sub_matches)?;
+            handle_telemetry(cmd);
+            Ok(())
+        }
+        #[cfg(feature = "quantum")]
+        "wallet" => {
+            let cmd = WalletCmd::from_matches(sub_matches)?;
+            handle_wallet(cmd);
+            Ok(())
         }
         "completions" => {
             handle_completions(sub_matches)?;
-            Ok(true)
+            Ok(())
         }
-        _ => Ok(false),
+        other => Err(format!("unknown subcommand '{other}'")),
     }
 }
 
 fn build_root_command() -> Command {
-    CommandBuilder::new(CommandId("contract"), "contract", "Contract management CLI")
+    let builder = CommandBuilder::new(CommandId("contract"), "contract", "Contract management CLI")
         .subcommand(build_deploy_command())
         .subcommand(build_call_command())
         .subcommand(build_abi_command())
@@ -318,9 +340,23 @@ fn build_root_command() -> Command {
         .subcommand(ExplorerCmd::command())
         .subcommand(GatewayCmd::command())
         .subcommand(SystemCmd::command())
-        .subcommand(build_completions_command())
-        .allow_external_subcommands(true)
-        .build()
+        .subcommand(BridgeCmd::command())
+        .subcommand(GovCmd::command())
+        .subcommand(HtlcCmd::command())
+        .subcommand(LightSyncCmd::command())
+        .subcommand(LightClientCmd::command())
+        .subcommand(LogCmd::command())
+        .subcommand(NetCmd::command())
+        .subcommand(SchedulerCmd::command())
+        .subcommand(ServiceBadgeCmd::command())
+        .subcommand(SnarkCmd::command())
+        .subcommand(StorageCmd::command())
+        .subcommand(TelemetryCmd::command());
+
+    #[cfg(feature = "quantum")]
+    let builder = builder.subcommand(WalletCmd::command());
+
+    builder.subcommand(build_completions_command()).build()
 }
 
 fn build_deploy_command() -> Command {
@@ -601,120 +637,4 @@ fn all_command_names() -> Vec<&'static str> {
         #[cfg(feature = "quantum")]
         "wallet",
     ]
-}
-
-mod legacy {
-    use super::*;
-    #[cfg(feature = "quantum")]
-    use crate::wallet;
-    use crate::{
-        bridge, gov, htlc, light_client, light_sync, logs, net, scheduler, service_badge, snark,
-        storage, telemetry,
-    };
-    use clap::{CommandFactory, Parser, Subcommand};
-
-    #[derive(Parser)]
-    #[command(name = "contract")]
-    struct LegacyCli {
-        #[command(subcommand)]
-        cmd: LegacyCommand,
-    }
-
-    #[derive(Subcommand)]
-    enum LegacyCommand {
-        /// Bridge deposit and withdraw
-        Bridge {
-            #[command(subcommand)]
-            action: bridge::BridgeCmd,
-        },
-        /// Networking utilities
-        Net {
-            #[command(subcommand)]
-            action: NetCmd,
-        },
-        /// Governance utilities
-        Gov {
-            #[command(subcommand)]
-            action: gov::GovCmd,
-        },
-        /// Light client synchronization
-        LightSync {
-            #[command(subcommand)]
-            action: light_sync::LightSyncCmd,
-        },
-        /// Light client utilities
-        LightClient {
-            #[command(subcommand)]
-            action: light_client::LightClientCmd,
-        },
-        /// Service badge utilities
-        ServiceBadge {
-            #[command(subcommand)]
-            action: ServiceBadgeCmd,
-        },
-        /// HTLC utilities
-        Htlc {
-            #[command(subcommand)]
-            action: htlc::HtlcCmd,
-        },
-        /// Storage market utilities
-        Storage {
-            #[command(subcommand)]
-            action: StorageCmd,
-        },
-        /// Scheduler diagnostics
-        Scheduler {
-            #[command(subcommand)]
-            action: SchedulerCmd,
-        },
-        /// SNARK tooling
-        Snark {
-            #[command(subcommand)]
-            action: SnarkCmd,
-        },
-        /// Log search utilities
-        Logs {
-            #[command(subcommand)]
-            action: LogCmd,
-        },
-        /// Telemetry diagnostics
-        Telemetry {
-            #[command(subcommand)]
-            action: TelemetryCmd,
-        },
-        /// Wallet utilities
-        #[cfg(feature = "quantum")]
-        Wallet {
-            #[command(subcommand)]
-            action: WalletCmd,
-        },
-    }
-
-    pub fn run(args: &[String]) -> i32 {
-        match LegacyCli::try_parse_from(args) {
-            Ok(cli) => {
-                match cli.cmd {
-                    LegacyCommand::Bridge { action } => bridge::handle(action),
-                    LegacyCommand::Net { action } => net::handle(action),
-                    LegacyCommand::Gov { action } => gov::handle(action),
-                    LegacyCommand::LightSync { action } => light_sync::handle(action),
-                    LegacyCommand::LightClient { action } => light_client::handle(action),
-                    LegacyCommand::ServiceBadge { action } => service_badge::handle(action),
-                    LegacyCommand::Htlc { action } => htlc::handle(action),
-                    LegacyCommand::Storage { action } => storage::handle(action),
-                    LegacyCommand::Scheduler { action } => scheduler::handle(action),
-                    LegacyCommand::Snark { action } => snark::handle(action),
-                    LegacyCommand::Logs { action } => logs::handle(action),
-                    LegacyCommand::Telemetry { action } => telemetry::handle(action),
-                    #[cfg(feature = "quantum")]
-                    LegacyCommand::Wallet { action } => wallet::handle(action),
-                }
-                0
-            }
-            Err(err) => {
-                err.print().expect("failed to print Clap error");
-                2
-            }
-        }
-    }
 }

@@ -2,13 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use runtime::net::TcpStream;
-use runtime::ws::{self, Message as WsMessage, ServerStream};
+use httpd::StatusCode;
+use runtime::ws::{Message as WsMessage, ServerStream};
 use serde::Serialize;
 use serde_json::json;
 use url::form_urlencoded;
-
-use super::RpcRuntimeConfig;
 
 use crate::log_indexer::{search_logs, LogEntry, LogFilter, LogIndexerError};
 
@@ -22,67 +20,22 @@ enum SearchError {
     QueryFailed(LogIndexerError),
 }
 
-struct TailConfig {
+pub(crate) struct TailConfig {
     db: PathBuf,
     filter: LogFilter,
     interval: Duration,
 }
 
-pub async fn serve_search(
-    mut stream: TcpStream,
-    origin: &str,
-    runtime_cfg: &RpcRuntimeConfig,
-    path: &str,
-) -> std::io::Result<()> {
-    let (status, body) = match build_search_response(path) {
-        Ok((status, body)) => (status, body),
+pub(crate) fn search_response(path: &str) -> (StatusCode, String) {
+    match build_search_response(path) {
+        Ok(body) => (StatusCode::OK, body),
         Err(err) => map_search_error(err),
-    };
-    let mut headers = format!(
-        "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n",
-        status,
-        body.len()
-    );
-    if runtime_cfg
-        .cors_allow_origins
-        .iter()
-        .any(|allowed| allowed == origin)
-    {
-        headers.push_str(&format!("Access-Control-Allow-Origin: {}\r\n", origin));
-    }
-    headers.push_str("\r\n");
-    let response = format!("{}{}", headers, body);
-    stream.write_all(response.as_bytes()).await?;
-    stream.shutdown().await
-}
-
-pub async fn serve_tail(mut stream: TcpStream, key: String, path: &str) {
-    match build_tail_config(path) {
-        Ok(cfg) => {
-            if let Err(e) = handshake(&mut stream, &key).await {
-                log_tail_handshake_failure(&e);
-                return;
-            }
-            let ws_stream = ServerStream::new(stream);
-            run_tail(ws_stream, cfg).await;
-        }
-        Err(err) => {
-            let (status, body) = map_search_error(err);
-            let response = format!(
-                "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                status,
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(response.as_bytes()).await;
-        }
     }
 }
 
-fn build_search_response(path: &str) -> Result<(String, String), SearchError> {
+pub(crate) fn build_search_response(path: &str) -> Result<String, SearchError> {
     let rows = run_query(path)?;
-    let body = encode_rows(&rows)?;
-    Ok(("200 OK".into(), body))
+    encode_rows(&rows)
 }
 
 fn encode_rows<T: Serialize>(rows: &T) -> Result<String, SearchError> {
@@ -104,7 +57,7 @@ fn run_query(path: &str) -> Result<Vec<LogEntry>, SearchError> {
     Ok(rows)
 }
 
-fn build_tail_config(path: &str) -> Result<TailConfig, SearchError> {
+pub(crate) fn build_tail_config(path: &str) -> Result<TailConfig, SearchError> {
     let (route, query) = split_route(path);
     if route != "/logs/tail" {
         return Err(SearchError::InvalidQuery("unknown endpoint".into()));
@@ -171,19 +124,19 @@ fn split_route(path: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn map_search_error(err: SearchError) -> (String, String) {
+pub(crate) fn map_search_error(err: SearchError) -> (StatusCode, String) {
     match err {
         SearchError::MissingDatabase => (
-            "404 Not Found".into(),
+            StatusCode::NOT_FOUND,
             json!({"error": "log database unavailable"}).to_string(),
         ),
         SearchError::InvalidQuery(msg) => {
-            ("400 Bad Request".into(), json!({"error": msg}).to_string())
+            (StatusCode::BAD_REQUEST, json!({"error": msg}).to_string())
         }
         SearchError::QueryFailed(err) => {
             log_query_failure(&err);
             (
-                "500 Internal Server Error".into(),
+                StatusCode::INTERNAL_SERVER_ERROR,
                 json!({"error": "log query failed"}).to_string(),
             )
         }
@@ -200,57 +153,7 @@ fn log_query_failure(err: &LogIndexerError) {
     eprintln!("rpc.logs: log query failed: {err}");
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde::ser::Error as _;
-    use serde::{Serialize, Serializer};
-
-    struct FailSerialize;
-
-    impl Serialize for FailSerialize {
-        fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            Err(S::Error::custom("serialization failed"))
-        }
-    }
-
-    #[test]
-    fn encode_rows_reports_json_error() {
-        match encode_rows(&FailSerialize) {
-            Err(SearchError::QueryFailed(LogIndexerError::Json(err))) => {
-                assert!(err.to_string().contains("serialization failed"));
-            }
-            other => panic!("unexpected encode result: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn map_search_error_handles_json_failure() {
-        let err = LogIndexerError::Json(serde_json::Error::custom("forced"));
-        let (status, body) = map_search_error(SearchError::QueryFailed(err));
-        assert_eq!(status, "500 Internal Server Error");
-        assert!(body.contains("log query failed"));
-    }
-}
-
-#[cfg(feature = "telemetry")]
-fn log_tail_handshake_failure(err: &std::io::Error) {
-    warn!(target: "rpc.logs", "tail handshake failed: {err}");
-}
-
-#[cfg(not(feature = "telemetry"))]
-fn log_tail_handshake_failure(err: &std::io::Error) {
-    eprintln!("rpc.logs: tail handshake failed: {err}");
-}
-
-async fn handshake(stream: &mut TcpStream, key: &str) -> std::io::Result<()> {
-    ws::write_server_handshake(stream, key, &[]).await
-}
-
-async fn run_tail(mut ws: ServerStream, cfg: TailConfig) {
+pub(crate) async fn run_tail(mut ws: ServerStream, cfg: TailConfig) {
     let mut last_id = cfg.filter.after_id.unwrap_or(0);
     loop {
         let mut filter = cfg.filter.clone();
@@ -322,4 +225,40 @@ pub fn run_search_for_path(path: &str) -> Result<Vec<LogEntry>, String> {
             "log query failed".to_string()
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::ser::Error as _;
+    use serde::{Serialize, Serializer};
+
+    struct FailSerialize;
+
+    impl Serialize for FailSerialize {
+        fn serialize<S>(&self, _: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Err(S::Error::custom("serialization failed"))
+        }
+    }
+
+    #[test]
+    fn encode_rows_reports_json_error() {
+        match encode_rows(&FailSerialize) {
+            Err(SearchError::QueryFailed(LogIndexerError::Json(err))) => {
+                assert!(err.to_string().contains("serialization failed"));
+            }
+            other => panic!("unexpected encode result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_search_error_handles_json_failure() {
+        let err = LogIndexerError::Json(serde_json::Error::custom("forced"));
+        let (status, body) = map_search_error(SearchError::QueryFailed(err));
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(body.contains("log query failed"));
+    }
 }

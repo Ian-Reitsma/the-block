@@ -1,11 +1,9 @@
-use axum::body::{self, Body};
-use axum::http::{Request, StatusCode};
+use httpd::{Method, StatusCode};
 use metrics_aggregator::{router, AppState};
 use serde::Deserialize;
 use serde_json::json;
 use std::future::Future;
 use tempfile::tempdir;
-use tower::ServiceExt;
 
 #[derive(Deserialize)]
 struct ApiCorrelation {
@@ -38,28 +36,27 @@ fn indexes_correlation_entries() {
                 }
             }
         }]);
-        let req = Request::builder()
-            .method("POST")
-            .uri("/ingest")
-            .header("content-type", "application/json")
+        let req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/ingest")
             .header("x-auth-token", "token")
-            .body(Body::from(payload.to_string()))
-            .unwrap();
-        let resp = app.clone().oneshot(req).await.unwrap();
+            .json(&payload)
+            .unwrap()
+            .build();
+        let resp = app.handle(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
         let resp = app
-            .oneshot(
-                Request::builder()
-                    .uri("/correlations/quic_handshake_fail_total")
-                    .body(Body::empty())
-                    .unwrap(),
+            .handle(
+                app.request_builder()
+                    .path("/correlations/quic_handshake_fail_total")
+                    .build(),
             )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let entries: Vec<ApiCorrelation> = serde_json::from_slice(&body).unwrap();
+        let entries: Vec<ApiCorrelation> = serde_json::from_slice(resp.body()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].correlation_id, "abc123");
         assert_eq!(entries[0].peer_id, "peer-1");

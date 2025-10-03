@@ -6,7 +6,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use clap::{Parser, Subcommand};
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command as CliCommand, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use crypto_suite::signatures::ed25519::SigningKey;
 use tracing_chrome::ChromeLayerBuilder;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
@@ -20,6 +24,9 @@ use the_block::{
     rpc::run_rpc_server,
     sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ShutdownFlag,
 };
+
+mod cli_support;
+use cli_support::{collect_args, parse_matches};
 
 fn key_dir() -> PathBuf {
     dirs::home_dir()
@@ -89,14 +96,12 @@ fn policy_pack_language(pack: &jurisdiction::PolicyPack) -> String {
         .unwrap_or_else(|| default_language_for_region(&pack.region).to_string())
 }
 
-#[derive(Parser)]
-#[command(author, version, about = "Run a basic node or manage wallet keys")]
+#[derive(Debug)]
 struct Cli {
-    #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(clap::ValueEnum, Clone, Debug)]
+#[derive(Clone, Debug)]
 enum OverlayBackendArg {
     Inhouse,
     Stub,
@@ -111,100 +116,89 @@ impl From<OverlayBackendArg> for OverlayBackend {
     }
 }
 
-#[derive(Subcommand)]
+impl std::str::FromStr for OverlayBackendArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "inhouse" => Ok(Self::Inhouse),
+            "stub" => Ok(Self::Stub),
+            other => Err(format!("invalid overlay backend '{other}'")),
+        }
+    }
+}
+
+#[derive(Debug)]
 enum Commands {
     /// Run a full node with JSON-RPC controls
     Run {
         /// Address to bind the JSON-RPC server to
-        #[arg(long, default_value = "127.0.0.1:3030")]
         rpc_addr: String,
 
         /// Seconds between mempool purge sweeps (0 to disable)
-        #[arg(long, default_value_t = 0)]
         mempool_purge_interval: u64,
 
         /// Interval in blocks between full snapshots
-        #[arg(long, default_value_t = 600)]
         snapshot_interval: u64,
 
         /// Expose Prometheus metrics on this address (requires `--features telemetry`)
-        #[arg(long, value_name = "ADDR")]
         metrics_addr: Option<String>,
 
         /// Path to RocksDB state database
-        #[arg(long, default_value_t = default_db_path())]
         db_path: String,
 
         /// Directory for chain data
-        #[arg(long, default_value = "node-data")]
         data_dir: String,
 
         /// Log output format: `plain` or `json`
-        #[arg(long, default_value = "plain")]
         log_format: String,
 
         /// Log level directives (e.g. `info`, `mempool=debug`)
-        #[arg(long = "log-level", value_name = "LEVEL", num_args = 0.., default_values_t = vec!["info".to_string()])]
         log_level: Vec<String>,
 
         /// Dry-run compute-market matches (default true)
-        #[arg(long, default_value_t = true)]
         dry_run: bool,
 
         /// Run auto-tuning benchmarks and exit
-        #[arg(long, default_value_t = false)]
         auto_tune: bool,
 
         /// Enable QUIC transport for gossip
-        #[arg(long, default_value_t = false)]
         quic: bool,
 
         /// Enable local mesh networking
-        #[arg(long, default_value_t = false)]
         range_boost: bool,
 
         /// Disable mining and operate as a relay-only node
-        #[arg(long, default_value_t = false)]
         relay_only: bool,
 
         /// Address to serve a status page on
-        #[arg(long)]
         status_addr: Option<String>,
 
         /// Load chain state from snapshot file before starting
-        #[arg(long)]
         snapshot: Option<String>,
 
         /// Port for QUIC listener
-        #[arg(long)]
         quic_port: Option<u16>,
 
         /// Path to QUIC certificate (DER)
-        #[arg(long)]
         quic_cert: Option<String>,
 
         /// Path to QUIC private key (DER)
-        #[arg(long)]
         quic_key: Option<String>,
 
         /// Rotate QUIC certificates after this many days
-        #[arg(long)]
         quic_cert_ttl_days: Option<u64>,
 
         /// Enable runtime profiling and emit Chrome trace to `trace.json`
-        #[arg(long, default_value_t = false)]
         profiling: bool,
 
         /// Country code or path to jurisdiction policy pack
-        #[arg(long)]
         jurisdiction: Option<String>,
 
         /// Overlay backend for peer discovery and uptime tracking
-        #[arg(long = "overlay-backend", value_enum)]
         overlay_backend: Option<OverlayBackendArg>,
 
         /// Enable VM debugging features
-        #[arg(long, default_value_t = false)]
         enable_vm_debug: bool,
     },
     /// Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem
@@ -227,30 +221,474 @@ enum Commands {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum ComputeCmd {
     /// Courier receipt operations
-    Courier {
-        #[command(subcommand)]
-        action: CourierCmd,
-    },
+    Courier { action: CourierCmd },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum BadgeCmd {
     /// Show current badge status
-    Status {
-        #[arg(long, default_value = "node-data")]
-        data_dir: String,
-    },
+    Status { data_dir: String },
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum CourierCmd {
     /// Send a bundle and store a courier receipt
     Send { file: String, sender: String },
     /// Flush stored receipts
     Flush,
+}
+
+fn build_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("node"),
+        "node",
+        "Run a basic node or manage wallet keys",
+    )
+    .subcommand(build_run_command())
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("node.generate_key"),
+            "generate-key",
+            "Generate a new keypair saved under ~/.the_block/keys/<key_id>.pem",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "key_id",
+            "Key identifier",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("node.import_key"),
+            "import-key",
+            "Import an existing PEM-encoded key file",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "file",
+            "Path to PEM file",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("node.show_address"),
+            "show-address",
+            "Show the hex address for the given key id",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "key_id",
+            "Key identifier",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("node.sign_tx"),
+            "sign-tx",
+            "Sign a transaction JSON payload with the given key",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "key_id",
+            "Key identifier",
+        )))
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "tx_json",
+            "Transaction JSON payload",
+        )))
+        .build(),
+    )
+    .subcommand(build_compute_command())
+    .subcommand(build_badge_command())
+    .build()
+}
+
+fn build_run_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("node.run"),
+        "run",
+        "Run a full node with JSON-RPC controls",
+    )
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "rpc_addr",
+            "rpc-addr",
+            "Address to bind the JSON-RPC server to",
+        )
+        .default("127.0.0.1:3030"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "mempool_purge_interval",
+            "mempool-purge-interval",
+            "Seconds between mempool purge sweeps (0 to disable)",
+        )
+        .default("0"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "snapshot_interval",
+            "snapshot-interval",
+            "Interval in blocks between full snapshots",
+        )
+        .default("600"),
+    ))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "metrics_addr",
+        "metrics-addr",
+        "Expose Prometheus metrics on this address",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "db_path",
+        "db-path",
+        "Path to RocksDB state database",
+    )))
+    .arg(ArgSpec::Option(
+        OptionSpec::new("data_dir", "data-dir", "Directory for chain data").default("node-data"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new("log_format", "log-format", "Log output format").default("plain"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new("log_level", "log-level", "Log level directives")
+            .multiple(true)
+            .default("info"),
+    ))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "dry_run",
+            "dry-run",
+            "Dry-run compute-market matches (default true)",
+        )
+        .default("true"),
+    ))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "auto_tune",
+        "auto-tune",
+        "Run auto-tuning benchmarks and exit",
+    )))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "quic",
+        "quic",
+        "Enable QUIC transport for gossip",
+    )))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "range_boost",
+        "range-boost",
+        "Enable local mesh networking",
+    )))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "relay_only",
+        "relay-only",
+        "Disable mining and operate as a relay-only node",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "status_addr",
+        "status-addr",
+        "Address to serve a status page on",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "snapshot",
+        "snapshot",
+        "Load chain state from snapshot file before starting",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "quic_port",
+        "quic-port",
+        "Port for QUIC listener",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "quic_cert",
+        "quic-cert",
+        "Path to QUIC certificate (DER)",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "quic_key",
+        "quic-key",
+        "Path to QUIC private key (DER)",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "quic_cert_ttl_days",
+        "quic-cert-ttl-days",
+        "Rotate QUIC certificates after this many days",
+    )))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "profiling",
+        "profiling",
+        "Enable runtime profiling and emit Chrome trace to trace.json",
+    )))
+    .arg(ArgSpec::Option(OptionSpec::new(
+        "jurisdiction",
+        "jurisdiction",
+        "Country code or path to jurisdiction policy pack",
+    )))
+    .arg(ArgSpec::Option(
+        OptionSpec::new(
+            "overlay_backend",
+            "overlay-backend",
+            "Overlay backend for peer discovery and uptime tracking",
+        )
+        .value_enum(&["inhouse", "stub"]),
+    ))
+    .arg(ArgSpec::Flag(FlagSpec::new(
+        "enable_vm_debug",
+        "enable-vm-debug",
+        "Enable VM debugging features",
+    )))
+    .build()
+}
+
+fn build_compute_command() -> CliCommand {
+    CommandBuilder::new(
+        CommandId("node.compute"),
+        "compute",
+        "Compute-related utilities",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("node.compute.courier"),
+            "courier",
+            "Courier receipt operations",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("node.compute.courier.send"),
+                "send",
+                "Send a bundle and store a courier receipt",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "file",
+                "Path to bundle file",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "sender",
+                "Sender identifier",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("node.compute.courier.flush"),
+                "flush",
+                "Flush stored receipts",
+            )
+            .build(),
+        )
+        .build(),
+    )
+    .build()
+}
+
+fn build_badge_command() -> CliCommand {
+    CommandBuilder::new(CommandId("node.badge"), "badge", "Service badge utilities")
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("node.badge.status"),
+                "status",
+                "Show current badge status",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new(
+                    "data_dir",
+                    "data-dir",
+                    "Data directory containing badge information",
+                )
+                .default("node-data"),
+            ))
+            .build(),
+        )
+        .build()
+}
+
+fn build_cli(matches: Matches) -> Result<Cli, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing subcommand".to_string())?;
+
+    let command = match sub {
+        "run" => parse_run(sub_matches)?,
+        "generate-key" => Commands::GenerateKey {
+            key_id: require_positional(sub_matches, "key_id")?,
+        },
+        "import-key" => Commands::ImportKey {
+            file: require_positional(sub_matches, "file")?,
+        },
+        "show-address" => Commands::ShowAddress {
+            key_id: require_positional(sub_matches, "key_id")?,
+        },
+        "sign-tx" => Commands::SignTx {
+            key_id: require_positional(sub_matches, "key_id")?,
+            tx_json: require_positional(sub_matches, "tx_json")?,
+        },
+        "compute" => Commands::Compute {
+            cmd: parse_compute(sub_matches)?,
+        },
+        "badge" => Commands::Badge {
+            cmd: parse_badge(sub_matches)?,
+        },
+        other => return Err(format!("unknown subcommand '{other}'")),
+    };
+
+    Ok(Cli { command })
+}
+
+fn parse_run(matches: &Matches) -> Result<Commands, String> {
+    let rpc_addr = matches
+        .get_string("rpc_addr")
+        .unwrap_or_else(|| "127.0.0.1:3030".to_string());
+    let mempool_purge_interval = parse_u64_option(matches, "mempool_purge_interval", 0)?;
+    let snapshot_interval = parse_u64_option(matches, "snapshot_interval", 600)?;
+    let metrics_addr = matches.get_string("metrics_addr");
+    let db_path = matches
+        .get_string("db_path")
+        .unwrap_or_else(default_db_path);
+    let data_dir = matches
+        .get_string("data_dir")
+        .unwrap_or_else(|| "node-data".to_string());
+    let log_format = matches
+        .get_string("log_format")
+        .unwrap_or_else(|| "plain".to_string());
+    let mut log_level = matches.get_strings("log_level");
+    if log_level.is_empty() {
+        log_level.push("info".to_string());
+    }
+    let dry_run = parse_bool_option(matches, "dry_run", true)?;
+    let auto_tune = matches.get_flag("auto_tune");
+    let quic = matches.get_flag("quic");
+    let range_boost = matches.get_flag("range_boost");
+    let relay_only = matches.get_flag("relay_only");
+    let status_addr = matches.get_string("status_addr");
+    let snapshot = matches.get_string("snapshot");
+    let quic_port = parse_optional_u16(matches, "quic_port")?;
+    let quic_cert = matches.get_string("quic_cert");
+    let quic_key = matches.get_string("quic_key");
+    let quic_cert_ttl_days = parse_optional_u64(matches, "quic_cert_ttl_days")?;
+    let profiling = matches.get_flag("profiling");
+    let jurisdiction = matches.get_string("jurisdiction");
+    let overlay_backend = matches
+        .get_string("overlay_backend")
+        .map(|value| value.parse::<OverlayBackendArg>())
+        .transpose()?;
+    let enable_vm_debug = matches.get_flag("enable_vm_debug");
+
+    Ok(Commands::Run {
+        rpc_addr,
+        mempool_purge_interval,
+        snapshot_interval,
+        metrics_addr,
+        db_path,
+        data_dir,
+        log_format,
+        log_level,
+        dry_run,
+        auto_tune,
+        quic,
+        range_boost,
+        relay_only,
+        status_addr,
+        snapshot,
+        quic_port,
+        quic_cert,
+        quic_key,
+        quic_cert_ttl_days,
+        profiling,
+        jurisdiction,
+        overlay_backend,
+        enable_vm_debug,
+    })
+}
+
+fn parse_compute(matches: &Matches) -> Result<ComputeCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing compute subcommand".to_string())?;
+
+    match sub {
+        "courier" => Ok(ComputeCmd::Courier {
+            action: parse_courier(sub_matches)?,
+        }),
+        other => Err(format!("unknown compute subcommand '{other}'")),
+    }
+}
+
+fn parse_courier(matches: &Matches) -> Result<CourierCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing courier action".to_string())?;
+
+    match sub {
+        "send" => Ok(CourierCmd::Send {
+            file: require_positional(sub_matches, "file")?,
+            sender: require_positional(sub_matches, "sender")?,
+        }),
+        "flush" => Ok(CourierCmd::Flush),
+        other => Err(format!("unknown courier action '{other}'")),
+    }
+}
+
+fn parse_badge(matches: &Matches) -> Result<BadgeCmd, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing badge subcommand".to_string())?;
+
+    match sub {
+        "status" => Ok(BadgeCmd::Status {
+            data_dir: sub_matches
+                .get_string("data_dir")
+                .unwrap_or_else(|| "node-data".to_string()),
+        }),
+        other => Err(format!("unknown badge subcommand '{other}'")),
+    }
+}
+
+fn require_positional(matches: &Matches, name: &str) -> Result<String, String> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+        .ok_or_else(|| format!("missing argument '{name}'"))
+}
+
+fn parse_u64_option(matches: &Matches, name: &str, default: u64) -> Result<u64, String> {
+    matches
+        .get_string(name)
+        .unwrap_or_else(|| default.to_string())
+        .parse::<u64>()
+        .map_err(|err| format!("invalid value for {name}: {err}"))
+}
+
+fn parse_optional_u16(matches: &Matches, name: &str) -> Result<Option<u16>, String> {
+    matches
+        .get_string(name)
+        .map(|value| {
+            value
+                .parse::<u16>()
+                .map_err(|err| format!("invalid {name}: {err}"))
+        })
+        .transpose()
+}
+
+fn parse_optional_u64(matches: &Matches, name: &str) -> Result<Option<u64>, String> {
+    matches
+        .get_string(name)
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|err| format!("invalid {name}: {err}"))
+        })
+        .transpose()
+}
+
+fn parse_bool_option(matches: &Matches, name: &str, default: bool) -> Result<bool, String> {
+    let raw = matches
+        .get_string(name)
+        .unwrap_or_else(|| default.to_string());
+    match raw.to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" => Ok(true),
+        "false" | "0" | "no" => Ok(false),
+        other => Err(format!("invalid boolean for {name}: {other}")),
+    }
 }
 
 fn rollback_and_exit(reason: &str) -> std::process::ExitCode {
@@ -265,7 +703,20 @@ fn rollback_and_exit(reason: &str) -> std::process::ExitCode {
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    let cli = Cli::parse();
+    let command = build_command();
+    let (bin, args) = collect_args("node");
+    let matches = match parse_matches(&command, &bin, args) {
+        Some(matches) => matches,
+        None => return std::process::ExitCode::SUCCESS,
+    };
+
+    let cli = match build_cli(matches) {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("{err}");
+            return std::process::ExitCode::from(2);
+        }
+    };
     // Verify build provenance at startup.
     if !the_block::provenance::verify_self() {
         return rollback_and_exit("binary provenance verification failed");

@@ -56,9 +56,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"]
 jsonrpc-core = "18"
 flate2 = "1"
 indexmap = "2"
-clap = { version = "4", features = ["derive"] }
 colored = "2"
-clap_complete = "4"
 base64 = "0.22"
 base64ct = "1.6.0"
 dirs = "5"
@@ -149,7 +147,6 @@ proptest = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 csv = "1"
 serial_test = "3"
-tiny_http = "0.12"
 wait-timeout = "0.2"
 arbitrary = { version = "1", features = ["derive"] }
 env_logger = "0.11"
@@ -158,7 +155,6 @@ tracing = "0.1"
 tar = "0.4"
 jurisdiction = { path = "../crates/jurisdiction" }
 insta = { version = "1", features = ["glob"] }
-axum = { version = "0.7", features = ["json"] }
 wat = "1"
 sim = { package = "tb-sim", path = "../sim" }
 

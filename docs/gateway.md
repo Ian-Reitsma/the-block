@@ -38,10 +38,10 @@ Security considerations are catalogued under
 
 ### WebSocket peer metrics
 
-- The `/ws/peer_metrics` endpoint now upgrades connections via
-  `runtime::ws::ServerStream`. The gateway inspects the standard
-  `Upgrade: websocket`, `Connection: upgrade`, and `Sec-WebSocket-*` headers,
-  then hands the upgraded socket to the runtime codec.
+- The `/ws/peer_metrics` endpoint now upgrades connections through the in-house
+  `httpd::Router::upgrade` API. Handshake validation (Upgrade/Connection headers,
+  `Sec-WebSocket-*` tokens, and keep-alive negotiation) is handled by httpd before
+  the runtime `ServerStream` is handed to the metrics publisher.
 - Metrics snapshots are serialized to JSON text frames. The runtime layer
   automatically responds to incoming ping frames and closes the connection when
   either side emits a close control frame.

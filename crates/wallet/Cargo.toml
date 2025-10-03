@@ -35,9 +35,7 @@ version = "2"
 optional = true
 
 [dev-dependencies]
-httpmock = "0.7"
-tiny_http = "0.12"
 rcgen = "0.11"
-rustls = { version = "0.21", features = ["dangerous_configuration"] }
 tempfile = "3"
 serial_test = "1"
+runtime = { path = "../runtime" }

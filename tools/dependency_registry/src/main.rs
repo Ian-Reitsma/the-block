@@ -1,12 +1,39 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use clap::Parser;
+use anyhow::{anyhow, Context, Result};
+use cli_core::{
+    command::Command,
+    help::HelpGenerator,
+    parse::{ParseError, Parser},
+};
+use std::env;
 
 use dependency_registry::{build_registry, output, BuildOptions, Cli, PolicyConfig};
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let mut argv = env::args();
+    let bin = argv
+        .next()
+        .unwrap_or_else(|| "dependency-registry".to_string());
+    let args: Vec<String> = argv.collect();
+
+    let command = Cli::build_command();
+    if args.is_empty() {
+        print_root_help(&command, &bin);
+        return Ok(());
+    }
+
+    let parser = Parser::new(&command);
+    let matches = match parser.parse(&args) {
+        Ok(matches) => matches,
+        Err(ParseError::HelpRequested(path)) => {
+            print_help_for_path(&command, &path);
+            return Ok(());
+        }
+        Err(err) => return Err(anyhow!(err)),
+    };
+
+    let cli = Cli::from_matches(&matches)?;
 
     if let Some(diff) = &cli.diff {
         let paths: Vec<PathBuf> = diff.clone();
@@ -56,4 +83,38 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_root_help(command: &Command, bin: &str) {
+    let generator = HelpGenerator::new(command);
+    println!("{}", generator.render());
+    println!("\nRun '{bin} --help' or '{bin} help <section>' for more information.");
+}
+
+fn print_help_for_path(root: &Command, path: &str) {
+    let segments: Vec<&str> = path.split_whitespace().collect();
+    if let Some(cmd) = find_command(root, &segments) {
+        let generator = HelpGenerator::new(cmd);
+        println!("{}", generator.render());
+    }
+}
+
+fn find_command<'a>(root: &'a Command, path: &[&str]) -> Option<&'a Command> {
+    if path.is_empty() {
+        return Some(root);
+    }
+
+    let mut current = root;
+    for segment in path.iter().skip(1) {
+        if let Some(next) = current
+            .subcommands
+            .iter()
+            .find(|command| command.name == *segment)
+        {
+            current = next;
+        } else {
+            return None;
+        }
+    }
+    Some(current)
 }

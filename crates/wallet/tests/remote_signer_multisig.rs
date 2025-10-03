@@ -1,0 +1,92 @@
+mod support;
+
+use std::time::Duration;
+
+use httpd::StatusCode;
+use ledger::crypto::remote_tag;
+use serial_test::serial;
+use wallet::{remote_signer::RemoteSigner, WalletError, WalletSigner};
+
+use support::HttpSignerMock;
+
+#[test]
+#[serial]
+fn multisig_success_and_failure() {
+    std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
+    std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
+    std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+
+    let signer_a = HttpSignerMock::success();
+    let signer_b = HttpSignerMock::success();
+    let endpoints = vec![signer_a.url().to_string(), signer_b.url().to_string()];
+    let signer = RemoteSigner::connect_multi(&endpoints, 2).expect("connect");
+    let msg = b"hello";
+    let approvals = signer.sign_multisig(msg).expect("sign");
+    for (pk, sig) in &approvals {
+        pk.verify(&remote_tag(msg), sig).unwrap();
+    }
+
+    let signer =
+        RemoteSigner::connect_multi(&vec![signer_a.url().to_string()], 1).expect("connect");
+    let approvals = signer.sign_multisig(b"fail").expect("single signer");
+    assert_eq!(approvals.len(), 1);
+}
+
+#[test]
+#[serial]
+fn multisig_threshold_fails_when_signer_returns_error() {
+    std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
+    std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
+    std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+
+    let good = HttpSignerMock::success();
+    let bad = HttpSignerMock::failing(StatusCode::INTERNAL_SERVER_ERROR);
+    let endpoints = vec![good.url().to_string(), bad.url().to_string()];
+    let signer = RemoteSigner::connect_multi(&endpoints, 2).expect("connect");
+    let err = signer
+        .sign_multisig(b"threshold")
+        .expect_err("threshold err");
+    assert!(
+        matches!(err, WalletError::Failure(_)),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+#[serial]
+fn multisig_rejects_invalid_signatures() {
+    std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
+    std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
+    std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+
+    let good = HttpSignerMock::success();
+    let bad = HttpSignerMock::invalid_signature();
+    let endpoints = vec![good.url().to_string(), bad.url().to_string()];
+    let signer = RemoteSigner::connect_multi(&endpoints, 2).expect("connect");
+    let err = signer
+        .sign_multisig(b"invalid")
+        .expect_err("invalid signature rejection");
+    assert!(
+        matches!(err, WalletError::Failure(_)),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+#[serial]
+fn multisig_times_out_slow_signers() {
+    std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
+    std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
+    std::env::remove_var("REMOTE_SIGNER_TLS_CA");
+    std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "50");
+
+    let fast = HttpSignerMock::success();
+    let slow = HttpSignerMock::delayed(Duration::from_millis(200));
+    let endpoints = vec![fast.url().to_string(), slow.url().to_string()];
+    let signer = RemoteSigner::connect_multi(&endpoints, 2).expect("connect");
+    let err = signer
+        .sign_multisig(b"timeout")
+        .expect_err("timeout enforced");
+    std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
+    assert!(matches!(err, WalletError::Timeout));
+}
