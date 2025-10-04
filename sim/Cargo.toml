@@ -37,7 +37,7 @@ dkg = { path = "../dkg" }
 explorer = { path = "../explorer" }
 hex = "0.4"
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+cli_core = { path = "../crates/cli_core" }
 coding = { path = "../crates/coding", optional = true }
 codec = { path = "../crates/codec", optional = true }
 crypto_suite = { path = "../crates/crypto_suite", optional = true }

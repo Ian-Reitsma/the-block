@@ -1,33 +1,38 @@
 #![allow(clippy::expect_used)]
 
-use clap::{Parser, Subcommand, ValueEnum};
-use std::fs;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs,
+    path::Path,
+    process,
+    str::FromStr,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use cli_core::{
+    arg::{ArgSpec, PositionalSpec},
+    command::{Command as CliCommand, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use the_block::{governance::House, Governance};
 
-#[derive(Parser)]
-#[command(author, version, about = "Governance helpers")]
+mod cli_support;
+use cli_support::{collect_args, parse_matches};
+
+#[derive(Debug)]
 struct Cli {
-    #[command(subcommand)]
     cmd: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum Command {
-    /// Submit a proposal JSON file
     Submit { file: String },
-    /// Vote for a proposal
     Vote { id: u64, house: HouseArg },
-    /// Execute a proposal after quorum and timelock
     Exec { id: u64 },
-    /// Show proposal status
     Status { id: u64 },
-    /// List all proposals and their current status
     List,
 }
 
-#[derive(Clone, ValueEnum)]
+#[derive(Clone, Debug)]
 enum HouseArg {
     Ops,
     Builders,
@@ -42,8 +47,34 @@ impl From<HouseArg> for House {
     }
 }
 
+impl FromStr for HouseArg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "ops" => Ok(HouseArg::Ops),
+            "builders" => Ok(HouseArg::Builders),
+            other => Err(format!("invalid house '{other}'")),
+        }
+    }
+}
+
 fn main() {
-    let cli = Cli::parse();
+    let command = build_command();
+    let (bin, args) = collect_args("gov");
+    let matches = match parse_matches(&command, &bin, args) {
+        Some(matches) => matches,
+        None => return,
+    };
+
+    let cli = match build_cli(matches) {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("{err}");
+            process::exit(2);
+        }
+    };
+
     let db_path = "examples/governance/proposals.db";
     if let Some(parent) = Path::new(db_path).parent() {
         let _ = fs::create_dir_all(parent);
@@ -93,4 +124,108 @@ fn main() {
             }
         }
     }
+}
+
+fn build_command() -> CliCommand {
+    CommandBuilder::new(CommandId("gov"), "gov", "Governance helpers")
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.submit"),
+                "submit",
+                "Submit a proposal JSON file",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "file",
+                "Proposal JSON file",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(CommandId("gov.vote"), "vote", "Vote for a proposal")
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "id",
+                    "Proposal id",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "house",
+                    "House (ops|builders)",
+                )))
+                .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.exec"),
+                "exec",
+                "Execute a proposal after quorum and timelock",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Proposal id",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(CommandId("gov.status"), "status", "Show proposal status")
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "id",
+                    "Proposal id",
+                )))
+                .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.list"),
+                "list",
+                "List all proposals and their current status",
+            )
+            .build(),
+        )
+        .build()
+}
+
+fn build_cli(matches: Matches) -> Result<Cli, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing subcommand".to_string())?;
+
+    let cmd = match sub {
+        "submit" => {
+            let file = require_positional(sub_matches, "file")?;
+            Command::Submit { file }
+        }
+        "vote" => {
+            let id_str = require_positional(sub_matches, "id")?;
+            let id = id_str
+                .parse::<u64>()
+                .map_err(|err| format!("invalid id: {err}"))?;
+            let house_str = require_positional(sub_matches, "house")?;
+            let house = HouseArg::from_str(&house_str)?;
+            Command::Vote { id, house }
+        }
+        "exec" => {
+            let id = parse_u64(sub_matches, "id")?;
+            Command::Exec { id }
+        }
+        "status" => {
+            let id = parse_u64(sub_matches, "id")?;
+            Command::Status { id }
+        }
+        "list" => Command::List,
+        other => return Err(format!("unknown subcommand '{other}'")),
+    };
+
+    Ok(Cli { cmd })
+}
+
+fn require_positional(matches: &Matches, name: &str) -> Result<String, String> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+        .ok_or_else(|| format!("missing argument '{name}'"))
+}
+
+fn parse_u64(matches: &Matches, name: &str) -> Result<u64, String> {
+    let raw = require_positional(matches, name)?;
+    raw.parse::<u64>()
+        .map_err(|err| format!("invalid {name}: {err}"))
 }

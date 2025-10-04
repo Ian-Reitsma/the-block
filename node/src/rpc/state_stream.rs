@@ -2,29 +2,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use light_client::{account_state_value, AccountChunk, StateChunk};
-use runtime::net::TcpStream;
-use runtime::ws::{self, Message as WsMessage, ServerStream};
+use runtime::ws::{Message as WsMessage, ServerStream};
 use state::MerkleTrie;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::Blockchain;
 
-/// Perform a minimal WebSocket handshake and stream state diffs to the client.
-pub async fn serve_state_stream(mut stream: TcpStream, key: String, bc: Arc<Mutex<Blockchain>>) {
-    if ws::write_server_handshake(&mut stream, &key, &[])
-        .await
-        .is_err()
-    {
-        return;
-    }
-    let ws_stream = ServerStream::new(stream);
-    #[cfg(feature = "telemetry")]
-    telemetry::STATE_STREAM_SUBSCRIBERS_TOTAL.inc();
-    run_stream(ws_stream, bc).await;
-}
-
-async fn run_stream(mut ws: ServerStream, bc: Arc<Mutex<Blockchain>>) {
+/// Stream state diffs to the client over an upgraded WebSocket connection.
+pub async fn run_stream(mut ws: ServerStream, bc: Arc<Mutex<Blockchain>>) {
     let mut seq = 0u64;
     loop {
         let (tip, accounts) = {

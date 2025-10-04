@@ -1,10 +1,8 @@
-use axum::body::{self, Body};
-use axum::http::{Request, StatusCode};
+use httpd::{Method, StatusCode};
 use metrics_aggregator::{router, AppState};
 use serde_json::json;
 use std::future::Future;
 use tempfile::tempdir;
-use tower::ServiceExt;
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
     runtime::block_on(future)
@@ -30,34 +28,31 @@ fn telemetry_round_trip() {
             }
         });
 
-        let req = Request::builder()
-            .method("POST")
-            .uri("/telemetry")
-            .header("content-type", "application/json")
+        let req = app
+            .request_builder()
+            .method(Method::Post)
+            .path("/telemetry")
             .header("x-auth-token", "token")
-            .body(Body::from(payload.to_string()))
-            .unwrap();
-        let resp = app.clone().oneshot(req).await.unwrap();
+            .json(&payload)
+            .unwrap()
+            .build();
+        let resp = app.handle(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::ACCEPTED);
 
-        let req = Request::builder()
-            .uri("/telemetry")
-            .body(Body::empty())
+        let resp = app
+            .handle(app.request_builder().path("/telemetry").build())
+            .await
             .unwrap();
-        let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let map: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let map: serde_json::Value = serde_json::from_slice(resp.body()).unwrap();
         assert!(map.get("node-a").is_some());
 
-        let req = Request::builder()
-            .uri("/telemetry/node-a")
-            .body(Body::empty())
+        let resp = app
+            .handle(app.request_builder().path("/telemetry/node-a").build())
+            .await
             .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-        let history: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let history: serde_json::Value = serde_json::from_slice(resp.body()).unwrap();
         assert_eq!(history.as_array().unwrap().len(), 1);
     });
 }

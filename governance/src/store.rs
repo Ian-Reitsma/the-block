@@ -5,11 +5,13 @@ use super::{
 use crate::params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
+use crate::treasury::{mark_cancelled, mark_executed, TreasuryDisbursement};
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
 use std::collections::HashMap;
 use std::env;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,6 +21,7 @@ pub const ROLLBACK_WINDOW_EPOCHS: u64 = 1;
 pub const QUORUM: u64 = 1;
 const PARAM_HISTORY_LIMIT: usize = 512;
 const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
+const TREASURY_HISTORY_LIMIT: usize = 1024;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LastActivation {
@@ -155,6 +158,52 @@ impl GovStore {
         if let Ok(bytes) = serde_json::to_vec(&history) {
             let _ = std::fs::write(&path, bytes);
         }
+    }
+
+    fn treasury_disbursement_path(&self) -> PathBuf {
+        self.base_path
+            .join("governance")
+            .join("treasury_disbursements.json")
+    }
+
+    fn load_disbursements(&self) -> sled::Result<Vec<TreasuryDisbursement>> {
+        let path = self.treasury_disbursement_path();
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                if bytes.is_empty() {
+                    Ok(Vec::new())
+                } else {
+                    serde_json::from_slice(&bytes).map_err(|e| {
+                        sled::Error::Unsupported(
+                            format!("decode treasury disbursements: {e}").into(),
+                        )
+                    })
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(Vec::new()),
+            Err(err) => Err(sled::Error::Unsupported(
+                format!("read treasury disbursements: {err}").into(),
+            )),
+        }
+    }
+
+    fn persist_disbursements(&self, records: &[TreasuryDisbursement]) -> sled::Result<()> {
+        let mut trimmed = records.to_vec();
+        trimmed.sort_by_key(|record| record.id);
+        if trimmed.len() > TREASURY_HISTORY_LIMIT {
+            let drop = trimmed.len() - TREASURY_HISTORY_LIMIT;
+            trimmed.drain(0..drop);
+        }
+        let bytes = serde_json::to_vec(&trimmed).map_err(|e| {
+            sled::Error::Unsupported(format!("encode treasury disbursements: {e}").into())
+        })?;
+        let path = self.treasury_disbursement_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&path, bytes).map_err(|e| {
+            sled::Error::Unsupported(format!("write treasury disbursements: {e}").into())
+        })
     }
 
     fn persist_fee_floor_policy(
@@ -990,5 +1039,79 @@ impl GovStore {
         self.proposals().insert(key, ser(&prop)?)?;
         rt.clear_current_params();
         Ok(())
+    }
+
+    pub fn queue_disbursement(
+        &self,
+        destination: &str,
+        amount_ct: u64,
+        memo: &str,
+        scheduled_epoch: u64,
+    ) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let next_id = records
+            .iter()
+            .map(|r| r.id)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1);
+        let record = TreasuryDisbursement::new(
+            next_id,
+            destination.to_string(),
+            amount_ct,
+            memo.to_string(),
+            scheduled_epoch,
+        );
+        records.push(record.clone());
+        self.persist_disbursements(&records)?;
+        Ok(record)
+    }
+
+    pub fn disbursements(&self) -> sled::Result<Vec<TreasuryDisbursement>> {
+        self.load_disbursements()
+    }
+
+    pub fn execute_disbursement(
+        &self,
+        id: u64,
+        tx_hash: &str,
+    ) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let mut record = None;
+        for entry in records.iter_mut() {
+            if entry.id == id {
+                mark_executed(entry, tx_hash.to_string());
+                record = Some(entry.clone());
+                break;
+            }
+        }
+        if let Some(updated) = record.clone() {
+            self.persist_disbursements(&records)?;
+            Ok(updated)
+        } else {
+            Err(sled::Error::Unsupported(
+                format!("unknown treasury disbursement id {id}").into(),
+            ))
+        }
+    }
+
+    pub fn cancel_disbursement(&self, id: u64, reason: &str) -> sled::Result<TreasuryDisbursement> {
+        let mut records = self.load_disbursements()?;
+        let mut record = None;
+        for entry in records.iter_mut() {
+            if entry.id == id {
+                mark_cancelled(entry, reason.to_string());
+                record = Some(entry.clone());
+                break;
+            }
+        }
+        if let Some(updated) = record.clone() {
+            self.persist_disbursements(&records)?;
+            Ok(updated)
+        } else {
+            Err(sled::Error::Unsupported(
+                format!("unknown treasury disbursement id {id}").into(),
+            ))
+        }
     }
 }

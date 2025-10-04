@@ -1,57 +1,16 @@
-use std::collections::VecDeque;
+mod support;
+
 use std::convert::TryInto;
-use std::sync::{Arc, Mutex};
-use std::thread;
 
 use contract_cli::light_client::{
     build_anchor_transaction, latest_header, resolve_did_record, submit_anchor, AnchorKeyMaterial,
 };
 use contract_cli::rpc::RpcClient;
 use contract_cli::tx::{generate_keypair, TxDidAnchor};
-use crypto_suite::signatures::{
-    ed25519::{Signature, SigningKey, VerifyingKey},
-    Verifier,
-};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use hex;
 use serde_json::json;
-use tiny_http::{Header, Response, Server};
-
-fn start_mock_server(
-    responses: Vec<String>,
-) -> (String, Arc<Mutex<Vec<String>>>, thread::JoinHandle<()>) {
-    let server = Server::http("127.0.0.1:0").expect("start server");
-    let addr = format!("http://{}", server.server_addr());
-    let captured = Arc::new(Mutex::new(Vec::new()));
-    let captured_clone = captured.clone();
-    let handle = thread::spawn(move || {
-        let mut incoming = server.incoming_requests();
-        let mut responses = VecDeque::from(responses);
-        while let Some(mut request) = incoming.next() {
-            let mut body = String::new();
-            request
-                .as_reader()
-                .read_to_string(&mut body)
-                .expect("read request body");
-            captured_clone.lock().unwrap().push(body);
-            let (response_body, should_exit) = if let Some(body) = responses.pop_front() {
-                let exit = responses.is_empty();
-                (body, exit)
-            } else {
-                (
-                    json!({"jsonrpc": "2.0", "result": {}, "id": 1}).to_string(),
-                    false,
-                )
-            };
-            let mut response = Response::from_string(response_body);
-            response.add_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap());
-            request.respond(response).expect("send response");
-            if should_exit {
-                break;
-            }
-        }
-    });
-    (addr, captured, handle)
-}
+use support::json_rpc::JsonRpcMock;
 
 fn owner_signing_key(bytes: &[u8]) -> SigningKey {
     let arr: [u8; 32] = bytes.try_into().expect("private key length");
@@ -178,26 +137,25 @@ fn anchor_submission_and_resolve_flow() {
         })
         .to_string(),
     ];
-    let (url, captured, handle) = start_mock_server(responses);
+    let server = JsonRpcMock::start(responses);
 
     let client = RpcClient::from_env();
-    let record = submit_anchor(&client, &url, &tx).expect("anchor RPC succeeds");
+    let record = submit_anchor(&client, server.url(), &tx).expect("anchor RPC succeeds");
     assert_eq!(record.address, tx.address);
     assert_eq!(record.nonce, tx.nonce);
     assert_eq!(record.hash, hex::encode(tx.document_hash()));
     assert_eq!(record.document, document);
 
-    let header = latest_header(&client, &url).expect("latest header");
+    let header = latest_header(&client, server.url()).expect("latest header");
     assert_eq!(header.height, 42);
 
-    let resolved = resolve_did_record(&client, &url, &tx.address).expect("resolve");
+    let resolved = resolve_did_record(&client, server.url(), &tx.address).expect("resolve");
     assert_eq!(resolved.address, tx.address);
     assert_eq!(resolved.nonce, Some(tx.nonce));
     assert_eq!(resolved.hash, Some(hex::encode(tx.document_hash())));
     assert_eq!(resolved.document, Some(document));
 
-    handle.join().expect("join server");
-    let bodies = captured.lock().unwrap();
+    let bodies = server.captured();
     assert!(bodies[0].contains("\"method\":\"identity.anchor\""));
     assert!(bodies[1].contains("\"method\":\"light.latest_header\""));
     assert!(bodies[2].contains("\"method\":\"identity.resolve\""));

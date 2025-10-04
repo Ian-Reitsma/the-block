@@ -1,20 +1,23 @@
 use crate::Blockchain;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use httpd::{serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode};
+use runtime::net::TcpListener;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 pub async fn run(addr: SocketAddr, bc: Arc<Mutex<Blockchain>>) -> anyhow::Result<()> {
-    let make = make_service_fn(move |_conn| {
-        let bc = Arc::clone(&bc);
-        async move {
-            Ok::<_, hyper::Error>(service_fn(move |_req: Request<Body>| {
-                let height = bc.lock().unwrap().block_height;
-                let body = format!("height: {height}\n");
-                async move { Ok::<_, hyper::Error>(Response::new(Body::from(body))) }
-            }))
-        }
-    });
-    Server::bind(&addr).serve(make).await?;
+    let listener = TcpListener::bind(addr).await?;
+    let state = StatusState { bc };
+    let router = Router::new(state).route(Method::Get, "/", status_handler);
+    serve(listener, router, ServerConfig::default()).await?;
     Ok(())
+}
+
+struct StatusState {
+    bc: Arc<Mutex<Blockchain>>,
+}
+
+async fn status_handler(req: Request<StatusState>) -> Result<Response, HttpError> {
+    let height = req.state().bc.lock().unwrap().block_height;
+    let body = format!("height: {height}\n").into_bytes();
+    Ok(Response::new(StatusCode::OK).with_body(body))
 }

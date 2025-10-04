@@ -1,10 +1,15 @@
 #![deny(warnings)]
 
 use crate::codec_helpers::json_to_string_pretty;
+use crate::parse_utils::{parse_required, parse_u64_required, require_string, take_string};
 use crate::rpc::{RpcClient, WalletQosError, WalletQosEvent};
 use crate::tx::{generate_keypair, sign_tx, FeeLane, RawTxPayload};
 use anyhow::{anyhow, Context, Result};
-use clap::Subcommand;
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use crypto::session::SessionKey;
 use hex;
 use once_cell::sync::Lazy;
@@ -26,62 +31,231 @@ struct CacheEntry {
     fetched_at: Instant,
 }
 
-#[derive(Subcommand)]
 pub enum WalletCmd {
     /// Generate Ed25519 and Dilithium keys in parallel and export keystore
-    Gen {
-        #[arg(long, default_value = "keystore.json")]
-        out: String,
-    },
+    Gen { out: String },
     /// Show available wallet commands
     Help,
     /// List balances for all known tokens
     Balances,
     /// Send tokens to an address with optional ephemeral source
     Send {
-        #[arg(long)]
         to: String,
-        #[arg(long)]
         amount: u64,
-        #[arg(long, default_value_t = 0)]
         fee: u64,
-        #[arg(long, default_value_t = 0)]
         nonce: u64,
-        #[arg(long, default_value_t = 100)]
         pct_ct: u8,
-        #[arg(long)]
         memo: Option<String>,
-        #[arg(long, default_value = "consumer")]
         lane: String,
-        #[arg(long, default_value = "http://127.0.0.1:26658")]
         rpc: String,
-        #[arg(long)]
         from: Option<String>,
-        #[arg(long)]
         ephemeral: bool,
-        #[arg(long)]
         auto_bump: bool,
-        #[arg(long)]
         force: bool,
-        #[arg(long)]
         json: bool,
-        #[arg(long = "lang")]
         lang: Option<String>,
     },
     /// Generate a session key with specified TTL in seconds
-    Session {
-        #[arg(long, default_value_t = 3600)]
-        ttl: u64,
-    },
+    Session { ttl: u64 },
     /// Broadcast a meta-transaction signed by a session key
     MetaSend {
-        #[arg(long)]
         to: String,
-        #[arg(long)]
         amount: u64,
-        #[arg(long)]
         session_sk: String,
     },
+}
+
+impl WalletCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("wallet"), "wallet", "Wallet utilities")
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("wallet.gen"),
+                    "gen",
+                    "Generate Ed25519 and Dilithium keys and export keystore",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("out", "out", "Keystore output path").default("keystore.json"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("wallet.help"),
+                    "help",
+                    "Show available wallet commands",
+                )
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("wallet.balances"),
+                    "balances",
+                    "List balances for all known tokens",
+                )
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("wallet.send"),
+                    "send",
+                    "Send tokens to an address",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("to", "to", "Recipient address").required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("amount", "amount", "Amount to send").required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("fee", "fee", "Fee to pay").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("nonce", "nonce", "Transaction nonce").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("pct_ct", "pct-ct", "Percent of CT to allocate").default("100"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "memo",
+                    "memo",
+                    "Optional memo field",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("lane", "lane", "Fee lane to use").default("consumer"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("rpc", "rpc", "Wallet RPC endpoint")
+                        .default("http://127.0.0.1:26658"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "from",
+                    "from",
+                    "Override sender address",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "ephemeral",
+                    "ephemeral",
+                    "Use an ephemeral key for the transaction",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "auto_bump",
+                    "auto-bump",
+                    "Automatically bump fee if below floor",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "force",
+                    "force",
+                    "Force submission even if below floor",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "lang",
+                    "lang",
+                    "Localization language override",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("wallet.session"),
+                    "session",
+                    "Generate a session key with specified TTL",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("ttl", "ttl", "Session TTL in seconds").default("3600"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("wallet.metasend"),
+                    "meta-send",
+                    "Broadcast a meta-transaction signed by a session key",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("to", "to", "Recipient address").required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("amount", "amount", "Amount to send").required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("session_sk", "session-sk", "Session secret key")
+                        .required(true),
+                ))
+                .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'wallet'".to_string())?;
+
+        match name {
+            "gen" => {
+                let out =
+                    take_string(sub_matches, "out").unwrap_or_else(|| "keystore.json".to_string());
+                Ok(WalletCmd::Gen { out })
+            }
+            "help" => Ok(WalletCmd::Help),
+            "balances" => Ok(WalletCmd::Balances),
+            "send" => {
+                let to = require_string(sub_matches, "to")?;
+                let amount = parse_u64_required(take_string(sub_matches, "amount"), "amount")?;
+                let fee = parse_u64_required(take_string(sub_matches, "fee"), "fee")?;
+                let nonce = parse_u64_required(take_string(sub_matches, "nonce"), "nonce")?;
+                let pct_ct = parse_required::<u8>(take_string(sub_matches, "pct_ct"), "pct-ct")?;
+                let memo = take_string(sub_matches, "memo");
+                let lane =
+                    take_string(sub_matches, "lane").unwrap_or_else(|| "consumer".to_string());
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                let from = take_string(sub_matches, "from");
+                let ephemeral = sub_matches.get_flag("ephemeral");
+                let auto_bump = sub_matches.get_flag("auto_bump");
+                let force = sub_matches.get_flag("force");
+                let json = sub_matches.get_flag("json");
+                let lang = take_string(sub_matches, "lang");
+                Ok(WalletCmd::Send {
+                    to,
+                    amount,
+                    fee,
+                    nonce,
+                    pct_ct,
+                    memo,
+                    lane,
+                    rpc,
+                    from,
+                    ephemeral,
+                    auto_bump,
+                    force,
+                    json,
+                    lang,
+                })
+            }
+            "session" => {
+                let ttl = parse_u64_required(take_string(sub_matches, "ttl"), "ttl")?;
+                Ok(WalletCmd::Session { ttl })
+            }
+            "meta-send" => {
+                let to = require_string(sub_matches, "to")?;
+                let amount = parse_u64_required(take_string(sub_matches, "amount"), "amount")?;
+                let session_sk = require_string(sub_matches, "session_sk")?;
+                Ok(WalletCmd::MetaSend {
+                    to,
+                    amount,
+                    session_sk,
+                })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'wallet'")),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]

@@ -9,6 +9,7 @@ use crate::simple_db;
 use crate::simple_db::{names, SimpleDb, SimpleDbBatch};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
+    COMPUTE_SLA_AUTOMATED_SLASH_TOTAL, COMPUTE_SLA_NEXT_DEADLINE_TS, COMPUTE_SLA_PENDING_TOTAL,
     COMPUTE_SLA_VIOLATIONS_TOTAL, SETTLE_APPLIED_TOTAL, SETTLE_FAILED_TOTAL,
     SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_CT_TOTAL,
 };
@@ -30,6 +31,7 @@ const KEY_METADATA: &str = "metadata";
 const KEY_AUDIT: &str = "audit_log";
 const KEY_ROOTS: &str = "recent_roots";
 const KEY_NEXT_SEQ: &str = "next_seq";
+const KEY_SLA_QUEUE: &str = "sla_queue";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SettleMode {
@@ -44,6 +46,7 @@ struct Metadata {
     armed_delay: Option<u64>,
     last_cancel_reason: Option<String>,
     last_anchor_hex: Option<String>,
+    last_sla_violation: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -67,6 +70,43 @@ pub struct BalanceSnapshot {
     pub industrial: u64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SlaRecord {
+    pub job_id: String,
+    pub provider: String,
+    pub buyer: String,
+    pub provider_bond: u64,
+    pub consumer_bond: u64,
+    pub deadline: u64,
+    pub scheduled_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SlaResolutionKind {
+    Completed,
+    Cancelled { reason: String },
+    Violated { reason: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SlaResolution {
+    pub job_id: String,
+    pub provider: String,
+    pub buyer: String,
+    pub outcome: SlaResolutionKind,
+    pub burned_ct: u64,
+    pub refunded_ct: u64,
+    pub deadline: u64,
+    pub resolved_at: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SlaOutcome<'a> {
+    Completed,
+    Cancelled { reason: &'a str },
+    Violated { reason: &'a str, automated: bool },
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SettlementEngineInfo {
     pub engine: String,
@@ -83,6 +123,7 @@ struct SettlementState {
     audit: VecDeque<AuditRecord>,
     roots: VecDeque<[u8; 32]>,
     next_seq: u64,
+    sla: Vec<SlaRecord>,
 }
 
 impl SettlementState {
@@ -95,6 +136,7 @@ impl SettlementState {
         let audit = load_or_default::<VecDeque<AuditRecord>, _>(&db, KEY_AUDIT, VecDeque::new);
         let roots = load_or_default::<VecDeque<[u8; 32]>, _>(&db, KEY_ROOTS, VecDeque::new);
         let next_seq = load_or_default::<u64, _>(&db, KEY_NEXT_SEQ, || 0u64);
+        let sla = load_or_default::<Vec<SlaRecord>, _>(&db, KEY_SLA_QUEUE, Vec::new);
         Self {
             db,
             base,
@@ -105,6 +147,7 @@ impl SettlementState {
             audit,
             roots,
             next_seq,
+            sla,
         }
     }
 
@@ -190,6 +233,7 @@ impl SettlementState {
     }
 
     fn persist_all(&mut self) {
+        self.refresh_sla_metrics();
         let mut batch = self.db.batch();
         let mut encode = || -> io::Result<()> {
             enqueue_value(&mut batch, KEY_LEDGER_CT, &self.ct)?;
@@ -199,6 +243,7 @@ impl SettlementState {
             enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
             enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
             enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
+            enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
             Ok(())
         };
 
@@ -217,6 +262,142 @@ impl SettlementState {
     fn flush(&self) {
         let _ = self.db.flush();
     }
+
+    fn refresh_sla_metrics(&self) {
+        #[cfg(feature = "telemetry")]
+        {
+            crate::telemetry::COMPUTE_SLA_PENDING_TOTAL.set(self.sla.len() as i64);
+            let next = self.next_deadline().unwrap_or(0);
+            crate::telemetry::COMPUTE_SLA_NEXT_DEADLINE_TS.set(next as i64);
+        }
+    }
+
+    fn next_deadline(&self) -> Option<u64> {
+        self.sla.iter().map(|r| r.deadline).min()
+    }
+
+    fn insert_sla(&mut self, record: SlaRecord) {
+        self.sla.retain(|existing| existing.job_id != record.job_id);
+        let pos = self
+            .sla
+            .iter()
+            .position(|existing| record.deadline < existing.deadline)
+            .unwrap_or(self.sla.len());
+        self.sla.insert(pos, record);
+        self.refresh_sla_metrics();
+    }
+
+    fn remove_sla(&mut self, job_id: &str) -> Option<SlaRecord> {
+        let result = self
+            .sla
+            .iter()
+            .position(|r| r.job_id == job_id)
+            .map(|idx| self.sla.remove(idx));
+        if result.is_some() {
+            self.refresh_sla_metrics();
+        }
+        result
+    }
+
+    fn apply_outcome(&mut self, record: SlaRecord, outcome: SlaOutcome<'_>) -> SlaResolution {
+        let resolved_at = now_ts();
+        let mut burned = 0;
+        let mut refunded = 0;
+        let outcome_kind = match outcome {
+            SlaOutcome::Completed => {
+                self.record_event(&record.provider, "sla_completed", 0, 0);
+                self.metadata.last_sla_violation = None;
+                SlaResolutionKind::Completed
+            }
+            SlaOutcome::Cancelled { reason } => {
+                let memo = format!("sla_cancelled_{reason}");
+                self.record_event(&record.provider, &memo, 0, 0);
+                self.metadata.last_cancel_reason = Some(reason.to_string());
+                SlaResolutionKind::Cancelled {
+                    reason: reason.to_string(),
+                }
+            }
+            SlaOutcome::Violated { reason, automated } => {
+                let memo = format!("sla_violation_{reason}");
+                match self.ct.debit(&record.provider, record.provider_bond) {
+                    Ok(_) => {
+                        burned = record.provider_bond;
+                        self.record_event(
+                            &record.provider,
+                            &memo,
+                            -(record.provider_bond as i64),
+                            0,
+                        );
+                        #[cfg(feature = "telemetry")]
+                        {
+                            SLASHING_BURN_CT_TOTAL.inc_by(burned);
+                            COMPUTE_SLA_VIOLATIONS_TOTAL
+                                .with_label_values(&[record.provider.as_str()])
+                                .inc();
+                            if automated {
+                                crate::telemetry::COMPUTE_SLA_AUTOMATED_SLASH_TOTAL.inc();
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        #[cfg(feature = "telemetry")]
+                        SETTLE_FAILED_TOTAL.with_label_values(&["penalize"]).inc();
+                        self.record_event(&record.provider, &format!("{memo}_failed"), 0, 0);
+                    }
+                }
+                if record.consumer_bond > 0 {
+                    self.ct.deposit(&record.buyer, record.consumer_bond);
+                    refunded = record.consumer_bond;
+                    self.record_event(
+                        &record.buyer,
+                        "sla_consumer_refund",
+                        record.consumer_bond as i64,
+                        0,
+                    );
+                }
+                self.metadata.last_sla_violation = Some(format!(
+                    "{reason}:{job}",
+                    reason = reason,
+                    job = record.job_id
+                ));
+                SlaResolutionKind::Violated {
+                    reason: reason.to_string(),
+                }
+            }
+        };
+        SlaResolution {
+            job_id: record.job_id,
+            provider: record.provider,
+            buyer: record.buyer,
+            outcome: outcome_kind,
+            burned_ct: burned,
+            refunded_ct: refunded,
+            deadline: record.deadline,
+            resolved_at,
+        }
+    }
+
+    fn enforce_overdue(&mut self, now: u64) -> Vec<SlaResolution> {
+        let mut resolved = Vec::new();
+        let mut idx = 0;
+        while idx < self.sla.len() {
+            if self.sla[idx].deadline <= now {
+                let record = self.sla.remove(idx);
+                self.refresh_sla_metrics();
+                let resolution = self.apply_outcome(
+                    record,
+                    SlaOutcome::Violated {
+                        reason: "deadline_missed",
+                        automated: true,
+                    },
+                );
+                resolved.push(resolution);
+            } else {
+                idx += 1;
+            }
+        }
+        resolved
+    }
 }
 
 fn load_or_default<T, F>(db: &SimpleDb, key: &str, default: F) -> T
@@ -233,6 +414,13 @@ fn enqueue_value<T: Serialize>(batch: &mut SimpleDbBatch, key: &str, value: &T) 
     let bytes = bincode::serialize(value)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
     batch.put(key, &bytes)
+}
+
+fn now_ts() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 fn compute_root(ct: &AccountLedger, it: &AccountLedger) -> [u8; 32] {
@@ -347,6 +535,49 @@ impl Settlement {
                 SETTLE_FAILED_TOTAL.with_label_values(&["penalize"]).inc();
                 Err(())
             }
+        })
+    }
+
+    pub fn track_sla(
+        job_id: &str,
+        provider: &str,
+        buyer: &str,
+        provider_bond: u64,
+        consumer_bond: u64,
+        deadline: u64,
+    ) {
+        with_state_mut(|state| {
+            let record = SlaRecord {
+                job_id: job_id.to_string(),
+                provider: provider.to_string(),
+                buyer: buyer.to_string(),
+                provider_bond,
+                consumer_bond,
+                deadline,
+                scheduled_at: now_ts(),
+            };
+            state.insert_sla(record);
+            state.persist_all();
+        });
+    }
+
+    pub fn resolve_sla(job_id: &str, outcome: SlaOutcome<'_>) -> Option<SlaResolution> {
+        with_state_mut(|state| {
+            let record = state.remove_sla(job_id)?;
+            let resolution = state.apply_outcome(record, outcome);
+            state.persist_all();
+            Some(resolution)
+        })
+    }
+
+    pub fn sweep_overdue() -> Vec<SlaResolution> {
+        with_state_mut(|state| {
+            let now = now_ts();
+            let resolutions = state.enforce_overdue(now);
+            if !resolutions.is_empty() {
+                state.persist_all();
+            }
+            resolutions
         })
     }
 

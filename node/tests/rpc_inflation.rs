@@ -61,4 +61,13 @@ async fn rpc_inflation_reports_industrial() {
     assert!(val2["result"]["industrial_backlog"].is_number());
     assert!(val2["result"]["industrial_units_total"].is_number());
     assert!(val2["result"]["industrial_price_per_unit"].is_number());
+
+    let balances = rpc(&addr, r#"{"method":"compute_market.provider_balances"}"#).await;
+    assert!(balances["result"].is_array());
+
+    let audit = rpc(&addr, r#"{"method":"compute_market.audit"}"#).await;
+    assert!(audit["result"].is_object());
+
+    let scheduler = rpc(&addr, r#"{"method":"compute_market.scheduler_metrics"}"#).await;
+    assert!(scheduler["result"].is_object());
 }

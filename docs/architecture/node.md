@@ -9,6 +9,11 @@ This document lists the dependency hierarchy for the `the_block` node crate. It 
 > legacy `reqwest` entries from the previous capture; treat them as historical
 > until the next tree export lands.
 
+> **Update (2025-11-15):** Tests, examples, and tooling mocks have been
+> consolidated on the in-house `httpd` harness. Legacy mentions of
+> `tiny_http`, `axum`, and related dev-dependencies have been pruned from this
+> snapshot.
+
 ```
 the_block v0.1.0 (/workspace/the-block/node)
 ├── anyhow v1.0.100
@@ -1284,95 +1289,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 └── xorfilter-rs v0.5.1
 [dev-dependencies]
 ├── arbitrary v1.4.2 (*)
-├── axum v0.7.9
-│   ├── async-trait v0.1.89 (proc-macro) (*)
-│   ├── axum-core v0.4.5
-│   │   ├── async-trait v0.1.89 (proc-macro) (*)
-│   │   ├── bytes v1.10.1
-│   │   ├── futures-util v0.3.31 (*)
-│   │   ├── http v1.3.1
-│   │   │   ├── bytes v1.10.1
-│   │   │   ├── fnv v1.0.7
-│   │   │   └── itoa v1.0.15
-│   │   ├── http-body v1.0.1
-│   │   │   ├── bytes v1.10.1
-│   │   │   └── http v1.3.1 (*)
-│   │   ├── http-body-util v0.1.3
-│   │   │   ├── bytes v1.10.1
-│   │   │   ├── futures-core v0.3.31
-│   │   │   ├── http v1.3.1 (*)
-│   │   │   ├── http-body v1.0.1 (*)
-│   │   │   └── pin-project-lite v0.2.16
-│   │   ├── mime v0.3.17
-│   │   ├── pin-project-lite v0.2.16
-│   │   ├── rustversion v1.0.22 (proc-macro)
-│   │   ├── sync_wrapper v1.0.2
-│   │   ├── tower-layer v0.3.3
-│   │   ├── tower-service v0.3.3
-│   │   └── tracing v0.1.41 (*)
-│   ├── axum-macros v0.4.2 (proc-macro)
-│   │   ├── proc-macro2 v1.0.101 (*)
-│   │   ├── quote v1.0.41 (*)
-│   │   └── syn v2.0.106 (*)
-│   ├── bytes v1.10.1
-│   ├── futures-util v0.3.31 (*)
-│   ├── http v1.3.1 (*)
-│   ├── http-body v1.0.1 (*)
-│   ├── http-body-util v0.1.3 (*)
-│   ├── hyper v1.7.0
-│   │   ├── atomic-waker v1.1.2
-│   │   ├── bytes v1.10.1
-│   │   ├── futures-channel v0.3.31 (*)
-│   │   ├── futures-core v0.3.31
-│   │   ├── http v1.3.1 (*)
-│   │   ├── http-body v1.0.1 (*)
-│   │   ├── httparse v1.10.1
-│   │   ├── httpdate v1.0.3
-│   │   ├── itoa v1.0.15
-│   │   ├── pin-project-lite v0.2.16
-│   │   ├── pin-utils v0.1.0
-│   │   ├── smallvec v1.15.1 (*)
-│   │   └── tokio v1.47.1 (*)
-│   ├── hyper-util v0.1.17
-│   │   ├── bytes v1.10.1
-│   │   ├── futures-core v0.3.31
-│   │   ├── http v1.3.1 (*)
-│   │   ├── http-body v1.0.1 (*)
-│   │   ├── hyper v1.7.0 (*)
-│   │   ├── pin-project-lite v0.2.16
-│   │   ├── tokio v1.47.1 (*)
-│   │   └── tower-service v0.3.3
-│   ├── itoa v1.0.15
-│   ├── matchit v0.7.3
-│   ├── memchr v2.7.6
-│   ├── mime v0.3.17
-│   ├── percent-encoding v2.3.2
-│   ├── pin-project-lite v0.2.16
-│   ├── rustversion v1.0.22 (proc-macro)
-│   ├── serde v1.0.228 (*)
-│   ├── serde_json v1.0.145 (*)
-│   ├── serde_path_to_error v0.1.20
-│   │   ├── itoa v1.0.15
-│   │   └── serde_core v1.0.228
-│   ├── serde_urlencoded v0.7.1
-│   │   ├── form_urlencoded v1.2.2 (*)
-│   │   ├── itoa v1.0.15
-│   │   ├── ryu v1.0.20
-│   │   └── serde v1.0.228 (*)
-│   ├── sync_wrapper v1.0.2
-│   ├── tokio v1.47.1 (*)
-│   ├── tower v0.5.2
-│   │   ├── futures-core v0.3.31
-│   │   ├── futures-util v0.3.31 (*)
-│   │   ├── pin-project-lite v0.2.16
-│   │   ├── sync_wrapper v1.0.2
-│   │   ├── tokio v1.47.1 (*)
-│   │   ├── tower-layer v0.3.3
-│   │   ├── tower-service v0.3.3
-│   │   └── tracing v0.1.41 (*)
-│   ├── tower-layer v0.3.3
-│   ├── tower-service v0.3.3
-│   └── tracing v0.1.41 (*)
 ├── criterion v0.5.1
 │   ├── anes v0.1.6
 │   ├── cast v0.3.0
@@ -1514,11 +1430,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── the_block v0.1.0 (/workspace/the-block/node) (*)
 │   ├── thiserror v1.0.69 (*)
 │   └── tokio-util v0.7.16 (*)
-├── tiny_http v0.12.0
-│   ├── ascii v1.1.0
-│   ├── chunked_transfer v1.5.0
-│   ├── httpdate v1.0.3
-│   └── log v0.4.28 (*)
 ├── tracing v0.1.41 (*)
 ├── tracing-test v0.2.5
 │   ├── tracing-core v0.1.34 (*)

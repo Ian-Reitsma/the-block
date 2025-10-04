@@ -1,4 +1,12 @@
-use clap::Subcommand;
+use crate::parse_utils::{
+    parse_bool, parse_positional_u32, parse_positional_u64, parse_usize, require_positional,
+    take_string,
+};
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use storage::{StorageContract, StorageOffer};
 use the_block::{
     generate_keypair, rpc,
@@ -6,7 +14,6 @@ use the_block::{
     transaction::{sign_tx, RawTxPayload},
 };
 
-#[derive(Subcommand)]
 pub enum StorageCmd {
     /// Upload data to storage market
     Upload {
@@ -24,39 +31,253 @@ pub enum StorageCmd {
         block: u64,
     },
     /// List provider quotas and recent upload metrics
-    Providers {
-        #[arg(long)]
-        json: bool,
-    },
+    Providers { json: bool },
     /// Toggle maintenance mode for a provider
     Maintenance {
         provider_id: String,
-        #[arg(long, default_value_t = true)]
         maintenance: bool,
     },
     /// Show recent repair attempts and outcomes
-    RepairHistory {
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(long)]
-        json: bool,
-    },
+    RepairHistory { limit: Option<usize>, json: bool },
     /// Trigger the repair loop once and print summary statistics
     RepairRun {},
     /// Force a repair attempt for a manifest chunk
     RepairChunk {
         manifest: String,
         chunk: u32,
-        #[arg(long)]
         force: bool,
     },
     /// List stored manifests and active coding algorithms
-    Manifests {
-        #[arg(long)]
-        limit: Option<usize>,
-        #[arg(long)]
-        json: bool,
-    },
+    Manifests { limit: Option<usize>, json: bool },
+}
+
+impl StorageCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("storage"), "storage", "Storage market utilities")
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.upload"),
+                    "upload",
+                    "Upload data to storage market",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "object_id",
+                    "Storage object identifier",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "provider_id",
+                    "Storage provider identifier",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "bytes",
+                    "Total bytes to store",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "shares",
+                    "Number of shares",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "price",
+                    "Price per block in CT",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "retention",
+                    "Retention duration in blocks",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.challenge"),
+                    "challenge",
+                    "Challenge a storage provider",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "object_id",
+                    "Storage object identifier",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "chunk",
+                    "Chunk index",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "block",
+                    "Block height",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.providers"),
+                    "providers",
+                    "List provider quotas and recent upload metrics",
+                )
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.maintenance"),
+                    "maintenance",
+                    "Toggle maintenance mode for a provider",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "provider_id",
+                    "Storage provider identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "maintenance",
+                        "maintenance",
+                        "Set maintenance mode (true/false)",
+                    )
+                    .default("true"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.repair_history"),
+                    "repair-history",
+                    "Show recent repair attempts and outcomes",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "limit",
+                    "limit",
+                    "Maximum entries to display",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.repair_run"),
+                    "repair-run",
+                    "Trigger the repair loop once and print summary statistics",
+                )
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.repair_chunk"),
+                    "repair-chunk",
+                    "Force a repair attempt for a manifest chunk",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "manifest",
+                    "Manifest identifier",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "chunk",
+                    "Chunk index",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "force",
+                    "force",
+                    "Force the repair attempt even if not due",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.manifests"),
+                    "manifests",
+                    "List stored manifests and active coding algorithms",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "limit",
+                    "limit",
+                    "Maximum manifests to display",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'storage'".to_string())?;
+
+        match name {
+            "upload" => {
+                let object_id = require_positional(sub_matches, "object_id")?;
+                let provider_id = require_positional(sub_matches, "provider_id")?;
+                let bytes = parse_positional_u64(sub_matches, "bytes")?;
+                let shares_raw = require_positional(sub_matches, "shares")?;
+                let shares = shares_raw
+                    .parse::<u16>()
+                    .map_err(|_| format!("invalid value '{shares_raw}' for 'shares'"))?;
+                let price = parse_positional_u64(sub_matches, "price")?;
+                let retention = parse_positional_u64(sub_matches, "retention")?;
+                Ok(StorageCmd::Upload {
+                    object_id,
+                    provider_id,
+                    bytes,
+                    shares,
+                    price,
+                    retention,
+                })
+            }
+            "challenge" => {
+                let object_id = require_positional(sub_matches, "object_id")?;
+                let chunk = parse_positional_u64(sub_matches, "chunk")?;
+                let block = parse_positional_u64(sub_matches, "block")?;
+                Ok(StorageCmd::Challenge {
+                    object_id,
+                    chunk,
+                    block,
+                })
+            }
+            "providers" => Ok(StorageCmd::Providers {
+                json: sub_matches.get_flag("json"),
+            }),
+            "maintenance" => {
+                let provider_id = require_positional(sub_matches, "provider_id")?;
+                let maintenance =
+                    parse_bool(take_string(sub_matches, "maintenance"), true, "maintenance")?;
+                Ok(StorageCmd::Maintenance {
+                    provider_id,
+                    maintenance,
+                })
+            }
+            "repair-history" => {
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?;
+                let json = sub_matches.get_flag("json");
+                Ok(StorageCmd::RepairHistory { limit, json })
+            }
+            "repair-run" => Ok(StorageCmd::RepairRun {}),
+            "repair-chunk" => {
+                let manifest = require_positional(sub_matches, "manifest")?;
+                let chunk = parse_positional_u32(sub_matches, "chunk")?;
+                let force = sub_matches.get_flag("force");
+                Ok(StorageCmd::RepairChunk {
+                    manifest,
+                    chunk,
+                    force,
+                })
+            }
+            "manifests" => {
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?;
+                let json = sub_matches.get_flag("json");
+                Ok(StorageCmd::Manifests { limit, json })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'storage'")),
+        }
+    }
 }
 
 pub fn handle(cmd: StorageCmd) {

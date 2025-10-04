@@ -5,8 +5,6 @@ edition = "2021"
 
 [dependencies]
 wallet = { path = "../crates/wallet", optional = true, features = ["dilithium"] }
-clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
 hex = "0.4"
 the_block = { path = "../node" }
 governance = { path = "../governance" }
@@ -16,8 +14,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dkg = { path = "../dkg", optional = true }
 anyhow = "1"
-    dex = { path = "../dex" }
-    ripemd = "0.1"
+dex = { path = "../dex" }
+ripemd = "0.1"
 storage = { path = "../storage" }
 runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"] }
 tokio = { version = "1", features = ["rt", "macros", "net"] }
@@ -29,7 +27,7 @@ crypto_suite = { path = "../crates/crypto_suite" }
 codec = { path = "../crates/codec" }
 cli_core = { path = "../crates/cli_core" }
 wasmtime = { version = "24", optional = true }
-    base64 = "0.22"
+base64 = "0.22"
 rusqlite = { version = "0.30", features = ["bundled"], optional = true }
 rpassword = "7"
 rand = "0.8"
@@ -50,8 +48,6 @@ full = ["wasm-metadata", "sqlite-storage"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-tiny_http = "0.12"
-httpmock = "0.7"
 
 [[bench]]
 name = "fee_estimator"

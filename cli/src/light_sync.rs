@@ -1,14 +1,55 @@
 use crate::codec_helpers::json_from_str;
-use clap::Subcommand;
+use crate::parse_utils::require_positional;
+use cli_core::{
+    arg::{ArgSpec, PositionalSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use light_client::{load_user_config, LightClientConfig, StateChunk, StateStream};
 use runtime::net::TcpStream;
 use runtime::ws::{self, ClientStream, Message as WsMessage};
 use url::Url;
 
-#[derive(Subcommand)]
 pub enum LightSyncCmd {
     /// Start light-client synchronization over a websocket URL
     Start { url: String },
+}
+
+impl LightSyncCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("light-sync"),
+            "light-sync",
+            "Light sync utilities",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-sync.start"),
+                "start",
+                "Start light-client synchronization over a websocket URL",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "url",
+                "Websocket endpoint for state streaming",
+            )))
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'light-sync'".to_string())?;
+
+        match name {
+            "start" => {
+                let url = require_positional(sub_matches, "url")?;
+                Ok(LightSyncCmd::Start { url })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'light-sync'")),
+        }
+    }
 }
 
 pub fn handle(cmd: LightSyncCmd) {

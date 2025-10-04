@@ -149,8 +149,10 @@ impl BlockingWebSocket {
             ));
         }
         for line in text.lines() {
-            if let Some(value) = line.strip_prefix("Sec-WebSocket-Accept: ") {
-                if value.trim() == expected_accept {
+            if let Some((name, value)) = line.split_once(':') {
+                if name.trim().eq_ignore_ascii_case("Sec-WebSocket-Accept")
+                    && value.trim() == expected_accept
+                {
                     return Ok(());
                 }
             }

@@ -1,6 +1,11 @@
 #![forbid(unsafe_code)]
 
-use clap::{Parser, Subcommand};
+use cli_core::{
+    arg::{ArgSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    help::HelpGenerator,
+    parse::{Matches, ParseError, Parser},
+};
 use coding::{compressor_for, erasure_coder_for};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
@@ -8,46 +13,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-/// Distributed benchmarking harness CLI.
-#[derive(Debug, Parser)]
-#[command(name = "bench-harness")]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Run the placeholder workload benchmark.
-    Workload {
-        /// Number of nodes to deploy for the benchmark.
-        #[arg(short, long, default_value_t = 1)]
-        nodes: u32,
-        /// Optional workload configuration in JSON format.
-        #[arg(short, long)]
-        workload: Option<PathBuf>,
-        /// Path to write benchmark report JSON.
-        #[arg(long)]
-        report: PathBuf,
-        /// Optional baseline metrics to detect regressions.
-        #[arg(long)]
-        baseline: Option<PathBuf>,
-    },
-    /// Compare default and fallback coding stacks.
-    CompareCoders {
-        /// Payload size in bytes for each iteration.
-        #[arg(long, default_value_t = 1_048_576)]
-        bytes: usize,
-        /// Number of data shards for erasure coding.
-        #[arg(long, default_value_t = 16)]
-        data: usize,
-        /// Number of parity shards for erasure coding.
-        #[arg(long, default_value_t = 1)]
-        parity: usize,
-        /// Number of iterations to average over.
-        #[arg(long, default_value_t = 32)]
-        iterations: u32,
-    },
+enum RunError {
+    Usage(String),
+    Failure(anyhow::Error),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,23 +24,188 @@ struct Metrics {
     throughput_tps: f64,
 }
 
-fn main() -> anyhow::Result<()> {
-    match Cli::parse().command {
-        Command::Workload {
-            nodes,
-            workload,
-            report,
-            baseline,
-        } => run_workload_mode(nodes, workload, report, baseline),
-        Command::CompareCoders {
-            bytes,
-            data,
-            parity,
-            iterations,
-        } => compare_coders(bytes, data, parity, iterations),
+fn main() {
+    if let Err(err) = run() {
+        match err {
+            RunError::Usage(msg) => {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+            RunError::Failure(err) => {
+                eprintln!("{err}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 
+fn run() -> Result<(), RunError> {
+    let mut argv = std::env::args();
+    let bin = argv.next().unwrap_or_else(|| "bench-harness".to_string());
+    let args: Vec<String> = argv.collect();
+
+    let command = build_command();
+    if args.is_empty() {
+        print_root_help(&command, &bin);
+        return Ok(());
+    }
+
+    let parser = Parser::new(&command);
+    let matches = match parser.parse(&args) {
+        Ok(matches) => matches,
+        Err(ParseError::HelpRequested(path)) => {
+            print_help_for_path(&command, &path);
+            return Ok(());
+        }
+        Err(err) => return Err(RunError::Usage(err.to_string())),
+    };
+
+    handle_matches(matches)
+}
+
+fn build_command() -> Command {
+    CommandBuilder::new(
+        CommandId("bench-harness"),
+        "bench-harness",
+        "Distributed benchmarking harness",
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("bench-harness.workload"),
+            "workload",
+            "Run the placeholder workload benchmark",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("nodes", "nodes", "Number of nodes to deploy").default("1"),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "workload",
+            "workload",
+            "Optional workload configuration in JSON format",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("report", "report", "Path to write benchmark report JSON")
+                .required(true),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "baseline",
+            "baseline",
+            "Optional baseline metrics to detect regressions",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("bench-harness.compare-coders"),
+            "compare-coders",
+            "Compare default and fallback coding stacks",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("bytes", "bytes", "Payload size in bytes for each iteration")
+                .default("1048576"),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("data", "data", "Number of data shards for erasure coding")
+                .default("16"),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new(
+                "parity",
+                "parity",
+                "Number of parity shards for erasure coding",
+            )
+            .default("1"),
+        ))
+        .arg(ArgSpec::Option(
+            OptionSpec::new(
+                "iterations",
+                "iterations",
+                "Number of iterations to average over",
+            )
+            .default("32"),
+        ))
+        .build(),
+    )
+    .build()
+}
+
+fn handle_matches(matches: Matches) -> Result<(), RunError> {
+    let (name, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| RunError::Usage("missing subcommand".into()))?;
+
+    match name {
+        "workload" => {
+            let nodes = parse_u32(sub_matches, "nodes")?;
+            let workload = sub_matches.get_string("workload").map(PathBuf::from);
+            let report = sub_matches
+                .get_string("report")
+                .map(PathBuf::from)
+                .ok_or_else(|| RunError::Usage("missing required '--report' option".into()))?;
+            let baseline = sub_matches.get_string("baseline").map(PathBuf::from);
+            run_workload_mode(nodes, workload, report, baseline)
+                .map_err(|err| RunError::Failure(err))
+        }
+        "compare-coders" => {
+            let bytes = parse_usize(sub_matches, "bytes")?;
+            let data = parse_usize(sub_matches, "data")?;
+            let parity = parse_usize(sub_matches, "parity")?;
+            let iterations = parse_u32(sub_matches, "iterations")?;
+            compare_coders(bytes, data, parity, iterations).map_err(|err| RunError::Failure(err))
+        }
+        other => Err(RunError::Usage(format!("unknown subcommand '{other}'"))),
+    }
+}
+
+fn parse_u32(matches: &Matches, name: &str) -> Result<u32, RunError> {
+    matches
+        .get(name)
+        .ok_or_else(|| RunError::Usage(format!("missing '--{name}' option")))?
+        .parse::<u32>()
+        .map_err(|err| RunError::Usage(err.to_string()))
+}
+
+fn parse_usize(matches: &Matches, name: &str) -> Result<usize, RunError> {
+    matches
+        .get(name)
+        .ok_or_else(|| RunError::Usage(format!("missing '--{name}' option")))?
+        .parse::<usize>()
+        .map_err(|err| RunError::Usage(err.to_string()))
+}
+
+fn print_root_help(command: &Command, bin: &str) {
+    let generator = HelpGenerator::new(command);
+    println!("{}", generator.render());
+    println!("\nRun '{bin} <subcommand> --help' for details on a command.");
+}
+
+fn print_help_for_path(root: &Command, path: &str) {
+    let segments: Vec<&str> = path.split_whitespace().collect();
+    if let Some(cmd) = find_command(root, &segments) {
+        let generator = HelpGenerator::new(cmd);
+        println!("{}", generator.render());
+    }
+}
+
+fn find_command<'a>(root: &'a Command, path: &[&str]) -> Option<&'a Command> {
+    if path.is_empty() {
+        return Some(root);
+    }
+
+    let mut current = root;
+    for segment in path.iter().skip(1) {
+        if let Some(next) = current
+            .subcommands
+            .iter()
+            .find(|command| command.name == *segment)
+        {
+            current = next;
+        } else {
+            return None;
+        }
+    }
+    Some(current)
+}
 fn run_workload_mode(
     nodes: u32,
     workload: Option<PathBuf>,

@@ -3,10 +3,18 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::codec_helpers::{json_from_str, json_to_string, json_to_string_pretty};
+use crate::parse_utils::{
+    optional_path, parse_bool, parse_u64, parse_u64_required, parse_usize_required,
+    require_positional, take_string,
+};
 use crate::rpc::RpcClient;
 use crate::tx::{TxDidAnchor, TxDidAnchorAttestation};
 use anyhow::{anyhow, Context, Result};
-use clap::{ArgGroup, Args, Subcommand};
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use light_client::{self, SyncOptions};
@@ -15,28 +23,19 @@ use serde_json::{self, Value};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug)]
 pub enum LightClientCmd {
     /// Show current proof rebate balance
-    RebateStatus {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    RebateStatus { url: String },
     /// Inspect historical proof rebate claims
     RebateHistory(RebateHistoryArgs),
     /// Interact with the decentralized identifier registry
-    Did {
-        #[command(subcommand)]
-        action: DidCmd,
-    },
+    Did { action: DidCmd },
     /// Inspect or configure device-aware sync policy
-    Device {
-        #[command(subcommand)]
-        action: DeviceCmd,
-    },
+    Device { action: DeviceCmd },
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug)]
 pub enum DidCmd {
     /// Anchor a DID document on-chain
     Anchor(DidAnchorArgs),
@@ -44,65 +43,49 @@ pub enum DidCmd {
     Resolve(DidResolveArgs),
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug)]
 pub enum DeviceCmd {
     /// Inspect current device probes and gating decision
     Status {
         /// Emit JSON instead of human-readable text
-        #[arg(long)]
         json: bool,
     },
     /// Persist an override that skips the charging requirement
     IgnoreCharging {
         /// Enable (`true`) or disable (`false`) the override
-        #[arg(long)]
         enable: bool,
     },
     /// Remove all persisted overrides
     ClearOverrides,
 }
 
-#[derive(Args, Debug, Clone)]
-#[command(
-    group = ArgGroup::new("owner_key")
-        .args(["secret", "secret_file"])
-        .required(true)
-)]
+#[derive(Debug, Clone)]
 pub struct DidAnchorArgs {
     /// Path to the DID document JSON file
     pub file: PathBuf,
     /// Override the address used for anchoring (defaults to the public key hex)
-    #[arg(long)]
     pub address: Option<String>,
     /// Nonce for replay protection
-    #[arg(long)]
     pub nonce: u64,
     /// Hex-encoded owner secret key
-    #[arg(long)]
     pub secret: Option<String>,
     /// File containing the owner secret key (hex)
-    #[arg(long = "secret-file")]
     pub secret_file: Option<PathBuf>,
     /// Optional remote signer material (JSON or raw hex secret)
-    #[arg(long)]
     pub remote_signer: Option<PathBuf>,
     /// JSON-RPC endpoint
-    #[arg(long, default_value = "http://127.0.0.1:26658")]
     pub rpc: String,
     /// Skip submission and emit the signed payload for offline broadcast
-    #[arg(long)]
     pub sign_only: bool,
 }
 
-#[derive(Args, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct DidResolveArgs {
     /// Address whose DID should be resolved
     pub address: String,
     /// JSON-RPC endpoint
-    #[arg(long, default_value = "http://127.0.0.1:26658")]
     pub rpc: String,
     /// Emit JSON instead of human-readable output
-    #[arg(long)]
     pub json: bool,
 }
 
@@ -121,22 +104,318 @@ pub struct AnchorRemoteAttestation {
     pub signature: String,
 }
 
-#[derive(Args, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct RebateHistoryArgs {
-    #[arg(long, default_value = "http://localhost:26658")]
     pub url: String,
     /// Hex-encoded relayer identifier to filter receipts
-    #[arg(long)]
     pub relayer: Option<String>,
     /// Resume listing before this block height
-    #[arg(long)]
     pub cursor: Option<u64>,
     /// Maximum number of receipts to fetch
-    #[arg(long, default_value_t = 25)]
     pub limit: usize,
     /// Emit JSON instead of human-readable output
-    #[arg(long)]
     pub json: bool,
+}
+
+impl LightClientCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("light-client"),
+            "light-client",
+            "Light-client utilities",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.rebate-status"),
+                "rebate-status",
+                "Show current proof rebate balance",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "JSON-RPC endpoint")
+                    .default("http://localhost:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.rebate-history"),
+                "rebate-history",
+                "Inspect historical proof rebate claims",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "JSON-RPC endpoint")
+                    .default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "relayer",
+                "relayer",
+                "Hex-encoded relayer identifier",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "cursor",
+                "cursor",
+                "Resume listing before this block height",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Maximum number of receipts").default("25"),
+            ))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .build(),
+        )
+        .subcommand(DidCmd::command())
+        .subcommand(DeviceCmd::command())
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'light-client'".to_string())?;
+
+        match name {
+            "rebate-status" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(LightClientCmd::RebateStatus { url })
+            }
+            "rebate-history" => {
+                let args = RebateHistoryArgs::from_matches(sub_matches)?;
+                Ok(LightClientCmd::RebateHistory(args))
+            }
+            "did" => {
+                let action = DidCmd::from_matches(sub_matches)?;
+                Ok(LightClientCmd::Did { action })
+            }
+            "device" => {
+                let action = DeviceCmd::from_matches(sub_matches)?;
+                Ok(LightClientCmd::Device { action })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'light-client'")),
+        }
+    }
+}
+
+impl DidCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("light-client.did"),
+            "did",
+            "Decentralized identifier registry operations",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.did.anchor"),
+                "anchor",
+                "Anchor a DID document on-chain",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "file",
+                "Path to the DID document JSON file",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "address",
+                "address",
+                "Override the address used for anchoring",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("nonce", "nonce", "Nonce for replay protection").required(true),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "secret",
+                "secret",
+                "Hex-encoded owner secret key",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "secret-file",
+                "secret-file",
+                "File containing the owner secret key (hex)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "remote-signer",
+                "remote-signer",
+                "Optional remote signer material (JSON or raw hex)",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "sign_only",
+                "sign-only",
+                "Skip submission and emit the signed payload",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.did.resolve"),
+                "resolve",
+                "Resolve the latest DID document for an address",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "address",
+                "Address whose DID should be resolved",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<DidCmd, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'light-client did'".to_string())?;
+
+        match name {
+            "anchor" => {
+                let args = DidAnchorArgs::from_matches(sub_matches)?;
+                Ok(DidCmd::Anchor(args))
+            }
+            "resolve" => {
+                let args = DidResolveArgs::from_matches(sub_matches)?;
+                Ok(DidCmd::Resolve(args))
+            }
+            other => Err(format!(
+                "unknown subcommand '{other}' for 'light-client did'"
+            )),
+        }
+    }
+}
+
+impl DeviceCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("light-client.device"),
+            "device",
+            "Inspect or configure device-aware sync policy",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.device.status"),
+                "status",
+                "Inspect current device probes and gating decision",
+            )
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable text",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.device.ignore_charging"),
+                "ignore-charging",
+                "Persist an override that skips the charging requirement",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new(
+                    "enable",
+                    "enable",
+                    "Enable (true) or disable (false) the override",
+                )
+                .required(true),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.device.clear_overrides"),
+                "clear-overrides",
+                "Remove all persisted overrides",
+            )
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<DeviceCmd, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'light-client device'".to_string())?;
+
+        match name {
+            "status" => Ok(DeviceCmd::Status {
+                json: sub_matches.get_flag("json"),
+            }),
+            "ignore-charging" => {
+                let enable = parse_bool(take_string(sub_matches, "enable"), false, "enable")?;
+                Ok(DeviceCmd::IgnoreCharging { enable })
+            }
+            "clear-overrides" => Ok(DeviceCmd::ClearOverrides),
+            other => Err(format!(
+                "unknown subcommand '{other}' for 'light-client device'"
+            )),
+        }
+    }
+}
+
+impl DidAnchorArgs {
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let file = PathBuf::from(require_positional(matches, "file")?);
+        let address = take_string(matches, "address");
+        let nonce = parse_u64_required(take_string(matches, "nonce"), "nonce")?;
+        let secret = take_string(matches, "secret");
+        let secret_file = optional_path(matches, "secret-file");
+        let remote_signer = optional_path(matches, "remote-signer");
+        if secret.is_none() && secret_file.is_none() {
+            return Err("either --secret or --secret-file must be provided".to_string());
+        }
+        let rpc =
+            take_string(matches, "rpc").unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+        let sign_only = matches.get_flag("sign_only");
+        Ok(DidAnchorArgs {
+            file,
+            address,
+            nonce,
+            secret,
+            secret_file,
+            remote_signer,
+            rpc,
+            sign_only,
+        })
+    }
+}
+
+impl DidResolveArgs {
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let address = require_positional(matches, "address")?;
+        let rpc =
+            take_string(matches, "rpc").unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+        let json = matches.get_flag("json");
+        Ok(DidResolveArgs { address, rpc, json })
+    }
+}
+
+impl RebateHistoryArgs {
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let url =
+            take_string(matches, "url").unwrap_or_else(|| "http://localhost:26658".to_string());
+        let relayer = take_string(matches, "relayer");
+        let cursor = parse_u64(take_string(matches, "cursor"), "cursor")?;
+        let limit = parse_usize_required(take_string(matches, "limit"), "limit")?;
+        let json = matches.get_flag("json");
+        Ok(RebateHistoryArgs {
+            url,
+            relayer,
+            cursor,
+            limit,
+            json,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

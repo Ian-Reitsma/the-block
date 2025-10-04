@@ -6,6 +6,7 @@ pub mod proposals;
 pub mod release;
 pub mod state;
 pub mod store;
+pub mod treasury;
 pub mod variance;
 
 pub use bicameral::{
@@ -30,6 +31,7 @@ pub use store::{
     DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, ACTIVATION_DELAY,
     QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
+pub use treasury::{DisbursementStatus, TreasuryDisbursement};
 
 /// Simplified address type reused across governance records.
 pub type Address = String;

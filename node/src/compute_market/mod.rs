@@ -2,6 +2,7 @@
 use crate::telemetry;
 use crate::transaction::FeeLane;
 use serde::{Deserialize, Serialize};
+use settlement::{SlaOutcome, SlaResolutionKind};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
@@ -280,6 +281,24 @@ impl Market {
         }
     }
 
+    fn sweep_overdue_jobs(&mut self) {
+        for resolution in settlement::Settlement::sweep_overdue() {
+            if let SlaResolutionKind::Violated { .. } = resolution.outcome {
+                if let Some(state) = self.jobs.remove(&resolution.job_id) {
+                    scheduler::record_failure(&state.provider);
+                    if state.job.capability.accelerator.is_some() {
+                        scheduler::record_accelerator_failure(&state.provider);
+                        #[cfg(feature = "telemetry")]
+                        crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
+                    }
+                }
+                scheduler::end_job(&resolution.job_id);
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
+            }
+        }
+    }
+
     /// Post an offer from a provider.
     pub fn post_offer(&mut self, offer: Offer) -> Result<(), &'static str> {
         let mut offer = offer;
@@ -316,6 +335,7 @@ impl Market {
 
     /// Submit a job from the consumer side, matching an existing offer.
     pub fn submit_job(&mut self, job: Job) -> Result<(), MarketError> {
+        self.sweep_overdue_jobs();
         if job.consumer_bond < MIN_BOND {
             return Err(MarketError::InvalidWorkload);
         }
@@ -406,6 +426,14 @@ impl Market {
             state.job.priority,
             expected,
         );
+        settlement::Settlement::track_sla(
+            &state.job.job_id,
+            &state.provider,
+            &state.job.buyer,
+            state.provider_bond,
+            state.job.consumer_bond,
+            state.job.deadline,
+        );
         self.jobs.insert(state.job.job_id.clone(), state);
         self.seen_jobs.insert(offer.job_id);
         #[cfg(feature = "telemetry")]
@@ -424,6 +452,7 @@ impl Market {
         job_id: &str,
         reason: scheduler::CancelReason,
     ) -> Option<(u64, u64)> {
+        self.sweep_overdue_jobs();
         let state = self.jobs.remove(job_id)?;
         courier::cancel_job(job_id);
         let mut attempt = 0u32;
@@ -439,9 +468,36 @@ impl Market {
         if !scheduler::cancel_job(job_id, &state.provider, reason) {
             return None;
         }
-        settlement::Settlement::accrue(&state.provider, "bond_refund", state.provider_bond);
-        settlement::Settlement::refund_split(&state.job.buyer, state.job.consumer_bond, 0);
-        Some((state.provider_bond, state.job.consumer_bond))
+        let outcome = match reason {
+            scheduler::CancelReason::Provider | scheduler::CancelReason::ProviderFault => {
+                SlaOutcome::Violated {
+                    reason: reason.as_str(),
+                    automated: false,
+                }
+            }
+            _ => SlaOutcome::Cancelled {
+                reason: reason.as_str(),
+            },
+        };
+        let resolution = settlement::Settlement::resolve_sla(job_id, outcome);
+        let mut provider_refund = state.provider_bond;
+        let mut consumer_refund = state.job.consumer_bond;
+        let refunded_by_resolution = resolution.as_ref().map_or(0, |res| res.refunded_ct);
+        if let Some(res) = &resolution {
+            if let SlaResolutionKind::Violated { .. } = res.outcome {
+                provider_refund = provider_refund.saturating_sub(res.burned_ct);
+            }
+            if res.refunded_ct > 0 {
+                consumer_refund = res.refunded_ct;
+            }
+        }
+        if provider_refund > 0 {
+            settlement::Settlement::accrue(&state.provider, "bond_refund", provider_refund);
+        }
+        if refunded_by_resolution == 0 && consumer_refund > 0 {
+            settlement::Settlement::refund_split(&state.job.buyer, consumer_refund, 0);
+        }
+        Some((provider_refund, consumer_refund))
     }
 
     /// Verify a slice proof and record the payout.
@@ -451,6 +507,7 @@ impl Market {
         proof: ExecutionReceipt,
     ) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
+        self.sweep_overdue_jobs();
         let state = self.jobs.get_mut(job_id).ok_or("unknown job")?;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -463,7 +520,13 @@ impl Market {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
             }
-            let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
+            let _ = settlement::Settlement::resolve_sla(
+                job_id,
+                SlaOutcome::Violated {
+                    reason: "deadline_missed",
+                    automated: false,
+                },
+            );
             #[cfg(feature = "telemetry")]
             crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
             self.jobs.remove(job_id);
@@ -522,6 +585,7 @@ impl Market {
 
     /// Finalize a job and release bonds if complete.
     pub fn finalize_job(&mut self, job_id: &str) -> Option<(u64, u64)> {
+        self.sweep_overdue_jobs();
         let state = self.jobs.get(job_id)?;
         if !state.completed {
             scheduler::record_failure(&state.provider);
@@ -532,28 +596,55 @@ impl Market {
             }
             return None;
         }
-        if let Some((expected, actual)) = scheduler::job_duration(job_id) {
+        let provider_id = state.provider.clone();
+        let buyer_id = state.job.buyer.clone();
+        let mut provider_refund = state.provider_bond;
+        let mut consumer_refund = state.job.consumer_bond;
+        let has_accel = state.job.capability.accelerator.is_some();
+        let resolution = if let Some((expected, actual)) = scheduler::job_duration(job_id) {
             if expected > 0 && actual > expected {
-                scheduler::record_failure(&state.provider);
-                if state.job.capability.accelerator.is_some() {
-                    scheduler::record_accelerator_failure(&state.provider);
+                scheduler::record_failure(&provider_id);
+                if has_accel {
+                    scheduler::record_accelerator_failure(&provider_id);
                     #[cfg(feature = "telemetry")]
                     crate::telemetry::SCHEDULER_ACCELERATOR_FAIL_TOTAL.inc();
                 }
-                let _ = settlement::Settlement::penalize_sla(&state.provider, state.provider_bond);
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
+                settlement::Settlement::resolve_sla(
+                    job_id,
+                    SlaOutcome::Violated {
+                        reason: "runtime_overage",
+                        automated: false,
+                    },
+                )
+            } else {
+                settlement::Settlement::resolve_sla(job_id, SlaOutcome::Completed)
+            }
+        } else {
+            settlement::Settlement::resolve_sla(job_id, SlaOutcome::Completed)
+        };
+        if let Some(res) = &resolution {
+            if let SlaResolutionKind::Violated { .. } = res.outcome {
+                provider_refund = provider_refund.saturating_sub(res.burned_ct);
+            }
+            if res.refunded_ct > 0 {
+                consumer_refund = res.refunded_ct;
             }
         }
         scheduler::record_success(&state.provider);
-        if state.job.capability.accelerator.is_some() {
+        if has_accel {
             scheduler::record_accelerator_success(&state.provider);
         }
-        let provider_bond = state.provider_bond;
-        let consumer_bond = state.job.consumer_bond;
         self.jobs.remove(job_id);
         scheduler::end_job(job_id);
-        Some((provider_bond, consumer_bond))
+        if provider_refund > 0 {
+            settlement::Settlement::accrue(&provider_id, "bond_refund", provider_refund);
+        }
+        if resolution.as_ref().map_or(true, |res| res.refunded_ct == 0) && consumer_refund > 0 {
+            settlement::Settlement::refund_split(&buyer_id, consumer_refund, 0);
+        }
+        Some((provider_refund, consumer_refund))
     }
 
     /// Execute a job by submitting slice outputs and returning total payout.
@@ -989,6 +1080,117 @@ mod tests {
         scheduler::reset_for_test();
         courier::cancel_job("c1");
         assert!(courier::handoff_job("c1", "prov").is_err());
+    }
+
+    #[test]
+    fn overdue_jobs_are_slashed_automatically() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 10_000);
+        settlement.prefund("buyer", 10_000);
+        scheduler::reset_for_test();
+        let mut market = Market::new();
+
+        let offer = Offer {
+            job_id: "auto1".into(),
+            provider: "prov".into(),
+            provider_bond: 5,
+            consumer_bond: 5,
+            units: 1,
+            price_per_unit: 1,
+            fee_pct_ct: 0,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
+            reputation_multiplier: 1.0,
+        };
+        market
+            .post_offer(offer)
+            .unwrap_or_else(|e| panic!("post offer: {e}"));
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let job = Job {
+            job_id: "auto1".into(),
+            buyer: "buyer".into(),
+            slices: vec![[0u8; 32]],
+            price_per_unit: 1,
+            consumer_bond: 5,
+            workloads: vec![Workload::Transcode(vec![])],
+            capability: scheduler::Capability::default(),
+            deadline: now + 1,
+            priority: scheduler::Priority::Normal,
+        };
+        market.submit_job(job).unwrap();
+
+        std::thread::sleep(Duration::from_secs(2));
+
+        let offer2 = Offer {
+            job_id: "auto2".into(),
+            provider: "prov".into(),
+            provider_bond: 5,
+            consumer_bond: 5,
+            units: 1,
+            price_per_unit: 1,
+            fee_pct_ct: 0,
+            capability: scheduler::Capability::default(),
+            reputation: 0,
+            reputation_multiplier: 1.0,
+        };
+        market
+            .post_offer(offer2)
+            .unwrap_or_else(|e| panic!("post offer 2: {e}"));
+        let job2 = Job {
+            job_id: "auto2".into(),
+            buyer: "buyer".into(),
+            slices: vec![[0u8; 32]],
+            price_per_unit: 1,
+            consumer_bond: 5,
+            workloads: vec![Workload::Transcode(vec![])],
+            capability: scheduler::Capability::default(),
+            deadline: now + 60,
+            priority: scheduler::Priority::Normal,
+        };
+        market.submit_job(job2).unwrap();
+
+        assert!(market.jobs.contains_key("auto2"));
+        assert!(!market.jobs.contains_key("auto1"));
+        assert!(settlement::Settlement::balance("prov") < 10_000);
+    }
+
+    #[test]
+    fn settlement_sweep_overdue_penalizes_and_records_resolution() {
+        use settlement::SlaResolutionKind;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let settlement = SettlementGuard::new();
+        settlement.prefund("prov", 1_000);
+        settlement.prefund("buyer", 1_000);
+
+        let past_deadline = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .saturating_sub(std::time::Duration::from_secs(5))
+            .as_secs();
+
+        settlement::Settlement::track_sla("sla-job", "prov", "buyer", 200, 100, past_deadline);
+
+        let resolutions = settlement::Settlement::sweep_overdue();
+        assert_eq!(resolutions.len(), 1);
+        let resolution = &resolutions[0];
+        assert_eq!(resolution.job_id, "sla-job");
+        assert!(matches!(
+            resolution.outcome,
+            SlaResolutionKind::Violated { .. }
+        ));
+        assert!(resolution.burned_ct >= 200);
+        assert!(settlement::Settlement::balance("prov") <= 800);
+
+        // second sweep should be idempotent once the queue is empty
+        let follow_up = settlement::Settlement::sweep_overdue();
+        assert!(follow_up.is_empty());
     }
 
     #[test]

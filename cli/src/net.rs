@@ -1,8 +1,13 @@
+use crate::parse_utils::{require_positional, take_string};
 use crate::{
     codec_helpers::{json_from_str, json_to_string_pretty},
     rpc::RpcClient,
 };
-use clap::{Subcommand, ValueEnum};
+use cli_core::{
+    arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use hex;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -22,7 +27,7 @@ struct OverlayStatusView {
     database_path: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, ValueEnum, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OverlayOutputFormat {
     Plain,
     Json,
@@ -34,109 +39,58 @@ impl Default for OverlayOutputFormat {
     }
 }
 
-#[derive(Subcommand)]
 pub enum NetCmd {
     /// Reputation operations
-    Reputation {
-        #[command(subcommand)]
-        action: ReputationCmd,
-    },
+    Reputation { action: ReputationCmd },
     /// DNS operations
-    Dns {
-        #[command(subcommand)]
-        action: DnsCmd,
-    },
+    Dns { action: DnsCmd },
     /// Rotate a peer's public key
     RotateKey {
         peer_id: String,
         new_key: String,
-        #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
     /// Rotate the local QUIC certificate
-    RotateCert {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    RotateCert { url: String },
     /// Rebate operations
-    Rebate {
-        #[command(subcommand)]
-        action: RebateCmd,
-    },
+    Rebate { action: RebateCmd },
     /// QUIC diagnostics
-    Quic {
-        #[command(subcommand)]
-        action: QuicCmd,
-    },
+    Quic { action: QuicCmd },
     /// Display QUIC peer statistics
     QuicStats {
-        #[arg(long, default_value = "http://localhost:26658")]
         url: String,
-        #[arg(long)]
         token: Option<String>,
-        #[arg(long)]
         json: bool,
     },
     /// Show gossip relay configuration and shard affinity
-    GossipStatus {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-        #[arg(long)]
-        json: bool,
-    },
+    GossipStatus { url: String, json: bool },
     /// Show overlay backend and persistence status
     OverlayStatus {
-        #[arg(long, default_value = "http://localhost:26658")]
         url: String,
-        #[arg(long = "format", value_enum)]
         format: Option<OverlayOutputFormat>,
-        #[arg(long)]
         json: bool,
     },
 }
 
-#[derive(Subcommand)]
 pub enum ReputationCmd {
     /// Show reputation for a peer
-    Show {
-        peer: String,
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Show { peer: String, url: String },
 }
 
-#[derive(Subcommand)]
 pub enum DnsCmd {
     /// Verify DNS TXT record for a domain
-    Verify {
-        domain: String,
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Verify { domain: String, url: String },
 }
 
-#[derive(Subcommand)]
 pub enum QuicCmd {
     /// Show recent handshake failures
-    Failures {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Failures { url: String },
     /// Inspect cached QUIC certificate history
-    History {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-        #[arg(long)]
-        json: bool,
-    },
+    History { url: String, json: bool },
     /// Reload the QUIC certificate cache from disk
-    Refresh {
-        #[arg(long, default_value = "http://localhost:26658")]
-        url: String,
-    },
+    Refresh { url: String },
 }
 
-#[derive(Subcommand)]
 pub enum RebateCmd {
     /// Claim rebate voucher for a peer
     Claim {
@@ -144,9 +98,389 @@ pub enum RebateCmd {
         threshold: u64,
         epoch: u64,
         reward: u64,
-        #[arg(long, default_value = "http://localhost:26658")]
         url: String,
     },
+}
+
+impl OverlayOutputFormat {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "plain" => Some(OverlayOutputFormat::Plain),
+            "json" => Some(OverlayOutputFormat::Json),
+            _ => None,
+        }
+    }
+}
+
+impl NetCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("net"), "net", "Networking utilities")
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.reputation"),
+                    "reputation",
+                    "Reputation operations",
+                )
+                .subcommand(ReputationCmd::command())
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(CommandId("net.dns"), "dns", "DNS operations")
+                    .subcommand(DnsCmd::command())
+                    .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.rotate_key"),
+                    "rotate-key",
+                    "Rotate a peer's public key",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "peer_id",
+                    "Peer identifier",
+                )))
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "new_key",
+                    "New public key",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.rotate_cert"),
+                    "rotate-cert",
+                    "Rotate the local QUIC certificate",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(CommandId("net.rebate"), "rebate", "Rebate operations")
+                    .subcommand(RebateCmd::command())
+                    .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(CommandId("net.quic"), "quic", "QUIC diagnostics")
+                    .subcommand(QuicCmd::command())
+                    .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.quic_stats"),
+                    "quic-stats",
+                    "Display QUIC peer statistics",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "token",
+                    "token",
+                    "Bearer token for authorization",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.gossip_status"),
+                    "gossip-status",
+                    "Show gossip relay configuration and shard affinity",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.overlay_status"),
+                    "overlay-status",
+                    "Show overlay backend and persistence status",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "format",
+                    "format",
+                    "Output format (plain/json)",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'net'".to_string())?;
+
+        match name {
+            "reputation" => {
+                let action = ReputationCmd::from_matches(sub_matches)?;
+                Ok(NetCmd::Reputation { action })
+            }
+            "dns" => {
+                let action = DnsCmd::from_matches(sub_matches)?;
+                Ok(NetCmd::Dns { action })
+            }
+            "rotate-key" => {
+                let peer_id = require_positional(sub_matches, "peer_id")?;
+                let new_key = require_positional(sub_matches, "new_key")?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(NetCmd::RotateKey {
+                    peer_id,
+                    new_key,
+                    url,
+                })
+            }
+            "rotate-cert" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(NetCmd::RotateCert { url })
+            }
+            "rebate" => {
+                let action = RebateCmd::from_matches(sub_matches)?;
+                Ok(NetCmd::Rebate { action })
+            }
+            "quic" => {
+                let action = QuicCmd::from_matches(sub_matches)?;
+                Ok(NetCmd::Quic { action })
+            }
+            "quic-stats" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let token = take_string(sub_matches, "token");
+                let json = sub_matches.get_flag("json");
+                Ok(NetCmd::QuicStats { url, token, json })
+            }
+            "gossip-status" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let json = sub_matches.get_flag("json");
+                Ok(NetCmd::GossipStatus { url, json })
+            }
+            "overlay-status" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let format = match take_string(sub_matches, "format") {
+                    Some(value) => {
+                        let lowered = value.to_ascii_lowercase();
+                        match OverlayOutputFormat::parse(&lowered) {
+                            Some(fmt) => Some(fmt),
+                            None => {
+                                return Err(format!(
+                                    "invalid value '{value}' for '--format': expected plain or json"
+                                ))
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let json = sub_matches.get_flag("json");
+                Ok(NetCmd::OverlayStatus { url, format, json })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'net'")),
+        }
+    }
+}
+
+impl ReputationCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("net.reputation.show"),
+            "show",
+            "Show reputation for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer",
+            "Peer identifier",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let peer = require_positional(matches, "peer")?;
+        let url =
+            take_string(matches, "url").unwrap_or_else(|| "http://localhost:26658".to_string());
+        Ok(ReputationCmd::Show { peer, url })
+    }
+}
+
+impl DnsCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("net.dns.verify"),
+            "verify",
+            "Verify DNS TXT record for a domain",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "domain",
+            "Domain name",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let domain = require_positional(matches, "domain")?;
+        let url =
+            take_string(matches, "url").unwrap_or_else(|| "http://localhost:26658".to_string());
+        Ok(DnsCmd::Verify { domain, url })
+    }
+}
+
+impl QuicCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("net.quic.root"), "quic", "QUIC diagnostics")
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.quic.failures"),
+                    "failures",
+                    "Show recent handshake failures",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.quic.history"),
+                    "history",
+                    "Inspect cached QUIC certificate history",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("net.quic.refresh"),
+                    "refresh",
+                    "Reload the QUIC certificate cache from disk",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+                ))
+                .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<QuicCmd, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'net quic'".to_string())?;
+
+        match name {
+            "failures" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(QuicCmd::Failures { url })
+            }
+            "history" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let json = sub_matches.get_flag("json");
+                Ok(QuicCmd::History { url, json })
+            }
+            "refresh" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(QuicCmd::Refresh { url })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'net quic'")),
+        }
+    }
+}
+
+impl RebateCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("net.rebate.claim"),
+            "claim",
+            "Claim rebate voucher for a peer",
+        )
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "peer",
+            "Peer identifier",
+        )))
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "threshold",
+            "Threshold value",
+        )))
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "epoch",
+            "Epoch number",
+        )))
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "reward",
+            "Reward amount",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let peer = require_positional(matches, "peer")?;
+        let threshold_raw = require_positional(matches, "threshold")?;
+        let threshold = threshold_raw
+            .parse::<u64>()
+            .map_err(|_| format!("invalid value '{threshold_raw}' for 'threshold'"))?;
+        let epoch = Self::parse_positional(matches, "epoch")?;
+        let reward = Self::parse_positional(matches, "reward")?;
+        let url =
+            take_string(matches, "url").unwrap_or_else(|| "http://localhost:26658".to_string());
+        Ok(RebateCmd::Claim {
+            peer,
+            threshold,
+            epoch,
+            reward,
+            url,
+        })
+    }
+
+    fn parse_positional(matches: &Matches, name: &str) -> Result<u64, String> {
+        let value = require_positional(matches, name)?;
+        value
+            .parse::<u64>()
+            .map_err(|_| format!("invalid value '{value}' for '{name}'"))
+    }
 }
 
 pub fn handle(cmd: NetCmd) {

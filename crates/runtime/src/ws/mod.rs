@@ -10,9 +10,79 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use rand::RngCore;
 use sha1::{Digest, Sha1};
+use std::future::Future;
 use std::io::{self, Error, ErrorKind};
+use std::pin::Pin;
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+pub type IoFuture<'a, T> = Pin<Box<dyn Future<Output = io::Result<T>> + Send + 'a>>;
+
+/// Minimal async IO abstraction allowing WebSocket streams to operate over
+/// first-party TCP as well as TLS transports surfaced by the HTTP server.
+pub trait WebSocketIo: Send + 'static {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, usize>;
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> IoFuture<'a, usize>;
+    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()>;
+    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()>;
+}
+
+/// Convenience helpers mirroring `TcpStream`'s extension methods for any
+/// [`WebSocketIo`] implementation.
+pub trait WebSocketIoExt: WebSocketIo {
+    fn read_exact<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, ()> {
+        Box::pin(async move {
+            let mut offset = 0usize;
+            while offset < buf.len() {
+                let read = self.read(&mut buf[offset..]).await?;
+                if read == 0 {
+                    return Err(io::Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "websocket transport reached eof",
+                    ));
+                }
+                offset += read;
+            }
+            Ok(())
+        })
+    }
+
+    fn write_all<'a>(&'a mut self, mut buf: &'a [u8]) -> IoFuture<'a, ()> {
+        Box::pin(async move {
+            while !buf.is_empty() {
+                let written = self.write(buf).await?;
+                if written == 0 {
+                    return Err(io::Error::new(
+                        ErrorKind::WriteZero,
+                        "websocket transport failed to write remaining bytes",
+                    ));
+                }
+                buf = &buf[written..];
+            }
+            Ok(())
+        })
+    }
+}
+
+impl<T> WebSocketIoExt for T where T: WebSocketIo + ?Sized {}
+
+impl WebSocketIo for TcpStream {
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> IoFuture<'a, usize> {
+        Box::pin(async move { TcpStream::read(self, buf).await })
+    }
+
+    fn write<'a>(&'a mut self, buf: &'a [u8]) -> IoFuture<'a, usize> {
+        Box::pin(async move { TcpStream::write(self, buf).await })
+    }
+
+    fn flush<'a>(&'a mut self) -> IoFuture<'a, ()> {
+        Box::pin(async move { TcpStream::flush(self).await })
+    }
+
+    fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()> {
+        Box::pin(async move { TcpStream::shutdown(self).await })
+    }
+}
 
 /// Generate the Sec-WebSocket-Accept header value for a given client key.
 pub fn handshake_accept(key: &str) -> String {
@@ -40,11 +110,14 @@ fn build_header_block(headers: &[(&str, &str)]) -> String {
 }
 
 /// Write a server-side handshake response to the socket.
-pub async fn write_server_handshake(
-    stream: &mut TcpStream,
+pub async fn write_server_handshake<I>(
+    stream: &mut I,
     key: &str,
     extra_headers: &[(&str, &str)],
-) -> io::Result<()> {
+) -> io::Result<()>
+where
+    I: WebSocketIo,
+{
     let accept = handshake_accept(key);
     let mut response = format!(
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n"
@@ -55,10 +128,10 @@ pub async fn write_server_handshake(
 }
 
 /// Read a client-side handshake response and validate the accept key.
-pub async fn read_client_handshake(
-    stream: &mut TcpStream,
-    expected_accept: &str,
-) -> io::Result<()> {
+pub async fn read_client_handshake<I>(stream: &mut I, expected_accept: &str) -> io::Result<()>
+where
+    I: WebSocketIo,
+{
     let mut buf = Vec::with_capacity(512);
     let mut tmp = [0u8; 64];
     while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -89,8 +162,10 @@ pub async fn read_client_handshake(
 
     let mut found = false;
     for line in headers.lines() {
-        if let Some(value) = line.strip_prefix("Sec-WebSocket-Accept: ") {
-            if value.trim() == expected_accept {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("sec-websocket-accept")
+                && value.trim() == expected_accept
+            {
                 found = true;
                 break;
             }
@@ -176,7 +251,7 @@ struct Fragment {
 
 /// Bidirectional WebSocket stream.
 pub struct WebSocketStream {
-    stream: TcpStream,
+    stream: Box<dyn WebSocketIo>,
     role: Role,
     fragment: Option<Fragment>,
     closing: bool,
@@ -184,7 +259,7 @@ pub struct WebSocketStream {
 }
 
 impl WebSocketStream {
-    fn new(stream: TcpStream, role: Role) -> Self {
+    fn new(stream: Box<dyn WebSocketIo>, role: Role) -> Self {
         Self {
             stream,
             role,
@@ -425,8 +500,8 @@ impl WebSocketStream {
         self.send(Message::Close(None)).await
     }
 
-    /// Access to the underlying TCP stream when required by higher layers.
-    pub fn into_inner(self) -> TcpStream {
+    /// Access to the underlying transport when required by higher layers.
+    pub fn into_inner(self) -> Box<dyn WebSocketIo> {
         self.stream
     }
 }
@@ -436,7 +511,14 @@ pub struct ServerStream(WebSocketStream);
 
 impl ServerStream {
     pub fn new(stream: TcpStream) -> Self {
-        Self(WebSocketStream::new(stream, Role::Server))
+        Self::from_io(stream)
+    }
+
+    pub fn from_io<I>(stream: I) -> Self
+    where
+        I: WebSocketIo,
+    {
+        Self(WebSocketStream::new(Box::new(stream), Role::Server))
     }
 
     pub async fn recv(&mut self) -> io::Result<Option<Message>> {
@@ -451,7 +533,7 @@ impl ServerStream {
         self.0.close().await
     }
 
-    pub fn into_inner(self) -> TcpStream {
+    pub fn into_inner(self) -> Box<dyn WebSocketIo> {
         self.0.into_inner()
     }
 }
@@ -461,7 +543,14 @@ pub struct ClientStream(WebSocketStream);
 
 impl ClientStream {
     pub fn new(stream: TcpStream) -> Self {
-        Self(WebSocketStream::new(stream, Role::Client))
+        Self::from_io(stream)
+    }
+
+    pub fn from_io<I>(stream: I) -> Self
+    where
+        I: WebSocketIo,
+    {
+        Self(WebSocketStream::new(Box::new(stream), Role::Client))
     }
 
     pub async fn recv(&mut self) -> io::Result<Option<Message>> {
@@ -476,7 +565,7 @@ impl ClientStream {
         self.0.close().await
     }
 
-    pub fn into_inner(self) -> TcpStream {
+    pub fn into_inner(self) -> Box<dyn WebSocketIo> {
         self.0.into_inner()
     }
 }

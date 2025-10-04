@@ -3,28 +3,19 @@ use age::Encryptor;
 use aws_config;
 #[cfg(feature = "s3")]
 use aws_sdk_s3::{primitives::ByteStream, Client as S3Client};
-use axum::{
-    extract::{Path as AxumPath, Query, State},
-    http::{header, StatusCode},
-    response::Response,
-    routing::{get, post},
-    Json, Router,
-};
-use bytes::Bytes;
-use crypto_suite::hashing::blake3;
 #[cfg(feature = "etcd-client")]
 use etcd_client::Client;
-use futures::StreamExt;
-use httpd::{HttpClient, Method};
+use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
 use once_cell::sync::Lazy;
 use openssl::{
+    error::ErrorStack,
     rand::rand_bytes,
     sha::sha256,
     symm::{Cipher, Crypter, Mode},
 };
 use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
-use runtime::sync::mpsc::{self, ReceiverStream};
 use runtime::{spawn, spawn_blocking};
+use thiserror::Error;
 use tracing::{info, warn};
 use urlencoding::encode;
 
@@ -391,6 +382,9 @@ static REGISTRY: Lazy<Registry> = Lazy::new(|| {
     r
 });
 
+#[cfg(feature = "s3")]
+static S3_BUCKET: Lazy<Option<String>> = Lazy::new(|| std::env::var("S3_BUCKET").ok());
+
 fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
     use serde_json::{Map, Value};
     match b {
@@ -563,36 +557,38 @@ fn sanitize_fragment(input: &str) -> String {
         .collect()
 }
 
-async fn ingest(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    Json(payload): Json<Vec<PeerStat>>,
-) -> StatusCode {
+async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
     let token = state.current_token();
-    if headers
-        .get("x-auth-token")
-        .and_then(|h| h.to_str().ok())
-        .map(|h| h == token)
-        .unwrap_or(false)
+    let authorized = request
+        .header("x-auth-token")
+        .map(|value| value == token)
+        .unwrap_or(false);
+    if !authorized {
+        return Ok(Response::new(StatusCode::UNAUTHORIZED));
+    }
+
+    let payload: Vec<PeerStat> = request.json()?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| HttpError::Handler(format!("clock error: {err}")))?
+        .as_secs();
+
     {
         let mut map = state.data.lock().unwrap();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        for stat in payload.clone() {
+        for stat in &payload {
             let entry = map
                 .entry(stat.peer_id.clone())
                 .or_insert_with(VecDeque::new);
             if let Some((ts, last)) = entry.back_mut() {
                 if *ts == now {
                     merge(last, &stat.metrics);
-                    let value = serde_json::to_vec(entry).unwrap();
+                    let value = serde_json::to_vec(entry)
+                        .map_err(|err| HttpError::Handler(err.to_string()))?;
                     let _ = state
                         .store
                         .put_bytes(METRICS_CF, stat.peer_id.as_bytes(), &value);
-                    let correlations = collect_correlations(&stat.metrics);
-                    for raw in correlations {
+                    for raw in collect_correlations(&stat.metrics) {
                         let record = CorrelationRecord {
                             metric: raw.metric.clone(),
                             correlation_id: raw.correlation_id.clone(),
@@ -608,17 +604,17 @@ async fn ingest(
                     continue;
                 }
             }
-            entry.push_back((now, stat.metrics));
+            entry.push_back((now, stat.metrics.clone()));
             if entry.len() > 1024 {
                 entry.pop_front();
             }
-            let value = serde_json::to_vec(entry).unwrap();
+            let value =
+                serde_json::to_vec(entry).map_err(|err| HttpError::Handler(err.to_string()))?;
             let _ = state
                 .store
                 .put_bytes(METRICS_CF, stat.peer_id.as_bytes(), &value);
             if let Some((_, metrics_value)) = entry.back() {
-                let correlations = collect_correlations(metrics_value);
-                for raw in correlations {
+                for raw in collect_correlations(metrics_value) {
                     let record = CorrelationRecord {
                         metric: raw.metric.clone(),
                         correlation_id: raw.correlation_id.clone(),
@@ -634,222 +630,258 @@ async fn ingest(
             }
         }
         ACTIVE_PEERS.set(map.len() as i64);
-        INGEST_TOTAL.inc();
-        drop(map);
-        state.prune();
-        state.persist();
-        if let Some(wal) = &state.wal {
-            let _ = wal.append(&payload);
-            REPLICATION_LAG.set(0);
-        }
-        if let Ok(blob) = serde_json::to_string(&payload) {
-            archive_metrics(&blob);
-        }
-        StatusCode::OK
-    } else {
-        StatusCode::UNAUTHORIZED
     }
+
+    INGEST_TOTAL.inc();
+    state.prune();
+    state.persist();
+    if let Some(wal) = &state.wal {
+        match wal.append(&payload) {
+            Ok(_) => REPLICATION_LAG.set(0),
+            Err(err) => warn!(target: "aggregator", error = %err, "failed to append to wal"),
+        }
+    }
+    if let Ok(blob) = serde_json::to_string(&payload) {
+        archive_metrics(&blob);
+    }
+
+    Ok(Response::new(StatusCode::OK))
 }
 
-async fn peer(
-    AxumPath(id): AxumPath<String>,
-    State(state): State<AppState>,
-) -> Json<Vec<(u64, serde_json::Value)>> {
-    let map = state.data.lock().unwrap();
-    let data = map
-        .get(&id)
+async fn peer(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let Some(id) = request.param("id") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let data: Vec<(u64, serde_json::Value)> = state
+        .data
+        .lock()
+        .unwrap()
+        .get(id)
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .collect();
+
     #[cfg(feature = "s3")]
-    if let Some(b) = &_bucket {
-        upload_sync(b.clone(), data.clone());
+    if let Some(bucket) = S3_BUCKET.as_ref() {
+        if let Ok(bytes) = serde_json::to_vec(&data) {
+            upload_sync(bucket.clone(), bytes);
+        }
     }
-    Json(data)
+
+    Response::new(StatusCode::OK).json(&data)
 }
 
-async fn correlations(
-    AxumPath(metric): AxumPath<String>,
-    State(state): State<AppState>,
-) -> Json<Vec<CorrelationRecord>> {
-    Json(state.correlations_for(&metric))
+async fn correlations(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let Some(metric) = request.param("metric") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let records = state.correlations_for(metric);
+    Response::new(StatusCode::OK).json(&records)
 }
 
-async fn cluster(State(state): State<AppState>) -> Json<usize> {
-    let map = state.data.lock().unwrap();
-    Json(map.len())
+async fn cluster(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let count = state.data.lock().unwrap().len();
+    Response::new(StatusCode::OK).json(&count)
 }
 
-#[derive(Deserialize)]
-struct ExportAllQuery {
+#[derive(Debug, Error)]
+enum ExportError {
+    #[error("serialization error: {0}")]
+    Serialization(String),
+    #[error("zip error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+    #[error("io error: {0}")]
+    Io(#[from] io::Error),
+    #[error("crypto error: {0}")]
+    Crypto(String),
+    #[error("openssl error: {0}")]
+    OpenSsl(#[from] ErrorStack),
+}
+
+struct ExportPayload {
+    bytes: Vec<u8>,
+    content_type: &'static str,
+}
+
+fn build_export_payload(
+    map: HashMap<String, VecDeque<(u64, serde_json::Value)>>,
     recipient: Option<String>,
     password: Option<String>,
-}
+    bucket: Option<String>,
+) -> Result<ExportPayload, ExportError> {
+    use zip::write::FileOptions;
 
-async fn export_all(
-    State(state): State<AppState>,
-    Query(params): Query<ExportAllQuery>,
-) -> Result<Response, StatusCode> {
-    if params.recipient.is_some() && params.password.is_some() {
-        return Err(StatusCode::BAD_REQUEST);
+    let mut cursor = io::Cursor::new(Vec::new());
+    {
+        let mut writer = zip::ZipWriter::new(&mut cursor);
+        for (peer_id, deque) in map {
+            let json = serde_json::to_vec(&deque)
+                .map_err(|err| ExportError::Serialization(err.to_string()))?;
+            writer.start_file(format!("{peer_id}.json"), FileOptions::default())?;
+            writer.write_all(&json)?;
+        }
+        writer.finish()?;
     }
-    let map = {
-        let map = state.data.lock().unwrap();
-        if map.len() > state.max_export_peers {
-            return Err(StatusCode::PAYLOAD_TOO_LARGE);
-        }
-        map.clone()
-    };
 
-    BULK_EXPORT_TOTAL.inc();
-
-    let recipient = params.recipient.clone();
-    let password = params.password.clone();
-    #[cfg(feature = "s3")]
-    let bucket = std::env::var("S3_BUCKET").ok();
-    #[cfg(not(feature = "s3"))]
-    let bucket: Option<String> = None;
-    let (tx, rx) = mpsc::channel::<Vec<u8>>(8);
-    let _ = spawn_blocking(move || {
-        let _bucket = bucket;
-        use zip::write::FileOptions;
-        let mut cursor = io::Cursor::new(Vec::new());
-        {
-            let mut writer = zip::ZipWriter::new(&mut cursor);
-            for (peer_id, deque) in map {
-                let json = serde_json::to_vec(&deque).unwrap();
-                let name = format!("{peer_id}.json");
-                writer.start_file(name, FileOptions::default()).unwrap();
-                writer.write_all(&json).unwrap();
-            }
-            let _ = writer.finish();
-        }
-        let bytes = cursor.into_inner();
-        let data = if let Some(rec) = recipient {
+    let bytes = cursor.into_inner();
+    let (data, content_type) = match (recipient, password) {
+        (Some(recipient), None) => {
             use std::str::FromStr;
-            let recipient = age::x25519::Recipient::from_str(&rec).unwrap();
+
+            let recipient = age::x25519::Recipient::from_str(&recipient)
+                .map_err(|err| ExportError::Crypto(err.to_string()))?;
             let encryptor = Encryptor::with_recipients(vec![
                 Box::new(recipient) as Box<dyn age::Recipient + Send>
             ])
-            .unwrap();
+            .ok_or_else(|| ExportError::Crypto("no encryption recipients configured".into()))?;
             let mut out = Vec::new();
-            let mut w = encryptor.wrap_output(&mut out).unwrap();
-            w.write_all(&bytes).unwrap();
-            w.finish().unwrap();
-            out
-        } else if let Some(pass) = password {
+            let mut writer = encryptor
+                .wrap_output(&mut out)
+                .map_err(|err| ExportError::Crypto(err.to_string()))?;
+            writer.write_all(&bytes)?;
+            writer
+                .finish()
+                .map_err(|err| ExportError::Crypto(err.to_string()))?;
+            (out, "application/age")
+        }
+        (None, Some(password)) => {
             let mut iv = [0u8; 16];
-            rand_bytes(&mut iv).unwrap();
-            let key = sha256(pass.as_bytes());
+            rand_bytes(&mut iv)?;
+            let key = sha256(password.as_bytes());
             let cipher = Cipher::aes_256_cbc();
-            let mut crypter = Crypter::new(cipher, Mode::Encrypt, &key, Some(&iv)).unwrap();
+            let mut crypter = Crypter::new(cipher, Mode::Encrypt, &key, Some(&iv))?;
             let mut out = vec![0u8; bytes.len() + cipher.block_size()];
-            let mut count = crypter.update(&bytes, &mut out).unwrap();
-            count += crypter.finalize(&mut out[count..]).unwrap();
+            let mut count = crypter.update(&bytes, &mut out)?;
+            count += crypter.finalize(&mut out[count..])?;
             out.truncate(count);
             let mut combined = Vec::with_capacity(iv.len() + out.len());
             combined.extend_from_slice(&iv);
             combined.extend_from_slice(&out);
-            combined
-        } else {
-            bytes
-        };
-        #[cfg(feature = "s3")]
-        if let Some(b) = &_bucket {
-            upload_sync(b.clone(), data.clone());
+            (combined, "application/octet-stream")
         }
-        for chunk in data.chunks(8192) {
-            if tx.blocking_send(chunk.to_vec()).is_err() {
-                return;
-            }
-        }
-    });
+        (None, None) => (bytes, "application/zip"),
+        (Some(_), Some(_)) => unreachable!("validated earlier"),
+    };
 
-    let body_stream =
-        ReceiverStream::new(rx).map(|chunk| Ok::<Bytes, io::Error>(Bytes::from(chunk)));
-    let body = axum::body::Body::from_stream(body_stream);
-    let mut resp = Response::new(body);
-    if params.recipient.is_some() {
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            header::HeaderValue::from_static("application/age"),
-        );
-    } else if params.password.is_some() {
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            header::HeaderValue::from_static("application/octet-stream"),
-        );
-    } else {
-        resp.headers_mut().insert(
-            header::CONTENT_TYPE,
-            header::HeaderValue::from_static("application/zip"),
-        );
+    #[cfg(feature = "s3")]
+    if let Some(bucket) = bucket {
+        upload_sync(bucket, data.clone());
     }
-    Ok(resp)
+    #[cfg(not(feature = "s3"))]
+    let _ = bucket;
+
+    Ok(ExportPayload {
+        bytes: data,
+        content_type,
+    })
 }
 
-async fn telemetry_post(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    Json(entry): Json<TelemetrySummaryEntry>,
-) -> StatusCode {
+async fn export_all(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let recipient = request.query_param("recipient").map(|s| s.to_string());
+    let password = request.query_param("password").map(|s| s.to_string());
+
+    if recipient.is_some() && password.is_some() {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    }
+
+    let map = {
+        let guard = state.data.lock().unwrap();
+        if guard.len() > state.max_export_peers {
+            return Ok(Response::new(StatusCode::PAYLOAD_TOO_LARGE));
+        }
+        guard.clone()
+    };
+
+    BULK_EXPORT_TOTAL.inc();
+
+    #[cfg(feature = "s3")]
+    let bucket = S3_BUCKET.as_ref().cloned();
+    #[cfg(not(feature = "s3"))]
+    let bucket: Option<String> = None;
+
+    let handle = spawn_blocking(move || build_export_payload(map, recipient, password, bucket));
+    let payload = handle
+        .await
+        .map_err(|err| HttpError::Handler(format!("export task join failed: {err}")))?
+        .map_err(|err| HttpError::Handler(err.to_string()))?;
+
+    let response = Response::new(StatusCode::OK)
+        .with_header("content-type", payload.content_type)
+        .with_body(payload.bytes);
+    Ok(response)
+}
+
+async fn telemetry_post(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
     let token = state.current_token();
-    let authorized = headers
-        .get("x-auth-token")
-        .and_then(|h| h.to_str().ok())
-        .map(|h| h == token)
+    let authorized = request
+        .header("x-auth-token")
+        .map(|value| value == token)
         .unwrap_or(false);
-    if authorized {
-        state.record_telemetry(entry);
-        StatusCode::ACCEPTED
-    } else {
-        StatusCode::UNAUTHORIZED
+    if !authorized {
+        return Ok(Response::new(StatusCode::UNAUTHORIZED));
     }
+
+    let entry: TelemetrySummaryEntry = request.json()?;
+    state.record_telemetry(entry);
+    Ok(Response::new(StatusCode::ACCEPTED))
 }
 
-async fn telemetry_index(
-    State(state): State<AppState>,
-) -> Json<HashMap<String, TelemetrySummaryEntry>> {
-    Json(state.telemetry_latest())
+async fn telemetry_index(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let payload = state.telemetry_latest();
+    Response::new(StatusCode::OK).json(&payload)
 }
 
-async fn telemetry_node(
-    State(state): State<AppState>,
-    AxumPath(node): AxumPath<String>,
-) -> Json<Vec<TelemetrySummaryEntry>> {
-    Json(state.telemetry_history(&node))
+async fn telemetry_node(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let Some(node) = request.param("node") else {
+        return Ok(Response::new(StatusCode::BAD_REQUEST));
+    };
+    let history = state.telemetry_history(node);
+    Response::new(StatusCode::OK).json(&history)
 }
 
-async fn wrappers(State(state): State<AppState>) -> Json<HashMap<String, WrapperSummaryEntry>> {
-    Json(state.wrappers_latest())
+async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let payload = state.wrappers_latest();
+    Response::new(StatusCode::OK).json(&payload)
 }
 
-async fn metrics() -> String {
+async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
     let encoder = TextEncoder::new();
     let metric_families = REGISTRY.gather();
     let mut buffer = String::new();
-    encoder.encode_utf8(&metric_families, &mut buffer).unwrap();
-    buffer
+    encoder
+        .encode_utf8(&metric_families, &mut buffer)
+        .map_err(|err| HttpError::Handler(err.to_string()))?;
+    Ok(Response::new(StatusCode::OK)
+        .with_header("content-type", "text/plain; version=0.0.4")
+        .with_body(buffer.into_bytes()))
 }
 
-pub fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/ingest", post(ingest))
-        .route("/peer/:id", get(peer))
-        .route("/correlations/:metric", get(correlations))
-        .route("/cluster", get(cluster))
-        .route("/telemetry", post(telemetry_post).get(telemetry_index))
-        .route("/telemetry/:node", get(telemetry_node))
-        .route("/wrappers", get(wrappers))
-        .route("/export/all", get(export_all))
-        .route("/healthz", get(health))
-        .route("/metrics", get(metrics))
-        .with_state(state)
+pub fn router(state: AppState) -> Router<AppState> {
+    Router::new(state)
+        .post("/ingest", ingest)
+        .get("/peer/:id", peer)
+        .get("/correlations/:metric", correlations)
+        .get("/cluster", cluster)
+        .post("/telemetry", telemetry_post)
+        .get("/telemetry", telemetry_index)
+        .get("/telemetry/:node", telemetry_node)
+        .get("/wrappers", wrappers)
+        .get("/export/all", export_all)
+        .get("/healthz", health)
+        .get("/metrics", metrics)
 }
 
-async fn health() -> StatusCode {
-    StatusCode::OK
+async fn health(_request: Request<AppState>) -> Result<Response, HttpError> {
+    Ok(Response::new(StatusCode::OK))
 }
 
 struct Wal {
@@ -895,14 +927,14 @@ impl Wal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::{self, Body};
-    use axum::http::{Request, StatusCode};
+    use age::{x25519::Identity, Decryptor};
+    use crypto_suite::hashing::blake3;
+    use httpd::{Method, StatusCode};
     use std::collections::HashMap;
     use std::fs;
     use std::future::Future;
     use std::io::{self, Cursor};
     use std::path::{Path, PathBuf};
-    use tower::ServiceExt; // for `oneshot`
     use zip::ZipArchive;
 
     struct TestTempDir {
@@ -954,26 +986,22 @@ mod tests {
                 {"peer_id": "a", "metrics": {"r":1}},
                 {"peer_id": "a", "metrics": {"r":2}}
             ]);
-            let req = Request::builder()
-                .method("POST")
-                .uri("/ingest")
-                .header("content-type", "application/json")
+            let ingest = app
+                .request_builder()
+                .method(Method::Post)
+                .path("/ingest")
                 .header("x-auth-token", "token")
-                .body(Body::from(payload.to_string()))
-                .unwrap();
-            let _ = app.clone().oneshot(req).await.unwrap();
+                .json(&payload)
+                .unwrap()
+                .build();
+            let _ = app.handle(ingest).await.unwrap();
+
             let resp = app
-                .oneshot(
-                    Request::builder()
-                        .uri("/peer/a")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
+                .handle(app.request_builder().path("/peer/a").build())
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
-            let body = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-            let vals: Vec<(u64, serde_json::Value)> = serde_json::from_slice(&body).unwrap();
+            let vals: Vec<(u64, serde_json::Value)> = serde_json::from_slice(resp.body()).unwrap();
             assert_eq!(vals.len(), 1);
             assert_eq!(vals[0].1["r"].as_f64().unwrap() as i64, 3);
         });
@@ -988,14 +1016,15 @@ mod tests {
                 let state = AppState::new("t".into(), &path, 1);
                 let app = router(state.clone());
                 let payload = serde_json::json!([{ "peer_id": "p", "metrics": {"v": 1}}]);
-                let req = Request::builder()
-                    .method("POST")
-                    .uri("/ingest")
-                    .header("content-type", "application/json")
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
                     .header("x-auth-token", "t")
-                    .body(Body::from(payload.to_string()))
-                    .unwrap();
-                let _ = app.oneshot(req).await.unwrap();
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let _ = app.handle(req).await.unwrap();
             }
             // Reload and ensure data persisted
             let state = AppState::new("t".into(), &path, 1);
@@ -1026,27 +1055,23 @@ mod tests {
             {
                 let app = router(state.clone());
                 let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}, {"peer_id": "p2", "metrics": {"v": 2}}]);
-                let req = Request::builder()
-                    .method("POST")
-                    .uri("/ingest")
-                    .header("content-type", "application/json")
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
                     .header("x-auth-token", "t")
-                    .body(Body::from(payload.to_string()))
-                    .unwrap();
-                let _ = app.oneshot(req).await.unwrap();
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let _ = app.handle(req).await.unwrap();
             }
             let app = router(state);
             let resp = app
-                .oneshot(
-                    Request::builder()
-                        .uri("/export/all")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
+                .handle(app.request_builder().path("/export/all").build())
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
-            let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            let body_bytes = resp.body().to_vec();
             let hash = blake3::hash(&body_bytes);
             assert_ne!(hash.as_bytes(), &[0u8; 32]);
             let cursor = Cursor::new(body_bytes);
@@ -1063,40 +1088,36 @@ mod tests {
 
     #[test]
     fn export_all_encrypts() {
-        use age::{x25519::Identity, Decryptor};
         run_async(async {
             let dir = tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
                 let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}]);
-                let req = Request::builder()
-                    .method("POST")
-                    .uri("/ingest")
-                    .header("content-type", "application/json")
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
                     .header("x-auth-token", "t")
-                    .body(Body::from(payload.to_string()))
-                    .unwrap();
-                let _ = app.oneshot(req).await.unwrap();
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let _ = app.handle(req).await.unwrap();
             }
             let id = Identity::generate();
             let recipient = id.to_public().to_string();
             let app = router(state);
             let resp = app
-                .oneshot(
-                    Request::builder()
-                        .uri(format!("/export/all?recipient={}", recipient))
-                        .body(Body::empty())
-                        .unwrap(),
+                .handle(
+                    app.request_builder()
+                        .path(format!("/export/all?recipient={recipient}"))
+                        .build(),
                 )
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
-            assert_eq!(
-                resp.headers().get(header::CONTENT_TYPE).unwrap(),
-                "application/age"
-            );
-            let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(resp.header("content-type"), Some("application/age"));
+            let body_bytes = resp.body().to_vec();
             let decryptor = Decryptor::new(&body_bytes[..]).unwrap();
             let mut plain = Vec::new();
             if let Decryptor::Recipients(d) = decryptor {
@@ -1128,31 +1149,31 @@ mod tests {
             {
                 let app = router(state.clone());
                 let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}]);
-                let req = Request::builder()
-                    .method("POST")
-                    .uri("/ingest")
-                    .header("content-type", "application/json")
+                let req = app
+                    .request_builder()
+                    .method(Method::Post)
+                    .path("/ingest")
                     .header("x-auth-token", "t")
-                    .body(Body::from(payload.to_string()))
-                    .unwrap();
-                let _ = app.oneshot(req).await.unwrap();
+                    .json(&payload)
+                    .unwrap()
+                    .build();
+                let _ = app.handle(req).await.unwrap();
             }
             let app = router(state);
             let resp = app
-                .oneshot(
-                    Request::builder()
-                        .uri("/export/all?password=secret")
-                        .body(Body::empty())
-                        .unwrap(),
+                .handle(
+                    app.request_builder()
+                        .path("/export/all?password=secret")
+                        .build(),
                 )
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
             assert_eq!(
-                resp.headers().get(header::CONTENT_TYPE).unwrap(),
-                "application/octet-stream"
+                resp.header("content-type"),
+                Some("application/octet-stream")
             );
-            let body_bytes = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+            let body_bytes = resp.body().to_vec();
             let (iv, cipher) = body_bytes.split_at(16);
             let key = sha256(b"secret");
             let plain = decrypt(Cipher::aes_256_cbc(), &key, Some(iv), cipher).unwrap();
@@ -1194,19 +1215,13 @@ mod tests {
 
             let app = router(state);
             let resp = app
-                .oneshot(
-                    Request::builder()
-                        .uri("/wrappers")
-                        .body(Body::empty())
-                        .unwrap(),
-                )
+                .handle(app.request_builder().path("/wrappers").build())
                 .await
                 .unwrap();
 
             assert_eq!(resp.status(), StatusCode::OK);
-            let body = body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
             let parsed: HashMap<String, WrapperSummaryEntry> =
-                serde_json::from_slice(&body).unwrap();
+                serde_json::from_slice(resp.body()).unwrap();
             let entry = parsed.get("node-a").expect("wrapper entry");
             assert_eq!(entry.metrics.len(), 1);
             assert_eq!(entry.metrics[0].metric, "codec_serialize_fail_total");

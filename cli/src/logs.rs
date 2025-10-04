@@ -1,4 +1,11 @@
-use clap::Subcommand;
+use crate::parse_utils::{
+    parse_u64, parse_usize, parse_usize_required, require_positional, require_string, take_string,
+};
+use cli_core::{
+    arg::{ArgSpec, OptionSpec, PositionalSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchOptions {
@@ -32,41 +39,31 @@ pub struct CorrelateMetricOptions {
     pub passphrase: Option<String>,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Debug)]
 pub enum LogCmd {
     /// Search indexed logs stored in SQLite.
     Search {
         /// SQLite database produced by `log indexer`.
         db: String,
         /// Filter by peer identifier.
-        #[arg(long)]
         peer: Option<String>,
         /// Filter by transaction hash correlation id.
-        #[arg(long)]
         tx: Option<String>,
         /// Filter by block height.
-        #[arg(long)]
         block: Option<u64>,
         /// Filter by raw correlation id value.
-        #[arg(long)]
         correlation: Option<String>,
         /// Filter by severity level.
-        #[arg(long)]
         level: Option<String>,
         /// Filter by minimum timestamp (inclusive).
-        #[arg(long)]
         since: Option<u64>,
         /// Filter by maximum timestamp (inclusive).
-        #[arg(long)]
         until: Option<u64>,
         /// Filter by internal row id greater than the provided value.
-        #[arg(long = "after-id")]
         after_id: Option<u64>,
         /// Optional passphrase to decrypt encrypted log messages.
-        #[arg(long)]
         passphrase: Option<String>,
         /// Maximum rows to return.
-        #[arg(long)]
         limit: Option<usize>,
     },
     /// Re-encrypt stored messages with a new passphrase.
@@ -74,33 +71,223 @@ pub enum LogCmd {
         /// SQLite database produced by `log indexer`.
         db: String,
         /// Existing passphrase protecting log messages.
-        #[arg(long = "old-passphrase")]
         old_passphrase: Option<String>,
         /// New passphrase to apply.
-        #[arg(long = "new-passphrase")]
         new_passphrase: Option<String>,
     },
     /// Fetch correlations from the metrics aggregator and stream matching logs.
     CorrelateMetric {
         /// Metrics aggregator base URL.
-        #[arg(long, default_value = "http://localhost:9000")]
         aggregator: String,
         /// Metric name to correlate (e.g. quic_handshake_fail_total).
-        #[arg(long)]
         metric: String,
         /// Optional override for the log database path.
-        #[arg(long)]
         db: Option<String>,
         /// Maximum correlated metric entries to inspect.
-        #[arg(long = "max-correlations", default_value_t = 1)]
         max_correlations: usize,
         /// Limit log rows returned per correlation.
-        #[arg(long, default_value_t = 20)]
         rows: usize,
         /// Optional passphrase to decrypt log messages.
-        #[arg(long)]
         passphrase: Option<String>,
     },
+}
+
+impl LogCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(
+            CommandId("logs"),
+            "logs",
+            "Log search and correlation utilities",
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("logs.search"),
+                "search",
+                "Search indexed logs stored in SQLite",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "db",
+                "SQLite database produced by log indexer",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "peer",
+                "peer",
+                "Filter by peer identifier",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "tx",
+                "tx",
+                "Filter by transaction hash correlation id",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "block",
+                "block",
+                "Filter by block height",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "correlation",
+                "correlation",
+                "Filter by raw correlation id value",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "level",
+                "level",
+                "Filter by severity level",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "since",
+                "since",
+                "Filter by minimum timestamp (inclusive)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "until",
+                "until",
+                "Filter by maximum timestamp (inclusive)",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "after_id",
+                "after-id",
+                "Filter by internal row id greater than the provided value",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "passphrase",
+                "passphrase",
+                "Passphrase to decrypt encrypted log messages",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "limit",
+                "limit",
+                "Maximum rows to return",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("logs.rotate_key"),
+                "rotate-key",
+                "Re-encrypt stored messages with a new passphrase",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "db",
+                "SQLite database produced by log indexer",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "old_passphrase",
+                "old-passphrase",
+                "Existing passphrase protecting log messages",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "new_passphrase",
+                "new-passphrase",
+                "New passphrase to apply",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("logs.correlate_metric"),
+                "correlate-metric",
+                "Fetch correlations from the metrics aggregator and stream matching logs",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("aggregator", "aggregator", "Metrics aggregator base URL")
+                    .default("http://localhost:9000"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("metric", "metric", "Metric name to correlate").required(true),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "db",
+                "db",
+                "Optional override for the log database path",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new(
+                    "max_correlations",
+                    "max-correlations",
+                    "Maximum correlated metric entries to inspect",
+                )
+                .default("1"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rows", "rows", "Limit log rows returned per correlation")
+                    .default("20"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "passphrase",
+                "passphrase",
+                "Passphrase to decrypt log messages",
+            )))
+            .build(),
+        )
+        .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'logs'".to_string())?;
+
+        match name {
+            "search" => {
+                let db = require_positional(sub_matches, "db")?;
+                let peer = take_string(sub_matches, "peer");
+                let tx = take_string(sub_matches, "tx");
+                let block = parse_u64(take_string(sub_matches, "block"), "block")?;
+                let correlation = take_string(sub_matches, "correlation");
+                let level = take_string(sub_matches, "level");
+                let since = parse_u64(take_string(sub_matches, "since"), "since")?;
+                let until = parse_u64(take_string(sub_matches, "until"), "until")?;
+                let after_id = parse_u64(take_string(sub_matches, "after_id"), "after-id")?;
+                let passphrase = take_string(sub_matches, "passphrase");
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?;
+                Ok(LogCmd::Search {
+                    db,
+                    peer,
+                    tx,
+                    block,
+                    correlation,
+                    level,
+                    since,
+                    until,
+                    after_id,
+                    passphrase,
+                    limit,
+                })
+            }
+            "rotate-key" => {
+                let db = require_positional(sub_matches, "db")?;
+                let old_passphrase = take_string(sub_matches, "old_passphrase");
+                let new_passphrase = take_string(sub_matches, "new_passphrase");
+                Ok(LogCmd::RotateKey {
+                    db,
+                    old_passphrase,
+                    new_passphrase,
+                })
+            }
+            "correlate-metric" => {
+                let aggregator = take_string(sub_matches, "aggregator")
+                    .unwrap_or_else(|| "http://localhost:9000".to_string());
+                let metric = require_string(sub_matches, "metric")?;
+                let db = take_string(sub_matches, "db");
+                let max_correlations = parse_usize_required(
+                    take_string(sub_matches, "max_correlations"),
+                    "max-correlations",
+                )?;
+                let rows = parse_usize_required(take_string(sub_matches, "rows"), "rows")?;
+                let passphrase = take_string(sub_matches, "passphrase");
+                Ok(LogCmd::CorrelateMetric {
+                    aggregator,
+                    metric,
+                    db,
+                    max_correlations,
+                    rows,
+                    passphrase,
+                })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'logs'")),
+        }
+    }
 }
 
 pub fn run_search(options: SearchOptions) {

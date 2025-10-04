@@ -94,11 +94,13 @@ simple archive and restore helpers for the database directory.
 #### Behaviour and resilience
 
 If the aggregator restarts or becomes unreachable, nodes queue updates
-in memory and retry with backoff until the service recovers. The current ingestion
-pipeline still relies on `axum`/`tokio`; only outbound log-correlation calls share the
-in-house `httpd::HttpClient` (`metrics-aggregator/src/lib.rs`). Aggregated
-snapshots deduplicate on peer ID so multiple nodes reporting the same
-peer collapse into a single record. The runtime-backed ingestion rewrite remains on the roadmap.
+in memory and retry with backoff until the service recovers. The ingestion
+pipeline now runs entirely on the first-party `httpd` router, matching the
+node, gateway, and tooling stacks while reusing the runtime request builder.
+Aggregated snapshots deduplicate on peer ID so multiple nodes reporting the
+same peer collapse into a single record. The remaining roadmap item is to
+swap the bespoke node RPC parser for `httpd::Router` so every surface shares
+the same configuration knobs.
 
 ### High-availability deployment
 
@@ -203,6 +205,7 @@ Settlement persistence adds complementary gauges:
 - `match_loop_latency_seconds{lane}` – latency histogram for each lane’s batch cycle. Rising p95 suggests fairness windows are expiring before matches land.
 - `receipt_persist_fail_total` – persistence failures writing lane-tagged receipts into the RocksDB-backed `ReceiptStore`.
 - `SLASHING_BURN_CT_TOTAL` and `COMPUTE_SLA_VIOLATIONS_TOTAL{provider}` – expose aggregate burn amounts and per-provider violation counts. Alert if a provider exceeds expected thresholds or if burns stop entirely when violations continue.
+- `COMPUTE_SLA_PENDING_TOTAL`, `COMPUTE_SLA_NEXT_DEADLINE_TS`, and `COMPUTE_SLA_AUTOMATED_SLASH_TOTAL` – track queued SLA items, the next enforcement window, and automated slashes triggered by sweeps. Alert if pending records grow without matching automated slashes or if the next deadline approaches zero without resolution.
 - `settle_audit_mismatch_total` – raised when automated audit checks detect a mismatch between the ledger and the anchored receipts, typically via `TB_SETTLE_AUDIT_INTERVAL_MS` or CI replay jobs.
 
 Dashboards should correlate these counters with the RocksDB health metrics (disk latency, file descriptor usage) and with RPC responses from `compute_market.provider_balances` and `compute_market.recent_roots`. A sudden plateau in `SETTLE_APPLIED_TOTAL` combined with stale Merkle roots usually indicates a stuck anchoring pipeline.

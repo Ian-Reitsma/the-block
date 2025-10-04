@@ -1,5 +1,6 @@
-use axum_server::tls_rustls::RustlsConfig;
+use httpd::{serve, serve_tls, ServerConfig, ServerTlsConfig};
 use metrics_aggregator::{router, AppState};
+use runtime::net::TcpListener;
 use std::{env, net::SocketAddr, path::PathBuf};
 
 fn main() {
@@ -19,19 +20,23 @@ fn main() {
         let state = AppState::new(token, db, retention);
         state.spawn_cleanup();
         let app = router(state);
+        let listener = TcpListener::bind(addr).await.expect("bind listener");
+        let config = ServerConfig::default();
         if let (Ok(cert), Ok(key)) = (env::var("AGGREGATOR_CERT"), env::var("AGGREGATOR_KEY")) {
-            let config = RustlsConfig::from_pem_file(cert, key)
+            let tls = if let Ok(ca) = env::var("AGGREGATOR_CLIENT_CA") {
+                ServerTlsConfig::from_pem_files_with_client_auth(cert, key, ca)
+                    .expect("tls client auth config")
+            } else if let Ok(ca) = env::var("AGGREGATOR_CLIENT_CA_OPTIONAL") {
+                ServerTlsConfig::from_pem_files_with_optional_client_auth(cert, key, ca)
+                    .expect("tls optional client auth config")
+            } else {
+                ServerTlsConfig::from_pem_files(cert, key).expect("tls config")
+            };
+            serve_tls(listener, app, config, tls)
                 .await
-                .expect("tls config");
-            axum_server::bind_rustls(addr, config)
-                .serve(app.into_make_service())
-                .await
-                .unwrap();
+                .expect("serve tls");
         } else {
-            axum_server::bind(addr)
-                .serve(app.into_make_service())
-                .await
-                .unwrap();
+            serve(listener, app, config).await.expect("serve http");
         }
     });
 }

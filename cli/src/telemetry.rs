@@ -1,27 +1,104 @@
+use crate::parse_utils::{parse_optional, parse_u64, parse_u64_required, take_string};
 use crate::rpc::RpcClient;
-use clap::Subcommand;
+use cli_core::{
+    arg::{ArgSpec, OptionSpec},
+    command::{Command, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use serde_json::json;
 
-#[derive(Subcommand)]
 pub enum TelemetryCmd {
     /// Dump current telemetry allocation in bytes
     Dump,
     /// Continuously print telemetry allocation every second
-    Tail {
-        #[arg(long, default_value_t = 1)]
-        interval: u64,
-    },
+    Tail { interval: u64 },
     /// Configure telemetry sampling and compaction intervals
     Configure {
-        #[arg(long)]
         sample_rate: Option<f64>,
-        #[arg(long)]
         compaction: Option<u64>,
-        #[arg(long, default_value = "http://localhost:26658")]
         url: String,
-        #[arg(long)]
         token: Option<String>,
     },
+}
+
+impl TelemetryCmd {
+    pub fn command() -> Command {
+        CommandBuilder::new(CommandId("telemetry"), "telemetry", "Telemetry diagnostics")
+            .subcommand(
+                CommandBuilder::new(CommandId("telemetry.dump"), "dump", "Dump telemetry usage")
+                    .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("telemetry.tail"),
+                    "tail",
+                    "Continuously print telemetry allocation every second",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("interval", "interval", "Sampling interval in seconds")
+                        .default("1"),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("telemetry.configure"),
+                    "configure",
+                    "Configure telemetry sampling and compaction intervals",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "sample_rate",
+                    "sample-rate",
+                    "Sampling rate (0.0-1.0)",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "compaction",
+                    "compaction",
+                    "Compaction interval in seconds",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "Telemetry RPC endpoint")
+                        .default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "token",
+                    "token",
+                    "Bearer token for authorization",
+                )))
+                .build(),
+            )
+            .build()
+    }
+
+    pub fn from_matches(matches: &Matches) -> Result<Self, String> {
+        let (name, sub_matches) = matches
+            .subcommand()
+            .ok_or_else(|| "missing subcommand for 'telemetry'".to_string())?;
+
+        match name {
+            "dump" => Ok(TelemetryCmd::Dump),
+            "tail" => {
+                let interval =
+                    parse_u64_required(take_string(sub_matches, "interval"), "interval")?;
+                Ok(TelemetryCmd::Tail { interval })
+            }
+            "configure" => {
+                let sample_rate =
+                    parse_optional(take_string(sub_matches, "sample_rate"), "sample-rate")?;
+                let compaction = parse_u64(take_string(sub_matches, "compaction"), "compaction")?;
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let token = take_string(sub_matches, "token");
+                Ok(TelemetryCmd::Configure {
+                    sample_rate,
+                    compaction,
+                    url,
+                    token,
+                })
+            }
+            other => Err(format!("unknown subcommand '{other}' for 'telemetry'")),
+        }
+    }
 }
 
 pub fn handle(cmd: TelemetryCmd) {

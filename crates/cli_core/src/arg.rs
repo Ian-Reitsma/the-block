@@ -35,6 +35,7 @@ pub struct OptionSpec {
     pub required: bool,
     pub value_enum: Option<&'static [&'static str]>,
     pub value_delimiter: Option<char>,
+    pub required_values: Option<usize>,
 }
 
 impl OptionSpec {
@@ -49,6 +50,7 @@ impl OptionSpec {
             required: false,
             value_enum: None,
             value_delimiter: None,
+            required_values: None,
         }
     }
 
@@ -79,6 +81,11 @@ impl OptionSpec {
 
     pub const fn value_delimiter(mut self, delimiter: char) -> Self {
         self.value_delimiter = Some(delimiter);
+        self
+    }
+
+    pub const fn value_arity(mut self, values: usize) -> Self {
+        self.required_values = Some(values);
         self
     }
 }

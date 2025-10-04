@@ -1,20 +1,24 @@
-use clap::{Parser, Subcommand};
+use std::process;
+
+use cli_core::{
+    arg::{ArgSpec, PositionalSpec},
+    command::{Command as CliCommand, CommandBuilder, CommandId},
+    parse::Matches,
+};
 use the_block::net::ban_store::{self, BanStoreLike};
 
-#[derive(Parser)]
-#[command(author, version, about = "Manage persistent peer bans")]
+mod cli_support;
+use cli_support::{collect_args, parse_matches};
+
+#[derive(Debug)]
 struct Cli {
-    #[command(subcommand)]
     cmd: Command,
 }
 
-#[derive(Subcommand)]
+#[derive(Debug)]
 enum Command {
-    /// List active bans
     List,
-    /// Ban a peer by hex-encoded public key for N seconds
     Ban { pk: String, secs: u64 },
-    /// Remove a ban for the given hex-encoded public key
     Unban { pk: String },
 }
 
@@ -42,7 +46,21 @@ fn run<S: BanStoreLike>(store: &S, cmd: Command) -> Vec<(String, u64)> {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    let command = build_command();
+    let (bin, args) = collect_args("ban");
+    let matches = match parse_matches(&command, &bin, args) {
+        Some(matches) => matches,
+        None => return,
+    };
+
+    let cli = match build_cli(matches) {
+        Ok(cli) => cli,
+        Err(err) => {
+            eprintln!("{err}");
+            process::exit(2);
+        }
+    };
+
     let store = ban_store::store().lock().unwrap_or_else(|e| e.into_inner());
     let out = run(&*store, cli.cmd);
     for (peer, until) in out {
@@ -56,6 +74,72 @@ fn current_ts() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|e| panic!("time error: {e}"))
         .as_secs()
+}
+
+fn build_command() -> CliCommand {
+    CommandBuilder::new(CommandId("ban"), "ban", "Manage persistent peer bans")
+        .subcommand(CommandBuilder::new(CommandId("ban.list"), "list", "List active bans").build())
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("ban.ban"),
+                "ban",
+                "Ban a peer by hex-encoded public key for N seconds",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "pk",
+                "Peer public key (hex)",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "secs",
+                "Ban duration in seconds",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("ban.unban"),
+                "unban",
+                "Remove a ban for the given hex-encoded public key",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "pk",
+                "Peer public key (hex)",
+            )))
+            .build(),
+        )
+        .build()
+}
+
+fn build_cli(matches: Matches) -> Result<Cli, String> {
+    let (sub, sub_matches) = matches
+        .subcommand()
+        .ok_or_else(|| "missing subcommand".to_string())?;
+
+    let cmd = match sub {
+        "list" => Command::List,
+        "ban" => {
+            let pk = require_positional(sub_matches, "pk")?;
+            let secs_str = require_positional(sub_matches, "secs")?;
+            let secs = secs_str
+                .parse::<u64>()
+                .map_err(|err| format!("invalid secs value: {err}"))?;
+            Command::Ban { pk, secs }
+        }
+        "unban" => {
+            let pk = require_positional(sub_matches, "pk")?;
+            Command::Unban { pk }
+        }
+        other => return Err(format!("unknown subcommand '{other}'")),
+    };
+
+    Ok(Cli { cmd })
+}
+
+fn require_positional(matches: &Matches, name: &str) -> Result<String, String> {
+    matches
+        .get_positional(name)
+        .and_then(|values| values.first().cloned())
+        .ok_or_else(|| format!("missing argument '{name}'"))
 }
 
 #[cfg(all(test, feature = "telemetry"))]
