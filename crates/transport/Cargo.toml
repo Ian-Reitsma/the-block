@@ -44,7 +44,7 @@ once_cell = "1"
 rand = { version = "0.8", optional = true }
 rand_core = { version = "0.6", optional = true }
 rcgen = { version = "0.12", optional = true }
-runtime = { path = "../runtime", default-features = false, features = ["tokio-backend"], optional = true }
+runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
 s2n-quic = { version = "1", features = ["unstable-provider-io-testing"], optional = true }

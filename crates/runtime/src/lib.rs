@@ -18,9 +18,11 @@ mod stub_impl;
 #[cfg(feature = "tokio-backend")]
 mod tokio_impl;
 
+pub mod fs;
 pub mod io;
 pub mod net;
 pub mod sync;
+pub mod telemetry;
 pub mod ws;
 
 #[cfg(not(any(

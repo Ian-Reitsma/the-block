@@ -9,7 +9,7 @@ LABEL=${TB_DEPENDENCY_FAULT_LABEL:-ci}
 
 args=()
 if [[ $# -eq 0 ]]; then
-  args+=("--runtime" "tokio")
+  args+=("--runtime" "inhouse")
   args+=("--transport" "quinn")
   args+=("--overlay" "inhouse")
   args+=("--storage" "rocksdb")

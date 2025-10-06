@@ -7,6 +7,7 @@ use runtime::sync::broadcast;
 use runtime::sync::mpsc;
 use runtime::sync::oneshot;
 use runtime::sync::semaphore::Semaphore;
+use runtime::sync::{CancellationToken, Mutex};
 
 #[test]
 fn semaphore_allows_multiple_acquirers() {
@@ -86,5 +87,96 @@ fn broadcast_delivers_to_subscribers() {
         let mut other = tx.subscribe();
         tx.send(3).unwrap();
         assert_eq!(other.recv().await.unwrap(), 3);
+    });
+}
+
+#[test]
+fn cancellation_token_notifies_waiters() {
+    runtime::block_on(async {
+        let token = CancellationToken::new();
+        let fired = Arc::new(AtomicBool::new(false));
+        let clone = fired.clone();
+        let waiter = {
+            let token = token.clone();
+            runtime::spawn(async move {
+                token.cancelled().await;
+                clone.store(true, Ordering::SeqCst);
+            })
+        };
+
+        sleep(Duration::from_millis(10)).await;
+        assert!(!fired.load(Ordering::SeqCst));
+
+        token.cancel();
+        waiter.await.unwrap();
+        assert!(fired.load(Ordering::SeqCst));
+    });
+}
+
+#[test]
+fn cancellation_token_wakes_multiple_waiters_and_is_idempotent() {
+    runtime::block_on(async {
+        let token = CancellationToken::new();
+        let first = Arc::new(AtomicBool::new(false));
+        let second = Arc::new(AtomicBool::new(false));
+
+        let h1 = {
+            let token = token.clone();
+            let flag = first.clone();
+            runtime::spawn(async move {
+                token.cancelled().await;
+                flag.store(true, Ordering::SeqCst);
+            })
+        };
+        let h2 = {
+            let token = token.clone();
+            let flag = second.clone();
+            runtime::spawn(async move {
+                token.cancelled().await;
+                flag.store(true, Ordering::SeqCst);
+            })
+        };
+
+        sleep(Duration::from_millis(5)).await;
+        token.cancel();
+        token.cancel();
+
+        h1.await.unwrap();
+        h2.await.unwrap();
+        assert!(first.load(Ordering::SeqCst));
+        assert!(second.load(Ordering::SeqCst));
+
+        // Additional listeners should observe an already-cancelled token immediately.
+        token.cancelled().await;
+    });
+}
+
+#[test]
+fn mutex_provides_async_exclusion() {
+    runtime::block_on(async {
+        let mutex = Arc::new(Mutex::new(0_u32));
+        let mut guard = mutex.lock().await;
+        assert!(mutex.try_lock().is_none());
+
+        let entered = Arc::new(AtomicBool::new(false));
+        let entered_clone = entered.clone();
+        let mutex_clone = mutex.clone();
+        let waiter = runtime::spawn(async move {
+            let mut guard = mutex_clone.lock().await;
+            entered_clone.store(true, Ordering::SeqCst);
+            *guard += 1;
+        });
+
+        sleep(Duration::from_millis(10)).await;
+        assert!(!entered.load(Ordering::SeqCst));
+
+        *guard += 1;
+        drop(guard);
+
+        waiter.await.unwrap();
+        assert!(entered.load(Ordering::SeqCst));
+
+        let guard = mutex.try_lock().expect("lock available after release");
+        assert_eq!(*guard, 2);
     });
 }

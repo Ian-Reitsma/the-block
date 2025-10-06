@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
+use runtime::sync::Mutex;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use tracing::{debug, warn};
 
 #[cfg(feature = "telemetry")]

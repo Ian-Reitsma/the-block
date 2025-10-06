@@ -422,6 +422,7 @@ mod tests {
         let snapshot = Snapshot {
             root,
             entries: vec![(b"alice".to_vec(), value)],
+            engine_backend: None,
         };
         let bytes = bincode::serialize(&snapshot).expect("serialize snapshot");
         fs::write(&path, bytes).expect("write snapshot");

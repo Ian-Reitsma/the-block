@@ -104,20 +104,28 @@ the same configuration knobs.
 
 ### High-availability deployment
 
-Run multiple aggregators for resilience. Each instance performs leader
-election via an external key-value store such as `etcd`; followers tail a
-write-ahead log to stay consistent. Nodes can discover aggregators through
-DNS SRV records and automatically fail over when the leader becomes
-unreachable. Load balancers should scrape `/healthz` on each instance and
-watch the `aggregator_replication_lag_seconds` gauge for replica drift.
+Run multiple aggregators for resilience. Each instance now coordinates
+through the bundled `InhouseEngine` lease table: the process that acquires
+the `coordination/leader` row within its metrics database keeps the
+leadership fence token alive, while followers tail the write-ahead log to
+stay consistent. Operators can override the generated instance identifier
+with `AGGREGATOR_INSTANCE_ID` or tune the lease timers via
+`AGGREGATOR_LEASE_TTL_SECS`, `AGGREGATOR_LEASE_RENEW_MARGIN_SECS`, and
+`AGGREGATOR_LEASE_RETRY_MS`. Nodes can discover aggregators through DNS SRV
+records and automatically fail over when the leader becomes unreachable.
+Load balancers should scrape `/healthz` on each instance and watch the
+`aggregator_replication_lag_seconds` gauge for replica drift.
 
 #### Metrics and alerts
 
-The aggregator exposes Prometheus gauges `cluster_peer_active_total` and
-counters `aggregator_ingest_total`. Recommended scrape targets are both
-the aggregator itself and the node exporters. Alert when
-`cluster_peer_active_total` drops unexpectedly or when
-`aggregator_ingest_total` stops increasing.
+The aggregator now emits metrics through the first-party `runtime::telemetry`
+registry, rendering a Prometheus-compatible text payload without linking the
+third-party `prometheus` crate. Gauges such as `cluster_peer_active_total` and
+counters like `aggregator_ingest_total`, `aggregator_retention_pruned_total`,
+and `bulk_export_total` are registered inside the in-house registry and served
+at `/metrics`. Recommended scrape targets remain both the aggregator and the
+node exporters. Alert when `cluster_peer_active_total` drops unexpectedly or
+when ingestion/export counters stop increasing.
 
 ### Metrics-to-logs correlation
 
@@ -143,19 +151,27 @@ Peer metrics exports sanitize relative paths, reject symlinks, and lock files du
 #### Bulk exports
 
 Operators can download all peer snapshots in one operation via the aggregator’s `GET /export/all` endpoint. The response is a ZIP archive where each entry is `<peer_id>.json`. The binary `net stats export --all --path bulk.zip --rpc http://aggregator:9300` streams this archive to disk. The service rejects requests when the peer count exceeds `max_export_peers` and increments the `bulk_export_total` counter for visibility.
-For sensitive deployments the archive can be encrypted in transit by passing an `age` recipient:
+For sensitive deployments the archive can be encrypted in transit by passing an
+in-house X25519 recipient (prefix `tbx1`):
 
 ```
-net stats export --all --path bulk.zip.age --age-recipient <RECIPIENT>
+net stats export --all --path bulk.tbenc --recipient <RECIPIENT>
 ```
-The CLI forwards the recipient to the aggregator which encrypts the ZIP stream and sets the `application/age` content type.
 
-Alternatively, operators can supply an OpenSSL passphrase to encrypt with AES-256-CBC:
+The CLI forwards the recipient to the aggregator which encrypts the ZIP stream
+and sets the `application/tb-envelope` content type. Recipients can decrypt the
+payload with `crypto_suite::encryption::envelope::decrypt_with_secret`.
+
+Alternatively, operators can supply a shared password to wrap the archive using
+the same first-party primitives:
 
 ```
-net stats export --all --path bulk.zip.enc --openssl-pass <PASSPHRASE>
+net stats export --all --path bulk.tbenc --password <PASSPHRASE>
 ```
-The first 16 bytes of the response contain the IV; the remainder is the ciphertext.
+
+Password-based responses advertise the `application/tb-password-envelope`
+content type and can be opened with
+`crypto_suite::encryption::envelope::decrypt_with_password`.
 
 Key rotations propagate through the same channel. After issuing `net rotate-key`,
 nodes increment `key_rotation_total` and persist the event to

@@ -116,7 +116,7 @@ async fn connect_state_ws(url: &str) -> Result<ClientStream, String> {
         .host_str()
         .ok_or_else(|| "missing host in websocket url".to_string())?;
     let port = parsed.port_or_known_default().unwrap_or(80);
-    let mut addrs = tokio::net::lookup_host((host, port))
+    let mut addrs = runtime::net::lookup_host(host, port)
         .await
         .map_err(|e| e.to_string())?;
     let addr = addrs

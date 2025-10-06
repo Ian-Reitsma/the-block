@@ -376,9 +376,7 @@ mod tests {
 
     fn tracker_with_tempdir() -> ProofTracker {
         let dir = tempdir().expect("tempdir");
-        let base = dir
-            .keep()
-            .unwrap_or_else(|(_, err)| panic!("preserve proof tracker tempdir: {err}"));
+        let base = dir.into_path();
         let path = base.join("rebates");
         ProofTracker::open(path)
     }

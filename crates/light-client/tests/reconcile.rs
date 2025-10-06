@@ -27,55 +27,57 @@ fn make_header(prev: &Header, height: u64) -> Header {
     h
 }
 
-#[tokio::test]
-async fn reconciles_partial_and_full_sync() {
-    let genesis = Header {
-        height: 0,
-        prev_hash: [0; 32],
-        merkle_root: [0; 32],
-        checkpoint_hash: [0; 32],
-        validator_key: None,
-        checkpoint_sig: None,
-        nonce: 0,
-        difficulty: 1,
-        timestamp_millis: 0,
-        l2_roots: vec![],
-        l2_sizes: vec![],
-        vdf_commit: [0; 32],
-        vdf_output: [0; 32],
-        vdf_proof: vec![],
-    };
-    let h1 = make_header(&genesis, 1);
-    let h2 = make_header(&h1, 2);
-    let h2_for_fetch = h2.clone();
+#[test]
+fn reconciles_partial_and_full_sync() {
+    runtime::block_on(async {
+        let genesis = Header {
+            height: 0,
+            prev_hash: [0; 32],
+            merkle_root: [0; 32],
+            checkpoint_hash: [0; 32],
+            validator_key: None,
+            checkpoint_sig: None,
+            nonce: 0,
+            difficulty: 1,
+            timestamp_millis: 0,
+            l2_roots: vec![],
+            l2_sizes: vec![],
+            vdf_commit: [0; 32],
+            vdf_output: [0; 32],
+            vdf_proof: vec![],
+        };
+        let h1 = make_header(&genesis, 1);
+        let h2 = make_header(&h1, 2);
+        let h2_for_fetch = h2.clone();
 
-    let mut partial = LightClient::new(genesis.clone());
-    partial.verify_and_append(h1.clone()).unwrap();
-    let fetch = move |start: u64, _batch: usize| {
-        let h2 = h2_for_fetch.clone();
-        async move {
-            match start {
-                2 => vec![h2],
-                _ => vec![],
+        let mut partial = LightClient::new(genesis.clone());
+        partial.verify_and_append(h1.clone()).unwrap();
+        let fetch = move |start: u64, _batch: usize| {
+            let h2 = h2_for_fetch.clone();
+            async move {
+                match start {
+                    2 => vec![h2],
+                    _ => vec![],
+                }
             }
-        }
-    };
-    sync_background(
-        &mut partial,
-        SyncOptions {
-            wifi_only: false,
-            require_charging: false,
-            min_battery: 0.0,
-            ..SyncOptions::default()
-        },
-        fetch,
-    )
-    .await
-    .unwrap();
+        };
+        sync_background(
+            &mut partial,
+            SyncOptions {
+                wifi_only: false,
+                require_charging: false,
+                min_battery: 0.0,
+                ..SyncOptions::default()
+            },
+            fetch,
+        )
+        .await
+        .unwrap();
 
-    let mut full = LightClient::new(genesis);
-    full.verify_and_append(h1).unwrap();
-    full.verify_and_append(h2).unwrap();
+        let mut full = LightClient::new(genesis);
+        full.verify_and_append(h1).unwrap();
+        full.verify_and_append(h2).unwrap();
 
-    assert_eq!(partial.chain, full.chain);
+        assert_eq!(partial.chain, full.chain);
+    });
 }

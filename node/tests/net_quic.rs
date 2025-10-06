@@ -59,438 +59,458 @@ impl Drop for S2nTransportGuard {
     }
 }
 
-#[tokio::test]
+#[test]
 #[serial]
-async fn quic_handshake_roundtrip() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, cert) = quic::listen(addr).await.unwrap();
-    let listen_addr = server_ep.local_addr().unwrap();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let ep = server_ep.clone();
-    the_block::spawn(async move {
-        if let Some(conn) = ep.accept().await {
-            let connection = conn.await.unwrap();
-            if let Some(bytes) = quic::recv(&connection).await {
-                tx.send(bytes).unwrap();
+fn quic_handshake_roundtrip() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let listen_addr = server_ep.local_addr().unwrap();
+        let (tx, rx) = runtime::sync::oneshot::channel();
+        let ep = server_ep.clone();
+        the_block::spawn(async move {
+            if let Some(conn) = ep.accept().await {
+                let connection = conn.await.unwrap();
+                if let Some(bytes) = quic::recv(&connection).await {
+                    tx.send(bytes).unwrap();
+                }
+                connection.close(0u32.into(), b"done");
             }
-            connection.close(0u32.into(), b"done");
-        }
-    });
-    #[cfg(feature = "telemetry")]
-    let before = QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["unknown", "certificate"])
-        .get();
-    let conn = quic::connect(listen_addr, cert).await.unwrap();
-    let hello = Hello {
-        network_id: [0u8; 4],
-        proto_version: PROTOCOL_VERSION,
-        feature_bits: 0,
-        agent: "test".into(),
-        nonce: 0,
-        transport: Transport::Quic,
-        quic_addr: None,
-        quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
-        quic_provider: None,
-        quic_capabilities: Vec::new(),
-    };
-    let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-    let bytes = bincode::serialize(&msg).unwrap();
-    quic::send(&conn, &bytes).await.unwrap();
-    let recv = rx.await.unwrap();
-    let parsed: Message = bincode::deserialize(&recv).unwrap();
-    assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
-    conn.close(0u32.into(), b"done");
-    server_ep.wait_idle().await;
-    #[cfg(feature = "telemetry")]
-    assert_eq!(
-        QUIC_HANDSHAKE_FAIL_TOTAL
+        });
+        #[cfg(feature = "telemetry")]
+        let before = QUIC_HANDSHAKE_FAIL_TOTAL
             .with_label_values(&["unknown", "certificate"])
-            .get(),
-        before
-    );
+            .get();
+        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+            quic_provider: None,
+            quic_capabilities: Vec::new(),
+        };
+        let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+        let bytes = bincode::serialize(&msg).unwrap();
+        quic::send(&conn, &bytes).await.unwrap();
+        let recv = rx.await.unwrap();
+        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
+        conn.close(0u32.into(), b"done");
+        server_ep.wait_idle().await;
+        #[cfg(feature = "telemetry")]
+        assert_eq!(
+            QUIC_HANDSHAKE_FAIL_TOTAL
+                .with_label_values(&["unknown", "certificate"])
+                .get(),
+            before
+        );
+    });
 }
 
-#[tokio::test]
+#[test]
 #[serial]
-async fn quic_gossip_roundtrip() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, cert) = quic::listen(addr).await.unwrap();
-    let listen_addr = server_ep.local_addr().unwrap();
-    let (hs_tx, hs_rx) = tokio::sync::oneshot::channel();
-    let (msg_tx, msg_rx) = tokio::sync::oneshot::channel();
-    let ep = server_ep.clone();
-    the_block::spawn(async move {
-        if let Some(conn) = ep.accept().await {
-            let connection = conn.await.unwrap();
-            if let Some(bytes) = quic::recv(&connection).await {
-                hs_tx.send(bytes).unwrap();
+fn quic_gossip_roundtrip() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let listen_addr = server_ep.local_addr().unwrap();
+        let (hs_tx, hs_rx) = runtime::sync::oneshot::channel();
+        let (msg_tx, msg_rx) = runtime::sync::oneshot::channel();
+        let ep = server_ep.clone();
+        the_block::spawn(async move {
+            if let Some(conn) = ep.accept().await {
+                let connection = conn.await.unwrap();
+                if let Some(bytes) = quic::recv(&connection).await {
+                    hs_tx.send(bytes).unwrap();
+                }
+                if let Some(bytes) = quic::recv(&connection).await {
+                    msg_tx.send(bytes).unwrap();
+                }
+                connection.close(0u32.into(), b"done");
             }
-            if let Some(bytes) = quic::recv(&connection).await {
-                msg_tx.send(bytes).unwrap();
-            }
-            connection.close(0u32.into(), b"done");
-        }
-    });
-    #[cfg(feature = "telemetry")]
-    let before = QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["unknown", "certificate"])
-        .get();
-    let conn = quic::connect(listen_addr, cert).await.unwrap();
-    let hello = Hello {
-        network_id: [0u8; 4],
-        proto_version: PROTOCOL_VERSION,
-        feature_bits: 0,
-        agent: "test".into(),
-        nonce: 0,
-        transport: Transport::Quic,
-        quic_addr: None,
-        quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
-        quic_provider: None,
-        quic_capabilities: Vec::new(),
-    };
-    let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&msg).unwrap())
-        .await
-        .unwrap();
-    let recv = hs_rx.await.unwrap();
-    let parsed: Message = bincode::deserialize(&recv).unwrap();
-    assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
-    let gossip = Message::new(Payload::Hello(Vec::new()), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&gossip).unwrap())
-        .await
-        .unwrap();
-    let recv = msg_rx.await.unwrap();
-    let parsed: Message = bincode::deserialize(&recv).unwrap();
-    assert!(matches!(parsed.body, Payload::Hello(peers) if peers.is_empty()));
-    conn.close(0u32.into(), b"done");
-    server_ep.wait_idle().await;
-    #[cfg(feature = "telemetry")]
-    assert_eq!(
-        QUIC_HANDSHAKE_FAIL_TOTAL
+        });
+        #[cfg(feature = "telemetry")]
+        let before = QUIC_HANDSHAKE_FAIL_TOTAL
             .with_label_values(&["unknown", "certificate"])
-            .get(),
-        before
-    );
+            .get();
+        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+            quic_provider: None,
+            quic_capabilities: Vec::new(),
+        };
+        let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+            .await
+            .unwrap();
+        let recv = hs_rx.await.unwrap();
+        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
+        let gossip = Message::new(Payload::Hello(Vec::new()), &sample_sk());
+        quic::send(&conn, &bincode::serialize(&gossip).unwrap())
+            .await
+            .unwrap();
+        let recv = msg_rx.await.unwrap();
+        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        assert!(matches!(parsed.body, Payload::Hello(peers) if peers.is_empty()));
+        conn.close(0u32.into(), b"done");
+        server_ep.wait_idle().await;
+        #[cfg(feature = "telemetry")]
+        assert_eq!(
+            QUIC_HANDSHAKE_FAIL_TOTAL
+                .with_label_values(&["unknown", "certificate"])
+                .get(),
+            before
+        );
+    });
 }
 
-#[tokio::test]
+#[test]
 #[serial]
-async fn quic_disconnect() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, cert) = quic::listen(addr).await.unwrap();
-    let listen_addr = server_ep.local_addr().unwrap();
-    let (close_tx, close_rx) = tokio::sync::oneshot::channel();
-    let ep = server_ep.clone();
-    the_block::spawn(async move {
-        if let Some(conn) = ep.accept().await {
-            let connection = conn.await.unwrap();
-            let _ = quic::recv(&connection).await;
-            connection.close(0u32.into(), b"server");
-            connection.closed().await;
-            close_tx.send(()).unwrap();
-        }
+fn quic_disconnect() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let listen_addr = server_ep.local_addr().unwrap();
+        let (close_tx, close_rx) = runtime::sync::oneshot::channel();
+        let ep = server_ep.clone();
+        the_block::spawn(async move {
+            if let Some(conn) = ep.accept().await {
+                let connection = conn.await.unwrap();
+                let _ = quic::recv(&connection).await;
+                connection.close(0u32.into(), b"server");
+                connection.closed().await;
+                close_tx.send(()).unwrap();
+            }
+        });
+        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+
+            quic_provider: None,
+
+            quic_capabilities: Vec::new(),
+        };
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+            .await
+            .unwrap();
+        conn.close(0u32.into(), b"client");
+        conn.closed().await;
+        close_rx.await.unwrap();
+        server_ep.wait_idle().await;
     });
-    let conn = quic::connect(listen_addr, cert).await.unwrap();
-    let hello = Hello {
-        network_id: [0u8; 4],
-        proto_version: PROTOCOL_VERSION,
-        feature_bits: 0,
-        agent: "test".into(),
-        nonce: 0,
-        transport: Transport::Quic,
-        quic_addr: None,
-        quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
+}
 
-        quic_provider: None,
+#[test]
+#[serial]
+fn quic_fallback_to_tcp() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        use rcgen::generate_simple_self_signed;
+        let cert = generate_simple_self_signed(["fallback".into()])
+            .unwrap()
+            .serialize_der()
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = runtime::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = Vec::new();
+            let _ = stream.read_to_end(&mut buf);
+            tx.send(buf).unwrap();
+        });
+        let relay = Relay::default();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
 
-        quic_capabilities: Vec::new(),
-    };
-    let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&msg).unwrap())
+            quic_provider: None,
+
+            quic_capabilities: Vec::new(),
+        };
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+        let msg_clone = msg.clone();
+        the_block::spawn_blocking(move || {
+            let relay = relay;
+            relay.broadcast(&msg_clone, &[(addr, Transport::Quic, Some(cert))]);
+        })
         .await
         .unwrap();
-    conn.close(0u32.into(), b"client");
-    conn.closed().await;
-    close_rx.await.unwrap();
-    server_ep.wait_idle().await;
-}
-
-#[tokio::test]
-#[serial]
-async fn quic_fallback_to_tcp() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    use rcgen::generate_simple_self_signed;
-    let cert = generate_simple_self_signed(["fallback".into()])
-        .unwrap()
-        .serialize_der()
-        .unwrap();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut buf = Vec::new();
-        let _ = stream.read_to_end(&mut buf);
-        tx.send(buf).unwrap();
+        let recv = rx.await.unwrap();
+        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        assert!(matches!(parsed.body, Payload::Handshake(_)));
     });
-    let relay = Relay::default();
-    let hello = Hello {
-        network_id: [0u8; 4],
-        proto_version: PROTOCOL_VERSION,
-        feature_bits: 0,
-        agent: "test".into(),
-        nonce: 0,
-        transport: Transport::Quic,
-        quic_addr: None,
-        quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
-
-        quic_provider: None,
-
-        quic_capabilities: Vec::new(),
-    };
-    let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-    let msg_clone = msg.clone();
-    the_block::spawn_blocking(move || {
-        let relay = relay;
-        relay.broadcast(&msg_clone, &[(addr, Transport::Quic, Some(cert))]);
-    })
-    .await
-    .unwrap();
-    let recv = rx.await.unwrap();
-    let parsed: Message = bincode::deserialize(&recv).unwrap();
-    assert!(matches!(parsed.body, Payload::Handshake(_)));
 }
 
 #[cfg(feature = "s2n-quic")]
-#[tokio::test]
+#[test]
 #[serial]
-async fn s2n_quic_connect_roundtrip() {
-    let _guard = S2nTransportGuard::install();
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let listener = transport_quic::start_server(addr)
-        .await
-        .expect("start s2n server");
-    let listen_addr = match &listener {
-        ListenerHandle::S2n(server) => server.local_addr().expect("local addr"),
-        #[cfg(feature = "quinn")]
-        ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
-    };
-    let server = match listener {
-        ListenerHandle::S2n(server) => server,
-        #[cfg(feature = "quinn")]
-        ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
-    };
-    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
-    let accept = server.clone();
-    the_block::spawn(async move {
-        if let Some(connecting) = accept.accept().await {
-            let _ = connecting.await;
-        }
-        let _ = done_tx.send(());
-    });
-
-    transport_quic::connect(listen_addr)
-        .await
-        .expect("connect to s2n server");
-
-    done_rx.await.unwrap();
-}
-
-#[tokio::test]
-#[serial]
-async fn quic_endpoint_reuse() {
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, cert) = quic::listen(addr).await.unwrap();
-    let ep = server_ep.clone();
-    the_block::spawn(async move {
-        while let Some(conn) = ep.accept().await {
-            let connection = conn.await.unwrap();
-            connection.close(0u32.into(), b"done");
-        }
-    });
-    let listen_addr = server_ep.local_addr().unwrap();
-    let conn1 = quic::connect(listen_addr, cert.clone()).await.unwrap();
-    conn1.close(0u32.into(), b"done");
-    let conn2 = quic::connect(listen_addr, cert).await.unwrap();
-    conn2.close(0u32.into(), b"done");
-    server_ep.wait_idle().await;
-    #[cfg(feature = "telemetry")]
-    assert_eq!(QUIC_ENDPOINT_REUSE_TOTAL.get(), 0);
-}
-
-#[tokio::test]
-#[serial]
-async fn quic_handshake_failure_metric() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    use rcgen::generate_simple_self_signed;
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, _cert) = quic::listen(addr).await.unwrap();
-    let listen_addr = server_ep.local_addr().unwrap();
-    let bad = generate_simple_self_signed(["bad".into()]).unwrap();
-    let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
-    let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["unknown", "certificate"])
-        .get();
-    let res = quic::connect(listen_addr, bad_cert).await;
-    assert!(res.is_err());
-    server_ep.wait_idle().await;
-    #[cfg(feature = "telemetry")]
-    assert!(
-        the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["unknown", "certificate"])
-            .get()
-            >= before + 1
-    );
-}
-
-#[tokio::test]
-#[serial]
-async fn quic_handshake_timeout() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    use rcgen::generate_simple_self_signed;
-    let cert = generate_simple_self_signed(["timeout".into()])
-        .unwrap()
-        .serialize_der()
-        .unwrap();
-    let addr: std::net::SocketAddr = "127.0.0.1:9".parse().unwrap();
-    let cert = rustls::Certificate(cert);
-    #[cfg(feature = "telemetry")]
-    let before = QUIC_HANDSHAKE_FAIL_TOTAL
-        .with_label_values(&["unknown", "timeout"])
-        .get();
-    let res = quic::connect(addr, cert).await;
-    assert!(res.is_err());
-    #[cfg(feature = "telemetry")]
-    assert!(
-        QUIC_HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["unknown", "timeout"])
-            .get()
-            >= before + 1
-    );
-}
-
-#[tokio::test]
-#[serial]
-async fn quic_version_mismatch() {
-    #[cfg(feature = "telemetry")]
-    reset_counters();
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, cert) = quic::listen(addr).await.unwrap();
-    let listen_addr = server_ep.local_addr().unwrap();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let ep = server_ep.clone();
-    the_block::spawn(async move {
-        if let Some(conn) = ep.accept().await {
-            let connection = conn.await.unwrap();
-            if let Some(bytes) = quic::recv(&connection).await {
-                tx.send(bytes).unwrap();
+fn s2n_quic_connect_roundtrip() {
+    runtime::block_on(async {
+        let _guard = S2nTransportGuard::install();
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = transport_quic::start_server(addr)
+            .await
+            .expect("start s2n server");
+        let listen_addr = match &listener {
+            ListenerHandle::S2n(server) => server.local_addr().expect("local addr"),
+            #[cfg(feature = "quinn")]
+            ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
+        };
+        let server = match listener {
+            ListenerHandle::S2n(server) => server,
+            #[cfg(feature = "quinn")]
+            ListenerHandle::Quinn(_) => unreachable!("expected s2n listener"),
+        };
+        let (done_tx, done_rx) = runtime::sync::oneshot::channel();
+        let accept = server.clone();
+        the_block::spawn(async move {
+            if let Some(connecting) = accept.accept().await {
+                let _ = connecting.await;
             }
-            connection.close(0u32.into(), b"done");
-        }
+            let _ = done_tx.send(());
+        });
+
+        transport_quic::connect(listen_addr)
+            .await
+            .expect("connect to s2n server");
+
+        done_rx.await.unwrap();
     });
-    let conn = quic::connect(listen_addr, cert).await.unwrap();
-    let hello = Hello {
-        network_id: [0u8; 4],
-        proto_version: PROTOCOL_VERSION - 1,
-        feature_bits: 0,
-        agent: "test".into(),
-        nonce: 0,
-        transport: Transport::Quic,
-        quic_addr: None,
-        quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
-
-        quic_provider: None,
-
-        quic_capabilities: Vec::new(),
-    };
-    let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&msg).unwrap())
-        .await
-        .unwrap();
-    let recv = rx.await.unwrap();
-    let parsed: Message = bincode::deserialize(&recv).unwrap();
-    let peers = PeerSet::new(Vec::new());
-    let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
-    net::set_track_handshake_fail(true);
-    peers.handle_message(parsed, Some(listen_addr), &chain);
-    #[cfg(feature = "telemetry")]
-    assert!(
-        the_block::telemetry::HANDSHAKE_FAIL_TOTAL
-            .with_label_values(&["protocol"])
-            .get()
-            >= 1
-    );
-    net::set_track_handshake_fail(false);
-    conn.close(0u32.into(), b"done");
-    server_ep.wait_idle().await;
 }
 
-#[tokio::test]
+#[test]
 #[serial]
-async fn quic_packet_loss_env() {
-    std::env::set_var("TB_QUIC_PACKET_LOSS", "1.0");
-    let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
-    let (server_ep, cert) = quic::listen(addr).await.unwrap();
-    let listen_addr = server_ep.local_addr().unwrap();
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let ep = server_ep.clone();
-    the_block::spawn(async move {
-        if let Some(conn) = ep.accept().await {
-            let connection = conn.await.unwrap();
-            let res = the_block::timeout(
-                std::time::Duration::from_millis(200),
-                quic::recv(&connection),
-            )
-            .await;
-            tx.send(res.is_err()).unwrap();
-            connection.close(0u32.into(), b"done");
-        }
+fn quic_endpoint_reuse() {
+    runtime::block_on(async {
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let ep = server_ep.clone();
+        the_block::spawn(async move {
+            while let Some(conn) = ep.accept().await {
+                let connection = conn.await.unwrap();
+                connection.close(0u32.into(), b"done");
+            }
+        });
+        let listen_addr = server_ep.local_addr().unwrap();
+        let conn1 = quic::connect(listen_addr, cert.clone()).await.unwrap();
+        conn1.close(0u32.into(), b"done");
+        let conn2 = quic::connect(listen_addr, cert).await.unwrap();
+        conn2.close(0u32.into(), b"done");
+        server_ep.wait_idle().await;
+        #[cfg(feature = "telemetry")]
+        assert_eq!(QUIC_ENDPOINT_REUSE_TOTAL.get(), 0);
     });
-    let conn = quic::connect(listen_addr, cert).await.unwrap();
-    let hello = Hello {
-        network_id: [0u8; 4],
-        proto_version: PROTOCOL_VERSION,
-        feature_bits: 0,
-        agent: "test".into(),
-        nonce: 0,
-        transport: Transport::Quic,
-        quic_addr: None,
-        quic_cert: None,
-        quic_fingerprint: None,
-        quic_fingerprint_previous: Vec::new(),
+}
 
-        quic_provider: None,
+#[test]
+#[serial]
+fn quic_handshake_failure_metric() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        use rcgen::generate_simple_self_signed;
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, _cert) = quic::listen(addr).await.unwrap();
+        let listen_addr = server_ep.local_addr().unwrap();
+        let bad = generate_simple_self_signed(["bad".into()]).unwrap();
+        let bad_cert = rustls::Certificate(bad.serialize_der().unwrap());
+        let before = the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["unknown", "certificate"])
+            .get();
+        let res = quic::connect(listen_addr, bad_cert).await;
+        assert!(res.is_err());
+        server_ep.wait_idle().await;
+        #[cfg(feature = "telemetry")]
+        assert!(
+            the_block::telemetry::QUIC_HANDSHAKE_FAIL_TOTAL
+                .with_label_values(&["unknown", "certificate"])
+                .get()
+                >= before + 1
+        );
+    });
+}
 
-        quic_capabilities: Vec::new(),
-    };
-    let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-    quic::send(&conn, &bincode::serialize(&msg).unwrap())
-        .await
-        .unwrap();
-    assert!(
-        rx.await.unwrap(),
-        "expected receive timeout due to packet loss"
-    );
-    std::env::remove_var("TB_QUIC_PACKET_LOSS");
-    conn.close(0u32.into(), b"done");
-    server_ep.wait_idle().await;
+#[test]
+#[serial]
+fn quic_handshake_timeout() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        use rcgen::generate_simple_self_signed;
+        let cert = generate_simple_self_signed(["timeout".into()])
+            .unwrap()
+            .serialize_der()
+            .unwrap();
+        let addr: std::net::SocketAddr = "127.0.0.1:9".parse().unwrap();
+        let cert = rustls::Certificate(cert);
+        #[cfg(feature = "telemetry")]
+        let before = QUIC_HANDSHAKE_FAIL_TOTAL
+            .with_label_values(&["unknown", "timeout"])
+            .get();
+        let res = quic::connect(addr, cert).await;
+        assert!(res.is_err());
+        #[cfg(feature = "telemetry")]
+        assert!(
+            QUIC_HANDSHAKE_FAIL_TOTAL
+                .with_label_values(&["unknown", "timeout"])
+                .get()
+                >= before + 1
+        );
+    });
+}
+
+#[test]
+#[serial]
+fn quic_version_mismatch() {
+    runtime::block_on(async {
+        #[cfg(feature = "telemetry")]
+        reset_counters();
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let listen_addr = server_ep.local_addr().unwrap();
+        let (tx, rx) = runtime::sync::oneshot::channel();
+        let ep = server_ep.clone();
+        the_block::spawn(async move {
+            if let Some(conn) = ep.accept().await {
+                let connection = conn.await.unwrap();
+                if let Some(bytes) = quic::recv(&connection).await {
+                    tx.send(bytes).unwrap();
+                }
+                connection.close(0u32.into(), b"done");
+            }
+        });
+        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION - 1,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+
+            quic_provider: None,
+
+            quic_capabilities: Vec::new(),
+        };
+        let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
+        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+            .await
+            .unwrap();
+        let recv = rx.await.unwrap();
+        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        let peers = PeerSet::new(Vec::new());
+        let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
+        net::set_track_handshake_fail(true);
+        peers.handle_message(parsed, Some(listen_addr), &chain);
+        #[cfg(feature = "telemetry")]
+        assert!(
+            the_block::telemetry::HANDSHAKE_FAIL_TOTAL
+                .with_label_values(&["protocol"])
+                .get()
+                >= 1
+        );
+        net::set_track_handshake_fail(false);
+        conn.close(0u32.into(), b"done");
+        server_ep.wait_idle().await;
+    });
+}
+
+#[test]
+#[serial]
+fn quic_packet_loss_env() {
+    runtime::block_on(async {
+        std::env::set_var("TB_QUIC_PACKET_LOSS", "1.0");
+        let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let (server_ep, cert) = quic::listen(addr).await.unwrap();
+        let listen_addr = server_ep.local_addr().unwrap();
+        let (tx, rx) = runtime::sync::oneshot::channel();
+        let ep = server_ep.clone();
+        the_block::spawn(async move {
+            if let Some(conn) = ep.accept().await {
+                let connection = conn.await.unwrap();
+                let res = the_block::timeout(
+                    std::time::Duration::from_millis(200),
+                    quic::recv(&connection),
+                )
+                .await;
+                tx.send(res.is_err()).unwrap();
+                connection.close(0u32.into(), b"done");
+            }
+        });
+        let conn = quic::connect(listen_addr, cert).await.unwrap();
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: 0,
+            agent: "test".into(),
+            nonce: 0,
+            transport: Transport::Quic,
+            quic_addr: None,
+            quic_cert: None,
+            quic_fingerprint: None,
+            quic_fingerprint_previous: Vec::new(),
+
+            quic_provider: None,
+
+            quic_capabilities: Vec::new(),
+        };
+        let msg = Message::new(Payload::Handshake(hello), &sample_sk());
+        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            rx.await.unwrap(),
+            "expected receive timeout due to packet loss"
+        );
+        std::env::remove_var("TB_QUIC_PACKET_LOSS");
+        conn.close(0u32.into(), b"done");
+        server_ep.wait_idle().await;
+    });
 }

@@ -28,48 +28,50 @@ fn make_header(prev: &Header, height: u64) -> Header {
     h
 }
 
-#[tokio::test]
-async fn syncs_to_chain_tip() {
-    let genesis = Header {
-        height: 0,
-        prev_hash: [0u8; 32],
-        merkle_root: [0u8; 32],
-        checkpoint_hash: [0u8; 32],
-        validator_key: None,
-        checkpoint_sig: None,
-        nonce: 0,
-        difficulty: 1,
-        timestamp_millis: 0,
-        l2_roots: vec![],
-        l2_sizes: vec![],
-        vdf_commit: [0u8; 32],
-        vdf_output: [0u8; 32],
-        vdf_proof: vec![],
-    };
-    let mut lc = LightClient::new(genesis.clone());
-    let h1 = make_header(&genesis, 1);
-    let h2 = make_header(&h1, 2);
-    let fetch = move |start: u64, _batch: usize| {
-        let h1 = h1.clone();
-        let h2 = h2.clone();
-        async move {
-            match start {
-                1 => vec![h1, h2],
-                _ => Vec::new(),
+#[test]
+fn syncs_to_chain_tip() {
+    runtime::block_on(async {
+        let genesis = Header {
+            height: 0,
+            prev_hash: [0u8; 32],
+            merkle_root: [0u8; 32],
+            checkpoint_hash: [0u8; 32],
+            validator_key: None,
+            checkpoint_sig: None,
+            nonce: 0,
+            difficulty: 1,
+            timestamp_millis: 0,
+            l2_roots: vec![],
+            l2_sizes: vec![],
+            vdf_commit: [0u8; 32],
+            vdf_output: [0u8; 32],
+            vdf_proof: vec![],
+        };
+        let mut lc = LightClient::new(genesis.clone());
+        let h1 = make_header(&genesis, 1);
+        let h2 = make_header(&h1, 2);
+        let fetch = move |start: u64, _batch: usize| {
+            let h1 = h1.clone();
+            let h2 = h2.clone();
+            async move {
+                match start {
+                    1 => vec![h1, h2],
+                    _ => Vec::new(),
+                }
             }
-        }
-    };
-    sync_background(
-        &mut lc,
-        SyncOptions {
-            wifi_only: false,
-            require_charging: false,
-            min_battery: 0.0,
-            ..SyncOptions::default()
-        },
-        fetch,
-    )
-    .await
-    .unwrap();
-    assert_eq!(lc.tip_height(), 2);
+        };
+        sync_background(
+            &mut lc,
+            SyncOptions {
+                wifi_only: false,
+                require_charging: false,
+                min_battery: 0.0,
+                ..SyncOptions::default()
+            },
+            fetch,
+        )
+        .await
+        .unwrap();
+        assert_eq!(lc.tip_height(), 2);
+    });
 }

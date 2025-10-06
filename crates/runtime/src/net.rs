@@ -1,5 +1,5 @@
 use std::io::{self, ErrorKind};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 #[cfg(feature = "tokio-backend")]
 use std::pin::Pin;
 #[cfg(feature = "tokio-backend")]
@@ -13,6 +13,9 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 #[cfg(feature = "inhouse-backend")]
 use crate::inhouse;
+
+mod dns;
+pub use dns::{lookup_srv, lookup_txt, SrvRecord};
 
 pub struct TcpListener {
     inner: TcpListenerInner,
@@ -51,6 +54,34 @@ enum UdpSocketInner {
     Tokio(tokio::net::UdpSocket),
     #[cfg(feature = "stub-backend")]
     Stub(StubUdpSocket),
+}
+
+/// Iterator over socket addresses returned by [`lookup_host`].
+pub struct LookupHost {
+    addrs: std::vec::IntoIter<SocketAddr>,
+}
+
+impl LookupHost {
+    fn new(addrs: Vec<SocketAddr>) -> Self {
+        Self {
+            addrs: addrs.into_iter(),
+        }
+    }
+}
+
+impl Iterator for LookupHost {
+    type Item = SocketAddr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.addrs.next()
+    }
+}
+
+impl LookupHost {
+    /// Returns the collected socket addresses.
+    pub fn into_iter(self) -> std::vec::IntoIter<SocketAddr> {
+        self.addrs
+    }
 }
 
 impl TcpListener {
@@ -377,6 +408,30 @@ impl UdpSocket {
             UdpSocketInner::Stub(socket) => socket.local_addr(),
         }
     }
+}
+
+/// Resolves a host and port to socket addresses using the active runtime backend.
+pub async fn lookup_host(host: impl AsRef<str>, port: u16) -> io::Result<LookupHost> {
+    let host = host.as_ref().to_owned();
+    let addrs = crate::spawn_blocking(move || -> io::Result<Vec<SocketAddr>> {
+        (host.as_str(), port)
+            .to_socket_addrs()
+            .map(|iter| iter.collect())
+    })
+    .await
+    .map_err(|err| io::Error::new(ErrorKind::Other, err))??;
+    Ok(LookupHost::new(addrs))
+}
+
+/// Resolves a host:port string into socket addresses.
+pub async fn lookup_host_str(addr: impl AsRef<str>) -> io::Result<LookupHost> {
+    let addr = addr.as_ref().to_owned();
+    let addrs = crate::spawn_blocking(move || -> io::Result<Vec<SocketAddr>> {
+        addr.to_socket_addrs().map(|iter| iter.collect())
+    })
+    .await
+    .map_err(|err| io::Error::new(ErrorKind::Other, err))??;
+    Ok(LookupHost::new(addrs))
 }
 
 #[cfg(feature = "tokio-backend")]

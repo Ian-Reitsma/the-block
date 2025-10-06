@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = ["inhouse-backend"]
-inhouse-backend = ["dep:metrics", "dep:crossbeam-deque", "dep:mio", "dep:socket2", "dep:libc"]
+inhouse-backend = ["dep:metrics", "dep:crossbeam-deque", "dep:mio", "dep:socket2", "dep:libc", "dep:nix"]
 tokio-backend = ["dep:tokio", "dep:metrics"]
 stub-backend = ["dep:metrics"]
 
@@ -21,6 +21,7 @@ socket2 = { version = "0.5", optional = true }
 pin-project-lite = "0.2"
 pin-project = "1"
 libc = { version = "0.2", optional = true }
+nix = { version = "0.27", optional = true, default-features = false, features = ["event", "inotify"] }
 base64 = "0.21"
 sha1 = "0.10"
 rand = "0.8"

@@ -20,7 +20,7 @@ use tracing::warn;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{DNS_VERIFICATION_FAIL_TOTAL, GATEWAY_DNS_LOOKUP_TOTAL};
-use trust_dns_resolver::{config::*, Resolver};
+use runtime::net::lookup_txt;
 
 static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     let path = std::env::var("TB_DNS_DB_PATH").unwrap_or_else(|_| "dns_db".into());
@@ -40,17 +40,8 @@ static VERIFY_CACHE: Lazy<Mutex<HashMap<String, (bool, Instant)>>> =
 fn default_txt_resolver(domain: &str) -> Vec<String> {
     let mut delay = Duration::from_millis(100);
     for _ in 0..3 {
-        if let Ok(r) = Resolver::new(ResolverConfig::default(), ResolverOpts::default()) {
-            if let Ok(lookup) = r.txt_lookup(domain) {
-                return lookup
-                    .iter()
-                    .flat_map(|r| {
-                        r.txt_data()
-                            .iter()
-                            .filter_map(|d| std::str::from_utf8(d).ok().map(|s| s.to_string()))
-                    })
-                    .collect();
-            }
+        if let Ok(records) = lookup_txt(domain) {
+            return records;
         }
         thread::sleep(delay);
         delay *= 2;

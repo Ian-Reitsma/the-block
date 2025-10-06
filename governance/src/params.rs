@@ -5,7 +5,7 @@ use serde_json;
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
-pub const RUNTIME_BACKEND_OPTIONS: [&str; 2] = ["tokio", "stub"];
+pub const RUNTIME_BACKEND_OPTIONS: [&str; 2] = ["inhouse", "stub"];
 pub const TRANSPORT_PROVIDER_OPTIONS: [&str; 2] = ["quinn", "s2n-quic"];
 pub const STORAGE_ENGINE_OPTIONS: [&str; 3] = ["memory", "rocksdb", "sled"];
 
@@ -13,7 +13,7 @@ const RUNTIME_BACKEND_MASK_ALL: i64 = (1 << RUNTIME_BACKEND_OPTIONS.len()) - 1;
 const TRANSPORT_PROVIDER_MASK_ALL: i64 = (1 << TRANSPORT_PROVIDER_OPTIONS.len()) - 1;
 const STORAGE_ENGINE_MASK_ALL: i64 = (1 << STORAGE_ENGINE_OPTIONS.len()) - 1;
 
-pub const DEFAULT_RUNTIME_BACKEND_POLICY: i64 = 1; // tokio
+pub const DEFAULT_RUNTIME_BACKEND_POLICY: i64 = 1; // inhouse
 pub const DEFAULT_TRANSPORT_PROVIDER_POLICY: i64 = 1; // quinn
 pub const DEFAULT_STORAGE_ENGINE_POLICY: i64 = (1 << 1) | (1 << 2); // rocksdb | sled
 

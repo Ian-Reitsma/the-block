@@ -196,9 +196,9 @@ mod tests {
     #[test]
     fn summary_tracks_updates_and_latest() {
         let records = vec![
-            record("runtime_backend", 10, 1, &["tokio"]),
+            record("runtime_backend", 10, 1, &["inhouse"]),
             record("transport_provider", 12, 2, &["quinn"]),
-            record("runtime_backend", 15, 3, &["tokio", "stub"]),
+            record("runtime_backend", 15, 3, &["inhouse", "stub"]),
             record("storage_engine", 20, 4, &["rocksdb", "sled"]),
         ];
 
@@ -207,10 +207,13 @@ mod tests {
         assert_eq!(summary.updates[2].kind, "runtime_backend");
         assert_eq!(summary.updates[2].epoch, 15);
         assert_eq!(summary.updates[2].proposal_id, 3);
-        assert_eq!(summary.updates[2].previous, Some(vec!["tokio".to_string()]));
+        assert_eq!(
+            summary.updates[2].previous,
+            Some(vec!["inhouse".to_string()])
+        );
         assert_eq!(
             summary.updates[2].current,
-            vec!["stub".to_string(), "tokio".to_string()]
+            vec!["inhouse".to_string(), "stub".to_string()]
         );
         assert_eq!(summary.updates[2].added, vec!["stub".to_string()]);
         assert!(summary.updates[2].removed.is_empty());
@@ -221,7 +224,7 @@ mod tests {
             .expect("runtime backend latest");
         assert_eq!(
             runtime.allowed,
-            vec!["stub".to_string(), "tokio".to_string()]
+            vec!["inhouse".to_string(), "stub".to_string()]
         );
         assert_eq!(runtime.epoch, 15);
         assert_eq!(runtime.proposal_id, 3);
@@ -230,8 +233,8 @@ mod tests {
     #[test]
     fn filter_excludes_earlier_entries() {
         let records = vec![
-            record("runtime_backend", 10, 1, &["tokio"]),
-            record("runtime_backend", 11, 2, &["tokio", "stub"]),
+            record("runtime_backend", 10, 1, &["inhouse"]),
+            record("runtime_backend", 11, 2, &["inhouse", "stub"]),
             record("storage_engine", 12, 3, &["rocksdb"]),
         ];
 
@@ -244,7 +247,10 @@ mod tests {
         );
         assert_eq!(summary.updates.len(), 2);
         assert_eq!(summary.updates[0].epoch, 11);
-        assert_eq!(summary.updates[0].previous, Some(vec!["tokio".to_string()]));
+        assert_eq!(
+            summary.updates[0].previous,
+            Some(vec!["inhouse".to_string()])
+        );
         assert_eq!(summary.updates[0].added, vec!["stub".to_string()]);
         assert!(summary.updates[0].removed.is_empty());
         assert_eq!(summary.updates[1].kind, "storage_engine");
@@ -253,34 +259,34 @@ mod tests {
     #[test]
     fn tracks_added_and_removed_backends() {
         let records = vec![
-            record("runtime_backend", 1, 1, &["tokio", "smol"]),
+            record("runtime_backend", 1, 1, &["inhouse", "smol"]),
             record("runtime_backend", 2, 2, &["smol"]),
-            record("runtime_backend", 3, 3, &["smol", "glommio"]),
+            record("runtime_backend", 3, 3, &["smol", "stub"]),
         ];
 
         let summary = summarise(&records, Filter::default());
         assert_eq!(summary.updates.len(), 3);
 
         let removal = &summary.updates[1];
-        assert_eq!(removal.removed, vec!["tokio".to_string()]);
+        assert_eq!(removal.removed, vec!["inhouse".to_string()]);
         assert!(removal.added.is_empty());
 
         let addition = &summary.updates[2];
-        assert_eq!(addition.added, vec!["glommio".to_string()]);
+        assert_eq!(addition.added, vec!["stub".to_string()]);
         assert!(addition.removed.is_empty());
     }
 
     #[test]
     fn change_summary_formats_human_readable_delta() {
-        let added = vec!["smol".to_string(), "tokio".to_string()];
+        let added = vec!["inhouse".to_string(), "smol".to_string()];
         let removed = vec!["async-std".to_string()];
         let summary = format_change_summary(&added, &removed).expect("delta formatted");
-        assert_eq!(summary, "added smol, tokio; removed async-std");
+        assert_eq!(summary, "added inhouse, smol; removed async-std");
 
         assert!(format_change_summary(&[], &[]).is_none());
         assert_eq!(
             format_change_summary(&added, &[]).unwrap(),
-            "added smol, tokio"
+            "added inhouse, smol"
         );
     }
 }

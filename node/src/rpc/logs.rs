@@ -14,7 +14,7 @@ use crate::log_indexer::{search_logs, LogEntry, LogFilter, LogIndexerError};
 use tracing::warn;
 
 #[derive(Debug)]
-enum SearchError {
+pub(crate) enum SearchError {
     MissingDatabase,
     InvalidQuery(String),
     QueryFailed(LogIndexerError),

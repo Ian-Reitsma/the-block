@@ -129,7 +129,7 @@ fn proposal_vote_activation_rollback() {
 
 #[test]
 fn gov_params_includes_dependency_policy() {
-    let runtime_mask = encode_runtime_backend_policy(["tokio", "stub"]).unwrap();
+    let runtime_mask = encode_runtime_backend_policy(["inhouse", "stub"]).unwrap();
     let transport_mask = encode_transport_provider_policy(["quinn"]).unwrap();
     let storage_mask = encode_storage_engine_policy(["rocksdb", "sled"]).unwrap();
 
@@ -141,7 +141,10 @@ fn gov_params_includes_dependency_policy() {
     let response = the_block::rpc::governance::gov_params(&params, 42).unwrap();
 
     assert_eq!(response["runtime_backend_mask"], json!(runtime_mask));
-    assert_eq!(response["runtime_backend_policy"], json!(["tokio", "stub"]));
+    assert_eq!(
+        response["runtime_backend_policy"],
+        json!(["inhouse", "stub"])
+    );
     assert_eq!(response["transport_provider_mask"], json!(transport_mask));
     assert_eq!(response["transport_provider_policy"], json!(["quinn"]));
     assert_eq!(response["storage_engine_mask"], json!(storage_mask));

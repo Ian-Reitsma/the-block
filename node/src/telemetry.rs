@@ -54,7 +54,7 @@ static CODING_PREVIOUS: Lazy<Mutex<HashMap<&'static str, String>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[cfg(feature = "telemetry")]
-const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["tokio", "stub"];
+const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["inhouse", "stub"];
 #[cfg(feature = "telemetry")]
 const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
 #[cfg(feature = "telemetry")]
@@ -1629,7 +1629,7 @@ mod tests {
     fn wrapper_snapshot_aggregates_wrapper_metrics() {
         reset_wrapper_metrics();
 
-        record_runtime_backend("tokio");
+        record_runtime_backend("inhouse");
         record_transport_backend("quinn");
         TRANSPORT_PROVIDER_CONNECT_TOTAL
             .with_label_values(&["quinn"])
@@ -1645,7 +1645,7 @@ mod tests {
         let summary = wrapper_metrics_snapshot();
         assert!(summary.metrics.len() > 3);
 
-        let runtime_value = metric_value(&summary, "runtime_backend_info", &["backend", "tokio"]);
+        let runtime_value = metric_value(&summary, "runtime_backend_info", &["backend", "inhouse"]);
         assert_eq!(runtime_value, Some(1.0));
 
         let transport_connect = metric_value(

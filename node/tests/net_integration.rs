@@ -23,18 +23,20 @@ fn init_env() -> tempfile::TempDir {
     dir
 }
 
-async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
-    let start = Instant::now();
-    loop {
-        let first = nodes[0].blockchain().block_height;
-        if nodes.iter().all(|n| n.blockchain().block_height == first) {
-            return true;
+fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
+    runtime::block_on(async {
+        let start = Instant::now();
+        loop {
+            let first = nodes[0].blockchain().block_height;
+            if nodes.iter().all(|n| n.blockchain().block_height == first) {
+                return true;
+            }
+            if start.elapsed() > max {
+                return false;
+            }
+            the_block::sleep(Duration::from_millis(20)).await;
         }
-        if start.elapsed() > max {
-            return false;
-        }
-        the_block::sleep(Duration::from_millis(20)).await;
-    }
+    })
 }
 
 struct TestNode {
@@ -71,97 +73,99 @@ impl TestNode {
     }
 }
 
-#[tokio::test]
+#[test]
 #[serial]
-async fn partitions_merge_consistent_fork_choice() {
-    let _env = init_env();
-    let mut nodes: Vec<TestNode> = Vec::new();
-    for _ in 0..5 {
-        let addr = free_addr();
-        let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
-        let mut tn = TestNode::new(addr, &peers);
-        for p in &peers {
-            tn.node.add_peer(*p);
+fn partitions_merge_consistent_fork_choice() {
+    runtime::block_on(async {
+        let _env = init_env();
+        let mut nodes: Vec<TestNode> = Vec::new();
+        for _ in 0..5 {
+            let addr = free_addr();
+            let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
+            let mut tn = TestNode::new(addr, &peers);
+            for p in &peers {
+                tn.node.add_peer(*p);
+            }
+            nodes.push(tn);
         }
-        nodes.push(tn);
-    }
 
-    the_block::sleep(Duration::from_millis(100)).await;
-    let mut ts = 1u64;
-    for _ in 0..3 {
-        {
-            let mut bc = nodes[0].node.blockchain();
-            bc.mine_block_at("miner", ts).unwrap();
-            ts += 1;
+        the_block::sleep(Duration::from_millis(100)).await;
+        let mut ts = 1u64;
+        for _ in 0..3 {
+            {
+                let mut bc = nodes[0].node.blockchain();
+                bc.mine_block_at("miner", ts).unwrap();
+                ts += 1;
+            }
+            nodes[0].node.broadcast_chain();
+            the_block::sleep(Duration::from_millis(50)).await;
         }
-        nodes[0].node.broadcast_chain();
-        the_block::sleep(Duration::from_millis(50)).await;
-    }
 
-    assert!(
-        wait_until_converged(
-            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-            Duration::from_secs(5)
-        )
-        .await
-    );
+        assert!(
+            wait_until_converged(
+                &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+                Duration::from_secs(5)
+            )
+            .await
+        );
 
-    for i in 0..3 {
-        for j in 3..5 {
-            nodes[i].node.remove_peer(nodes[j].addr);
-            nodes[j].node.remove_peer(nodes[i].addr);
-        }
-    }
-
-    for _ in 0..2 {
-        {
-            let mut bc = nodes[0].node.blockchain();
-            bc.mine_block_at("minerA", ts).unwrap();
-            ts += 1;
-        }
         for i in 0..3 {
-            nodes[i].node.broadcast_chain();
+            for j in 3..5 {
+                nodes[i].node.remove_peer(nodes[j].addr);
+                nodes[j].node.remove_peer(nodes[i].addr);
+            }
         }
-        the_block::sleep(Duration::from_millis(50)).await;
-    }
 
-    for _ in 0..5 {
-        {
-            let mut bc = nodes[3].node.blockchain();
-            bc.mine_block_at("minerB", ts).unwrap();
-            ts += 1;
+        for _ in 0..2 {
+            {
+                let mut bc = nodes[0].node.blockchain();
+                bc.mine_block_at("minerA", ts).unwrap();
+                ts += 1;
+            }
+            for i in 0..3 {
+                nodes[i].node.broadcast_chain();
+            }
+            the_block::sleep(Duration::from_millis(50)).await;
         }
-        for j in 3..5 {
-            nodes[j].node.broadcast_chain();
+
+        for _ in 0..5 {
+            {
+                let mut bc = nodes[3].node.blockchain();
+                bc.mine_block_at("minerB", ts).unwrap();
+                ts += 1;
+            }
+            for j in 3..5 {
+                nodes[j].node.broadcast_chain();
+            }
+            the_block::sleep(Duration::from_millis(50)).await;
         }
-        the_block::sleep(Duration::from_millis(50)).await;
-    }
 
-    for i in 0..3 {
-        for j in 3..5 {
-            nodes[i].node.add_peer(nodes[j].addr);
-            nodes[j].node.add_peer(nodes[i].addr);
+        for i in 0..3 {
+            for j in 3..5 {
+                nodes[i].node.add_peer(nodes[j].addr);
+                nodes[j].node.add_peer(nodes[i].addr);
+            }
         }
-    }
 
-    assert!(
-        wait_until_converged(
-            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-            Duration::from_secs(10)
-        )
-        .await
-    );
+        assert!(
+            wait_until_converged(
+                &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+                Duration::from_secs(10)
+            )
+            .await
+        );
 
-    let height = nodes[3].node.blockchain().block_height;
-    assert!(nodes
-        .iter()
-        .all(|n| n.node.blockchain().block_height == height));
+        let height = nodes[3].node.blockchain().block_height;
+        assert!(nodes
+            .iter()
+            .all(|n| n.node.blockchain().block_height == height));
 
-    for n in &mut nodes {
-        n.shutdown();
-    }
-    std::env::remove_var("TB_NET_KEY_PATH");
-    std::env::remove_var("TB_NET_KEY_SEED");
-    std::env::remove_var("TB_PEER_DB_PATH");
-    std::env::remove_var("TB_PEER_SEED");
+        for n in &mut nodes {
+            n.shutdown();
+        }
+        std::env::remove_var("TB_NET_KEY_PATH");
+        std::env::remove_var("TB_NET_KEY_SEED");
+        std::env::remove_var("TB_PEER_DB_PATH");
+        std::env::remove_var("TB_PEER_SEED");
+    });
 }

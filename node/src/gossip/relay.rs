@@ -88,9 +88,7 @@ impl ShardStore {
     #[cfg(test)]
     fn temporary() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let base = dir
-            .keep()
-            .unwrap_or_else(|(_, err)| panic!("preserve gossip tempdir: {err}"));
+        let base = dir.into_path();
         let path = base.join("gossip_store");
         let path_str = path.to_string_lossy().to_string();
         Self::with_factory(&path_str, &SimpleDb::open_named)
@@ -672,6 +670,11 @@ mod tests {
                 )
             })
             .collect();
+        for (idx, (addr, _, _)) in peers.iter().enumerate() {
+            let peer =
+                crate::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32]).expect("peer id");
+            crate::net::peer::inject_addr_mapping_for_tests(*addr, peer);
+        }
         let mut delivered = 0usize;
         relay.broadcast_with(&msg, &peers, |_, _| delivered += 1);
         assert!(delivered >= relay.settings.min_fanout);
@@ -692,6 +695,11 @@ mod tests {
                 )
             })
             .collect();
+        for (idx, (addr, _, _)) in peers.iter().enumerate() {
+            let peer =
+                crate::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32]).expect("peer id");
+            crate::net::peer::inject_addr_mapping_for_tests(*addr, peer);
+        }
         let mut first_hits = HashMap::new();
         for _ in 0..20 {
             let mut calls = Vec::new();

@@ -19,6 +19,8 @@ use nix::libc;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+use runtime::net::lookup_srv;
+use runtime::sync::broadcast;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -34,11 +36,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::broadcast;
 
 use tar::Builder;
 use tempfile::NamedTempFile;
-use trust_dns_resolver::Resolver;
 
 use super::{ban_store, peer_metrics_store};
 #[cfg(feature = "quic")]
@@ -1201,8 +1201,8 @@ pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
     ADDR_MAP.lock().get(addr).copied()
 }
 
-#[cfg(test)]
-pub(crate) fn inject_addr_mapping_for_tests(addr: SocketAddr, peer: super::OverlayPeerId) {
+#[cfg_attr(not(any(test, feature = "integration-tests")), allow(dead_code))]
+pub fn inject_addr_mapping_for_tests(addr: SocketAddr, peer: super::OverlayPeerId) {
     let mut buf = [0u8; 32];
     let bytes = super::overlay_peer_to_bytes(&peer);
     buf.copy_from_slice(&bytes);
@@ -1836,36 +1836,38 @@ mod tests {
         flag: Arc<AtomicBool>,
     }
 
-    #[tokio::test]
-    async fn aggregator_failover_selects_next_url() {
-        let received = Arc::new(AtomicBool::new(false));
-        let router = Router::new(TestState {
-            flag: received.clone(),
-        })
-        .route(Method::Post, "/ingest", |req| async move {
-            let state = req.state().clone();
-            state.flag.store(true, Ordering::SeqCst);
-            Ok(Response::new(StatusCode::OK))
+    #[test]
+    fn aggregator_failover_selects_next_url() {
+        runtime::block_on(async {
+            let received = Arc::new(AtomicBool::new(false));
+            let router = Router::new(TestState {
+                flag: received.clone(),
+            })
+            .route(Method::Post, "/ingest", |req| async move {
+                let state = req.state().clone();
+                state.flag.store(true, Ordering::SeqCst);
+                Ok(Response::new(StatusCode::OK))
+            });
+            let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+            let listener = runtime::net::TcpListener::bind(bind_addr).await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = runtime::spawn(async move {
+                httpd::serve(listener, router, ServerConfig::default())
+                    .await
+                    .unwrap();
+            });
+            let bad = "http://127.0.0.1:59999".to_string();
+            let good = format!("http://{}", addr);
+            let client = AggregatorClient::new(vec![bad, good], "t".into());
+            aggregator_guard().replace(client.clone());
+            let snap = PeerSnapshot {
+                peer_id: "p".into(),
+                metrics: PeerMetrics::default(),
+            };
+            client.ingest(vec![snap]).await;
+            assert!(received.load(Ordering::SeqCst));
+            server.abort();
         });
-        let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = runtime::net::TcpListener::bind(bind_addr).await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = runtime::spawn(async move {
-            httpd::serve(listener, router, ServerConfig::default())
-                .await
-                .unwrap();
-        });
-        let bad = "http://127.0.0.1:59999".to_string();
-        let good = format!("http://{}", addr);
-        let client = AggregatorClient::new(vec![bad, good], "t".into());
-        aggregator_guard().replace(client.clone());
-        let snap = PeerSnapshot {
-            peer_id: "p".into(),
-            metrics: PeerMetrics::default(),
-        };
-        client.ingest(vec![snap]).await;
-        assert!(received.load(Ordering::SeqCst));
-        server.abort();
     }
 }
 
@@ -2277,13 +2279,11 @@ pub fn set_metrics_aggregator(cfg: Option<AggregatorConfig>) {
     if let Some(cfg) = cfg {
         let mut urls = vec![cfg.url];
         if let Some(srv) = cfg.srv_record {
-            if let Ok(resolver) = Resolver::from_system_conf() {
-                if let Ok(lookup) = resolver.srv_lookup(srv) {
-                    for rec in lookup.iter() {
-                        let host = rec.target().to_string();
-                        let url = format!("https://{}:{}", host.trim_end_matches('.'), rec.port());
-                        urls.push(url);
-                    }
+            if let Ok(records) = lookup_srv(&srv) {
+                for rec in records {
+                    let host = rec.target.trim_end_matches('.');
+                    let url = format!("https://{}:{}", host, rec.port);
+                    urls.push(url);
                 }
             }
         }
