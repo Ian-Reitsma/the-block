@@ -1,7 +1,9 @@
 #![forbid(unsafe_code)]
 
+pub mod encryption;
 pub mod hashing;
 pub mod key_derivation;
+pub mod mac;
 pub mod signatures;
 pub mod transactions;
 pub mod zk;

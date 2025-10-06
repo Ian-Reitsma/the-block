@@ -112,7 +112,7 @@ for legal hold records, mirroring the explorer's jurisdiction timeline.
 
 ## Config reload
 
-The node watches `config/default.toml` for changes and reloads rate-limit and reputation settings without restart. Trigger a manual reload with `config reload` from the CLI. Successful reloads increment `config_reload_total{result="ok"}` and update `config_reload_last_ts`; malformed files are logged and ignored.
+The node watches `config/default.toml` for changes using the in-house runtime watcher and reloads rate-limit and reputation settings without restart. Trigger a manual reload with `config reload` from the CLI. Successful reloads increment `config_reload_total{result="ok"}` and update `config_reload_last_ts`; malformed files are logged and ignored.
 
 Bond CT for a service role once the node is running:
 

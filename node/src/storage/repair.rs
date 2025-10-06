@@ -35,35 +35,37 @@ static REPAIR_POOL: Lazy<ThreadPool> = Lazy::new(|| {
 });
 
 pub fn spawn(path: String, period: Duration) {
-    let _ = runtime::spawn_blocking(move || {
-        let mut db = SimpleDb::open_named(names::STORAGE_REPAIR, &path);
-        let log = RepairLog::new(Path::new(&path).join("repair_log"));
-        loop {
-            if let Err(err) = run_once(&mut db, &log, RepairRequest::default()) {
-                #[cfg(not(feature = "telemetry"))]
-                let _ = &err;
-                #[cfg(feature = "telemetry")]
-                {
-                    let algorithms = settings::algorithms();
-                    STORAGE_REPAIR_FAILURES_TOTAL
-                        .with_label_values(&[
-                            err.label(),
-                            algorithms.erasure(),
-                            algorithms.compression(),
-                        ])
-                        .inc();
-                    STORAGE_REPAIR_ATTEMPTS_TOTAL
-                        .with_label_values(&["fatal"])
-                        .inc();
+    let _ = thread::Builder::new()
+        .name("storage-repair-loop".into())
+        .spawn(move || {
+            let mut db = SimpleDb::open_named(names::STORAGE_REPAIR, &path);
+            let log = RepairLog::new(Path::new(&path).join("repair_log"));
+            loop {
+                if let Err(err) = run_once(&mut db, &log, RepairRequest::default()) {
+                    #[cfg(not(feature = "telemetry"))]
+                    let _ = &err;
+                    #[cfg(feature = "telemetry")]
+                    {
+                        let algorithms = settings::algorithms();
+                        STORAGE_REPAIR_FAILURES_TOTAL
+                            .with_label_values(&[
+                                err.label(),
+                                algorithms.erasure(),
+                                algorithms.compression(),
+                            ])
+                            .inc();
+                        STORAGE_REPAIR_ATTEMPTS_TOTAL
+                            .with_label_values(&["fatal"])
+                            .inc();
+                    }
                 }
+                notify_iteration();
+                if should_stop() {
+                    break;
+                }
+                thread::sleep(period);
             }
-            notify_iteration();
-            if should_stop() {
-                break;
-            }
-            thread::sleep(period);
-        }
-    });
+        });
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -906,11 +908,11 @@ pub fn fountain_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 #[cfg(test)]
+use runtime::sync::mpsc::UnboundedSender;
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
 use std::sync::Mutex;
-#[cfg(test)]
-use tokio::sync::mpsc::UnboundedSender;
 
 #[cfg(test)]
 static ITERATION_HOOK: Lazy<Mutex<Option<UnboundedSender<()>>>> = Lazy::new(|| Mutex::new(None));
@@ -965,7 +967,7 @@ mod tests {
         let path_str = path.to_str().expect("path").to_string();
         runtime::block_on(async move {
             let _guard = tempdir; // keep directory alive for the background task
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            let (tx, mut rx) = runtime::sync::mpsc::unbounded_channel();
             install_iteration_hook(tx);
             spawn(path_str, Duration::from_millis(10));
 

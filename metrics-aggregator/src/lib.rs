@@ -1,44 +1,40 @@
-use age::Encryptor;
-#[cfg(feature = "s3")]
-use aws_config;
-#[cfg(feature = "s3")]
-use aws_sdk_s3::{primitives::ByteStream, Client as S3Client};
-#[cfg(feature = "etcd-client")]
-use etcd_client::Client;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
 use once_cell::sync::Lazy;
-use openssl::{
-    error::ErrorStack,
-    rand::rand_bytes,
-    sha::sha256,
-    symm::{Cipher, Crypter, Mode},
-};
-use prometheus::{IntCounter, IntGauge, Registry, TextEncoder};
+use runtime::telemetry::{Counter, Gauge, Registry};
 use runtime::{spawn, spawn_blocking};
+use std::str::FromStr;
 use thiserror::Error;
 use tracing::{info, warn};
 use urlencoding::encode;
 
+use crypto_suite::encryption::{
+    envelope::{self, EnvelopeError, PASSWORD_CONTENT_TYPE, RECIPIENT_CONTENT_TYPE},
+    x25519,
+};
+
 #[cfg(feature = "s3")]
-fn upload_sync(bucket: String, data: Vec<u8>) {
-    let handle = runtime::handle();
-    handle.block_on(async move {
-        let config = aws_config::load_from_env().await;
-        let client = S3Client::new(&config);
-        let _ = client
-            .put_object()
-            .bucket(bucket)
-            .key("metrics/latest.zip")
-            .body(ByteStream::from(data))
-            .send()
-            .await;
-    });
+mod object_store;
+
+mod leader;
+
+pub use leader::LeaderElectionConfig;
+
+#[cfg(feature = "s3")]
+fn upload_sync(bucket: &str, data: Vec<u8>) {
+    if let Err(err) = object_store::upload_metrics_snapshot(bucket, data) {
+        warn!(
+            target: "aggregator",
+            error = %err,
+            "failed to upload metrics snapshot"
+        );
+    }
 }
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
@@ -119,12 +115,23 @@ pub struct AppState {
     pub token: Arc<RwLock<String>>,
     token_path: Option<PathBuf>,
     store: Arc<InhouseEngine>,
+    db_path: Arc<PathBuf>,
     retention_secs: u64,
     max_export_peers: usize,
     wal: Option<Arc<Wal>>,
     correlations: Arc<Mutex<HashMap<String, VecDeque<CorrelationRecord>>>>,
     last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
     telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummaryEntry>>>>,
+    leader_flag: Arc<AtomicBool>,
+    leader_id: Arc<RwLock<Option<String>>>,
+    leader_fencing: Arc<AtomicU64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaderSnapshot {
+    pub is_leader: bool,
+    pub leader_id: Option<String>,
+    pub fencing_token: u64,
 }
 
 impl AppState {
@@ -161,12 +168,16 @@ impl AppState {
             token: Arc::new(RwLock::new(token)),
             token_path,
             store,
+            db_path: Arc::new(db_path),
             retention_secs,
             max_export_peers: 1000,
             wal,
             correlations: Arc::new(Mutex::new(HashMap::new())),
             last_metric_values: Arc::new(Mutex::new(HashMap::new())),
             telemetry: Arc::new(Mutex::new(HashMap::new())),
+            leader_flag: Arc::new(AtomicBool::new(false)),
+            leader_id: Arc::new(RwLock::new(None)),
+            leader_fencing: Arc::new(AtomicU64::new(0)),
         };
         state.prune();
         state
@@ -200,7 +211,7 @@ impl AppState {
             });
         }
         if removed > 0 {
-            RETENTION_PRUNED_TOTAL.inc_by(removed);
+            aggregator_metrics().retention_pruned_total.inc_by(removed);
             let _ = self.store.flush();
         }
         removed
@@ -339,48 +350,94 @@ impl AppState {
             })
             .unwrap_or_default()
     }
+
+    pub(crate) fn store_handle(&self) -> Arc<InhouseEngine> {
+        Arc::clone(&self.store)
+    }
+
+    pub(crate) fn db_path(&self) -> Arc<PathBuf> {
+        Arc::clone(&self.db_path)
+    }
+
+    pub(crate) fn update_leader_state(
+        &self,
+        is_leader: bool,
+        leader_id: Option<String>,
+        fencing: u64,
+    ) {
+        self.leader_flag.store(is_leader, Ordering::SeqCst);
+        self.leader_fencing.store(fencing, Ordering::SeqCst);
+        if let Ok(mut guard) = self.leader_id.write() {
+            *guard = leader_id;
+        }
+    }
+
+    pub fn is_leader(&self) -> bool {
+        self.leader_flag.load(Ordering::SeqCst)
+    }
+
+    pub fn leader_snapshot(&self) -> LeaderSnapshot {
+        let leader_id = self
+            .leader_id
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned());
+        LeaderSnapshot {
+            is_leader: self.is_leader(),
+            leader_id,
+            fencing_token: self.leader_fencing.load(Ordering::SeqCst),
+        }
+    }
 }
 
-static INGEST_TOTAL: Lazy<IntCounter> =
-    Lazy::new(|| IntCounter::new("aggregator_ingest_total", "Total peer metric ingests").unwrap());
+struct AggregatorMetrics {
+    registry: Registry,
+    ingest_total: Counter,
+    bulk_export_total: Counter,
+    active_peers: Gauge,
+    replication_lag: Gauge,
+    retention_pruned_total: Counter,
+}
 
-static BULK_EXPORT_TOTAL: Lazy<IntCounter> =
-    Lazy::new(|| IntCounter::new("bulk_export_total", "Total bulk export attempts").unwrap());
-
-static ACTIVE_PEERS: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new(
-        "cluster_peer_active_total",
-        "Unique peers tracked by aggregator",
-    )
-    .unwrap()
+static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
+    let registry = Registry::new();
+    let ingest_total = registry
+        .register_counter("aggregator_ingest_total", "Total peer metric ingests")
+        .expect("register aggregator_ingest_total");
+    let bulk_export_total = registry
+        .register_counter("bulk_export_total", "Total bulk export attempts")
+        .expect("register bulk_export_total");
+    let active_peers = registry
+        .register_gauge(
+            "cluster_peer_active_total",
+            "Unique peers tracked by aggregator",
+        )
+        .expect("register cluster_peer_active_total");
+    let replication_lag = registry
+        .register_gauge(
+            "aggregator_replication_lag_seconds",
+            "Seconds since last WAL entry applied",
+        )
+        .expect("register aggregator_replication_lag_seconds");
+    let retention_pruned_total = registry
+        .register_counter(
+            "aggregator_retention_pruned_total",
+            "Peer metric samples pruned by retention",
+        )
+        .expect("register aggregator_retention_pruned_total");
+    AggregatorMetrics {
+        registry,
+        ingest_total,
+        bulk_export_total,
+        active_peers,
+        replication_lag,
+        retention_pruned_total,
+    }
 });
 
-static REPLICATION_LAG: Lazy<IntGauge> = Lazy::new(|| {
-    IntGauge::new(
-        "aggregator_replication_lag_seconds",
-        "Seconds since last WAL entry applied",
-    )
-    .unwrap()
-});
-
-static RETENTION_PRUNED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    IntCounter::new(
-        "aggregator_retention_pruned_total",
-        "Peer metric samples pruned by retention",
-    )
-    .unwrap()
-});
-
-static REGISTRY: Lazy<Registry> = Lazy::new(|| {
-    let r = Registry::new();
-    r.register(Box::new(INGEST_TOTAL.clone())).unwrap();
-    r.register(Box::new(ACTIVE_PEERS.clone())).unwrap();
-    r.register(Box::new(BULK_EXPORT_TOTAL.clone())).unwrap();
-    r.register(Box::new(REPLICATION_LAG.clone())).unwrap();
-    r.register(Box::new(RETENTION_PRUNED_TOTAL.clone()))
-        .unwrap();
-    r
-});
+fn aggregator_metrics() -> &'static AggregatorMetrics {
+    Lazy::force(&METRICS)
+}
 
 #[cfg(feature = "s3")]
 static S3_BUCKET: Lazy<Option<String>> = Lazy::new(|| std::env::var("S3_BUCKET").ok());
@@ -629,15 +686,15 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
                 }
             }
         }
-        ACTIVE_PEERS.set(map.len() as i64);
+        aggregator_metrics().active_peers.set(map.len() as f64);
     }
 
-    INGEST_TOTAL.inc();
+    aggregator_metrics().ingest_total.inc();
     state.prune();
     state.persist();
     if let Some(wal) = &state.wal {
         match wal.append(&payload) {
-            Ok(_) => REPLICATION_LAG.set(0),
+            Ok(_) => aggregator_metrics().replication_lag.set(0.0),
             Err(err) => warn!(target: "aggregator", error = %err, "failed to append to wal"),
         }
     }
@@ -666,7 +723,7 @@ async fn peer(request: Request<AppState>) -> Result<Response, HttpError> {
     #[cfg(feature = "s3")]
     if let Some(bucket) = S3_BUCKET.as_ref() {
         if let Ok(bytes) = serde_json::to_vec(&data) {
-            upload_sync(bucket.clone(), bytes);
+            upload_sync(bucket, bytes);
         }
     }
 
@@ -696,10 +753,8 @@ enum ExportError {
     Zip(#[from] zip::result::ZipError),
     #[error("io error: {0}")]
     Io(#[from] io::Error),
-    #[error("crypto error: {0}")]
-    Crypto(String),
-    #[error("openssl error: {0}")]
-    OpenSsl(#[from] ErrorStack),
+    #[error("envelope error: {0}")]
+    Envelope(#[from] EnvelopeError),
 }
 
 struct ExportPayload {
@@ -730,45 +785,21 @@ fn build_export_payload(
     let bytes = cursor.into_inner();
     let (data, content_type) = match (recipient, password) {
         (Some(recipient), None) => {
-            use std::str::FromStr;
-
-            let recipient = age::x25519::Recipient::from_str(&recipient)
-                .map_err(|err| ExportError::Crypto(err.to_string()))?;
-            let encryptor = Encryptor::with_recipients(vec![
-                Box::new(recipient) as Box<dyn age::Recipient + Send>
-            ])
-            .ok_or_else(|| ExportError::Crypto("no encryption recipients configured".into()))?;
-            let mut out = Vec::new();
-            let mut writer = encryptor
-                .wrap_output(&mut out)
-                .map_err(|err| ExportError::Crypto(err.to_string()))?;
-            writer.write_all(&bytes)?;
-            writer
-                .finish()
-                .map_err(|err| ExportError::Crypto(err.to_string()))?;
-            (out, "application/age")
+            let recipient = x25519::PublicKey::from_str(&recipient)
+                .map_err(|err| ExportError::Envelope(err.into()))?;
+            let out = envelope::encrypt_for_recipient(&bytes, &recipient)?;
+            (out, RECIPIENT_CONTENT_TYPE)
         }
         (None, Some(password)) => {
-            let mut iv = [0u8; 16];
-            rand_bytes(&mut iv)?;
-            let key = sha256(password.as_bytes());
-            let cipher = Cipher::aes_256_cbc();
-            let mut crypter = Crypter::new(cipher, Mode::Encrypt, &key, Some(&iv))?;
-            let mut out = vec![0u8; bytes.len() + cipher.block_size()];
-            let mut count = crypter.update(&bytes, &mut out)?;
-            count += crypter.finalize(&mut out[count..])?;
-            out.truncate(count);
-            let mut combined = Vec::with_capacity(iv.len() + out.len());
-            combined.extend_from_slice(&iv);
-            combined.extend_from_slice(&out);
-            (combined, "application/octet-stream")
+            let out = envelope::encrypt_with_password(&bytes, password.as_bytes())?;
+            (out, PASSWORD_CONTENT_TYPE)
         }
         (None, None) => (bytes, "application/zip"),
         (Some(_), Some(_)) => unreachable!("validated earlier"),
     };
 
     #[cfg(feature = "s3")]
-    if let Some(bucket) = bucket {
+    if let Some(ref bucket) = bucket {
         upload_sync(bucket, data.clone());
     }
     #[cfg(not(feature = "s3"))]
@@ -797,7 +828,7 @@ async fn export_all(request: Request<AppState>) -> Result<Response, HttpError> {
         guard.clone()
     };
 
-    BULK_EXPORT_TOTAL.inc();
+    aggregator_metrics().bulk_export_total.inc();
 
     #[cfg(feature = "s3")]
     let bucket = S3_BUCKET.as_ref().cloned();
@@ -854,15 +885,10 @@ async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
 }
 
 async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
-    let encoder = TextEncoder::new();
-    let metric_families = REGISTRY.gather();
-    let mut buffer = String::new();
-    encoder
-        .encode_utf8(&metric_families, &mut buffer)
-        .map_err(|err| HttpError::Handler(err.to_string()))?;
+    let body = aggregator_metrics().registry.render();
     Ok(Response::new(StatusCode::OK)
         .with_header("content-type", "text/plain; version=0.0.4")
-        .with_body(buffer.into_bytes()))
+        .with_body(body.into_bytes()))
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
@@ -888,22 +914,12 @@ struct Wal {
     file: Mutex<std::fs::File>,
 }
 
-#[cfg(feature = "etcd-client")]
-#[allow(dead_code)]
-pub async fn run_leader_election(endpoints: Vec<String>, state: AppState) {
-    if let Ok(mut client) = Client::connect(endpoints, None).await {
-        if let Ok(resp) = client.lease_grant(5, None).await {
-            let lease_id = resp.id();
-            if client
-                .put("metrics-aggregator/leader", "", Some(lease_id))
-                .await
-                .is_ok()
-            {
-                let _ = client.lease_keep_alive(lease_id).await;
-            }
-        }
-    }
-    let _ = state; // suppress unused warning when feature disabled
+pub async fn run_leader_election(options: Vec<String>, state: AppState) {
+    leader::run_with_options(options, state).await;
+}
+
+pub async fn run_leader_election_with_config(state: AppState, config: LeaderElectionConfig) {
+    leader::run_with_config(state, config).await;
 }
 
 impl Wal {
@@ -927,9 +943,13 @@ impl Wal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use age::{x25519::Identity, Decryptor};
+    use crypto_suite::encryption::{
+        envelope::{self, PASSWORD_CONTENT_TYPE, RECIPIENT_CONTENT_TYPE},
+        x25519::SecretKey,
+    };
     use crypto_suite::hashing::blake3;
     use httpd::{Method, StatusCode};
+    use rand::rngs::OsRng;
     use std::collections::HashMap;
     use std::fs;
     use std::future::Future;
@@ -1104,8 +1124,9 @@ mod tests {
                     .build();
                 let _ = app.handle(req).await.unwrap();
             }
-            let id = Identity::generate();
-            let recipient = id.to_public().to_string();
+            let mut rng = OsRng;
+            let secret = SecretKey::generate(&mut rng);
+            let recipient = secret.public_key().to_string();
             let app = router(state);
             let resp = app
                 .handle(
@@ -1116,19 +1137,9 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
-            assert_eq!(resp.header("content-type"), Some("application/age"));
+            assert_eq!(resp.header("content-type"), Some(RECIPIENT_CONTENT_TYPE));
             let body_bytes = resp.body().to_vec();
-            let decryptor = Decryptor::new(&body_bytes[..]).unwrap();
-            let mut plain = Vec::new();
-            if let Decryptor::Recipients(d) = decryptor {
-                use std::io::Read;
-                let mut r = d
-                    .decrypt(std::iter::once(&id as &dyn age::Identity))
-                    .unwrap();
-                r.read_to_end(&mut plain).unwrap();
-            } else {
-                panic!();
-            }
+            let plain = envelope::decrypt_with_secret(&body_bytes, &secret).unwrap();
             let mut zip = ZipArchive::new(Cursor::new(plain)).unwrap();
             assert_eq!(zip.len(), 1);
             let mut file = zip.by_name("p1.json").unwrap();
@@ -1141,8 +1152,7 @@ mod tests {
     }
 
     #[test]
-    fn export_all_openssl_encrypts() {
-        use openssl::symm::{decrypt, Cipher};
+    fn export_all_password_encrypts() {
         run_async(async {
             let dir = tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
@@ -1169,14 +1179,9 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
-            assert_eq!(
-                resp.header("content-type"),
-                Some("application/octet-stream")
-            );
+            assert_eq!(resp.header("content-type"), Some(PASSWORD_CONTENT_TYPE));
             let body_bytes = resp.body().to_vec();
-            let (iv, cipher) = body_bytes.split_at(16);
-            let key = sha256(b"secret");
-            let plain = decrypt(Cipher::aes_256_cbc(), &key, Some(iv), cipher).unwrap();
+            let plain = envelope::decrypt_with_password(&body_bytes, b"secret").unwrap();
             let mut zip = ZipArchive::new(Cursor::new(plain)).unwrap();
             assert_eq!(zip.len(), 1);
             let mut file = zip.by_name("p1.json").unwrap();

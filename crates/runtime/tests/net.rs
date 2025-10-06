@@ -1,7 +1,7 @@
 #![cfg(feature = "inhouse-backend")]
 
 use runtime::io::{read_length_prefixed, write_length_prefixed};
-use runtime::net::{TcpListener, TcpStream, UdpSocket};
+use runtime::net::{lookup_host, TcpListener, TcpStream, UdpSocket};
 use runtime::{self, sleep, spawn};
 use std::net::SocketAddr;
 use std::sync::Once;
@@ -92,5 +92,20 @@ fn udp_round_trip() {
         assert_eq!(&buf[..len], b"ping");
 
         server.await.expect("udp server task");
+    });
+}
+
+#[test]
+fn lookup_host_resolves_loopback() {
+    ensure_inhouse_backend();
+
+    runtime::block_on(async {
+        let addrs = lookup_host("localhost", 80)
+            .await
+            .expect("resolve localhost");
+        assert!(
+            addrs.into_iter().any(|addr| addr.ip().is_loopback()),
+            "expected loopback address"
+        );
     });
 }

@@ -29,6 +29,8 @@ tree reproducible, while `tools/dependency_registry` records policy-compliant sn
 for auditing.
 Recent updates removed third-party Reed–Solomon and RaptorQ dependencies in favour of the in-house `coding` crate implementations; wrapper telemetry and policy rollout now track the `lt-inhouse` fountain and GF(256) Reed–Solomon identifiers so governance can audit the swap.
 
+The CLI, light-client, node, and metrics-aggregator crates now ride the runtime facade end-to-end—DNS resolution flows through `runtime::net::lookup_host`/`lookup_txt`, device probes rely on the in-house async mutex, and all async tests execute via `runtime::block_on`—so the workspace builds without Tokio while the runtime crate keeps a compatibility stub for policy-gated rollbacks. The metrics aggregator’s object-store integration now signs uploads with the first-party SigV4 helper layered on `httpd::HttpClient`, eliminating the AWS SDK while preserving S3 compatibility for our in-house bucket service. Leader election no longer depends on `etcd-client`; aggregators coordinate through the shared `InhouseEngine` lease table with first-party fencing tokens, keeping tonic/hyper/Tokio out of the build graph entirely. Bulk metric exports now encrypt via `crypto_suite::encryption::envelope`, replacing the `age` and OpenSSL stacks with X25519/HKDF/AES primitives that live alongside the rest of the in-house crypto suite.
+
 ## 2. Wrapper Flow Diagram
 
 ```mermaid

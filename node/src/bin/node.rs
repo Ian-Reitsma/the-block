@@ -1,10 +1,10 @@
 #![deny(warnings)]
 #![allow(clippy::expect_used)]
 
+use runtime::sync::CancellationToken;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
-use tokio_util::sync::CancellationToken;
 
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
@@ -701,8 +701,11 @@ fn rollback_and_exit(reason: &str) -> std::process::ExitCode {
     std::process::ExitCode::FAILURE
 }
 
-#[tokio::main]
-async fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
+    runtime::block_on(async_main())
+}
+
+async fn async_main() -> std::process::ExitCode {
     let command = build_command();
     let (bin, args) = collect_args("node");
     let matches = match parse_matches(&command, &bin, args) {
@@ -874,7 +877,7 @@ async fn main() -> std::process::ExitCode {
             }
 
             let mining = Arc::new(AtomicBool::new(false));
-            let (tx, rx) = tokio::sync::oneshot::channel();
+            let (tx, rx) = runtime::sync::oneshot::channel();
             let mut rpc_cfg = bc.lock().unwrap().config.rpc.clone();
             rpc_cfg.relay_only = relay_only;
             let handle = runtime::spawn(run_rpc_server(

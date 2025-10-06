@@ -11,6 +11,7 @@ use runtime::{
 use serde_json::json;
 use std::fs::File;
 use std::io::Write;
+use std::net::ToSocketAddrs;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_size::{terminal_size, Width};
@@ -194,10 +195,10 @@ enum StatsCmd {
         min_reputation: Option<f64>,
         /// Only include peers active within this many seconds
         active_within: Option<u64>,
-        /// Encrypt archive with age recipient
-        age_recipient: Option<String>,
-        /// Encrypt archive with OpenSSL using passphrase
-        openssl_pass: Option<String>,
+        /// Encrypt archive with the in-house envelope recipient
+        recipient: Option<String>,
+        /// Encrypt archive using a shared password
+        password: Option<String>,
     },
     /// Persist metrics to disk
     Persist {
@@ -433,14 +434,14 @@ fn build_stats_command() -> CliCommand {
             "Only include peers active within this many seconds",
         )))
         .arg(ArgSpec::Option(OptionSpec::new(
-            "age_recipient",
-            "age-recipient",
-            "Encrypt archive with age recipient",
+            "recipient",
+            "recipient",
+            "Encrypt archive with the in-house envelope recipient",
         )))
         .arg(ArgSpec::Option(OptionSpec::new(
-            "openssl_pass",
-            "openssl-pass",
-            "Encrypt archive with OpenSSL using passphrase",
+            "password",
+            "password",
+            "Encrypt archive using a shared password",
         )))
         .build(),
     )
@@ -775,8 +776,8 @@ fn parse_stats_export(matches: &Matches) -> Result<StatsCmd, String> {
         rpc: rpc_value(matches),
         min_reputation,
         active_within,
-        age_recipient: matches.get_string("age_recipient"),
-        openssl_pass: matches.get_string("openssl_pass"),
+        recipient: matches.get_string("recipient"),
+        password: matches.get_string("password"),
     })
 }
 
@@ -910,10 +911,17 @@ async fn connect_peer_metrics_ws(url: &str) -> Result<ClientStream, String> {
         .host_str()
         .ok_or_else(|| "missing host in websocket url".to_string())?;
     let port = parsed.port_or_known_default().unwrap_or(80);
-    let mut addrs = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|e| e.to_string())?;
+    let host_owned = host.to_string();
+    let addrs = runtime::spawn_blocking(move || {
+        (host_owned.as_str(), port)
+            .to_socket_addrs()
+            .map(|iter| iter.collect::<Vec<_>>())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
     let addr = addrs
+        .into_iter()
         .next()
         .ok_or_else(|| "no addresses resolved for websocket host".to_string())?;
     let mut stream = TcpStream::connect(addr).await.map_err(|e| e.to_string())?;
@@ -1329,18 +1337,18 @@ fn main() {
                 rpc,
                 min_reputation: _,
                 active_within: _,
-                age_recipient,
-                openssl_pass,
+                recipient,
+                password,
             } => {
                 if all {
-                    if age_recipient.is_some() && openssl_pass.is_some() {
-                        eprintln!("cannot combine --age-recipient and --openssl-pass");
+                    if recipient.is_some() && password.is_some() {
+                        eprintln!("cannot combine --recipient and --password");
                         return;
                     }
                     let mut url = format!("{}/export/all", rpc);
-                    if let Some(rec) = age_recipient {
+                    if let Some(rec) = recipient {
                         url.push_str(&format!("?recipient={rec}"));
-                    } else if let Some(pass) = openssl_pass {
+                    } else if let Some(pass) = password {
                         url.push_str(&format!("?password={pass}"));
                     }
                     match BlockingClient::default().request(Method::Get, &url) {

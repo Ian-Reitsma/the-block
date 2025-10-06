@@ -56,7 +56,7 @@ pub struct LogFilter {
     pub passphrase: Option<String>,
 }
 
-pub type Result<T> = std::result::Result<T, LogIndexerError>;
+pub type Result<T, E = LogIndexerError> = std::result::Result<T, E>;
 
 #[derive(Debug)]
 pub enum LogIndexerError {

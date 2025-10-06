@@ -12,45 +12,49 @@ use util::timeout::expect_timeout;
 
 mod util;
 
-async fn rpc(addr: &str, body: &str) -> Value {
-    let addr: SocketAddr = addr.parse().unwrap();
-    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
-    let req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    expect_timeout(stream.write_all(req.as_bytes()))
-        .await
-        .unwrap();
-    let mut resp = Vec::with_capacity(1024);
-    expect_timeout(read_to_end(&mut stream, &mut resp))
-        .await
-        .unwrap();
-    let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-    serde_json::from_slice(&resp[body_idx + 4..]).unwrap()
+fn rpc(addr: &str, body: &str) -> Value {
+    runtime::block_on(async {
+        let addr: SocketAddr = addr.parse().unwrap();
+        let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
+        let req = format!(
+            "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        expect_timeout(stream.write_all(req.as_bytes()))
+            .await
+            .unwrap();
+        let mut resp = Vec::with_capacity(1024);
+        expect_timeout(read_to_end(&mut stream, &mut resp))
+            .await
+            .unwrap();
+        let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        serde_json::from_slice(&resp[body_idx + 4..]).unwrap()
+    })
 }
 
-#[tokio::test]
+#[test]
 #[serial]
-async fn price_board_no_data_errors() {
-    let dir = util::temp::temp_dir("rpc_market_err");
-    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-    let mining = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    let handle = the_block::spawn(run_rpc_server(
-        Arc::clone(&bc),
-        Arc::clone(&mining),
-        "127.0.0.1:0".to_string(),
-        RpcConfig::default(),
-        tx,
-    ));
-    let addr = expect_timeout(rx).await.unwrap();
+fn price_board_no_data_errors() {
+    runtime::block_on(async {
+        let dir = util::temp::temp_dir("rpc_market_err");
+        let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+        let mining = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = runtime::sync::oneshot::channel();
+        let handle = the_block::spawn(run_rpc_server(
+            Arc::clone(&bc),
+            Arc::clone(&mining),
+            "127.0.0.1:0".to_string(),
+            RpcConfig::default(),
+            tx,
+        ));
+        let addr = expect_timeout(rx).await.unwrap();
 
-    let req = r#"{"method":"price_board_get"}"#;
-    let val = expect_timeout(rpc(&addr, req)).await;
-    assert_eq!(val["error"]["code"], -33000);
-    assert_eq!(val["error"]["message"], "no price data");
-    handle.abort();
-    let _ = handle.await;
+        let req = r#"{"method":"price_board_get"}"#;
+        let val = expect_timeout(rpc(&addr, req)).await;
+        assert_eq!(val["error"]["code"], -33000);
+        assert_eq!(val["error"]["message"], "no price data");
+        handle.abort();
+        let _ = handle.await;
+    });
 }

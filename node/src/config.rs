@@ -7,18 +7,19 @@ use governance_spec::{
     DEFAULT_RUNTIME_BACKEND_POLICY, DEFAULT_STORAGE_ENGINE_POLICY,
     DEFAULT_TRANSPORT_PROVIDER_POLICY,
 };
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use signal_hook::consts::signal::SIGHUP;
 use signal_hook::iterator::Signals;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc::channel, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 use std::thread;
-#[cfg(feature = "quic")]
 use std::time::Duration;
 
+use runtime::fs::watch::{
+    RecursiveMode as WatchRecursiveMode, WatchEventKind, Watcher as FsWatcher,
+};
 #[cfg(feature = "quic")]
 use transport::{Config as TransportConfig, ProviderKind};
 
@@ -874,42 +875,51 @@ pub fn watch(dir: &str) {
     }
     crate::gossip::config::watch(dir);
     let cfg_dir = dir.to_string();
-    thread::spawn(move || {
-        let (tx, rx) = channel();
-        let mut watcher: RecommendedWatcher = notify::recommended_watcher(tx).expect("watcher");
+    runtime::spawn(async move {
         let path = Path::new(&cfg_dir);
-        if watcher.watch(path, RecursiveMode::NonRecursive).is_err() {
-            return;
-        }
-        for res in rx {
-            if let Ok(event) = res {
-                if matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
-                ) {
-                    let mut reload_node = false;
-                    let mut reload_gossip = false;
-                    let mut reload_storage = false;
-                    for path in &event.paths {
-                        if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-                            match name {
-                                "default.toml" => reload_node = true,
-                                "gossip.toml" => reload_gossip = true,
-                                "storage.toml" => reload_storage = true,
-                                _ => {}
+        match FsWatcher::new(path, WatchRecursiveMode::NonRecursive) {
+            Ok(mut watcher) => loop {
+                match watcher.next().await {
+                    Ok(event)
+                        if matches!(
+                            event.kind,
+                            WatchEventKind::Created
+                                | WatchEventKind::Modified
+                                | WatchEventKind::Removed
+                        ) =>
+                    {
+                        let mut reload_node = false;
+                        let mut reload_gossip = false;
+                        let mut reload_storage = false;
+                        for changed in &event.paths {
+                            if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
+                                match name {
+                                    "default.toml" => reload_node = true,
+                                    "gossip.toml" => reload_gossip = true,
+                                    "storage.toml" => reload_storage = true,
+                                    _ => {}
+                                }
                             }
                         }
+                        if reload_node {
+                            let _ = reload();
+                        }
+                        if reload_gossip {
+                            crate::gossip::config::reload();
+                        }
+                        if reload_storage {
+                            crate::storage::settings::configure_from_dir(&cfg_dir);
+                        }
                     }
-                    if reload_node {
-                        let _ = reload();
-                    }
-                    if reload_gossip {
-                        crate::gossip::config::reload();
-                    }
-                    if reload_storage {
-                        crate::storage::settings::configure_from_dir(&cfg_dir);
+                    Ok(_) => {}
+                    Err(err) => {
+                        log::warn!("config_watch_error: {err}");
+                        runtime::sleep(Duration::from_secs(1)).await;
                     }
                 }
+            },
+            Err(err) => {
+                log::warn!("config_watch_init_failed: {err}");
             }
         }
     });

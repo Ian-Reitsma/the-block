@@ -54,11 +54,13 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc::channel, Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use runtime::fs::watch::{
+    RecursiveMode as WatchRecursiveMode, WatchEventKind, Watcher as FsWatcher,
+};
 
 #[cfg(all(feature = "quic", feature = "telemetry"))]
 use crate::telemetry::{
@@ -844,46 +846,52 @@ fn spawn_peer_cert_store_watch(path: PathBuf) {
         return;
     }
     *guard = Some(path.clone());
-    thread::spawn(move || {
+    runtime::spawn(async move {
         let parent = path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."));
-        let (tx, rx) = channel();
-        let mut watcher: RecommendedWatcher = match notify::recommended_watcher(tx) {
-            Ok(w) => w,
-            Err(_) => return,
-        };
-        if watcher.watch(&parent, RecursiveMode::NonRecursive).is_err() {
-            return;
-        }
-        for res in rx {
-            if let Ok(event) = res {
-                if !matches!(
-                    event.kind,
-                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
-                ) {
-                    continue;
-                }
-                let mut relevant = false;
-                for changed in &event.paths {
-                    if changed == &path {
-                        relevant = true;
-                        break;
-                    }
-                    if let (Some(file), Some(target)) = (changed.file_name(), path.file_name()) {
-                        if file == target {
-                            relevant = true;
-                            break;
+        match FsWatcher::new(&parent, WatchRecursiveMode::NonRecursive) {
+            Ok(mut watcher) => loop {
+                match watcher.next().await {
+                    Ok(event)
+                        if matches!(
+                            event.kind,
+                            WatchEventKind::Created
+                                | WatchEventKind::Modified
+                                | WatchEventKind::Removed
+                        ) =>
+                    {
+                        if event
+                            .paths
+                            .iter()
+                            .any(|changed| is_relevant_change(changed, &path))
+                        {
+                            let _ = reload_peer_cert_store_from_disk();
                         }
                     }
+                    Ok(_) => {}
+                    Err(err) => {
+                        log::warn!("peer_cert_store_watch_error: {err}");
+                        runtime::sleep(Duration::from_secs(1)).await;
+                    }
                 }
-                if relevant {
-                    let _ = reload_peer_cert_store_from_disk();
-                }
+            },
+            Err(err) => {
+                log::warn!("peer_cert_store_watch_init_failed: {err}");
             }
         }
     });
+}
+
+fn is_relevant_change(changed: &Path, target: &Path) -> bool {
+    if changed == target {
+        return true;
+    }
+    match (changed.file_name(), target.file_name()) {
+        (Some(changed_name), Some(target_name)) => changed_name == target_name,
+        _ => false,
+    }
 }
 
 fn ensure_peer_cert_store_loaded() {

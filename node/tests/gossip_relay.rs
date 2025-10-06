@@ -67,6 +67,11 @@ proptest! {
                 )
             })
             .collect();
+        for (idx, (addr, _, _)) in peers.iter().enumerate() {
+            let peer = the_block::net::overlay_peer_from_bytes(&[(idx as u8) + 1; 32])
+                .expect("peer id");
+            the_block::net::peer::inject_addr_mapping_for_tests(*addr, peer);
+        }
         let mut delivered = 0usize;
         relay.broadcast_with(&msg, &peers, |_, _| delivered += 1);
         let max_allowed = max.min(peers_count);

@@ -23,7 +23,7 @@
     },
     {
       "name": "bytemuck",
-      "version": "1.23.2",
+      "version": "1.24.0",
       "kind": "Depth",
       "detail": "dependency depth 4 exceeds policy limit 3",
       "depth": 4
@@ -414,13 +414,6 @@
       "depth": 4
     },
     {
-      "name": "strsim",
-      "version": "0.11.1",
-      "kind": "Depth",
-      "detail": "dependency depth 4 exceeds policy limit 3",
-      "depth": 4
-    },
-    {
       "name": "syn",
       "version": "1.0.109",
       "kind": "Depth",
@@ -468,13 +461,6 @@
       "kind": "Depth",
       "detail": "dependency depth 6 exceeds policy limit 3",
       "depth": 6
-    },
-    {
-      "name": "unicode-bidi",
-      "version": "0.3.18",
-      "kind": "Depth",
-      "detail": "dependency depth 4 exceeds policy limit 3",
-      "depth": 4
     },
     {
       "name": "unicode-ident",
@@ -881,13 +867,6 @@
       "kind": "Depth",
       "detail": "dependency depth 7 exceeds policy limit 3",
       "depth": 7
-    },
-    {
-      "name": "zeroize_derive",
-      "version": "1.4.2",
-      "kind": "Depth",
-      "detail": "dependency depth 4 exceeds policy limit 3",
-      "depth": 4
     },
     {
       "name": "zerotrie",

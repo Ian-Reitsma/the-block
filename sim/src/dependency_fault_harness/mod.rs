@@ -11,9 +11,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use once_cell::sync::Lazy;
+use runtime::sync::CancellationToken;
 use serde::Serialize;
 use tempfile;
-use tokio_util::sync::CancellationToken;
 
 use codec::{self, Codec as CodecProfile};
 use coding::{Config as CodingConfig, RolloutConfig};
@@ -37,7 +37,7 @@ pub static OUTPUT_ROOT: Lazy<PathBuf> = Lazy::new(|| PathBuf::from("sim/output/d
 /// Runtime backend options.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum RuntimeBackendChoice {
-    Tokio,
+    Inhouse,
     Stub,
 }
 
@@ -143,7 +143,7 @@ pub struct BackendSelections {
 impl Default for BackendSelections {
     fn default() -> Self {
         Self {
-            runtime: RuntimeBackendChoice::Tokio,
+            runtime: RuntimeBackendChoice::Inhouse,
             transport: TransportBackendChoice::Quinn,
             overlay: OverlayBackendChoice::Inhouse,
             storage: StorageBackendChoice::RocksDb,
@@ -1330,12 +1330,12 @@ impl KeyValueIterator for MemoryIter {
 
 impl RuntimeBackendChoice {
     pub const fn variants() -> &'static [&'static str] {
-        &["tokio", "stub"]
+        &["inhouse", "stub"]
     }
 
     fn as_env(&self) -> &'static str {
         match self {
-            RuntimeBackendChoice::Tokio => "tokio",
+            RuntimeBackendChoice::Inhouse => "inhouse",
             RuntimeBackendChoice::Stub => "stub",
         }
     }
@@ -1430,7 +1430,7 @@ impl std::str::FromStr for RuntimeBackendChoice {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "tokio" => Ok(Self::Tokio),
+            "inhouse" => Ok(Self::Inhouse),
             "stub" => Ok(Self::Stub),
             other => Err(other.to_string()),
         }

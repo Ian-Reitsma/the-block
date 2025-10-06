@@ -1,18 +1,20 @@
-use std::collections::HashSet;
+#![cfg(feature = "integration-tests")]
+
 use std::sync::{atomic::AtomicBool, Arc, Mutex, Once};
-use std::time::Duration;
 
 use anyhow::Result;
-use runtime::net::{TcpListener, TcpStream};
+use runtime::io::{AsyncReadExt, AsyncWriteExt};
+use runtime::net::TcpStream;
+use runtime::sync::oneshot;
 use runtime::ws;
-use the_block::identity::did::DidRegistry;
-use the_block::identity::handle_registry::HandleRegistry;
-use the_block::rpc::{self, RpcRuntimeConfig};
+use the_block::config::RpcConfig;
+use the_block::rpc::run_rpc_server;
+use the_block::Blockchain;
 
 fn configure_runtime() {
     static INIT: Once = Once::new();
     INIT.call_once(|| {
-        std::env::set_var("TB_RUNTIME_BACKEND", "tokio");
+        std::env::set_var("TB_RUNTIME_BACKEND", "inhouse");
         the_block::simple_db::configure_engines(the_block::simple_db::EngineConfig {
             default_engine: the_block::simple_db::EngineKind::Memory,
             overrides: Default::default(),
@@ -36,83 +38,79 @@ async fn read_response_headers(stream: &mut TcpStream) -> Result<String> {
     }
 }
 
-fn runtime_config() -> Arc<RpcRuntimeConfig> {
-    Arc::new(RpcRuntimeConfig {
-        allowed_hosts: vec!["localhost".into()],
-        cors_allow_origins: Vec::new(),
-        max_body_bytes: 1024,
-        request_timeout: Duration::from_secs(1),
-        enable_debug: true,
-        admin_token: None,
-        relay_only: false,
-    })
-}
-
-fn registries() -> (Arc<Mutex<HandleRegistry>>, Arc<Mutex<DidRegistry>>) {
+async fn spawn_rpc_server() -> (
+    std::net::SocketAddr,
+    runtime::JoinHandle<()>,
+    tempfile::TempDir,
+) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let base = dir.into_path();
-    let handle_path = base.join("handles");
-    let did_path = base.join("dids");
-    let handles = HandleRegistry::open(handle_path.to_string_lossy().as_ref());
-    let dids = DidRegistry::open(&did_path);
-    (Arc::new(Mutex::new(handles)), Arc::new(Mutex::new(dids)))
-}
-
-fn spawn_rpc_handler(listener: TcpListener) -> runtime::JoinHandle<()> {
-    let bc = Arc::new(Mutex::new(the_block::Blockchain::default()));
+    let chain_path = dir.path().join("chain");
+    let bc = Arc::new(Mutex::new(Blockchain::new(
+        chain_path.to_string_lossy().as_ref(),
+    )));
     let mining = Arc::new(AtomicBool::new(false));
-    let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
-    let (handles, dids) = registries();
-    let cfg = runtime_config();
-    the_block::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            rpc::handle_conn(stream, bc, mining, nonces, handles, dids, cfg).await;
-        }
-    })
+    let (tx, rx) = oneshot::channel();
+    let rpc_cfg = RpcConfig {
+        enable_debug: true,
+        relay_only: false,
+        ..Default::default()
+    };
+    let handle = the_block::spawn(run_rpc_server(
+        Arc::clone(&bc),
+        Arc::clone(&mining),
+        "127.0.0.1:0".into(),
+        rpc_cfg,
+        tx,
+    ));
+    let addr = rx.await.expect("rpc ready");
+    let socket = addr.parse().expect("socket address");
+    (socket, handle, dir)
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn state_stream_upgrade_requires_headers() -> Result<()> {
-    configure_runtime();
-    let listener = TcpListener::bind("127.0.0.1:0".parse()?).await?;
-    let addr = listener.local_addr()?;
-    let server = spawn_rpc_handler(listener);
+#[test]
+fn state_stream_upgrade_requires_headers() -> Result<()> {
+    runtime::block_on(async {
+        configure_runtime();
+        let (addr, server, _dir) = spawn_rpc_server().await;
 
-    let mut client = TcpStream::connect(addr).await?;
-    let key = ws::handshake_key();
-    let request = format!(
+        let mut client = TcpStream::connect(addr).await?;
+        let key = ws::handshake_key();
+        let request = format!(
         "GET /state_stream HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
     );
-    client.write_all(request.as_bytes()).await?;
-    let headers = read_response_headers(&mut client).await?;
-    assert!(
-        headers.starts_with("HTTP/1.1 101"),
-        "unexpected response: {headers}"
-    );
-    client.shutdown().await?;
-    server.await.unwrap();
-    Ok(())
+        client.write_all(request.as_bytes()).await?;
+        let headers = read_response_headers(&mut client).await?;
+        assert!(
+            headers.starts_with("HTTP/1.1 101"),
+            "unexpected response: {headers}"
+        );
+        client.shutdown().await?;
+        server.abort();
+        let _ = server.await;
+        Ok(())
+    })
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn missing_upgrade_header_is_rejected() -> Result<()> {
-    configure_runtime();
-    let listener = TcpListener::bind("127.0.0.1:0".parse()?).await?;
-    let addr = listener.local_addr()?;
-    let server = spawn_rpc_handler(listener);
+#[test]
+fn missing_upgrade_header_is_rejected() -> Result<()> {
+    runtime::block_on(async {
+        configure_runtime();
+        let (addr, server, _dir) = spawn_rpc_server().await;
 
-    let mut client = TcpStream::connect(addr).await?;
-    let key = ws::handshake_key();
-    let request = format!(
+        let mut client = TcpStream::connect(addr).await?;
+        let key = ws::handshake_key();
+        let request = format!(
         "GET /state_stream HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
     );
-    client.write_all(request.as_bytes()).await?;
-    let headers = read_response_headers(&mut client).await?;
-    assert!(
-        headers.starts_with("HTTP/1.1 400"),
-        "unexpected response: {headers}"
-    );
-    client.shutdown().await?;
-    server.await.unwrap();
-    Ok(())
+        client.write_all(request.as_bytes()).await?;
+        let headers = read_response_headers(&mut client).await?;
+        assert!(
+            headers.starts_with("HTTP/1.1 400"),
+            "unexpected response: {headers}"
+        );
+        client.shutdown().await?;
+        server.abort();
+        let _ = server.await;
+        Ok(())
+    })
 }

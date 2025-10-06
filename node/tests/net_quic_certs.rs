@@ -1,7 +1,9 @@
 #![cfg(all(feature = "integration-tests", feature = "quic"))]
 
 use crypto_suite::signatures::ed25519::SigningKey;
+use runtime;
 use serial_test::serial;
+use std::time::Duration;
 use tempfile::tempdir;
 use the_block::net::{
     peer_cert_history, record_peer_certificate, refresh_peer_cert_store_from_disk, transport_quic,
@@ -58,6 +60,17 @@ fn encrypts_and_reloads_quic_peer_certs() {
         history[0].current.fingerprint,
         hex::encode(advert.fingerprint)
     );
+
+    std::fs::write(&store_path, "[]").expect("truncate store");
+    runtime::block_on(async {
+        for _ in 0..40 {
+            if peer_cert_history().is_empty() {
+                return;
+            }
+            runtime::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("peer cert watcher did not observe external change");
+    });
 
     teardown_env();
 }

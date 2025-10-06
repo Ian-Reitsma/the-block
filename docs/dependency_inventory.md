@@ -3,7 +3,6 @@
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |
 | strategic | `rustls` | 0.23.32 | crates.io | Apache-2.0 OR ISC OR MIT | 2 |
-| strategic | `tokio` | 1.47.1 | crates.io | MIT | 1 |
 | replaceable | `bincode` | 1.3.3 | crates.io | MIT | 1 |
 | replaceable | `rocksdb` | 0.21.0 | path | Apache-2.0 | 1 |
 | replaceable | `serde` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 1 |
@@ -16,7 +15,7 @@
 | unclassified | `allocator-api2` | 0.2.21 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `android_system_properties` | 0.1.5 | crates.io | MIT/Apache-2.0 | 4 |
 | unclassified | `anes` | 0.1.6 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `anstream` | 0.6.20 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `anstream` | 0.6.21 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `anstyle` | 1.0.13 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `anstyle-parse` | 0.2.7 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `anstyle-query` | 1.1.4 | crates.io | MIT OR Apache-2.0 | 3 |
@@ -46,12 +45,12 @@
 | unclassified | `bs58` | 0.4.0 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `bstr` | 1.12.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `bumpalo` | 3.19.0 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `bytemuck` | 1.23.2 | crates.io | Zlib OR Apache-2.0 OR MIT | 4 |
+| unclassified | `bytemuck` | 1.24.0 | crates.io | Zlib OR Apache-2.0 OR MIT | 4 |
 | unclassified | `byteorder` | 1.5.0 | crates.io | Unlicense OR MIT | 2 |
 | unclassified | `bytes` | 1.10.1 | crates.io | MIT | 1 |
 | unclassified | `bzip2-sys` | 0.1.13+1.0.8 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `cast` | 0.3.0 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `cc` | 1.2.39 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `cc` | 1.2.40 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `cexpr` | 0.6.0 | crates.io | Apache-2.0/MIT | 4 |
 | unclassified | `cfg-if` | 1.0.3 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `chrono` | 0.4.42 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -61,7 +60,6 @@
 | unclassified | `clang-sys` | 1.8.1 | crates.io | Apache-2.0 | 4 |
 | unclassified | `clap` | 4.5.48 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `clap_builder` | 4.5.48 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `clap_derive` | 4.5.47 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `clap_lex` | 0.7.5 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `cli_core` | 0.1.0 | workspace | MIT OR Apache-2.0 | 1 |
 | unclassified | `cobs` | 0.3.0 | crates.io | MIT OR Apache-2.0 | 3 |
@@ -122,7 +120,6 @@
 | unclassified | `embedded-io` | 0.6.1 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `encode_unicode` | 1.0.0 | crates.io | Apache-2.0 OR MIT | 3 |
 | unclassified | `encoding_rs` | 0.8.35 | crates.io | (Apache-2.0 OR MIT) AND BSD-3-Clause | 2 |
-| unclassified | `enum-as-inner` | 0.6.1 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `env_filter` | 0.1.3 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `env_logger` | 0.11.8 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `equivalent` | 1.0.2 | crates.io | Apache-2.0 OR MIT | 2 |
@@ -136,9 +133,9 @@
 | unclassified | `ff` | 0.6.0 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `ff_derive` | 0.6.0 | crates.io | MIT/Apache-2.0 | 4 |
 | unclassified | `filetime` | 0.2.26 | crates.io | MIT/Apache-2.0 | 2 |
-| unclassified | `find-msvc-tools` | 0.1.2 | crates.io | MIT OR Apache-2.0 | 3 |
+| unclassified | `find-msvc-tools` | 0.1.3 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `findshlibs` | 0.10.2 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `flate2` | 1.1.2 | crates.io | MIT OR Apache-2.0 | 1 |
+| unclassified | `flate2` | 1.1.3 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `float-cmp` | 0.10.0 | crates.io | MIT | 2 |
 | unclassified | `fnv` | 1.0.7 | crates.io | Apache-2.0 / MIT | 2 |
 | unclassified | `foldhash` | 0.1.5 | crates.io | Zlib | 4 |
@@ -146,7 +143,6 @@
 | unclassified | `foreign-types-shared` | 0.1.1 | crates.io | MIT/Apache-2.0 | 5 |
 | unclassified | `form_urlencoded` | 1.2.2 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `fs2` | 0.4.3 | crates.io | MIT/Apache-2.0 | 1 |
-| unclassified | `fsevent-sys` | 4.1.0 | crates.io | MIT | 2 |
 | unclassified | `fuchsia-cprng` | 0.1.1 | crates.io | file:LICENSE | 3 |
 | unclassified | `futures` | 0.3.31 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `futures-channel` | 0.3.31 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -197,21 +193,15 @@
 | unclassified | `icu_properties_data` | 2.0.1 | crates.io | Unicode-3.0 | 5 |
 | unclassified | `icu_provider` | 2.0.0 | crates.io | Unicode-3.0 | 5 |
 | unclassified | `id-arena` | 2.2.1 | crates.io | MIT/Apache-2.0 | 4 |
-| unclassified | `idna` | 0.4.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `idna` | 1.1.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `idna_adapter` | 1.2.1 | crates.io | Apache-2.0 OR MIT | 3 |
 | unclassified | `indexmap` | 2.11.4 | crates.io | Apache-2.0 OR MIT | 1 |
 | unclassified | `indoc` | 2.0.6 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `inferno` | 0.11.21 | crates.io | CDDL-1.0 | 2 |
 | unclassified | `inflation` | 0.1.0 | workspace | — | 1 |
-| unclassified | `inotify` | 0.9.6 | crates.io | ISC | 2 |
-| unclassified | `inotify-sys` | 0.1.5 | crates.io | ISC | 3 |
 | unclassified | `insta` | 1.43.2 | crates.io | Apache-2.0 | 1 |
 | unclassified | `instant` | 0.1.13 | crates.io | BSD-3-Clause | 3 |
 | unclassified | `io-lifetimes` | 1.0.11 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
-| unclassified | `io-uring` | 0.7.10 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `ipconfig` | 0.3.2 | crates.io | MIT/Apache-2.0 | 2 |
-| unclassified | `ipnet` | 2.11.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `is-terminal` | 0.4.16 | crates.io | MIT | 2 |
 | unclassified | `is_terminal_polyfill` | 1.70.1 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `itertools` | 0.10.5 | crates.io | MIT/Apache-2.0 | 2 |
@@ -227,8 +217,6 @@
 | unclassified | `json` | 0.12.4 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `jsonrpc-core` | 18.0.0 | crates.io | MIT | 1 |
 | unclassified | `jurisdiction` | 0.1.0 | workspace | — | 1 |
-| unclassified | `kqueue` | 1.1.1 | crates.io | MIT | 2 |
-| unclassified | `kqueue-sys` | 1.0.4 | crates.io | MIT | 3 |
 | unclassified | `lazy_static` | 1.5.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `lazycell` | 1.3.0 | crates.io | MIT/Apache-2.0 | 4 |
 | unclassified | `leb128` | 0.2.5 | crates.io | Apache-2.0/MIT | 3 |
@@ -244,17 +232,15 @@
 | unclassified | `libssh2-sys` | 0.3.1 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `libz-sys` | 1.1.22 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `light-client` | 0.1.0 | workspace | — | 1 |
-| unclassified | `linked-hash-map` | 0.5.6 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `linux-raw-sys` | 0.1.4 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
 | unclassified | `linux-raw-sys` | 0.11.0 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
 | unclassified | `linux-raw-sys` | 0.3.8 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
 | unclassified | `linux-raw-sys` | 0.4.15 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
 | unclassified | `litemap` | 0.8.0 | crates.io | Unicode-3.0 | 6 |
-| unclassified | `lock_api` | 0.4.13 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `lock_api` | 0.4.14 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `log` | 0.4.28 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `logtest` | 2.0.0 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `lru` | 0.11.1 | crates.io | MIT | 1 |
-| unclassified | `lru-cache` | 0.1.2 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `lz4-sys` | 1.11.1+lz4-1.10.0 | crates.io | MIT | 3 |
 | unclassified | `mach2` | 0.4.3 | crates.io | BSD-2-Clause OR MIT OR Apache-2.0 | 2 |
 | unclassified | `matchers` | 0.2.0 | crates.io | MIT | 2 |
@@ -268,7 +254,6 @@
 | unclassified | `minimal-lexical` | 0.2.1 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `miniz_oxide` | 0.8.9 | crates.io | MIT OR Zlib OR Apache-2.0 | 2 |
 | unclassified | `mio` | 0.8.11 | crates.io | MIT | 2 |
-| unclassified | `mio` | 1.0.4 | crates.io | MIT | 2 |
 | unclassified | `nalgebra` | 0.29.0 | crates.io | BSD-3-Clause | 2 |
 | unclassified | `nalgebra` | 0.32.6 | crates.io | BSD-3-Clause | 1 |
 | unclassified | `nalgebra-macros` | 0.1.0 | crates.io | Apache-2.0 | 3 |
@@ -278,7 +263,6 @@
 | unclassified | `nix` | 0.27.1 | crates.io | MIT | 1 |
 | unclassified | `nom` | 7.1.3 | crates.io | MIT | 2 |
 | unclassified | `normalize-line-endings` | 0.3.0 | crates.io | Apache-2.0 | 2 |
-| unclassified | `notify` | 6.1.1 | crates.io | CC0-1.0 | 1 |
 | unclassified | `nu-ansi-term` | 0.50.1 | crates.io | MIT | 2 |
 | unclassified | `num-bigint` | 0.2.6 | crates.io | MIT/Apache-2.0 | 5 |
 | unclassified | `num-bigint` | 0.4.6 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -298,15 +282,14 @@
 | unclassified | `openssl` | 0.10.73 | crates.io | Apache-2.0 | 3 |
 | unclassified | `openssl-macros` | 0.1.1 | crates.io | MIT/Apache-2.0 | 4 |
 | unclassified | `openssl-probe` | 0.1.6 | crates.io | MIT/Apache-2.0 | 2 |
-| unclassified | `openssl-src` | 300.5.3+3.5.4 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `openssl-sys` | 0.9.109 | crates.io | MIT | 2 |
 | unclassified | `option-ext` | 0.2.0 | crates.io | MPL-2.0 | 3 |
 | unclassified | `p2p_overlay` | 0.1.0 | workspace | — | 1 |
 | unclassified | `pairing` | 0.16.0 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `parking_lot` | 0.11.2 | crates.io | Apache-2.0/MIT | 2 |
-| unclassified | `parking_lot` | 0.12.4 | crates.io | MIT OR Apache-2.0 | 1 |
+| unclassified | `parking_lot` | 0.12.5 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `parking_lot_core` | 0.8.6 | crates.io | Apache-2.0/MIT | 3 |
-| unclassified | `parking_lot_core` | 0.9.11 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `parking_lot_core` | 0.9.12 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `paste` | 1.0.15 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `peeking_take_while` | 0.1.2 | crates.io | Apache-2.0/MIT | 4 |
 | unclassified | `pem` | 3.0.5 | crates.io | MIT | 3 |
@@ -340,7 +323,7 @@
 | unclassified | `prometheus` | 0.13.4 | crates.io | Apache-2.0 | 1 |
 | unclassified | `proptest` | 1.8.0 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `protobuf` | 2.28.0 | crates.io | MIT | 2 |
-| unclassified | `psm` | 0.1.26 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `psm` | 0.1.27 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `pyo3` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `pyo3-build-config` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `pyo3-ffi` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -372,13 +355,12 @@
 | unclassified | `rcgen` | 0.11.3 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `rdrand` | 0.4.0 | crates.io | ISC | 3 |
 | unclassified | `redox_syscall` | 0.2.16 | crates.io | MIT | 4 |
-| unclassified | `redox_syscall` | 0.5.17 | crates.io | MIT | 3 |
+| unclassified | `redox_syscall` | 0.5.18 | crates.io | MIT | 3 |
 | unclassified | `redox_users` | 0.4.6 | crates.io | MIT | 3 |
 | unclassified | `regalloc2` | 0.9.3 | crates.io | Apache-2.0 WITH LLVM-exception | 4 |
 | unclassified | `regex` | 1.11.3 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `regex-automata` | 0.4.11 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `regex-syntax` | 0.8.6 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `resolv-conf` | 0.7.5 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `rgb` | 0.8.52 | crates.io | MIT | 3 |
 | unclassified | `ring` | 0.16.20 | crates.io | file:LICENSE | 3 |
 | unclassified | `ring` | 0.17.14 | crates.io | Apache-2.0 AND ISC | 3 |
@@ -399,7 +381,7 @@
 | unclassified | `rustls-pki-types` | 1.12.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `rustls-webpki` | 0.103.7 | crates.io | ISC | 3 |
 | unclassified | `rustversion` | 1.0.22 | crates.io | MIT OR Apache-2.0 | 4 |
-| unclassified | `rusty-fork` | 0.3.0 | crates.io | MIT/Apache-2.0 | 2 |
+| unclassified | `rusty-fork` | 0.3.1 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `ryu` | 1.0.20 | crates.io | Apache-2.0 OR BSL-1.0 | 2 |
 | unclassified | `safe_arch` | 0.7.4 | crates.io | Zlib OR Apache-2.0 OR MIT | 4 |
 | unclassified | `same-file` | 1.0.6 | crates.io | Unlicense/MIT | 3 |
@@ -429,12 +411,12 @@
 | unclassified | `signal-hook-registry` | 1.4.6 | crates.io | Apache-2.0/MIT | 2 |
 | unclassified | `simba` | 0.6.0 | crates.io | Apache-2.0 | 3 |
 | unclassified | `simba` | 0.8.1 | crates.io | Apache-2.0 | 2 |
+| unclassified | `simd-adler32` | 0.3.7 | crates.io | MIT | 3 |
 | unclassified | `similar` | 2.7.0 | crates.io | Apache-2.0 | 2 |
-| unclassified | `slab` | 0.4.11 | crates.io | MIT | 2 |
+| unclassified | `slab` | 0.4.11 | crates.io | MIT | 3 |
 | unclassified | `slice-group-by` | 0.3.1 | crates.io | MIT | 5 |
 | unclassified | `smallvec` | 1.15.1 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `socket2` | 0.5.10 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `socket2` | 0.6.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `spin` | 0.5.2 | crates.io | MIT | 4 |
 | unclassified | `sptr` | 0.3.2 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `stable_deref_trait` | 1.2.0 | crates.io | MIT/Apache-2.0 | 3 |
@@ -445,7 +427,6 @@
 | unclassified | `storage_engine` | 0.1.0 | workspace | — | 1 |
 | unclassified | `str_stack` | 0.1.0 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `strength_reduce` | 0.2.4 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `strsim` | 0.11.1 | crates.io | MIT | 4 |
 | unclassified | `subtle` | 2.6.1 | crates.io | BSD-3-Clause | 1 |
 | unclassified | `symbolic-common` | 12.16.3 | crates.io | MIT | 3 |
 | unclassified | `symbolic-demangle` | 12.16.3 | crates.io | MIT | 2 |
@@ -476,8 +457,6 @@
 | unclassified | `tinytemplate` | 1.2.1 | crates.io | Apache-2.0 OR MIT | 2 |
 | unclassified | `tinyvec` | 1.10.0 | crates.io | Zlib OR Apache-2.0 OR MIT | 2 |
 | unclassified | `tinyvec_macros` | 0.1.1 | crates.io | MIT OR Apache-2.0 OR Zlib | 3 |
-| unclassified | `tokio-macros` | 2.5.0 | crates.io | MIT | 2 |
-| unclassified | `tokio-util` | 0.7.16 | crates.io | MIT | 1 |
 | unclassified | `toml` | 0.8.23 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `toml_datetime` | 0.6.11 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `toml_edit` | 0.22.27 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -492,11 +471,8 @@
 | unclassified | `tracing-test` | 0.2.5 | crates.io | MIT | 1 |
 | unclassified | `tracing-test-macro` | 0.2.5 | crates.io | MIT | 2 |
 | unclassified | `transpose` | 0.2.3 | crates.io | MIT OR Apache-2.0 | 3 |
-| unclassified | `trust-dns-proto` | 0.23.2 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `trust-dns-resolver` | 0.23.2 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `typenum` | 1.18.0 | crates.io | MIT OR Apache-2.0 | 2 |
+| unclassified | `typenum` | 1.19.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `unarray` | 0.1.4 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `unicode-bidi` | 0.3.18 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `unicode-ident` | 1.0.19 | crates.io | (MIT OR Apache-2.0) AND Unicode-3.0 | 4 |
 | unclassified | `unicode-normalization` | 0.1.24 | crates.io | MIT/Apache-2.0 | 1 |
 | unclassified | `unicode-width` | 0.2.1 | crates.io | MIT OR Apache-2.0 | 3 |
@@ -554,7 +530,6 @@
 | unclassified | `webpki-roots` | 0.26.11 | crates.io | CDLA-Permissive-2.0 | 2 |
 | unclassified | `webpki-roots` | 1.0.2 | crates.io | CDLA-Permissive-2.0 | 3 |
 | unclassified | `wide` | 0.7.33 | crates.io | Zlib OR Apache-2.0 OR MIT | 3 |
-| unclassified | `widestring` | 1.2.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `winapi` | 0.3.9 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `winapi-i686-pc-windows-gnu` | 0.4.0 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `winapi-util` | 0.1.11 | crates.io | Unlicense OR MIT | 3 |
@@ -607,7 +582,6 @@
 | unclassified | `windows_x86_64_msvc` | 0.52.6 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `windows_x86_64_msvc` | 0.53.0 | crates.io | MIT OR Apache-2.0 | 5 |
 | unclassified | `winnow` | 0.7.13 | crates.io | MIT | 3 |
-| unclassified | `winreg` | 0.50.0 | crates.io | MIT | 3 |
 | unclassified | `wit-bindgen` | 0.46.0 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 5 |
 | unclassified | `wit-parser` | 0.215.0 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
 | unclassified | `writeable` | 0.6.1 | crates.io | Unicode-3.0 | 6 |
@@ -623,7 +597,6 @@
 | unclassified | `zerofrom` | 0.1.6 | crates.io | Unicode-3.0 | 6 |
 | unclassified | `zerofrom-derive` | 0.1.6 | crates.io | Unicode-3.0 | 7 |
 | unclassified | `zeroize` | 1.8.2 | crates.io | Apache-2.0 OR MIT | 3 |
-| unclassified | `zeroize_derive` | 1.4.2 | crates.io | Apache-2.0 OR MIT | 4 |
 | unclassified | `zerotrie` | 0.2.2 | crates.io | Unicode-3.0 | 5 |
 | unclassified | `zerovec` | 0.11.4 | crates.io | Unicode-3.0 | 5 |
 | unclassified | `zerovec-derive` | 0.11.1 | crates.io | Unicode-3.0 | 6 |

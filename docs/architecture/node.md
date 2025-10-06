@@ -679,21 +679,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── bitflags v2.9.4
 │   ├── cfg-if v1.0.3
 │   └── libc v0.2.176
-├── notify v6.1.1
-│   ├── crossbeam-channel v0.5.15 (*)
-│   ├── filetime v0.2.26
-│   │   ├── cfg-if v1.0.3
-│   │   └── libc v0.2.176
-│   ├── inotify v0.9.6
-│   │   ├── bitflags v1.3.2
-│   │   ├── inotify-sys v0.1.5
-│   │   │   └── libc v0.2.176
-│   │   └── libc v0.2.176
-│   ├── libc v0.2.176
-│   ├── log v0.4.28 (*)
-│   ├── mio v0.8.11 (*)
-│   └── walkdir v2.5.0
-│       └── same-file v1.0.6
 ├── num_cpus v1.17.0
 │   └── libc v0.2.176
 ├── once_cell v1.21.3

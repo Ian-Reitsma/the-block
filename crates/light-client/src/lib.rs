@@ -293,7 +293,7 @@ where
         if opts.poll_interval > Duration::from_secs(0) {
             runtime::sleep(opts.poll_interval).await;
         } else {
-            tokio::task::yield_now().await;
+            runtime::yield_now().await;
         }
     }
 }
@@ -386,8 +386,8 @@ mod tests {
         h
     }
 
-    #[tokio::test]
-    async fn respects_thresholds() {
+    #[test]
+    fn respects_thresholds() {
         let opts = SyncOptions {
             wifi_only: true,
             require_charging: true,
@@ -410,9 +410,11 @@ mod tests {
             vdf_output: [0u8; 32],
             vdf_proof: Vec::new(),
         };
-        let mut lc = LightClient::new(genesis.clone());
-        let _ = sync_background(&mut lc, opts, |_start, _batch| async { Vec::new() }).await;
-        assert_eq!(lc.chain.len(), 1);
+        runtime::block_on(async move {
+            let mut lc = LightClient::new(genesis.clone());
+            let _ = sync_background(&mut lc, opts, |_start, _batch| async { Vec::new() }).await;
+            assert_eq!(lc.chain.len(), 1);
+        });
     }
 
     #[test]

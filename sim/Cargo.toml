@@ -43,10 +43,9 @@ codec = { path = "../crates/codec", optional = true }
 crypto_suite = { path = "../crates/crypto_suite", optional = true }
 once_cell = "1"
 p2p_overlay = { path = "../crates/p2p_overlay", optional = true }
-runtime = { path = "../crates/runtime", default-features = false, features = ["tokio-backend"], optional = true }
+runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 storage_engine = { path = "../crates/storage_engine", optional = true, default-features = false, features = ["rocksdb", "sled"] }
 transport = { path = "../crates/transport", optional = true }
-tokio-util = "0.7"
 thiserror = "1"
 tempfile = "3"
 

@@ -365,7 +365,7 @@ async fn dids_listing(request: Request<ExplorerHttpState>) -> Result<Response, H
             Ok(rows) => Response::new(StatusCode::OK).json(&rows),
             Err(err) => {
                 log_error("did history query failed", &err);
-                let empty: Vec<did_view::DidRecordRow> = Vec::new();
+                let empty: Vec<DidRecordRow> = Vec::new();
                 Response::new(StatusCode::OK).json(&empty)
             }
         }
@@ -380,7 +380,7 @@ async fn dids_listing(request: Request<ExplorerHttpState>) -> Result<Response, H
             Ok(rows) => Response::new(StatusCode::OK).json(&rows),
             Err(err) => {
                 log_error("recent did query failed", &err);
-                let empty: Vec<did_view::DidRecordRow> = Vec::new();
+                let empty: Vec<DidRecordRow> = Vec::new();
                 Response::new(StatusCode::OK).json(&empty)
             }
         }

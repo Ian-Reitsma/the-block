@@ -1,10 +1,10 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::hashing::blake3;
+use runtime::sync::CancellationToken;
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LaneSeed};
 use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};
 use the_block::transaction::FeeLane;
-use tokio_util::sync::CancellationToken;
 
 #[test]
 fn offer_validation() {
@@ -97,63 +97,65 @@ fn price_board_tracks_bands() {
     assert_eq!(board.bands(FeeLane::Consumer).unwrap(), (2, 3, 4));
 }
 
-#[tokio::test]
-async fn dry_run_receipts_are_idempotent() {
-    let dir = tempfile::tempdir().unwrap();
-    let store_path = dir.path().join("receipts");
-    let store = ReceiptStore::open(store_path.to_str().unwrap());
-    matcher::seed_orders(vec![LaneSeed {
-        lane: FeeLane::Consumer,
-        bids: vec![Bid {
-            job_id: "job".into(),
-            buyer: "buyer".into(),
-            price: 5,
+#[test]
+fn dry_run_receipts_are_idempotent() {
+    runtime::block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let store_path = dir.path().join("receipts");
+        let store = ReceiptStore::open(store_path.to_str().unwrap());
+        matcher::seed_orders(vec![LaneSeed {
             lane: FeeLane::Consumer,
-        }],
-        asks: vec![Ask {
-            job_id: "job".into(),
-            provider: "prov".into(),
-            price: 5,
-            lane: FeeLane::Consumer,
-        }],
-        metadata: LaneMetadata::default(),
-    }])
-    .unwrap();
-    let stop = CancellationToken::new();
-    let handle = the_block::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
-    the_block::sleep(std::time::Duration::from_millis(20)).await;
-    stop.cancel();
-    handle.await.unwrap();
-    assert_eq!(store.len().unwrap(), 1);
-    assert_eq!(store.recent_by_lane(FeeLane::Consumer, 4).unwrap().len(), 1);
-    drop(store);
+            bids: vec![Bid {
+                job_id: "job".into(),
+                buyer: "buyer".into(),
+                price: 5,
+                lane: FeeLane::Consumer,
+            }],
+            asks: vec![Ask {
+                job_id: "job".into(),
+                provider: "prov".into(),
+                price: 5,
+                lane: FeeLane::Consumer,
+            }],
+            metadata: LaneMetadata::default(),
+        }])
+        .unwrap();
+        let stop = CancellationToken::new();
+        let handle = the_block::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
+        the_block::sleep(std::time::Duration::from_millis(20)).await;
+        stop.cancel();
+        handle.await.unwrap();
+        assert_eq!(store.len().unwrap(), 1);
+        assert_eq!(store.recent_by_lane(FeeLane::Consumer, 4).unwrap().len(), 1);
+        drop(store);
 
-    let store = ReceiptStore::open(store_path.to_str().unwrap());
-    matcher::seed_orders(vec![LaneSeed {
-        lane: FeeLane::Consumer,
-        bids: vec![Bid {
-            job_id: "job".into(),
-            buyer: "buyer".into(),
-            price: 5,
+        let store = ReceiptStore::open(store_path.to_str().unwrap());
+        matcher::seed_orders(vec![LaneSeed {
             lane: FeeLane::Consumer,
-        }],
-        asks: vec![Ask {
-            job_id: "job".into(),
-            provider: "prov".into(),
-            price: 5,
-            lane: FeeLane::Consumer,
-        }],
-        metadata: LaneMetadata::default(),
-    }])
-    .unwrap();
-    let stop = CancellationToken::new();
-    let handle = the_block::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
-    the_block::sleep(std::time::Duration::from_millis(20)).await;
-    stop.cancel();
-    handle.await.unwrap();
-    assert_eq!(store.len().unwrap(), 1);
-    let receipts = store.recent_by_lane(FeeLane::Consumer, 4).unwrap();
-    assert_eq!(receipts.len(), 1);
-    assert_eq!(receipts[0].lane, FeeLane::Consumer);
-    matcher::seed_orders(Vec::new()).unwrap();
+            bids: vec![Bid {
+                job_id: "job".into(),
+                buyer: "buyer".into(),
+                price: 5,
+                lane: FeeLane::Consumer,
+            }],
+            asks: vec![Ask {
+                job_id: "job".into(),
+                provider: "prov".into(),
+                price: 5,
+                lane: FeeLane::Consumer,
+            }],
+            metadata: LaneMetadata::default(),
+        }])
+        .unwrap();
+        let stop = CancellationToken::new();
+        let handle = the_block::spawn(matcher::match_loop(store.clone(), true, stop.clone()));
+        the_block::sleep(std::time::Duration::from_millis(20)).await;
+        stop.cancel();
+        handle.await.unwrap();
+        assert_eq!(store.len().unwrap(), 1);
+        let receipts = store.recent_by_lane(FeeLane::Consumer, 4).unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].lane, FeeLane::Consumer);
+        matcher::seed_orders(Vec::new()).unwrap();
+    });
 }

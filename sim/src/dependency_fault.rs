@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
         Err(err) => return Err(anyhow::anyhow!(err.to_string())),
     };
 
-    let runtime = parse_choice(&matches, "runtime", RuntimeBackendChoice::Tokio)?;
+    let runtime = parse_choice(&matches, "runtime", RuntimeBackendChoice::Inhouse)?;
     let transport = parse_choice(&matches, "transport", TransportBackendChoice::Quinn)?;
     let overlay = parse_choice(&matches, "overlay", OverlayBackendChoice::Inhouse)?;
     let storage = parse_choice(&matches, "storage", StorageBackendChoice::RocksDb)?;
@@ -124,7 +124,7 @@ fn build_command() -> Command {
     )
     .arg(ArgSpec::Option(
         OptionSpec::new("runtime", "runtime", "Runtime backend to use")
-            .default(RuntimeBackendChoice::Tokio.as_str())
+            .default(RuntimeBackendChoice::Inhouse.as_str())
             .value_enum(RuntimeBackendChoice::variants()),
     ))
     .arg(ArgSpec::Option(

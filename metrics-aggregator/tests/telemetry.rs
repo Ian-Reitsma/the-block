@@ -54,5 +54,24 @@ fn telemetry_round_trip() {
         assert_eq!(resp.status(), StatusCode::OK);
         let history: serde_json::Value = serde_json::from_slice(resp.body()).unwrap();
         assert_eq!(history.as_array().unwrap().len(), 1);
+
+        let resp = app
+            .handle(app.request_builder().path("/metrics").build())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.header("content-type"),
+            Some("text/plain; version=0.0.4")
+        );
+        let body = String::from_utf8(resp.body().to_vec()).unwrap();
+        assert!(
+            body.contains("# TYPE aggregator_ingest_total counter"),
+            "metrics payload missing ingest counter: {body}"
+        );
+        assert!(
+            body.contains("# TYPE cluster_peer_active_total gauge"),
+            "metrics payload missing active peer gauge: {body}"
+        );
     });
 }

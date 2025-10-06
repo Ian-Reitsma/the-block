@@ -3,13 +3,13 @@ use crate::compute_market::receipt::Receipt;
 use crate::transaction::FeeLane;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
+use runtime::sync::CancellationToken;
 use runtime::yield_now;
 use std::collections::VecDeque;
 use std::env;
 use std::sync::RwLock;
 use std::time::{Duration, Instant, SystemTime};
 use thiserror::Error;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct Bid {
