@@ -7,6 +7,5 @@ edition = "2021"
 cli_core = { path = "../../crates/cli_core" }
 zip = "0.6"
 crypto_suite = { path = "../../crates/crypto_suite" }
-self_update = "0.39"
 which = "5"
 anyhow = "1"

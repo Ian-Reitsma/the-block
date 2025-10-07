@@ -5132,7 +5132,7 @@ fn calculate_hash(
 #[must_use]
 #[pyfunction]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
     rng.fill_bytes(&mut priv_bytes);
     let sk = SigningKey::from_bytes(&priv_bytes);
@@ -5351,7 +5351,7 @@ pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod shard_cache_tests {
     use super::*;
     use std::panic::{catch_unwind, AssertUnwindSafe};
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn shard_cache_round_trip_populates_and_updates_entries() {

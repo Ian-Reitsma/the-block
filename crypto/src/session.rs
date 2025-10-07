@@ -1,5 +1,5 @@
+use crate::primitives::rng::OsRng;
 use crypto_suite::signatures::ed25519::{SigningKey, SECRET_KEY_LENGTH};
-use rand::{rngs::OsRng, RngCore};
 
 /// Ephemeral session key with expiration timestamp.
 #[derive(Clone)]
@@ -15,7 +15,7 @@ pub struct SessionKey {
 impl SessionKey {
     /// Generate a new session key expiring at `expires_at` (UNIX secs).
     pub fn generate(expires_at: u64) -> Self {
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         let mut secret_bytes = [0u8; SECRET_KEY_LENGTH];
         rng.fill_bytes(&mut secret_bytes);
         let secret = SigningKey::from_bytes(&secret_bytes);

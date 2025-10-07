@@ -47,7 +47,7 @@ exist before replaying snapshots. To migrate an existing state directory:
    directories into the new format, e.g.:
 
    ```
-   cargo run -p storage-migrate -- state/rocksdb state/inhouse
+  cargo run -p storage-migrate -- state/legacy state/inhouse
    ```
 
    The tool streams column families into the in-house engine and verifies SST

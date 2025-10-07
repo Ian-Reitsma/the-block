@@ -467,7 +467,7 @@ mod tests {
             vdf_proof: vec![],
         };
         let mut lc = LightClient::new(genesis.clone());
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         let sk = SigningKey::generate(&mut rng);
         let pk = sk.verifying_key().to_bytes();
         let mut h1 = make_header(&genesis, 1);

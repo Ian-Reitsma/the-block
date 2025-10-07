@@ -12,6 +12,8 @@ use cli_core::{
     parse::Matches,
 };
 use crypto_suite::signatures::ed25519::SigningKey;
+use sys::paths;
+use sys::process;
 use tracing_chrome::ChromeLayerBuilder;
 use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
 
@@ -29,7 +31,7 @@ mod cli_support;
 use cli_support::{collect_args, parse_matches};
 
 fn key_dir() -> PathBuf {
-    dirs::home_dir()
+    paths::home_dir()
         .expect("home directory")
         .join(".the_block")
         .join("keys")
@@ -40,21 +42,18 @@ fn key_path(id: &str) -> PathBuf {
 }
 
 fn write_pem(path: &Path, sk: &SigningKey) -> std::io::Result<()> {
-    use base64::engine::general_purpose::STANDARD as B64;
-    use base64::Engine;
+    use base64_fp::encode_standard;
     let pem = format!(
         "-----BEGIN ED25519 PRIVATE KEY-----\n{}\n-----END ED25519 PRIVATE KEY-----\n",
-        B64.encode(sk.to_bytes())
+        encode_standard(&sk.to_bytes())
     );
     fs::write(path, pem)
 }
 
 fn read_pem(src: &str) -> std::io::Result<SigningKey> {
-    use base64::engine::general_purpose::STANDARD as B64;
-    use base64::Engine;
+    use base64_fp::decode_standard;
     let b64: String = src.lines().filter(|l| !l.starts_with("---")).collect();
-    let bytes = B64
-        .decode(b64)
+    let bytes = decode_standard(&b64)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let arr: [u8; 32] = bytes
         .try_into()
@@ -69,7 +68,7 @@ fn load_key(id: &str) -> SigningKey {
 }
 
 fn default_db_path() -> String {
-    dirs::home_dir()
+    paths::home_dir()
         .expect("home directory")
         .join(".block")
         .join("db")
@@ -945,7 +944,7 @@ async fn async_main() -> std::process::ExitCode {
                         let key_meta = std::fs::metadata(&key_path).ok();
                         match (cert_meta, key_meta) {
                             (Some(cm), Some(km)) => {
-                                let uid = nix::unistd::Uid::effective().as_raw();
+                                let uid = process::effective_uid().unwrap_or(0);
                                 if cm.mode() & 0o777 != 0o600
                                     || km.mode() & 0o777 != 0o600
                                     || cm.uid() != uid

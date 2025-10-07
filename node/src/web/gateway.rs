@@ -17,10 +17,10 @@ use std::{
 mod rate_limit;
 use once_cell::sync::Lazy;
 use rate_limit::RateLimitFilter;
-use signal_hook::consts::signal::SIGHUP;
-use signal_hook::iterator::Signals;
 use std::fs;
+use sys::signals::{Signals, SIGHUP};
 
+use crate::{storage::pipeline, vm::wasm, ReadAck, StakeTable};
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -28,9 +28,6 @@ use httpd::{
 use runtime::net::TcpListener;
 use runtime::sync::mpsc;
 use runtime::ws::Message as WsMessage;
-use wasmtime::{Engine, Linker, Module, Store};
-
-use crate::{exec, storage::pipeline, ReadAck, StakeTable};
 
 /// Simple token bucket for per-IP throttling.
 struct Bucket {
@@ -59,6 +56,35 @@ struct GatewayState {
     read_tx: mpsc::Sender<ReadAck>,
     buckets: Arc<Mutex<HashMap<SocketAddr, Bucket>>>,
     filter: Arc<Mutex<RateLimitFilter>>,
+}
+
+#[derive(Clone)]
+struct DynamicFunc {
+    wasm: Vec<u8>,
+    gas_limit: u64,
+}
+
+static DYNAMIC_FUNCS: Lazy<Mutex<HashMap<(String, String), DynamicFunc>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub fn register_dynamic(domain: &str, path: &str, wasm: Vec<u8>, gas_limit: u64) {
+    DYNAMIC_FUNCS.lock().unwrap().insert(
+        (domain.to_string(), path.to_string()),
+        DynamicFunc { wasm, gas_limit },
+    );
+}
+
+fn lookup_dynamic(domain: &str, path: &str) -> Option<DynamicFunc> {
+    DYNAMIC_FUNCS
+        .lock()
+        .unwrap()
+        .get(&(domain.to_string(), path.to_string()))
+        .cloned()
+}
+
+#[cfg(test)]
+fn clear_dynamic_registry() {
+    DYNAMIC_FUNCS.lock().unwrap().clear();
 }
 
 impl GatewayState {
@@ -255,55 +281,18 @@ async fn handle_func(
     mut req: Request<GatewayState>,
     state: Arc<GatewayState>,
 ) -> Result<Response, HttpError> {
-    let wasm = pipeline::fetch_wasm(&domain).unwrap_or_default();
-    let engine = Engine::default();
-    let module = Module::new(&engine, wasm).map_err(|_| HttpError::Handler("wasm".into()))?;
-    let mut store = Store::new(&engine, ());
-    let linker = Linker::new(&engine);
-    let func = linker
-        .instantiate(&mut store, &module)
-        .and_then(|i| i.get_func(&mut store, "handler"))
-        .ok();
-    if let Some(f) = func {
-        let body_bytes = req.take_body();
-        let start = Instant::now();
-        let res = f.call(&mut store, &[], &mut []).map(|_| body_bytes);
-        match res {
-            Ok(out) => {
-                let cpu_ms = start.elapsed().as_millis() as u64;
-                let bytes_out = out.len() as u64;
-                let func_id: [u8; 32] = blake3::hash(&wasm).into();
-                let _ = exec::record(
-                    &domain,
-                    func_id,
-                    bytes_out,
-                    cpu_ms,
-                    [0u8; 32],
-                    Vec::new(),
-                    Vec::new(),
-                    &crate::logging::corr_id_hash(&func_id),
-                );
-                #[cfg(feature = "telemetry")]
-                crate::telemetry::READ_STATS.record(&domain, bytes_out);
-                let ack = ReadAck {
-                    manifest: [0; 32],
-                    path_hash: blake3::hash(api.as_bytes()).into(),
-                    bytes: bytes_out,
-                    ts: now_ts(),
-                    client_hash: blake3::hash(domain.as_bytes()).into(),
-                    pk: [0u8; 32],
-                    sig: [0u8; 64],
-                };
-                let _ = state.read_tx.send(ack).await;
-                Ok(Response::new(StatusCode::OK).with_body(out))
-            }
-            Err(_) => {
-                Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR)
-                    .with_body(b"exec failed".to_vec()))
-            }
+    if let Some(func) = lookup_dynamic(&domain, api) {
+        let mut meter = wasm::GasMeter::new(func.gas_limit);
+        match wasm::execute(&func.wasm, req.body_bytes(), &mut meter) {
+            Ok(bytes) => Ok(Response::new(StatusCode::OK).with_body(bytes)),
+            Err(err) => Ok(Response::new(StatusCode::BAD_REQUEST)
+                .with_body(format!("wasm execution failed: {err}\n").into_bytes())
+                .close()),
         }
     } else {
-        Ok(Response::new(StatusCode::NOT_FOUND).with_body(b"no func".to_vec()))
+        let mut body = format!("dynamic endpoint '{api}' not registered\n").into_bytes();
+        let _ = pipeline::fetch_wasm(&domain);
+        Ok(Response::new(StatusCode::NOT_FOUND).with_body(body).close())
     }
 }
 
@@ -322,7 +311,7 @@ pub trait StakeTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpd::{Router, StatusCode};
+    use httpd::{Method, Router, StatusCode};
     use runtime::sync::mpsc;
     use std::collections::{HashMap, HashSet};
 
@@ -381,5 +370,42 @@ mod tests {
         assert!(state.authorize(&request).is_ok());
         let response = state.authorize(&request).expect_err("rate limited");
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn dynamic_execution_returns_bytes() {
+        clear_dynamic_registry();
+        let module = {
+            let mut buf = Vec::new();
+            buf.extend_from_slice(&wasm::MAGIC);
+            buf.push(wasm::VERSION_V1);
+            buf.extend_from_slice(&[
+                wasm::opcodes::PUSH_INPUT,
+                0,
+                wasm::opcodes::PUSH_INPUT,
+                1,
+                wasm::opcodes::ADD_I64,
+                wasm::opcodes::RETURN,
+                1,
+            ]);
+            buf
+        };
+        register_dynamic("dyn.test", "/sum", module, 64);
+
+        let state = state_with_domains(&["dyn.test"]);
+        let router = Router::new(state.clone()).route(Method::Post, "/api/*tail", handle_api);
+        let mut body = Vec::new();
+        body.extend_from_slice(&3i64.to_le_bytes());
+        body.extend_from_slice(&7i64.to_le_bytes());
+        let request = router
+            .request_builder()
+            .host("dyn.test")
+            .method(Method::Post)
+            .path("/api/sum")
+            .body(body)
+            .build();
+        let response = router.handle(request).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.body(), 10i64.to_le_bytes());
     }
 }

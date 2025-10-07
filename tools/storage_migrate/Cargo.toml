@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 crypto_suite = { path = "../../crates/crypto_suite" }
-storage_engine = { path = "../../crates/storage_engine", features = ["rocksdb", "sled"] }
+storage_engine = { path = "../../crates/storage_engine" }

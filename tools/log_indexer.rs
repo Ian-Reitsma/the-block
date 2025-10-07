@@ -1,11 +1,12 @@
 use std::error::Error as StdError;
 use std::fmt;
+use std::fs;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::{engine::general_purpose, Engine as _};
+use base64_fp::{decode_standard, encode_standard};
 use cli_core::{
     arg::{ArgSpec, OptionSpec, PositionalSpec},
     command::{Command as CliCommand, CommandBuilder, CommandId},
@@ -17,8 +18,16 @@ use coding::{
     CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
 };
 use crypto_suite::hashing::blake3::derive_key;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
+use sled::{self, Db, Tree};
+
+#[cfg(feature = "sqlite-migration")]
+use rusqlite::{Connection, Row};
+
+const ENTRIES_TREE: &str = "entries";
+const META_TREE: &str = "meta";
+const NEXT_ID_KEY: &str = "next_id";
+const OFFSET_PREFIX: &str = "offset:";
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct LogEntry {
@@ -56,23 +65,142 @@ pub struct LogFilter {
     pub passphrase: Option<String>,
 }
 
-pub type Result<T, E = LogIndexerError> = std::result::Result<T, E>;
+#[derive(Serialize, Deserialize, Clone)]
+struct StoredEntry {
+    id: u64,
+    timestamp: u64,
+    level: String,
+    message: String,
+    correlation_id: String,
+    peer: Option<String>,
+    tx: Option<String>,
+    block: Option<u64>,
+    encrypted: bool,
+    nonce: Option<Vec<u8>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct IngestState {
+    offset: u64,
+    updated_at: u64,
+}
+
+struct LogStore {
+    db: Db,
+    entries: Tree,
+    meta: Tree,
+}
+
+impl LogStore {
+    fn open(path: &Path) -> Result<Self> {
+        let (store_path, legacy_sqlite) = prepare_store_path(path)?;
+        let db = sled::open(&store_path)?;
+        let entries = db.open_tree(ENTRIES_TREE)?;
+        let meta = db.open_tree(META_TREE)?;
+        let store = Self { db, entries, meta };
+        if let Some(legacy) = legacy_sqlite {
+            migrate_sqlite(&store, &legacy)?;
+        }
+        Ok(store)
+    }
+
+    fn load_next_id(&self) -> Result<u64> {
+        if let Some(value) = self.meta.get(NEXT_ID_KEY)? {
+            Ok(bytes_to_u64(&value))
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn save_next_id(&self, id: u64) -> Result<()> {
+        self.meta
+            .insert(NEXT_ID_KEY, id.to_be_bytes().to_vec())?
+            .map(|_| ());
+        Ok(())
+    }
+
+    fn load_offset(&self, source: &str) -> Result<u64> {
+        let key = format!("{OFFSET_PREFIX}{source}");
+        match self.meta.get(key.as_bytes())? {
+            Some(value) => {
+                let state: IngestState = serde_json::from_slice(&value)?;
+                Ok(state.offset)
+            }
+            None => Ok(0),
+        }
+    }
+
+    fn save_offset(&self, source: &str, offset: u64) -> Result<()> {
+        let key = format!("{OFFSET_PREFIX}{source}");
+        let state = IngestState {
+            offset,
+            updated_at: current_unix_seconds(),
+        };
+        self.meta
+            .insert(key.as_bytes(), serde_json::to_vec(&state)?)?
+            .map(|_| ());
+        Ok(())
+    }
+
+    #[cfg(feature = "sqlite-migration")]
+    fn save_offset_with_timestamp(&self, source: &str, offset: u64, updated_at: u64) -> Result<()> {
+        let key = format!("{OFFSET_PREFIX}{source}");
+        let state = IngestState { offset, updated_at };
+        self.meta
+            .insert(key.as_bytes(), serde_json::to_vec(&state)?)?
+            .map(|_| ());
+        Ok(())
+    }
+
+    fn store_entry(&self, entry: &StoredEntry) -> Result<()> {
+        let key = entry_key(entry.id);
+        self.entries
+            .insert(key.as_bytes(), serde_json::to_vec(entry)?)?
+            .map(|_| ());
+        Ok(())
+    }
+
+    fn load_entries(&self) -> Result<Vec<StoredEntry>> {
+        let mut items = Vec::new();
+        for result in self.entries.iter() {
+            let (_, value) = result?;
+            let entry: StoredEntry = serde_json::from_slice(&value)?;
+            items.push(entry);
+        }
+        Ok(items)
+    }
+
+    fn flush(&self) -> Result<()> {
+        self.db.flush()?;
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub enum LogIndexerError {
     Io(io::Error),
-    Sqlite(rusqlite::Error),
+    Storage(sled::Error),
     Json(serde_json::Error),
     Encryption(String),
+    MigrationRequired(PathBuf),
+    #[cfg(feature = "sqlite-migration")]
+    Sqlite(rusqlite::Error),
 }
 
 impl fmt::Display for LogIndexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LogIndexerError::Io(err) => write!(f, "io error: {err}"),
-            LogIndexerError::Sqlite(err) => write!(f, "sqlite error: {err}"),
+            LogIndexerError::Storage(err) => write!(f, "storage error: {err}"),
             LogIndexerError::Json(err) => write!(f, "json error: {err}"),
             LogIndexerError::Encryption(msg) => write!(f, "encryption error: {msg}"),
+            LogIndexerError::MigrationRequired(path) => write!(
+                f,
+                "legacy SQLite database detected at '{}'; rebuild with --features sqlite-migration to migrate",
+                path.display()
+            ),
+            #[cfg(feature = "sqlite-migration")]
+            LogIndexerError::Sqlite(err) => write!(f, "sqlite error: {err}"),
         }
     }
 }
@@ -81,16 +209,19 @@ impl StdError for LogIndexerError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             LogIndexerError::Io(err) => Some(err),
-            LogIndexerError::Sqlite(err) => Some(err),
+            LogIndexerError::Storage(err) => Some(err),
             LogIndexerError::Json(err) => Some(err),
             LogIndexerError::Encryption(_) => None,
+            LogIndexerError::MigrationRequired(_) => None,
+            #[cfg(feature = "sqlite-migration")]
+            LogIndexerError::Sqlite(err) => Some(err),
         }
     }
 }
 
-impl From<rusqlite::Error> for LogIndexerError {
-    fn from(err: rusqlite::Error) -> Self {
-        LogIndexerError::Sqlite(err)
+impl From<sled::Error> for LogIndexerError {
+    fn from(err: sled::Error) -> Self {
+        LogIndexerError::Storage(err)
     }
 }
 
@@ -106,38 +237,33 @@ impl From<serde_json::Error> for LogIndexerError {
     }
 }
 
-/// Index JSON log lines into a SQLite database using default options.
+#[cfg(feature = "sqlite-migration")]
+impl From<rusqlite::Error> for LogIndexerError {
+    fn from(err: rusqlite::Error) -> Self {
+        LogIndexerError::Sqlite(err)
+    }
+}
+
+pub type Result<T, E = LogIndexerError> = std::result::Result<T, E>;
+
+/// Index JSON log lines into the in-house log store using default options.
 pub fn index_logs(log_path: &Path, db_path: &Path) -> Result<()> {
     index_logs_with_options(log_path, db_path, IndexOptions::default())
 }
 
 /// Index JSON log lines with explicit options such as encryption.
 pub fn index_logs_with_options(log_path: &Path, db_path: &Path, opts: IndexOptions) -> Result<()> {
-    let mut conn = Connection::open(db_path)?;
-    ensure_schema(&conn)?;
+    let store = LogStore::open(db_path)?;
     let mut file = File::open(log_path)?;
     let source = canonical_source_key(log_path);
-    let mut offset = last_ingested_offset(&conn, &source)?;
+    let mut offset = store.load_offset(&source)?;
     if offset > 0 {
         file.seek(SeekFrom::Start(offset))?;
     }
     let mut reader = BufReader::new(file);
     let mut line = String::new();
     let key = opts.passphrase.as_ref().map(|p| derive_encryption_key(p));
-    let tx = conn.transaction()?;
-    let mut insert = tx.prepare(
-        "INSERT INTO logs (
-            timestamp,
-            level,
-            message,
-            correlation_id,
-            peer,
-            tx,
-            block,
-            encrypted,
-            nonce
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-    )?;
+    let mut next_id = store.load_next_id()?;
     loop {
         line.clear();
         let bytes = reader.read_line(&mut line)?;
@@ -149,55 +275,31 @@ pub fn index_logs_with_options(log_path: &Path, db_path: &Path, opts: IndexOptio
             continue;
         }
         let entry: LogEntry = serde_json::from_str(line.trim_end())?;
+        next_id = next_id.saturating_add(1);
         let (message, encrypted, nonce) = if let Some(key) = key.as_ref() {
             let (cipher, nonce) = encrypt_message(key, &entry.message)?;
-            (cipher, 1i64, Some(nonce))
+            (cipher, true, Some(nonce))
         } else {
-            (entry.message.clone(), 0i64, None)
+            (entry.message.clone(), false, None)
         };
-        insert.execute(params![
-            entry.timestamp,
-            entry.level,
+        let stored = StoredEntry {
+            id: next_id,
+            timestamp: entry.timestamp,
+            level: entry.level,
             message,
-            entry.correlation_id,
-            entry.peer,
-            entry.tx,
-            entry.block.map(|b| b as i64),
+            correlation_id: entry.correlation_id,
+            peer: entry.peer,
+            tx: entry.tx,
+            block: entry.block,
             encrypted,
             nonce,
-        ])?;
-        increment_indexed_metric(&entry.correlation_id);
+        };
+        store.store_entry(&stored)?;
+        increment_indexed_metric(&stored.correlation_id);
     }
-    drop(insert);
-    update_ingest_offset(&tx, &source, offset)?;
-    tx.commit()?;
-    Ok(())
-}
-
-fn ensure_schema(conn: &Connection) -> Result<()> {
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp INTEGER,
-            level TEXT,
-            message TEXT,
-            correlation_id TEXT,
-            peer TEXT,
-            tx TEXT,
-            block INTEGER,
-            encrypted INTEGER NOT NULL DEFAULT 0,
-            nonce BLOB
-        )",
-        [],
-    )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ingest_state (
-            source TEXT PRIMARY KEY,
-            offset INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        )",
-        [],
-    )?;
+    store.save_offset(&source, offset)?;
+    store.save_next_id(next_id)?;
+    store.flush()?;
     Ok(())
 }
 
@@ -208,30 +310,6 @@ fn canonical_source_key(path: &Path) -> String {
         .to_string()
 }
 
-fn last_ingested_offset(conn: &Connection, source: &str) -> Result<u64> {
-    let value = conn
-        .query_row(
-            "SELECT offset FROM ingest_state WHERE source = ?1",
-            params![source],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()?;
-    Ok(value.unwrap_or(0).max(0) as u64)
-}
-
-fn update_ingest_offset(tx: &rusqlite::Transaction<'_>, source: &str, offset: u64) -> Result<()> {
-    let updated_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    tx.execute(
-        "INSERT INTO ingest_state (source, offset, updated_at) VALUES (?1, ?2, ?3)
-        ON CONFLICT(source) DO UPDATE SET offset = excluded.offset, updated_at = excluded.updated_at",
-        params![source, offset as i64, updated_at],
-    )?;
-    Ok(())
-}
-
 fn encrypt_message(
     key: &[u8; CHACHA20_POLY1305_KEY_LEN],
     message: &str,
@@ -239,7 +317,7 @@ fn encrypt_message(
     let payload = encrypt_xchacha20_poly1305(key, message.as_bytes())
         .map_err(|e| LogIndexerError::Encryption(format!("encrypt: {e}")))?;
     let (nonce, body) = payload.split_at(XCHACHA20_POLY1305_NONCE_LEN);
-    Ok((general_purpose::STANDARD.encode(body), nonce.to_vec()))
+    Ok((encode_standard(body), nonce.to_vec()))
 }
 
 fn decrypt_message(
@@ -247,7 +325,7 @@ fn decrypt_message(
     data: &str,
     nonce: &[u8],
 ) -> Option<String> {
-    let body = general_purpose::STANDARD.decode(data).ok()?;
+    let body = decode_standard(data).ok()?;
     if nonce.is_empty() {
         return decrypt_xchacha20_poly1305(key, &body)
             .ok()
@@ -296,89 +374,74 @@ fn increment_indexed_metric(correlation_id: &str) {
 #[cfg(not(feature = "telemetry"))]
 fn increment_indexed_metric(_correlation_id: &str) {}
 
-fn row_to_entry(row: &Row<'_>, key: Option<&[u8; CHACHA20_POLY1305_KEY_LEN]>) -> Result<LogEntry> {
-    let encrypted: i64 = row.get("encrypted")?;
-    let nonce: Option<Vec<u8>> = row.get("nonce")?;
-    let stored_msg: String = row.get("message")?;
-    let message = if encrypted == 1 {
-        if let (Some(key), Some(nonce)) = (key, nonce.as_ref()) {
-            decrypt_message(key, &stored_msg, nonce).unwrap_or_else(|| "<decrypt-failed>".into())
-        } else {
-            "<encrypted>".into()
-        }
-    } else {
-        stored_msg
-    };
-    Ok(LogEntry {
-        id: row.get::<_, Option<i64>>("id")?.map(|v| v.max(0) as u64),
-        timestamp: row.get("timestamp")?,
-        level: row.get("level")?,
-        message,
-        correlation_id: row.get("correlation_id")?,
-        peer: row.get("peer")?,
-        tx: row.get("tx")?,
-        block: row.get::<_, Option<i64>>("block")?.map(|v| v as u64),
-    })
+fn bytes_to_u64(value: &[u8]) -> u64 {
+    let mut buf = [0u8; 8];
+    let len = value.len().min(8);
+    buf[8 - len..].copy_from_slice(&value[value.len() - len..]);
+    u64::from_be_bytes(buf)
+}
+
+fn entry_key(id: u64) -> String {
+    format!("entry:{id:016x}")
+}
+
+fn current_unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Search indexed logs with optional filters.
 pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> {
-    let conn = Connection::open(db_path)?;
-    ensure_schema(&conn)?;
-    let mut clauses = Vec::new();
-    let mut values: Vec<rusqlite::types::Value> = Vec::new();
-    if let Some(after) = filter.after_id {
-        clauses.push("id > ?".to_string());
-        values.push((after as i64).into());
-    }
-    if let Some(peer) = &filter.peer {
-        clauses.push("peer = ?".to_string());
-        values.push(peer.clone().into());
-    }
-    if let Some(tx) = &filter.tx {
-        clauses.push("tx = ?".to_string());
-        values.push(tx.clone().into());
-    }
-    if let Some(block) = filter.block {
-        clauses.push("block = ?".to_string());
-        values.push((block as i64).into());
-    }
-    if let Some(corr) = &filter.correlation {
-        clauses.push("correlation_id = ?".to_string());
-        values.push(corr.clone().into());
-    }
-    if let Some(level) = &filter.level {
-        clauses.push("level = ?".to_string());
-        values.push(level.clone().into());
-    }
-    if let Some(since) = filter.since {
-        clauses.push("timestamp >= ?".to_string());
-        values.push((since as i64).into());
-    }
-    if let Some(until) = filter.until {
-        clauses.push("timestamp <= ?".to_string());
-        values.push((until as i64).into());
-    }
-    let mut sql = String::from(
-        "SELECT id, timestamp, level, message, correlation_id, peer, tx, block, encrypted, nonce FROM logs",
-    );
-    if !clauses.is_empty() {
-        sql.push_str(" WHERE ");
-        sql.push_str(&clauses.join(" AND "));
-    }
-    sql.push_str(" ORDER BY timestamp DESC");
-    if let Some(limit) = filter.limit {
-        sql.push_str(" LIMIT ?");
-        values.push((limit as i64).into());
-    }
-    let mut stmt = conn.prepare(&sql)?;
+    let store = LogStore::open(db_path)?;
+    let entries = store.load_entries()?;
     let key = filter.passphrase.as_ref().map(|p| derive_encryption_key(p));
     let key_ref = key.as_ref();
-    let mut rows = stmt.query(params_from_iter(values.iter()))?;
-    let mut out = Vec::new();
-    while let Some(row) = rows.next()? {
-        out.push(row_to_entry(row, key_ref)?);
+    let mut results: Vec<LogEntry> = entries
+        .into_iter()
+        .filter(|entry| match filter.after_id {
+            Some(after) => entry.id > after,
+            None => true,
+        })
+        .filter(|entry| match &filter.peer {
+            Some(peer) => entry.peer.as_deref() == Some(peer.as_str()),
+            None => true,
+        })
+        .filter(|entry| match &filter.tx {
+            Some(tx) => entry.tx.as_deref() == Some(tx.as_str()),
+            None => true,
+        })
+        .filter(|entry| match filter.block {
+            Some(block) => entry.block == Some(block),
+            None => true,
+        })
+        .filter(|entry| match &filter.correlation {
+            Some(corr) => entry.correlation_id == *corr,
+            None => true,
+        })
+        .filter(|entry| match &filter.level {
+            Some(level) => entry.level == *level,
+            None => true,
+        })
+        .filter(|entry| match filter.since {
+            Some(since) => entry.timestamp >= since,
+            None => true,
+        })
+        .filter(|entry| match filter.until {
+            Some(until) => entry.timestamp <= until,
+            None => true,
+        })
+        .map(|entry| stored_to_public(entry, key_ref))
+        .collect();
+
+    results.sort_by(|a, b| b.timestamp.cmp(&a.timestamp).then_with(|| b.id.cmp(&a.id)));
+    if let Some(limit) = filter.limit {
+        if results.len() > limit {
+            results.truncate(limit);
+        }
     }
+
     #[cfg(feature = "telemetry")]
     {
         if filter
@@ -386,12 +449,154 @@ pub fn search_logs(db_path: &Path, filter: &LogFilter) -> Result<Vec<LogEntry>> 
             .as_ref()
             .map(|c| !c.is_empty())
             .unwrap_or(false)
-            && out.is_empty()
+            && results.is_empty()
         {
             crate::telemetry::record_log_correlation_fail();
         }
     }
-    Ok(out)
+
+    Ok(results)
+}
+
+fn stored_to_public(entry: StoredEntry, key: Option<&[u8; CHACHA20_POLY1305_KEY_LEN]>) -> LogEntry {
+    let message = if entry.encrypted {
+        if let (Some(key), Some(nonce)) = (key, entry.nonce.as_ref()) {
+            decrypt_message(key, &entry.message, nonce).unwrap_or_else(|| "<decrypt-failed>".into())
+        } else {
+            "<encrypted>".into()
+        }
+    } else {
+        entry.message
+    };
+
+    LogEntry {
+        id: Some(entry.id),
+        timestamp: entry.timestamp,
+        level: entry.level,
+        message,
+        correlation_id: entry.correlation_id,
+        peer: entry.peer,
+        tx: entry.tx,
+        block: entry.block,
+    }
+}
+
+fn prepare_store_path(path: &Path) -> Result<(PathBuf, Option<PathBuf>)> {
+    if path.exists() {
+        if path.is_dir() {
+            return Ok((path.to_path_buf(), None));
+        }
+        #[cfg(not(feature = "sqlite-migration"))]
+        {
+            return Err(LogIndexerError::MigrationRequired(path.to_path_buf()));
+        }
+        #[cfg(feature = "sqlite-migration")]
+        {
+            let legacy = rename_legacy_file(path)?;
+            fs::create_dir_all(path)?;
+            return Ok((path.to_path_buf(), Some(legacy)));
+        }
+    }
+    fs::create_dir_all(path)?;
+    Ok((path.to_path_buf(), None))
+}
+
+#[cfg(feature = "sqlite-migration")]
+fn rename_legacy_file(path: &Path) -> Result<PathBuf> {
+    let mut candidate = path.with_extension("sqlite");
+    let mut counter = 0u32;
+    while candidate.exists() {
+        counter += 1;
+        candidate = path.with_extension(format!("sqlite.{counter}"));
+    }
+    fs::rename(path, &candidate)?;
+    Ok(candidate)
+}
+
+#[cfg(feature = "sqlite-migration")]
+fn migrate_sqlite(store: &LogStore, legacy_path: &Path) -> Result<()> {
+    let conn = Connection::open(legacy_path)?;
+    ensure_schema(&conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, timestamp, level, message, correlation_id, peer, tx, block, encrypted, nonce FROM logs ORDER BY id ASC",
+    )?;
+    let mut rows = stmt.query([])?;
+    let mut max_id = store.load_next_id()?;
+    while let Some(row) = rows.next()? {
+        let entry = row_to_stored_entry(row)?;
+        max_id = max_id.max(entry.id);
+        store.store_entry(&entry)?;
+    }
+    let mut offset_stmt = conn.prepare("SELECT source, offset, updated_at FROM ingest_state")?;
+    let mut offset_rows = offset_stmt.query([])?;
+    while let Some(row) = offset_rows.next()? {
+        let source: String = row.get(0)?;
+        let offset: i64 = row.get(1)?;
+        let updated_at: i64 = row.get(2)?;
+        store.save_offset_with_timestamp(
+            &source,
+            offset.max(0) as u64,
+            updated_at.max(0) as u64,
+        )?;
+    }
+    store.save_next_id(max_id)?;
+    store.flush()?;
+    Ok(())
+}
+
+#[cfg(not(feature = "sqlite-migration"))]
+fn migrate_sqlite(_store: &LogStore, _legacy_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(feature = "sqlite-migration")]
+fn ensure_schema(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp INTEGER,
+            level TEXT,
+            message TEXT,
+            correlation_id TEXT,
+            peer TEXT,
+            tx TEXT,
+            block INTEGER,
+            encrypted INTEGER NOT NULL DEFAULT 0,
+            nonce BLOB
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ingest_state (
+            source TEXT PRIMARY KEY,
+            offset INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    Ok(())
+}
+
+#[cfg(feature = "sqlite-migration")]
+fn row_to_stored_entry(row: &Row<'_>) -> Result<StoredEntry> {
+    let encrypted: i64 = row.get("encrypted")?;
+    let nonce: Option<Vec<u8>> = row.get("nonce")?;
+    let message: String = row.get("message")?;
+    Ok(StoredEntry {
+        id: row
+            .get::<_, Option<i64>>("id")?
+            .map(|v| v.max(0) as u64)
+            .unwrap_or_default(),
+        timestamp: row.get("timestamp")?,
+        level: row.get("level")?,
+        message,
+        correlation_id: row.get("correlation_id")?,
+        peer: row.get("peer")?,
+        tx: row.get("tx")?,
+        block: row.get::<_, Option<i64>>("block")?.map(|v| v as u64),
+        encrypted: encrypted == 1,
+        nonce,
+    })
 }
 
 #[derive(Debug)]
@@ -418,17 +623,10 @@ fn main() {
 
 fn run_cli() -> Result<(), CliError> {
     let mut argv = std::env::args();
-    let bin = argv.next().unwrap_or_else(|| "log-indexer".to_string());
-    let args: Vec<String> = argv.collect();
-
+    let _bin = argv.next().unwrap_or_else(|| "log-indexer".into());
     let command = build_command();
-    if args.is_empty() {
-        print_root_help(&command, &bin);
-        return Ok(());
-    }
-
     let parser = Parser::new(&command);
-    let matches = match parser.parse(&args) {
+    let matches = match parser.parse(&argv.collect::<Vec<_>>()) {
         Ok(matches) => matches,
         Err(ParseError::HelpRequested(path)) => {
             print_help_for_path(&command, &path);
@@ -457,7 +655,7 @@ fn build_command() -> CliCommand {
         CommandBuilder::new(
             CommandId("log-indexer.index"),
             "index",
-            "Index a JSON log file into SQLite",
+            "Index a JSON log file into the in-house log store",
         )
         .arg(ArgSpec::Positional(PositionalSpec::new(
             "log",
@@ -465,7 +663,7 @@ fn build_command() -> CliCommand {
         )))
         .arg(ArgSpec::Positional(PositionalSpec::new(
             "db",
-            "Destination SQLite database file",
+            "Destination directory for the log store",
         )))
         .arg(ArgSpec::Option(OptionSpec::new(
             "passphrase",
@@ -482,7 +680,7 @@ fn build_command() -> CliCommand {
         )
         .arg(ArgSpec::Positional(PositionalSpec::new(
             "db",
-            "SQLite database file produced by 'index'",
+            "Log store directory produced by 'index'",
         )))
         .arg(ArgSpec::Option(OptionSpec::new(
             "peer",

@@ -13,8 +13,6 @@ strategic = [
   "ed25519-dalek",
 ]
 replaceable = [
-  "sled",
-  "rocksdb",
   "serde",
   "bincode",
 ]

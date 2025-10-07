@@ -1,5 +1,5 @@
 #[cfg(feature = "pq")]
-use base64::Engine as _;
+use base64_fp::encode_standard;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -133,7 +133,7 @@ pub fn log_law_enforcement_request(path: impl AsRef<Path>, metadata: &str) -> st
     #[cfg(feature = "pq")]
     let out = {
         let enc = encrypt_metadata(metadata.as_bytes());
-        base64::engine::general_purpose::STANDARD.encode(enc)
+        encode_standard(&enc)
     };
     #[cfg(not(feature = "pq"))]
     let out = metadata.to_owned();

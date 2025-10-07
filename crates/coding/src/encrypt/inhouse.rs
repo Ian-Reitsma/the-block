@@ -1,6 +1,6 @@
 use crate::error::EncryptError;
+use crate::primitives::rng;
 use core::num::Wrapping;
-use rand::{rngs::OsRng, RngCore};
 
 pub const KEY_LEN: usize = 32;
 pub const NONCE_LEN: usize = 12;
@@ -438,7 +438,8 @@ fn seal_with_nonce(
 
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>, EncryptError> {
     let mut nonce = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    rng::fill_secure_bytes(&mut nonce)
+        .map_err(|err| EncryptError::EntropyUnavailable { reason: err.reason })?;
     seal_with_nonce(key, &nonce, plaintext)
 }
 
@@ -476,7 +477,8 @@ fn seal_xchacha_with_nonce(
 
 pub fn encrypt_xchacha(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>, EncryptError> {
     let mut nonce = [0u8; XNONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+    rng::fill_secure_bytes(&mut nonce)
+        .map_err(|err| EncryptError::EntropyUnavailable { reason: err.reason })?;
     seal_xchacha_with_nonce(key, &nonce, plaintext)
 }
 

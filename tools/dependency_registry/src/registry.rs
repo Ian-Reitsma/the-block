@@ -3,10 +3,10 @@ use std::{
     path::Path,
 };
 
-use anyhow::{Context, Result};
 use camino::Utf8Path;
 use cargo_metadata::{Metadata, MetadataCommand, Node, Package, PackageId};
 use chrono::Utc;
+use diagnostics::anyhow::{Context, Result};
 
 use crate::{
     config::PolicyConfig,

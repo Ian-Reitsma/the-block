@@ -35,15 +35,14 @@ first eight bytes of its BLAKE3 digest as a `u64`.
 
 ## Fuel conversion
 
-The WASM executor translates remaining gas into Wasmtime fuel using
-`FUEL_PER_GAS`. Each call to `vm::wasm::execute` seeds the store via
-`Store::set_fuel` with the full `GasMeter::remaining()` budget and refuses to
-start if no gas is left, ensuring contracts observe deterministic out-of-gas
-failures before any code runs. After execution completes the remaining fuel is
-queried with `Store::get_fuel` so the meter can be charged exactly. If the host
-Wasmtime build was compiled without fuel support the executor now surfaces a
-clear error instructing operators to enable `Config::consume_fuel` rather than
-silently mis-accounting gas.
+The WASM executor translates remaining gas into engine fuel using
+`FUEL_PER_GAS`. Modules target a lightweight first-party interpreter with the
+`TBW1` magic header and a compact stack machine instruction set. Each opcode
+(`push_i64`, `push_input`, arithmetic, equality, and `return`) consumes one unit
+of gas when executed. A return count of zero yields the entire stack as the
+result payload; a positive count returns that many values from the top of the
+stack. Modules that request more inputs than supplied or attempt division by
+zero raise an execution error.
 
 ## Example
 

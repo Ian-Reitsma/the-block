@@ -7,7 +7,7 @@ edition = "2021"
 # Post-quantum Dilithium implementation
 pqcrypto-dilithium = { version = "0.5", optional = true }
 pqcrypto-traits = { version = "0.3", optional = true }
-rand = "0.8"
+base64_fp = { path = "../crates/base64_fp" }
 crypto_suite = { path = "../crates/crypto_suite" }
 
 [features]

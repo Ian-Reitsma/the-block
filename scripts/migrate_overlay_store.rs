@@ -20,14 +20,14 @@ struct PersistedPeers {
 }
 
 fn default_old_path() -> PathBuf {
-    dirs::home_dir()
+    sys::paths::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".the_block")
         .join("overlay_peers.json")
 }
 
 fn default_new_path() -> PathBuf {
-    dirs::home_dir()
+    sys::paths::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".the_block")
         .join("overlay")

@@ -21,7 +21,7 @@ connected replicas of the RPC state.
   - `TB_MOBILE_CACHE_SWEEP_SECS` – sweep cadence (default 30 seconds).
   - `TB_MOBILE_CACHE_MAX_ENTRIES` / `TB_MOBILE_CACHE_MAX_BYTES` – per-entry count and payload caps.
   - `TB_MOBILE_CACHE_MAX_QUEUE` – maximum queued offline transactions.
-  - `TB_MOBILE_CACHE_DB` – persistence directory for the sled database (default `mobile_cache.db`).
+  - `TB_MOBILE_CACHE_DB` – persistence directory for the first-party sled database (default `mobile_cache.db`).
 
 ## Offline queue and invalidation
 
@@ -91,8 +91,9 @@ Entries are sorted by key; ages rely on monotonic clocks and reset to zero after
 ## Backwards compatibility
 
 Existing deployments should export a cache key derived from the node’s signing key via `TB_MOBILE_CACHE_KEY_HEX` before
-upgrading. The gateway automatically migrates prior in-memory data into the encrypted sled store on first run. To migrate
-older cache directories:
+upgrading. The gateway automatically migrates prior in-memory data into the encrypted sled store on first run; legacy
+third-party sled directories are upgraded in place when the node is rebuilt with the `sled` crate’s `legacy-format`
+feature. To migrate older cache directories manually:
 
 1. Stop the gateway node and ensure `TB_MOBILE_CACHE_DB` points at the directory that should host `mobile_cache.db`.
 2. Back up and remove any legacy plaintext cache files (previous builds sometimes wrote JSON under `gateway/mobile_cache/`).

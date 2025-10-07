@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use anyhow::{anyhow, Context, Result};
+use diagnostics::anyhow as diag_anyhow;
+use diagnostics::anyhow::{Context, Result};
 
 use crate::model::{DependencyEntry, DependencyRegistry, ViolationReport};
 
@@ -65,6 +66,25 @@ pub fn write_markdown(registry: &DependencyRegistry, markdown_path: &Path) -> Re
 
     fs::write(markdown_path, rows)
         .with_context(|| format!("unable to write {}", markdown_path.display()))
+}
+
+pub fn write_crate_manifest(registry: &DependencyRegistry, manifest_path: &Path) -> Result<()> {
+    if let Some(parent) = manifest_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let mut names = registry
+        .entries
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
+    names.sort();
+    names.dedup();
+
+    let buffer = names.join("\n");
+    fs::write(manifest_path, buffer)
+        .with_context(|| format!("unable to write {}", manifest_path.display()))
 }
 
 pub fn write_violations(report: &ViolationReport, out_dir: &Path) -> Result<()> {
@@ -271,7 +291,7 @@ pub fn explain_crate(crate_name: &str, registry_path: &Path) -> Result<()> {
     }
 
     if !found {
-        return Err(anyhow!(
+        return Err(diag_anyhow::anyhow!(
             "crate {} not present in registry {}",
             crate_name,
             registry_path.display()

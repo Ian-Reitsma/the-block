@@ -1,10 +1,11 @@
 use once_cell::sync::OnceCell;
-use sled::Tree;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::simple_db::{names, SimpleDb};
+
 pub struct BanStore {
-    tree: Tree,
+    db: Mutex<SimpleDb>,
 }
 
 /// Minimal trait so callers (and tests) can provide an alternate backend
@@ -17,22 +18,26 @@ pub trait BanStoreLike {
 
 impl BanStore {
     pub fn open(path: &str) -> Self {
-        let db = sled::open(path).unwrap_or_else(|e| panic!("open ban db: {e}"));
-        let tree = db
-            .open_tree("bans")
-            .unwrap_or_else(|e| panic!("open bans tree: {e}"));
-        Self { tree }
+        let db = SimpleDb::open_named(names::NET_BANS, path);
+        Self { db: Mutex::new(db) }
     }
 
     pub fn ban(&self, pk: &[u8; 32], until: u64) {
-        let _ = self.tree.insert(pk, &until.to_be_bytes());
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let key = key_for(pk);
+        db.put(key.as_bytes(), &until.to_be_bytes())
+            .unwrap_or_else(|e| panic!("store ban {key}: {e}"));
+        drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         tracing::info!(peer = %hex::encode(pk), until, "peer banned");
         self.update_metric();
     }
 
     pub fn unban(&self, pk: &[u8; 32]) {
-        let _ = self.tree.remove(pk);
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let key = key_for(pk);
+        let _ = db.try_remove(&key);
+        drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
         tracing::info!(peer = %hex::encode(pk), "peer unbanned");
         self.update_metric();
@@ -40,69 +45,59 @@ impl BanStore {
 
     pub fn is_banned(&self, pk: &[u8; 32]) -> bool {
         self.purge_expired();
-        if let Ok(Some(v)) = self.tree.get(pk) {
-            let mut arr = [0u8; 8];
-            arr.copy_from_slice(&v);
-            let ts = u64::from_be_bytes(arr);
-            let now = current_ts();
-            if ts > now {
-                return true;
-            }
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let key = key_for(pk);
+        if let Some(ts) = db.get(&key).and_then(as_timestamp) {
+            return ts > current_ts();
         }
         false
     }
 
     pub fn purge_expired(&self) {
         let now = current_ts();
-        let keys: Vec<Vec<u8>> = self
-            .tree
-            .iter()
-            .filter_map(|res| res.ok())
-            .filter_map(|(k, v)| {
-                let mut arr = [0u8; 8];
-                arr.copy_from_slice(&v);
-                let ts = u64::from_be_bytes(arr);
-                if ts <= now {
-                    Some(k.to_vec())
-                } else {
-                    None
-                }
+        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let keys: Vec<String> = db
+            .keys_with_prefix("")
+            .into_iter()
+            .filter(|key| {
+                db.get(key)
+                    .and_then(as_timestamp)
+                    .map(|ts| ts <= now)
+                    .unwrap_or(false)
             })
             .collect();
-        for k in keys {
-            let _ = self.tree.remove(k);
+        for key in keys {
+            let _ = db.try_remove(&key);
         }
+        drop(db);
         self.update_metric();
     }
 
     pub fn list(&self) -> Vec<(String, u64)> {
         self.purge_expired();
-        self.tree
-            .iter()
-            .filter_map(|res| res.ok())
-            .map(|(k, v)| {
-                let mut arr = [0u8; 8];
-                arr.copy_from_slice(&v);
-                let ts = u64::from_be_bytes(arr);
-                (hex::encode(k.as_ref()), ts)
-            })
-            .collect()
+        self.entries()
     }
 
     fn update_metric(&self) {
         #[cfg(feature = "telemetry")]
         {
-            crate::telemetry::BANNED_PEERS_TOTAL.set(self.tree.len() as i64);
+            let entries = self.entries();
+            crate::telemetry::BANNED_PEERS_TOTAL.set(entries.len() as i64);
             crate::telemetry::BANNED_PEER_EXPIRATION.reset();
-            for res in self.tree.iter().filter_map(|r| r.ok()) {
-                let mut arr = [0u8; 8];
-                arr.copy_from_slice(&res.1);
-                let ts = u64::from_be_bytes(arr);
+            for (peer, ts) in entries {
                 crate::telemetry::BANNED_PEER_EXPIRATION
-                    .with_label_values(&[&hex::encode(res.0.as_ref())])
+                    .with_label_values(&[&peer])
                     .set(ts as i64);
             }
         }
+    }
+
+    fn entries(&self) -> Vec<(String, u64)> {
+        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.keys_with_prefix("")
+            .into_iter()
+            .filter_map(|key| db.get(&key).and_then(as_timestamp).map(|ts| (key, ts)))
+            .collect()
     }
 }
 
@@ -125,6 +120,19 @@ fn current_ts() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|e| panic!("time error: {e}"))
         .as_secs()
+}
+
+fn key_for(pk: &[u8; 32]) -> String {
+    hex::encode(pk)
+}
+
+fn as_timestamp(bytes: Vec<u8>) -> Option<u64> {
+    if bytes.len() != 8 {
+        return None;
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&bytes);
+    Some(u64::from_be_bytes(arr))
 }
 
 static BAN_STORE: OnceCell<Mutex<BanStore>> = OnceCell::new();

@@ -50,7 +50,7 @@ pub fn encrypt_for_recipient(
     plaintext: &[u8],
     recipient: &PublicKey,
 ) -> Result<Vec<u8>, EnvelopeError> {
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let ephemeral = SecretKey::generate(&mut rng);
     let shared = ephemeral.diffie_hellman(recipient);
 
@@ -107,7 +107,7 @@ pub fn decrypt_with_secret(
 }
 
 pub fn encrypt_with_password(plaintext: &[u8], password: &[u8]) -> Result<Vec<u8>, EnvelopeError> {
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut salt = [0u8; SALT_LEN];
     rng.fill_bytes(&mut salt);
     let (key, iv, mac_key) = derive_material(password, &salt, PASSWORD_INFO);
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn round_trip_recipient() {
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         let secret = SecretKey::generate(&mut rng);
         let recipient = secret.public_key();
         let plaintext = b"hello world".to_vec();
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn authentication_failure() {
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         let secret = SecretKey::generate(&mut rng);
         let recipient = secret.public_key();
         let mut envelope = encrypt_for_recipient(b"hello", &recipient).unwrap();

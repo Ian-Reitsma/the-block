@@ -8,24 +8,36 @@ individual log entries with telemetry metrics and external tooling.
 Logs emitted as JSON can be indexed with the `log_indexer` utility:
 
 ```
-$ cargo run --release --manifest-path tools/log_indexer_cli/Cargo.toml -- index <logfile> <sqlite.db>
-$ cargo run --release --manifest-path tools/log_indexer_cli/Cargo.toml -- index <logfile> <sqlite.db> --passphrase secret
+$ cargo run --release --manifest-path tools/log_indexer_cli/Cargo.toml -- index <logfile> <log_store_dir>
+$ cargo run --release --manifest-path tools/log_indexer_cli/Cargo.toml -- index <logfile> <log_store_dir> --passphrase secret
 ```
 
-The indexer stores each entry's timestamp, level, message and
-correlation identifier in a SQLite database while recording the last
-file offset it processed. Subsequent runs resume automatically from the
-previous offset, and every insert increments both the
-`log_entries_indexed_total` counter and the correlation-tagged
+The indexer now persists each entry's timestamp, level, message and
+correlation identifier inside a first-party key-value store backed by
+the in-house storage engine while recording the last file offset it
+processed. Subsequent runs resume automatically from the previous offset
+and every insert increments both the `log_entries_indexed_total`
+counter and the correlation-tagged
 `log_correlation_index_total{correlation_id="…"}` metric for
-observability.
+observability. If you are upgrading from a legacy SQLite `.db` file,
+pass the existing path to the new indexer and enable the
+`sqlite-migration` feature (`cargo run --features sqlite-migration …`) to
+perform an in-place import before switching back to the default build.
+
+> **Serialization migration.** While the logging stack is still wired to the
+> legacy JSON/TOML tooling, the new `foundation_serialization` crate already
+> ships stub traits and helpers for JSON/CBOR/binary formats. Expect RPC and CLI
+> entry points to start depending on those traits so we can excise `serde` and
+> friends without keeping their derive macros in the hot path. Until the
+> implementation lands the helpers intentionally return `unimplemented` errors
+> to keep accidental linkage with the third-party crates impossible.
 
 Once indexed, the CLI can query for specific correlation IDs, peer
 identifiers, transaction hashes or block numbers via:
 
 ```
-$ contract logs search --db sqlite.db --correlation <id>
-$ contract logs search --db sqlite.db --peer peer-42 --since 1700000000 --until 1700003600
+$ contract logs search --db log_store_dir --correlation <id>
+$ contract logs search --db log_store_dir --peer peer-42 --since 1700000000 --until 1700003600
 ```
 
 The metrics aggregator ingests the same `correlation_id` labels from
@@ -62,7 +74,7 @@ If `--passphrase` is omitted the command prompts securely. Operators can
 rotate encrypted payloads in-place using:
 
 ```
-$ contract logs rotate-key --db sqlite.db --old-passphrase old --new-passphrase new
+$ contract logs rotate-key --db log_store_dir --old-passphrase old --new-passphrase new
 ```
 
 Encrypted messages are decrypted on the fly when the same passphrase is

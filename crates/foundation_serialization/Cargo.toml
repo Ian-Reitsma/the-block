@@ -1,0 +1,9 @@
+[package]
+name = "foundation_serialization"
+version = "0.1.0"
+edition = "2021"
+description = "First-party serialization scaffolding for The Block"
+authors = ["The Block Dev Team"]
+license = "MIT"
+
+[dependencies]

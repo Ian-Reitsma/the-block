@@ -1,5 +1,4 @@
 pub mod abi;
-pub mod abi_wasm;
 pub mod bytecode;
 pub mod contracts;
 pub mod debugger;

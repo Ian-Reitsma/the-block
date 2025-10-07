@@ -5,12 +5,10 @@ use crypto_suite::hashing::blake3;
 use crypto_suite::{self, signatures::ed25519};
 #[cfg(feature = "telemetry")]
 use dashmap::DashMap;
-#[cfg(feature = "telemetry")]
-use hdrhistogram::Histogram as HdrHistogram;
 use hex;
-use once_cell::sync::Lazy;
 #[cfg(feature = "telemetry")]
-use procfs::process::Process;
+use histogram_fp::Histogram as HdrHistogram;
+use once_cell::sync::Lazy;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
     IntGaugeVec, Opts, Registry, TextEncoder,
@@ -24,6 +22,8 @@ use std::sync::RwLock;
 #[cfg(feature = "telemetry")]
 use std::sync::{Mutex, Once};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(feature = "telemetry")]
+use sys::process;
 #[cfg(feature = "telemetry")]
 use ureq;
 
@@ -58,7 +58,7 @@ const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["inhouse", "stub"];
 #[cfg(feature = "telemetry")]
 const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
 #[cfg(feature = "telemetry")]
-const KNOWN_STORAGE_ENGINES: [&str; 4] = ["memory", "inhouse", "rocksdb", "sled"];
+const KNOWN_STORAGE_ENGINES: [&str; 4] = ["memory", "inhouse", "rocksdb", "rocksdb-compat"];
 #[cfg(feature = "telemetry")]
 const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
     ("bincode", &["transaction", "gossip", "storage_manifest"]),
@@ -110,7 +110,7 @@ pub struct MemorySnapshot {
 
 #[cfg(feature = "telemetry")]
 struct MemoryHist {
-    hist: Mutex<HdrHistogram<u64>>,
+    hist: Mutex<HdrHistogram>,
     latest: AtomicU64,
 }
 
@@ -145,7 +145,7 @@ impl MemoryHist {
 
     fn snapshot(&self) -> MemorySnapshot {
         let latest = self.latest.load(Ordering::Relaxed);
-        if let Ok(guard) = self.hist.lock() {
+        if let Ok(mut guard) = self.hist.lock() {
             if guard.len() == 0 {
                 MemorySnapshot {
                     latest,
@@ -823,12 +823,7 @@ pub fn force_compact() {
 
 #[cfg(feature = "telemetry")]
 pub fn current_alloc_bytes() -> u64 {
-    if let Ok(proc) = Process::myself() {
-        if let Ok(statm) = proc.statm() {
-            return statm.resident * procfs::page_size() as u64;
-        }
-    }
-    0
+    process::resident_memory_bytes().unwrap_or(0)
 }
 
 #[cfg(feature = "telemetry")]

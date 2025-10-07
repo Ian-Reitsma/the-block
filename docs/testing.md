@@ -79,27 +79,28 @@ cargo test --all --features test-telemetry --release
 
 ### Memory-Constrained integration runs
 
-- The `lightweight-integration` crate feature swaps the RocksDB-backed
-  `SimpleDb` for an in-memory implementation that snapshots column families to
-  disk. Enable this feature when running the heaviest integration targets
-  (such as `gov_dependencies` and `maybe_purge_loop`) on machines with limited
-  RAM:
+- The `lightweight-integration` crate feature swaps the legacy
+  RocksDB-compatible adapter for an in-memory implementation that snapshots
+  column families to disk. Enable this feature when running the heaviest
+  integration targets (such as `gov_dependencies` and `maybe_purge_loop`) on
+  machines with limited RAM:
 
   ```
   cargo test -p the_block --no-default-features --features lightweight-integration --test gov_dependencies
   cargo test -p the_block --no-default-features --features lightweight-integration --test maybe_purge_loop
   ```
 
-- To compare behaviour with the RocksDB backend, run the same targets with
-  `--features storage-rocksdb` (and optionally `--no-default-features` if you
-  only need the library):
+- To compare behaviour with the compatibility wrapper, run the same targets
+  with `--features storage-rocksdb` (and optionally `--no-default-features` if
+  you only need the library). The flag now maps to the first-party engine while
+  preserving historical feature gating:
 
   ```
   cargo test -p the_block --no-default-features --features storage-rocksdb --test gov_dependencies
   ```
 
-- `cargo test` without additional flags continues to exercise the full RocksDB
-  stack for suites that require on-disk persistence and WAL recovery.
+- `cargo test` without additional flags now exercises the first-party backend.
+  The RocksDB stack is no longer linked during workspace builds.
 
 ### Opting in to integration binaries
 

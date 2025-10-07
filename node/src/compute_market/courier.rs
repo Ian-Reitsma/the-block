@@ -40,7 +40,8 @@ impl CourierStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|e| panic!("time error: {e}"))
             .as_secs();
-        let id = rand::rngs::OsRng.next_u64();
+        let mut rng = rand::rngs::OsRng::default();
+        let id = rng.next_u64();
         let receipt = CourierReceipt {
             id,
             bundle_hash,

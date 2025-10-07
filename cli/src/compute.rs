@@ -448,7 +448,7 @@ fn cancel_log_path() -> std::path::PathBuf {
     std::env::var("TB_CANCEL_PATH")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            sys::paths::home_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join(".the_block")
                 .join("cancellations.log")

@@ -13,7 +13,7 @@ fn rejects_wrong_version() {
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
     let peers = PeerSet::new(vec![]);
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    OsRng::default().fill_bytes(&mut bytes);
     let kp = SigningKey::from_bytes(&bytes);
     let hello = Hello {
         network_id: [0u8; 4],

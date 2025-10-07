@@ -12,11 +12,11 @@ backend = "inhouse"
 peer_db_path = "state/overlay/peers.json"
 
 [storage]
-default_engine = "rocksdb"
+default_engine = "inhouse"
 
 [storage.overrides]
-gossip_relay = "sled"
-net_peer_chunks = "sled"
+gossip_relay = "inhouse"
+net_peer_chunks = "inhouse"
 gateway_dns = "memory"
 localnet_receipts = "memory"
 

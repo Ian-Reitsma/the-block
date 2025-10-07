@@ -19,7 +19,7 @@ fn handshake_requires_compute_market_bit() {
     let peers = PeerSet::new(vec![]);
     let bc = Arc::new(Mutex::new(Blockchain::default()));
     let addr: SocketAddr = "127.0.0.1:9001".parse().unwrap();
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let sk = SigningKey::from_bytes(&seed);

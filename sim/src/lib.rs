@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use rocksdb::DB;
 use serde::Serialize;
 
 pub mod bridging;
@@ -27,7 +26,7 @@ use liquidity::LiquidityModel;
 #[derive(Clone, Copy)]
 pub enum Backend {
     Memory,
-    RocksDb,
+    LegacyRocksDb,
 }
 
 /// Economic and network simulation harness.
@@ -41,7 +40,6 @@ pub struct Simulation {
     pub backlog: f64,
     pub backend: Backend,
     rng: StdRng,
-    db: Option<DB>,
     partition_steps: u64,
     reconciliation_latency: u64,
     session_keys: u64,
@@ -66,7 +64,6 @@ impl Simulation {
             backlog: 0.0,
             backend: Backend::Memory,
             rng: StdRng::seed_from_u64(seed),
-            db: None,
             partition_steps: 0,
             reconciliation_latency: 0,
             session_keys: 0,
@@ -78,9 +75,11 @@ impl Simulation {
     /// Create a simulation with an explicit storage backend.
     pub fn with_backend(nodes: u64, backend: Backend) -> Self {
         let mut sim = Self::new(nodes);
-        if let Backend::RocksDb = backend {
-            let path = std::env::var("SIM_DB_PATH").unwrap_or_else(|_| "sim.db".into());
-            sim.db = Some(DB::open_default(path).expect("open sim db"));
+        if let Backend::LegacyRocksDb = backend {
+            panic!(
+                "legacy RocksDB backend has been removed; rerun with Backend::Memory or the \
+                 forthcoming in-house engine"
+            );
         }
         sim.backend = backend;
         sim

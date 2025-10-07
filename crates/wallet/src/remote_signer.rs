@@ -1,6 +1,5 @@
 use crate::{WalletError, WalletSigner};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+use base64_fp::encode_standard;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
 use hex;
 use httpd::{BlockingClient, Method};
@@ -112,7 +111,7 @@ impl BlockingWebSocket {
     fn handshake(&mut self, host: &str, path: &str) -> io::Result<()> {
         let mut key_bytes = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut key_bytes);
-        let key = BASE64.encode(key_bytes);
+        let key = encode_standard(&key_bytes);
         let request = format!(
             "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
         );
@@ -268,7 +267,7 @@ fn handshake_accept(key: &str) -> String {
     let mut hasher = Sha1::new();
     hasher.update(key.as_bytes());
     hasher.update(WS_GUID.as_bytes());
-    BASE64.encode(hasher.finalize())
+    encode_standard(&hasher.finalize())
 }
 
 impl RemoteSigner {

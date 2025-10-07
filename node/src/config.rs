@@ -9,13 +9,13 @@ use governance_spec::{
 };
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use signal_hook::consts::signal::SIGHUP;
-use signal_hook::iterator::Signals;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
+use sys::paths;
+use sys::signals::{Signals, SIGHUP};
 
 use runtime::fs::watch::{
     RecursiveMode as WatchRecursiveMode, WatchEventKind, Watcher as FsWatcher,
@@ -310,7 +310,7 @@ fn parse_engine_kind(name: &str) -> Option<EngineKind> {
         "memory" => Some(EngineKind::Memory),
         "inhouse" => Some(EngineKind::Inhouse),
         "rocksdb" => Some(EngineKind::RocksDb),
-        "sled" => Some(EngineKind::Sled),
+        "sled" => Some(EngineKind::Inhouse),
         _ => None,
     }
 }
@@ -466,7 +466,7 @@ fn default_metrics_export_dir() -> String {
 
 fn default_overlay_db_path() -> String {
     std::env::var("TB_OVERLAY_DB_PATH").unwrap_or_else(|_| {
-        dirs::home_dir()
+        paths::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".the_block")
             .join("overlay")

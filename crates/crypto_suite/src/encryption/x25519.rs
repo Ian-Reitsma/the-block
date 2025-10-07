@@ -1,7 +1,7 @@
 use core::fmt;
 use core::str::FromStr;
 
-use rand_core::{CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 use thiserror::Error;
 
 const SCALAR_LEN: usize = 32;
@@ -422,7 +422,7 @@ fn scalar_mult(scalar: &[u8; SCALAR_LEN], point: &[u8; POINT_LEN]) -> [u8; POINT
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand_core::OsRng;
+    use rand::OsRng;
 
     #[test]
     fn basepoint_scalar_mult_matches_rfc7748() {
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn public_key_roundtrip_display() {
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         let sk = SecretKey::generate(&mut rng);
         let pk = sk.public_key();
         let encoded = pk.to_string();

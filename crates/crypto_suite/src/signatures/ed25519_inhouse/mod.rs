@@ -10,7 +10,7 @@ pub use sha512::Sha512;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
-use rand_core::{CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 use thiserror::Error;
 
 use point::{CompressedPoint, EdwardsPoint};

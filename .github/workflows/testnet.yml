@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+
+env:
+  FIRST_PARTY_ONLY: 1
 jobs:
   mini-testnet:
     runs-on: ubuntu-latest

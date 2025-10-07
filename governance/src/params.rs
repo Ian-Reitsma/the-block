@@ -7,7 +7,7 @@ use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
 pub const RUNTIME_BACKEND_OPTIONS: [&str; 2] = ["inhouse", "stub"];
 pub const TRANSPORT_PROVIDER_OPTIONS: [&str; 2] = ["quinn", "s2n-quic"];
-pub const STORAGE_ENGINE_OPTIONS: [&str; 3] = ["memory", "rocksdb", "sled"];
+pub const STORAGE_ENGINE_OPTIONS: [&str; 4] = ["memory", "rocksdb", "rocksdb-compat", "inhouse"];
 
 const RUNTIME_BACKEND_MASK_ALL: i64 = (1 << RUNTIME_BACKEND_OPTIONS.len()) - 1;
 const TRANSPORT_PROVIDER_MASK_ALL: i64 = (1 << TRANSPORT_PROVIDER_OPTIONS.len()) - 1;
@@ -15,7 +15,7 @@ const STORAGE_ENGINE_MASK_ALL: i64 = (1 << STORAGE_ENGINE_OPTIONS.len()) - 1;
 
 pub const DEFAULT_RUNTIME_BACKEND_POLICY: i64 = 1; // inhouse
 pub const DEFAULT_TRANSPORT_PROVIDER_POLICY: i64 = 1; // quinn
-pub const DEFAULT_STORAGE_ENGINE_POLICY: i64 = (1 << 1) | (1 << 2); // rocksdb | sled
+pub const DEFAULT_STORAGE_ENGINE_POLICY: i64 = (1 << 1) | (1 << 3); // rocksdb alias | inhouse
 
 fn decode_policy(mask: i64, options: &[&str]) -> Vec<String> {
     let mut allowed = Vec::new();
@@ -1135,14 +1135,19 @@ pub fn retune_multipliers(
         theta[2].round() as i64,
         theta[3].round() as i64,
     ];
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::{rngs::StdRng, RngCore};
     let b = supply * (1.0 / (1u64 << 20) as f64);
     let mut rng: StdRng = match rng_seed {
-        Some(seed) => StdRng::seed_from_u64(seed),
-        None => StdRng::from_rng(rand::thread_rng()).expect("rng seed"),
+        Some(seed) => {
+            let mut bytes = [0u8; 32];
+            bytes[..8].copy_from_slice(&seed.to_le_bytes());
+            StdRng::from_seed(bytes)
+        }
+        None => StdRng::from_rng(rand::rngs::OsRng::default())
+            .unwrap_or_else(|_| StdRng::from_seed([0u8; 32])),
     };
     let noisy: [i64; 4] = raw.map(|v| {
-        let u: f64 = rng.gen::<f64>() - 0.5;
+        let u = (rng.next_u64() as f64 / u64::MAX as f64) - 0.5;
         let noise = if u >= 0.0 {
             -b * (1.0 - 2.0 * u).ln()
         } else {

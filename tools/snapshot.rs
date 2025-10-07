@@ -1,5 +1,3 @@
-use std::fs::{self, File};
-use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::Result;
@@ -9,30 +7,25 @@ use cli_core::{
     help::HelpGenerator,
     parse::{Matches, ParseError, Parser},
 };
-use rocksdb::{checkpoint::Checkpoint, DB};
-/// Create a hybrid-compressed snapshot of a RocksDB database.
-pub fn create_snapshot(db_path: &Path, out_path: &Path) -> Result<()> {
-    let db = DB::open_default(db_path)?;
-    let checkpoint = Checkpoint::new(&db)?;
-    checkpoint.create_checkpoint(".snapshot_tmp")?;
-    let mut buf = Vec::new();
-    File::open(".snapshot_tmp")?.read_to_end(&mut buf)?;
-    let compressor = coding::compressor_for("lz77-rle", 4)?;
-    let encoded = compressor.compress(&buf)?;
-    fs::write(out_path, &encoded)?;
-    #[cfg(feature = "telemetry")]
-    metrics::increment_counter!("snapshot_created_total");
-    fs::remove_file(".snapshot_tmp").ok();
-    Ok(())
+/// Create a hybrid-compressed snapshot of the legacy RocksDB database.
+///
+/// The RocksDB backend has been fully retired; call sites should migrate to the
+/// first-party in-house storage exporter.  This helper now surfaces a clear
+/// error so automation fails fast instead of silently linking the native
+/// dependency again.
+pub fn create_snapshot(_db_path: &Path, _out_path: &Path) -> Result<()> {
+    anyhow::bail!(
+        "legacy RocksDB snapshots are no longer supported; use the in-house \
+         storage exporter instead"
+    )
 }
 
 /// Restore a snapshot into a RocksDB directory.
-pub fn restore_snapshot(archive_path: &Path, db_path: &Path) -> Result<()> {
-    let bytes = fs::read(archive_path)?;
-    let compressor = coding::compressor_for("lz77-rle", 4)?;
-    let decoded = compressor.decompress(&bytes)?;
-    fs::write(db_path, &decoded)?;
-    Ok(())
+pub fn restore_snapshot(_archive_path: &Path, _db_path: &Path) -> Result<()> {
+    anyhow::bail!(
+        "legacy RocksDB snapshots are no longer supported; use the in-house \
+         storage importer instead"
+    )
 }
 
 enum CliError {

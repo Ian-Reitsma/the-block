@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
 
+env:
+  FIRST_PARTY_ONLY: 1
+
 jobs:
   build:
     runs-on: ubuntu-latest

@@ -2,12 +2,14 @@
 RUST_TEST_THREADS = "1"
 PROPTEST_CASES = "64"
 PROPTEST_DISABLE_FAILURE_PERSISTENCE = "1"
+FIRST_PARTY_ONLY = { value = "1", force = true }
 
 [build]
 # Limit build parallelism when running the full test suite so the linker and
 # C++ builds (e.g. RocksDB) do not exhaust constrained CI machines. Developers
 # can override this locally by setting `CARGO_BUILD_JOBS`.
 jobs = 1
+rustflags = ["--cfg", "first_party_only"]
 
 [test]
 # The previous configuration forced use of `ld.lld` for test binaries to speed

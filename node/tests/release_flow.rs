@@ -34,7 +34,7 @@ fn release_flow_approves_hash() {
 fn release_flow_requires_signature_when_signers_configured() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let sk1 = SigningKey::generate(&mut rng);
     let sk2 = SigningKey::generate(&mut rng);
     let signer_hex = format!(
@@ -72,7 +72,7 @@ fn release_flow_requires_signature_when_signers_configured() {
 fn release_flow_rejects_missing_signature() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let sk1 = SigningKey::generate(&mut rng);
     let sk2 = SigningKey::generate(&mut rng);
     let signer_hex = format!(

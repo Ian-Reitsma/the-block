@@ -1,13 +1,26 @@
 #![cfg(feature = "integration-tests")]
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::Path;
 
 use tempfile::tempdir;
 use the_block::log_indexer::{index_logs_with_options, IndexOptions};
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+fn run_search(path: &str) -> Result<Vec<the_block::log_indexer::LogEntry>> {
+    use the_block::rpc::logs::SearchError;
+
+    the_block::rpc::logs::run_search_for_path(path).map_err(|err| {
+        let message = match err {
+            SearchError::MissingDatabase => "log database unavailable".to_string(),
+            SearchError::InvalidQuery(msg) => msg,
+            SearchError::QueryFailed(inner) => inner.to_string(),
+        };
+        io::Error::new(io::ErrorKind::Other, message).into()
+    })
+}
 
 #[test]
 fn search_filters_and_decryption() -> Result<()> {
@@ -16,12 +29,18 @@ fn search_filters_and_decryption() -> Result<()> {
     let mut file = File::create(&log_path)?;
     writeln!(
         file,
-        "{{\"timestamp\":1,\"level\":\"INFO\",\"message\":\"ready\",\"correlation_id\":\"alpha\"}}"
+        "{}",
+        r#"{"timestamp":1,"level":"INFO","message":"ready","correlation_id":"alpha"}"#
     )?;
-    writeln!(file, "{{\"timestamp\":2,\"level\":\"ERROR\",\"message\":\"failed\",\"correlation_id\":\"beta\"}}")?;
     writeln!(
         file,
-        "{{\"timestamp\":3,\"level\":\"WARN\",\"message\":\"retry\",\"correlation_id\":\"beta\"}}"
+        "{}",
+        r#"{"timestamp":2,"level":"ERROR","message":"failed","correlation_id":"beta"}"#
+    )?;
+    writeln!(
+        file,
+        "{}",
+        r#"{"timestamp":3,"level":"WARN","message":"retry","correlation_id":"beta"}"#
     )?;
 
     let db_path = dir.path().join("logs.db");
@@ -34,21 +53,16 @@ fn search_filters_and_decryption() -> Result<()> {
     )?;
 
     std::env::set_var("TB_LOG_DB_PATH", db_path.to_string_lossy().to_string());
-    let error_rows =
-        the_block::rpc::logs::run_search_for_path("/logs/search?level=ERROR&passphrase=secret")?;
+    let error_rows = run_search("/logs/search?level=ERROR&passphrase=secret")?;
     assert_eq!(error_rows.len(), 1);
     assert_eq!(error_rows[0].correlation_id, "beta");
     assert_eq!(error_rows[0].message, "failed");
 
-    let beta_since_rows = the_block::rpc::logs::run_search_for_path(
-        "/logs/search?correlation=beta&since=3&passphrase=secret",
-    )?;
+    let beta_since_rows = run_search("/logs/search?correlation=beta&since=3&passphrase=secret")?;
     assert_eq!(beta_since_rows.len(), 1);
     assert_eq!(beta_since_rows[0].level, "WARN");
 
-    let after_rows = the_block::rpc::logs::run_search_for_path(
-        "/logs/search?after-id=1&passphrase=secret&limit=2",
-    )?;
+    let after_rows = run_search("/logs/search?after-id=1&passphrase=secret&limit=2")?;
     assert!(after_rows.iter().all(|row| row.id.unwrap_or(0) > 1));
 
     Ok(())
@@ -64,9 +78,10 @@ fn tail_streams_indexed_rows() -> Result<()> {
         let log_path = dir.path().join("events.json");
         let mut file = File::create(&log_path)?;
         writeln!(
-        file,
-        "{\"timestamp\":10,\"level\":\"INFO\",\"message\":\"ready\",\"correlation_id\":\"alpha\"}"
-    )?;
+            file,
+            "{}",
+            r#"{"timestamp":10,"level":"INFO","message":"ready","correlation_id":"alpha"}"#
+        )?;
 
         let db_path = dir.path().join("logs.db");
         index_logs_with_options(
@@ -120,17 +135,21 @@ fn tail_streams_indexed_rows() -> Result<()> {
                     }
                 })
                 .expect("websocket key");
-            the_block::rpc::logs::serve_tail(stream, key, &path).await;
-            Ok::<(), Box<dyn std::error::Error>>(())
+            runtime::ws::write_server_handshake(&mut stream, &key, &[])
+                .await
+                .expect("server handshake");
+            let cfg = the_block::rpc::logs::build_tail_config(&path).expect("tail config");
+            let ws_stream = runtime::ws::ServerStream::new(stream);
+            the_block::rpc::logs::run_tail(ws_stream, cfg).await;
         });
 
         let mut stream = TcpStream::connect(addr).await?;
         let key = ws::handshake_key();
         let path = format!("/logs/tail?passphrase=secret");
         let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n",
-        host = addr
-    );
+            "GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n",
+            host = addr
+        );
         stream.write_all(request.as_bytes()).await?;
         let expected_accept = ws::handshake_accept(&key);
         ws::read_client_handshake(&mut stream, &expected_accept).await?;
@@ -146,7 +165,7 @@ fn tail_streams_indexed_rows() -> Result<()> {
         }
         ws.close().await?;
         drop(ws);
-        server.await.expect("server task")?;
+        server.abort();
         std::env::remove_var("TB_LOG_DB_PATH");
         Ok(())
     })

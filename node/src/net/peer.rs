@@ -11,11 +11,8 @@ use crate::p2p::handshake::Transport;
 use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use fs2::FileExt;
 use hex;
 use indexmap::IndexMap;
-#[cfg(unix)]
-use nix::libc;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
 use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
@@ -36,9 +33,11 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
+use sys::fs::{FileLockExt, O_NOFOLLOW};
 
+use sys::paths;
+use sys::tempfile::{self, Builder as TempBuilder, NamedTempFile};
 use tar::Builder;
-use tempfile::NamedTempFile;
 
 use super::{ban_store, peer_metrics_store};
 #[cfg(feature = "quic")]
@@ -1398,7 +1397,7 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
             use std::os::unix::fs::OpenOptionsExt;
             std::fs::OpenOptions::new()
                 .read(true)
-                .custom_flags(libc::O_NOFOLLOW)
+                .custom_flags(O_NOFOLLOW)
                 .open(&path)?;
         }
         #[cfg(not(unix))]
@@ -1551,7 +1550,7 @@ pub fn export_all_peer_stats(
                 use std::os::unix::fs::OpenOptionsExt;
                 std::fs::OpenOptions::new()
                     .read(true)
-                    .custom_flags(libc::O_NOFOLLOW)
+                    .custom_flags(O_NOFOLLOW)
                     .open(&path)?;
             }
             #[cfg(not(unix))]
@@ -1572,9 +1571,7 @@ pub fn export_all_peer_stats(
             );
             Ok(overwritten)
         } else {
-            let tmp_dir = tempfile::Builder::new()
-                .prefix("export")
-                .tempdir_in(&base)?;
+            let tmp_dir = TempBuilder::new().prefix("export").tempdir_in(&base)?;
             for pk in &keys {
                 let m = {
                     let map = peer_metrics_guard();
@@ -1627,7 +1624,7 @@ pub fn export_all_peer_stats(
                 use std::os::unix::fs::OpenOptionsExt;
                 std::fs::OpenOptions::new()
                     .read(true)
-                    .custom_flags(libc::O_NOFOLLOW)
+                    .custom_flags(O_NOFOLLOW)
                     .open(&path)?;
             }
             #[cfg(not(unix))]
@@ -1746,7 +1743,7 @@ fn peer_db_path() -> PathBuf {
     std::env::var("TB_PEER_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("peers.txt")
@@ -1765,7 +1762,7 @@ mod tests {
     use httpd::{Method, Response, Router, ServerConfig, StatusCode};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     struct EnvGuard {
         prev_limit: u32,
@@ -1875,7 +1872,7 @@ fn quic_peer_db_path() -> PathBuf {
     std::env::var("TB_QUIC_PEER_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("quic_peers.txt")
@@ -1883,14 +1880,14 @@ fn quic_peer_db_path() -> PathBuf {
 }
 
 fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
-    use base64::Engine;
+    use base64_fp::decode_standard;
     let mut map = HashMap::new();
     if let Ok(data) = fs::read_to_string(quic_peer_db_path()) {
         for line in data.lines() {
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() == 3 {
                 if let (Ok(tcp), Ok(quic)) = (parts[0].parse(), parts[1].parse()) {
-                    if let Ok(cert) = base64::engine::general_purpose::STANDARD.decode(parts[2]) {
+                    if let Ok(cert) = decode_standard(parts[2]) {
                         map.insert(tcp, QuicEndpoint { addr: quic, cert });
                     }
                 }
@@ -1901,15 +1898,14 @@ fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
 }
 
 fn persist_quic_peers(map: &HashMap<SocketAddr, QuicEndpoint>) {
-    use base64::engine::general_purpose::STANDARD as B64;
-    use base64::Engine;
+    use base64_fp::encode_standard;
     let path = quic_peer_db_path();
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let mut lines: Vec<String> = map
         .iter()
-        .map(|(tcp, info)| format!("{tcp},{},{}", info.addr, B64.encode(&info.cert)))
+        .map(|(tcp, info)| format!("{tcp},{},{}", info.addr, encode_standard(&info.cert)))
         .collect();
     lines.sort();
     let _ = fs::write(path, lines.join("\n"));
@@ -1919,7 +1915,7 @@ fn chunk_db_path() -> PathBuf {
     std::env::var("TB_CHUNK_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("chunks")

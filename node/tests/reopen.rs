@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use base64::Engine;
+use base64_fp::decode_standard;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -33,9 +33,7 @@ fn load_fixture(name: &str) -> tempfile::TempDir {
         .join("db.b64");
     let b64 = fs::read_to_string(src).unwrap();
     let clean: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(clean)
-        .unwrap();
+    let bytes = decode_standard(&clean).unwrap();
     let dst = dir.path().join("db");
     fs::write(&dst, bytes).unwrap();
     dir

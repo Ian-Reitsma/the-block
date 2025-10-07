@@ -8,19 +8,17 @@ use std::process::exit;
 use storage_engine::inhouse_engine::InhouseEngine;
 use storage_engine::memory_engine::MemoryEngine;
 use storage_engine::rocksdb_engine::RocksDbEngine;
-use storage_engine::sled_engine::SledEngine;
 use storage_engine::{KeyValue, KeyValueIterator, StorageError, StorageResult};
 
 fn usage() {
     eprintln!("usage: storage_migrate <source_dir> <dest_dir> <dest_engine>");
-    eprintln!("       dest_engine: memory | inhouse | rocksdb | sled");
+    eprintln!("       dest_engine: memory | inhouse | rocksdb-compat");
 }
 
 enum EngineWrapper {
     Memory(MemoryEngine),
     Inhouse(InhouseEngine),
     RocksDb(RocksDbEngine),
-    Sled(SledEngine),
 }
 
 impl EngineWrapper {
@@ -30,9 +28,6 @@ impl EngineWrapper {
         }
         if let Ok(engine) = RocksDbEngine::open(path) {
             return Ok(EngineWrapper::RocksDb(engine));
-        }
-        if let Ok(engine) = SledEngine::open(path) {
-            return Ok(EngineWrapper::Sled(engine));
         }
         if let Ok(engine) = MemoryEngine::open(path) {
             return Ok(EngineWrapper::Memory(engine));
@@ -48,11 +43,8 @@ impl EngineWrapper {
             "inhouse" => InhouseEngine::open(path)
                 .map(EngineWrapper::Inhouse)
                 .map_err(|e| e.to_string()),
-            "rocksdb" => RocksDbEngine::open(path)
+            "rocksdb-compat" | "rocksdb" => RocksDbEngine::open(path)
                 .map(EngineWrapper::RocksDb)
-                .map_err(|e| e.to_string()),
-            "sled" => SledEngine::open(path)
-                .map(EngineWrapper::Sled)
                 .map_err(|e| e.to_string()),
             other => Err(format!("unsupported destination engine `{other}`")),
         }
@@ -63,7 +55,6 @@ impl EngineWrapper {
             EngineWrapper::Memory(engine) => engine.ensure_cf(cf),
             EngineWrapper::Inhouse(engine) => engine.ensure_cf(cf),
             EngineWrapper::RocksDb(engine) => engine.ensure_cf(cf),
-            EngineWrapper::Sled(engine) => engine.ensure_cf(cf),
         }
     }
 
@@ -72,7 +63,6 @@ impl EngineWrapper {
             EngineWrapper::Memory(engine) => engine.list_cfs(),
             EngineWrapper::Inhouse(engine) => engine.list_cfs(),
             EngineWrapper::RocksDb(engine) => engine.list_cfs(),
-            EngineWrapper::Sled(engine) => engine.list_cfs(),
         }
     }
 
@@ -81,7 +71,6 @@ impl EngineWrapper {
             EngineWrapper::Memory(engine) => engine.put_bytes(cf, key, value),
             EngineWrapper::Inhouse(engine) => engine.put_bytes(cf, key, value),
             EngineWrapper::RocksDb(engine) => engine.put_bytes(cf, key, value),
-            EngineWrapper::Sled(engine) => engine.put_bytes(cf, key, value),
         }
     }
 
@@ -90,7 +79,6 @@ impl EngineWrapper {
             EngineWrapper::Memory(engine) => engine.flush(),
             EngineWrapper::Inhouse(engine) => engine.flush(),
             EngineWrapper::RocksDb(engine) => engine.flush(),
-            EngineWrapper::Sled(engine) => engine.flush(),
         }
     }
 
@@ -114,13 +102,6 @@ impl EngineWrapper {
                 Ok(())
             }
             EngineWrapper::RocksDb(engine) => {
-                let mut iter = engine.prefix_iterator(cf, b"")?;
-                while let Some((key, value)) = iter.next()? {
-                    f(key, value);
-                }
-                Ok(())
-            }
-            EngineWrapper::Sled(engine) => {
                 let mut iter = engine.prefix_iterator(cf, b"")?;
                 while let Some((key, value)) = iter.next()? {
                     f(key, value);

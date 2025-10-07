@@ -57,6 +57,7 @@ mod version;
 #[cfg(feature = "quantum")]
 mod wallet;
 
+use crate::wasm::extract_wasm_metadata;
 use ai::handle as handle_ai;
 use bridge::handle as handle_bridge;
 use bridge::BridgeCmd;
@@ -95,22 +96,6 @@ use version::handle as handle_version;
 use wallet::handle as handle_wallet;
 #[cfg(feature = "quantum")]
 use wallet::WalletCmd;
-
-#[cfg(feature = "wasm-metadata")]
-fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
-    let engine = wasmtime::Engine::default();
-    if let Ok(module) = wasmtime::Module::new(&engine, bytes) {
-        let exports: Vec<String> = module.exports().map(|e| e.name().to_string()).collect();
-        codec_helpers::json_to_vec(&exports).unwrap_or_default()
-    } else {
-        Vec::new()
-    }
-}
-
-#[cfg(not(feature = "wasm-metadata"))]
-fn extract_wasm_metadata(_bytes: &[u8]) -> Vec<u8> {
-    Vec::new()
-}
 
 fn main() {
     let mut argv = env::args();

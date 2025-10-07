@@ -71,7 +71,7 @@ Nodes can push their per-peer statistics to an external
 Set the `metrics_aggregator` section in `config.toml` with the aggregator `url`
 and shared `auth_token`. Additional environment variables tune persistence:
 
-- `AGGREGATOR_DB` — path to the sled database directory (default:
+- `AGGREGATOR_DB` — path to the first-party sled database directory (default:
   `./peer_metrics.db`).
 - `AGGREGATOR_RETENTION_SECS` — prune entries older than this many seconds
   (default: `604800` for 7 days). The same value can be set in
@@ -83,7 +83,7 @@ Token-based auth uses the `auth_token`; when the token is stored on disk
 both the node and aggregator reload it for new requests without requiring
 a restart.
 
-Snapshots persist across restarts in a disk-backed sled store keyed by
+Snapshots persist across restarts in a disk-backed first-party sled store keyed by
 peer ID. On startup the aggregator drops entries older than
 `retention_secs` and schedules a periodic cleanup that prunes stale rows,
 incrementing the `aggregator_retention_pruned_total` counter. Operators
@@ -136,7 +136,7 @@ contract logs correlate-metric --metric quic_handshake_fail_total \
     --aggregator http://localhost:9300 --rows 20 --max-correlations 5
 ```
 
-The log indexer records ingest offsets in SQLite, batches inserts with prepared statements, supports encryption key rotation with passphrase prompts, and exposes both REST (`/logs/search`) and WebSocket (`/logs/tail`) streaming APIs for dashboards. `scripts/log_indexer_load.sh` stress-tests one million log lines, while integration tests under `node/tests/log_api.rs` validate the filters end-to-end. The node crate now depends on `rusqlite` (built with the bundled SQLite engine) at runtime so operators do not need a system SQLite installation. Set the `passphrase` option when invoking `index` (either through the CLI or RPC) to encrypt message bodies at rest; supply the same passphrase via the query string when using `/logs/search` or `/logs/tail` to decrypt results on the fly.
+The log indexer records ingest offsets in the first-party log store, batches inserts with lightweight JSON payloads, supports encryption key rotation with passphrase prompts, and exposes both REST (`/logs/search`) and WebSocket (`/logs/tail`) streaming APIs for dashboards. `scripts/log_indexer_load.sh` stress-tests one million log lines, while integration tests under `node/tests/log_api.rs` validate the filters end-to-end. Legacy SQLite databases are migrated automatically when the indexer is built with `--features sqlite-migration`; once imported, the default build path keeps the dependency surface purely first-party. Set the `passphrase` option when invoking `index` (either through the CLI or RPC) to encrypt message bodies at rest; supply the same passphrase via the query string when using `/logs/search` or `/logs/tail` to decrypt results on the fly.
 
 When the node runs without the `telemetry` feature the `tracing` crate is not linked, so subsystems that normally emit structured spans fall back to plain stderr diagnostics. RPC log streaming, mempool admission, and QUIC handshake validation all degrade gracefully: warnings appear in the system journal, counters remain untouched, and the RPC surface continues to return JSON errors. Enable `--features telemetry` whenever Prometheus metrics and structured spans are required.
 
@@ -201,7 +201,7 @@ database path and injects secrets for TLS keys and auth tokens.
 | --- | --- | --- |
 | `401 unauthorized` | Bad `auth_token` | Rotate token on both node and service |
 | `503 unavailable` | Aggregator down | Node will retry; check service logs |
-| `db_locked` in logs | SQLite busy | Place DB on faster disk or increase backoff |
+| `log query failed` in logs | log store directory unavailable or corrupt | Validate `TB_LOG_DB_PATH`, rerun the indexer, or migrate from the legacy backup |
 
 Operators can clone the dashboard JSON and add environment-specific panels—for
 example, graphing `subsidy_bytes_total{type="storage"}` per account or plotting

@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
+use sys::tempfile;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{

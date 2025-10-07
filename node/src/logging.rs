@@ -15,7 +15,7 @@ pub fn corr_id_hash(hash: &[u8]) -> String {
 pub fn corr_id_random() -> String {
     use rand::{rngs::OsRng, RngCore};
     let mut bytes = [0u8; 8];
-    OsRng.fill_bytes(&mut bytes);
+    OsRng::default().fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 

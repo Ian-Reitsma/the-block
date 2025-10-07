@@ -1,5 +1,7 @@
 //! Database schema migrations.
 
+use std::convert::TryInto;
+
 use sled::Db;
 
 const SCHEMA_VERSION_KEY: &[u8] = b"schema_version";
@@ -9,7 +11,10 @@ fn current_version(db: &Db) -> u32 {
     db.get(SCHEMA_VERSION_KEY)
         .ok()
         .flatten()
-        .and_then(|v| v.as_ref().try_into().ok().map(u32::from_le_bytes))
+        .and_then(|v| {
+            let bytes: [u8; 4] = v.as_slice().try_into().ok()?;
+            Some(u32::from_le_bytes(bytes))
+        })
         .unwrap_or(0)
 }
 

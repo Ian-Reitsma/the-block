@@ -1678,9 +1678,35 @@ impl Explorer {
         std::fs::read(path).ok().and_then(|b| decode_json(&b).ok())
     }
 
-    /// Convert WASM bytecode into a human-readable WAT string.
+    /// Convert WASM bytecode into a human-readable summary understood by the
+    /// first-party interpreter.
     pub fn wasm_disasm(&self, bytes: &[u8]) -> Option<String> {
-        wasmprinter::print_bytes(bytes).ok()
+        let meta = the_block::vm::wasm::analyze(bytes).ok()?;
+        let instructions = the_block::vm::wasm::disassemble(bytes).ok()?;
+        let mut out = String::new();
+        out.push_str(&format!("version: {}\n", meta.version));
+        out.push_str(&format!("instructions: {}\n", meta.instruction_count));
+        out.push_str(&format!("required_inputs: {}\n", meta.required_inputs));
+        if let Some(ret) = meta.return_values {
+            out.push_str(&format!("return_values: {}\n", ret));
+        }
+        out.push_str("code:\n");
+        for (idx, instr) in instructions.iter().enumerate() {
+            use the_block::vm::wasm::Instruction::*;
+            let line = match instr {
+                Nop => "nop".to_string(),
+                PushConst(v) => format!("push_const {v}"),
+                PushInput(i) => format!("push_input {i}"),
+                Add => "add".to_string(),
+                Sub => "sub".to_string(),
+                Mul => "mul".to_string(),
+                Div => "div".to_string(),
+                Eq => "eq".to_string(),
+                Return(count) => format!("return {count}"),
+            };
+            out.push_str(&format!("  {idx:04}: {line}\n"));
+        }
+        Some(out)
     }
 }
 

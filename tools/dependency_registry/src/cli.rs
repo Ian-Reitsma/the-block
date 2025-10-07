@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Result};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use diagnostics::anyhow as diag_anyhow;
+use diagnostics::anyhow::Result;
 
 /// Generate and audit the workspace dependency registry.
 #[derive(Debug)]
@@ -42,6 +43,9 @@ pub struct Cli {
 
     /// Optional path to emit a frozen dependency snapshot for releases.
     pub snapshot: Option<PathBuf>,
+
+    /// Path to the generated crate manifest used by build guards.
+    pub manifest_out: PathBuf,
 }
 
 impl Cli {
@@ -94,6 +98,14 @@ impl Cli {
             "snapshot",
             "Emit a frozen dependency snapshot",
         )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new(
+                "manifest-out",
+                "manifest-out",
+                "Emit a flat list of crates for the first-party build guard",
+            )
+            .default("config/first_party_manifest.txt"),
+        ))
         .build()
     }
 
@@ -115,7 +127,7 @@ impl Cli {
             } else if values.len() == 2 {
                 Some(values.into_iter().map(PathBuf::from).collect())
             } else {
-                return Err(anyhow!(
+                return Err(diag_anyhow::anyhow!(
                     "--diff expects exactly two paths (old and new snapshots)"
                 ));
             }
@@ -123,7 +135,11 @@ impl Cli {
         let explain = matches.get_string("explain");
         let max_depth = matches
             .get("max-depth")
-            .map(|value| value.parse::<usize>().map_err(|err| anyhow!(err)))
+            .map(|value| {
+                value
+                    .parse::<usize>()
+                    .map_err(|err| diag_anyhow::anyhow!(err))
+            })
             .transpose()?;
         let baseline = matches
             .get_string("baseline")
@@ -134,6 +150,10 @@ impl Cli {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("target"));
         let snapshot = matches.get_string("snapshot").map(PathBuf::from);
+        let manifest_out = matches
+            .get_string("manifest-out")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("config/first_party_manifest.txt"));
 
         Ok(Self {
             manifest_path,
@@ -146,6 +166,7 @@ impl Cli {
             baseline,
             out_dir,
             snapshot,
+            manifest_out,
         })
     }
 

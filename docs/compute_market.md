@@ -25,14 +25,12 @@ therefore return solely CT.
 
 ## Settlement Ledger & Auditing
 
-Settlement persists CT flows (with a legacy industrial field fixed to zero in production) in a RocksDB-backed ledger located under `compute_settlement.db`. `Settlement::init` wires a
-feature-gated RocksDB handle (`storage-rocksdb`) and transparently falls back to
-an in-memory ledger for tests. Every accrual writes dual entries, updates a
+Settlement persists CT flows (with a legacy industrial field fixed to zero in production) in a first-party ledger located under `compute_settlement.db`. `Settlement::init` wires the compatibility handle (`storage-rocksdb`) to the in-house engine and
+transparently falls back to an in-memory ledger for tests. Every accrual writes dual entries, updates a
 rolling Merkle root cache, records activation metadata, and bumps a monotonic
 sequence so operators can replay state after restarts. The ledger exposes:
 
-- **CLI:** Build `contract-cli` with `--features full` (or the lighter
-  `--features sqlite-storage`) and invoke `contract compute stats` to report
+- **CLI:** Build `contract-cli` with `--features full` and invoke `contract compute stats` to report
   CT balances alongside the most recent audit entries fetched via
   `compute_market.provider_balances` and `compute_market.audit`.
 - **RPC:**
@@ -47,7 +45,7 @@ sequence so operators can replay state after restarts. The ledger exposes:
     running balances, timestamp, sequence number, and optional anchor hash.
   - `compute_market.recent_roots` exposes the last 32 Merkle roots (or a caller
     supplied limit) as hex strings so explorers can render continuity proofs
-    directly from the RocksDB-backed ledger.
+    directly from the ledger.
 - **Explorer:** `explorer/src/compute_view.rs` renders provider balances,
   anchors, and audit logs directly from the persisted ledger, relying on the
   RPCs above.

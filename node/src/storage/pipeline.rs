@@ -408,7 +408,7 @@ impl StoragePipeline {
         hasher.update(data);
         let root: [u8; 32] = hasher.finalize().into();
         let mut blob_id = [0u8; 32];
-        OsRng.fill_bytes(&mut blob_id);
+        OsRng::default().fill_bytes(&mut blob_id);
         BlobTx {
             owner: owner.to_string(),
             blob_id,
@@ -702,9 +702,9 @@ impl StoragePipeline {
         data_hasher.update(data);
         let blob_root: [u8; 32] = data_hasher.finalize().into();
         let mut blob_id = [0u8; 32];
-        OsRng.fill_bytes(&mut blob_id);
+        OsRng::default().fill_bytes(&mut blob_id);
         let mut key_bytes = [0u8; 32];
-        OsRng.fill_bytes(&mut key_bytes);
+        OsRng::default().fill_bytes(&mut key_bytes);
         let encryptor = settings::encryptor(&key_bytes).map_err(|e| e.to_string())?;
 
         let handles = catalog.ranked_nodes();
@@ -1120,13 +1120,13 @@ mod tests {
     use crate::storage::repair;
     use crate::storage::types::ObjectManifest;
     use std::sync::{Mutex, MutexGuard, OnceLock};
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct SettlementGuard {
         _lock: MutexGuard<'static, ()>,
-        _dir: tempfile::TempDir,
+        _dir: sys::tempfile::TempDir,
     }
 
     impl SettlementGuard {

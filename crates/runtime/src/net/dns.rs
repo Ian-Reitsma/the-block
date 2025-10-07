@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::str;
 use std::time::Duration;
 
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngCore};
 
 use crate::{block_on, timeout};
 
@@ -50,8 +50,9 @@ async fn async_lookup(name: &str, record_type: u16) -> io::Result<Vec<u8>> {
         ));
     }
 
-    let mut rng = StdRng::from_entropy();
-    let query_id: u16 = rng.gen();
+    let mut rng = StdRng::from_rng(rand::rngs::OsRng::default())
+        .unwrap_or_else(|_| StdRng::from_seed([0u8; 32]));
+    let query_id: u16 = (rng.next_u64() & 0xffff) as u16;
     let payload = build_query(query_name, record_type, query_id)?;
 
     let mut last_error: Option<io::Error> = None;

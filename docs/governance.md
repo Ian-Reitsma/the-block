@@ -15,7 +15,7 @@ Two chambers participate in ratifying upgrades:
 
 All tooling now consumes the `governance` workspace crate, which mirrors the
 state machine shipped in the node binary. The crate re-exports the bicameral
-voting scaffolding, `GovStore` sled persistence, release approval workflow, and
+voting scaffolding, `GovStore` first-party sled persistence, release approval workflow, and
 parameter registry so SDKs, the CLI, and external services build against the
 same API surface as the node. Consumers instantiate a `GovStore`, submit
 proposals, and drive activation through the provided `Runtime` facade, which is
@@ -57,7 +57,7 @@ dependency registry snapshot check.
 
 ### GovStore persistence & history artifacts
 
-`GovStore::open` seeds a sled database alongside a `governance/history/`
+`GovStore::open` seeds a first-party sled database alongside a `governance/history/`
 directory that mirrors every activation. When parameters change,
 `persist_param_change` appends JSON rows to
 `governance/history/param_changes.json`, mirrors fee-floor updates to

@@ -403,7 +403,7 @@ pub fn account_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn load_file_rebuilds_accounts_from_entries() {

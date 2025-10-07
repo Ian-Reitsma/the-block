@@ -99,25 +99,6 @@ fn memory_engine_behaviour() {
     crash_safety_test(|p| MemoryEngine::open(p).expect("open memory"));
 }
 
-#[cfg(feature = "sled")]
-#[test]
-fn sled_engine_behaviour() {
-    use storage_engine::sled_engine::SledEngine;
-
-    let dir = tempdir().expect("sled tempdir");
-    let path = dir.path().join("sled");
-    let path_str = path.to_string_lossy().into_owned();
-
-    let engine = SledEngine::open(&path_str).expect("open sled");
-    concurrency_test(engine);
-
-    let engine = SledEngine::open(&path_str).expect("reopen sled");
-    prefix_iteration_test(engine);
-
-    crash_safety_test(|p| SledEngine::open(p).expect("open sled"));
-}
-
-#[cfg(feature = "rocksdb")]
 #[test]
 fn rocksdb_engine_behaviour() {
     use storage_engine::rocksdb_engine::RocksDbEngine;

@@ -111,5 +111,6 @@ cargo test -p the_block --lib simple_db::memory_tests::tests::prefers_base64_sna
 - When migrating from legacy underscores to base64, allow the loader to clean up
   superseded files automatically rather than deleting them manually.
 - The lightweight backend is intended for tests and constrained environments.
-  Production deployments should continue to use the RocksDB backend under
-  `--features storage-rocksdb`.
+  Production deployments should continue to use the default in-house backend;
+  the `storage-rocksdb` flag now aliases this implementation while legacy
+  nodes migrate away from the third-party stack.

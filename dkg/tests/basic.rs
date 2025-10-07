@@ -1,5 +1,4 @@
-use dkg::{combine, run_dkg};
-use threshold_crypto::SignatureShare;
+use dkg::{combine, run_dkg, SignatureShare};
 
 #[test]
 fn key_refresh_and_dropout() {

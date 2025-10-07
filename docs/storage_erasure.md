@@ -163,18 +163,19 @@ For a walkthrough of the entire storage pipeline, see
 ## Storage Engine Migration
 
 The storage pipeline now honours the workspace-wide storage-engine
-abstraction, allowing RocksDB, sled, or the in-memory engine to back the
+abstraction, allowing RocksDB, the first-party sled crate, or the in-memory engine to back the
 provider registry and rent-escrow tables. When migrating an existing node:
 
 1. **Back up the current data directory.** Stop the node and take an archive
    of the storage pipeline directories (typically `blobstore/`,
    `blobstore/compute_settlement.db`, and `blobstore/rent_escrow.db`).
 2. **Run the migration tool.** `cargo run -p storage_migrate -- <old_dir>
-   <new_dir> <engine>` rewrites the sled/RocksDB directories into the desired
-   backend and verifies checksums. For example, convert a sled store to RocksDB
-   with `cargo run -p storage_migrate -- blobstore blobstore.rocksdb rocksdb`.
+   <new_dir> <engine>` rewrites the sled directories into the desired backend
+   and verifies checksums. The legacy RocksDB exporter has been removed; use
+   `cargo run -p storage_migrate -- blobstore blobstore.inhouse inhouse` to
+   materialise the first-party backend.
 3. **Update the node configuration.** Edit `config/default.toml` and set
-   `storage.default_engine = "rocksdb"` or add overrides for
+   `storage.default_engine = "inhouse"` or add overrides for
    `storage.overrides.storage_pipeline`/`storage.overrides.storage_fs` as
    required. Operators can temporarily set `storage_legacy_mode = true` to keep
    the previous behaviour for one release, but the CLI prints a deprecation
@@ -182,9 +183,9 @@ provider registry and rent-escrow tables. When migrating an existing node:
 4. **Verify after restart.** `the-block storage providers` reports the active
    pipeline and rent-escrow engines and emits a warning when they diverge from
    the recommended default. Telemetry exposes
-   `storage_engine_info{name="storage_pipeline",engine="rocksdb"}` so
-   dashboards confirm the migration. Set `storage_legacy_mode` back to `false`
-   once the new backend is stable.
+   `storage_engine_info{name="storage_pipeline",engine="rocksdb-compat"}` when
+   the compatibility wrapper is active so dashboards confirm the migration. Set
+   `storage_legacy_mode` back to `false` once the new backend is stable.
 
 ## Repair Loop Operations and Observability
 

@@ -4,9 +4,13 @@
 
 This guide covers the basic contract workflow for The‑Block's prototype VM.
 For commands that inspect WASM exports or log indexes, build the CLI with the
-`full` feature flag (`cargo run -p contract-cli --features full -- …`) so the
-optional Wasmtime and SQLite helpers are available. Lean builds without the flag
-skip those integrations to keep test harnesses lightweight.
+`full` feature flag (`cargo run -p contract-cli --features full -- …`). The
+metadata extractor emits a textual summary of the module (version, instruction
+count, required inputs, return values) derived from the first-party interpreter,
+so you can confirm opcode usage without external tooling. Legacy SQLite imports
+are handled by enabling the `sqlite-migration` feature during the initial
+migration pass; the default build stays on the pure-Rust runtime and log store
+to keep test harnesses lightweight.
 
 ## Opcode ABI
 

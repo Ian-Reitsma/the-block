@@ -13,6 +13,9 @@ on:
       - 'tools/remote-signer/**'
       - 'tests/remote_signer_multisig.rs'
 
+env:
+  FIRST_PARTY_ONLY: 1
+
 jobs:
   test:
     strategy:

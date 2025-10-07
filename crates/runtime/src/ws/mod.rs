@@ -6,8 +6,7 @@
 //! third-party stacks.
 
 use crate::net::TcpStream;
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+use base64_fp::encode_standard;
 use rand::RngCore;
 use sha1::{Digest, Sha1};
 use std::future::Future;
@@ -90,7 +89,7 @@ pub fn handshake_accept(key: &str) -> String {
     hasher.update(key.as_bytes());
     hasher.update(GUID.as_bytes());
     let digest = hasher.finalize();
-    BASE64.encode(digest)
+    encode_standard(&digest)
 }
 
 /// Generate a random Sec-WebSocket-Key suitable for initiating a client
@@ -98,7 +97,7 @@ pub fn handshake_accept(key: &str) -> String {
 pub fn handshake_key() -> String {
     let mut key = [0u8; 16];
     rand::thread_rng().fill_bytes(&mut key);
-    BASE64.encode(key)
+    encode_standard(&key)
 }
 
 /// Additional headers that should be appended to the handshake response.

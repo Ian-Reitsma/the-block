@@ -84,7 +84,7 @@ impl Wallet {
 
     /// Generate a new wallet with OS randomness.
     pub fn generate() -> Self {
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         let signing_key = SigningKey::generate(&mut rng);
         Self { signing_key }
     }
@@ -137,7 +137,7 @@ pub mod hardware {
 
     impl MockHardwareWallet {
         pub fn new() -> Self {
-            let mut rng = OsRng;
+            let mut rng = OsRng::default();
             let signing_key = SigningKey::generate(&mut rng);
             Self {
                 signing_key,

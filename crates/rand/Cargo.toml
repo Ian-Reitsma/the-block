@@ -1,0 +1,7 @@
+[package]
+name = "rand"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand_core = { path = "../rand_core" }
