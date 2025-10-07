@@ -4,7 +4,7 @@ use crate::identity::{
     DidError, DidRecord, DidRegistry,
 };
 use crate::transaction::TxDidAnchor;
-use serde_json::Value;
+use foundation_serialization::json::Value;
 
 pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value, HandleError> {
     let handle = params
@@ -33,23 +33,23 @@ pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value
     let addr = reg.register_handle(handle, &pk_bytes, pq_bytes.as_deref(), &sig_bytes, nonce)?;
     #[cfg(not(feature = "pq-crypto"))]
     let addr = reg.register_handle(handle, &pk_bytes, &sig_bytes, nonce)?;
-    Ok(serde_json::json!({"address": addr}))
+    Ok(foundation_serialization::json::json!({"address": addr}))
 }
 
 pub fn resolve_handle(params: &Value, reg: &HandleRegistry) -> Value {
     let handle = params.get("handle").and_then(|v| v.as_str()).unwrap_or("");
     let addr = reg.resolve_handle(handle);
-    serde_json::json!({"address": addr})
+    foundation_serialization::json::json!({"address": addr})
 }
 
 pub fn whoami(params: &Value, reg: &HandleRegistry) -> Value {
     let addr = params.get("address").and_then(|v| v.as_str()).unwrap_or("");
     let handle = reg.handle_of(addr);
-    serde_json::json!({"address": addr, "handle": handle})
+    foundation_serialization::json::json!({"address": addr, "handle": handle})
 }
 
 fn did_record_json(record: DidRecord) -> Value {
-    serde_json::json!({
+    foundation_serialization::json::json!({
         "address": record.address,
         "document": record.document,
         "hash": hex::encode(record.hash),
@@ -57,7 +57,7 @@ fn did_record_json(record: DidRecord) -> Value {
         "updated_at": record.updated_at,
         "public_key": hex::encode(record.public_key),
         "remote_attestation": record.remote_attestation.map(|att| {
-            serde_json::json!({"signer": att.signer, "signature": att.signature})
+            foundation_serialization::json::json!({"signer": att.signer, "signature": att.signature})
         }),
     })
 }
@@ -67,8 +67,8 @@ pub fn anchor_did(
     reg: &mut DidRegistry,
     gov: &GovStore,
 ) -> Result<Value, DidError> {
-    let tx: TxDidAnchor =
-        serde_json::from_value(params.clone()).map_err(|_| DidError::InvalidRequest)?;
+    let tx: TxDidAnchor = foundation_serialization::json::from_value(params.clone())
+        .map_err(|_| DidError::InvalidRequest)?;
     let record = reg.anchor(&tx, Some(gov))?;
     Ok(did_record_json(record))
 }
@@ -77,7 +77,7 @@ pub fn resolve_did(params: &Value, reg: &DidRegistry) -> Value {
     let address = params.get("address").and_then(|v| v.as_str()).unwrap_or("");
     match reg.resolve(address) {
         Some(record) => did_record_json(record),
-        None => serde_json::json!({
+        None => foundation_serialization::json::json!({
             "address": address,
             "document": Value::Null,
             "hash": Value::Null,

@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 default = []
+sim-db = []
 runtime-wrapper = ["dep:runtime"]
 transport-wrapper = ["dep:transport"]
 overlay-wrapper = ["dep:p2p_overlay"]

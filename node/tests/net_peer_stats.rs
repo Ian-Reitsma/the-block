@@ -37,7 +37,7 @@ fn init_env() -> tempfile::TempDir {
     dir
 }
 
-fn rpc(addr: &str, body: &str) -> serde_json::Value {
+fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
     runtime::block_on(async {
         let addr: SocketAddr = addr.parse().unwrap();
         let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
@@ -55,7 +55,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
             .unwrap();
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
-        serde_json::from_str(&resp[body_idx + 4..]).unwrap()
+        foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
     })
 }
 
@@ -303,7 +303,8 @@ fn peer_stats_export_rpc() {
         let val = rpc(&addr, &body).await;
         assert_eq!(val["result"]["status"].as_str(), Some("ok"));
         let contents = std::fs::read_to_string(dir.path().join(path)).unwrap();
-        let m: serde_json::Value = serde_json::from_str(&contents).unwrap();
+        let m: foundation_serialization::json::Value =
+            foundation_serialization::json::from_str(&contents).unwrap();
         assert_eq!(m["requests"].as_u64().unwrap(), 1);
 
         handle.abort();
@@ -916,9 +917,10 @@ fn peer_stats_cli_show_json_snapshot() {
         .await
         .unwrap();
         assert!(output.status.success());
-        let mut val: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let mut val: foundation_serialization::json::Value =
+            foundation_serialization::json::from_slice(&output.stdout).unwrap();
         if let Some(rep) = val.get_mut("reputation") {
-            *rep = serde_json::json!(1.0);
+            *rep = foundation_serialization::json::json!(1.0);
         }
         assert_eq!(
             val.get("peer_id").and_then(|v| v.as_str()),
@@ -1021,16 +1023,20 @@ fn peer_stats_cli_sort_filter_snapshot() {
         .await
         .unwrap();
         assert!(output.status.success());
-        let mut val: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let mut val: foundation_serialization::json::Value =
+            foundation_serialization::json::from_slice(&output.stdout).unwrap();
         if let Some(arr) = val.get_mut("peers").and_then(|v| v.as_array_mut()) {
             for (i, p) in arr.iter_mut().enumerate() {
                 if let Some(obj) = p.as_object_mut() {
                     obj.remove("latency");
                     obj.insert(
                         "peer".into(),
-                        serde_json::Value::String(format!("peer{}", i)),
+                        foundation_serialization::json::Value::String(format!("peer{}", i)),
                     );
-                    obj.insert("reputation".into(), serde_json::Value::from(1.0));
+                    obj.insert(
+                        "reputation".into(),
+                        foundation_serialization::json::Value::from(1.0),
+                    );
                 }
             }
         }
@@ -1063,16 +1069,20 @@ fn peer_stats_cli_sort_filter_snapshot() {
         .await
         .unwrap();
         assert!(output2.status.success());
-        let mut val2: serde_json::Value = serde_json::from_slice(&output2.stdout).unwrap();
+        let mut val2: foundation_serialization::json::Value =
+            foundation_serialization::json::from_slice(&output2.stdout).unwrap();
         if let Some(arr) = val2.get_mut("peers").and_then(|v| v.as_array_mut()) {
             for (i, p) in arr.iter_mut().enumerate() {
                 if let Some(obj) = p.as_object_mut() {
                     obj.remove("latency");
                     obj.insert(
                         "peer".into(),
-                        serde_json::Value::String(format!("peer{}", i)),
+                        foundation_serialization::json::Value::String(format!("peer{}", i)),
                     );
-                    obj.insert("reputation".into(), serde_json::Value::from(1.0));
+                    obj.insert(
+                        "reputation".into(),
+                        foundation_serialization::json::Value::from(1.0),
+                    );
                 }
             }
         }

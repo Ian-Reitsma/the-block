@@ -6,7 +6,7 @@ use coding::{
     compressor_for, encryptor_for, erasure_coder_for, fountain_coder_for, CodingError, Compressor,
     Config, ConfigError, Encryptor, ErasureCoder, FountainCoder, DEFAULT_FALLBACK_EMERGENCY_ENV,
 };
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 
 #[derive(Clone, Debug)]
 pub struct Algorithms {
@@ -140,14 +140,14 @@ fn shared_from_config(mut config: Config) -> Result<Shared, CodingError> {
     #[cfg(feature = "telemetry")]
     {
         if erasure_emergency {
-            tracing::warn!(
+            diagnostics::tracing::warn!(
                 algorithm = %algorithms.erasure(),
                 env = %emergency_env,
                 "storage_erasure_fallback_emergency"
             );
         }
         if compression_emergency {
-            tracing::warn!(
+            diagnostics::tracing::warn!(
                 algorithm = %algorithms.compression(),
                 env = %emergency_env,
                 "storage_compression_fallback_emergency"
@@ -189,7 +189,7 @@ pub fn configure(config: Config) {
         }
         Err(err) => {
             #[cfg(feature = "telemetry")]
-            tracing::warn!(reason = %err, "coding_config_invalid");
+            diagnostics::tracing::warn!(reason = %err, "coding_config_invalid");
             #[cfg(not(feature = "telemetry"))]
             eprintln!("coding_config_invalid: {err}");
         }
@@ -203,7 +203,7 @@ pub fn configure_from_dir(dir: &str) {
         Err(ConfigError::Io(ref err)) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => {
             #[cfg(feature = "telemetry")]
-            tracing::warn!(reason = %err, path = %path.display(), "coding_config_load_failed");
+            diagnostics::tracing::warn!(reason = %err, path = %path.display(), "coding_config_load_failed");
             #[cfg(not(feature = "telemetry"))]
             eprintln!(
                 "coding_config_load_failed: {err} (path: {})",

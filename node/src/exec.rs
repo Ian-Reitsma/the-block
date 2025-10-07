@@ -124,7 +124,7 @@ pub fn record(
     #[cfg(not(feature = "telemetry"))]
     let _ = trace_id;
     #[cfg(feature = "telemetry")]
-    tracing::info!(%trace_id, provider_id, bytes_out, cpu_ms, "exec receipt");
+    diagnostics::tracing::info!(%trace_id, provider_id, bytes_out, cpu_ms, "exec receipt");
     #[cfg(feature = "telemetry")]
     {
         SUBSIDY_CPU_MS_TOTAL.inc_by(cpu_ms);

@@ -33,13 +33,16 @@ impl Drop for EnvVarGuard {
     }
 }
 
-fn rpc_request(addr: &str, body: &serde_json::Value) -> serde_json::Value {
+fn rpc_request(
+    addr: &str,
+    body: &foundation_serialization::json::Value,
+) -> foundation_serialization::json::Value {
     runtime::block_on(async {
         let addr: SocketAddr = addr.parse().expect("valid socket address");
         let mut stream = expect_timeout(TcpStream::connect(addr))
             .await
             .expect("connect to RPC server");
-        let payload = serde_json::to_string(body).expect("serialize request");
+        let payload = foundation_serialization::json::to_string(body).expect("serialize request");
         let req = format!(
             "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
             payload.len(),
@@ -54,11 +57,12 @@ fn rpc_request(addr: &str, body: &serde_json::Value) -> serde_json::Value {
             .expect("read response");
         let resp = String::from_utf8(resp).expect("response is utf8");
         let body_idx = resp.find("\r\n\r\n").expect("headers terminator present");
-        serde_json::from_str(&resp[body_idx + 4..]).expect("parse response body")
+        foundation_serialization::json::from_str(&resp[body_idx + 4..])
+            .expect("parse response body")
     })
 }
 
-fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> serde_json::Value {
+fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> foundation_serialization::json::Value {
     let pk_bytes = sk.verifying_key().to_bytes();
     let mut tx = TxDidAnchor {
         address: hex::encode(pk_bytes),
@@ -70,7 +74,7 @@ fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> serde_json::Value {
     };
     let sig = sk.sign(tx.owner_digest().as_ref());
     tx.signature = sig.to_bytes().to_vec();
-    serde_json::to_value(tx).expect("serialize anchor payload")
+    foundation_serialization::json::to_value(tx).expect("serialize anchor payload")
 }
 
 #[testkit::tb_serial]
@@ -107,7 +111,7 @@ fn identity_anchor_nonces_are_scoped_per_address() {
 
         assert_ne!(addr1_hex, addr2_hex, "distinct addresses required");
 
-        let req1 = serde_json::json!({
+        let req1 = foundation_serialization::json::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "identity.anchor",
@@ -118,7 +122,7 @@ fn identity_anchor_nonces_are_scoped_per_address() {
         assert_eq!(resp1["result"]["nonce"].as_u64(), Some(1));
         assert!(resp1.get("error").is_none());
 
-        let req2 = serde_json::json!({
+        let req2 = foundation_serialization::json::json!({
             "jsonrpc": "2.0",
             "id": 2,
             "method": "identity.anchor",
@@ -129,7 +133,7 @@ fn identity_anchor_nonces_are_scoped_per_address() {
         assert_eq!(resp2["result"]["nonce"].as_u64(), Some(1));
         assert!(resp2.get("error").is_none());
 
-        let replay_req = serde_json::json!({
+        let replay_req = foundation_serialization::json::json!({
             "jsonrpc": "2.0",
             "id": 3,
             "method": "identity.anchor",

@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use concurrency::Lazy;
 use ledger::address::ShardId;
-use once_cell::sync::Lazy;
 
 #[derive(Clone, Copy)]
 struct Candidate {

@@ -1,10 +1,14 @@
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
+use concurrency::{mutex, MutexExt, MutexT};
 use serde::{Deserialize, Serialize};
 use settlement::{SlaOutcome, SlaResolutionKind};
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use sys::cpu;
@@ -182,13 +186,13 @@ impl Workload {
 
 /// Execute workloads and produce proof hashes with per-slice caching.
 pub struct WorkloadRunner {
-    cache: std::sync::Arc<parking_lot::Mutex<HashMap<usize, [u8; 32]>>>,
+    cache: Arc<MutexT<HashMap<usize, [u8; 32]>>>,
 }
 
 impl WorkloadRunner {
     pub fn new() -> Self {
         Self {
-            cache: std::sync::Arc::new(parking_lot::Mutex::new(HashMap::new())),
+            cache: Arc::new(mutex(HashMap::new())),
         }
     }
 
@@ -216,7 +220,7 @@ impl WorkloadRunner {
     /// Run the workload for a given slice ID asynchronously. Results are cached so
     /// repeated executions avoid recomputation.
     pub async fn run(&self, slice_id: usize, w: Workload) -> [u8; 32] {
-        if let Some(cached) = self.cache.lock().get(&slice_id) {
+        if let Some(cached) = self.cache.guard().get(&slice_id) {
             return *cached;
         }
         let res = runtime::spawn_blocking(move || match w {
@@ -227,7 +231,7 @@ impl WorkloadRunner {
         })
         .await
         .unwrap_or_else(|e| panic!("workload failed: {e}"));
-        self.cache.lock().insert(slice_id, res);
+        self.cache.guard().insert(slice_id, res);
         res
     }
 }

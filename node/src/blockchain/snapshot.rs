@@ -2,8 +2,7 @@
 use crate::telemetry::{SNAPSHOT_DURATION_SECONDS, SNAPSHOT_FAIL_TOTAL};
 use crate::{Account, TokenBalance};
 use hex;
-use serde::{Deserialize, Serialize};
-use state::{MerkleTrie, Snapshot};
+use state::MerkleTrie;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs;
@@ -60,7 +59,6 @@ impl SnapshotManager {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 struct SnapshotAccount {
     address: String,
     consumer: u64,
@@ -68,18 +66,179 @@ struct SnapshotAccount {
     nonce: u64,
 }
 
-#[derive(Serialize, Deserialize)]
 struct SnapshotDisk {
     height: u64,
     accounts: Vec<SnapshotAccount>,
     root: String,
 }
 
-#[derive(Serialize, Deserialize)]
 struct SnapshotDiff {
     height: u64,
     accounts: Vec<SnapshotAccount>,
     root: String,
+}
+
+fn encode_snapshot_disk(snap: &SnapshotDisk) -> Vec<u8> {
+    encode_snapshot_common(snap.height, &snap.root, &snap.accounts)
+}
+
+fn encode_snapshot_diff(diff: &SnapshotDiff) -> Vec<u8> {
+    encode_snapshot_common(diff.height, &diff.root, &diff.accounts)
+}
+
+fn encode_snapshot_common(height: u64, root: &str, accounts: &[SnapshotAccount]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&height.to_le_bytes());
+    out.extend_from_slice(&(root.len() as u32).to_le_bytes());
+    out.extend_from_slice(root.as_bytes());
+    out.extend_from_slice(&(accounts.len() as u32).to_le_bytes());
+    for account in accounts {
+        let address_bytes = account.address.as_bytes();
+        out.extend_from_slice(&(address_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(address_bytes);
+        out.extend_from_slice(&account.consumer.to_le_bytes());
+        out.extend_from_slice(&account.industrial.to_le_bytes());
+        out.extend_from_slice(&account.nonce.to_le_bytes());
+    }
+    out
+}
+
+fn decode_snapshot_disk(bytes: &[u8]) -> std::io::Result<SnapshotDisk> {
+    decode_snapshot_common(bytes).map(|(height, accounts, root)| SnapshotDisk {
+        height,
+        accounts,
+        root,
+    })
+}
+
+fn decode_snapshot_diff(bytes: &[u8]) -> std::io::Result<SnapshotDiff> {
+    decode_snapshot_common(bytes).map(|(height, accounts, root)| SnapshotDiff {
+        height,
+        accounts,
+        root,
+    })
+}
+
+fn decode_snapshot_common(bytes: &[u8]) -> std::io::Result<(u64, Vec<SnapshotAccount>, String)> {
+    let mut cursor = 0usize;
+
+    fn invalid_data(msg: &'static str) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, msg)
+    }
+
+    fn read_exact<'a>(
+        bytes: &'a [u8],
+        cursor: &mut usize,
+        len: usize,
+    ) -> std::io::Result<&'a [u8]> {
+        if bytes.len() < *cursor + len {
+            return Err(invalid_data("truncated snapshot data"));
+        }
+        let slice = &bytes[*cursor..*cursor + len];
+        *cursor += len;
+        Ok(slice)
+    }
+
+    fn read_u32(bytes: &[u8], cursor: &mut usize) -> std::io::Result<u32> {
+        let raw = read_exact(bytes, cursor, 4)?;
+        Ok(u32::from_le_bytes(raw.try_into().unwrap()))
+    }
+
+    fn read_u64(bytes: &[u8], cursor: &mut usize) -> std::io::Result<u64> {
+        let raw = read_exact(bytes, cursor, 8)?;
+        Ok(u64::from_le_bytes(raw.try_into().unwrap()))
+    }
+
+    let height = read_u64(bytes, &mut cursor)?;
+    let root_len = read_u32(bytes, &mut cursor)? as usize;
+    let root_bytes = read_exact(bytes, &mut cursor, root_len)?;
+    let root = String::from_utf8(root_bytes.to_vec())
+        .map_err(|_| invalid_data("invalid utf8 in snapshot"))?;
+
+    let account_len = read_u32(bytes, &mut cursor)? as usize;
+    let mut accounts = Vec::with_capacity(account_len);
+    for _ in 0..account_len {
+        let addr_len = read_u32(bytes, &mut cursor)? as usize;
+        let addr_bytes = read_exact(bytes, &mut cursor, addr_len)?;
+        let address = String::from_utf8(addr_bytes.to_vec())
+            .map_err(|_| invalid_data("invalid utf8 in snapshot"))?;
+        let consumer = read_u64(bytes, &mut cursor)?;
+        let industrial = read_u64(bytes, &mut cursor)?;
+        let nonce = read_u64(bytes, &mut cursor)?;
+        accounts.push(SnapshotAccount {
+            address,
+            consumer,
+            industrial,
+            nonce,
+        });
+    }
+
+    if cursor != bytes.len() {
+        return Err(invalid_data("unexpected trailing snapshot bytes"));
+    }
+
+    Ok((height, accounts, root))
+}
+
+fn decode_state_snapshot(bytes: &[u8]) -> std::io::Result<([u8; 32], Vec<(Vec<u8>, Vec<u8>)>)> {
+    fn invalid_data(msg: &'static str) -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, msg)
+    }
+
+    fn read_exact<'a>(
+        bytes: &'a [u8],
+        cursor: &mut usize,
+        len: usize,
+    ) -> std::io::Result<&'a [u8]> {
+        if bytes.len() < *cursor + len {
+            return Err(invalid_data("truncated snapshot data"));
+        }
+        let slice = &bytes[*cursor..*cursor + len];
+        *cursor += len;
+        Ok(slice)
+    }
+
+    fn read_u32_be(bytes: &[u8], cursor: &mut usize) -> std::io::Result<u32> {
+        let raw = read_exact(bytes, cursor, 4)?;
+        Ok(u32::from_be_bytes(raw.try_into().unwrap()))
+    }
+
+    let mut cursor = 0usize;
+    if bytes.len() < 32 {
+        return Err(invalid_data("missing snapshot root"));
+    }
+    let mut root = [0u8; 32];
+    root.copy_from_slice(&bytes[..32]);
+    cursor += 32;
+
+    let entry_count = read_u32_be(bytes, &mut cursor)? as usize;
+    let mut entries = Vec::with_capacity(entry_count);
+    for _ in 0..entry_count {
+        let key_len = read_u32_be(bytes, &mut cursor)? as usize;
+        let key = read_exact(bytes, &mut cursor, key_len)?.to_vec();
+        let value_len = read_u32_be(bytes, &mut cursor)? as usize;
+        let value = read_exact(bytes, &mut cursor, value_len)?.to_vec();
+        entries.push((key, value));
+    }
+
+    if cursor < bytes.len() {
+        let flag = bytes[cursor];
+        cursor += 1;
+        match flag {
+            0 => {}
+            1 => {
+                let engine_len = read_u32_be(bytes, &mut cursor)? as usize;
+                let _ = read_exact(bytes, &mut cursor, engine_len)?;
+            }
+            _ => return Err(invalid_data("invalid snapshot engine flag")),
+        }
+    }
+
+    if cursor != bytes.len() {
+        return Err(invalid_data("unexpected trailing snapshot bytes"));
+    }
+
+    Ok((root, entries))
 }
 
 fn merkle_root(accounts: &[SnapshotAccount]) -> String {
@@ -134,7 +293,7 @@ pub fn write_snapshot(
         let dir = Path::new(base).join("snapshots");
         fs::create_dir_all(&dir)?;
         let file = dir.join(format!("{:010}.bin", height));
-        let bytes = bincode::serialize(&snap).unwrap_or_else(|e| panic!("snapshot serialize: {e}"));
+        let bytes = encode_snapshot_disk(&snap);
         fs::write(&file, bytes)?;
         // Rotate old snapshots and diffs
         if let Ok(entries) = fs::read_dir(&dir) {
@@ -191,7 +350,7 @@ pub fn write_diff(
         let dir = Path::new(base).join("snapshots");
         fs::create_dir_all(&dir)?;
         let file = dir.join(format!("{:010}.diff", height));
-        let bytes = bincode::serialize(&diff).unwrap_or_else(|e| panic!("diff serialize: {e}"));
+        let bytes = encode_snapshot_diff(&diff);
         fs::write(file, bytes)?;
         Ok(root)
     })();
@@ -229,7 +388,7 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                         Ok(b) => b,
                         Err(_) => continue,
                     };
-                    if let Ok(snap) = bincode::deserialize::<SnapshotDisk>(&bytes) {
+                    if let Ok(snap) = decode_snapshot_disk(&bytes) {
                         if latest.as_ref().map_or(true, |(h, _, _)| height > *h) {
                             let accounts_map: HashMap<String, Account> = snap
                                 .accounts
@@ -272,7 +431,7 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                         if let Ok(height) = stem.parse::<u64>() {
                             if height > h {
                                 if let Ok(bytes) = fs::read(&path) {
-                                    if let Ok(diff) = bincode::deserialize::<SnapshotDiff>(&bytes) {
+                                    if let Ok(diff) = decode_snapshot_diff(&bytes) {
                                         diffs.push((height, diff));
                                     }
                                 }
@@ -325,10 +484,9 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
 
 pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, String)> {
     let data = fs::read(path)?;
-    let snap: Snapshot = bincode::deserialize(&data)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let (root, entries) = decode_state_snapshot(&data)?;
     let mut accounts = HashMap::new();
-    for (key, value) in snap.entries {
+    for (key, value) in entries {
         let address = String::from_utf8(key)
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid address"))?;
         if value.len() < 24 {
@@ -375,7 +533,7 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
         })?
         .parse::<u64>()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok((height, accounts, hex::encode(snap.root)))
+    Ok((height, accounts, hex::encode(root)))
 }
 
 pub fn account_proof(

@@ -7,7 +7,7 @@ use cli_core::{
     parse::Matches,
     ConfigReader,
 };
-use serde_json::json;
+use foundation_serialization::json::json;
 use std::{path::PathBuf, process};
 
 pub enum ConfigCmd {
@@ -87,12 +87,12 @@ pub fn handle(cmd: ConfigCmd) {
 
 pub fn reload(url: String) {
     let client = RpcClient::from_env();
-    #[derive(serde::Serialize)]
+    #[derive(Serialize)]
     struct Payload<'a> {
         jsonrpc: &'static str,
         id: u32,
         method: &'static str,
-        params: serde_json::Value,
+        params: foundation_serialization::json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
         auth: Option<&'a str>,
     }

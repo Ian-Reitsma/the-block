@@ -436,8 +436,8 @@ async fn serve(addr: SocketAddr) -> std::io::Result<()> {
 
 `BufferedTcpStream` keeps any bytes read ahead during header parsing so body
 reads can reuse the buffer without additional syscalls. The helper behaves like
-`tokio::io::BufReader` but is implemented entirely on top of the runtime socket
-layer.
+`runtime::io::BufReader` but is implemented entirely on top of the in-house
+socket layer.
 
 ### Length-prefixed framing
 
@@ -483,6 +483,6 @@ async fn udp_echo() -> std::io::Result<()> {
 ```
 
 The sockets register with the in-house reactor automatically and work across all
-compiled backends (`inhouse`, `tokio`, or the stub fallback). These examples
+compiled backends (`inhouse` or the stub fallback). These examples
 double as smoke tests when developing new runtime backends or adjusting the
 polling integration.

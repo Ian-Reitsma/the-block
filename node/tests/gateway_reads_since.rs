@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
-use serde_json::json;
+use foundation_serialization::json::json;
 use tempfile::tempdir;
 use the_block::gateway::dns::{gateway_policy, publish_record, reads_since};
 

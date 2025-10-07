@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Once, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use concurrency::Lazy;
 use ledger::address::ShardId;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
 use storage_engine::rocksdb_engine::RocksDbEngine;
@@ -145,7 +145,7 @@ pub fn set_legacy_mode(enabled: bool) {
     if enabled {
         LEGACY_WARN_ONCE.call_once(|| {
             #[cfg(feature = "telemetry")]
-            tracing::warn!(
+            diagnostics::tracing::warn!(
                 target: "storage_legacy_mode",
                 "storage legacy mode enabled; this toggle will be removed in the next release"
             );
@@ -710,7 +710,7 @@ impl SimpleDb {
 #[cfg(test)]
 mod tests {
     use super::{configure_engines, names, Engine, EngineConfig, EngineKind, SimpleDb};
-    use once_cell::sync::Lazy;
+    use concurrency::Lazy;
     use std::collections::HashMap;
     use std::sync::Mutex;
     use sys::tempfile::tempdir;

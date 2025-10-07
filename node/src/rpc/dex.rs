@@ -1,15 +1,15 @@
 #![forbid(unsafe_code)]
 
 use crate::dex::{check_liquidity_rules, storage::EscrowState, DexStore, TrustLedger};
+use concurrency::Lazy;
 use dex::escrow::PaymentProof;
-use once_cell::sync::Lazy;
-use serde_json::json;
+use foundation_serialization::json::json;
 use std::sync::Mutex;
 
 pub static STORE: Lazy<Mutex<DexStore>> = Lazy::new(|| Mutex::new(DexStore::open("dex_db")));
 pub static LEDGER: Lazy<Mutex<TrustLedger>> = Lazy::new(|| Mutex::new(TrustLedger::default()));
 
-pub fn escrow_status(id: u64) -> serde_json::Value {
+pub fn escrow_status(id: u64) -> foundation_serialization::json::Value {
     let store = STORE.lock().unwrap();
     let state: EscrowState = store.load_escrow_state();
     if let Some(entry) = state.escrow.status(id) {
@@ -32,7 +32,10 @@ pub fn escrow_status(id: u64) -> serde_json::Value {
     }
 }
 
-pub fn escrow_release(id: u64, amount: u64) -> Result<serde_json::Value, &'static str> {
+pub fn escrow_release(
+    id: u64,
+    amount: u64,
+) -> Result<foundation_serialization::json::Value, &'static str> {
     let mut store = STORE.lock().unwrap();
     let mut state = store.load_escrow_state();
     let (buy, sell, _qty, locked_at) = state.locks.get(&id).cloned().ok_or("not_found")?;

@@ -3,8 +3,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Result};
 use dashmap::DashMap;
+use diagnostics::{anyhow, Result, TbError};
 use once_cell::sync::{Lazy, OnceCell};
 pub use quinn::{Connection, Endpoint};
 use rand::Rng;
@@ -57,7 +57,9 @@ pub enum QuinnCallbackError {
     AlreadyInstalled,
 }
 
-pub fn set_event_callbacks(callbacks: QuinnEventCallbacks) -> Result<(), QuinnCallbackError> {
+pub fn set_event_callbacks(
+    callbacks: QuinnEventCallbacks,
+) -> std::result::Result<(), QuinnCallbackError> {
     let cell = CALLBACKS.get_or_init(|| RwLock::new(Arc::new(QuinnEventCallbacks::default())));
     let mut guard = cell.write().unwrap();
     *guard = Arc::new(callbacks);
@@ -77,7 +79,7 @@ where
 #[derive(Debug)]
 pub enum ConnectError {
     Handshake(HandshakeError),
-    Other(anyhow::Error),
+    Other(TbError),
 }
 
 impl std::fmt::Display for ConnectError {
@@ -151,12 +153,13 @@ pub const CAPABILITIES: &[ProviderCapability] = &[
 pub const PROVIDER_ID: &str = "quinn";
 
 pub async fn listen(addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
-    let cert = generate_simple_self_signed(["the-block".to_string()])?;
-    let cert_der = cert.serialize_der()?;
+    let cert = generate_simple_self_signed(["the-block".to_string()]).map_err(|e| anyhow!(e))?;
+    let cert_der = cert.serialize_der().map_err(|e| anyhow!(e))?;
     let key_der = cert.serialize_private_key_der();
     let cert = Certificate(cert_der.clone());
     let key = PrivateKey(key_der);
-    let server_config = quinn::ServerConfig::with_single_cert(vec![cert.clone()], key)?;
+    let server_config =
+        quinn::ServerConfig::with_single_cert(vec![cert.clone()], key).map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
     let mut attempts = 0usize;
     loop {
@@ -179,7 +182,8 @@ pub async fn listen_with_cert(
 ) -> Result<Endpoint> {
     let cert = Certificate(cert_der.to_vec());
     let key = PrivateKey(key_der.to_vec());
-    let server_config = quinn::ServerConfig::with_single_cert(vec![cert], key)?;
+    let server_config =
+        quinn::ServerConfig::with_single_cert(vec![cert], key).map_err(|e| anyhow!(e))?;
     let policy = retry_policy();
     let mut attempts = 0usize;
     loop {
@@ -303,12 +307,12 @@ pub async fn send(conn: &Connection, data: &[u8]) -> Result<()> {
         Ok(s) => s,
         Err(e) => {
             notify_conn_err(conn.remote_address(), &e);
-            return Err(e.into());
+            return Err(anyhow!(e));
         }
     };
     if let Err(e) = stream.write_all(data).await {
         notify_write_err(conn.remote_address(), &e);
-        return Err(e.into());
+        return Err(anyhow!(e));
     }
     if let Ok(dup_str) = std::env::var("TB_QUIC_PACKET_DUP") {
         if let Ok(dup) = dup_str.parse::<f64>() {
@@ -324,7 +328,7 @@ pub async fn send(conn: &Connection, data: &[u8]) -> Result<()> {
     });
     if let Err(e) = stream.finish().await {
         notify_write_err(conn.remote_address(), &e);
-        return Err(e.into());
+        return Err(anyhow!(e));
     }
     Ok(())
 }
@@ -442,7 +446,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
             _scts: &mut dyn Iterator<Item = &[u8]>,
             _ocsp_response: &[u8],
             _now: std::time::SystemTime,
-        ) -> Result<ServerCertVerified, rustls::Error> {
+        ) -> std::result::Result<ServerCertVerified, rustls::Error> {
             Ok(ServerCertVerified::assertion())
         }
 
@@ -451,7 +455,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
             _message: &[u8],
             _cert: &Certificate,
             _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
             Ok(HandshakeSignatureValid::assertion())
         }
 
@@ -460,7 +464,7 @@ pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connectio
             _message: &[u8],
             _cert: &Certificate,
             _dss: &DigitallySignedStruct,
-        ) -> Result<HandshakeSignatureValid, rustls::Error> {
+        ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
             Ok(HandshakeSignatureValid::assertion())
         }
 

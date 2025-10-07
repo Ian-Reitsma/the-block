@@ -1,9 +1,9 @@
 #![allow(clippy::module_name_repetitions)]
 
+use foundation_serialization::json::Value;
 use httpd::{BlockingClient, ClientError as HttpClientError, ClientResponse, Method};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::fmt;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -133,7 +133,7 @@ impl RpcClient {
         struct Envelope<T> {
             result: T,
         }
-        let params = serde_json::json!({ "lane": lane.as_str() });
+        let params = foundation_serialization::json::json!({ "lane": lane.as_str() });
         let payload = Payload {
             jsonrpc: "2.0",
             id: 1,

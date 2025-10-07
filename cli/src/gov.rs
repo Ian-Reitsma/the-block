@@ -7,13 +7,13 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::{binary, json::json};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote, Vote,
     VoteChoice,
 };
-use serde_json::json;
 use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
 
 struct CliReleaseVerifier;
@@ -530,7 +530,7 @@ pub fn handle(cmd: GovCmd) {
             let store = GovStore::open(state);
             for item in store.proposals().iter() {
                 if let Ok((_, raw)) = item {
-                    if let Ok(p) = bincode::deserialize::<Proposal>(&raw) {
+                    if let Ok(p) = binary::decode::<Proposal>(&raw) {
                         println!("{} {:?}", p.id, p.status);
                     }
                 }
@@ -556,9 +556,9 @@ pub fn handle(cmd: GovCmd) {
         }
         GovCmd::Status { id, state } => {
             let store = GovStore::open(state);
-            let key = bincode::serialize(&id).unwrap();
+            let key = binary::encode(&id).expect("serialize proposal id");
             if let Ok(Some(raw)) = store.proposals().get(key) {
-                if let Ok(p) = bincode::deserialize::<Proposal>(&raw) {
+                if let Ok(p) = binary::decode::<Proposal>(&raw) {
                     println!("{:?}", p.status);
                 }
             }
@@ -775,7 +775,9 @@ pub fn handle(cmd: GovCmd) {
                 let memo_value = memo.unwrap_or_default();
                 match store.queue_disbursement(&destination, amount, &memo_value, epoch) {
                     Ok(record) => {
-                        if let Ok(serialized) = serde_json::to_string_pretty(&record) {
+                        if let Ok(serialized) =
+                            foundation_serialization::json::to_string_pretty(&record)
+                        {
                             println!("{serialized}");
                         } else {
                             println!("queued disbursement {}", record.id);
@@ -788,7 +790,9 @@ pub fn handle(cmd: GovCmd) {
                 let store = GovStore::open(state);
                 match store.execute_disbursement(id, &tx_hash) {
                     Ok(record) => {
-                        if let Ok(serialized) = serde_json::to_string_pretty(&record) {
+                        if let Ok(serialized) =
+                            foundation_serialization::json::to_string_pretty(&record)
+                        {
                             println!("{serialized}");
                         } else {
                             println!("executed disbursement {id}");
@@ -801,7 +805,9 @@ pub fn handle(cmd: GovCmd) {
                 let store = GovStore::open(state);
                 match store.cancel_disbursement(id, &reason) {
                     Ok(record) => {
-                        if let Ok(serialized) = serde_json::to_string_pretty(&record) {
+                        if let Ok(serialized) =
+                            foundation_serialization::json::to_string_pretty(&record)
+                        {
                             println!("{serialized}");
                         } else {
                             println!("cancelled disbursement {id}");
@@ -815,7 +821,7 @@ pub fn handle(cmd: GovCmd) {
                 match store.disbursements() {
                     Ok(records) => {
                         let payload = json!({ "disbursements": records });
-                        match serde_json::to_string_pretty(&payload) {
+                        match foundation_serialization::json::to_string_pretty(&payload) {
                             Ok(serialized) => println!("{serialized}"),
                             Err(err) => eprintln!("format failed: {err}"),
                         }

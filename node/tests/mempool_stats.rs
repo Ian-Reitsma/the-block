@@ -16,7 +16,7 @@ use util::timeout::expect_timeout;
 
 mod util;
 
-fn rpc(addr: &str, body: &str) -> serde_json::Value {
+fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
     runtime::block_on(async {
         let addr: SocketAddr = addr.parse().unwrap();
         let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
@@ -34,7 +34,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
             .unwrap();
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
-        serde_json::from_str(&resp[body_idx + 4..]).unwrap()
+        foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
     })
 }
 
@@ -119,7 +119,7 @@ fn mempool_qos_event_public_rpc() {
         let client_ack = client.clone();
         let url_ack = url.clone();
         let ack = the_block::spawn_blocking(move || {
-            let payload = serde_json::json!({
+            let payload = foundation_serialization::json::json!({
                 "jsonrpc": "2.0",
                 "id": 7,
                 "method": "mempool.qos_event",
@@ -133,7 +133,7 @@ fn mempool_qos_event_public_rpc() {
             client_ack
                 .call(&url_ack, &payload)
                 .expect("send QoS event")
-                .json::<serde_json::Value>()
+                .json::<foundation_serialization::json::Value>()
                 .expect("parse QoS response")
         })
         .await

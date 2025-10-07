@@ -16,7 +16,7 @@ fn ingest_and_query() {
         false,
         the_block::transaction::FeeLane::Consumer,
     );
-    let bytes = bincode::serialize(&vec![r]).unwrap();
+    let bytes = foundation_serialization::binary::encode(&vec![r]).unwrap();
     std::fs::write(receipts.join("1"), bytes).unwrap();
     let db = dir.path().join("explorer.db");
     let ex = Explorer::open(&db).unwrap();

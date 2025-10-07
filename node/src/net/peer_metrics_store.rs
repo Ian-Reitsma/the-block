@@ -3,9 +3,9 @@ use crate::net::peer::DropReason;
 use crate::net::peer::PeerMetrics;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{verbose, PEER_RATE_LIMIT_TOTAL};
+use concurrency::{MutexExt, OnceCell};
 #[cfg(feature = "telemetry")]
 use hex;
-use once_cell::sync::OnceCell;
 use sled::Tree;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -121,7 +121,7 @@ static STORE: OnceCell<Mutex<Option<PeerMetricsStore>>> = OnceCell::new();
 pub fn init(path: &str) {
     let store = PeerMetricsStore::open(path).ok();
     if let Some(cell) = STORE.get() {
-        *cell.lock().unwrap() = store;
+        *cell.guard() = store;
     } else {
         let _ = STORE.set(Mutex::new(store));
     }
@@ -130,9 +130,7 @@ pub fn init(path: &str) {
 pub fn store() -> Option<PeerMetricsStoreGuard<'static>> {
     STORE
         .get()
-        .map(|m| PeerMetricsStoreGuard {
-            inner: m.lock().unwrap(),
-        })
+        .map(|m| PeerMetricsStoreGuard { inner: m.guard() })
         .and_then(|g| if g.inner.is_some() { Some(g) } else { None })
 }
 

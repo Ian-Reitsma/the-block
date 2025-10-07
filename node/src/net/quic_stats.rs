@@ -1,5 +1,5 @@
+use concurrency::Lazy;
 use hex;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::RwLock;

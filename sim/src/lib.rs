@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, Rng};
 use serde::Serialize;
 
 pub mod bridging;
@@ -184,6 +184,7 @@ impl Simulation {
         if !partition_active && self.reconciliation_latency > 0 {
             self.reconciliation_latency -= 1;
         }
+        #[cfg(feature = "sim-db")]
         if let Some(db) = &self.db {
             let key = step.to_be_bytes();
             let val = bincode::serialize(&snap).expect("serialize snapshot");

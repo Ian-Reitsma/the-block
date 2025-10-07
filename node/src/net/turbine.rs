@@ -1,9 +1,9 @@
-use parking_lot::Mutex;
 use std::collections::{HashSet, VecDeque};
 use std::net::SocketAddr;
+use std::sync::Mutex;
 
+use concurrency::{Lazy, MutexExt};
 use crypto_suite::hashing::blake3::Hasher;
-use once_cell::sync::Lazy;
 
 use crate::net::message::BlobChunk;
 use crate::net::peer::is_throttled_addr;
@@ -70,7 +70,7 @@ pub fn broadcast_with<F>(
         h.update(&buf);
         *h.finalize().as_bytes()
     };
-    let mut guard = SEEN.lock();
+    let mut guard = SEEN.guard();
     if guard.0.contains(&hash) {
         for p in peers {
             record_ip_drop(&p.0);

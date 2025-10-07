@@ -1,8 +1,8 @@
 #![cfg(feature = "integration-tests")]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
+use foundation_serialization::json::Value;
 use runtime::{io::read_to_end, net::TcpStream};
-use serde_json::Value;
 use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use util::timeout::expect_timeout;
@@ -31,7 +31,7 @@ fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
             .unwrap();
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
-        serde_json::from_str(&resp[body_idx + 4..]).unwrap()
+        foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
     })
 }
 

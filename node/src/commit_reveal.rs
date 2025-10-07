@@ -1,6 +1,6 @@
-use crypto_suite::hashing::blake3;
 #[cfg(feature = "pq-crypto")]
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
+use crypto_suite::hashing::blake3;
 #[cfg(feature = "pq-crypto")]
 use pqcrypto_dilithium::dilithium3::{
     detached_sign, keypair, verify_detached_signature, DetachedSignature, PublicKey, SecretKey,

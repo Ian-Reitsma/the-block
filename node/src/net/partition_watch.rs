@@ -4,7 +4,7 @@ use std::sync::{
     Mutex,
 };
 
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 
 use super::OverlayPeerId;
 #[cfg(feature = "telemetry")]

@@ -8,8 +8,8 @@ use contract_cli::light_client::{
 use contract_cli::rpc::RpcClient;
 use contract_cli::tx::{generate_keypair, TxDidAnchor};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
+use foundation_serialization::json::json;
 use hex;
-use serde_json::json;
 use support::json_rpc::JsonRpcMock;
 
 fn owner_signing_key(bytes: &[u8]) -> SigningKey {
@@ -44,8 +44,8 @@ fn build_anchor_transaction_generates_signatures() {
     let owner_vk = owner_key.verifying_key();
     assert_eq!(tx.address, hex::encode(&owner_public));
     assert_eq!(tx.public_key, owner_public.clone());
-    let parsed_document: serde_json::Value =
-        serde_json::from_str(&tx.document).expect("canonical doc");
+    let parsed_document: foundation_serialization::json::Value =
+        foundation_serialization::json::from_str(&tx.document).expect("canonical doc");
     assert_eq!(parsed_document, document);
     let sig = signature_from_vec(&tx.signature);
     owner_vk
@@ -131,7 +131,7 @@ fn anchor_submission_and_resolve_flow() {
                 "nonce": tx.nonce,
                 "updated_at": 123,
                 "public_key": hex::encode(&owner_public),
-                "remote_attestation": serde_json::Value::Null
+                "remote_attestation": foundation_serialization::json::Value::Null
             },
             "id": 1
         })

@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 use std::sync::Mutex;
 
 use crate::vm::{

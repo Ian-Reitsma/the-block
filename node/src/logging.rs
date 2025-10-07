@@ -22,21 +22,21 @@ pub fn corr_id_random() -> String {
 #[macro_export]
 macro_rules! log_context {
     (block = $height:expr) => {
-        tracing::info_span!("block", correlation_id = %$crate::logging::corr_id_height($height))
+        diagnostics::tracing::info_span!("block", correlation_id = %$crate::logging::corr_id_height($height))
     };
     (tx = $hash:expr) => {
-        tracing::info_span!("tx", correlation_id = %$crate::logging::corr_id_hash(&$hash))
+        diagnostics::tracing::info_span!("tx", correlation_id = %$crate::logging::corr_id_hash(&$hash))
     };
     (request) => {
-        tracing::info_span!(
+        diagnostics::tracing::info_span!(
             "request",
             correlation_id = %$crate::logging::corr_id_random()
         )
     };
     (request = $id:expr) => {
-        tracing::info_span!("request", correlation_id = %$id)
+        diagnostics::tracing::info_span!("request", correlation_id = %$id)
     };
     (provider = $id:expr) => {
-        tracing::info_span!("provider", id = %$id)
+        diagnostics::tracing::info_span!("provider", id = %$id)
     };
 }

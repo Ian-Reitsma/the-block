@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use crate::vm::contracts::htlc::Htlc;
-use once_cell::sync::Lazy;
-use serde_json::json;
+use concurrency::Lazy;
+use foundation_serialization::json::json;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -17,7 +17,7 @@ pub fn insert(id: u64, h: Htlc) {
     }
 }
 
-pub fn status(id: u64) -> serde_json::Value {
+pub fn status(id: u64) -> foundation_serialization::json::Value {
     let store = STORE.lock().unwrap();
     if let Some(h) = store.get(&id) {
         json!({
@@ -30,7 +30,7 @@ pub fn status(id: u64) -> serde_json::Value {
     }
 }
 
-pub fn refund(id: u64, now: u64) -> serde_json::Value {
+pub fn refund(id: u64, now: u64) -> foundation_serialization::json::Value {
     let mut store = STORE.lock().unwrap();
     if let Some(h) = store.get_mut(&id) {
         if h.refund(now) {

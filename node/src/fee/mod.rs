@@ -2,8 +2,8 @@
 //!
 //! Implements selector-based fee decomposition as per CONSENSUS.md.
 
-use python_bridge::{Error as PyError, Result as PyResult};
-use thiserror::Error;
+use crate::py::{PyError, PyResult};
+use std::fmt;
 
 /// Maximum fee allowed before admission.
 ///
@@ -11,13 +11,22 @@ use thiserror::Error;
 pub const MAX_FEE: u64 = (1u64 << 63) - 1;
 
 /// Errors that can occur during fee decomposition.
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum FeeError {
-    #[error("invalid selector")]
     InvalidSelector,
-    #[error("fee overflow")]
     Overflow,
 }
+
+impl fmt::Display for FeeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FeeError::InvalidSelector => write!(f, "invalid selector"),
+            FeeError::Overflow => write!(f, "fee overflow"),
+        }
+    }
+}
+
+impl std::error::Error for FeeError {}
 
 /// Split a raw fee into consumer and industrial components based on a
 /// consumer percentage.
@@ -47,4 +56,22 @@ pub fn decompose_py(pct_ct: u8, fee: u64) -> PyResult<(u64, u64)> {
         FeeError::InvalidSelector => PyError::value("invalid selector"),
         FeeError::Overflow => PyError::value("fee overflow"),
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ErrInvalidSelector;
+
+impl ErrInvalidSelector {
+    pub fn new_err(msg: impl Into<String>) -> PyError {
+        PyError::value(msg)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ErrFeeOverflow;
+
+impl ErrFeeOverflow {
+    pub fn new_err(msg: impl Into<String>) -> PyError {
+        PyError::value(msg)
+    }
 }

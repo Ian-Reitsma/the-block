@@ -3,7 +3,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use transport::{
     available_providers, inhouse_certificate_store, CertificateHandle, CertificateStore, Config,
     DefaultFactory, ListenerHandle, ProviderCapability, ProviderKind, RetryPolicy,

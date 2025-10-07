@@ -2,7 +2,7 @@
 
 use std::sync::{atomic::AtomicBool, Arc, Mutex, Once};
 
-use anyhow::Result;
+use diagnostics::anyhow::Result;
 use runtime::io::{AsyncReadExt, AsyncWriteExt};
 use runtime::net::TcpStream;
 use runtime::sync::oneshot;
@@ -28,7 +28,7 @@ async fn read_response_headers(stream: &mut TcpStream) -> Result<String> {
     loop {
         let read = stream.read(&mut tmp).await?;
         if read == 0 {
-            anyhow::bail!("connection closed before headers");
+            diagnostics::anyhow::bail!("connection closed before headers");
         }
         buf.extend_from_slice(&tmp[..read]);
         if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {

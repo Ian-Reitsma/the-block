@@ -3,11 +3,12 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use anyhow::{anyhow, Context, Result};
 use crypto_suite::hashing::blake3::{hash, Hasher};
+use diagnostics::{anyhow, Result as DiagResult, TbError};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +41,7 @@ struct AdapterInner {
 }
 
 impl Adapter {
-    pub fn new(retry: RetryPolicy, callbacks: &InhouseEventCallbacks) -> Result<Self> {
+    pub fn new(retry: RetryPolicy, callbacks: &InhouseEventCallbacks) -> DiagResult<Self> {
         if let Some(hook) = callbacks.provider_connect.clone() {
             hook(PROVIDER_ID);
         }
@@ -62,7 +63,7 @@ impl Adapter {
         }
     }
 
-    pub async fn listen(&self, addr: SocketAddr) -> Result<(Endpoint, Certificate)> {
+    pub async fn listen(&self, addr: SocketAddr) -> DiagResult<(Endpoint, Certificate)> {
         let mut endpoints = self.inner.endpoints.lock().unwrap();
         if endpoints.contains_key(&addr) {
             return Err(anyhow!("listener already active"));
@@ -78,7 +79,11 @@ impl Adapter {
         Ok((Endpoint { addr }, certificate))
     }
 
-    pub async fn connect(&self, addr: SocketAddr, cert: &Certificate) -> Result<Arc<Connection>> {
+    pub async fn connect(
+        &self,
+        addr: SocketAddr,
+        cert: &Certificate,
+    ) -> DiagResult<Arc<Connection>> {
         let mut attempts = 0usize;
         loop {
             attempts += 1;
@@ -98,7 +103,7 @@ impl Adapter {
         }
     }
 
-    pub async fn connect_insecure(&self, addr: SocketAddr) -> Result<Arc<Connection>> {
+    pub async fn connect_insecure(&self, addr: SocketAddr) -> DiagResult<Arc<Connection>> {
         let cert = {
             let endpoints = self.inner.endpoints.lock().unwrap();
             endpoints
@@ -123,7 +128,7 @@ impl Adapter {
             .collect()
     }
 
-    pub async fn send(&self, conn: &Arc<Connection>, data: &[u8]) -> Result<()> {
+    pub async fn send(&self, conn: &Arc<Connection>, data: &[u8]) -> DiagResult<()> {
         conn.enqueue(data);
         Ok(())
     }
@@ -132,11 +137,15 @@ impl Adapter {
         conn.dequeue()
     }
 
-    pub fn verify_remote_certificate(&self, peer_key: &[u8; 32], cert: &[u8]) -> Result<[u8; 32]> {
+    pub fn verify_remote_certificate(
+        &self,
+        peer_key: &[u8; 32],
+        cert: &[u8],
+    ) -> DiagResult<[u8; 32]> {
         verify_remote_certificate(peer_key, cert)
     }
 
-    fn try_connect(&self, addr: SocketAddr, cert: &Certificate) -> Result<Arc<Connection>> {
+    fn try_connect(&self, addr: SocketAddr, cert: &Certificate) -> DiagResult<Arc<Connection>> {
         let endpoints = self.inner.endpoints.lock().unwrap();
         let state = endpoints
             .get(&addr)
@@ -178,7 +187,7 @@ pub struct Certificate {
 }
 
 impl Certificate {
-    fn generate() -> Result<Self> {
+    fn generate() -> DiagResult<Self> {
         let mut random = [0u8; 64];
         OsRng::default().fill_bytes(&mut random);
         let mut hasher = Hasher::new();
@@ -268,29 +277,35 @@ impl InhouseCertificateStore {
         }
     }
 
-    fn persist(&self, advert: &Advertisement) -> Result<()> {
-        let mut file = File::create(&self.path).with_context(|| "create cert store")?;
-        let json = serde_json::to_vec(advert)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
+    fn persist(&self, advert: &Advertisement) -> DiagResult<()> {
+        let mut file =
+            File::create(&self.path).map_err(|err| anyhow!("create cert store: {err}"))?;
+        let json =
+            serde_json::to_vec(advert).map_err(|err| anyhow!("serialize cert store: {err}"))?;
+        file.write_all(&json)
+            .map_err(|err| anyhow!("write cert store: {err}"))?;
+        file.sync_all()
+            .map_err(|err| anyhow!("sync cert store: {err}"))?;
         Ok(())
     }
 
-    fn load(&self) -> Result<Option<Advertisement>> {
+    fn load(&self) -> DiagResult<Option<Advertisement>> {
         if !self.path.exists() {
             return Ok(None);
         }
-        let mut file = File::open(&self.path).with_context(|| "open cert store")?;
+        let mut file = File::open(&self.path).map_err(|err| anyhow!("open cert store: {err}"))?;
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
+        file.read_to_end(&mut buf)
+            .map_err(|err| anyhow!("read cert store: {err}"))?;
         if buf.is_empty() {
             return Ok(None);
         }
-        let advert: Advertisement = serde_json::from_slice(&buf)?;
+        let advert: Advertisement =
+            serde_json::from_slice(&buf).map_err(|err| anyhow!("decode cert store: {err}"))?;
         Ok(Some(advert))
     }
 
-    fn generate(&self) -> Result<Advertisement> {
+    fn generate(&self) -> DiagResult<Advertisement> {
         let certificate = Certificate::generate()?;
         Ok(Advertisement {
             fingerprint: certificate.fingerprint,
@@ -301,16 +316,16 @@ impl InhouseCertificateStore {
 
 impl CertificateStore for InhouseCertificateStore {
     type Advertisement = Advertisement;
-    type Error = anyhow::Error;
+    type Error = TbError;
 
-    fn initialize(&self) -> Result<Self::Advertisement, Self::Error> {
+    fn initialize(&self) -> StdResult<Self::Advertisement, Self::Error> {
         let advert = self.generate()?;
         self.persist(&advert)?;
         *self.current.lock().unwrap() = Some(advert.clone());
         Ok(advert)
     }
 
-    fn rotate(&self) -> Result<Self::Advertisement, Self::Error> {
+    fn rotate(&self) -> StdResult<Self::Advertisement, Self::Error> {
         let advert = self.generate()?;
         self.persist(&advert)?;
         *self.current.lock().unwrap() = Some(advert.clone());
@@ -351,7 +366,7 @@ pub fn fingerprint_history() -> Vec<[u8; 32]> {
     Vec::new()
 }
 
-pub fn verify_remote_certificate(_peer_key: &[u8; 32], cert: &[u8]) -> Result<[u8; 32]> {
+pub fn verify_remote_certificate(_peer_key: &[u8; 32], cert: &[u8]) -> DiagResult<[u8; 32]> {
     if cert.is_empty() {
         return Err(anyhow!("certificate payload empty"));
     }

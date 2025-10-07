@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{binary, Deserialize, Serialize};
 use state::Proof;
 use std::collections::HashMap;
 use std::fs;
@@ -72,15 +72,18 @@ pub use telemetry::{
 
 /// Account-level update carried by a [`StateChunk`].
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct AccountChunk {
     pub address: String,
     pub balance: u64,
     pub account_seq: u64,
+    #[serde(with = "proof_serde")]
     pub proof: Proof,
 }
 
 /// A chunk of state updates delivered over the stream.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct StateChunk {
     /// Monotonic sequence number.
     pub seq: u64,
@@ -95,24 +98,28 @@ pub struct StateChunk {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 struct CachedAccount {
     balance: u64,
     seq: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 struct PersistedState {
     accounts: HashMap<String, CachedAccount>,
     next_seq: u64,
 }
 
 #[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct PersistedStateRef<'a> {
     accounts: &'a HashMap<String, CachedAccount>,
     next_seq: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 struct SnapshotAccount {
     address: String,
     balance: u64,
@@ -120,6 +127,7 @@ struct SnapshotAccount {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 struct SnapshotPayload {
     accounts: Vec<SnapshotAccount>,
     next_seq: u64,
@@ -276,10 +284,10 @@ impl StateStream {
             return Ok(None);
         }
         let bytes = fs::read(path)?;
-        match bincode::deserialize::<PersistedState>(&bytes) {
+        match binary::decode::<PersistedState>(&bytes) {
             Ok(state) => Ok(Some(state)),
             Err(_) => {
-                if let Ok(legacy) = bincode::deserialize::<HashMap<String, u64>>(&bytes) {
+                if let Ok(legacy) = binary::decode::<HashMap<String, u64>>(&bytes) {
                     let accounts = legacy
                         .into_iter()
                         .map(|(addr, bal)| {
@@ -315,7 +323,7 @@ impl StateStream {
                 accounts: &self.cache,
                 next_seq: self.next_seq,
             };
-            let bytes = bincode::serialize(&state)
+            let bytes = binary::encode(&state)
                 .map_err(|err| StateStreamError::Serialization(err.to_string()))?;
             fs::write(&tmp_path, &bytes)?;
             if let Err(err) = fs::rename(&tmp_path, path) {
@@ -533,10 +541,10 @@ impl StateStream {
     }
 
     fn decode_snapshot(bytes: &[u8]) -> Result<SnapshotPayload, StateStreamError> {
-        match bincode::deserialize::<SnapshotPayload>(bytes) {
+        match binary::decode::<SnapshotPayload>(bytes) {
             Ok(snapshot) => Ok(snapshot),
             Err(_) => {
-                if let Ok(legacy) = bincode::deserialize::<HashMap<String, u64>>(bytes) {
+                if let Ok(legacy) = binary::decode::<HashMap<String, u64>>(bytes) {
                     let accounts = legacy
                         .into_iter()
                         .map(|(address, balance)| SnapshotAccount {
@@ -588,4 +596,53 @@ pub fn account_state_value(balance: u64, seq: u64) -> [u8; 16] {
     bytes[..8].copy_from_slice(&balance.to_le_bytes());
     bytes[8..].copy_from_slice(&seq.to_le_bytes());
     bytes
+}
+
+mod proof_serde {
+    use super::*;
+    use foundation_serialization::serde::{
+        de::{SeqAccess, Visitor},
+        ser::SerializeSeq,
+        Deserializer, Serializer,
+    };
+    use std::fmt;
+
+    pub fn serialize<S>(proof: &Proof, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(proof.0.len()))?;
+        for (hash, is_left) in &proof.0 {
+            seq.serialize_element(&(*hash, *is_left))?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Proof, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ProofVisitor;
+
+        impl<'de> Visitor<'de> for ProofVisitor {
+            type Value = Proof;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a Merkle proof as a sequence of (hash, is_left)")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut entries = Vec::new();
+                while let Some((hash, is_left)) = seq.next_element::<([u8; 32], bool)>()? {
+                    entries.push((hash, is_left));
+                }
+                Ok(Proof(entries))
+            }
+        }
+
+        deserializer.deserialize_seq(ProofVisitor)
+    }
 }

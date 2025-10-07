@@ -1,9 +1,12 @@
-use anyhow::{anyhow, Result};
+use diagnostics::anyhow::{anyhow, Result};
 use std::net::SocketAddr;
 
-use transport::{self, ConnectError, ConnectionHandle, ConnectionStatsSnapshot, ListenerHandle};
+use transport::{self, ConnectionHandle, ListenerHandle};
 
-pub use transport::{classify_err, CertificateHandle, HandshakeError, QuinnDisconnect};
+pub use transport::{
+    classify_err, CertificateHandle, ConnectError, ConnectionStatsSnapshot, HandshakeError,
+    QuinnDisconnect,
+};
 
 fn quinn_adapter() -> Result<transport::QuinnAdapter> {
     super::transport_registry()

@@ -13,7 +13,9 @@ pub async fn run_trace(mut ws: ServerStream, code: Vec<u8>) {
     let steps = dbg.run().to_vec();
     for step in steps {
         if ws
-            .send(WsMessage::Text(serde_json::to_string(&step).unwrap()))
+            .send(WsMessage::Text(
+                foundation_serialization::json::to_string(&step).unwrap(),
+            ))
             .await
             .is_err()
         {

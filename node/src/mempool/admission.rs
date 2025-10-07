@@ -138,7 +138,7 @@ fn log_fee_floor_policy_change(
     previous: u64,
     current: u64,
 ) {
-    tracing::info!(
+    diagnostics::tracing::info!(
         target: "mempool",
         lane,
         window,
@@ -161,7 +161,7 @@ fn log_fee_floor_policy_change(
 
 #[cfg(feature = "telemetry")]
 fn log_fee_floor_movement(lane: &str, old: u64, new: u64) {
-    tracing::info!(
+    diagnostics::tracing::info!(
         target: "mempool",
         lane,
         old,

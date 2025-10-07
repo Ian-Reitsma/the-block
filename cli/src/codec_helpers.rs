@@ -1,5 +1,5 @@
 use codec::{self, profiles};
-use serde::{de::DeserializeOwned, Serialize};
+use foundation_serialization::{de::DeserializeOwned, Serialize};
 
 pub fn json_from_str<T>(input: &str) -> codec::Result<T>
 where

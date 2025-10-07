@@ -3,8 +3,10 @@
 //! Exposes Python bindings for constructing, signing, and verifying
 //! transactions using Ed25519 with domain separation.
 
+use crate::py::{PyError, PyResult};
 use crate::{to_array_32, to_array_64};
 use codec::{self, profiles};
+use concurrency::{Lazy, MutexExt};
 #[cfg(feature = "quantum")]
 use crypto::dilithium;
 use crypto_suite::hashing::blake3::{self, Hasher};
@@ -15,17 +17,16 @@ use crypto_suite::transactions::{
 use hex;
 use ledger::address::{self, ShardId};
 use lru::LruCache;
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
-use python_bridge::{Error as PyError, Result as PyResult};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
 fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
 }
 
+#[cfg_attr(not(feature = "python-bindings"), allow(dead_code))]
 fn py_type_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
 }
@@ -217,12 +218,14 @@ impl RawTxPayload {
     }
 
     // Python alias property: expose `from` alongside `from_` for ergonomics
-    #[getter(from)]
+    #[cfg_attr(feature = "python-bindings", getter(from))]
+    #[cfg_attr(not(feature = "python-bindings"), allow(dead_code))]
     fn get_from_alias(&self) -> String {
         self.from_.clone()
     }
 
-    #[setter(from)]
+    #[cfg_attr(feature = "python-bindings", setter(from))]
+    #[cfg_attr(not(feature = "python-bindings"), allow(dead_code))]
     fn set_from_alias(&mut self, val: String) {
         self.from_ = val;
     }
@@ -477,7 +480,7 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
         h.update(&bytes);
         h.finalize().into()
     };
-    if let Some(result) = SIG_CACHE.lock().get(&key).copied() {
+    if let Some(result) = SIG_CACHE.guard().get(&key).copied() {
         return result;
     }
 
@@ -570,7 +573,7 @@ pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
             }
         }
     };
-    SIG_CACHE.lock().put(key, res);
+    SIG_CACHE.guard().put(key, res);
     res
 }
 

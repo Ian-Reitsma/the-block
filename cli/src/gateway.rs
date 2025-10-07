@@ -122,17 +122,19 @@ pub fn handle(cmd: GatewayCmd) {
             let client = RpcClient::from_env();
             match action {
                 MobileCacheAction::Status { url, auth, pretty } => {
-                    let payload = serde_json::json!({
+                    let payload = foundation_serialization::json::json!({
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "gateway.mobile_cache_status",
-                        "params": serde_json::Value::Null,
+                        "params": foundation_serialization::json::Value::Null,
                     });
                     match client.call_with_auth(&url, &payload, auth.as_deref()) {
                         Ok(resp) => match resp.text() {
                             Ok(body) => {
                                 if pretty {
-                                    match json_from_str::<serde_json::Value>(&body) {
+                                    match json_from_str::<foundation_serialization::json::Value>(
+                                        &body,
+                                    ) {
                                         Ok(value) => {
                                             if let Ok(text) = json_to_string_pretty(&value) {
                                                 println!("{}", text);
@@ -157,11 +159,11 @@ pub fn handle(cmd: GatewayCmd) {
                     }
                 }
                 MobileCacheAction::Flush { url, auth } => {
-                    let payload = serde_json::json!({
+                    let payload = foundation_serialization::json::json!({
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "gateway.mobile_cache_flush",
-                        "params": serde_json::Value::Null,
+                        "params": foundation_serialization::json::Value::Null,
                     });
                     match client.call_with_auth(&url, &payload, auth.as_deref()) {
                         Ok(resp) => {

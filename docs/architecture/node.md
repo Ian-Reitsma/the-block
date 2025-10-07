@@ -432,18 +432,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   │           └── typenum v1.18.0
 │   │   ├── socket2 v0.5.10
 │   │   │   └── libc v0.2.176
-│   │   └── tokio v1.47.1
-│   │       ├── bytes v1.10.1
-│   │       ├── libc v0.2.176
-│   │       ├── mio v1.0.4
-│   │       │   └── libc v0.2.176
-│   │       ├── pin-project-lite v0.2.16
-│   │       ├── socket2 v0.6.0
-│   │       │   └── libc v0.2.176
-│   │       └── tokio-macros v2.5.0 (proc-macro)
-│   │           ├── proc-macro2 v1.0.101 (*)
-│   │           ├── quote v1.0.41 (*)
-│   │           └── syn v2.0.106 (*)
 │   ├── serde v1.0.228 (*)
 │   ├── serde_json v1.0.145 (*)
 │   ├── thiserror v1.0.69 (*)
@@ -603,7 +591,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── serde_json v1.0.145 (*)
 │   │   └── thiserror v1.0.69 (*)
 │   ├── thiserror v1.0.69 (*)
-│   ├── tokio v1.47.1 (*)
 │   ├── toml v0.8.23 (*)
 │   └── tracing v0.1.41 (*)
 ├── lru v0.11.1
@@ -762,13 +749,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   └── time-macros v0.2.24 (proc-macro)
 │       ├── num-conv v0.1.0
 │       └── time-core v0.1.6
-├── tokio v1.47.1 (*)
-├── tokio-util v0.7.16
-│   ├── bytes v1.10.1
-│   ├── futures-core v0.3.31
-│   ├── futures-sink v0.3.31
-│   ├── pin-project-lite v0.2.16
-│   └── tokio v1.47.1 (*)
 ├── toml v0.8.23 (*)
 ├── tracing-chrome v0.6.0
 │   ├── crossbeam v0.8.4
@@ -814,7 +794,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── resolv-conf v0.7.5
 │   ├── smallvec v1.15.1 (*)
 │   ├── thiserror v1.0.69 (*)
-│   ├── tokio v1.47.1 (*)
 │   ├── tracing v0.1.41 (*)
 │   └── trust-dns-proto v0.23.2
 │       ├── async-trait v0.1.89 (proc-macro) (*)
@@ -839,7 +818,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       ├── smallvec v1.15.1 (*)
 │       ├── thiserror v1.0.69 (*)
 │       ├── tinyvec v1.10.0 (*)
-│       ├── tokio v1.47.1 (*)
 │       ├── tracing v0.1.41 (*)
 │       └── url v2.5.7 (*)
 ├── unicode-normalization v0.1.24 (*)

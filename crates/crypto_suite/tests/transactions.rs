@@ -6,9 +6,15 @@ use crypto_suite::zk::groth16::{
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 
+fn seeded_rng(seed: u64) -> StdRng {
+    let mut bytes = [0u8; 32];
+    bytes[..8].copy_from_slice(&seed.to_le_bytes());
+    <StdRng as SeedableRng>::from_seed(bytes)
+}
+
 #[test]
 fn ed25519_signature_is_deterministic() {
-    let mut rng = StdRng::seed_from_u64(0xFACE_CAFE);
+    let mut rng = seeded_rng(0xFACE_CAFE);
     let signing_key = SigningKey::generate(&mut rng);
     let signer = TransactionSigner::from_chain_id(1);
     let mut payload = vec![0u8; 64];
@@ -36,7 +42,7 @@ fn ed25519_signature_is_deterministic() {
 
 #[test]
 fn domain_separation_differs_across_chains() {
-    let mut rng = StdRng::seed_from_u64(7);
+    let mut rng = seeded_rng(7);
     let signing_key = SigningKey::generate(&mut rng);
     let payload = b"domain-test";
 

@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use serde_json::Value;
+use foundation_serialization::json::Value;
 use the_block::rpc::client::{RpcClient, RpcClientError};
 
 #[test]

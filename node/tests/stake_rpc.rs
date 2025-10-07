@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use serde_json::json;
+use foundation_serialization::json::json;
 use the_block::rpc::pos;
 use wallet::Wallet;
 

@@ -5,7 +5,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use serde_json::json;
+use foundation_serialization::json::json;
 
 pub enum TelemetryCmd {
     /// Dump current telemetry allocation in bytes

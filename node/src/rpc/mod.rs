@@ -15,21 +15,19 @@ use crate::{
 };
 use ::storage::{contract::StorageContract, offer::StorageOffer};
 use base64_fp::decode_standard;
-use bincode;
+use concurrency::Lazy;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use foundation_serialization::{binary, Deserialize, Serialize};
 use hex;
 use httpd::{
     form_urlencoded, serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
 };
-use once_cell::sync::Lazy;
 use runtime::net::TcpListener;
 use runtime::sync::{
     oneshot,
     semaphore::{OwnedSemaphorePermit, Semaphore},
 };
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs;
@@ -307,9 +305,9 @@ struct RpcRequest {
     _jsonrpc: Option<String>,
     method: String,
     #[serde(default)]
-    params: serde_json::Value,
+    params: foundation_serialization::json::Value,
     #[serde(default)]
-    id: Option<serde_json::Value>,
+    id: Option<foundation_serialization::json::Value>,
     #[serde(default)]
     badge: Option<String>,
 }
@@ -319,13 +317,13 @@ struct RpcRequest {
 enum RpcResponse {
     Result {
         jsonrpc: &'static str,
-        result: serde_json::Value,
-        id: Option<serde_json::Value>,
+        result: foundation_serialization::json::Value,
+        id: Option<foundation_serialization::json::Value>,
     },
     Error {
         jsonrpc: &'static str,
         error: RpcError,
-        id: Option<serde_json::Value>,
+        id: Option<foundation_serialization::json::Value>,
     },
 }
 
@@ -429,7 +427,7 @@ fn telemetry_rpc_error(code: RpcClientErrorCode) {
 
 fn check_nonce(
     scope: impl Into<String>,
-    params: &serde_json::Value,
+    params: &foundation_serialization::json::Value,
     nonces: &Arc<Mutex<HashSet<(String, u64)>>>,
 ) -> Result<(), RpcError> {
     let nonce = params
@@ -527,14 +525,16 @@ fn execute_rpc(
                     #[cfg(feature = "telemetry")]
                     {
                         if let Some(path) = request.params.get("path").and_then(|v| v.as_str()) {
-                            log::info!("peer_stats_export operator={peer_ip:?} path={path}");
+                            diagnostics::log::info!(
+                                "peer_stats_export operator={peer_ip:?} path={path}"
+                            );
                         } else {
-                            log::info!("peer_stats_export operator={peer_ip:?}");
+                            diagnostics::log::info!("peer_stats_export operator={peer_ip:?}");
                         }
                     }
                 } else if method_str == "net.peer_stats_export_all" {
                     #[cfg(feature = "telemetry")]
-                    log::info!("peer_stats_export_all operator={peer_ip:?}");
+                    diagnostics::log::info!("peer_stats_export_all operator={peer_ip:?}");
                 } else if method_str == "net.peer_throttle" {
                     #[cfg(feature = "telemetry")]
                     {
@@ -543,11 +543,11 @@ fn execute_rpc(
                             .get("clear")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false);
-                        log::info!("peer_throttle operator={peer_ip:?} clear={clear}");
+                        diagnostics::log::info!("peer_throttle operator={peer_ip:?} clear={clear}");
                     }
                 } else if method_str == "net.backpressure_clear" {
                     #[cfg(feature = "telemetry")]
-                    log::info!("backpressure_clear operator={peer_ip:?}");
+                    diagnostics::log::info!("backpressure_clear operator={peer_ip:?}");
                 }
                 dispatch_result()
             }
@@ -622,21 +622,22 @@ async fn handle_rpc_post(request: Request<RpcState>) -> Result<Response, HttpErr
     let auth = request.header("authorization");
     let peer_ip = Some(remote.ip());
     let origin = request.header("origin");
-    let rpc_request = match serde_json::from_slice::<RpcRequest>(request.body_bytes()) {
-        Ok(req) => req,
-        Err(_) => {
-            let response = RpcResponse::Error {
-                jsonrpc: "2.0",
-                error: RpcError {
-                    code: -32700,
-                    message: "parse error",
-                },
-                id: None,
-            };
-            let response = Response::new(StatusCode::OK).json(&response)?;
-            return Ok(state.apply_cors(response, origin));
-        }
-    };
+    let rpc_request =
+        match foundation_serialization::json::from_slice::<RpcRequest>(request.body_bytes()) {
+            Ok(req) => req,
+            Err(_) => {
+                let response = RpcResponse::Error {
+                    jsonrpc: "2.0",
+                    error: RpcError {
+                        code: -32700,
+                        message: "parse error",
+                    },
+                    id: None,
+                };
+                let response = Response::new(StatusCode::OK).json(&response)?;
+                return Ok(state.apply_cors(response, origin));
+            }
+        };
     let rpc_response = execute_rpc(&state, rpc_request, auth, peer_ip);
     let response = Response::new(StatusCode::OK).json(&rpc_response)?;
     Ok(state.apply_cors(response, origin))
@@ -771,7 +772,7 @@ async fn handle_badge_status(request: Request<RpcState>) -> Result<Response, Htt
         chain.check_badges();
         chain.badge_status()
     };
-    let body = serde_json::json!({
+    let body = foundation_serialization::json::json!({
         "active": active,
         "last_mint": last_mint,
         "last_burn": last_burn,
@@ -811,7 +812,7 @@ fn dispatch(
     handles: Arc<Mutex<HandleRegistry>>,
     dids: Arc<Mutex<DidRegistry>>,
     runtime_cfg: Arc<RpcRuntimeConfig>,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     if BADGE_METHODS.contains(&req.method.as_str()) {
         let badge = req
             .params
@@ -840,9 +841,9 @@ fn dispatch(
             match bc.lock() {
                 Ok(mut guard) => {
                     guard.difficulty = val;
-                    serde_json::json!({"status": "ok"})
+                    foundation_serialization::json::json!({"status": "ok"})
                 }
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "balance" => {
@@ -853,12 +854,12 @@ fn dispatch(
                 .unwrap_or("");
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(acct) = guard.accounts.get(addr) {
-                serde_json::json!({
+                foundation_serialization::json::json!({
                     "consumer": acct.balance.consumer,
                     "industrial": acct.balance.industrial,
                 })
             } else {
-                serde_json::json!({"consumer": 0, "industrial": 0})
+                foundation_serialization::json::json!({"consumer": 0, "industrial": 0})
             }
         }
         "ledger.shard_of" => {
@@ -868,7 +869,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let shard = ledger::shard_of(addr);
-            serde_json::json!({"shard": shard})
+            foundation_serialization::json::json!({"shard": shard})
         }
         "anomaly.label" => {
             let _label = req
@@ -878,7 +879,7 @@ fn dispatch(
                 .unwrap_or("");
             #[cfg(feature = "telemetry")]
             crate::telemetry::ANOMALY_LABEL_TOTAL.inc();
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "settlement_status" => {
             let provider = req.params.get("provider").and_then(|v| v.as_str());
@@ -889,9 +890,9 @@ fn dispatch(
             };
             if let Some(p) = provider {
                 let (ct, industrial) = Settlement::balance_split(p);
-                serde_json::json!({"mode": mode, "balance": ct, "ct": ct, "industrial": industrial})
+                foundation_serialization::json::json!({"mode": mode, "balance": ct, "ct": ct, "industrial": industrial})
             } else {
-                serde_json::json!({"mode": mode})
+                foundation_serialization::json::json!({"mode": mode})
             }
         }
         "settlement.audit" => compute_market::settlement_audit(),
@@ -946,7 +947,7 @@ fn dispatch(
                     message: "invalid params",
                 })
                 .and_then(|v| {
-                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
                         code: -32602,
                         message: "invalid params",
                     })
@@ -959,7 +960,7 @@ fn dispatch(
                     message: "invalid params",
                 })
                 .and_then(|v| {
-                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
                         code: -32602,
                         message: "invalid params",
                     })
@@ -972,7 +973,7 @@ fn dispatch(
                     message: "invalid params",
                 })
                 .and_then(|v| {
-                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
                         code: -32602,
                         message: "invalid params",
                     })
@@ -1008,7 +1009,7 @@ fn dispatch(
                     message: "invalid params",
                 })
                 .and_then(|v| {
-                    serde_json::from_value(v.clone()).map_err(|_| RpcError {
+                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
                         code: -32602,
                         message: "invalid params",
                     })
@@ -1098,7 +1099,7 @@ fn dispatch(
                     })
                 }
             };
-            let receipt: AssistReceipt = match bincode::deserialize(&bytes) {
+            let receipt: AssistReceipt = match binary::decode(&bytes) {
                 Ok(r) => r,
                 Err(_) => {
                     return Err(RpcError {
@@ -1119,10 +1120,10 @@ fn dispatch(
             let key = format!("localnet_receipts/{}", hash);
             let mut db = LOCALNET_RECEIPTS.lock().unwrap_or_else(|e| e.into_inner());
             if db.get(&key).is_some() {
-                serde_json::json!({"status":"ignored"})
+                foundation_serialization::json::json!({"status":"ignored"})
             } else {
                 db.insert(&key, Vec::new());
-                serde_json::json!({"status":"ok"})
+                foundation_serialization::json::json!({"status":"ok"})
             }
         }
         "dns.publish_record" => match gateway::dns::publish_record(&req.params) {
@@ -1146,18 +1147,20 @@ fn dispatch(
                 sample_rate: Option<f64>,
                 compaction_secs: Option<u64>,
             }
-            let cfg: TelemetryConfigure =
-                serde_json::from_value(req.params.clone()).unwrap_or(TelemetryConfigure {
-                    sample_rate: None,
-                    compaction_secs: None,
-                });
+            let cfg: TelemetryConfigure = foundation_serialization::json::from_value(
+                req.params.clone(),
+            )
+            .unwrap_or(TelemetryConfigure {
+                sample_rate: None,
+                compaction_secs: None,
+            });
             if let Some(rate) = cfg.sample_rate {
                 crate::telemetry::set_sample_rate(rate);
             }
             if let Some(secs) = cfg.compaction_secs {
                 crate::telemetry::set_compaction_interval(secs);
             }
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "status": "ok",
                 "sample_rate_ppm": crate::telemetry::sample_rate_ppm(),
                 "compaction_secs": crate::telemetry::compaction_interval_secs(),
@@ -1172,12 +1175,14 @@ fn dispatch(
         }
         #[cfg(feature = "telemetry")]
         "analytics" => {
-            let q: analytics::AnalyticsQuery = serde_json::from_value(req.params.clone())
-                .unwrap_or(analytics::AnalyticsQuery {
-                    domain: String::new(),
-                });
+            let q: analytics::AnalyticsQuery = foundation_serialization::json::from_value(
+                req.params.clone(),
+            )
+            .unwrap_or(analytics::AnalyticsQuery {
+                domain: String::new(),
+            });
             let stats = analytics::analytics(&crate::telemetry::READ_STATS, q);
-            serde_json::to_value(stats).unwrap()
+            foundation_serialization::json::to_value(stats).unwrap()
         }
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
@@ -1195,7 +1200,7 @@ fn dispatch(
             };
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             let stats = guard.mempool_stats(lane);
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "size": stats.size,
                 "age_p50": stats.age_p50,
                 "age_p95": stats.age_p95,
@@ -1229,7 +1234,7 @@ fn dispatch(
                 if event == "override" {
                     FEE_FLOOR_OVERRIDE_TOTAL.with_label_values(&labels).inc();
                 }
-                tracing::info!(
+                diagnostics::tracing::info!(
                     target: "mempool",
                     lane,
                     event,
@@ -1242,11 +1247,11 @@ fn dispatch(
             {
                 let _ = (lane, event, fee, floor);
             }
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "net.overlay_status" => {
             let status = net::overlay_status();
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "backend": status.backend,
                 "active_peers": status.active_peers,
                 "persisted_peers": status.persisted_peers,
@@ -1264,7 +1269,7 @@ fn dispatch(
                 code: -32602,
                 message: "unknown peer",
             })?;
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "requests": m.requests,
                 "bytes_sent": m.bytes_sent,
                 "drops": m.drops,
@@ -1286,7 +1291,7 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(100) as usize;
             let stats = net::peer_stats_all(offset, limit);
-            serde_json::to_value(stats).unwrap()
+            foundation_serialization::json::to_value(stats).unwrap()
         }
         "net.peer_stats_reset" => {
             let id = req
@@ -1296,7 +1301,7 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             if net::reset_peer_metrics(&pk) {
-                serde_json::json!({"status": "ok"})
+                foundation_serialization::json::json!({"status": "ok"})
             } else {
                 return Err(RpcError {
                     code: -32602,
@@ -1319,7 +1324,9 @@ fn dispatch(
             let active = req.params.get("active_within").and_then(|v| v.as_u64());
             if all {
                 match net::export_all_peer_stats(path, min_rep, active) {
-                    Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
+                    Ok(over) => {
+                        foundation_serialization::json::json!({"status": "ok", "overwritten": over})
+                    }
                     Err(e) => {
                         return Err(RpcError {
                             code: -32602,
@@ -1335,7 +1342,9 @@ fn dispatch(
                     .unwrap_or("");
                 let pk = parse_overlay_peer_param(id)?;
                 match net::export_peer_stats(&pk, path) {
-                    Ok(over) => serde_json::json!({"status": "ok", "overwritten": over}),
+                    Ok(over) => {
+                        foundation_serialization::json::json!({"status": "ok", "overwritten": over})
+                    }
                     Err(e) => {
                         return Err(RpcError {
                             code: -32602,
@@ -1349,10 +1358,10 @@ fn dispatch(
             let min_rep = req.params.get("min_reputation").and_then(|v| v.as_f64());
             let active = req.params.get("active_within").and_then(|v| v.as_u64());
             let map = net::peer_stats_map(min_rep, active);
-            serde_json::to_value(map).unwrap()
+            foundation_serialization::json::to_value(map).unwrap()
         }
         "net.peer_stats_persist" => match net::persist_peer_metrics() {
-            Ok(()) => serde_json::json!({"status": "ok"}),
+            Ok(()) => foundation_serialization::json::json!({"status": "ok"}),
             Err(_) => {
                 return Err(RpcError {
                     code: -32603,
@@ -1374,7 +1383,7 @@ fn dispatch(
             let pk = parse_overlay_peer_param(id)?;
             if clear {
                 if net::clear_throttle(&pk) {
-                    serde_json::json!({"status": "ok"})
+                    foundation_serialization::json::json!({"status": "ok"})
                 } else {
                     return Err(RpcError {
                         code: -32602,
@@ -1383,7 +1392,7 @@ fn dispatch(
                 }
             } else {
                 net::throttle_peer(&pk, "manual");
-                serde_json::json!({"status": "ok"})
+                foundation_serialization::json::json!({"status": "ok"})
             }
         }
         "net.backpressure_clear" => {
@@ -1394,7 +1403,7 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             if net::clear_throttle(&pk) {
-                serde_json::json!({"status": "ok"})
+                foundation_serialization::json::json!({"status": "ok"})
             } else {
                 return Err(RpcError {
                     code: -32602,
@@ -1404,7 +1413,7 @@ fn dispatch(
         }
         "net.reputation_sync" => {
             net::reputation_sync();
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "net.rotate_cert" => {
             #[cfg(feature = "quic")]
@@ -1414,7 +1423,7 @@ fn dispatch(
                     Ok(advert) => {
                         let previous: Vec<String> =
                             advert.previous.iter().map(|fp| hex::encode(fp)).collect();
-                        serde_json::json!({
+                        foundation_serialization::json::json!({
                             "status": "ok",
                             "fingerprint": hex::encode(advert.fingerprint),
                             "previous": previous,
@@ -1422,7 +1431,7 @@ fn dispatch(
                     }
                     Err(err) => {
                         #[cfg(feature = "telemetry")]
-                        tracing::error!(error = %err, "quic_cert_rotation_failed");
+                        diagnostics::tracing::error!(error = %err, "quic_cert_rotation_failed");
                         #[cfg(not(feature = "telemetry"))]
                         let _ = err;
                         return Err(RpcError {
@@ -1509,7 +1518,7 @@ fn dispatch(
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
                     .with_label_values(&["ok"])
                     .inc();
-                serde_json::json!({"status":"ok"})
+                foundation_serialization::json::json!({"status":"ok"})
             } else {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
@@ -1523,13 +1532,13 @@ fn dispatch(
         }
         "net.handshake_failures" => {
             let entries = net::recent_handshake_failures();
-            serde_json::json!({"failures": entries})
+            foundation_serialization::json::json!({"failures": entries})
         }
-        "net.quic_stats" => match serde_json::to_value(net::quic_stats()) {
+        "net.quic_stats" => match foundation_serialization::json::to_value(net::quic_stats()) {
             Ok(val) => val,
             Err(e) => {
                 #[cfg(feature = "telemetry")]
-                tracing::warn!(target: "rpc", error = %e, "failed to serialize quic stats");
+                diagnostics::tracing::warn!(target: "rpc", error = %e, "failed to serialize quic stats");
                 #[cfg(not(feature = "telemetry"))]
                 let _ = e;
                 return Err(RpcError {
@@ -1538,22 +1547,24 @@ fn dispatch(
                 });
             }
         },
-        "net.quic_certs" => match serde_json::to_value(net::peer_cert_history()) {
-            Ok(val) => val,
-            Err(e) => {
-                #[cfg(feature = "telemetry")]
-                tracing::warn!(target: "rpc", error = %e, "failed to serialize quic cert history");
-                #[cfg(not(feature = "telemetry"))]
-                let _ = e;
-                return Err(RpcError {
-                    code: -32603,
-                    message: "serialization error",
-                });
+        "net.quic_certs" => {
+            match foundation_serialization::json::to_value(net::peer_cert_history()) {
+                Ok(val) => val,
+                Err(e) => {
+                    #[cfg(feature = "telemetry")]
+                    diagnostics::tracing::warn!(target: "rpc", error = %e, "failed to serialize quic cert history");
+                    #[cfg(not(feature = "telemetry"))]
+                    let _ = e;
+                    return Err(RpcError {
+                        code: -32603,
+                        message: "serialization error",
+                    });
+                }
             }
-        },
+        }
         "net.quic_certs_refresh" => {
             let refreshed = net::refresh_peer_cert_store_from_disk();
-            serde_json::json!({ "reloaded": refreshed })
+            foundation_serialization::json::json!({ "reloaded": refreshed })
         }
         "peer.rebate_status" => {
             let peer = req
@@ -1578,7 +1589,7 @@ fn dispatch(
                 },
             )?;
             let eligible = net::uptime::eligible(&pk, threshold, epoch);
-            serde_json::json!({"eligible": eligible})
+            foundation_serialization::json::json!({"eligible": eligible})
         }
         "peer.rebate_claim" => {
             let peer = req
@@ -1608,11 +1619,11 @@ fn dispatch(
                 },
             )?;
             let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
-            serde_json::json!({"voucher": voucher})
+            foundation_serialization::json::json!({"voucher": voucher})
         }
         "net.config_reload" => {
             if crate::config::reload() {
-                serde_json::json!({"status": "ok"})
+                foundation_serialization::json::json!({"status": "ok"})
             } else {
                 return Err(RpcError {
                     code: -32603,
@@ -1627,8 +1638,8 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             match kyc::verify(user) {
-                Ok(true) => serde_json::json!({"status": "verified"}),
-                Ok(false) => serde_json::json!({"status": "denied"}),
+                Ok(true) => foundation_serialization::json::json!({"status": "verified"}),
+                Ok(false) => foundation_serialization::json::json!({"status": "denied"}),
                 Err(_) => {
                     return Err(RpcError {
                         code: -32080,
@@ -1640,7 +1651,7 @@ fn dispatch(
         "pow.get_template" => {
             // simplistic template: zero prev/merkle
             let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1, 0);
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "prev_hash": hex::encode(tmpl.prev_hash),
                 "merkle_root": hex::encode(tmpl.merkle_root),
                 "checkpoint_hash": hex::encode(tmpl.checkpoint_hash),
@@ -1654,21 +1665,22 @@ fn dispatch(
                 code: -32602,
                 message: "missing header",
             })?;
-            let parse32 = |v: &serde_json::Value| -> Result<[u8; 32], RpcError> {
-                let s = v.as_str().ok_or(RpcError {
-                    code: -32602,
-                    message: "bad hex",
-                })?;
-                let bytes = hex::decode(s).map_err(|_| RpcError {
-                    code: -32602,
-                    message: "bad hex",
-                })?;
-                let arr: [u8; 32] = bytes.try_into().map_err(|_| RpcError {
-                    code: -32602,
-                    message: "bad hex",
-                })?;
-                Ok(arr)
-            };
+            let parse32 =
+                |v: &foundation_serialization::json::Value| -> Result<[u8; 32], RpcError> {
+                    let s = v.as_str().ok_or(RpcError {
+                        code: -32602,
+                        message: "bad hex",
+                    })?;
+                    let bytes = hex::decode(s).map_err(|_| RpcError {
+                        code: -32602,
+                        message: "bad hex",
+                    })?;
+                    let arr: [u8; 32] = bytes.try_into().map_err(|_| RpcError {
+                        code: -32602,
+                        message: "bad hex",
+                    })?;
+                    Ok(arr)
+                };
             let prev_hash = parse32(&header_obj["prev_hash"])?;
             let merkle_root = parse32(&header_obj["merkle_root"])?;
             let checkpoint_hash = parse32(&header_obj["checkpoint_hash"])?;
@@ -1703,7 +1715,7 @@ fn dispatch(
             let hash = hdr.hash();
             let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
             if val <= u64::MAX / difficulty.max(1) {
-                serde_json::json!({"status":"accepted"})
+                foundation_serialization::json::json!({"status":"accepted"})
             } else {
                 return Err(RpcError {
                     code: -32082,
@@ -1718,7 +1730,7 @@ fn dispatch(
         "consensus.pos.slash" => pos::slash(&req.params)?,
         "light.latest_header" => {
             let guard = bc.lock().unwrap();
-            serde_json::to_value(light::latest_header(&guard)).unwrap()
+            foundation_serialization::json::to_value(light::latest_header(&guard)).unwrap()
         }
         "light.headers" => {
             let start = req
@@ -1732,18 +1744,19 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(200) as usize;
             let guard = bc.lock().unwrap();
-            serde_json::to_value(light::headers_since(&guard, start, limit)).unwrap()
+            foundation_serialization::json::to_value(light::headers_since(&guard, start, limit))
+                .unwrap()
         }
         "light_client.rebate_status" => {
             let status = {
                 let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
                 light::rebate_status(&guard)
             };
-            match serde_json::to_value(status) {
+            match foundation_serialization::json::to_value(status) {
                 Ok(val) => val,
                 Err(e) => {
                     #[cfg(feature = "telemetry")]
-                    tracing::warn!(
+                    diagnostics::tracing::warn!(
                         target: "rpc",
                         error = %e,
                         "failed to serialize rebate status"
@@ -1782,11 +1795,11 @@ fn dispatch(
                 let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
                 light::rebate_history(&guard, relayer.as_deref(), cursor, limit)
             };
-            match serde_json::to_value(history) {
+            match foundation_serialization::json::to_value(history) {
                 Ok(val) => val,
                 Err(e) => {
                     #[cfg(feature = "telemetry")]
-                    tracing::warn!(
+                    diagnostics::tracing::warn!(
                         target: "rpc",
                         error = %e,
                         "failed to serialize rebate history"
@@ -1803,15 +1816,15 @@ fn dispatch(
         "rent.escrow.balance" => {
             let esc = RentEscrow::open("rent_escrow.db");
             if let Some(id) = req.params.get("id").and_then(|v| v.as_str()) {
-                serde_json::json!({"balance": esc.balance(id)})
+                foundation_serialization::json::json!({"balance": esc.balance(id)})
             } else if let Some(acct) = req.params.get("account").and_then(|v| v.as_str()) {
-                serde_json::json!({"balance": esc.balance_account(acct)})
+                foundation_serialization::json::json!({"balance": esc.balance_account(acct)})
             } else {
-                serde_json::json!({"balance": 0})
+                foundation_serialization::json::json!({"balance": 0})
             }
         }
         "mesh.peers" => {
-            serde_json::json!({"peers": range_boost::peers()})
+            foundation_serialization::json::json!({"peers": range_boost::peers()})
         }
         "inflation.params" => inflation::params(&bc),
         "compute_market.stats" => {
@@ -1885,9 +1898,10 @@ fn dispatch(
         }
         "net.gossip_status" => {
             if let Some(status) = net::gossip_status() {
-                serde_json::to_value(status).unwrap_or_else(|_| serde_json::json!({}))
+                foundation_serialization::json::to_value(status)
+                    .unwrap_or_else(|_| foundation_serialization::json::json!({}))
             } else {
-                serde_json::json!({"status": "unavailable"})
+                foundation_serialization::json::json!({"status": "unavailable"})
             }
         }
         "net.dns_verify" => {
@@ -1901,16 +1915,16 @@ fn dispatch(
         "stake.role" => pos::role(&req.params)?,
         "config.reload" => {
             let ok = crate::config::reload();
-            serde_json::json!({"reloaded": ok})
+            foundation_serialization::json::json!({"reloaded": ok})
         }
         "register_handle" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             match handles.lock() {
                 Ok(mut reg) => match identity::register_handle(&req.params, &mut reg) {
                     Ok(v) => v,
-                    Err(e) => serde_json::json!({"error": e.code()}),
+                    Err(e) => foundation_serialization::json::json!({"error": e.code()}),
                 },
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "identity.anchor" => {
@@ -1924,28 +1938,28 @@ fn dispatch(
             match dids.lock() {
                 Ok(mut reg) => match identity::anchor_did(&req.params, &mut reg, &GOV_STORE) {
                     Ok(v) => v,
-                    Err(e) => serde_json::json!({"error": e.code()}),
+                    Err(e) => foundation_serialization::json::json!({"error": e.code()}),
                 },
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "resolve_handle" => match handles.lock() {
             Ok(reg) => identity::resolve_handle(&req.params, &reg),
-            Err(_) => serde_json::json!({"address": null}),
+            Err(_) => foundation_serialization::json::json!({"address": null}),
         },
         "identity.resolve" => match dids.lock() {
             Ok(reg) => identity::resolve_did(&req.params, &reg),
-            Err(_) => serde_json::json!({
-                "address": Value::Null,
-                "document": Value::Null,
-                "hash": Value::Null,
-                "nonce": Value::Null,
-                "updated_at": Value::Null,
+            Err(_) => foundation_serialization::json::json!({
+                "address": foundation_serialization::json::Value::Null,
+                "document": foundation_serialization::json::Value::Null,
+                "hash": foundation_serialization::json::Value::Null,
+                "nonce": foundation_serialization::json::Value::Null,
+                "updated_at": foundation_serialization::json::Value::Null,
             }),
         },
         "whoami" => match handles.lock() {
             Ok(reg) => identity::whoami(&req.params, &reg),
-            Err(_) => serde_json::json!({"address": null, "handle": null}),
+            Err(_) => foundation_serialization::json::json!({"address": null, "handle": null}),
         },
         "record_le_request" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -1970,11 +1984,11 @@ fn dispatch(
                         .unwrap_or("en");
                     match crate::le_portal::record_request(&base, agency, case, jurisdiction, lang)
                     {
-                        Ok(_) => serde_json::json!({"status": "ok"}),
-                        Err(_) => serde_json::json!({"error": "io"}),
+                        Ok(_) => foundation_serialization::json::json!({"status": "ok"}),
+                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
                     }
                 }
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "warrant_canary" => {
@@ -1988,22 +2002,22 @@ fn dispatch(
                 Ok(guard) => {
                     let base = guard.path.clone();
                     match crate::le_portal::record_canary(&base, msg) {
-                        Ok(hash) => serde_json::json!({"hash": hash}),
-                        Err(_) => serde_json::json!({"error": "io"}),
+                        Ok(hash) => foundation_serialization::json::json!({"hash": hash}),
+                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
                     }
                 }
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "le.list_requests" => match bc.lock() {
             Ok(guard) => {
                 let base = guard.path.clone();
                 match crate::le_portal::list_requests(&base) {
-                    Ok(v) => serde_json::to_value(v).unwrap_or_default(),
-                    Err(_) => serde_json::json!({"error": "io"}),
+                    Ok(v) => foundation_serialization::json::to_value(v).unwrap_or_default(),
+                    Err(_) => foundation_serialization::json::json!({"error": "io"}),
                 }
             }
-            Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
         },
         "le.record_action" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -2028,11 +2042,11 @@ fn dispatch(
                         .unwrap_or("en");
                     match crate::le_portal::record_action(&base, agency, action, jurisdiction, lang)
                     {
-                        Ok(hash) => serde_json::json!({"hash": hash}),
-                        Err(_) => serde_json::json!({"error": "io"}),
+                        Ok(hash) => foundation_serialization::json::json!({"hash": hash}),
+                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
                     }
                 }
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "le.upload_evidence" => {
@@ -2054,7 +2068,7 @@ fn dispatch(
                 .unwrap_or("");
             let data = match decode_standard(data_b64) {
                 Ok(d) => d,
-                Err(_) => return Ok(serde_json::json!({"error": "decode"})),
+                Err(_) => return Ok(foundation_serialization::json::json!({"error": "decode"})),
             };
             match bc.lock() {
                 Ok(guard) => {
@@ -2073,26 +2087,26 @@ fn dispatch(
                         lang,
                         &data,
                     ) {
-                        Ok(hash) => serde_json::json!({"hash": hash}),
-                        Err(_) => serde_json::json!({"error": "io"}),
+                        Ok(hash) => foundation_serialization::json::json!({"hash": hash}),
+                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
                     }
                 }
-                Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
             }
         }
         "service_badge_issue" => match bc.lock() {
             Ok(mut guard) => {
                 let token = guard.badge_tracker_mut().force_issue();
-                serde_json::json!({"badge": token})
+                foundation_serialization::json::json!({"badge": token})
             }
-            Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
         },
         "service_badge_revoke" => match bc.lock() {
             Ok(mut guard) => {
                 guard.badge_tracker_mut().revoke();
-                serde_json::json!({"revoked": true})
+                foundation_serialization::json::json!({"revoked": true})
             }
-            Err(_) => serde_json::json!({"error": "lock poisoned"}),
+            Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
         },
         "service_badge_verify" => {
             let badge = req
@@ -2100,14 +2114,14 @@ fn dispatch(
                 .get("badge")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            serde_json::json!({"valid": crate::service_badge::verify(badge)})
+            foundation_serialization::json::json!({"valid": crate::service_badge::verify(badge)})
         }
         "submit_tx" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             let tx_hex = req.params.get("tx").and_then(|v| v.as_str()).unwrap_or("");
             match hex::decode(tx_hex)
                 .ok()
-                .and_then(|b| bincode::deserialize::<SignedTransaction>(&b).ok())
+                .and_then(|b| binary::decode::<SignedTransaction>(&b).ok())
             {
                 Some(mut tx) => {
                     if let Some(f) = req.params.get("max_fee").and_then(|v| v.as_u64()) {
@@ -2118,10 +2132,12 @@ fn dispatch(
                     }
                     match bc.lock() {
                         Ok(mut guard) => match guard.submit_transaction(tx) {
-                            Ok(()) => serde_json::json!({"status": "ok"}),
-                            Err(e) => serde_json::json!({"error": format!("{e:?}")}),
+                            Ok(()) => foundation_serialization::json::json!({"status": "ok"}),
+                            Err(e) => {
+                                foundation_serialization::json::json!({"error": format!("{e:?}")})
+                            }
                         },
-                        Err(_) => serde_json::json!({"error": "lock poisoned"}),
+                        Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
                     }
                 }
                 None => {
@@ -2160,12 +2176,12 @@ fn dispatch(
                 crate::telemetry::SNAPSHOT_INTERVAL_CHANGED.set(interval as i64);
             }
             #[cfg(feature = "telemetry")]
-            log::info!("snapshot_interval_changed {interval}");
-            serde_json::json!({"status": "ok"})
+            diagnostics::log::info!("snapshot_interval_changed {interval}");
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "start_mining" => {
             if runtime_cfg.relay_only {
-                serde_json::json!({
+                foundation_serialization::json::json!({
                     "error": {"code": -32075, "message": "relay_only"}
                 })
             } else {
@@ -2187,13 +2203,13 @@ fn dispatch(
                         }
                     });
                 }
-                serde_json::json!({"status": "ok"})
+                foundation_serialization::json::json!({"status": "ok"})
             }
         }
         "stop_mining" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             mining.store(false, Ordering::SeqCst);
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "jurisdiction.status" => jurisdiction::status(&bc)?,
         "jurisdiction.set" => {
@@ -2223,11 +2239,11 @@ fn dispatch(
             #[cfg(feature = "telemetry")]
             {
                 let m = crate::gather_metrics().unwrap_or_default();
-                serde_json::json!(m)
+                foundation_serialization::json::json!(m)
             }
             #[cfg(not(feature = "telemetry"))]
             {
-                serde_json::json!("telemetry disabled")
+                foundation_serialization::json::json!("telemetry disabled")
             }
         }
         "price_board_get" => {
@@ -2243,7 +2259,7 @@ fn dispatch(
             };
             match crate::compute_market::price_board::bands(lane) {
                 Some((p25, median, p75)) => {
-                    serde_json::json!({"p25": p25, "median": median, "p75": p75})
+                    foundation_serialization::json::json!({"p25": p25, "median": median, "p75": p75})
                 }
                 None => {
                     return Err(crate::compute_market::MarketError::NoPriceData.into());
@@ -2258,11 +2274,11 @@ fn dispatch(
                 .unwrap_or(0);
             let height = bc.lock().unwrap_or_else(|e| e.into_inner()).block_height;
             crate::compute_market::settlement::Settlement::arm(delay, height);
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "compute_cancel_arm" => {
             crate::compute_market::settlement::Settlement::cancel_arm();
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "compute_back_to_dry_run" => {
             let reason = req
@@ -2271,7 +2287,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             crate::compute_market::settlement::Settlement::back_to_dry_run(reason);
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         "dex_escrow_status" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2302,7 +2318,7 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
             if let Some(proof) = dex::escrow_proof(id, idx) {
-                serde_json::to_value(proof).map_err(|_| RpcError {
+                foundation_serialization::json::to_value(proof).map_err(|_| RpcError {
                     code: -32603,
                     message: "internal error",
                 })?
@@ -2587,7 +2603,7 @@ fn dispatch(
                 message: "invalid params",
             })?;
             let gas = vm::estimate_gas(code);
-            serde_json::json!({"gas_used": gas})
+            foundation_serialization::json::json!({"gas_used": gas})
         }
         "vm.exec_trace" => {
             let code_hex = req
@@ -2600,12 +2616,12 @@ fn dispatch(
                 message: "invalid params",
             })?;
             let trace = vm::exec_trace(code);
-            serde_json::json!({"trace": trace})
+            foundation_serialization::json::json!({"trace": trace})
         }
         "vm.storage_read" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let data = vm::storage_read(id).unwrap_or_default();
-            serde_json::json!({"data": hex::encode(data)})
+            foundation_serialization::json::json!({"data": hex::encode(data)})
         }
         "vm.storage_write" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2619,7 +2635,7 @@ fn dispatch(
                 message: "invalid params",
             })?;
             vm::storage_write(id, bytes);
-            serde_json::json!({"status": "ok"})
+            foundation_serialization::json::json!({"status": "ok"})
         }
         _ => {
             return Err(RpcError {

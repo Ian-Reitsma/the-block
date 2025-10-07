@@ -12,3 +12,4 @@ thiserror = "1"
 tracing = "0.1"
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 rustls-pemfile = "2"
+regex-lite = "0.1"

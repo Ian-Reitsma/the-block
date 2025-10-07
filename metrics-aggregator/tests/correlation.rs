@@ -3,7 +3,7 @@ use metrics_aggregator::{router, AppState};
 use serde::Deserialize;
 use serde_json::json;
 use std::future::Future;
-use tempfile::tempdir;
+use sys::tempfile;
 
 #[derive(Deserialize)]
 struct ApiCorrelation {
@@ -21,7 +21,7 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
 #[test]
 fn indexes_correlation_entries() {
     run_async(async {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("correlation.db"), 60);
         let app = router(state.clone());
         let payload = json!([{

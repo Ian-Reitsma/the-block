@@ -12,17 +12,18 @@ selected at startup.
 
 When migrating existing code:
 
-- Replace `tokio::spawn`/`tokio::task::spawn` with `runtime::spawn`.  The helper
-  keeps the metrics instrumentation that measures spawn latency and tracks
-  pending tasks across both backends.
+- Replace legacy `tokio::spawn`/`tokio::task::spawn` calls with
+  `runtime::spawn`.  The helper keeps the metrics instrumentation that measures
+  spawn latency and tracks pending tasks on the in-house reactor.
 - Swap blocking helpers such as `tokio::task::spawn_blocking` and
   `tokio::runtime::Runtime::block_on` with the corresponding runtime facade
-  calls.
+  calls.  Tokio is no longer linked into the workspace, so these helpers are the
+  only supported async entry points.
 - Use `runtime::sleep`, `runtime::interval`, `runtime::timeout`, and
   `runtime::yield_now` for timing primitives instead of `tokio::time::*`.
-- Convert `tokio::select!` invocations to `runtime::select!`.  The macro routes
-  to Tokio when the Tokio backend is active and falls back to the stub backend
-  in unit tests or deterministic harnesses.
+- Convert `tokio::select!` invocations to `runtime::select!`.  The macro now
+  multiplexes across the in-house and stub backends so deterministic harnesses
+  and production builds share the same code paths.
 - Synchronous retry loops can call `runtime::block_on(runtime::sleep(..))` to
   reuse shared backoff logic while staying executor agnostic.
 

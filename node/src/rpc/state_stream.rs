@@ -43,7 +43,7 @@ pub async fn run_stream(mut ws: ServerStream, bc: Arc<Mutex<Blockchain>>) {
             root,
             compressed: false,
         };
-        let msg = serde_json::to_string(&chunk).unwrap();
+        let msg = foundation_serialization::json::to_string(&chunk).unwrap();
         if ws.send(WsMessage::Text(msg)).await.is_err() {
             break;
         }

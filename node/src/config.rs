@@ -1,13 +1,14 @@
 use crate::simple_db::{EngineConfig, EngineKind};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{record_dependency_policy, CONFIG_RELOAD_TOTAL};
-use anyhow::{anyhow, Result};
+use concurrency::Lazy;
+use diagnostics::anyhow::{anyhow, Result};
+use diagnostics::TbError;
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     DEFAULT_RUNTIME_BACKEND_POLICY, DEFAULT_STORAGE_ENGINE_POLICY,
     DEFAULT_TRANSPORT_PROVIDER_POLICY,
 };
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -322,7 +323,7 @@ fn apply_storage_policy(cfg: &mut NodeConfig, allowed: &[String]) {
     let fallback = allowed.iter().find_map(|name| parse_engine_kind(name));
     let Some(fallback_engine) = fallback else {
         #[cfg(feature = "telemetry")]
-        tracing::warn!(allowed = ?allowed, "storage_engine_policy_missing_fallback");
+        diagnostics::tracing::warn!(allowed = ?allowed, "storage_engine_policy_missing_fallback");
         return;
     };
     let mut changed = false;
@@ -338,7 +339,7 @@ fn apply_storage_policy(cfg: &mut NodeConfig, allowed: &[String]) {
     }
     if changed {
         #[cfg(feature = "telemetry")]
-        tracing::warn!(allowed = ?allowed, "storage_engine_policy_enforced");
+        diagnostics::tracing::warn!(allowed = ?allowed, "storage_engine_policy_enforced");
     }
 }
 
@@ -359,7 +360,7 @@ fn apply_transport_policy(cfg: &mut NodeConfig, allowed: &[String]) {
         if replace {
             quic_cfg.transport.provider = Some(fallback);
             #[cfg(feature = "telemetry")]
-            tracing::warn!(allowed = ?allowed, "transport_provider_policy_enforced");
+            diagnostics::tracing::warn!(allowed = ?allowed, "transport_provider_policy_enforced");
         }
     }
 }
@@ -371,7 +372,7 @@ fn enforce_runtime_policy(allowed: &[String]) {
     let active = crate::runtime::handle().backend_name();
     if !allowed_contains(allowed, active) {
         #[cfg(feature = "telemetry")]
-        tracing::warn!(active, allowed = ?allowed, "runtime_backend_policy_violation");
+        diagnostics::tracing::warn!(active, allowed = ?allowed, "runtime_backend_policy_violation");
         #[cfg(not(feature = "telemetry"))]
         eprintln!(
             "runtime backend `{}` not permitted by governance policy: {:?}",
@@ -697,8 +698,10 @@ impl NodeConfig {
 
 fn load_file(dir: &str) -> Result<NodeConfig> {
     let path = format!("{}/default.toml", dir);
-    let data = fs::read_to_string(&path)?;
-    let mut cfg: NodeConfig = toml::from_str(&data)?;
+    let data = fs::read_to_string(&path)
+        .map_err(|err| TbError::with_source(format!("failed to read config at {path}"), err))?;
+    let mut cfg: NodeConfig = toml::from_str(&data)
+        .map_err(|err| TbError::with_source("failed to parse node config", err))?;
     #[cfg(feature = "quic")]
     {
         let quic_path = format!("{}/quic.toml", dir);
@@ -786,7 +789,7 @@ fn apply(cfg: &NodeConfig) {
     crate::net::configure_overlay(&cfg.overlay);
     if let Err(err) = ensure_overlay_sanity(&cfg.overlay) {
         #[cfg(feature = "telemetry")]
-        tracing::warn!(reason = %err, "overlay_sanity_failed");
+        diagnostics::tracing::warn!(reason = %err, "overlay_sanity_failed");
         #[cfg(not(feature = "telemetry"))]
         eprintln!("overlay_sanity_failed: {err}");
     }
@@ -815,7 +818,7 @@ fn apply(cfg: &NodeConfig) {
             .unwrap_or_else(TransportConfig::default);
         if let Err(err) = crate::net::configure_transport(&transport_cfg) {
             #[cfg(feature = "telemetry")]
-            tracing::warn!(reason = %err, "transport_configure_failed");
+            diagnostics::tracing::warn!(reason = %err, "transport_configure_failed");
             #[cfg(not(feature = "telemetry"))]
             eprintln!("transport_configure_failed: {err}");
         }
@@ -859,7 +862,7 @@ pub fn reload() -> bool {
         Err(e) => {
             #[cfg(feature = "telemetry")]
             {
-                log::warn!("config_reload_failed: {e}");
+                diagnostics::log::warn!("config_reload_failed: {e}");
                 CONFIG_RELOAD_TOTAL.with_label_values(&["err"]).inc();
             }
             #[cfg(not(feature = "telemetry"))]
@@ -913,19 +916,19 @@ pub fn watch(dir: &str) {
                     }
                     Ok(_) => {}
                     Err(err) => {
-                        log::warn!("config_watch_error: {err}");
+                        diagnostics::log::warn!("config_watch_error: {err}");
                         runtime::sleep(Duration::from_secs(1)).await;
                     }
                 }
             },
             Err(err) => {
-                log::warn!("config_watch_init_failed: {err}");
+                diagnostics::log::warn!("config_watch_init_failed: {err}");
             }
         }
     });
 
     thread::spawn(|| {
-        let mut signals = Signals::new([SIGHUP]).expect("signals");
+        let signals = Signals::new([SIGHUP]).expect("signals");
         for _ in signals.forever() {
             let _ = reload();
             crate::gossip::config::reload();

@@ -5,9 +5,15 @@ edition = "2021"
 
 [features]
 default = []
-inhouse = ["dep:anyhow", "dep:crypto_suite", "dep:rand", "dep:serde", "dep:serde_json", "dep:runtime"]
+inhouse = [
+    "dep:crypto_suite",
+    "dep:rand",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:runtime",
+    "dep:sys",
+]
 quinn = [
-    "dep:anyhow",
     "dep:crypto_suite",
     "dep:dashmap",
     "dep:quinn",
@@ -17,24 +23,23 @@ quinn = [
     "dep:rustls",
 ]
 "s2n-quic" = [
-    "dep:anyhow",
     "dep:base64_fp",
     "dep:crypto_suite",
-    "dep:sys",
     "dep:hex",
     "dep:rand",
     "dep:rcgen",
-    "dep:s2n-quic",
+    "dep:runtime",
     "dep:serde",
     "dep:serde_json",
+    "dep:sys",
     "dep:time",
     "dep:x509-parser",
 ]
 quic = ["quinn", "s2n-quic"]
 
 [dependencies]
-anyhow = { version = "1", optional = true }
 async-trait = "0.1"
+diagnostics = { path = "../diagnostics" }
 base64_fp = { path = "../base64_fp", optional = true }
 dashmap = { version = "5", optional = true }
 sys = { path = "../sys", optional = true }
@@ -46,11 +51,8 @@ rcgen = { version = "0.12", optional = true }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
-s2n-quic = { version = "1", features = ["unstable-provider-io-testing"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 x509-parser = { version = "0.16", optional = true }
 
-[dev-dependencies]
-tempfile = "3"

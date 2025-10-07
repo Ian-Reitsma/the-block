@@ -1,9 +1,9 @@
 use crate::{simple_db::names, SimpleDb};
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use icu_normalizer::ComposingNormalizerBorrowed;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use unicode_normalization::UnicodeNormalization;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct HandleRecord {
@@ -49,12 +49,12 @@ impl HandleRegistry {
     }
 
     fn normalize(handle: &str) -> Option<String> {
-        let h: String = handle.nfc().collect();
-        let h = h.trim();
-        if h.is_empty() {
+        let normalized = ComposingNormalizerBorrowed::new_nfc().normalize(handle);
+        let trimmed = normalized.trim();
+        if trimmed.is_empty() {
             return None;
         }
-        Some(h.to_lowercase())
+        Some(trimmed.to_lowercase())
     }
 
     fn reserved(handle: &str) -> bool {

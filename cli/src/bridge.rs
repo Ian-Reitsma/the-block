@@ -9,8 +9,8 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::json::json;
 use httpd::ClientResponse;
-use serde_json::json;
 use std::fs;
 
 pub enum BridgeCmd {
@@ -426,12 +426,12 @@ pub fn handle(action: BridgeCmd) {
             let header = load_header(&header);
             let proof = load_proof(&proof);
             let proofs = relayer_proofs(&relayers, &user, amount);
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -468,12 +468,12 @@ pub fn handle(action: BridgeCmd) {
             }
             let proofs = relayer_proofs(&relayers, &user, amount);
             let primary = relayers.first().cloned().unwrap_or_default();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -500,12 +500,12 @@ pub fn handle(action: BridgeCmd) {
             challenger,
             url,
         } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -525,12 +525,12 @@ pub fn handle(action: BridgeCmd) {
             }
         }
         BridgeCmd::Pending { asset, url } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -548,12 +548,12 @@ pub fn handle(action: BridgeCmd) {
             }
         }
         BridgeCmd::Challenges { asset, url } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -571,12 +571,12 @@ pub fn handle(action: BridgeCmd) {
             }
         }
         BridgeCmd::Relayers { asset, url } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -599,12 +599,12 @@ pub fn handle(action: BridgeCmd) {
             limit,
             url,
         } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -624,12 +624,12 @@ pub fn handle(action: BridgeCmd) {
             }
         }
         BridgeCmd::SlashLog { url } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -649,12 +649,12 @@ pub fn handle(action: BridgeCmd) {
             amount,
             url,
         } => {
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }

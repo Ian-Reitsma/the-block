@@ -39,7 +39,8 @@ fn badge_status_endpoint() {
             .await
             .unwrap();
         let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&resp[body_idx + 4..]).unwrap();
+        let body: foundation_serialization::json::Value =
+            foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
         assert!(!body["active"].as_bool().unwrap());
         assert!(body["last_mint"].is_null());
         assert!(body["last_burn"].is_null());
@@ -67,7 +68,8 @@ fn badge_status_endpoint() {
             .await
             .unwrap();
         let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&resp[body_idx + 4..]).unwrap();
+        let body: foundation_serialization::json::Value =
+            foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
         assert!(body["active"].as_bool().unwrap());
         assert!(body["last_mint"].as_u64().is_some());
 

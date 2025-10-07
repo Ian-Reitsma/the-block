@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2"
+crypto_suite = { path = "../crypto_suite" }

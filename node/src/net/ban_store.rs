@@ -1,4 +1,4 @@
-use once_cell::sync::OnceCell;
+use concurrency::{MutexExt, OnceCell};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,29 +23,29 @@ impl BanStore {
     }
 
     pub fn ban(&self, pk: &[u8; 32], until: u64) {
-        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let mut db = self.db.guard();
         let key = key_for(pk);
         db.put(key.as_bytes(), &until.to_be_bytes())
             .unwrap_or_else(|e| panic!("store ban {key}: {e}"));
         drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-        tracing::info!(peer = %hex::encode(pk), until, "peer banned");
+        diagnostics::tracing::info!(peer = %hex::encode(pk), until, "peer banned");
         self.update_metric();
     }
 
     pub fn unban(&self, pk: &[u8; 32]) {
-        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let mut db = self.db.guard();
         let key = key_for(pk);
         let _ = db.try_remove(&key);
         drop(db);
         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-        tracing::info!(peer = %hex::encode(pk), "peer unbanned");
+        diagnostics::tracing::info!(peer = %hex::encode(pk), "peer unbanned");
         self.update_metric();
     }
 
     pub fn is_banned(&self, pk: &[u8; 32]) -> bool {
         self.purge_expired();
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let db = self.db.guard();
         let key = key_for(pk);
         if let Some(ts) = db.get(&key).and_then(as_timestamp) {
             return ts > current_ts();
@@ -55,7 +55,7 @@ impl BanStore {
 
     pub fn purge_expired(&self) {
         let now = current_ts();
-        let mut db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let mut db = self.db.guard();
         let keys: Vec<String> = db
             .keys_with_prefix("")
             .into_iter()
@@ -93,7 +93,7 @@ impl BanStore {
     }
 
     fn entries(&self) -> Vec<(String, u64)> {
-        let db = self.db.lock().unwrap_or_else(|e| e.into_inner());
+        let db = self.db.guard();
         db.keys_with_prefix("")
             .into_iter()
             .filter_map(|key| db.get(&key).and_then(as_timestamp).map(|ts| (key, ts)))
@@ -149,7 +149,7 @@ pub fn store() -> &'static Mutex<BanStore> {
 /// Primarily used by tests to isolate state.
 pub fn init(path: &str) {
     if let Some(store) = BAN_STORE.get() {
-        let mut guard = store.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = store.guard();
         *guard = BanStore::open(path);
     } else {
         let _ = BAN_STORE.set(Mutex::new(BanStore::open(path)));
