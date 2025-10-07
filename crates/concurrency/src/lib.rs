@@ -11,31 +11,24 @@ pub use std::sync::{MutexGuard, RwLockReadGuard, RwLockWriteGuard};
 /// Lightweight drop-in for `once_cell::sync::Lazy` while the full
 /// concurrency primitives are implemented.
 pub struct Lazy<T> {
-    init: Mutex<Option<Box<dyn FnOnce() -> T + Send + 'static>>>,
+    init: fn() -> T,
     cell: OnceLock<T>,
 }
 
 impl<T> Lazy<T> {
-    pub fn new<F>(init: F) -> Self
-    where
-        F: FnOnce() -> T + Send + 'static,
-    {
+    pub const fn new(init: fn() -> T) -> Self {
         Lazy {
-            init: Mutex::new(Some(Box::new(init))),
+            init,
             cell: OnceLock::new(),
         }
     }
 
     pub fn get(&self) -> &T {
-        self.cell.get_or_init(|| {
-            let mut init = self
-                .init
-                .lock()
-                .expect("lazy initializer poisoned")
-                .take()
-                .expect("lazy initializer already consumed");
-            init()
-        })
+        self.cell.get_or_init(self.init)
+    }
+
+    pub fn force(this: &Self) -> &T {
+        this.get()
     }
 }
 
@@ -45,6 +38,14 @@ where
 {
     fn default() -> Self {
         Lazy::new(T::default)
+    }
+}
+
+impl<T> std::ops::Deref for Lazy<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.get()
     }
 }
 

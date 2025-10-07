@@ -1,5 +1,5 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use std::fs;
 use std::sync::Once;
 use the_block::Blockchain;
@@ -31,8 +31,7 @@ fn build_tx(sk: &[u8], from: &str, to: &str, fee: u64, nonce: u64) -> SignedTran
     sign_tx(sk.to_vec(), payload).expect("valid signature")
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn eviction_records_hash_and_releases_slot() {
     init();
     let dir = temp_dir("mempool_eviction");

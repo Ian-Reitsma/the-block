@@ -1,5 +1,5 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use std::fs;
 use std::sync::Once;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
@@ -35,8 +35,7 @@ fn build_signed_tx(
     sign_tx(sk.to_vec(), payload).unwrap()
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn eviction_keeps_high_fee() {
     init();
     let dir = temp_dir("mp_evict");
@@ -54,8 +53,7 @@ fn eviction_keeps_high_fee() {
     assert!(!bc.mempool_consumer.contains_key(&("alice".to_string(), 1)));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn block_sorts_by_fee() {
     init();
     let dir = temp_dir("mp_sort");

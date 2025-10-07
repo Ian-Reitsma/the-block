@@ -1,9 +1,7 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use the_block::compute_market::courier::CourierStore;
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn courier_receipt_forwarding() {
     let dir = tempfile::tempdir().unwrap();
     let store = CourierStore::open(dir.path().to_str().unwrap());
@@ -15,8 +13,7 @@ fn courier_receipt_forwarding() {
     assert!(rec.acknowledged);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn receipt_validation() {
     let dir = tempfile::tempdir().unwrap();
     let store = CourierStore::open(dir.path().to_str().unwrap());
@@ -26,8 +23,7 @@ fn receipt_validation() {
 }
 
 #[cfg(feature = "telemetry")]
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn courier_retry_updates_metrics() {
     use the_block::telemetry::{COURIER_FLUSH_ATTEMPT_TOTAL, COURIER_FLUSH_FAILURE_TOTAL};
 

@@ -1,10 +1,11 @@
+use concurrency::Lazy;
+use diagnostics::tracing::{info, warn};
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
-use once_cell::sync::Lazy;
 use runtime::telemetry::{Counter, Gauge, Registry};
 use runtime::{spawn, spawn_blocking};
+use std::error::Error as StdError;
+use std::fmt;
 use std::str::FromStr;
-use thiserror::Error;
-use tracing::{info, warn};
 use urlencoding::encode;
 
 use crypto_suite::encryption::{
@@ -745,16 +746,52 @@ async fn cluster(request: Request<AppState>) -> Result<Response, HttpError> {
     Response::new(StatusCode::OK).json(&count)
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 enum ExportError {
-    #[error("serialization error: {0}")]
     Serialization(String),
-    #[error("zip error: {0}")]
-    Zip(#[from] zip::result::ZipError),
-    #[error("io error: {0}")]
-    Io(#[from] io::Error),
-    #[error("envelope error: {0}")]
-    Envelope(#[from] EnvelopeError),
+    Zip(zip::result::ZipError),
+    Io(io::Error),
+    Envelope(EnvelopeError),
+}
+
+impl fmt::Display for ExportError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExportError::Serialization(err) => write!(f, "serialization error: {err}"),
+            ExportError::Zip(err) => write!(f, "zip error: {err}"),
+            ExportError::Io(err) => write!(f, "io error: {err}"),
+            ExportError::Envelope(err) => write!(f, "envelope error: {err}"),
+        }
+    }
+}
+
+impl StdError for ExportError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            ExportError::Serialization(_) => None,
+            ExportError::Zip(err) => Some(err),
+            ExportError::Io(err) => Some(err),
+            ExportError::Envelope(err) => Some(err),
+        }
+    }
+}
+
+impl From<zip::result::ZipError> for ExportError {
+    fn from(value: zip::result::ZipError) -> Self {
+        ExportError::Zip(value)
+    }
+}
+
+impl From<io::Error> for ExportError {
+    fn from(value: io::Error) -> Self {
+        ExportError::Io(value)
+    }
+}
+
+impl From<EnvelopeError> for ExportError {
+    fn from(value: EnvelopeError) -> Self {
+        ExportError::Envelope(value)
+    }
 }
 
 struct ExportPayload {

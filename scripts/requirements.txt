@@ -1,3 +1,2 @@
-maturin==1.9.2
 patchelf==0.17.2.1 ; sys_platform != "darwin"
 pytest==8.4.1

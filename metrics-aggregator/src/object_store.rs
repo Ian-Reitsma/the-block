@@ -1,9 +1,10 @@
 use std::env;
+use std::error::Error as StdError;
+use std::fmt;
 use std::time::SystemTime;
 
 use crypto_suite::mac::{hmac_sha256, sha256_digest};
 use httpd::{ClientError, HttpClient, Method};
-use thiserror::Error;
 use time::{format_description::FormatItem, macros::format_description, OffsetDateTime};
 
 const METRICS_OBJECT_KEY: &str = "metrics/latest.zip";
@@ -341,22 +342,61 @@ fn env_or(keys: &[&str]) -> Option<String> {
     keys.iter().find_map(|key| env::var(key).ok())
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum UploadError {
-    #[error("missing environment variable {0}")]
     MissingEnv(&'static str),
-    #[error("invalid endpoint: {0}")]
     InvalidEndpoint(String),
-    #[error("unsupported endpoint scheme: {0}")]
     UnsupportedScheme(String),
-    #[error("invalid endpoint port: {0}")]
     InvalidPort(String),
-    #[error("time formatting error: {0}")]
-    Time(#[from] time::error::Format),
-    #[error("http client error: {0}")]
-    Client(#[from] ClientError),
-    #[error("unexpected response status {status}: {body}")]
+    Time(time::error::Format),
+    Client(ClientError),
     UnexpectedResponse { status: u16, body: String },
+}
+
+impl fmt::Display for UploadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UploadError::MissingEnv(name) => {
+                write!(f, "missing environment variable {name}")
+            }
+            UploadError::InvalidEndpoint(endpoint) => write!(f, "invalid endpoint: {endpoint}"),
+            UploadError::UnsupportedScheme(scheme) => {
+                write!(f, "unsupported endpoint scheme: {scheme}")
+            }
+            UploadError::InvalidPort(port) => write!(f, "invalid endpoint port: {port}"),
+            UploadError::Time(err) => write!(f, "time formatting error: {err}"),
+            UploadError::Client(err) => write!(f, "http client error: {err}"),
+            UploadError::UnexpectedResponse { status, body } => {
+                write!(f, "unexpected response status {status}: {body}")
+            }
+        }
+    }
+}
+
+impl StdError for UploadError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            UploadError::Time(err) => Some(err),
+            UploadError::Client(err) => Some(err),
+            UploadError::UnexpectedResponse { .. } => None,
+            UploadError::MissingEnv(_) => None,
+            UploadError::InvalidEndpoint(_) => None,
+            UploadError::UnsupportedScheme(_) => None,
+            UploadError::InvalidPort(_) => None,
+        }
+    }
+}
+
+impl From<time::error::Format> for UploadError {
+    fn from(value: time::error::Format) -> Self {
+        UploadError::Time(value)
+    }
+}
+
+impl From<ClientError> for UploadError {
+    fn from(value: ClientError) -> Self {
+        UploadError::Client(value)
+    }
 }
 
 #[cfg(test)]

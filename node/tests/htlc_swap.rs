@@ -9,7 +9,7 @@ fn successful_swap_redeem() {
     h.update(preimage);
     let hash = h.finalize().to_vec();
     let mut c = Htlc::new(hash, HashAlgo::Sha3, 100);
-    assert!(c.redeem(preimage, 10));
+    assert!(c.redeem(preimage, 10).unwrap());
 }
 
 #[test]
@@ -29,6 +29,6 @@ fn timeout_prevents_redeem() {
     h.update(preimage);
     let hash = h.finalize().to_vec();
     let mut c = Htlc::new(hash, HashAlgo::Sha3, 20);
-    assert!(!c.redeem(preimage, 25));
+    assert!(!c.redeem(preimage, 25).unwrap());
     assert!(c.refund(25));
 }

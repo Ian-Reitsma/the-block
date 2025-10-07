@@ -3,11 +3,10 @@ mod store {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use httpd::StatusCode;
+    use httpd::{form_urlencoded, StatusCode};
     use runtime::ws::{Message as WsMessage, ServerStream};
     use serde::Serialize;
     use serde_json::json;
-    use url::form_urlencoded;
 
     use crate::log_indexer::{search_logs, LogEntry, LogFilter, LogIndexerError};
 
@@ -112,7 +111,7 @@ mod store {
         let mut map = HashMap::new();
         if let Some(q) = query {
             for (key, value) in form_urlencoded::parse(q.as_bytes()) {
-                map.insert(key.into_owned(), value.into_owned());
+                map.insert(key, value);
             }
         }
         map

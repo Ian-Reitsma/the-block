@@ -33,3 +33,8 @@ generation, transactions, and persistence, see [docs/explain.md](explain.md).
 > `Blockchain.open(path)` as a static constructor. The method is annotated with
 > `@staticmethod` in PyO3 so the first argument is always treated as the path
 > rather than an implicit instance.
+>
+> **Bridge status:** The legacy PyO3 bridge has been removed while the
+> first-party `python_bridge` crate lands. Until the `python-bindings` feature
+> exposes the new FFI, importing `the_block` will raise a feature-disabled
+> error and the demo exits early.

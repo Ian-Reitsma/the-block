@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::needless_range_loop)]
 
@@ -11,7 +12,6 @@ use the_block::{
 };
 
 mod util;
-use serial_test::serial;
 use util::temp::temp_dir;
 
 static PY_INIT: Once = Once::new();
@@ -45,8 +45,7 @@ fn build_signed_tx(
     sign_tx(sk.to_vec(), payload).expect("valid key")
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn replacement_rejected() {
     init();
     let dir = temp_dir("temp_replace");
@@ -61,8 +60,7 @@ fn replacement_rejected() {
     assert!(matches!(res, Err(TxAdmissionError::Duplicate)));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn eviction_via_drop_transaction() {
     init();
     let dir = temp_dir("temp_evict");
@@ -82,8 +80,7 @@ fn eviction_via_drop_transaction() {
     bc.submit_transaction(tx3).unwrap();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn ttl_expiry_purges_and_counts() {
     init();
     let dir = temp_dir("temp_ttl");
@@ -107,8 +104,7 @@ fn ttl_expiry_purges_and_counts() {
     assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn fee_floor_enforced() {
     init();
     let dir = temp_dir("temp_fee_floor");
@@ -120,8 +116,7 @@ fn fee_floor_enforced() {
     assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::FeeTooLow));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn orphan_sweep_removes_missing_sender() {
     init();
     let dir = temp_dir("temp_orphan");
@@ -140,8 +135,7 @@ fn orphan_sweep_removes_missing_sender() {
     assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn orphan_ratio_triggers_rebuild() {
     init();
     let dir = temp_dir("temp_orphan_ratio");
@@ -159,8 +153,7 @@ fn orphan_ratio_triggers_rebuild() {
     assert_eq!(bc.orphan_count(), 0);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn heap_orphan_stress_triggers_rebuild_and_orders() {
     init();
     let dir = temp_dir("temp_heap_orphan");
@@ -200,8 +193,7 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn orphan_drop_decrements_counter() {
     init();
     let dir = temp_dir("temp_orphan_drop");
@@ -222,8 +214,7 @@ fn orphan_drop_decrements_counter() {
     assert_eq!(bc.orphan_count(), 0);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn ttl_purge_drops_orphan_and_decrements_counter() {
     init();
     let dir = temp_dir("temp_orphan_ttl");
@@ -251,8 +242,7 @@ fn ttl_purge_drops_orphan_and_decrements_counter() {
     assert_eq!(bc.mempool_consumer.len(), 1);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn drop_lock_poisoned_error_and_recovery() {
     init();
     let dir = temp_dir("temp_drop_poison");
@@ -286,8 +276,7 @@ fn drop_lock_poisoned_error_and_recovery() {
     assert_eq!(bc.drop_transaction("alice", 1), Ok(()));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn submit_lock_poisoned_error_and_recovery() {
     init();
     let dir = temp_dir("temp_submit_poison");
@@ -320,8 +309,7 @@ fn submit_lock_poisoned_error_and_recovery() {
     assert_eq!(bc.submit_transaction(tx), Ok(()));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn eviction_panic_rolls_back() {
     init();
     let dir = temp_dir("temp_evict_panic");
@@ -347,8 +335,7 @@ fn eviction_panic_rolls_back() {
     assert_eq!(bc.mempool_consumer.len(), 1);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn admission_panic_rolls_back() {
     init();
     let dir = temp_dir("temp_admit_panic");
@@ -375,8 +362,7 @@ fn admission_panic_rolls_back() {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn comparator_orders_by_fee_expiry_hash() {
     init();
     let ttl = 10;

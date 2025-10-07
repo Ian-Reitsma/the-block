@@ -5,6 +5,10 @@
 > **2025-10-07 note**: Workspace crates now consume the first-party `base64_fp` encoder/decoder; the remaining `base64` entries
 > below are transitive pulls scheduled for replacement once upstream dependencies are rewritten or patched to accept the in-house
 > implementation.
+> **2025-10-09 update**: Removed third-party dev/test crates (Criterion, Proptest,
+> Insta, SerialTest, env_logger, logtest, tracing-test, wait-timeout) after
+> landing the `testkit` macros. The inventory below reflects only runtime or
+> build-time dependencies that remain in the tree.
 | strategic | `rustls` | 0.23.32 | crates.io | Apache-2.0 OR ISC OR MIT | 2 |
 | replaceable | `bincode` | 1.3.3 | crates.io | MIT | 1 |
 | replaceable | `serde` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 1 |
@@ -86,8 +90,6 @@
 | unclassified | `cranelift-native` | 0.111.4 | crates.io | Apache-2.0 WITH LLVM-exception | 3 |
 | unclassified | `cranelift-wasm` | 0.111.4 | crates.io | Apache-2.0 WITH LLVM-exception | 3 |
 | unclassified | `crc32fast` | 1.5.0 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `criterion` | 0.5.1 | crates.io | Apache-2.0 OR MIT | 1 |
-| unclassified | `criterion-plot` | 0.5.0 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `crossbeam` | 0.8.4 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `crossbeam-channel` | 0.5.15 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `crossbeam-deque` | 0.8.6 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -123,7 +125,6 @@
 | unclassified | `encode_unicode` | 1.0.0 | crates.io | Apache-2.0 OR MIT | 3 |
 | unclassified | `encoding_rs` | 0.8.35 | crates.io | (Apache-2.0 OR MIT) AND BSD-3-Clause | 2 |
 | unclassified | `env_filter` | 0.1.3 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `env_logger` | 0.11.8 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `equivalent` | 1.0.2 | crates.io | Apache-2.0 OR MIT | 2 |
 | unclassified | `errno` | 0.3.14 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `explorer` | 0.1.0 | workspace | — | 2 |
@@ -201,7 +202,6 @@
 | unclassified | `indoc` | 2.0.6 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `inferno` | 0.11.21 | crates.io | CDDL-1.0 | 2 |
 | unclassified | `inflation` | 0.1.0 | workspace | — | 1 |
-| unclassified | `insta` | 1.43.2 | crates.io | Apache-2.0 | 1 |
 | unclassified | `instant` | 0.1.13 | crates.io | BSD-3-Clause | 3 |
 | unclassified | `io-lifetimes` | 1.0.11 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
 | unclassified | `is-terminal` | 0.4.16 | crates.io | MIT | 2 |
@@ -241,7 +241,6 @@
 | unclassified | `litemap` | 0.8.0 | crates.io | Unicode-3.0 | 6 |
 | unclassified | `lock_api` | 0.4.14 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `log` | 0.4.28 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `logtest` | 2.0.0 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `lru` | 0.11.1 | crates.io | MIT | 1 |
 | unclassified | `lz4-sys` | 1.11.1+lz4-1.10.0 | crates.io | MIT | 3 |
 | unclassified | `mach2` | 0.4.3 | crates.io | BSD-2-Clause OR MIT OR Apache-2.0 | 2 |
@@ -323,14 +322,9 @@
 | unclassified | `proc-macro2` | 1.0.101 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `procfs` | 0.15.1 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `prometheus` | 0.13.4 | crates.io | Apache-2.0 | 1 |
-| unclassified | `proptest` | 1.8.0 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `protobuf` | 2.28.0 | crates.io | MIT | 2 |
 | unclassified | `psm` | 0.1.27 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `pyo3` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `pyo3-build-config` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `pyo3-ffi` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `pyo3-macros` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `pyo3-macros-backend` | 0.24.2 | crates.io | MIT OR Apache-2.0 | 3 |
+| unclassified | `python_bridge` | 0.1.0 | workspace | — | 0 |
 | unclassified | `quick-error` | 1.2.3 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `quick-xml` | 0.26.0 | crates.io | MIT | 3 |
 | unclassified | `quote` | 1.0.41 | crates.io | MIT OR Apache-2.0 | 3 |
@@ -401,10 +395,6 @@
 | unclassified | `serde_json` | 1.0.145 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `serde_spanned` | 0.6.9 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `serde_yaml` | 0.9.34+deprecated | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `serial_test` | 1.0.0 | crates.io | MIT | 2 |
-| unclassified | `serial_test` | 3.2.0 | crates.io | MIT | 1 |
-| unclassified | `serial_test_derive` | 1.0.0 | crates.io | MIT | 3 |
-| unclassified | `serial_test_derive` | 3.2.0 | crates.io | MIT | 2 |
 | unclassified | `sha1` | 0.10.6 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `sha2` | 0.10.9 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `sharded-slab` | 0.1.7 | crates.io | MIT | 2 |
@@ -470,8 +460,6 @@
 | unclassified | `tracing-log` | 0.2.0 | crates.io | MIT | 2 |
 | unclassified | `tracing-serde` | 0.2.0 | crates.io | MIT | 2 |
 | unclassified | `tracing-subscriber` | 0.3.20 | crates.io | MIT | 1 |
-| unclassified | `tracing-test` | 0.2.5 | crates.io | MIT | 1 |
-| unclassified | `tracing-test-macro` | 0.2.5 | crates.io | MIT | 2 |
 | unclassified | `transpose` | 0.2.3 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `typenum` | 1.19.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `unarray` | 0.1.4 | crates.io | MIT OR Apache-2.0 | 2 |
@@ -492,7 +480,6 @@
 | unclassified | `value-bag` | 1.11.1 | crates.io | Apache-2.0 OR MIT | 2 |
 | unclassified | `vcpkg` | 0.2.15 | crates.io | MIT/Apache-2.0 | 3 |
 | unclassified | `version_check` | 0.9.5 | crates.io | MIT/Apache-2.0 | 4 |
-| unclassified | `wait-timeout` | 0.2.1 | crates.io | MIT/Apache-2.0 | 1 |
 | unclassified | `walkdir` | 2.5.0 | crates.io | Unlicense/MIT | 2 |
 | unclassified | `wallet` | 0.1.0 | workspace | — | 1 |
 | unclassified | `wasi` | 0.11.1+wasi-snapshot-preview1 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |

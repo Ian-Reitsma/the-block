@@ -5,7 +5,6 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use runtime::io::read_to_end;
 use runtime::net::TcpStream;
 use serde_json::Value;
-use serial_test::serial;
 use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use util::timeout::expect_timeout;
@@ -33,8 +32,7 @@ fn rpc(addr: &str, body: &str) -> Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn price_board_no_data_errors() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_market_err");

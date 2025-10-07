@@ -13,11 +13,17 @@ where
     G: FnMut(&str, Vec<u8>),
 {
     let current: u32 = get(KEY)
-        .and_then(|b| bincode::deserialize(&b).ok())
+        .and_then(|b| {
+            if b.len() == 4 {
+                let mut buf = [0u8; 4];
+                buf.copy_from_slice(&b);
+                Some(u32::from_be_bytes(buf))
+            } else {
+                None
+            }
+        })
         .unwrap_or(0);
     if current < SCHEMA_VERSION {
-        if let Ok(bytes) = bincode::serialize(&SCHEMA_VERSION) {
-            put(KEY, bytes);
-        }
+        put(KEY, SCHEMA_VERSION.to_be_bytes().to_vec());
     }
 }

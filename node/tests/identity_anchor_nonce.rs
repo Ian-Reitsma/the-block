@@ -1,7 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use runtime::{io::read_to_end, net::TcpStream};
-use serial_test::serial;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
@@ -74,8 +73,7 @@ fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> serde_json::Value {
     serde_json::to_value(tx).expect("serialize anchor payload")
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn identity_anchor_nonces_are_scoped_per_address() {
     runtime::block_on(async {
         let dir = tempdir().expect("tempdir");

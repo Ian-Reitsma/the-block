@@ -1,10 +1,8 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
-use insta::assert_snapshot;
 use rand::{thread_rng, RngCore};
 use runtime::{io::read_to_end, net::TcpStream};
-use serial_test::serial;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::process::Command;
@@ -61,8 +59,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_rpc() {
     runtime::block_on(async {
         let dir = init_env();
@@ -125,8 +122,7 @@ fn peer_stats_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_all_rpc() {
     runtime::block_on(async {
         let dir = init_env();
@@ -188,8 +184,7 @@ fn peer_stats_all_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_reset_rpc() {
     runtime::block_on(async {
         let dir = init_env();
@@ -257,8 +252,7 @@ fn peer_stats_reset_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_rpc() {
     runtime::block_on(async {
         let dir = init_env();
@@ -317,8 +311,7 @@ fn peer_stats_export_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_invalid_path() {
     let dir = init_env();
     the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
@@ -353,8 +346,7 @@ fn peer_stats_export_invalid_path() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_concurrent() {
     let dir = init_env();
     the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
@@ -404,8 +396,7 @@ fn peer_stats_export_concurrent() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_rpc_map() {
     runtime::block_on(async {
         let dir = init_env();
@@ -454,8 +445,7 @@ fn peer_stats_export_all_rpc_map() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_rpc_dir() {
     runtime::block_on(async {
         let dir = init_env();
@@ -506,8 +496,7 @@ fn peer_stats_export_all_rpc_dir() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_invalid_path() {
     let dir = init_env();
     the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
@@ -518,8 +507,7 @@ fn peer_stats_export_all_invalid_path() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_quota() {
     let dir = init_env();
     the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
@@ -555,8 +543,7 @@ fn peer_stats_export_all_quota() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_filter_reputation() {
     let dir = init_env();
     the_block::net::clear_peer_metrics();
@@ -621,8 +608,7 @@ fn peer_stats_export_all_filter_reputation() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_filter_activity() {
     let dir = init_env();
     the_block::net::clear_peer_metrics();
@@ -685,8 +671,7 @@ fn peer_stats_export_all_filter_activity() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_export_all_peer_list_changed() {
     let dir = init_env();
     the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
@@ -706,8 +691,7 @@ fn peer_stats_export_all_peer_list_changed() {
     Settlement::shutdown();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[cfg_attr(feature = "quic", ignore)]
 fn peer_stats_cli_show_and_reputation() {
     runtime::block_on(async {
@@ -801,8 +785,7 @@ fn peer_stats_cli_show_and_reputation() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_cli_show_table_snapshot() {
     runtime::block_on(async {
         let dir = init_env();
@@ -864,15 +847,16 @@ fn peer_stats_cli_show_table_snapshot() {
         .unwrap();
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert_snapshot!("stats_show_table", stdout);
+        assert!(stdout.contains("Peer ID"));
+        assert!(stdout.contains(&peer_id));
+        assert!(stdout.contains("Reputation"));
 
         handle.abort();
         Settlement::shutdown();
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_cli_show_json_snapshot() {
     runtime::block_on(async {
         let dir = init_env();
@@ -936,16 +920,19 @@ fn peer_stats_cli_show_json_snapshot() {
         if let Some(rep) = val.get_mut("reputation") {
             *rep = serde_json::json!(1.0);
         }
-        let stdout = serde_json::to_string_pretty(&val).unwrap();
-        assert_snapshot!("stats_show_json", stdout);
+        assert_eq!(
+            val.get("peer_id").and_then(|v| v.as_str()),
+            Some(peer_id.as_str())
+        );
+        assert_eq!(val.get("reputation").and_then(|v| v.as_f64()), Some(1.0));
+        assert!(val.get("metrics").is_some());
 
         handle.abort();
         Settlement::shutdown();
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_cli_sort_filter_snapshot() {
     runtime::block_on(async {
         let dir = init_env();
@@ -1047,8 +1034,16 @@ fn peer_stats_cli_sort_filter_snapshot() {
                 }
             }
         }
-        let stdout = serde_json::to_string_pretty(&val).unwrap();
-        assert_snapshot!("stats_sort_json", stdout);
+        let peers = val
+            .get("peers")
+            .and_then(|v| v.as_array())
+            .expect("peers array");
+        assert_eq!(peers.len(), 2);
+        assert_eq!(peers[0].get("peer").and_then(|v| v.as_str()), Some("peer0"));
+        assert_eq!(peers[1].get("peer").and_then(|v| v.as_str()), Some("peer1"));
+        assert!(peers
+            .iter()
+            .all(|p| p.get("reputation").and_then(|v| v.as_f64()) == Some(1.0)));
 
         // filter by first peer prefix
         let prefix = &hex::encode(pk1)[..4];
@@ -1081,16 +1076,23 @@ fn peer_stats_cli_sort_filter_snapshot() {
                 }
             }
         }
-        let stdout2 = serde_json::to_string_pretty(&val2).unwrap();
-        assert_snapshot!("stats_filter_json", stdout2);
+        let peers = val2
+            .get("peers")
+            .and_then(|v| v.as_array())
+            .expect("filtered peers array");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].get("peer").and_then(|v| v.as_str()), Some("peer0"));
+        assert_eq!(
+            peers[0].get("reputation").and_then(|v| v.as_f64()),
+            Some(1.0)
+        );
 
         handle.abort();
         Settlement::shutdown();
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_malformed_id() {
     runtime::block_on(async {
         let dir = init_env();
@@ -1117,8 +1119,7 @@ fn peer_stats_malformed_id() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_unknown_peer() {
     runtime::block_on(async {
         let dir = init_env();
@@ -1151,8 +1152,7 @@ fn peer_stats_unknown_peer() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[cfg_attr(feature = "quic", ignore)]
 fn peer_stats_drop_counter_rpc() {
     runtime::block_on(async {
@@ -1222,8 +1222,7 @@ fn peer_stats_drop_counter_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_cli_reset() {
     runtime::block_on(async {
         let dir = init_env();
@@ -1280,8 +1279,7 @@ fn peer_stats_cli_reset() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_all_pagination_rpc() {
     runtime::block_on(async {
         let dir = tempdir().unwrap();
@@ -1338,8 +1336,7 @@ fn peer_stats_all_pagination_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_stats_persist_restart() {
     runtime::block_on(async {
         let dir = init_env();

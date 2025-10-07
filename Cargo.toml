@@ -17,6 +17,7 @@ members = [
   "crates/p2p_overlay",
   "crates/storage_engine",
   "crates/coding",
+  "crates/testkit_macros",
   "fuzz",
   "sim",
   "tools/xtask",
@@ -53,6 +54,8 @@ members = [
   "crates/testkit",
   "crates/cli_core",
   "crates/foundation_serialization",
+  "crates/dependency_guard",
+  "crates/python_bridge",
   "crates/sys",
 ]
 default-members = [

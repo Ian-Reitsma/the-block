@@ -1,10 +1,8 @@
 //! Lightweight DID state tracking for replay protection.
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
-
 /// Snapshot of the latest anchored DID state for an address.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DidState {
     /// Hash of the anchored DID document.
     pub hash: [u8; 32],

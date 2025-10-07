@@ -2,8 +2,6 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use serial_test::serial;
-
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{thread_rng, RngCore};
 use the_block::net::{
@@ -29,8 +27,7 @@ fn ip_drop_increments_metric() {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rate_limit_drop_records_reason() {
     // Lower the per-second threshold so we can reliably trigger a drop without
     // burning the full default quota. Environment variables are read once on
@@ -148,8 +145,7 @@ fn evicts_least_recently_used_peer() {
     assert!(peer_stats(&pk3).is_some());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn reputation_decreases_on_rate_limit() {
     let peers = PeerSet::new(vec![]);
     let chain = Arc::new(Mutex::new(Blockchain::default()));

@@ -2,8 +2,11 @@
 name = "auto-profile"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
-criterion = { version = "0.5", default-features = false }
 pprof = { version = "0.11", features = ["flamegraph"] }
 crypto_suite = { path = "../../crates/crypto_suite" }
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

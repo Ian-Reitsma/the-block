@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::time::Instant;
@@ -73,8 +72,7 @@ impl TestNode {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn partitions_merge_consistent_fork_choice() {
     runtime::block_on(async {
         let _env = init_env();

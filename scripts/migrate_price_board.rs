@@ -46,6 +46,6 @@ fn main() {
     };
     let v3 = V3 { window: v2.window, consumer: conv(v2.consumer), industrial: conv(v2.industrial) };
     let payload_new = bincode::serialize(&v3).expect("serialize v3");
-    let blob = encode_blob(MAGIC_PRICE_BOARD, 3, &payload_new);
+    let blob = encode_blob(MAGIC_PRICE_BOARD, 3, &payload_new).expect("encode blob");
     fs::write(&path, blob).expect("write migrated board");
 }

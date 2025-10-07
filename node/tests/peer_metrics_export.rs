@@ -1,10 +1,8 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use tempfile::tempdir;
 use the_block::net::{export_peer_stats, record_request, set_metrics_export_dir};
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rejects_traversal_and_symlink() {
     let dir = tempdir().unwrap();
     set_metrics_export_dir(dir.path().to_str().unwrap().to_string());

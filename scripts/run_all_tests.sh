@@ -47,7 +47,7 @@ else
   FEATURE_FLAG=""
 fi
 
-maturin develop --release $FEATURE_FLAG
+echo "python bindings are disabled; skipping maturin develop --release $FEATURE_FLAG"
 TIMEOUT="${TEST_TIMEOUT:-60}"
 if cargo nextest run --help 2>&1 | grep -q -- '--test-timeout'; then
   TIMEOUT_FLAG=("--test-timeout" "${TIMEOUT}s")

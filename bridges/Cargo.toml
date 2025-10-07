@@ -11,10 +11,10 @@ hex = "0.4"
 once_cell = { version = "1", optional = true }
 prometheus = { version = "0.13", optional = true }
 ledger = { path = "../ledger" }
+sys = { path = "../crates/sys" }
 
 [features]
 telemetry = ["once_cell", "prometheus"]
 
 [dev-dependencies]
-tempfile = "3"
 dex = { path = "../dex" }

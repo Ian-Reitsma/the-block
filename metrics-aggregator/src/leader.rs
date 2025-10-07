@@ -1,13 +1,14 @@
 use crate::{AppState, LeaderSnapshot};
+use diagnostics::tracing::{info, warn};
 use runtime::sleep;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::error::Error as StdError;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue};
-use thiserror::Error;
-use tracing::{info, warn};
 
 const LEADER_CF: &str = "coordination";
 const LEADER_KEY: &[u8] = b"leader";
@@ -165,16 +166,54 @@ impl Default for LeaderElectionConfig {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum LeaderElectionError {
-    #[error("storage error: {0}")]
-    Storage(#[from] storage_engine::StorageError),
-    #[error("encoding error: {0}")]
-    Encoding(#[from] serde_json::Error),
-    #[error("time error: {0}")]
-    Time(#[from] std::time::SystemTimeError),
-    #[error("invalid leader election configuration: {0}")]
+    Storage(storage_engine::StorageError),
+    Encoding(serde_json::Error),
+    Time(std::time::SystemTimeError),
     InvalidConfig(String),
+}
+
+impl fmt::Display for LeaderElectionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LeaderElectionError::Storage(err) => write!(f, "storage error: {err}"),
+            LeaderElectionError::Encoding(err) => write!(f, "encoding error: {err}"),
+            LeaderElectionError::Time(err) => write!(f, "time error: {err}"),
+            LeaderElectionError::InvalidConfig(err) => {
+                write!(f, "invalid leader election configuration: {err}")
+            }
+        }
+    }
+}
+
+impl StdError for LeaderElectionError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            LeaderElectionError::Storage(err) => Some(err),
+            LeaderElectionError::Encoding(err) => Some(err),
+            LeaderElectionError::Time(err) => Some(err),
+            LeaderElectionError::InvalidConfig(_) => None,
+        }
+    }
+}
+
+impl From<storage_engine::StorageError> for LeaderElectionError {
+    fn from(value: storage_engine::StorageError) -> Self {
+        LeaderElectionError::Storage(value)
+    }
+}
+
+impl From<serde_json::Error> for LeaderElectionError {
+    fn from(value: serde_json::Error) -> Self {
+        LeaderElectionError::Encoding(value)
+    }
+}
+
+impl From<std::time::SystemTimeError> for LeaderElectionError {
+    fn from(value: std::time::SystemTimeError) -> Self {
+        LeaderElectionError::Time(value)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -404,7 +443,7 @@ fn log_transition(instance_id: &str, previous: &LeaderSnapshot, current: &Leader
     {
         info!(
             target = "aggregator",
-            leader = current.leader_id.as_deref(),
+            leader = current.leader_id.as_deref().unwrap_or("(none)"),
             fencing = current.fencing_token,
             "observed new remote metrics aggregator leader"
         );

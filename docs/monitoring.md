@@ -140,6 +140,8 @@ The log indexer records ingest offsets in the first-party log store, batches ins
 
 When the node runs without the `telemetry` feature the `tracing` crate is not linked, so subsystems that normally emit structured spans fall back to plain stderr diagnostics. RPC log streaming, mempool admission, and QUIC handshake validation all degrade gracefully: warnings appear in the system journal, counters remain untouched, and the RPC surface continues to return JSON errors. Enable `--features telemetry` whenever Prometheus metrics and structured spans are required.
 
+The CLI, aggregator, and wallet stacks now share the new `httpd::uri` helpers for URL parsing and query encoding. Until the full HTTP router lands these helpers intentionally reject unsupported schemes and surface `UriError::InvalidAuthority` rather than guessing behaviour, so operators may see 501 responses when integrations send exotic URLs. The stub keeps the dependency graph first-party while we flesh out end-to-end parsers.
+
 #### Threat model
 
 Attackers may attempt auth token reuse, replay submissions, or file-path

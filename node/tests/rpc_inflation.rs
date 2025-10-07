@@ -1,7 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
-use serial_test::serial;
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
     config::RpcConfig,
@@ -38,8 +37,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_inflation_reports_industrial() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_inflation");

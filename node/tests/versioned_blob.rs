@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use the_block::util::versioned_blob::{
-    decode_blob, encode_blob, DecodeErr, Versioned, MAGIC_PRICE_BOARD,
+    decode_blob, encode_blob, DecodeErr, EncodeErr, Versioned, MAGIC_PRICE_BOARD,
 };
 
 #[derive(Debug, PartialEq)]
@@ -8,8 +8,8 @@ struct Example(Vec<u8>);
 
 impl Versioned for Example {
     const VERSION: u16 = 1;
-    fn encode(&self) -> Vec<u8> {
-        self.0.clone()
+    fn encode(&self) -> Result<Vec<u8>, EncodeErr> {
+        Ok(self.0.clone())
     }
     fn decode_v(version: u16, bytes: &[u8]) -> Result<Self, DecodeErr> {
         if version != Self::VERSION {
@@ -22,7 +22,7 @@ impl Versioned for Example {
 #[test]
 fn bad_magic() {
     let payload = b"hello";
-    let blob = encode_blob(MAGIC_PRICE_BOARD, Example::VERSION, payload);
+    let blob = encode_blob(MAGIC_PRICE_BOARD, Example::VERSION, payload).expect("encode blob");
     assert_eq!(
         decode_blob(&blob, *b"BADC").unwrap_err(),
         DecodeErr::BadMagic
@@ -32,7 +32,12 @@ fn bad_magic() {
 #[test]
 fn version_mismatch() {
     let payload = Example(b"abc".to_vec());
-    let blob = encode_blob(MAGIC_PRICE_BOARD, Example::VERSION, &payload.encode());
+    let blob = encode_blob(
+        MAGIC_PRICE_BOARD,
+        Example::VERSION,
+        &payload.encode().expect("encode example"),
+    )
+    .expect("encode blob");
     let (_v, bytes) = decode_blob(&blob, MAGIC_PRICE_BOARD).unwrap();
     assert_eq!(
         Example::decode_v(Example::VERSION + 1, bytes).unwrap_err(),
@@ -45,7 +50,7 @@ fn version_mismatch() {
 #[test]
 fn bad_crc() {
     let payload = b"world";
-    let mut blob = encode_blob(MAGIC_PRICE_BOARD, Example::VERSION, payload);
+    let mut blob = encode_blob(MAGIC_PRICE_BOARD, Example::VERSION, payload).expect("encode blob");
     let last = blob.last_mut().unwrap();
     *last ^= 0xFF;
     assert_eq!(

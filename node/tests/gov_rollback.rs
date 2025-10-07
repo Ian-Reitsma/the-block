@@ -1,13 +1,11 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::governance::{GovStore, Params, ProposalStatus, Runtime, ACTIVATION_DELAY};
 use the_block::rpc::governance::{gov_propose, gov_vote};
 use the_block::Blockchain;
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rollback_specific_proposal() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path().join("gov.db"));

@@ -68,13 +68,13 @@
 - Jurisdiction policy packs and law-enforcement logging ([crates/jurisdiction](../crates/jurisdiction), [node/tests/jurisdiction_packs.rs](../node/tests/jurisdiction_packs.rs)).
 - Atomic file writer consolidates durable write‑rename‑sync persistence ([node/src/util/atomic_file.rs](../node/src/util/atomic_file.rs)).
 - Versioned blob framing encodes magic bytes, version tags, and CRC32 checksums for on‑disk schemas ([node/src/util/versioned_blob.rs](../node/src/util/versioned_blob.rs)).
-- Python: `mine_block(txs)` helper to mine a block from signed transactions for scripts and demos ([node/src/lib.rs](../node/src/lib.rs)).
+- Python: `mine_block(txs)` helper remains exported but now returns a feature-disabled error until the first-party bridge lands ([node/src/lib.rs](../node/src/lib.rs)).
 - Asynchronous JSON-RPC server built on `tokio` replaces the thread-per-connection model and dispatches requests with async tasks while preserving spec-compliant errors ([node/src/rpc.rs](../node/src/rpc.rs), [node/src/bin/node.rs](../node/src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
 - Network partition/rejoin and invalid gossip cases ensure longest-chain convergence ([tests/net_gossip.rs](tests/net_gossip.rs)).
-- Demo auto-builds the extension and defaults the purge loop to one second; CI captures logs and clears manual flags ([demo.py](demo.py), [tests/demo.rs](tests/demo.rs)).
+- Demo exits early with a bridge-disabled message while the first-party Python facade is under construction ([demo.py](demo.py)).
 - Telemetry logs TTL drops and orphan sweeps with stable `code` fields and sample JSON lines ([node/src/telemetry.rs](../node/src/telemetry.rs), [tests/logging.rs](tests/logging.rs)).
 - Stress tests spawn overlapping purge loops, log start/stop times, and assert metrics after each join ([tests/test_spawn_purge_loop.py](tests/test_spawn_purge_loop.py)).
-- Test harness installs `maturin` on demand and builds the Python extension before running tests ([tests/conftest.py](tests/conftest.py)).
+- Test harness detects the missing Python bindings and skips extension builds until the `python-bindings` feature ships ([tests/conftest.py](tests/conftest.py)).
 - Prototype service-badge tracker mints placeholder badges after high-uptime epochs ([node/src/service_badge.rs](../node/src/service_badge.rs), [tests/service_badge.rs](tests/service_badge.rs)).
 - Grafana dashboard now graphs snapshot duration/failures and service badge metrics (`badge_active`, `badge_last_change_seconds`) for monitoring.
 - Network topology diagrams and an RPC walkthrough illustrate partition tests and end-to-end transaction flow ([docs/network_topologies.md](docs/network_topologies.md), [README.md](README.md), [AGENTS.md](AGENTS.md)).
@@ -94,9 +94,10 @@
 ### Breaking
 - Renamed `fee_token` to `pct_ct` and bumped the crypto domain tag to `THE_BLOCKv2|` ([node/src/lib.rs](../node/src/lib.rs)).
 
-- Fix: make `demo.py` build the `the_block` extension with `maturin` when
-  missing and default `TB_PURGE_LOOP_SECS` to `1`, preventing module and
-  purge-loop errors during quick starts.
+- Fix: have `demo.py` fail fast with a bridge-disabled message instead of
+  invoking `maturin`, and keep the purge-loop default at `TB_PURGE_LOOP_SECS=1`
+  so quick starts surface actionable guidance without pulling third-party
+  build tooling.
 - Feat: log `orphan_sweep_total` alongside `ttl_drop_total` in purge loop
   telemetry, extend logging tests for nonce-gap and balance rejections, and
   document sample JSON log output.

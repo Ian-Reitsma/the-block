@@ -2,6 +2,7 @@
 name = "bench-harness"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 anyhow = "1"
@@ -12,3 +13,6 @@ tempfile = "3"
 coding = { path = "../../crates/coding" }
 rand = { path = "../../crates/rand" }
 
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

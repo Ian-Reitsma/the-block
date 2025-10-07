@@ -2,6 +2,7 @@
 name = "remote-signer"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
@@ -13,3 +14,6 @@ qrcode = "0.12"
 
 [features]
 hid = ["hidapi"]
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

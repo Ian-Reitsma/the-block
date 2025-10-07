@@ -2,7 +2,7 @@ use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use explorer::{did_view, Explorer, MetricPoint};
 use hex;
 use std::convert::TryInto;
-use tempfile::tempdir;
+use sys::temp;
 use the_block::generate_keypair;
 use the_block::governance::GovStore;
 use the_block::identity::DidRegistry;
@@ -26,7 +26,7 @@ fn build_anchor(doc: &str, nonce: u64, sk: &SigningKey) -> TxDidAnchor {
 
 #[test]
 fn explorer_indexes_recent_dids_and_metrics() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     let did_path = dir.path().join("did.db");
     std::env::set_var("TB_DID_DB_PATH", did_path.to_string_lossy().as_ref());
     let gov = GovStore::open(dir.path().join("gov.db"));

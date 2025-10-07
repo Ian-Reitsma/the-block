@@ -427,7 +427,8 @@ Sec-WebSocket-Version: 13\r\n\r\n"
             .write(request.as_bytes())
             .await
             .expect("write request");
-        ws::read_client_handshake(&mut stream, &ws::handshake_accept(&key))
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
+        ws::read_client_handshake(&mut stream, &expected_accept)
             .await
             .expect("handshake");
 
@@ -497,7 +498,7 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
                 + 4;
             let headers = std::str::from_utf8(&response[..header_end]).expect("utf8 response");
             assert!(headers.starts_with("HTTP/1.1 101"));
-            let accept = ws::handshake_accept(&key);
+            let accept = ws::handshake_accept(&key).expect("handshake accept");
             assert!(headers.lines().any(|line| {
                 line.trim()
                     .eq_ignore_ascii_case(&format!("Sec-WebSocket-Accept: {accept}"))

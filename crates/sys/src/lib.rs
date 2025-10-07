@@ -403,3 +403,4 @@ pub mod fs {
 }
 
 pub use error::{Result, SysError};
+pub use tempfile as temp;

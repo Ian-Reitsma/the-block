@@ -13,6 +13,38 @@ This document outlines the strategy for integration and chaos testing in **The-B
 > set for memory-constrained runs and re-enable full telemetry when validating
 > release candidates.
 
+## First-party testkit macros
+
+The third-party benchmarking, property-testing, snapshot, and serialisation
+harnesses have been replaced with the first-party `testkit` crate. Developers
+should use the helper macros below when authoring or migrating tests:
+
+- `tb_bench!` wraps former Criterion benchmarks and now executes the body a
+  deterministic number of iterations (100 by default). The harness records
+  total and per-iteration timings and prints them to STDOUT so runs can be
+  compared without external tooling. Pass `iterations = <count>` to override
+  the loop count for heavyweight benchmarks.
+- `tb_prop_test!` replaces `proptest!` blocks. The macro exposes a
+  [`prop::Runner`](../crates/testkit/src/lib.rs) that supports deterministic
+  cases via `add_case` and pseudo-random coverage via `add_random_case`. The
+  built-in PRNG honours the optional `TB_PROP_SEED` environment variable, making
+  failing scenarios reproducible without third-party engines.
+- `tb_snapshot_test!` and `tb_snapshot!` replace Insta-style assertions. Values
+  are compared against UTF-8 snapshots stored under `tests/snapshots/<module>`,
+  and setting `TB_UPDATE_SNAPSHOTS=1` rewrites the on-disk baseline. The helper
+  normalises line endings so recordings are stable across platforms.
+- `tb_fixture!` declares reusable fixtures that return a lightweight wrapper
+  implementing `Deref`/`DerefMut`, enabling explicit teardown without a global
+  registry.
+- `tb_serial` (provided by `testkit_macros`) enforces serial execution by
+  locking a global mutex inside the generated `#[test]`, preventing concurrent
+  access to shared resources during integration runs.
+
+These macros now execute real harness code; property suites, benchmarks, and
+snapshots should be maintained alongside the production stack instead of relying
+on external crates. Document any remaining manual coverage expectations in code
+reviews when behaviour changes.
+
 ## Network Integration
 
 - `node/tests/net_integration.rs` boots a five-node harness that mines blocks,

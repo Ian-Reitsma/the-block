@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
-use serial_test::serial;
 use std::time::Duration;
 use tempfile::tempdir;
 use the_block::{
@@ -41,8 +40,7 @@ fn build_signed_tx(
     sign_tx(sk.to_vec(), payload).expect("signing")
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn consumer_fee_comfort_updates_at_epoch_boundary() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
@@ -128,8 +126,7 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
     assert!(res.is_ok(), "res={:?}", res);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn industrial_min_capacity_param_wires_and_rollback() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
@@ -200,8 +197,7 @@ fn industrial_min_capacity_param_wires_and_rollback() {
     );
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn scheduler_weights_apply_and_record_activation() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
@@ -305,8 +301,7 @@ fn scheduler_weights_apply_and_record_activation() {
     );
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn snapshot_interval_param_updates_runtime() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());

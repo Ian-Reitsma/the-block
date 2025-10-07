@@ -101,11 +101,11 @@ pub fn recent_rebate_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::temp;
 
     #[test]
     fn leaderboard_and_history_from_tracker() {
-        let dir = tempdir().expect("tempdir");
+        let dir = temp::tempdir().expect("tempdir");
         let path = dir.path().join("rebates");
         {
             let mut tracker = ProofTracker::open(&path);

@@ -1,5 +1,5 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use std::fs;
 use std::sync::Once;
 use the_block::dex::{escrow::Escrow, DexStore, Order, OrderBook, Side, TrustLedger};
@@ -15,8 +15,7 @@ fn init() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn order_book_persists() {
     init();
     let dir = temp_dir("dex_store");

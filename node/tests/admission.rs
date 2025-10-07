@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use crypto_suite::hashing::blake3;
 use std::fs;
@@ -12,7 +13,6 @@ use the_block::{
 };
 
 mod util;
-use serial_test::serial;
 use util::temp::temp_dir;
 
 static PY_INIT: Once = Once::new();
@@ -46,8 +46,7 @@ fn build_signed_tx(
     sign_tx(sk.to_vec(), payload).expect("valid key")
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rejects_unknown_sender() {
     init();
     let dir = temp_dir("temp_admission");
@@ -58,8 +57,7 @@ fn rejects_unknown_sender() {
     assert!(bc.submit_transaction(tx).is_err());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn mine_block_skips_nonce_gaps() {
     init();
     let dir = temp_dir("temp_admission");
@@ -90,8 +88,7 @@ fn mine_block_skips_nonce_gaps() {
     assert_eq!(bc.skipped[0].payload.nonce, 5);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn validate_block_rejects_nonce_gap() {
     init();
     let dir = temp_dir("temp_admission");
@@ -215,8 +212,7 @@ fn validate_block_rejects_nonce_gap() {
     assert!(!bc.validate_block(&block).unwrap());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rejects_fee_below_min() {
     init();
     let dir = temp_dir("temp_fee");
@@ -228,8 +224,7 @@ fn rejects_fee_below_min() {
     assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::FeeTooLow));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn mempool_full_evicts_lowest() {
     init();
     let dir = temp_dir("temp_full");
@@ -247,8 +242,7 @@ fn mempool_full_evicts_lowest() {
     assert!(bc.mempool_consumer.contains_key(&("b".to_string(), 1)));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn fee_per_byte_boundary() {
     init();
     let dir = temp_dir("temp_fpb");
@@ -283,8 +277,7 @@ fn fee_per_byte_boundary() {
 }
 
 #[cfg(feature = "telemetry")]
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn industrial_deferred_when_consumer_fees_high() {
     init();
     let dir = temp_dir("temp_defer");
@@ -329,8 +322,7 @@ fn industrial_deferred_when_consumer_fees_high() {
     assert_eq!(telemetry::INDUSTRIAL_DEFERRED_TOTAL.get(), 0);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn lock_poisoned_error_and_recovery() {
     init();
     let dir = temp_dir("temp_poison");
@@ -368,8 +360,7 @@ fn lock_poisoned_error_and_recovery() {
     assert_eq!(bc.submit_transaction(tx), Ok(()));
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn enforces_per_account_pending_limit() {
     init();
     let dir = temp_dir("temp_pending");
@@ -387,8 +378,7 @@ fn enforces_per_account_pending_limit() {
     );
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn reject_overspend_multiple_nonces() {
     init();
     let dir = temp_dir("temp_overspend_multi");
@@ -405,8 +395,7 @@ fn reject_overspend_multiple_nonces() {
     );
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn validate_block_rejects_wrong_difficulty() {
     init();
     let dir = temp_dir("temp_admission");
@@ -448,8 +437,7 @@ fn validate_block_rejects_wrong_difficulty() {
     assert!(!bc.validate_block(&block).unwrap());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn admission_panic_rolls_back_all_steps() {
     init();
     let (sk, _pk) = generate_keypair();

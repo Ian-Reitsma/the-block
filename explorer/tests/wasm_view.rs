@@ -1,5 +1,5 @@
 use explorer::Explorer;
-use tempfile::tempdir;
+use sys::temp;
 
 fn sample_module() -> Vec<u8> {
     let mut buf = Vec::new();
@@ -23,7 +23,7 @@ fn sample_module() -> Vec<u8> {
 
 #[test]
 fn disassembles_wasm() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     let db = dir.path().join("ex.db");
     let ex = Explorer::open(&db).unwrap();
     let wasm = sample_module();

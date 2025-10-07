@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use hex;
 use serde_json::Value;
-use serial_test::serial;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
     config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
@@ -43,8 +42,7 @@ fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_smoke() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_smoke");
@@ -119,8 +117,7 @@ fn rpc_smoke() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_nonce_replay_rejected() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_nonce_replay");
@@ -171,8 +168,7 @@ fn rpc_nonce_replay_rejected() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_light_client_rebate_status() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_rebate_status");
@@ -220,8 +216,7 @@ fn rpc_light_client_rebate_status() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_light_client_rebate_history() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_rebate_history");
@@ -290,8 +285,7 @@ fn rpc_light_client_rebate_history() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_concurrent_controls() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_concurrent");
@@ -374,8 +368,7 @@ fn rpc_concurrent_controls() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_error_responses() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_errors");
@@ -431,8 +424,7 @@ fn rpc_error_responses() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_fragmented_request() {
     runtime::block_on(async {
         let dir = util::temp::temp_dir("rpc_fragmented");

@@ -23,5 +23,5 @@ pin-project = "1"
 libc = { version = "0.2", optional = true }
 nix = { version = "0.27", optional = true, default-features = false, features = ["event", "inotify"] }
 base64_fp = { path = "../base64_fp" }
-sha1 = "0.10"
 rand = { path = "../rand" }
+crypto_suite = { path = "../crypto_suite" }

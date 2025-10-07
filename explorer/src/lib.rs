@@ -1713,11 +1713,11 @@ impl Explorer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::temp;
 
     #[test]
     fn index_and_query() {
-        let dir = tempdir().unwrap();
+        let dir = temp::tempdir().unwrap();
         let receipts = dir.path().join("receipts");
         std::fs::create_dir_all(&receipts).unwrap();
         let r = Receipt::new(

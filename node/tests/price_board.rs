@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use std::fs;
 #[cfg(feature = "test-telemetry")]
@@ -20,10 +19,7 @@ use the_block::util::test_clock::PausedClock;
 use the_block::util::versioned_blob::{encode_blob, MAGIC_PRICE_BOARD};
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-use tracing_test::traced_test;
-
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn computes_bands() {
     reset();
     for p in [1, 2, 3, 4, 5] {
@@ -35,8 +31,7 @@ fn computes_bands() {
     assert_eq!(b.2, 4);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn records_weighted_prices() {
     reset();
     record_price(FeeLane::Consumer, 100, 0.5);
@@ -46,8 +41,7 @@ fn records_weighted_prices() {
     assert_eq!(w, 50);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn backlog_adjusts_bid() {
     reset();
     for p in [10, 10, 10, 10] {
@@ -58,9 +52,7 @@ fn backlog_adjusts_bid() {
 }
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-#[test]
-#[serial]
-#[traced_test]
+#[testkit::tb_serial]
 fn persists_across_restart() {
     reset_path_for_test();
     let dir = tempdir().unwrap();
@@ -80,9 +72,7 @@ fn persists_across_restart() {
 }
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-#[test]
-#[serial]
-#[traced_test]
+#[testkit::tb_serial]
 fn resets_on_corrupted_file() {
     reset_path_for_test();
     let dir = tempdir().unwrap();
@@ -93,9 +83,7 @@ fn resets_on_corrupted_file() {
 }
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-#[test]
-#[serial]
-#[traced_test]
+#[testkit::tb_serial]
 fn ignores_tmp_crash_file() {
     reset_path_for_test();
     let dir = tempdir().unwrap();
@@ -114,23 +102,19 @@ fn ignores_tmp_crash_file() {
 }
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-#[test]
-#[serial]
-#[traced_test]
+#[testkit::tb_serial]
 fn resets_on_unknown_version() {
     reset_path_for_test();
     let dir = tempdir().unwrap();
     let path = dir.path().join("board.v1.bin");
-    let blob = encode_blob(MAGIC_PRICE_BOARD, 999, &[]);
+    let blob = encode_blob(MAGIC_PRICE_BOARD, 999, &[]).expect("encode blob");
     fs::write(&path, blob).unwrap();
     init(path.to_str().unwrap().to_string(), 10, 30);
     assert!(bands(FeeLane::Consumer).is_none());
 }
 
 #[cfg(feature = "test-telemetry")]
-#[test]
-#[serial]
-#[traced_test]
+#[testkit::tb_serial]
 fn save_occurs_after_interval() {
     reset_path_for_test();
     let dir = tempdir().unwrap();

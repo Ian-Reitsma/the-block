@@ -1,7 +1,7 @@
 use colored::*;
 use crypto_suite::signatures::Signer;
 use hex;
-use httpd::{BlockingClient, ClientError as HttpClientError, Method};
+use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
 use regex::Regex;
 use runtime::net::TcpStream;
 use runtime::{
@@ -16,7 +16,6 @@ use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use terminal_size::{terminal_size, Width};
 use the_block::net::load_net_key;
-use url::Url;
 
 use std::process;
 
@@ -902,7 +901,7 @@ fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, Htt
 }
 
 async fn connect_peer_metrics_ws(url: &str) -> Result<ClientStream, String> {
-    let parsed = Url::parse(url).map_err(|e| e.to_string())?;
+    let parsed = Uri::parse(url).map_err(|e| e.to_string())?;
     if parsed.scheme() != "ws" {
         return Err(format!("unsupported scheme {}", parsed.scheme()));
     }
@@ -948,7 +947,7 @@ async fn connect_peer_metrics_ws(url: &str) -> Result<ClientStream, String> {
         .write_all(request.as_bytes())
         .await
         .map_err(|e| e.to_string())?;
-    let expected_accept = ws::handshake_accept(&key);
+    let expected_accept = ws::handshake_accept(&key).map_err(|err| err.to_string())?;
     ws::read_client_handshake(&mut stream, &expected_accept)
         .await
         .map_err(|e| e.to_string())?;
