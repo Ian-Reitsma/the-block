@@ -1,10 +1,17 @@
 #![deny(warnings)]
 #![allow(clippy::expect_used)]
 
+use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
 use runtime::sync::CancellationToken;
-use std::fs;
+use serde_json::{json, Map as JsonMap};
+use std::fs::{self, File};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering as AtomicOrdering},
+    Arc, Mutex,
+};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
@@ -14,8 +21,6 @@ use cli_core::{
 use crypto_suite::signatures::ed25519::SigningKey;
 use sys::paths;
 use sys::process;
-use tracing_chrome::ChromeLayerBuilder;
-use tracing_subscriber::{prelude::*, util::SubscriberInitExt, EnvFilter};
 
 use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
@@ -29,6 +34,318 @@ use the_block::{
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum LevelFilter {
+    Error = 0,
+    Warn = 1,
+    Info = 2,
+    Debug = 3,
+    Trace = 4,
+}
+
+impl LevelFilter {
+    fn parse(spec: &str) -> Option<Self> {
+        match spec.trim().to_ascii_lowercase().as_str() {
+            "error" => Some(Self::Error),
+            "warn" | "warning" => Some(Self::Warn),
+            "info" => Some(Self::Info),
+            "debug" => Some(Self::Debug),
+            "trace" => Some(Self::Trace),
+            _ => None,
+        }
+    }
+
+    fn from_level(level: LogLevel) -> Self {
+        match level.as_str() {
+            "error" => Self::Error,
+            "warn" => Self::Warn,
+            "debug" => Self::Debug,
+            "trace" => Self::Trace,
+            _ => Self::Info,
+        }
+    }
+
+    fn accepts(self, level: LogLevel) -> bool {
+        self >= Self::from_level(level)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LogFormat {
+    Plain,
+    Json,
+}
+
+#[derive(Clone, Debug)]
+struct Directive {
+    target: String,
+    level: LevelFilter,
+}
+
+struct CliLogSink {
+    default: LevelFilter,
+    directives: Vec<Directive>,
+    format: LogFormat,
+    stderr: Mutex<io::Stderr>,
+    trace: Option<Arc<TraceWriter>>,
+}
+
+impl CliLogSink {
+    fn new(
+        default: LevelFilter,
+        directives: Vec<Directive>,
+        format: LogFormat,
+        trace: Option<Arc<TraceWriter>>,
+    ) -> Self {
+        CliLogSink {
+            default,
+            directives,
+            format,
+            stderr: Mutex::new(io::stderr()),
+            trace,
+        }
+    }
+
+    fn should_log(&self, record: &LogRecord) -> bool {
+        let mut effective = self.default;
+        let mut best = 0usize;
+        let target = record.target.as_ref();
+        for directive in &self.directives {
+            if target.starts_with(&directive.target) && directive.target.len() >= best {
+                effective = directive.level;
+                best = directive.target.len();
+            }
+        }
+        effective.accepts(record.level)
+    }
+
+    fn write_plain(&self, record: &LogRecord, stderr: &mut io::Stderr) {
+        let _ = write!(
+            stderr,
+            "[{}] {} -- {}",
+            record.level.as_str().to_uppercase(),
+            record.target,
+            record.message
+        );
+        if !record.fields.is_empty() {
+            let _ = write!(stderr, " | ");
+            for (idx, field) in record.fields.iter().enumerate() {
+                if idx > 0 {
+                    let _ = write!(stderr, ", ");
+                }
+                if field.key.is_empty() {
+                    let _ = write!(stderr, "{}", field.value);
+                } else {
+                    let _ = write!(stderr, "{}={}", field.key, field.value);
+                }
+            }
+        }
+        let _ = writeln!(
+            stderr,
+            " ({}:{}::{})",
+            record.file, record.line, record.module_path
+        );
+    }
+
+    fn write_json(&self, record: &LogRecord, stderr: &mut io::Stderr) {
+        let mut obj = JsonMap::new();
+        obj.insert("level".into(), json!(record.level.as_str()));
+        obj.insert("target".into(), json!(record.target.as_ref()));
+        obj.insert("module".into(), json!(record.module_path.as_ref()));
+        obj.insert("file".into(), json!(record.file.as_ref()));
+        obj.insert("line".into(), json!(record.line));
+        obj.insert("message".into(), json!(record.message.as_ref()));
+        if !record.fields.is_empty() {
+            let mut fields = JsonMap::new();
+            for (idx, field) in record.fields.iter().enumerate() {
+                let key = if field.key.is_empty() {
+                    format!("field_{idx}")
+                } else {
+                    field.key.to_string()
+                };
+                fields.insert(key, json!(field.value));
+            }
+            obj.insert("fields".into(), json!(fields));
+        }
+        let _ = serde_json::to_writer(stderr, &obj);
+        let _ = stderr.write_all(b"\n");
+    }
+}
+
+impl LogSink for CliLogSink {
+    fn log(&self, record: &LogRecord) {
+        if !self.should_log(record) {
+            return;
+        }
+
+        if let Some(trace) = &self.trace {
+            trace.write_event(record);
+        }
+
+        let mut stderr = self.stderr.lock().unwrap_or_else(|err| err.into_inner());
+
+        match self.format {
+            LogFormat::Plain => self.write_plain(record, &mut stderr),
+            LogFormat::Json => self.write_json(record, &mut stderr),
+        }
+    }
+
+    fn flush(&self) {
+        if let Ok(mut stderr) = self.stderr.lock() {
+            let _ = stderr.flush();
+        }
+        if let Some(trace) = &self.trace {
+            trace.flush();
+        }
+    }
+}
+
+struct TraceWriter {
+    inner: Mutex<TraceInner>,
+    finished: AtomicBool,
+}
+
+struct TraceInner {
+    file: File,
+    first: bool,
+}
+
+impl TraceWriter {
+    fn new(path: &Path) -> io::Result<Self> {
+        let mut file = File::create(path)?;
+        file.write_all(b"[\n")?;
+        Ok(TraceWriter {
+            inner: Mutex::new(TraceInner { file, first: true }),
+            finished: AtomicBool::new(false),
+        })
+    }
+
+    fn write_event(&self, record: &LogRecord) {
+        if self.finished.load(AtomicOrdering::Relaxed) {
+            return;
+        }
+        let mut guard = match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(err) => err.into_inner(),
+        };
+        if !guard.first {
+            let _ = guard.file.write_all(b",\n");
+        } else {
+            guard.first = false;
+        }
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros();
+        let mut args = JsonMap::new();
+        args.insert("message".into(), json!(record.message.as_ref()));
+        args.insert("level".into(), json!(record.level.as_str()));
+        for (idx, field) in record.fields.iter().enumerate() {
+            let key = if field.key.is_empty() {
+                format!("field_{idx}")
+            } else {
+                field.key.to_string()
+            };
+            args.insert(key, json!(field.value));
+        }
+        let event = json!({
+            "name": record.target.as_ref(),
+            "cat": record.module_path.as_ref(),
+            "ph": "i",
+            "s": "g",
+            "ts": ts,
+            "args": args,
+        });
+        let _ = serde_json::to_writer(&mut guard.file, &event);
+        let _ = guard.file.write_all(b"\n");
+    }
+
+    fn flush(&self) {
+        if let Ok(mut guard) = self.inner.lock() {
+            let _ = guard.file.flush();
+        }
+    }
+
+    fn finish(&self) {
+        if self.finished.swap(true, AtomicOrdering::SeqCst) {
+            return;
+        }
+        if let Ok(mut guard) = self.inner.lock() {
+            let _ = guard.file.write_all(b"]\n");
+            let _ = guard.file.flush();
+        }
+    }
+}
+
+struct TraceGuard {
+    writer: Arc<TraceWriter>,
+}
+
+impl Drop for TraceGuard {
+    fn drop(&mut self) {
+        self.writer.finish();
+    }
+}
+
+fn parse_directives(specs: &[String]) -> (LevelFilter, Vec<Directive>) {
+    let mut default = LevelFilter::Info;
+    let mut directives = Vec::new();
+    for spec in specs {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some((target, level)) = trimmed.split_once('=') {
+            if let Some(level) = LevelFilter::parse(level) {
+                let target = target.trim();
+                if !target.is_empty() {
+                    directives.push(Directive {
+                        target: target.to_string(),
+                        level,
+                    });
+                }
+            }
+        } else if let Some(level) = LevelFilter::parse(trimmed) {
+            default = level;
+        }
+    }
+    (default, directives)
+}
+
+fn init_logging(
+    format: &str,
+    specs: &[String],
+    profiling: bool,
+) -> Result<(Option<pprof::ProfilerGuard>, Option<TraceGuard>), TbError> {
+    let (default, directives) = parse_directives(specs);
+    let log_format = if format.eq_ignore_ascii_case("json") {
+        LogFormat::Json
+    } else {
+        LogFormat::Plain
+    };
+
+    let trace = if profiling {
+        let writer = TraceWriter::new(Path::new("trace.json"))
+            .map_err(|err| TbError::with_source("failed to create trace file", err))?;
+        Some(Arc::new(writer))
+    } else {
+        None
+    };
+
+    let sink = CliLogSink::new(default, directives, log_format, trace.clone());
+    diagnostics::install_log_sink(Box::new(sink))
+        .map_err(|_| TbError::new("log sink already installed"))?;
+
+    if profiling {
+        let guard =
+            pprof::ProfilerGuard::new(100).ok_or_else(|| TbError::new("profiler init failed"))?;
+        let trace_guard = trace.map(|writer| TraceGuard { writer });
+        Ok((Some(guard), trace_guard))
+    } else {
+        Ok((None, trace.map(|writer| TraceGuard { writer })))
+    }
+}
 
 fn key_dir() -> PathBuf {
     paths::home_dir()
@@ -767,26 +1084,12 @@ async fn async_main() -> std::process::ExitCode {
             the_block::vm::set_vm_debug_enabled(enable_vm_debug);
             #[cfg(feature = "telemetry")]
             the_block::telemetry::init_wrapper_metrics();
-            let filter = EnvFilter::new(log_level.join(","));
-            let (profiler, _chrome) = if profiling {
-                let (chrome_layer, guard) = ChromeLayerBuilder::new().file("trace.json").build();
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(chrome_layer)
-                    .try_init()
-                    .expect("set subscriber");
-                (
-                    Some(pprof::ProfilerGuard::new(100).expect("profiler")),
-                    Some(guard),
-                )
-            } else {
-                let fmt = tracing_subscriber::fmt().with_env_filter(filter);
-                if log_format == "json" {
-                    fmt.json().init();
-                } else {
-                    fmt.init();
+            let (profiler, _trace_guard) = match init_logging(&log_format, &log_level, profiling) {
+                Ok(guards) => guards,
+                Err(err) => {
+                    eprintln!("failed to initialise logging: {err}");
+                    (None, None)
                 }
-                (None, None)
             };
             let mut inner = Blockchain::open_with_db(&data_dir, &db_path).expect("open blockchain");
             if let Some(path) = snapshot.as_ref() {

@@ -11,9 +11,9 @@ use cli_core::{
     parse::Matches,
 };
 use crypto::session::SessionKey;
+use foundation_serialization::{binary, Serialize};
 use hex;
 use once_cell::sync::Lazy;
-use serde::Serialize;
 use std::collections::HashMap;
 #[cfg(feature = "quantum")]
 use std::fs::File;
@@ -307,7 +307,7 @@ pub fn handle(cmd: WalletCmd) {
                 let ed = ed_handle.join().expect("ed25519");
                 let (pq_pk, pq_sk) = pq_handle.join().expect("dilithium");
                 let mut f = File::create(&out).expect("write");
-                let json = serde_json::json!({
+                let json = foundation_serialization::json::json!({
                     "ed25519_pub": hex::encode(ed.public_key().to_bytes()),
                     "dilithium_pub": hex::encode(pq_pk.as_bytes()),
                     "dilithium_sk": hex::encode(pq_sk.as_bytes()),
@@ -364,7 +364,7 @@ pub fn handle(cmd: WalletCmd) {
                 Ok(lane) => lane,
                 Err(err) => {
                     if json {
-                        let payload = serde_json::json!({
+                        let payload = foundation_serialization::json::json!({
                             "status": "error",
                             "message": err.to_string(),
                         });
@@ -447,7 +447,7 @@ pub fn handle(cmd: WalletCmd) {
                 }
                 Err(err) => {
                     if json {
-                        let payload = serde_json::json!({
+                        let payload = foundation_serialization::json::json!({
                             "status": "error",
                             "message": err.to_string(),
                         });
@@ -490,7 +490,7 @@ pub fn handle(cmd: WalletCmd) {
             if let Some(tx) = sign_tx(&sk_bytes, &payload) {
                 println!(
                     "meta-tx signed {}",
-                    hex::encode(bincode::serialize(&tx).unwrap())
+                    hex::encode(binary::encode(&tx).expect("serialize tx"))
                 );
             } else {
                 println!("invalid session key");

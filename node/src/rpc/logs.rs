@@ -3,21 +3,22 @@ mod store {
     use std::path::PathBuf;
     use std::time::Duration;
 
+    use foundation_serialization::json::json;
     use httpd::{form_urlencoded, StatusCode};
     use runtime::ws::{Message as WsMessage, ServerStream};
     use serde::Serialize;
-    use serde_json::json;
 
     use crate::log_indexer::{search_logs, LogEntry, LogFilter, LogIndexerError};
 
     #[cfg(feature = "telemetry")]
-    use tracing::warn;
+    use diagnostics::tracing::warn;
 
     #[derive(Debug)]
     pub enum SearchError {
         MissingDatabase,
         InvalidQuery(String),
         QueryFailed(LogIndexerError),
+        EncodeFailed(String),
     }
 
     pub struct TailConfig {
@@ -39,9 +40,8 @@ mod store {
     }
 
     fn encode_rows<T: Serialize>(rows: &T) -> Result<String, SearchError> {
-        serde_json::to_string(rows)
-            .map_err(LogIndexerError::from)
-            .map_err(SearchError::QueryFailed)
+        foundation_serialization::json::to_string(rows)
+            .map_err(|err| SearchError::EncodeFailed(err.to_string()))
     }
 
     fn run_query(path: &str) -> Result<Vec<LogEntry>, SearchError> {
@@ -140,6 +140,10 @@ mod store {
                     json!({"error": "log query failed"}).to_string(),
                 )
             }
+            SearchError::EncodeFailed(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": format!("serialization failed: {err}")}).to_string(),
+            ),
         }
     }
 
@@ -164,7 +168,7 @@ mod store {
                 Ok(entries) if entries.is_empty() => {}
                 Ok(entries) => {
                     last_id = entries.last().and_then(|row| row.id).unwrap_or(last_id);
-                    if let Ok(body) = serde_json::to_string(&entries) {
+                    if let Ok(body) = foundation_serialization::json::to_string(&entries) {
                         if ws.send(WsMessage::Text(body)).await.is_err() {
                             break;
                         }

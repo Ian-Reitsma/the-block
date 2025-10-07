@@ -7,11 +7,11 @@ use crate::net::{
 };
 use crate::simple_db::{names, SimpleDb};
 use codec::profiles;
+use concurrency::{MutexExt, MutexGuard};
 use crypto_suite::hashing::blake3::hash;
 use hex;
 use ledger::address::ShardId;
 use lru::LruCache;
-use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use serde::Serialize;
@@ -19,7 +19,9 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+#[cfg(test)]
 use sys::tempfile;
 
 #[cfg(feature = "telemetry")]
@@ -82,10 +84,6 @@ impl ShardStore {
         }
     }
 
-    fn new(path: &str) -> Self {
-        Self::with_factory(path, &SimpleDb::open_named)
-    }
-
     #[cfg(test)]
     fn temporary() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -116,7 +114,7 @@ impl ShardStore {
     }
 
     fn register(&self, shard: ShardId, peer: OverlayPeerId) {
-        let mut cache = self.cache.lock();
+        let mut cache = self.cache();
         let entry = cache.entry(shard).or_default();
         if entry.contains(&peer) {
             return;
@@ -128,17 +126,25 @@ impl ShardStore {
         drop(cache);
         if let Ok(bytes) = codec::serialize(profiles::gossip(), &snapshot) {
             let key = format!("shard:{shard}");
-            let mut db = self.db.lock();
+            let mut db = self.db();
             let _ = db.insert(&key, bytes);
         }
     }
 
     fn peers(&self, shard: ShardId) -> Vec<OverlayPeerId> {
-        self.cache.lock().get(&shard).cloned().unwrap_or_default()
+        self.cache().get(&shard).cloned().unwrap_or_default()
     }
 
     fn snapshot(&self) -> HashMap<ShardId, Vec<OverlayPeerId>> {
-        self.cache.lock().clone()
+        self.cache().clone()
+    }
+
+    fn db(&self) -> MutexGuard<'_, SimpleDb> {
+        self.db.guard()
+    }
+
+    fn cache(&self) -> MutexGuard<'_, HashMap<ShardId, Vec<OverlayPeerId>>> {
+        self.cache.guard()
     }
 }
 
@@ -242,7 +248,7 @@ impl Relay {
     }
 
     pub fn should_process_at(&self, msg: &Message, now: Instant) -> bool {
-        let mut guard = self.recent.lock();
+        let mut guard = self.recent.guard();
         let dropped = Self::clean_expired_locked(&mut guard, self.settings.ttl, now);
         #[cfg(feature = "telemetry")]
         if dropped > 0 {
@@ -435,7 +441,7 @@ impl Relay {
     }
 
     fn update_metrics(&self, selected: &[OverlayPeerId], candidates: usize, avg_score: f64) {
-        let mut guard = self.metrics.lock();
+        let mut guard = self.metrics.guard();
         let fanout = selected.len();
         guard.last_fanout = Some(fanout);
         guard.last_candidates = Some(candidates);
@@ -553,9 +559,9 @@ impl Relay {
     }
 
     pub fn status(&self) -> RelayStatus {
-        let dedup_size = self.recent.lock().len();
+        let dedup_size = self.recent.guard().len();
         let fanout = {
-            let guard = self.metrics.lock();
+            let guard = self.metrics.guard();
             FanoutStatus {
                 min: self.settings.min_fanout,
                 base: self.settings.base_fanout,
@@ -708,7 +714,7 @@ mod tests {
             if let Some(addr) = calls.first() {
                 *first_hits.entry(*addr).or_insert(0usize) += 1;
             }
-            relay.recent.lock().clear();
+            relay.recent.guard().clear();
         }
         assert!(first_hits.len() > 1);
     }

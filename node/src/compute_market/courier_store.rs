@@ -26,14 +26,14 @@ impl ReceiptStore {
                         #[cfg(feature = "telemetry")]
                         crate::telemetry::RECEIPT_CORRUPT_TOTAL.inc();
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                        tracing::warn!("corrupt receipt for key {:?}", key);
+                        diagnostics::tracing::warn!("corrupt receipt for key {:?}", key);
                         #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
                         let _ = key;
                     }
                 }
                 Err(err) => {
                     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                    tracing::error!("iterate receipts: {err}");
+                    diagnostics::tracing::error!("iterate receipts: {err}");
                     #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
                     let _ = err;
                 }

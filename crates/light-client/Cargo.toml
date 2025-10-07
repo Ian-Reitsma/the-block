@@ -16,14 +16,12 @@ ios-probe = [
 telemetry = ["dep:once_cell", "dep:prometheus"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+foundation_serialization = { path = "../foundation_serialization" }
 once_cell = { version = "1", optional = true }
 prometheus = { version = "0.13", optional = true }
 async-trait = "0.1"
 flate2 = "1"
 futures = "0.3"
-bincode = "1"
 coding = { path = "../coding" }
 crypto_suite = { path = "../crypto_suite" }
 tracing = "0.1"

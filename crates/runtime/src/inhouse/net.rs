@@ -115,62 +115,6 @@ impl TcpStream {
         TcpWriteFuture { stream: self, buf }
     }
 
-    #[cfg(feature = "tokio-backend")]
-    pub(crate) fn poll_read(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        loop {
-            match self.inner.read(buf) {
-                Ok(bytes) => return Poll::Ready(Ok(bytes)),
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    match self.registration.poll_read_ready(cx) {
-                        Poll::Ready(Ok(())) => continue,
-                        Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-                        Poll::Pending => return Poll::Pending,
-                    }
-                }
-                Err(err) => return Poll::Ready(Err(err)),
-            }
-        }
-    }
-
-    #[cfg(feature = "tokio-backend")]
-    pub(crate) fn poll_write(
-        &mut self,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        loop {
-            match self.inner.write(buf) {
-                Ok(bytes) => return Poll::Ready(Ok(bytes)),
-                Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                    match self.registration.poll_write_ready(cx) {
-                        Poll::Ready(Ok(())) => continue,
-                        Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-                        Poll::Pending => return Poll::Pending,
-                    }
-                }
-                Err(err) => return Poll::Ready(Err(err)),
-            }
-        }
-    }
-
-    #[cfg(feature = "tokio-backend")]
-    pub(crate) fn poll_flush(&mut self, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.registration.poll_write_ready(cx) {
-            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-
-    #[cfg(feature = "tokio-backend")]
-    pub(crate) fn poll_shutdown(&mut self, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(self.inner.shutdown(Shutdown::Both))
-    }
-
     pub(crate) async fn flush(&mut self) -> io::Result<()> {
         // TCP sockets do not expose a userspace flush mechanism; writes are
         // forwarded to the kernel immediately. Treat flush as a no-op so

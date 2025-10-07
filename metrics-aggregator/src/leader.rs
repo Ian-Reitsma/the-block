@@ -479,7 +479,7 @@ fn default_instance_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::tempfile;
 
     fn state(db: &std::path::Path) -> AppState {
         AppState::new("token".into(), db, 60)
@@ -496,7 +496,7 @@ mod tests {
 
     #[test]
     fn first_instance_claims_leadership() {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("db");
         let state_a = state(&db_path);
         let election = LeaderElection::new(state_a.clone(), config("a")).unwrap();
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn follower_observes_existing_leader() {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("db");
         let state_a = state(&db_path);
         let election_a = LeaderElection::new(state_a.clone(), config("a")).unwrap();
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn follower_takes_over_after_expiry() {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("db");
         let state_a = state(&db_path);
         let election_a = LeaderElection::new(state_a.clone(), config("a")).unwrap();

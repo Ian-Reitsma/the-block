@@ -2,11 +2,13 @@
 
 use std::net::SocketAddr;
 
-use anyhow::{anyhow, Result};
+use diagnostics::anyhow::{anyhow, Result};
 
 use crypto_suite::signatures::ed25519::SigningKey;
 
-use transport::{self, CertAdvertisement, ListenerHandle, LocalCert};
+use transport::{self, ListenerHandle};
+
+pub use transport::{CertAdvertisement, LocalCert};
 
 fn s2n_adapter() -> Result<transport::S2nAdapter> {
     super::transport_registry()
@@ -55,14 +57,14 @@ pub fn verify_remote_certificate(peer_key: &[u8; 32], cert: &[u8]) -> Result<[u8
     }
 }
 
-pub async fn start_server(addr: SocketAddr) -> Result<ListenerHandle, Box<dyn std::error::Error>> {
-    let adapter = s2n_adapter().map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
+pub async fn start_server(addr: SocketAddr) -> Result<ListenerHandle> {
+    let adapter = s2n_adapter()?;
     let key = super::load_net_key();
     adapter.start_server(addr, &key).await
 }
 
-pub async fn connect(addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
-    let adapter = s2n_adapter().map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
+pub async fn connect(addr: SocketAddr) -> Result<()> {
+    let adapter = s2n_adapter()?;
     adapter.connect(addr).await
 }
 

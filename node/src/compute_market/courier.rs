@@ -1,7 +1,6 @@
 use super::scheduler::{self, Capability};
+use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use crypto_suite::hashing::blake3::Hasher;
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
 use rand::RngCore;
 use runtime::{block_on, sleep};
 use serde::{Deserialize, Serialize};
@@ -85,14 +84,14 @@ impl CourierStore {
                         #[cfg(feature = "telemetry")]
                         crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                        tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
+                        diagnostics::tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec) {
                             rec.acknowledged = true;
                             let bytes = bincode::serialize(&rec)
                                 .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                                tracing::error!("courier update failed: {e}");
+                                diagnostics::tracing::error!("courier update failed: {e}");
                                 #[cfg(all(
                                     not(feature = "telemetry"),
                                     not(feature = "test-telemetry")
@@ -106,7 +105,11 @@ impl CourierStore {
                             #[cfg(feature = "telemetry")]
                             crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
                             #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                            tracing::warn!(id = rec.id, attempt, "courier forward failed");
+                            diagnostics::tracing::warn!(
+                                id = rec.id,
+                                attempt,
+                                "courier forward failed"
+                            );
                             attempt += 1;
                             if attempt >= 5 {
                                 break;
@@ -144,14 +147,14 @@ impl CourierStore {
                         #[cfg(feature = "telemetry")]
                         crate::telemetry::COURIER_FLUSH_ATTEMPT_TOTAL.inc();
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                        tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
+                        diagnostics::tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec).await {
                             rec.acknowledged = true;
                             let bytes = bincode::serialize(&rec)
                                 .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                                tracing::error!("courier update failed: {e}");
+                                diagnostics::tracing::error!("courier update failed: {e}");
                                 #[cfg(all(
                                     not(feature = "telemetry"),
                                     not(feature = "test-telemetry")
@@ -165,7 +168,11 @@ impl CourierStore {
                             #[cfg(feature = "telemetry")]
                             crate::telemetry::COURIER_FLUSH_FAILURE_TOTAL.inc();
                             #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                            tracing::warn!(id = rec.id, attempt, "courier forward failed");
+                            diagnostics::tracing::warn!(
+                                id = rec.id,
+                                attempt,
+                                "courier forward failed"
+                            );
                             attempt += 1;
                             if attempt >= 5 {
                                 break;
@@ -198,19 +205,31 @@ fn take_backoff_delay(delay: &mut Duration) -> Duration {
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static HANDOFF_FAIL: AtomicBool = AtomicBool::new(false);
-static CANCELED: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
-static HALTED: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
-static RESERVED: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+static CANCELED: Lazy<MutexT<HashSet<String>>> = Lazy::new(|| mutex(HashSet::new()));
+static HALTED: Lazy<MutexT<HashSet<String>>> = Lazy::new(|| mutex(HashSet::new()));
+static RESERVED: Lazy<MutexT<HashSet<String>>> = Lazy::new(|| mutex(HashSet::new()));
+
+fn canceled_jobs() -> MutexGuard<'static, HashSet<String>> {
+    CANCELED.guard()
+}
+
+fn halted_jobs() -> MutexGuard<'static, HashSet<String>> {
+    HALTED.guard()
+}
+
+fn reserved_jobs() -> MutexGuard<'static, HashSet<String>> {
+    RESERVED.guard()
+}
 
 pub fn handoff_job(job_id: &str, new_provider: &str) -> Result<(), &'static str> {
     if HANDOFF_FAIL.load(Ordering::Relaxed) {
         return Err("handoff failed");
     }
-    if CANCELED.lock().remove(job_id) {
+    if canceled_jobs().remove(job_id) {
         return Err("job cancelled");
     }
     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-    tracing::info!(job_id, provider = new_provider, "courier handoff");
+    diagnostics::tracing::info!(job_id, provider = new_provider, "courier handoff");
     #[cfg(not(any(feature = "telemetry", feature = "test-telemetry")))]
     let _ = new_provider;
     Ok(())
@@ -221,25 +240,25 @@ pub fn set_handoff_fail(val: bool) {
 }
 
 pub fn cancel_job(job_id: &str) {
-    CANCELED.lock().insert(job_id.to_owned());
+    canceled_jobs().insert(job_id.to_owned());
 }
 
 pub fn halt_job(job_id: &str) {
-    HALTED.lock().insert(job_id.to_owned());
+    halted_jobs().insert(job_id.to_owned());
 }
 
 pub fn was_halted(job_id: &str) -> bool {
-    HALTED.lock().contains(job_id)
+    halted_jobs().contains(job_id)
 }
 
 pub fn reserve_resources(job_id: &str) {
-    RESERVED.lock().insert(job_id.to_owned());
+    reserved_jobs().insert(job_id.to_owned());
 }
 
 pub fn release_resources(job_id: &str) -> bool {
-    RESERVED.lock().remove(job_id)
+    reserved_jobs().remove(job_id)
 }
 
 pub fn is_reserved(job_id: &str) -> bool {
-    RESERVED.lock().contains(job_id)
+    reserved_jobs().contains(job_id)
 }

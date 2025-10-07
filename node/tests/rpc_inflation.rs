@@ -11,7 +11,7 @@ use the_block::{
 mod util;
 use util::timeout::expect_timeout;
 
-fn rpc(addr: &str, body: &str) -> serde_json::Value {
+fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
     runtime::block_on(async {
         use runtime::io::read_to_end;
         use runtime::net::TcpStream;
@@ -33,7 +33,8 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
         let body = &resp[body_idx + 4..];
-        serde_json::from_str::<serde_json::Value>(body).unwrap()
+        foundation_serialization::json::from_str::<foundation_serialization::json::Value>(body)
+            .unwrap()
     })
 }
 

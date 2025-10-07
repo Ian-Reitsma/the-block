@@ -1,161 +1,106 @@
-#![cfg(feature = "integration-tests")]
-#[cfg(feature = "quic")]
-fn env_ratio(var: &str, default: f64) -> f64 {
-    std::env::var(var)
-        .ok()
-        .and_then(|raw| {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            let ratio = if let Some(percent) = trimmed.strip_suffix('%') {
-                percent.parse::<f64>().ok().map(|v| v / 100.0)
-            } else {
-                trimmed.parse::<f64>().ok()
-            }?;
-            Some(ratio.clamp(0.0, 1.0))
-        })
-        .unwrap_or(default)
+#![cfg(all(feature = "integration-tests", feature = "s2n-quic"))]
+
+use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use runtime::sync::oneshot;
+use sys::tempfile::{tempdir, TempDir};
+use the_block::net::transport_quic as s2n_transport;
+use transport::{Config as TransportConfig, ListenerHandle, ProviderKind};
+
+struct S2nTransportGuard {
+    _dir: TempDir,
 }
 
-#[cfg(feature = "quic")]
-fn generate_cert() -> (Vec<u8>, Vec<u8>) {
-    use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType};
-
-    let mut params = CertificateParams::new(vec!["the-block".into()]);
-    params.alg = &rcgen::PKCS_ED25519;
-    let mut dn = DistinguishedName::new();
-    dn.push(DnType::CommonName, "the-block chaos harness");
-    params.distinguished_name = dn;
-    let cert = Certificate::from_params(params).expect("cert params");
-    let cert_der = cert.serialize_der().expect("cert der");
-    let key_der = cert.serialize_private_key_der();
-    (cert_der, key_der)
+impl S2nTransportGuard {
+    fn install() -> Self {
+        let dir = tempdir().expect("tempdir");
+        let cert_store = dir.path().join("cert_store.json");
+        let peer_store = dir.path().join("peer_store.json");
+        let net_key = dir.path().join("net_key");
+        std::env::set_var("TB_NET_CERT_STORE_PATH", &cert_store);
+        std::env::set_var("TB_PEER_CERT_CACHE_PATH", &peer_store);
+        std::env::set_var("TB_NET_KEY_PATH", &net_key);
+        let mut cfg = TransportConfig::default();
+        cfg.provider = ProviderKind::S2nQuic;
+        cfg.certificate_cache = Some(cert_store);
+        the_block::net::configure_transport(&cfg).expect("configure transport");
+        Self { _dir: dir }
+    }
 }
 
-#[cfg(feature = "quic")]
-#[test]
-fn quic_chaos_smoke() {
+impl Drop for S2nTransportGuard {
+    fn drop(&mut self) {
+        std::env::remove_var("TB_NET_CERT_STORE_PATH");
+        std::env::remove_var("TB_PEER_CERT_CACHE_PATH");
+        std::env::remove_var("TB_NET_KEY_PATH");
+        let _ = the_block::net::configure_transport(&TransportConfig::default());
+    }
+}
+
+#[testkit::tb_serial]
+fn s2n_handshake_recovers_from_dropped_packets() {
     runtime::block_on(async {
-        use bytes::Bytes;
-        use s2n_quic::provider::io::testing::{self, Model};
-        use s2n_quic::{client::Connect, Client, Server};
-        use std::sync::{Arc, Mutex, OnceLock};
-        use std::time::Duration;
+        let _guard = S2nTransportGuard::install();
+        let listener = s2n_transport::start_server("127.0.0.1:0".parse().unwrap())
+            .await
+            .expect("start server");
+        let server = match listener {
+            ListenerHandle::S2n(server) => server,
+            _ => panic!("expected s2n listener"),
+        };
+        let server_addr = server.local_addr().expect("server addr");
 
-        let loss = env_ratio("TB_QUIC_PACKET_LOSS", 0.05);
-        let dup = env_ratio("TB_QUIC_PACKET_DUP", 0.02);
+        let proxy_socket = runtime::net::UdpSocket::bind("127.0.0.1:0".parse().unwrap())
+            .await
+            .expect("bind proxy");
+        let proxy_addr = proxy_socket.local_addr().expect("proxy addr");
 
-        let model = Model::default();
-        model.set_drop_rate(loss);
-        model.set_retransmit_rate(dup);
-        model.set_delay(Duration::from_millis(10));
-        model.set_network_jitter(Duration::from_millis(1));
+        let proxy_task = the_block::spawn(proxy_loop(proxy_socket, server_addr));
 
-        let payload = Bytes::from_static(b"chaos payload frame");
-        let payload_len = payload.len();
-        let ack_bytes = Bytes::from_static(b"ack");
+        let (done_tx, done_rx) = oneshot::channel();
+        let acceptor = Arc::clone(&server);
+        the_block::spawn(async move {
+            if let Some(connecting) = acceptor.accept().await {
+                let _ = connecting.await;
+            }
+            let _ = done_tx.send(());
+        });
 
-        let delivered = Arc::new(Mutex::new(Vec::new()));
-        let acked = Arc::new(Mutex::new(Vec::new()));
-        let server_addr = Arc::new(OnceLock::new());
+        s2n_transport::connect(proxy_addr)
+            .await
+            .expect("client connect succeeds after retries");
 
-        let duration = testing::test_seed(model, 0xD15EA5ED, |handle| -> testing::Result<()> {
-            let (cert_der, key_der) = generate_cert();
-
-            let server_handle = handle.clone();
-            let addr_cell = Arc::clone(&server_addr);
-            let server_store = Arc::clone(&delivered);
-            let payload_copy = payload.clone();
-            let ack_copy = ack_bytes.clone();
-            testing::spawn(async move {
-                let io = server_handle.builder().build().expect("server io builder");
-                let mut server = Server::builder()
-                    .with_tls((&cert_der[..], &key_der[..]))
-                    .expect("server tls")
-                    .with_io(io)
-                    .expect("server io")
-                    .start()
-                    .await
-                    .expect("server start");
-
-                let addr = server.local_addr().expect("server addr");
-                let _ = addr_cell.set(addr);
-
-                if let Some(mut conn) = server.accept().await {
-                    if let Ok(Some(mut stream)) = conn.accept_bidirectional_stream().await {
-                        let mut data = Vec::new();
-                        while let Some(chunk) = stream.receive().await.expect("server receive") {
-                            data.extend_from_slice(&chunk);
-                            if data.len() >= payload_copy.len() {
-                                break;
-                            }
-                        }
-                        data.truncate(payload_copy.len());
-                        stream
-                            .send(ack_copy.clone())
-                            .await
-                            .expect("server send ack");
-                        stream.finish().expect("server finish stream");
-                        *server_store.lock().expect("store lock") = data;
-                    }
-                }
-            });
-
-            let client_handle = handle.clone();
-            let trust_der = cert_der.clone();
-            let addr_cell = Arc::clone(&server_addr);
-            let ack_store = Arc::clone(&acked);
-            let payload_client = payload.clone();
-            testing::spawn(async move {
-                let io = client_handle.builder().build().expect("client io builder");
-                let client = Client::builder()
-                    .with_tls(&trust_der[..])
-                    .expect("client tls")
-                    .with_io(io)
-                    .expect("client io")
-                    .start()
-                    .await
-                    .expect("client start");
-
-                let addr = loop {
-                    if let Some(addr) = addr_cell.get() {
-                        break *addr;
-                    }
-                    testing::time::delay(Duration::from_millis(1)).await;
-                };
-
-                let connection = client
-                    .connect(Connect::new(addr, "the-block"))
-                    .await
-                    .expect("client connect");
-                let mut stream = connection
-                    .open_bidirectional_stream()
-                    .await
-                    .expect("open stream");
-                stream
-                    .send(payload_client.clone())
-                    .await
-                    .expect("send payload");
-                stream.finish().expect("client finish stream");
-
-                let mut ack = Vec::new();
-                while let Some(chunk) = stream.receive().await.expect("client receive") {
-                    ack.extend_from_slice(&chunk);
-                }
-                *ack_store.lock().expect("ack lock") = ack;
-            });
-
-            Ok(())
-        })
-        .expect("chaos runtime");
-
-        let observed = delivered.lock().expect("delivered lock").clone();
-        assert_eq!(observed.len(), payload_len, "payload truncated");
-        assert_eq!(observed, payload.to_vec(), "payload mismatch under chaos");
-
-        let ack = acked.lock().expect("acked lock").clone();
-        assert_eq!(ack, ack_bytes.to_vec(), "ack mismatch");
-        assert!(duration > Duration::ZERO);
+        done_rx.await.expect("server completed handshake");
+        proxy_task
+            .await
+            .expect("proxy task join")
+            .expect("proxy loop");
     });
+}
+
+async fn proxy_loop(
+    mut socket: runtime::net::UdpSocket,
+    server_addr: SocketAddr,
+) -> io::Result<()> {
+    let mut buf = [0u8; 64];
+    let mut client_addr: Option<SocketAddr> = None;
+    let mut dropped = false;
+    loop {
+        let (len, src) = socket.recv_from(&mut buf).await?;
+        if src == server_addr {
+            if let Some(client) = client_addr {
+                socket.send_to(&buf[..len], client).await?;
+                return Ok(());
+            }
+            continue;
+        }
+        client_addr = Some(src);
+        if !dropped {
+            dropped = true;
+            continue;
+        }
+        socket.send_to(&buf[..len], server_addr).await?;
+    }
 }

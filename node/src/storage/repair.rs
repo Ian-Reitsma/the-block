@@ -6,8 +6,8 @@ use crate::storage::settings;
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
-use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
@@ -75,6 +75,7 @@ pub struct RepairRequest {
     pub force: bool,
 }
 
+#[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
 fn manifest_algorithms(db: &SimpleDb, manifest_hex: &str) -> (String, String) {
     let defaults = settings::algorithms();
     let key = format!("manifest/{manifest_hex}");
@@ -266,6 +267,7 @@ pub enum RepairErrorKind {
 }
 
 impl RepairErrorKind {
+    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     fn label(&self) -> &'static str {
         match self {
             RepairErrorKind::Manifest => "manifest",

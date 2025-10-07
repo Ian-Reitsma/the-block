@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use foundation_serialization::{binary, Deserialize, Serialize};
 use light_client::{
     account_state_value, AccountChunk, StateChunk, StateStream, StateStreamBuilder,
     StateStreamError,
@@ -7,14 +8,16 @@ use light_client::{
 use state::MerkleTrie;
 use tempfile::tempdir;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct SnapshotAccount {
     address: String,
     balance: u64,
     seq: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct SnapshotPayload {
     accounts: Vec<SnapshotAccount>,
     next_seq: u64,
@@ -127,7 +130,7 @@ fn snapshot_resume_persists_state() {
         }],
         next_seq: 5,
     };
-    let bytes = bincode::serialize(&snapshot).unwrap();
+    let bytes = binary::encode(&snapshot).unwrap();
     stream
         .apply_snapshot(&bytes, false)
         .expect("snapshot should load");
@@ -196,7 +199,7 @@ fn snapshot_persist_failure_rolls_back_state() {
         }],
         next_seq: 4,
     };
-    let bytes = bincode::serialize(&snapshot).unwrap();
+    let bytes = binary::encode(&snapshot).unwrap();
     let err = stream
         .apply_snapshot(&bytes, false)
         .expect_err("snapshot persist failure should bubble up");

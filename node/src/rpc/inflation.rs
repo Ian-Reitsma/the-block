@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use serde_json::json;
+use foundation_serialization::json::json;
 
 use crate::{compute_market::price_board, Blockchain};
 
 /// Return current subsidy multipliers and industrial demand metrics.
-pub fn params(bc: &Arc<Mutex<Blockchain>>) -> serde_json::Value {
+pub fn params(bc: &Arc<Mutex<Blockchain>>) -> foundation_serialization::json::Value {
     let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
     let (backlog, util) = price_board::backlog_utilization();
     json!({

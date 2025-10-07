@@ -3,30 +3,57 @@ use crate::provenance;
 use crypto_suite::hashing::blake3;
 use httpd::{BlockingClient, Method};
 use std::collections::HashSet;
+use std::fmt;
 use std::fs;
 use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use sys::tempfile::NamedTempFile;
-use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum UpdateError {
-    #[error("release hash {hash} not authorized: {reason}")]
     Unauthorized { hash: String, reason: String },
-    #[error("release source URL not configured")]
     MissingSource,
-    #[error("network error: {0}")]
     Network(String),
-    #[error("hash mismatch: expected {expected}, found {actual}")]
     HashMismatch { expected: String, actual: String },
-    #[error("signature invalid for release hash {0}")]
     SignatureInvalid(String),
-    #[error("rollback unavailable: {0}")]
     RollbackUnavailable(String),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+}
+
+fn sys_temp_err(err: sys::error::SysError) -> UpdateError {
+    UpdateError::Io(io::Error::new(io::ErrorKind::Other, err))
+}
+
+impl fmt::Display for UpdateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UpdateError::Unauthorized { hash, reason } => {
+                write!(f, "release hash {hash} not authorized: {reason}")
+            }
+            UpdateError::MissingSource => write!(f, "release source URL not configured"),
+            UpdateError::Network(err) => write!(f, "network error: {err}"),
+            UpdateError::HashMismatch { expected, actual } => {
+                write!(f, "hash mismatch: expected {expected}, found {actual}")
+            }
+            UpdateError::SignatureInvalid(hash) => {
+                write!(f, "signature invalid for release hash {hash}")
+            }
+            UpdateError::RollbackUnavailable(reason) => {
+                write!(f, "rollback unavailable: {reason}")
+            }
+            UpdateError::Io(err) => write!(f, "I/O error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for UpdateError {}
+
+impl From<std::io::Error> for UpdateError {
+    fn from(value: std::io::Error) -> Self {
+        UpdateError::Io(value)
+    }
 }
 
 pub struct DownloadedRelease {
@@ -109,7 +136,7 @@ pub fn fetch_release(
             return Err(UpdateError::SignatureInvalid("none".into()));
         }
     }
-    let mut file = NamedTempFile::new()?;
+    let mut file = NamedTempFile::new().map_err(sys_temp_err)?;
     file.write_all(&bytes)?;
     let dest_path = destination
         .map(|dest| dest.to_path_buf())

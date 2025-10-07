@@ -31,7 +31,7 @@ pub fn choose_tip(a: &TipMeta, b: &TipMeta) -> Ordering {
     };
     #[cfg(feature = "telemetry")]
     if let Some(ref s) = span {
-        tracing::info!(parent: s, a_height = a.height, b_height = b.height, "fork_choice_start");
+        diagnostics::tracing::info!(parent: s, a_height = a.height, b_height = b.height, "fork_choice_start");
     }
     use Ordering::*;
     let res = match a.checkpoint_height.cmp(&b.checkpoint_height) {
@@ -49,7 +49,7 @@ pub fn choose_tip(a: &TipMeta, b: &TipMeta) -> Ordering {
     };
     #[cfg(feature = "telemetry")]
     if let Some(s) = span {
-        tracing::info!(parent: &s, ?res, "fork_choice_end");
+        diagnostics::tracing::info!(parent: &s, ?res, "fork_choice_end");
     }
     res
 }

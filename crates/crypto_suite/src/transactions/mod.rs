@@ -206,7 +206,8 @@ impl TransactionSigner {
 #[cfg(test)]
 mod tests {
     use bincode::Options;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     use super::*;
 
@@ -233,7 +234,7 @@ mod tests {
     fn signing_and_verification_round_trip() {
         let mut seed = [0u8; 32];
         seed[..8].copy_from_slice(&7u64.to_le_bytes());
-        let mut rng = StdRng::from_seed(seed);
+        let mut rng = <StdRng as SeedableRng>::from_seed(seed);
         let signing_key = SigningKey::generate(&mut rng);
         let signer = TransactionSigner::from_chain_id(1);
         let payload = b"payload";

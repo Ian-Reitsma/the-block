@@ -16,10 +16,10 @@ use cli_core::{
     parse::Matches,
 };
 use crypto_suite::signatures::ed25519::SigningKey;
+use foundation_serialization::json::{self, Value};
 use hex;
 use light_client::{self, SyncOptions};
 use serde::{Deserialize, Serialize};
-use serde_json::{self, Value};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
 
@@ -616,7 +616,7 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
         jsonrpc: "2.0",
         id: 1,
         method: "light_client.rebate_status",
-        params: serde_json::json!({}),
+        params: foundation_serialization::json::json!({}),
         auth: None,
     };
     let response = client
@@ -630,7 +630,7 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
 }
 
 fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<()> {
-    let mut params = serde_json::Map::new();
+    let mut params = foundation_serialization::json::Map::new();
     if let Some(relayer) = &args.relayer {
         params.insert("relayer".to_string(), Value::String(relayer.clone()));
     }
@@ -639,7 +639,9 @@ fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<
     }
     params.insert(
         "limit".to_string(),
-        Value::Number(serde_json::Number::from(args.limit as u64)),
+        Value::Number(foundation_serialization::json::Number::from(
+            args.limit as u64,
+        )),
     );
 
     let payload = Payload {
@@ -657,7 +659,8 @@ fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<
         .context("failed to read rebate history response")?;
     let value: Value = json_from_str(&text).context("failed to parse rebate history response")?;
     let envelope: RpcEnvelope<RebateHistoryResult> =
-        serde_json::from_value(value.clone()).context("invalid rebate history envelope")?;
+        foundation_serialization::json::from_value(value.clone())
+            .context("invalid rebate history envelope")?;
     if let Some(err) = envelope.error {
         anyhow::bail!("{} (code {})", err.message, err.code);
     }
@@ -689,7 +692,7 @@ fn run_device_status(json: bool) -> Result<()> {
         Ok(p) => p,
         Err(err) => {
             if json {
-                let payload = serde_json::json!({
+                let payload = foundation_serialization::json::json!({
                     "error": err.to_string(),
                     "gating": opts
                         .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
@@ -706,7 +709,7 @@ fn run_device_status(json: bool) -> Result<()> {
     let snapshot = runtime::block_on(async { watcher.poll().await });
     let gating = opts.gating_reason(&snapshot.status);
     if json {
-        let payload = serde_json::json!({
+        let payload = foundation_serialization::json::json!({
             "wifi": snapshot.status.on_wifi,
             "charging": snapshot.status.is_charging,
             "battery": snapshot.status.battery_level,
@@ -772,7 +775,8 @@ fn run_anchor_command(args: DidAnchorArgs) -> Result<()> {
     let (document, material) = prepare_anchor_inputs(&args)?;
     let tx = build_anchor_transaction(&document, &material)?;
     if args.sign_only {
-        let payload = serde_json::to_value(&tx).context("serialize anchor payload")?;
+        let payload =
+            foundation_serialization::json::to_value(&tx).context("serialize anchor payload")?;
         println!(
             "{}",
             json_to_string_pretty(&payload).context("pretty-print anchor payload")?
@@ -963,7 +967,8 @@ pub fn build_anchor_transaction(doc: &Value, material: &AnchorKeyMaterial) -> Re
 }
 
 pub fn submit_anchor(client: &RpcClient, url: &str, tx: &TxDidAnchor) -> Result<AnchorRecord> {
-    let params = serde_json::to_value(tx).context("serialize anchor request")?;
+    let params =
+        foundation_serialization::json::to_value(tx).context("serialize anchor request")?;
     let payload = Payload {
         jsonrpc: "2.0",
         id: 1,
@@ -989,8 +994,8 @@ pub fn submit_anchor(client: &RpcClient, url: &str, tx: &TxDidAnchor) -> Result<
     if let Some(code) = result.get("error").and_then(|v| v.as_str()) {
         return Err(anyhow!("identity.anchor rejected request: {}", code));
     }
-    let wire: AnchorRecordWire =
-        serde_json::from_value(result).context("unexpected identity.anchor response format")?;
+    let wire: AnchorRecordWire = foundation_serialization::json::from_value(result)
+        .context("unexpected identity.anchor response format")?;
     Ok(wire.into_record())
 }
 
@@ -1019,7 +1024,7 @@ pub fn latest_header(client: &RpcClient, url: &str) -> Result<LightHeader> {
 }
 
 pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Result<ResolvedDid> {
-    let params = serde_json::json!({ "address": address });
+    let params = foundation_serialization::json::json!({ "address": address });
     let payload = Payload {
         jsonrpc: "2.0",
         id: 1,
@@ -1048,7 +1053,7 @@ pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Resul
             code
         ));
     }
-    let wire: ResolvedDidWire =
-        serde_json::from_value(result).context("unexpected identity.resolve response format")?;
+    let wire: ResolvedDidWire = foundation_serialization::json::from_value(result)
+        .context("unexpected identity.resolve response format")?;
     Ok(wire.into_record())
 }

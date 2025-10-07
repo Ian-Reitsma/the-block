@@ -1,16 +1,16 @@
 #![deny(warnings)]
 
 use crate::net::peer::HandshakeError;
-#[cfg(feature = "quic")]
+#[cfg(all(feature = "quic", test))]
 use crate::net::transport_quic;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
+#[cfg(all(feature = "telemetry", feature = "quic"))]
+use diagnostics::tracing::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
-#[cfg(all(feature = "telemetry", feature = "quic"))]
-use tracing::warn;
 #[cfg(feature = "quic")]
 use transport;
 
@@ -137,7 +137,7 @@ fn verify_certificate_with_provider(
     provider_id: &str,
     peer_key: &[u8; 32],
     cert: &[u8],
-) -> anyhow::Result<[u8; 32]> {
+) -> diagnostics::anyhow::Result<[u8; 32]> {
     if let transport::ProviderKind::S2nQuic = kind {
         if let Some(registry) = crate::net::transport_registry() {
             if let Some(adapter) = registry.s2n() {

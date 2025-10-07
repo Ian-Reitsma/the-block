@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 use serde::Deserialize;
 use std::fs;
 use std::num::NonZeroUsize;

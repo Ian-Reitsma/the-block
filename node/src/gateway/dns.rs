@@ -1,11 +1,13 @@
 use super::{mobile_cache, read_receipt};
 use crate::simple_db::{names, SimpleDb};
 use crate::ERR_DNS_SIG_INVALID;
+use concurrency::Lazy;
 use crypto_suite::signatures::ed25519::{
     Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
+#[cfg(feature = "telemetry")]
+use diagnostics::tracing::warn;
 use hex;
-use once_cell::sync::Lazy;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -15,8 +17,6 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-#[cfg(feature = "telemetry")]
-use tracing::warn;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{DNS_VERIFICATION_FAIL_TOTAL, GATEWAY_DNS_LOOKUP_TOTAL};

@@ -4,7 +4,7 @@ use runtime::net::TcpListener;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-pub async fn run(addr: SocketAddr, bc: Arc<Mutex<Blockchain>>) -> anyhow::Result<()> {
+pub async fn run(addr: SocketAddr, bc: Arc<Mutex<Blockchain>>) -> diagnostics::anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     let state = StatusState { bc };
     let router = Router::new(state).route(Method::Get, "/", status_handler);

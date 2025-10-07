@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+#[cfg(any(feature = "inhouse", all(feature = "quinn", not(feature = "s2n-quic"))))]
 use crypto_suite::hashing::blake3;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -131,7 +132,7 @@ impl Default for Config {
 }
 
 #[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
-use anyhow::{anyhow, Result as AnyResult};
+use diagnostics::{anyhow, Result as DiagResult};
 
 #[cfg(feature = "quinn")]
 use crate::quinn_backend as quinn_impl;
@@ -190,7 +191,7 @@ pub struct TransportCallbacks {
 /// Factory responsible for constructing provider registries.
 #[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 pub trait TransportFactory: Send + Sync {
-    fn create(&self, cfg: &Config, callbacks: &TransportCallbacks) -> AnyResult<ProviderRegistry>;
+    fn create(&self, cfg: &Config, callbacks: &TransportCallbacks) -> DiagResult<ProviderRegistry>;
 }
 
 /// Default factory wiring the concrete backend implementations.
@@ -200,7 +201,7 @@ pub struct DefaultFactory;
 
 #[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 impl TransportFactory for DefaultFactory {
-    fn create(&self, cfg: &Config, callbacks: &TransportCallbacks) -> AnyResult<ProviderRegistry> {
+    fn create(&self, cfg: &Config, callbacks: &TransportCallbacks) -> DiagResult<ProviderRegistry> {
         let instance = match cfg.provider {
             ProviderKind::Quinn => {
                 #[cfg(feature = "quinn")]
@@ -259,6 +260,7 @@ impl ProviderRegistry {
     pub fn fingerprint_history(&self) -> Option<Vec<[u8; 32]>> {
         match self.inner.as_ref() {
             ProviderInstance::S2n(adapter) => Some(adapter.fingerprint_history()),
+            #[cfg(any(feature = "quinn", feature = "inhouse"))]
             _ => None,
         }
     }
@@ -276,10 +278,10 @@ impl ProviderRegistry {
 
     #[cfg(feature = "s2n-quic")]
     pub fn s2n(&self) -> Option<S2nAdapter> {
-        if let ProviderInstance::S2n(adapter) = self.inner.as_ref() {
-            Some(adapter.clone())
-        } else {
-            None
+        match self.inner.as_ref() {
+            ProviderInstance::S2n(adapter) => Some(adapter.clone()),
+            #[cfg(any(feature = "quinn", feature = "inhouse"))]
+            _ => None,
         }
     }
 
@@ -308,17 +310,17 @@ enum ProviderInstance {
 #[cfg(any(feature = "quinn", feature = "s2n-quic", feature = "inhouse"))]
 impl ProviderInstance {
     #[cfg(feature = "quinn")]
-    fn new_quinn(cfg: &Config, callbacks: &QuinnCallbacks) -> AnyResult<Self> {
+    fn new_quinn(cfg: &Config, callbacks: &QuinnCallbacks) -> DiagResult<Self> {
         QuinnAdapter::new(cfg, callbacks).map(Self::Quinn)
     }
 
     #[cfg(feature = "s2n-quic")]
-    fn new_s2n(cfg: &Config, callbacks: &S2nCallbacks) -> AnyResult<Self> {
+    fn new_s2n(cfg: &Config, callbacks: &S2nCallbacks) -> DiagResult<Self> {
         S2nAdapter::new(cfg, callbacks).map(Self::S2n)
     }
 
     #[cfg(feature = "inhouse")]
-    fn new_inhouse(cfg: &Config, callbacks: &InhouseCallbacks) -> AnyResult<Self> {
+    fn new_inhouse(cfg: &Config, callbacks: &InhouseCallbacks) -> DiagResult<Self> {
         let adapter = InhouseAdapter::new(cfg, callbacks)?;
         Ok(Self::Inhouse(adapter))
     }
@@ -376,7 +378,7 @@ struct QuinnAdapterInner {
 
 #[cfg(feature = "quinn")]
 impl QuinnAdapter {
-    fn new(cfg: &Config, callbacks: &QuinnCallbacks) -> AnyResult<Self> {
+    fn new(cfg: &Config, callbacks: &QuinnCallbacks) -> DiagResult<Self> {
         let mut backend_callbacks = quinn_impl::QuinnEventCallbacks::default();
         backend_callbacks.handshake_latency = callbacks.handshake_latency.clone();
         backend_callbacks.handshake_failure = callbacks.handshake_failure.clone();
@@ -398,7 +400,10 @@ impl QuinnAdapter {
         self.0.retry.clone()
     }
 
-    pub async fn listen(&self, addr: SocketAddr) -> AnyResult<(ListenerHandle, CertificateHandle)> {
+    pub async fn listen(
+        &self,
+        addr: SocketAddr,
+    ) -> DiagResult<(ListenerHandle, CertificateHandle)> {
         let (endpoint, cert) = quinn_impl::listen(addr).await?;
         Ok((
             ListenerHandle::Quinn(endpoint),
@@ -411,7 +416,7 @@ impl QuinnAdapter {
         addr: SocketAddr,
         cert_der: &[u8],
         key_der: &[u8],
-    ) -> AnyResult<ListenerHandle> {
+    ) -> DiagResult<ListenerHandle> {
         let endpoint = quinn_impl::listen_with_cert(addr, cert_der, key_der).await?;
         Ok(ListenerHandle::Quinn(endpoint))
     }
@@ -448,7 +453,7 @@ impl QuinnAdapter {
         quinn_impl::connection_stats()
     }
 
-    pub async fn send(&self, conn: &ConnectionHandle, data: &[u8]) -> AnyResult<()> {
+    pub async fn send(&self, conn: &ConnectionHandle, data: &[u8]) -> DiagResult<()> {
         match conn {
             ConnectionHandle::Quinn(conn) => quinn_impl::send(conn, data).await.map_err(Into::into),
         }
@@ -486,7 +491,7 @@ struct InhouseAdapterInner {
 
 #[cfg(feature = "inhouse")]
 impl InhouseAdapter {
-    fn new(cfg: &Config, callbacks: &InhouseCallbacks) -> AnyResult<Self> {
+    fn new(cfg: &Config, callbacks: &InhouseCallbacks) -> DiagResult<Self> {
         let mut backend_callbacks = inhouse_impl::InhouseEventCallbacks::default();
         backend_callbacks.handshake_success = callbacks.handshake_success.clone();
         backend_callbacks.handshake_failure = callbacks.handshake_failure.clone();
@@ -506,7 +511,10 @@ impl InhouseAdapter {
         self.0.retry.clone()
     }
 
-    pub async fn listen(&self, addr: SocketAddr) -> AnyResult<(ListenerHandle, CertificateHandle)> {
+    pub async fn listen(
+        &self,
+        addr: SocketAddr,
+    ) -> DiagResult<(ListenerHandle, CertificateHandle)> {
         let (endpoint, cert) = self.0.backend.listen(addr).await?;
         Ok((
             ListenerHandle::Inhouse(endpoint),
@@ -518,7 +526,7 @@ impl InhouseAdapter {
         &self,
         addr: SocketAddr,
         cert: &CertificateHandle,
-    ) -> AnyResult<ConnectionHandle> {
+    ) -> DiagResult<ConnectionHandle> {
         let cert = match cert {
             CertificateHandle::Inhouse(cert) => cert,
             #[cfg(feature = "quinn")]
@@ -530,7 +538,7 @@ impl InhouseAdapter {
         Ok(ConnectionHandle::Inhouse(conn))
     }
 
-    pub async fn connect_insecure(&self, addr: SocketAddr) -> AnyResult<ConnectionHandle> {
+    pub async fn connect_insecure(&self, addr: SocketAddr) -> DiagResult<ConnectionHandle> {
         let conn = self.0.backend.connect_insecure(addr).await?;
         Ok(ConnectionHandle::Inhouse(conn))
     }
@@ -543,7 +551,7 @@ impl InhouseAdapter {
         self.0.backend.connection_stats()
     }
 
-    pub async fn send(&self, conn: &ConnectionHandle, data: &[u8]) -> AnyResult<()> {
+    pub async fn send(&self, conn: &ConnectionHandle, data: &[u8]) -> DiagResult<()> {
         match conn {
             ConnectionHandle::Inhouse(conn) => {
                 self.0.backend.send(conn, data).await?;
@@ -568,7 +576,7 @@ impl InhouseAdapter {
         &self,
         peer_key: &[u8; 32],
         cert: &[u8],
-    ) -> AnyResult<[u8; 32]> {
+    ) -> DiagResult<[u8; 32]> {
         Ok(self.0.backend.verify_remote_certificate(peer_key, cert)?)
     }
 
@@ -595,7 +603,7 @@ struct S2nAdapterInner {
 
 #[cfg(feature = "s2n-quic")]
 impl S2nAdapter {
-    fn new(cfg: &Config, callbacks: &S2nCallbacks) -> AnyResult<Self> {
+    fn new(cfg: &Config, callbacks: &S2nCallbacks) -> DiagResult<Self> {
         let mut backend_callbacks = s2n_impl::S2nEventCallbacks::default();
         backend_callbacks.cert_rotated = callbacks.cert_rotated.clone();
         backend_callbacks.handshake_failure = callbacks.handshake_failure.clone();
@@ -614,14 +622,11 @@ impl S2nAdapter {
         self.0.certificate_cache.clone()
     }
 
-    pub fn initialize(
-        &self,
-        signing_key: &SigningKey,
-    ) -> anyhow::Result<s2n_impl::CertAdvertisement> {
+    pub fn initialize(&self, signing_key: &SigningKey) -> DiagResult<s2n_impl::CertAdvertisement> {
         s2n_impl::initialize(signing_key)
     }
 
-    pub fn rotate(&self, signing_key: &SigningKey) -> anyhow::Result<s2n_impl::CertAdvertisement> {
+    pub fn rotate(&self, signing_key: &SigningKey) -> DiagResult<s2n_impl::CertAdvertisement> {
         s2n_impl::rotate(signing_key)
     }
 
@@ -645,7 +650,7 @@ impl S2nAdapter {
         &self,
         peer_key: &[u8; 32],
         cert: &[u8],
-    ) -> anyhow::Result<[u8; 32]> {
+    ) -> DiagResult<[u8; 32]> {
         s2n_impl::verify_remote_certificate(peer_key, cert)
     }
 
@@ -653,12 +658,12 @@ impl S2nAdapter {
         &self,
         addr: SocketAddr,
         signing_key: &SigningKey,
-    ) -> Result<ListenerHandle, Box<dyn std::error::Error>> {
+    ) -> DiagResult<ListenerHandle> {
         let server = s2n_impl::start_server(addr, signing_key).await?;
         Ok(ListenerHandle::S2n(server))
     }
 
-    pub async fn connect(&self, addr: SocketAddr) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect(&self, addr: SocketAddr) -> DiagResult<()> {
         s2n_impl::connect(addr).await
     }
 
@@ -733,7 +738,7 @@ pub fn fingerprint(cert: &[u8]) -> [u8; 32] {
 }
 
 #[cfg(all(feature = "quinn", not(feature = "s2n-quic")))]
-pub fn verify_remote_certificate(_peer_key: &[u8; 32], _cert: &[u8]) -> AnyResult<[u8; 32]> {
+pub fn verify_remote_certificate(_peer_key: &[u8; 32], _cert: &[u8]) -> DiagResult<[u8; 32]> {
     Err(anyhow!("s2n-quic provider not compiled"))
 }
 
@@ -785,7 +790,7 @@ pub fn verify_remote_certificate_for(
     provider_id: &str,
     peer_key: &[u8; 32],
     cert: &[u8],
-) -> AnyResult<[u8; 32]> {
+) -> DiagResult<[u8; 32]> {
     #[cfg(not(feature = "s2n-quic"))]
     let _ = (peer_key, cert);
     match provider_kind_from_id(provider_id) {

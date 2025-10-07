@@ -14,12 +14,11 @@ use crate::telemetry::{
     SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_CT_TOTAL,
 };
 use bincode;
-use ledger::utxo_account::AccountLedger;
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 #[cfg(feature = "telemetry")]
-use tracing::error;
+use diagnostics::tracing::error;
+use ledger::utxo_account::AccountLedger;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 const AUDIT_CAP: usize = 256;
 const ROOT_HISTORY: usize = 32;
@@ -272,6 +271,7 @@ impl SettlementState {
         }
     }
 
+    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     fn next_deadline(&self) -> Option<u64> {
         self.sla.iter().map(|r| r.deadline).min()
     }
@@ -450,10 +450,14 @@ fn compute_root(ct: &AccountLedger, it: &AccountLedger) -> [u8; 32] {
     *root.as_bytes()
 }
 
-static STATE: Lazy<Mutex<Option<SettlementState>>> = Lazy::new(|| Mutex::new(None));
+static STATE: Lazy<MutexT<Option<SettlementState>>> = Lazy::new(|| mutex(None));
+
+fn settlement_state() -> MutexGuard<'static, Option<SettlementState>> {
+    STATE.guard()
+}
 
 fn with_state_mut<R>(f: impl FnOnce(&mut SettlementState) -> R) -> R {
-    let mut guard = STATE.lock();
+    let mut guard = settlement_state();
     let state = guard
         .as_mut()
         .expect("Settlement::init must be called before use");
@@ -461,7 +465,7 @@ fn with_state_mut<R>(f: impl FnOnce(&mut SettlementState) -> R) -> R {
 }
 
 fn with_state<R>(f: impl FnOnce(&SettlementState) -> R) -> R {
-    let guard = STATE.lock();
+    let guard = settlement_state();
     let state = guard
         .as_ref()
         .expect("Settlement::init must be called before use");
@@ -480,7 +484,7 @@ impl Settlement {
         F: Fn(&str, &str) -> SimpleDb,
     {
         {
-            let mut guard = STATE.lock();
+            let mut guard = settlement_state();
             if let Some(state) = guard.as_mut() {
                 state.persist_all();
                 state.flush();
@@ -504,11 +508,11 @@ impl Settlement {
             SettlementState::new(base, mode, factory(names::COMPUTE_SETTLEMENT, db_path_str));
         state.persist_all();
         state.flush();
-        *STATE.lock() = Some(state);
+        *settlement_state() = Some(state);
     }
 
     pub fn shutdown() {
-        let mut guard = STATE.lock();
+        let mut guard = settlement_state();
         if let Some(state) = guard.as_mut() {
             state.persist_all();
             state.flush();

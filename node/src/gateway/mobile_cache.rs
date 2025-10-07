@@ -1,11 +1,11 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use coding::{ChaCha20Poly1305Encryptor, Encryptor, CHACHA20_POLY1305_NONCE_LEN};
-use once_cell::sync::Lazy;
+use concurrency::{mutex, Lazy, MutexGuard, MutexT};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -23,28 +23,52 @@ use crate::telemetry::{MOBILE_CACHE_QUEUE_BYTES, MOBILE_CACHE_QUEUE_TOTAL};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{MOBILE_CACHE_SWEEP_TOTAL, MOBILE_CACHE_SWEEP_WINDOW_SECONDS};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum MobileCacheError {
-    #[error("persistence error: {0}")]
-    Persistence(#[from] sled::Error),
-    #[error("serialization error: {0}")]
+    Persistence(sled::Error),
     Serialization(String),
-    #[error("encryption failure")]
     Encryption,
-    #[error("decryption failure")]
     Decryption,
-    #[error("entry exceeds max payload ({size} > {limit} bytes)")]
     EntryTooLarge { size: usize, limit: usize },
-    #[error("cache capacity reached ({limit} entries)")]
     Capacity { limit: usize },
-    #[error("queue capacity reached ({limit} entries)")]
     QueueCapacity { limit: usize },
-    #[error("missing encryption key (set TB_MOBILE_CACHE_KEY_HEX or TB_NODE_KEY_HEX)")]
     MissingKey,
-    #[error("invalid encryption key length")]
     InvalidKeyLength,
-    #[error("cache lock poisoned")]
     LockPoisoned,
+}
+
+impl fmt::Display for MobileCacheError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MobileCacheError::Persistence(err) => write!(f, "persistence error: {err}"),
+            MobileCacheError::Serialization(err) => write!(f, "serialization error: {err}"),
+            MobileCacheError::Encryption => write!(f, "encryption failure"),
+            MobileCacheError::Decryption => write!(f, "decryption failure"),
+            MobileCacheError::EntryTooLarge { size, limit } => {
+                write!(f, "entry exceeds max payload ({size} > {limit} bytes)")
+            }
+            MobileCacheError::Capacity { limit } => {
+                write!(f, "cache capacity reached ({limit} entries)")
+            }
+            MobileCacheError::QueueCapacity { limit } => {
+                write!(f, "queue capacity reached ({limit} entries)")
+            }
+            MobileCacheError::MissingKey => write!(
+                f,
+                "missing encryption key (set TB_MOBILE_CACHE_KEY_HEX or TB_NODE_KEY_HEX)"
+            ),
+            MobileCacheError::InvalidKeyLength => write!(f, "invalid encryption key length"),
+            MobileCacheError::LockPoisoned => write!(f, "cache lock poisoned"),
+        }
+    }
+}
+
+impl std::error::Error for MobileCacheError {}
+
+impl From<sled::Error> for MobileCacheError {
+    fn from(value: sled::Error) -> Self {
+        MobileCacheError::Persistence(value)
+    }
 }
 
 #[derive(Clone)]
@@ -749,12 +773,14 @@ impl MobileCache {
     }
 }
 
-static GLOBAL_CACHE: Lazy<Mutex<MobileCache>> = Lazy::new(|| {
+static GLOBAL_CACHE: Lazy<MutexT<MobileCache>> = Lazy::new(|| {
     let cfg = MobileCacheConfig::from_env().unwrap_or_else(|err| {
         #[cfg(not(feature = "telemetry"))]
         let _ = &err;
         #[cfg(feature = "telemetry")]
-        log::warn!("mobile cache config from env failed: {err}; using ephemeral fallback");
+        diagnostics::log::warn!(
+            "mobile cache config from env failed: {err}; using ephemeral fallback"
+        );
         let tmp = std::env::temp_dir().join("mobile_cache_ephemeral");
         let mut key = [0u8; 32];
         OsRng::default().fill_bytes(&mut key);
@@ -772,15 +798,15 @@ static GLOBAL_CACHE: Lazy<Mutex<MobileCache>> = Lazy::new(|| {
     let cache = MobileCache::open(cfg).unwrap_or_else(|err| {
         panic!("failed to initialise mobile cache: {err}");
     });
-    Mutex::new(cache)
+    mutex(cache)
 });
 
-fn lock_cache() -> Option<std::sync::MutexGuard<'static, MobileCache>> {
+fn lock_cache() -> Option<MutexGuard<'static, MobileCache>> {
     match GLOBAL_CACHE.lock() {
         Ok(guard) => Some(guard),
         Err(poisoned) => {
             #[cfg(feature = "telemetry")]
-            log::error!("mobile cache poisoned: {}", poisoned);
+            diagnostics::log::error!("mobile cache poisoned: {}", poisoned);
             Some(poisoned.into_inner())
         }
     }
@@ -823,7 +849,7 @@ pub fn purge_policy(domain: &str) {
             #[cfg(not(feature = "telemetry"))]
             let _ = &err;
             #[cfg(feature = "telemetry")]
-            log::warn!("failed to invalidate policy cache for {domain}: {err}");
+            diagnostics::log::warn!("failed to invalidate policy cache for {domain}: {err}");
         }
     }
 }
@@ -865,7 +891,7 @@ pub fn cache_policy(domain: &str, value: &serde_json::Value) {
             #[cfg(not(feature = "telemetry"))]
             let _ = &err;
             #[cfg(feature = "telemetry")]
-            log::debug!("policy cache insert failed: {err}");
+            diagnostics::log::debug!("policy cache insert failed: {err}");
         }
     }
 }
@@ -880,7 +906,7 @@ pub fn invalidate_prefix(prefix: &str) {
             #[cfg(not(feature = "telemetry"))]
             let _ = &err;
             #[cfg(feature = "telemetry")]
-            log::warn!("failed to invalidate prefix {prefix}: {err}");
+            diagnostics::log::warn!("failed to invalidate prefix {prefix}: {err}");
         }
     }
 }

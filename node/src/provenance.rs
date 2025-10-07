@@ -1,9 +1,9 @@
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3::hash;
 use crypto_suite::signatures::ed25519::{
     Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use hex;
-use once_cell::sync::Lazy;
 use std::convert::TryInto;
 use std::fs;
 use std::path::Path;

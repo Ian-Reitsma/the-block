@@ -23,7 +23,9 @@ use thiserror::Error;
 
 pub mod blocking;
 pub mod client;
+pub mod filters;
 pub mod jsonrpc;
+pub mod metrics;
 pub mod uri;
 pub use blocking::{BlockingClient, BlockingRequestBuilder};
 pub use client::{Client as HttpClient, ClientConfig, ClientError, ClientResponse};

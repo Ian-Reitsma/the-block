@@ -11,6 +11,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use flate2::{write::GzEncoder, Compression};
+use foundation_serialization::{Deserialize, Serialize};
 
 mod config;
 mod device;
@@ -102,7 +103,8 @@ impl SyncOptions {
 }
 
 /// Block header for light-client verification.
-#[derive(Clone, Default, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Clone, Default, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Header {
     pub height: u64,
     pub prev_hash: [u8; 32],
@@ -213,7 +215,8 @@ pub fn verify_checkpoint(h: &Header, checkpoints: &HashMap<u64, [u8; 32]>) -> bo
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum GatingReason {
     WifiUnavailable,
     RequiresCharging,
@@ -230,7 +233,8 @@ impl GatingReason {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SyncOutcome {
     pub appended: usize,
     pub status: DeviceStatusSnapshot,
@@ -299,7 +303,8 @@ where
 }
 
 /// Compress log data for upload via telemetry.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct AnnotatedLogBundle {
     pub compression: &'static str,
     pub payload: Vec<u8>,
@@ -313,7 +318,8 @@ impl AnnotatedLogBundle {
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DeviceStatusEnvelope {
     pub on_wifi: bool,
     pub is_charging: bool,
@@ -448,7 +454,7 @@ mod tests {
 
     #[test]
     fn verifies_pos_signature() {
-        use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+        use crypto_suite::signatures::ed25519::SigningKey;
         use rand::rngs::OsRng;
         let genesis = Header {
             height: 0,

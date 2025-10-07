@@ -1,10 +1,10 @@
 use anyhow::Result as AnyhowResult;
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::{binary, de::DeserializeOwned, json, Deserialize, Serialize};
 use hex::encode as hex_encode;
 use httpd::{HttpError, Request, Response, Router, StatusCode};
 use lru::LruCache;
 use rusqlite::{params, Connection, OptionalExtension, Result};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::env;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -568,12 +568,14 @@ pub use ai_summary::summarize_block;
 pub mod dkg_view;
 pub mod jurisdiction_view;
 
-pub(crate) fn decode_json<T: DeserializeOwned>(bytes: &[u8]) -> serde_json::Result<T> {
-    serde_json::from_slice(bytes)
+pub(crate) fn decode_json<T: DeserializeOwned>(
+    bytes: &[u8],
+) -> foundation_serialization::Result<T> {
+    json::from_slice(bytes)
 }
 
-fn encode_json<T: Serialize>(value: &T) -> serde_json::Result<Vec<u8>> {
-    serde_json::to_vec(value)
+fn encode_json<T: Serialize>(value: &T) -> foundation_serialization::Result<Vec<u8>> {
+    json::to_vec(value)
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptRecord {
@@ -763,14 +765,14 @@ impl Explorer {
         if let Ok(block) = decode_json(bytes) {
             return Ok(block);
         }
-        bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode block: {e}"))
+        binary::decode(bytes).map_err(|e| anyhow::anyhow!("decode block: {e}"))
     }
 
     fn decode_tx(bytes: &[u8]) -> AnyhowResult<SignedTransaction> {
         if let Ok(tx) = decode_json(bytes) {
             return Ok(tx);
         }
-        bincode::deserialize(bytes).map_err(|e| anyhow::anyhow!("decode tx: {e}"))
+        binary::decode(bytes).map_err(|e| anyhow::anyhow!("decode tx: {e}"))
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -934,7 +936,7 @@ impl Explorer {
 
     fn tx_hash(tx: &SignedTransaction) -> String {
         let mut hasher = Hasher::new();
-        let bytes = bincode::serialize(tx).unwrap_or_default();
+        let bytes = binary::encode(tx).unwrap_or_default();
         hasher.update(&bytes);
         hasher.finalize().to_hex().to_string()
     }
@@ -1602,7 +1604,7 @@ impl Explorer {
             for ent in entries.flatten() {
                 if let Ok(epoch) = ent.file_name().to_string_lossy().parse::<u64>() {
                     if let Ok(bytes) = std::fs::read(ent.path()) {
-                        if let Ok(list) = bincode::deserialize::<Vec<Receipt>>(&bytes) {
+                        if let Ok(list) = binary::decode::<Vec<Receipt>>(&bytes) {
                             for r in list {
                                 let rec = ReceiptRecord {
                                     key: hex_encode(r.idempotency_key),
@@ -1729,7 +1731,7 @@ mod tests {
             false,
             the_block::transaction::FeeLane::Consumer,
         );
-        let bytes = bincode::serialize(&vec![r]).unwrap();
+        let bytes = binary::encode(&vec![r]).unwrap();
         std::fs::write(receipts.join("1"), bytes).unwrap();
         let db = dir.path().join("explorer.db");
         let ex = Explorer::open(&db).unwrap();

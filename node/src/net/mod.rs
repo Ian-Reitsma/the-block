@@ -14,7 +14,7 @@ pub mod uptime;
 #[cfg(not(feature = "quic"))]
 pub mod quic {
     use super::peer::HandshakeError;
-    use anyhow::Error;
+    use diagnostics::anyhow::Error;
 
     #[derive(Debug)]
     pub enum ConnectError {
@@ -31,14 +31,14 @@ use crate::{
     gossip::relay::{Relay, RelayStatus},
     BlobTx, Blockchain, ShutdownFlag, SignedTransaction,
 };
-use anyhow::anyhow;
 use base64_fp::{decode_standard, encode_standard};
 use coding::default_encryptor;
+use concurrency::{Lazy, OnceCell};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
+use diagnostics::anyhow::anyhow;
 use hex;
 use ledger::address::ShardId;
-use once_cell::sync::{Lazy, OnceCell};
 #[cfg(feature = "telemetry")]
 use p2p_overlay::OverlayDiagnostics;
 use p2p_overlay::{
@@ -72,8 +72,7 @@ use crate::telemetry::{OVERLAY_BACKEND_ACTIVE, OVERLAY_PEER_PERSISTED_TOTAL, OVE
 #[cfg(feature = "quic")]
 use transport::{
     self, Config as TransportConfig, DefaultFactory as TransportDefaultFactory,
-    ProviderRegistry as TransportProviderRegistry, QuinnCallbacks, QuinnDisconnect, S2nCallbacks,
-    TransportCallbacks, TransportFactory,
+    ProviderRegistry as TransportProviderRegistry, QuinnDisconnect, TransportCallbacks,
 };
 
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
@@ -252,7 +251,7 @@ pub fn overlay_status() -> OverlayStatus {
             #[cfg(feature = "telemetry")]
             {
                 clear_overlay_metrics();
-                tracing::warn!(reason = %err, "overlay_diagnostics_failed");
+                diagnostics::tracing::warn!(reason = %err, "overlay_diagnostics_failed");
             }
             #[cfg(not(feature = "telemetry"))]
             eprintln!("overlay_diagnostics_failed: {err}");
@@ -306,7 +305,7 @@ pub fn install_transport_factory(factory: Arc<dyn transport::TransportFactory>) 
 }
 
 #[cfg(feature = "quic")]
-pub fn configure_transport(cfg: &TransportConfig) -> anyhow::Result<()> {
+pub fn configure_transport(cfg: &TransportConfig) -> diagnostics::anyhow::Result<()> {
     let callbacks = build_transport_callbacks();
     let factory = TRANSPORT_FACTORY.read().unwrap().clone();
     let registry = factory.create(cfg, &callbacks)?;
@@ -326,7 +325,7 @@ pub(crate) fn transport_registry() -> Option<TransportProviderRegistry> {
     }
     if let Err(err) = configure_transport(&TransportConfig::default()) {
         #[cfg(feature = "telemetry")]
-        tracing::warn!(reason = %err, "transport_configure_default_failed");
+        diagnostics::tracing::warn!(reason = %err, "transport_configure_default_failed");
         #[cfg(not(feature = "telemetry"))]
         eprintln!("transport_configure_default_failed: {err}");
     }
@@ -349,6 +348,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
                     .with_label_values(&[provider])
                     .inc();
             }
+            #[cfg(not(feature = "telemetry"))]
+            let _ = provider;
         });
         cb
     };
@@ -381,7 +382,7 @@ fn build_transport_callbacks() -> TransportCallbacks {
                         .with_label_values(&[peer_label.as_str(), mapped.as_str()])
                         .inc();
                 }
-                tracing::error!(reason = mapped.as_str(), "quic_connect_fail");
+                diagnostics::tracing::error!(reason = mapped.as_str(), "quic_connect_fail");
             }
         }));
 
@@ -396,11 +397,15 @@ fn build_transport_callbacks() -> TransportCallbacks {
         quinn.bytes_sent = Some(Arc::new(|_addr: SocketAddr, bytes: u64| {
             #[cfg(feature = "telemetry")]
             QUIC_BYTES_SENT_TOTAL.inc_by(bytes);
+            #[cfg(not(feature = "telemetry"))]
+            let _ = bytes;
         }));
 
         quinn.bytes_received = Some(Arc::new(|_addr: SocketAddr, bytes: u64| {
             #[cfg(feature = "telemetry")]
             QUIC_BYTES_RECV_TOTAL.inc_by(bytes);
+            #[cfg(not(feature = "telemetry"))]
+            let _ = bytes;
         }));
 
         quinn.disconnect = Some(Arc::new(|_addr: SocketAddr, reason: QuinnDisconnect| {
@@ -411,6 +416,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
                     .with_label_values(&[label.as_ref()])
                     .inc();
             }
+            #[cfg(not(feature = "telemetry"))]
+            let _ = reason;
         }));
     }
 
@@ -423,6 +430,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
         s2n.cert_rotated = Some(Arc::new(|label: &'static str| {
             #[cfg(feature = "telemetry")]
             QUIC_CERT_ROTATION_TOTAL.with_label_values(&[label]).inc();
+            #[cfg(not(feature = "telemetry"))]
+            let _ = label;
         }));
 
         s2n.handshake_failure = Some(Arc::new(|reason: &str| {
@@ -433,37 +442,39 @@ fn build_transport_callbacks() -> TransportCallbacks {
                     .with_label_values(&[peer_label.as_str(), reason])
                     .inc();
             }
+            #[cfg(not(feature = "telemetry"))]
+            let _ = reason;
         }));
 
         s2n.retransmit = Some(Arc::new(|count: u64| {
             #[cfg(feature = "telemetry")]
             QUIC_RETRANSMIT_TOTAL.inc_by(count);
+            #[cfg(not(feature = "telemetry"))]
+            let _ = count;
         }));
     }
 
+    #[cfg(feature = "inhouse")]
     {
         let inhouse = &mut callbacks.inhouse;
-        #[cfg(feature = "inhouse")]
-        {
-            inhouse.provider_connect = Some(provider_counter.clone());
-            inhouse.handshake_success = Some(Arc::new(|addr: SocketAddr| {
-                if let Some(pk) = pk_from_addr(&addr) {
-                    quic_stats::record_address(&pk, addr);
-                }
-            }));
-            inhouse.handshake_failure = Some(Arc::new(|addr: SocketAddr, reason: &str| {
-                if let Some(pk) = pk_from_addr(&addr) {
-                    quic_stats::record_handshake_failure(&pk);
-                }
-                #[cfg(feature = "telemetry")]
-                {
-                    let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
-                    QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[peer_label.as_str(), reason])
-                        .inc();
-                }
-            }));
-        }
+        inhouse.provider_connect = Some(provider_counter.clone());
+        inhouse.handshake_success = Some(Arc::new(|addr: SocketAddr| {
+            if let Some(pk) = pk_from_addr(&addr) {
+                quic_stats::record_address(&pk, addr);
+            }
+        }));
+        inhouse.handshake_failure = Some(Arc::new(|addr: SocketAddr, reason: &str| {
+            if let Some(pk) = pk_from_addr(&addr) {
+                quic_stats::record_handshake_failure(&pk);
+            }
+            #[cfg(feature = "telemetry")]
+            {
+                let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
+                QUIC_HANDSHAKE_FAIL_TOTAL
+                    .with_label_values(&[peer_label.as_str(), reason])
+                    .inc();
+            }
+        }));
     }
 
     callbacks
@@ -875,13 +886,13 @@ fn spawn_peer_cert_store_watch(path: PathBuf) {
                     }
                     Ok(_) => {}
                     Err(err) => {
-                        log::warn!("peer_cert_store_watch_error: {err}");
+                        diagnostics::log::warn!("peer_cert_store_watch_error: {err}");
                         runtime::sleep(Duration::from_secs(1)).await;
                     }
                 }
             },
             Err(err) => {
-                log::warn!("peer_cert_store_watch_init_failed: {err}");
+                diagnostics::log::warn!("peer_cert_store_watch_init_failed: {err}");
             }
         }
     });
@@ -1374,7 +1385,7 @@ impl Node {
                             let trace = crate::telemetry::log_context();
                             let span = crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
                             span.in_scope(|| {
-                                tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
+                                diagnostics::tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
                             });
                         }
                         if let Ok(msg) = bincode::deserialize::<Message>(&buf) {
@@ -1582,7 +1593,7 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     #[cfg(feature = "telemetry")]
     if crate::telemetry::should_log("p2p") {
         let span = crate::log_context!(tx = *blake3::hash(&bytes).as_bytes());
-        tracing::info!(parent: &span, peer = %addr, len = bytes.len(), "send_msg");
+        diagnostics::tracing::info!(parent: &span, peer = %addr, len = bytes.len(), "send_msg");
     }
     stream.write_all(&bytes)?;
     crate::net::peer::record_send(addr, bytes.len());

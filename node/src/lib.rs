@@ -19,14 +19,21 @@ use crate::consensus::observer;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
+use concurrency::dashmap::Entry as DashEntry;
+use concurrency::DashMap;
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
-use dashmap::DashMap;
+#[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
+use diagnostics::tracing::info;
+#[cfg(feature = "telemetry")]
+use diagnostics::tracing::warn;
 use hex;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
 use lru::LruCache;
-use python_bridge::{Error as PyError, ErrorKind as PyErrorKind, Result as PyResult};
+mod py;
+
+use crate::py::{PyError, PyResult};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -34,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
@@ -41,10 +49,6 @@ use std::sync::{
 };
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-#[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
-use tracing::info;
-#[cfg(feature = "telemetry")]
-use tracing::warn;
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
 pub mod config;
 pub mod dkg;
@@ -60,9 +64,7 @@ pub use runtime::{
 };
 pub use simple_db::SimpleDb;
 use simple_db::{DbDelta, SimpleDb as Db};
-use std::any::Any;
 use std::convert::TryInto;
-use thiserror::Error;
 
 const EPOCH_BLOCKS: u64 = 120;
 const EPOCHS_PER_YEAR: u64 = 365 * 24 * 60 * 60 / EPOCH_BLOCKS;
@@ -155,7 +157,6 @@ pub use transaction::{
 };
 // Python helper re-exported at the crate root
 pub use self::mine_block_py as mine_block;
-use transaction::{canonical_payload_py, decode_payload_py, sign_tx_py, verify_signed_tx_py};
 pub mod consensus;
 pub use consensus::pow;
 pub mod commit_reveal;
@@ -178,41 +179,51 @@ pub mod vm;
 // === Transaction admission errors ===
 
 #[repr(u16)]
-#[derive(Debug, Error, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TxAdmissionError {
-    #[error("unknown sender")]
     UnknownSender = ERR_UNKNOWN_SENDER,
-    #[error("insufficient balance")]
     InsufficientBalance = ERR_INSUFFICIENT_BALANCE,
-    #[error("nonce gap")]
     NonceGap = ERR_NONCE_GAP,
-    #[error("invalid selector")]
     InvalidSelector = ERR_INVALID_SELECTOR,
-    #[error("bad signature")]
     BadSignature = ERR_BAD_SIGNATURE,
-    #[error("duplicate transaction")]
     Duplicate = ERR_DUPLICATE,
-    #[error("transaction not found")]
     NotFound = ERR_NOT_FOUND,
-    #[error("balance overflow")]
     BalanceOverflow = ERR_BALANCE_OVERFLOW,
-    #[error("fee overflow")]
     FeeOverflow = ERR_FEE_OVERFLOW,
-    #[error("fee too large")]
     FeeTooLarge = ERR_FEE_TOO_LARGE,
-    #[error("fee below minimum")]
     FeeTooLow = ERR_FEE_TOO_LOW,
-    #[error("mempool full")]
     MempoolFull = ERR_MEMPOOL_FULL,
-    #[error("lock poisoned")]
     LockPoisoned = ERR_LOCK_POISONED,
-    #[error("pending limit reached")]
     PendingLimitReached = ERR_PENDING_LIMIT,
-    #[error("additional signatures required")]
     PendingSignatures = ERR_PENDING_SIGNATURES,
-    #[error("session expired")]
     SessionExpired = ERR_SESSION_EXPIRED,
 }
+
+impl fmt::Display for TxAdmissionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let msg = match self {
+            TxAdmissionError::UnknownSender => "unknown sender",
+            TxAdmissionError::InsufficientBalance => "insufficient balance",
+            TxAdmissionError::NonceGap => "nonce gap",
+            TxAdmissionError::InvalidSelector => "invalid selector",
+            TxAdmissionError::BadSignature => "bad signature",
+            TxAdmissionError::Duplicate => "duplicate transaction",
+            TxAdmissionError::NotFound => "transaction not found",
+            TxAdmissionError::BalanceOverflow => "balance overflow",
+            TxAdmissionError::FeeOverflow => "fee overflow",
+            TxAdmissionError::FeeTooLarge => "fee too large",
+            TxAdmissionError::FeeTooLow => "fee below minimum",
+            TxAdmissionError::MempoolFull => "mempool full",
+            TxAdmissionError::LockPoisoned => "lock poisoned",
+            TxAdmissionError::PendingLimitReached => "pending limit reached",
+            TxAdmissionError::PendingSignatures => "additional signatures required",
+            TxAdmissionError::SessionExpired => "session expired",
+        };
+        write!(f, "{}", msg)
+    }
+}
+
+impl std::error::Error for TxAdmissionError {}
 
 impl TxAdmissionError {
     #[must_use]
@@ -222,9 +233,25 @@ impl TxAdmissionError {
     }
 }
 
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-#[error("balance underflow")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BalanceUnderflow;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ErrBalanceUnderflow;
+
+impl fmt::Display for BalanceUnderflow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "balance underflow")
+    }
+}
+
+impl std::error::Error for BalanceUnderflow {}
+
+impl ErrBalanceUnderflow {
+    pub fn new_err(msg: impl Into<String>) -> PyError {
+        PyError::value(msg)
+    }
+}
 
 impl From<BalanceUnderflow> for PyError {
     fn from(_: BalanceUnderflow) -> Self {
@@ -271,7 +298,7 @@ fn scrub(s: &str) -> String {
 #[cfg(feature = "telemetry-json")]
 fn log_event(
     subsystem: &str,
-    level: log::Level,
+    level: diagnostics::log::Level,
     op: &str,
     sender: &str,
     nonce: u64,
@@ -298,7 +325,7 @@ fn log_event(
     }
     let msg = serde_json::Value::Object(obj).to_string();
     telemetry::observe_log_size(msg.len());
-    log::log!(level, "{}", msg);
+    diagnostics::log::log!(level, "{}", msg);
 }
 
 // === Database keys ===
@@ -1080,10 +1107,10 @@ impl Blockchain {
         };
         let mut ages = Vec::new();
         let mut fees = Vec::new();
-        for entry in map.iter() {
+        map.for_each(|_, entry| {
             ages.push(now.saturating_sub(entry.timestamp_millis));
             fees.push(entry.tx.tip);
-        }
+        });
         ages.sort_unstable();
         fees.sort_unstable();
         let size = ages.len();
@@ -1152,7 +1179,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "service",
-                log::Level::Info,
+                diagnostics::log::Level::Info,
                 "badge",
                 "-",
                 0,
@@ -1163,7 +1190,7 @@ impl Blockchain {
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("service") {
-                let span = tracing::info_span!("badge", from = before, to = after);
+                let span = diagnostics::tracing::info_span!("badge", from = before, to = after);
                 let _e = span.enter();
                 info!("badge {}", if after { "minted" } else { "revoked" });
             }
@@ -1204,12 +1231,12 @@ impl Blockchain {
 
 impl Blockchain {
     /// Default Python constructor opens ./chain_db
-    #[new]
+    #[cfg_attr(feature = "python-bindings", new)]
     pub fn py_new() -> PyResult<Self> {
         Blockchain::open("chain_db")
     }
 
-    #[staticmethod]
+    #[cfg_attr(feature = "python-bindings", staticmethod)]
     pub fn open_with_db(path: &str, db_path: &str) -> PyResult<Self> {
         // Open an existing database and auto-migrate to schema v4.
         // See `docs/detailed_updates.md` for layout history.
@@ -1788,7 +1815,7 @@ impl Blockchain {
         crate::simple_db::configure_engines(cfg.storage.clone());
         if let Err(err) = crate::config::ensure_overlay_sanity(&cfg.overlay) {
             #[cfg(feature = "telemetry")]
-            tracing::warn!(reason = %err, "overlay_sanity_failed");
+            diagnostics::tracing::warn!(reason = %err, "overlay_sanity_failed");
             #[cfg(not(feature = "telemetry"))]
             eprintln!("overlay_sanity_failed: {err}");
         }
@@ -1801,7 +1828,7 @@ impl Blockchain {
                 .unwrap_or_else(transport::Config::default);
             if let Err(err) = crate::net::configure_transport(&transport_cfg) {
                 #[cfg(feature = "telemetry")]
-                tracing::warn!(reason = %err, "transport_configure_failed");
+                diagnostics::tracing::warn!(reason = %err, "transport_configure_failed");
                 #[cfg(not(feature = "telemetry"))]
                 eprintln!("transport_configure_failed: {err}");
             }
@@ -1946,8 +1973,8 @@ impl Blockchain {
                     .unwrap_or(0);
                 let fpb = if size == 0 { 0 } else { e.tx.tip / size };
                 #[cfg(feature = "telemetry")]
-                let _span = tracing::span!(
-                    tracing::Level::TRACE,
+                let _span = diagnostics::tracing::span!(
+                    diagnostics::tracing::Level::TRACE,
                     "startup_rebuild",
                     sender = %scrub(&e.sender),
                     nonce = e.nonce,
@@ -2006,7 +2033,7 @@ impl Blockchain {
         #[cfg(feature = "telemetry-json")]
         log_event(
             "storage",
-            log::Level::Info,
+            diagnostics::log::Level::Info,
             "startup_purge",
             "",
             0,
@@ -2023,12 +2050,12 @@ impl Blockchain {
         Ok(bc)
     }
 
-    #[staticmethod]
+    #[cfg_attr(feature = "python-bindings", staticmethod)]
     pub fn open(path: &str) -> PyResult<Self> {
         Self::open_with_db(path, path)
     }
 
-    #[staticmethod]
+    #[cfg_attr(feature = "python-bindings", staticmethod)]
     pub fn with_difficulty(path: &str, difficulty: u64) -> PyResult<Self> {
         let mut bc = Blockchain::open(path)?;
         bc.difficulty = difficulty;
@@ -2041,7 +2068,7 @@ impl Blockchain {
     }
 
     /// Return the on-disk schema version
-    #[getter]
+    #[cfg_attr(feature = "python-bindings", getter)]
     pub fn schema_version(&self) -> usize {
         // Bump this constant whenever the serialized `ChainDisk` format changes.
         // Older binaries must refuse to open newer databases.
@@ -2050,18 +2077,25 @@ impl Blockchain {
 
     /// Persist the entire chain + state under the current schema
     pub fn persist_chain(&mut self) -> PyResult<()> {
-        let mempool: Vec<MempoolEntryDisk> = self
-            .mempool_consumer
-            .iter()
-            .chain(self.mempool_industrial.iter())
-            .map(|e| MempoolEntryDisk {
-                sender: e.key().0.clone(),
-                nonce: e.key().1,
-                tx: e.value().tx.clone(),
-                timestamp_millis: e.value().timestamp_millis,
-                timestamp_ticks: e.value().timestamp_ticks,
-            })
-            .collect();
+        let mut mempool: Vec<MempoolEntryDisk> = Vec::new();
+        self.mempool_consumer.for_each(|key, value| {
+            mempool.push(MempoolEntryDisk {
+                sender: key.0.clone(),
+                nonce: key.1,
+                tx: value.tx.clone(),
+                timestamp_millis: value.timestamp_millis,
+                timestamp_ticks: value.timestamp_ticks,
+            });
+        });
+        self.mempool_industrial.for_each(|key, value| {
+            mempool.push(MempoolEntryDisk {
+                sender: key.0.clone(),
+                nonce: key.1,
+                tx: value.tx.clone(),
+                timestamp_millis: value.timestamp_millis,
+                timestamp_ticks: value.timestamp_ticks,
+            });
+        });
         let disk = ChainDisk {
             schema_version: self.schema_version(),
             chain: self.chain.clone(),
@@ -2250,8 +2284,8 @@ impl Blockchain {
         let lane = tx.lane;
         #[cfg(feature = "telemetry")]
         let _pool_guard = {
-            let span = tracing::span!(
-                tracing::Level::TRACE,
+            let span = diagnostics::tracing::span!(
+                diagnostics::tracing::Level::TRACE,
                 "mempool_mutex",
                 sender = %scrub(&sender_addr),
                 nonce,
@@ -2289,7 +2323,7 @@ impl Blockchain {
                 #[cfg(feature = "telemetry-json")]
                 log_event(
                     "mempool",
-                    log::Level::Warn,
+                    diagnostics::log::Level::Warn,
                     "reject",
                     &sender_addr,
                     nonce,
@@ -2301,7 +2335,7 @@ impl Blockchain {
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 if telemetry::should_log("mempool") {
                     let span = crate::log_context!(tx = tx_hash);
-                    tracing::warn!(
+                    diagnostics::tracing::warn!(
                         parent: &span,
                         "tx rejected sender={sender_addr} nonce={nonce} reason=fee_too_low"
                     );
@@ -2320,8 +2354,8 @@ impl Blockchain {
 
         #[cfg(feature = "telemetry")]
         let lock_guard = {
-            let span = tracing::span!(
-                tracing::Level::TRACE,
+            let span = diagnostics::tracing::span!(
+                diagnostics::tracing::Level::TRACE,
                 "admission_lock",
                 sender = %scrub(&sender_addr),
                 nonce
@@ -2351,7 +2385,7 @@ impl Blockchain {
                 let tx_hash = tx.id();
                 log_event(
                     "mempool",
-                    log::Level::Warn,
+                    diagnostics::log::Level::Warn,
                     "reject",
                     &sender_addr,
                     nonce,
@@ -2364,7 +2398,7 @@ impl Blockchain {
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("mempool") {
                 let span = crate::log_context!(tx = tx.id());
-                tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=invalid_selector");
+                diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=invalid_selector");
             }
             #[cfg(feature = "telemetry")]
             {
@@ -2437,20 +2471,20 @@ impl Blockchain {
             telemetry::EVICTIONS_TOTAL.inc();
             // find lowest-priority entry for eviction
             let mut victim: Option<((String, u64), MempoolEntry)> = None;
-            for entry in mempool.iter() {
-                let key = (entry.key().0.clone(), entry.key().1);
-                let val = entry.value().clone();
+            mempool.for_each(|key, val| {
+                let key_clone = (key.0.clone(), key.1);
+                let val_clone = val.clone();
                 victim = match victim {
                     Some((ref k, ref v)) => {
-                        if mempool_cmp(&val, v, self.tx_ttl) == Ordering::Greater {
-                            Some((key, val))
+                        if mempool_cmp(&val_clone, v, self.tx_ttl) == Ordering::Greater {
+                            Some((key_clone, val_clone))
                         } else {
                             Some((k.clone(), v.clone()))
                         }
                     }
-                    None => Some((key, val)),
+                    None => Some((key_clone, val_clone)),
                 };
-            }
+            });
             if let Some(((ev_sender, ev_nonce), ev_entry)) = victim {
                 let ev_hash = ev_entry.tx.id();
                 if ev_sender != sender_addr {
@@ -2461,8 +2495,8 @@ impl Blockchain {
                         .clone();
                     #[cfg(feature = "telemetry")]
                     let _guard = {
-                        let span = tracing::span!(
-                            tracing::Level::TRACE,
+                        let span = diagnostics::tracing::span!(
+                            diagnostics::tracing::Level::TRACE,
                             "admission_lock",
                             sender = %scrub(&ev_sender),
                             nonce = ev_nonce
@@ -2517,7 +2551,7 @@ impl Blockchain {
                     let ev_hash = ev_entry.tx.id();
                     log_event(
                         "mempool",
-                        log::Level::Info,
+                        diagnostics::log::Level::Info,
                         "evict",
                         &ev_sender,
                         ev_nonce,
@@ -2530,7 +2564,7 @@ impl Blockchain {
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 if telemetry::should_log("mempool") {
                     let span = crate::log_context!(tx = ev_entry.tx.id());
-                    tracing::info!(parent: &span, "tx evicted sender={} nonce={} reason=priority", scrub(&ev_sender), ev_nonce);
+                    diagnostics::tracing::info!(parent: &span, "tx evicted sender={} nonce={} reason=priority", scrub(&ev_sender), ev_nonce);
                 }
                 if self.panic_on_evict.swap(false, AtomicOrdering::SeqCst) {
                     panic!("evict panic");
@@ -2543,7 +2577,7 @@ impl Blockchain {
                     let tx_hash = tx.id();
                     log_event(
                         "mempool",
-                        log::Level::Warn,
+                        diagnostics::log::Level::Warn,
                         "reject",
                         &sender_addr,
                         nonce,
@@ -2556,21 +2590,21 @@ impl Blockchain {
                 #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                 if telemetry::should_log("mempool") {
                     let span = crate::log_context!(tx = tx.id());
-                    tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=mempool_full");
+                    diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=mempool_full");
                 }
                 return Err(TxAdmissionError::MempoolFull);
             }
         }
 
         match mempool.entry((sender_addr.clone(), nonce)) {
-            dashmap::mapref::entry::Entry::Occupied(_) => {
+            DashEntry::Occupied(_) => {
                 #[cfg(feature = "telemetry")]
                 {
                     let tx_hash = tx.id();
                     #[cfg(feature = "telemetry-json")]
                     log_event(
                         "mempool",
-                        log::Level::Warn,
+                        diagnostics::log::Level::Warn,
                         "reject",
                         &sender_addr,
                         nonce,
@@ -2582,7 +2616,7 @@ impl Blockchain {
                     #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                     if telemetry::should_log("mempool") {
                         let span = crate::log_context!(tx = tx_hash);
-                        tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                        diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
                     }
                 }
                 #[cfg(feature = "telemetry")]
@@ -2592,7 +2626,7 @@ impl Blockchain {
                 }
                 Err(TxAdmissionError::Duplicate)
             }
-            dashmap::mapref::entry::Entry::Vacant(vacant) => {
+            DashEntry::Vacant(vacant) => {
                 let accounts = &mut self.accounts;
                 let sender = match accounts.get_mut(&sender_addr) {
                     Some(s) => s,
@@ -2603,7 +2637,7 @@ impl Blockchain {
                             let tx_hash = tx.id();
                             log_event(
                                 "mempool",
-                                log::Level::Warn,
+                                diagnostics::log::Level::Warn,
                                 "reject",
                                 &sender_addr,
                                 nonce,
@@ -2616,7 +2650,7 @@ impl Blockchain {
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
                             let span = crate::log_context!(tx = tx.id());
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
+                            diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=unknown_sender");
                         }
                         #[cfg(feature = "telemetry")]
                         self.record_reject("unknown_sender");
@@ -2644,7 +2678,7 @@ impl Blockchain {
                             #[cfg(feature = "telemetry-json")]
                             log_event(
                                 "mempool",
-                                log::Level::Warn,
+                                diagnostics::log::Level::Warn,
                                 "reject",
                                 &sender_addr,
                                 nonce,
@@ -2656,7 +2690,7 @@ impl Blockchain {
                             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                             if telemetry::should_log("mempool") {
                                 let span = crate::log_context!(tx = tx_hash);
-                                tracing::warn!(
+                                diagnostics::tracing::warn!(
                                     parent: &span,
                                     "tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit"
                                 );
@@ -2700,7 +2734,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            log::Level::Warn,
+                            diagnostics::log::Level::Warn,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -2712,7 +2746,7 @@ impl Blockchain {
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
                             let span = crate::log_context!(tx = tx_hash);
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
+                            diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=insufficient_balance");
                         }
                     }
                     #[cfg(feature = "telemetry")]
@@ -2726,7 +2760,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            log::Level::Warn,
+                            diagnostics::log::Level::Warn,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -2738,7 +2772,7 @@ impl Blockchain {
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
                             let span = crate::log_context!(tx = tx_hash);
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
+                            diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=duplicate");
                         }
                         telemetry::DUP_TX_REJECT_TOTAL.inc();
                         self.record_reject("duplicate");
@@ -2752,7 +2786,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            log::Level::Warn,
+                            diagnostics::log::Level::Warn,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -2764,7 +2798,7 @@ impl Blockchain {
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
                             let span = crate::log_context!(tx = tx_hash);
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=nonce_gap");
+                            diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=nonce_gap");
                         }
                         self.record_reject("nonce_gap");
                     }
@@ -2807,7 +2841,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            log::Level::Warn,
+                            diagnostics::log::Level::Warn,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -2819,7 +2853,7 @@ impl Blockchain {
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
                             let span = crate::log_context!(tx = tx_hash);
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
+                            diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=bad_signature");
                         }
                         self.record_reject("bad_signature");
                     }
@@ -2832,7 +2866,7 @@ impl Blockchain {
                         #[cfg(feature = "telemetry-json")]
                         log_event(
                             "mempool",
-                            log::Level::Warn,
+                            diagnostics::log::Level::Warn,
                             "reject",
                             &sender_addr,
                             nonce,
@@ -2844,7 +2878,7 @@ impl Blockchain {
                         #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
                         if telemetry::should_log("mempool") {
                             let span = crate::log_context!(tx = tx_hash);
-                            tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit");
+                            diagnostics::tracing::warn!(parent: &span, "tx rejected sender={sender_addr} nonce={nonce} reason=pending_limit");
                         }
                         self.record_reject("pending_limit");
                     }
@@ -2887,7 +2921,7 @@ impl Blockchain {
                     #[cfg(feature = "telemetry-json")]
                     log_event(
                         "mempool",
-                        log::Level::Info,
+                        diagnostics::log::Level::Info,
                         "admit",
                         &sender_addr,
                         nonce,
@@ -2927,8 +2961,8 @@ impl Blockchain {
         let _pool_guard = {
             let size = self.mempool_size_consumer.load(AtomicOrdering::SeqCst)
                 + self.mempool_size_industrial.load(AtomicOrdering::SeqCst);
-            let span = tracing::span!(
-                tracing::Level::TRACE,
+            let span = diagnostics::tracing::span!(
+                diagnostics::tracing::Level::TRACE,
                 "mempool_mutex",
                 sender = %scrub(sender),
                 nonce,
@@ -2957,7 +2991,7 @@ impl Blockchain {
             .clone();
         #[cfg(feature = "telemetry")]
         let _guard = {
-            let span = tracing::span!(tracing::Level::TRACE, "admission_lock", sender = %scrub(sender), nonce = nonce);
+            let span = diagnostics::tracing::span!(diagnostics::tracing::Level::TRACE, "admission_lock", sender = %scrub(sender), nonce = nonce);
             span.in_scope(|| lock.lock()).map_err(|_| {
                 telemetry::LOCK_POISON_TOTAL.inc();
                 self.record_reject("lock_poison");
@@ -3005,7 +3039,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
-                log::Level::Info,
+                diagnostics::log::Level::Info,
                 "drop",
                 sender,
                 nonce,
@@ -3059,7 +3093,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
-                log::Level::Info,
+                diagnostics::log::Level::Info,
                 "drop",
                 sender,
                 nonce,
@@ -3083,7 +3117,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry-json")]
             log_event(
                 "mempool",
-                log::Level::Warn,
+                diagnostics::log::Level::Warn,
                 "drop",
                 sender,
                 nonce,
@@ -3114,11 +3148,11 @@ impl Blockchain {
             .as_millis() as u64;
         let mut expired: Vec<(String, u64, u64)> = Vec::new();
         let mut orphaned: Vec<(String, u64, u64)> = Vec::new();
-        for entry in self.mempool_consumer.iter() {
-            let sender = entry.key().0.clone();
-            let nonce = entry.key().1;
-            let fpb = entry.value().fee_per_byte();
-            if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
+        self.mempool_consumer.for_each(|key, value| {
+            let sender = key.0.clone();
+            let nonce = key.1;
+            let fpb = value.fee_per_byte();
+            if now.saturating_sub(value.timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
                     telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
@@ -3127,12 +3161,12 @@ impl Blockchain {
             } else if !self.accounts.contains_key(&sender) {
                 orphaned.push((sender, nonce, fpb));
             }
-        }
-        for entry in self.mempool_industrial.iter() {
-            let sender = entry.key().0.clone();
-            let nonce = entry.key().1;
-            let fpb = entry.value().fee_per_byte();
-            if now.saturating_sub(entry.value().timestamp_millis) > ttl_ms {
+        });
+        self.mempool_industrial.for_each(|key, value| {
+            let sender = key.0.clone();
+            let nonce = key.1;
+            let fpb = value.fee_per_byte();
+            if now.saturating_sub(value.timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
                 if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
                     telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
@@ -3141,12 +3175,12 @@ impl Blockchain {
             } else if !self.accounts.contains_key(&sender) {
                 orphaned.push((sender, nonce, fpb));
             }
-        }
+        });
         let expired_count = expired.len() as u64;
         for (sender, nonce, fpb) in expired {
             #[cfg(feature = "telemetry")]
-            let _span = tracing::span!(
-                tracing::Level::TRACE,
+            let _span = diagnostics::tracing::span!(
+                diagnostics::tracing::Level::TRACE,
                 "eviction_sweep",
                 sender = %scrub(&sender),
                 nonce,
@@ -3172,8 +3206,8 @@ impl Blockchain {
             }
             for (sender, nonce, fpb) in orphaned {
                 #[cfg(feature = "telemetry")]
-                let _span = tracing::span!(
-                    tracing::Level::TRACE,
+                let _span = diagnostics::tracing::span!(
+                    diagnostics::tracing::Level::TRACE,
                     "eviction_sweep",
                     sender = %scrub(&sender),
                     nonce,
@@ -3362,7 +3396,7 @@ impl Blockchain {
             #[cfg(feature = "telemetry")]
             {
                 crate::telemetry::MINER_REWARD_RECALC_TOTAL.inc();
-                tracing::info!(
+                diagnostics::tracing::info!(
                     active = active_eff,
                     factor = self.logistic_factor,
                     "miner_reward_recalc"
@@ -3387,12 +3421,11 @@ impl Blockchain {
         }
 
         self.skipped.clear();
-        let mut pending: Vec<MempoolEntry> = self
-            .mempool_consumer
-            .iter()
-            .map(|e| e.value().clone())
-            .chain(self.mempool_industrial.iter().map(|e| e.value().clone()))
-            .collect();
+        let mut pending: Vec<MempoolEntry> = Vec::new();
+        self.mempool_consumer
+            .for_each(|_, value| pending.push(value.clone()));
+        self.mempool_industrial
+            .for_each(|_, value| pending.push(value.clone()));
         pending.sort_unstable_by(|a, b| mempool_cmp(a, b, self.tx_ttl));
         let max_in_block = self.dynamic_block_limit();
         let mut included = Vec::new();
@@ -3754,8 +3787,8 @@ impl Blockchain {
                 // CONSENSUS.md §10.3: mempool mutations are guarded by mempool_mutex
                 #[cfg(feature = "telemetry")]
                 let _pool_guard = {
-                    let span = tracing::span!(
-                        tracing::Level::TRACE,
+                    let span = diagnostics::tracing::span!(
+                        diagnostics::tracing::Level::TRACE,
                         "mempool_mutex",
                         sender = %scrub(&miner_addr),
                         nonce = 0u64,
@@ -3787,8 +3820,8 @@ impl Blockchain {
                         .clone();
                     #[cfg(feature = "telemetry")]
                     let _guard = {
-                        let span = tracing::span!(
-                            tracing::Level::TRACE,
+                        let span = diagnostics::tracing::span!(
+                            diagnostics::tracing::Level::TRACE,
                             "admission_lock",
                             sender = %scrub(&tx.payload.from_),
                             nonce = tx.payload.nonce
@@ -4525,7 +4558,7 @@ pub fn spawn_purge_loop_thread(
                         if ttl_delta > 0 {
                             log_event(
                                 "mempool",
-                                log::Level::Info,
+                                diagnostics::log::Level::Info,
                                 "purge_loop",
                                 "",
                                 0,
@@ -4538,7 +4571,7 @@ pub fn spawn_purge_loop_thread(
                         if orphan_delta > 0 {
                             log_event(
                                 "mempool",
-                                log::Level::Info,
+                                diagnostics::log::Level::Info,
                                 "purge_loop",
                                 "",
                                 0,
@@ -4611,7 +4644,7 @@ pub fn maybe_spawn_purge_loop(
         Ok(secs) => Ok(spawn_purge_loop_thread(bc, secs, shutdown)),
         Err(e) => {
             #[cfg(feature = "telemetry")]
-            log::warn!("{e}");
+            diagnostics::log::warn!("{e}");
             Err(e)
         }
     }
@@ -4622,7 +4655,7 @@ pub fn maybe_spawn_purge_loop(
 pub struct ShutdownFlag(Arc<AtomicBool>);
 
 impl ShutdownFlag {
-    #[new]
+    #[cfg_attr(feature = "python-bindings", new)]
     /// Create a new unset shutdown flag.
     ///
     /// Returns:
@@ -4671,6 +4704,7 @@ pub struct PurgeLoop {
 }
 
 impl PurgeLoop {
+    #[cfg_attr(feature = "python-bindings", new)]
     pub fn new<T>(_bc: T) -> PyResult<Self> {
         Err(PyError::feature_disabled()
             .with_message("PurgeLoop is only available once python bindings ship"))
@@ -4942,7 +4976,7 @@ pub struct PyRemoteSigner {
 }
 
 impl PyRemoteSigner {
-    #[new]
+    #[cfg_attr(feature = "python-bindings", new)]
     pub fn new(url: String) -> PyResult<Self> {
         let inner = WalletRemoteSigner::connect(&url).map_err(|e| py_runtime_err(e.to_string()))?;
         Ok(Self { inner })

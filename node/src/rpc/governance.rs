@@ -2,10 +2,10 @@ use super::RpcError;
 use crate::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
+use foundation_serialization::{binary, json::json};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
-use serde_json::json;
 
 fn parse_key(k: &str) -> Option<ParamKey> {
     match k {
@@ -39,7 +39,7 @@ pub fn submit_proposal(
     deps: Vec<u64>,
     current_epoch: u64,
     vote_deadline: u64,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let key = parse_key(key).ok_or(RpcError {
         code: -32060,
         message: "bad key",
@@ -70,7 +70,7 @@ pub fn vote_proposal(
     proposal_id: u64,
     choice: &str,
     current_epoch: u64,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let choice = match choice {
         "yes" => VoteChoice::Yes,
         "no" => VoteChoice::No,
@@ -79,25 +79,25 @@ pub fn vote_proposal(
     // ensure dependencies activated
     let tree = store.proposals();
     if let Some(raw) = tree
-        .get(bincode::serialize(&proposal_id).unwrap())
+        .get(binary::encode(&proposal_id).unwrap())
         .map_err(|_| RpcError {
             code: -32068,
             message: "storage",
         })?
     {
-        let prop: Proposal = bincode::deserialize(&raw).map_err(|_| RpcError {
+        let prop: Proposal = binary::decode(&raw).map_err(|_| RpcError {
             code: -32069,
             message: "decode",
         })?;
         for dep in &prop.deps {
             if let Some(dr) = tree
-                .get(bincode::serialize(dep).unwrap())
+                .get(binary::encode(dep).unwrap())
                 .map_err(|_| RpcError {
                     code: -32068,
                     message: "storage",
                 })?
             {
-                let dp: Proposal = bincode::deserialize(&dr).map_err(|_| RpcError {
+                let dp: Proposal = binary::decode(&dr).map_err(|_| RpcError {
                     code: -32069,
                     message: "decode",
                 })?;
@@ -136,7 +136,7 @@ pub fn gov_propose(
     max: i64,
     current_epoch: u64,
     vote_deadline: u64,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     submit_proposal(
         store,
         proposer,
@@ -156,11 +156,11 @@ pub fn gov_vote(
     proposal_id: u64,
     choice: &str,
     current_epoch: u64,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     vote_proposal(store, voter, proposal_id, choice, current_epoch)
 }
 
-pub fn gov_list(store: &GovStore) -> Result<serde_json::Value, RpcError> {
+pub fn gov_list(store: &GovStore) -> Result<foundation_serialization::json::Value, RpcError> {
     let mut arr = vec![];
     for item in store.proposals().iter() {
         // need access; make proposals() pub
@@ -168,19 +168,24 @@ pub fn gov_list(store: &GovStore) -> Result<serde_json::Value, RpcError> {
             code: -32063,
             message: "iter",
         })?;
-        let p: Proposal = bincode::deserialize(&raw).map_err(|_| RpcError {
+        let p: Proposal = binary::decode(&raw).map_err(|_| RpcError {
             code: -32065,
             message: "decode",
         })?;
         arr.push(p);
     }
-    Ok(serde_json::to_value(arr).map_err(|_| RpcError {
-        code: -32066,
-        message: "json",
-    })?)
+    Ok(
+        foundation_serialization::json::to_value(arr).map_err(|_| RpcError {
+            code: -32066,
+            message: "json",
+        })?,
+    )
 }
 
-pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcError> {
+pub fn gov_params(
+    params: &Params,
+    epoch: u64,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     Ok(json!({
         "epoch": epoch,
         "snapshot_interval_secs": params.snapshot_interval_secs,
@@ -203,7 +208,9 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<serde_json::Value, RpcE
     }))
 }
 
-pub fn release_signers(store: &GovStore) -> Result<serde_json::Value, RpcError> {
+pub fn release_signers(
+    store: &GovStore,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let signers = crate::provenance::release_signer_hexes();
     let threshold = store
         .approved_release_hashes()
@@ -227,7 +234,7 @@ pub fn release_signers(store: &GovStore) -> Result<serde_json::Value, RpcError> 
     }))
 }
 
-pub fn inflation_params(params: &Params) -> serde_json::Value {
+pub fn inflation_params(params: &Params) -> foundation_serialization::json::Value {
     json!({
         "beta_storage_sub_ct": params.beta_storage_sub_ct,
         "gamma_read_sub_ct": params.gamma_read_sub_ct,
@@ -242,7 +249,7 @@ pub fn gov_rollback_last(
     params: &mut Params,
     rt: &mut Runtime,
     current_epoch: u64,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     store
         .rollback_last(current_epoch, rt, params)
         .map_err(|_| RpcError {
@@ -258,7 +265,7 @@ pub fn gov_rollback(
     params: &mut Params,
     rt: &mut Runtime,
     current_epoch: u64,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     store
         .rollback_proposal(proposal_id, current_epoch, rt, params)
         .map_err(|_| RpcError {

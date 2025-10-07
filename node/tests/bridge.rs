@@ -5,8 +5,8 @@ use bridges::{
     light_client::{header_hash, Header, Proof},
     RelayerBundle, RelayerProof,
 };
+use concurrency::Lazy;
 use hex;
-use once_cell::sync::Lazy;
 use sled::Config;
 use std::path::Path;
 use std::sync::Mutex;

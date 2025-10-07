@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
+use foundation_serialization::json::Value;
 use runtime::{io::read_to_end, net::TcpStream};
-use serde_json::Value;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
@@ -35,7 +35,7 @@ fn rpc(addr: &str, body: &str) -> Value {
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
         let body = &resp[body_idx + 4..];
-        serde_json::from_str(body).unwrap()
+        foundation_serialization::json::from_str(body).unwrap()
     })
 }
 

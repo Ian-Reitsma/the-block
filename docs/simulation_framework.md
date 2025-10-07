@@ -63,7 +63,7 @@ To run the harness:
 
 ```bash
 cargo run -p tb-sim --bin dependency_fault --features dependency-fault \
-  --runtime tokio --transport quinn --overlay libp2p --storage inhouse \
+  --runtime inhouse --transport quinn --overlay libp2p --storage inhouse \
   --coding reed-solomon --crypto dalek --codec bincode \
   --fault transport:timeout --fault coding:panic --duration-secs 10
 ```

@@ -1,8 +1,8 @@
 #![cfg(feature = "integration-tests")]
 
+use concurrency::Lazy;
 use hex;
 use ledger::address::ShardId;
-use once_cell::sync::Lazy;
 use state::{MerkleTrie, SnapshotManager};
 use std::collections::HashMap;
 use std::sync::Mutex;

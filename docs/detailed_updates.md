@@ -69,7 +69,7 @@
 - Atomic file writer consolidates durable write‑rename‑sync persistence ([node/src/util/atomic_file.rs](../node/src/util/atomic_file.rs)).
 - Versioned blob framing encodes magic bytes, version tags, and CRC32 checksums for on‑disk schemas ([node/src/util/versioned_blob.rs](../node/src/util/versioned_blob.rs)).
 - Python: `mine_block(txs)` helper remains exported but now returns a feature-disabled error until the first-party bridge lands ([node/src/lib.rs](../node/src/lib.rs)).
-- Asynchronous JSON-RPC server built on `tokio` replaces the thread-per-connection model and dispatches requests with async tasks while preserving spec-compliant errors ([node/src/rpc.rs](../node/src/rpc.rs), [node/src/bin/node.rs](../node/src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
+- Asynchronous JSON-RPC server built on the in-house runtime replaces the thread-per-connection model and dispatches requests with async tasks while preserving spec-compliant errors ([node/src/rpc.rs](../node/src/rpc.rs), [node/src/bin/node.rs](../node/src/bin/node.rs), [tests/node_rpc.rs](tests/node_rpc.rs)).
 - Network partition/rejoin and invalid gossip cases ensure longest-chain convergence ([tests/net_gossip.rs](tests/net_gossip.rs)).
 - Demo exits early with a bridge-disabled message while the first-party Python facade is under construction ([demo.py](demo.py)).
 - Telemetry logs TTL drops and orphan sweeps with stable `code` fields and sample JSON lines ([node/src/telemetry.rs](../node/src/telemetry.rs), [tests/logging.rs](tests/logging.rs)).

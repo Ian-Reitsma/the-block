@@ -157,7 +157,8 @@ fn tail_streams_indexed_rows() -> Result<()> {
         let message = ws.recv().await?.expect("websocket message");
         match message {
             WsMessage::Text(text) => {
-                let rows: Vec<the_block::log_indexer::LogEntry> = serde_json::from_str(&text)?;
+                let rows: Vec<the_block::log_indexer::LogEntry> =
+                    foundation_serialization::json::from_str(&text)?;
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0].message, "ready");
             }

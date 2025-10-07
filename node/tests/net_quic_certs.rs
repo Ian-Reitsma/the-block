@@ -100,17 +100,18 @@ fn prunes_stale_quic_cert_history() {
 
     let store_path = dir.path().join("peer_certs.json");
     let mut data = std::fs::read_to_string(&store_path).expect("read store");
-    let mut json: serde_json::Value = serde_json::from_str(&data).expect("decode store");
+    let mut json: foundation_serialization::json::Value =
+        foundation_serialization::json::from_str(&data).expect("decode store");
     if let Some(array) = json.as_array_mut() {
         if let Some(entry) = array.first_mut() {
             if let Some(history) = entry.get_mut("history") {
                 if let Some(first) = history.as_array_mut().and_then(|v| v.first_mut()) {
-                    first["updated_at"] = serde_json::json!(0);
+                    first["updated_at"] = foundation_serialization::json::json!(0);
                 }
             }
         }
     }
-    data = serde_json::to_string_pretty(&json).expect("encode store");
+    data = foundation_serialization::json::to_string_pretty(&json).expect("encode store");
     std::fs::write(&store_path, data).expect("write store");
     let _ = refresh_peer_cert_store_from_disk();
 

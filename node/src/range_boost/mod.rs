@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use concurrency::{Lazy, MutexExt};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
@@ -54,7 +54,7 @@ pub fn is_enabled() -> bool {
 }
 
 fn record_latency(addr: String, latency: u128) {
-    let mut guard = PEER_LATENCY.lock().unwrap();
+    let mut guard = PEER_LATENCY.guard();
     let is_new = !guard.contains_key(&addr);
     guard.insert(addr.clone(), latency);
     #[cfg(feature = "telemetry")]
@@ -71,14 +71,12 @@ fn record_latency(addr: String, latency: u128) {
 }
 
 pub fn peer_latency(addr: &SocketAddr) -> Option<u128> {
-    PEER_LATENCY
-        .lock()
-        .ok()
-        .and_then(|map| map.get(&addr.to_string()).cloned())
+    let map = PEER_LATENCY.guard();
+    map.get(&addr.to_string()).cloned()
 }
 
 pub fn best_peer() -> Option<MeshPeer> {
-    let map = PEER_LATENCY.lock().ok()?;
+    let map = PEER_LATENCY.guard();
     map.iter().min_by_key(|(_, l)| **l).map(|(a, l)| MeshPeer {
         addr: a.clone(),
         latency_ms: *l,
@@ -86,7 +84,7 @@ pub fn best_peer() -> Option<MeshPeer> {
 }
 
 pub fn peers() -> Vec<MeshPeer> {
-    let map = PEER_LATENCY.lock().unwrap();
+    let map = PEER_LATENCY.guard();
     let mut peers: Vec<MeshPeer> = map
         .iter()
         .map(|(a, l)| MeshPeer {

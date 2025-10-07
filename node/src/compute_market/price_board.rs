@@ -1,7 +1,8 @@
 use crate::transaction::FeeLane;
-use once_cell::sync::{Lazy, OnceCell};
+use concurrency::{Lazy, OnceCell};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -17,10 +18,10 @@ use crate::util::atomic_file::write_atomic;
 use crate::util::clock::{Clock, MonotonicClock};
 use crate::util::versioned_blob::{decode_blob, encode_blob, DecodeErr, MAGIC_PRICE_BOARD};
 
+#[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
+use diagnostics::tracing::{info, warn};
 #[cfg(feature = "telemetry")]
 use prometheus::{IntCounterVec, IntGauge, IntGaugeVec, Opts};
-#[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-use tracing::{info, warn};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{INDUSTRIAL_BACKLOG, INDUSTRIAL_PRICE_PER_UNIT, INDUSTRIAL_UTILIZATION};
@@ -293,7 +294,12 @@ pub fn init_with_clock<C: Clock>(path: String, window: usize, save_interval_secs
                     "version_migrate"
                 }
             }
-            Err(DecodeErr::BadMagic | DecodeErr::BadCrc | DecodeErr::UnsupportedVersion { .. }) => {
+            Err(
+                DecodeErr::BadMagic
+                | DecodeErr::BadCrc
+                | DecodeErr::UnsupportedVersion { .. }
+                | DecodeErr::Unimplemented(_),
+            ) => {
                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                 warn!(
                     "corrupted price board {}; starting empty",
@@ -384,11 +390,20 @@ pub fn reset_path_for_test() {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum MigrateErr {
-    #[error("unsupported version {0}")]
     Unsupported(u16),
 }
+
+impl fmt::Display for MigrateErr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MigrateErr::Unsupported(ver) => write!(f, "unsupported version {ver}"),
+        }
+    }
+}
+
+impl std::error::Error for MigrateErr {}
 
 fn migrate(from_ver: u16, bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
     if from_ver == 1 {

@@ -4,7 +4,7 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+use foundation_serialization::json::Value;
 use the_block::{
     config::NodeConfig, rpc::run_rpc_server, telemetry, Blockchain, DEFAULT_SNAPSHOT_INTERVAL,
 };
@@ -37,7 +37,7 @@ fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
             .await
             .unwrap();
         let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        serde_json::from_slice(&resp[body_idx + 4..]).unwrap()
+        foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap()
     })
 }
 
@@ -132,7 +132,7 @@ fn snapshot_interval_restart_cycle() {
             let _ = expect_timeout(rpc(&addr, &body, Some("testtoken"))).await;
             handle.abort();
             let _ = handle.await;
-            log::logger().flush();
+            diagnostics::log::logger().flush();
             drop(bc);
             let cfg_text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
             assert!(cfg_text.contains(&format!("snapshot_interval = {interval}")));

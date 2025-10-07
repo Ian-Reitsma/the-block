@@ -1,5 +1,4 @@
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::cmp::Reverse;
@@ -438,7 +437,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep += 1;
         {
-            let mut store = REPUTATION_STORE.lock();
+            let mut store = reputation_store();
             store.adjust(provider, 1);
         }
         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -459,7 +458,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep -= 1;
         {
-            let mut store = REPUTATION_STORE.lock();
+            let mut store = reputation_store();
             store.adjust(provider, -1);
         }
         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -480,7 +479,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep += 1;
         {
-            let mut store = REPUTATION_STORE.lock();
+            let mut store = reputation_store();
             store.adjust(provider, 1);
         }
         #[cfg(feature = "telemetry")]
@@ -499,7 +498,7 @@ impl SchedulerState {
         let rep = self.reputation.entry(provider.to_owned()).or_insert(0);
         *rep -= 1;
         {
-            let mut store = REPUTATION_STORE.lock();
+            let mut store = reputation_store();
             store.adjust(provider, -1);
         }
         #[cfg(feature = "telemetry")]
@@ -575,7 +574,7 @@ impl SchedulerState {
                                 .inc();
                         }
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                        tracing::info!(job_id, old = %current.provider, new = new_provider, "preempted job");
+                        diagnostics::tracing::info!(job_id, old = %current.provider, new = new_provider, "preempted job");
                         true
                     }
                     Err(_) => {
@@ -586,7 +585,7 @@ impl SchedulerState {
                                 .inc();
                         }
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                        tracing::warn!(job_id, old = %current.provider, new = new_provider, "handoff failed");
+                        diagnostics::tracing::warn!(job_id, old = %current.provider, new = new_provider, "handoff failed");
                         false
                     }
                 }
@@ -812,9 +811,9 @@ impl SchedulerState {
     }
 }
 
-static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
+static SCHEDULER: Lazy<MutexT<SchedulerState>> = Lazy::new(|| {
     let rep = {
-        let mut store = REPUTATION_STORE.lock();
+        let mut store = reputation_store();
         store.decay(provider_reputation_decay(), provider_reputation_retention());
         store
             .data
@@ -822,7 +821,7 @@ static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
             .map(|(k, v)| (k.clone(), v.score))
             .collect()
     };
-    Mutex::new(SchedulerState {
+    mutex(SchedulerState {
         offers: HashMap::new(),
         utilization: HashMap::new(),
         reputation: rep,
@@ -837,6 +836,10 @@ static SCHEDULER: Lazy<Mutex<SchedulerState>> = Lazy::new(|| {
         priority_miss_total: 0,
     })
 });
+
+fn scheduler() -> MutexGuard<'static, SchedulerState> {
+    SCHEDULER.guard()
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ReputationEntry {
@@ -945,10 +948,14 @@ impl ReputationStore {
     }
 }
 
-static REPUTATION_STORE: Lazy<Mutex<ReputationStore>> = Lazy::new(|| {
+static REPUTATION_STORE: Lazy<MutexT<ReputationStore>> = Lazy::new(|| {
     let path = reputation_db_path();
-    Mutex::new(ReputationStore::load(path))
+    mutex(ReputationStore::load(path))
 });
+
+fn reputation_store() -> MutexGuard<'static, ReputationStore> {
+    REPUTATION_STORE.guard()
+}
 
 static PROVIDER_REPUTATION_DECAY: AtomicU64 = AtomicU64::new(f64::to_bits(0.05));
 static PROVIDER_REPUTATION_RETENTION: AtomicU64 = AtomicU64::new(7 * 24 * 60 * 60);
@@ -1008,7 +1015,7 @@ pub fn reputation_gossip_enabled() -> bool {
 }
 
 pub fn reputation_snapshot() -> Vec<crate::net::ReputationUpdate> {
-    REPUTATION_STORE.lock().snapshot()
+    reputation_store().snapshot()
 }
 
 fn lookup_cancellation(job_id: &str) -> Option<String> {
@@ -1027,7 +1034,7 @@ fn lookup_cancellation(job_id: &str) -> Option<String> {
 }
 
 pub fn job_status(job_id: &str) -> serde_json::Value {
-    let sched = SCHEDULER.lock();
+    let sched = scheduler();
     if sched.active.contains_key(job_id) {
         serde_json::json!({"status": "active"})
     } else if sched.pending.iter().any(|j| j.job_id == job_id) {
@@ -1083,7 +1090,7 @@ fn load_pending() -> BinaryHeap<QueuedJob> {
 }
 
 pub fn merge_reputation(provider: &str, score: i64, epoch: u64) -> bool {
-    REPUTATION_STORE.lock().merge(provider, score, epoch)
+    reputation_store().merge(provider, score, epoch)
 }
 
 #[cfg(test)]
@@ -1187,15 +1194,13 @@ pub fn register_offer(
     price_per_unit: u64,
     multiplier: f64,
 ) {
-    SCHEDULER
-        .lock()
-        .register_offer(provider, capability, reputation, price_per_unit, multiplier);
+    scheduler().register_offer(provider, capability, reputation, price_per_unit, multiplier);
 }
 
 pub fn match_offer(need: &Capability) -> Option<String> {
     #[cfg(feature = "telemetry")]
     let start = std::time::Instant::now();
-    let res = SCHEDULER.lock().match_job(need);
+    let res = scheduler().match_job(need);
     if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
         #[cfg(feature = "telemetry")]
         telemetry::SCHEDULER_MATCH_LATENCY_SECONDS.observe(start.elapsed().as_secs_f64());
@@ -1210,9 +1215,7 @@ pub fn start_job_with_expected(
     priority: Priority,
     expected_secs: u64,
 ) {
-    SCHEDULER
-        .lock()
-        .enqueue_job(job_id, provider, cap, priority, expected_secs);
+    scheduler().enqueue_job(job_id, provider, cap, priority, expected_secs);
 }
 
 pub fn start_job_with_priority(job_id: &str, provider: &str, cap: Capability, priority: Priority) {
@@ -1228,64 +1231,64 @@ pub fn start_job_expected(job_id: &str, provider: &str, cap: Capability, expecte
 }
 
 pub fn end_job(job_id: &str) {
-    SCHEDULER.lock().end_job(job_id);
+    scheduler().end_job(job_id);
 }
 
 pub fn cancel_job(job_id: &str, provider: &str, reason: CancelReason) -> bool {
-    SCHEDULER.lock().cancel_job(job_id, provider, reason)
+    scheduler().cancel_job(job_id, provider, reason)
 }
 
 pub fn try_preempt(job_id: &str, new_provider: &str, new_rep: i64) -> bool {
-    SCHEDULER.lock().preempt(job_id, new_provider, new_rep)
+    scheduler().preempt(job_id, new_provider, new_rep)
 }
 
 pub fn active_provider(job_id: &str) -> Option<String> {
-    SCHEDULER.lock().active_provider(job_id)
+    scheduler().active_provider(job_id)
 }
 
 pub fn job_requirements(job_id: &str) -> Option<Capability> {
-    SCHEDULER.lock().job_requirements(job_id)
+    scheduler().job_requirements(job_id)
 }
 
 pub fn provider_capability(provider: &str) -> Option<Capability> {
-    SCHEDULER.lock().provider_capability(provider)
+    scheduler().provider_capability(provider)
 }
 
 pub fn job_duration(job_id: &str) -> Option<(u64, u64)> {
-    SCHEDULER.lock().job_duration(job_id)
+    scheduler().job_duration(job_id)
 }
 
 pub fn record_success(provider: &str) {
-    SCHEDULER.lock().record_success(provider);
+    scheduler().record_success(provider);
 }
 
 pub fn record_accelerator_success(provider: &str) {
-    SCHEDULER.lock().record_accelerator_success(provider);
+    scheduler().record_accelerator_success(provider);
 }
 
 pub fn record_accelerator_failure(provider: &str) {
-    SCHEDULER.lock().record_accelerator_failure(provider);
+    scheduler().record_accelerator_failure(provider);
 }
 
 pub fn record_failure(provider: &str) {
-    SCHEDULER.lock().record_failure(provider);
+    scheduler().record_failure(provider);
 }
 
 pub fn metrics() -> serde_json::Value {
-    SCHEDULER.lock().metrics()
+    scheduler().metrics()
 }
 
 pub fn stats() -> SchedulerStats {
-    SCHEDULER.lock().stats()
+    scheduler().stats()
 }
 
 pub fn reputation_get(provider: &str) -> i64 {
-    REPUTATION_STORE.lock().get(provider)
+    reputation_store().get(provider)
 }
 
 pub fn reset_for_test() {
     {
-        let mut s = SCHEDULER.lock();
+        let mut s = scheduler();
         s.offers.clear();
         s.utilization.clear();
         s.reputation.clear();
@@ -1299,7 +1302,7 @@ pub fn reset_for_test() {
             telemetry::SCHEDULER_ACTIVE_JOBS.set(0);
         }
     }
-    REPUTATION_STORE.lock().data.clear();
+    reputation_store().data.clear();
     PREEMPT_ENABLED.store(false, Ordering::Relaxed);
     PREEMPT_MIN_DELTA.store(10, Ordering::Relaxed);
     REPUTATION_MULT_MIN.store((0.5f64).to_bits(), Ordering::Relaxed);

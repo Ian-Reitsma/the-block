@@ -1,5 +1,5 @@
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
+use concurrency::DashMap;
+use concurrency::Lazy;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;

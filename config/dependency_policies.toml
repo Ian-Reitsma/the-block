@@ -6,7 +6,6 @@ max_depth = 3
 
 [tiers]
 strategic = [
-  "tokio",
   "inhouse",
   "quinn",
   "rustls",

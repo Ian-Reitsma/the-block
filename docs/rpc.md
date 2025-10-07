@@ -79,7 +79,8 @@ All RPC WebSocket endpoints now run on the in-house
 [`runtime::ws`](../crates/runtime/src/ws/mod.rs) stack. The server side wraps
 upgraded sockets in `runtime::ws::ServerStream`, so `/logs/tail`,
 `/state/stream`, and `/vm.trace` negotiate RFC 6455 handshakes without relying
-on `tokio_tungstenite`. Frames follow the same semantics across endpoints:
+on the in-house WebSocket stack (superseding the prior `tokio_tungstenite`
+implementation). Frames follow the same semantics across endpoints:
 
 - Text messages carry JSON payloads (`Vec<LogEntry>` for log tails,
   `StateChunk` for state streaming, and execution steps for VM traces).

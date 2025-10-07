@@ -2,7 +2,7 @@ use httpd::{Method, StatusCode};
 use metrics_aggregator::{router, AppState};
 use serde_json::json;
 use std::future::Future;
-use tempfile::tempdir;
+use sys::tempfile;
 
 fn run_async<T>(future: impl Future<Output = T>) -> T {
     runtime::block_on(future)
@@ -11,7 +11,7 @@ fn run_async<T>(future: impl Future<Output = T>) -> T {
 #[test]
 fn telemetry_round_trip() {
     run_async(async {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state.clone());
 

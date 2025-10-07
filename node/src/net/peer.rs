@@ -10,12 +10,11 @@ use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::Transport;
 use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
+use concurrency::{Lazy, MutexExt};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use hex;
 use indexmap::IndexMap;
-use once_cell::sync::Lazy;
-use parking_lot::Mutex;
-use rand::{rngs::StdRng, seq::SliceRandom, SeedableRng};
+use rand::{rngs::StdRng, seq::SliceRandom};
 use runtime::net::lookup_srv;
 use runtime::sync::broadcast;
 use serde::{Deserialize, Serialize};
@@ -27,6 +26,7 @@ use std::future::Future;
 use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex as StdMutex,
@@ -38,6 +38,10 @@ use sys::fs::{FileLockExt, O_NOFOLLOW};
 use sys::paths;
 use sys::tempfile::{self, Builder as TempBuilder, NamedTempFile};
 use tar::Builder;
+
+fn sys_to_io_error(err: sys::error::SysError) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, err)
+}
 
 use super::{ban_store, peer_metrics_store};
 #[cfg(feature = "quic")]
@@ -54,7 +58,7 @@ fn now_secs() -> u64 {
 fn log_suspicious(path: &str) {
     let count = SUSPICIOUS_EXPORTS.fetch_add(1, Ordering::Relaxed) + 1;
     if count % 100 == 0 {
-        tracing::warn!(%path, "suspicious metrics export attempt count={}", count);
+        diagnostics::tracing::warn!(%path, "suspicious metrics export attempt count={}", count);
     }
 }
 
@@ -113,12 +117,12 @@ impl PeerSet {
 
     /// Add a peer to the set.
     pub fn add(&self, addr: SocketAddr) {
-        let mut guard = self.addrs.lock();
+        let mut guard = self.addrs.guard();
         guard.insert(addr);
         persist_peers(&guard);
-        let mut map = self.transports.lock();
+        let mut map = self.transports.guard();
         map.entry(addr).or_insert(Transport::Tcp);
-        let q = self.quic.lock();
+        let q = self.quic.guard();
         if !q.contains_key(&addr) {
             persist_quic_peers(&q);
         }
@@ -126,25 +130,25 @@ impl PeerSet {
 
     /// Remove a peer from the set.
     pub fn remove(&self, addr: SocketAddr) {
-        let mut guard = self.addrs.lock();
+        let mut guard = self.addrs.guard();
         guard.remove(&addr);
         persist_peers(&guard);
-        let mut map = self.transports.lock();
+        let mut map = self.transports.guard();
         map.remove(&addr);
     }
 
     /// Clear all peers from the set.
     pub fn clear(&self) {
-        let mut guard = self.addrs.lock();
+        let mut guard = self.addrs.guard();
         guard.clear();
         persist_peers(&guard);
-        let mut map = self.transports.lock();
+        let mut map = self.transports.guard();
         map.clear();
     }
 
     /// Return a snapshot of known peers.
     pub fn list(&self) -> Vec<SocketAddr> {
-        self.addrs.lock().iter().copied().collect()
+        self.addrs.guard().iter().copied().collect()
     }
 
     /// Snapshot peers with their advertised transport.
@@ -157,9 +161,9 @@ impl PeerSet {
 
     /// Snapshot peers with transport and optional QUIC certificate.
     pub fn list_with_info(&self) -> Vec<(SocketAddr, Transport, Option<Vec<u8>>)> {
-        let addrs = self.addrs.lock();
-        let transports = self.transports.lock();
-        let quic = self.quic.lock();
+        let addrs = self.addrs.guard();
+        let transports = self.transports.guard();
+        let quic = self.quic.guard();
         addrs
             .iter()
             .map(|a| {
@@ -175,7 +179,7 @@ impl PeerSet {
     /// Record the mapping from address to peer id and allocate metrics entry.
     fn map_addr(&self, addr: SocketAddr, pk: [u8; 32]) {
         {
-            let mut m = ADDR_MAP.lock();
+            let mut m = ADDR_MAP.guard();
             m.insert(addr, pk);
         }
         #[cfg(feature = "quic")]
@@ -194,7 +198,7 @@ impl PeerSet {
                     remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
                         let id = overlay_peer_label(&_old);
-                        tracing::info!(peer = id.as_str(), "evict_peer_metrics");
+                        diagnostics::tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
             }
@@ -207,13 +211,13 @@ impl PeerSet {
 
     /// Record the preferred transport for `addr`.
     pub fn set_transport(&self, addr: SocketAddr, transport: Transport) {
-        let mut map = self.transports.lock();
+        let mut map = self.transports.guard();
         map.insert(addr, transport);
     }
 
     /// Record QUIC endpoint info for `addr`.
     pub fn set_quic(&self, addr: SocketAddr, quic_addr: SocketAddr, cert: Vec<u8>) {
-        let mut map = self.quic.lock();
+        let mut map = self.quic.guard();
         map.insert(
             addr,
             QuicEndpoint {
@@ -241,8 +245,8 @@ impl PeerSet {
     }
 
     fn authorize(&self, pk: [u8; 32]) {
-        self.authorized.lock().insert(pk);
-        let mut ids = PEER_IDENTITIES.lock();
+        self.authorized.guard().insert(pk);
+        let mut ids = PEER_IDENTITIES.guard();
         ids.entry(pk).or_insert(PeerIdentity {
             peer_id: pk,
             public_key: pk,
@@ -252,14 +256,14 @@ impl PeerSet {
     }
 
     fn is_authorized(&self, pk: &[u8; 32]) -> bool {
-        self.authorized.lock().contains(pk)
+        self.authorized.guard().contains(pk)
     }
 
     fn check_rate(&self, pk: &[u8; 32]) -> Result<(), PeerErrorCode> {
         if ban_store_guard().is_banned(pk) {
             return Err(PeerErrorCode::Banned);
         }
-        let mut map = self.states.lock();
+        let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
             last: Instant::now(),
@@ -323,7 +327,7 @@ impl PeerSet {
     }
 
     fn check_shard_rate(&self, pk: &[u8; 32], size: usize) -> Result<(), PeerErrorCode> {
-        let mut map = self.states.lock();
+        let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
             last: Instant::now(),
@@ -400,7 +404,7 @@ impl PeerSet {
         }
 
         let mut peer_key = msg.pubkey;
-        if let Some((new, revoke)) = ROTATED_KEYS.lock().get(&peer_key).copied() {
+        if let Some((new, revoke)) = ROTATED_KEYS.guard().get(&peer_key).copied() {
             if now_secs() > revoke {
                 return;
             }
@@ -450,10 +454,10 @@ impl PeerSet {
             record_drop(&peer_key, reason);
             if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
                 if let Some(peer_addr) = addr {
-                    let mut a = self.addrs.lock();
+                    let mut a = self.addrs.guard();
                     a.remove(&peer_addr);
                 }
-                self.authorized.lock().remove(&peer_key);
+                self.authorized.guard().remove(&peer_key);
             }
             return;
         }
@@ -536,14 +540,14 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
+                let mut bc = chain.guard();
                 let _ = bc.submit_transaction(tx);
             }
             Payload::BlobTx(tx) => {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
+                let mut bc = chain.guard();
                 let _ = bc.submit_blob_tx(tx);
             }
             Payload::Block(shard, block) => {
@@ -553,7 +557,7 @@ impl PeerSet {
                 if let Ok(peer_id) = crate::net::overlay_peer_from_bytes(&peer_key) {
                     crate::net::register_shard_peer(shard, peer_id);
                 }
-                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
+                let mut bc = chain.guard();
                 if (block.index as usize) == bc.chain.len() {
                     let prev = bc.chain.last().map(|b| b.hash.clone()).unwrap_or_default();
                     if block.index == 0 || block.previous_hash == prev {
@@ -574,7 +578,7 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.lock().unwrap_or_else(|e| e.into_inner());
+                let mut bc = chain.guard();
                 if new_chain.len() > bc.chain.len() {
                     #[cfg(feature = "telemetry")]
                     let start = Instant::now();
@@ -597,15 +601,15 @@ impl PeerSet {
                     record_drop(&peer_key, reason);
                     if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
                         if let Some(peer_addr) = addr {
-                            let mut a = self.addrs.lock();
+                            let mut a = self.addrs.guard();
                             a.remove(&peer_addr);
                         }
-                        self.authorized.lock().remove(&peer_key);
+                        self.authorized.guard().remove(&peer_key);
                     }
                     return;
                 }
                 let key = format!("chunk/{}/{}", hex::encode(chunk.root), chunk.index);
-                let _ = CHUNK_DB.lock().try_insert(&key, chunk.data);
+                let _ = CHUNK_DB.guard().try_insert(&key, chunk.data);
             }
             Payload::Reputation(entries) => {
                 if crate::compute_market::scheduler::reputation_gossip_enabled() {
@@ -859,7 +863,7 @@ fn update_peer_rates(pk: &[u8; 32], entry: &mut PeerMetrics, bytes: u64, reqs: u
                     .inc();
                 if crate::telemetry::should_log("p2p") {
                     let id = overlay_peer_label(pk);
-                    tracing::warn!(
+                    diagnostics::tracing::warn!(
                         peer = id.as_str(),
                         reason = r,
                         duration = dur,
@@ -876,7 +880,7 @@ fn update_peer_rates(pk: &[u8; 32], entry: &mut PeerMetrics, bytes: u64, reqs: u
 }
 
 pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
-    if let Some(pk) = ADDR_MAP.lock().get(&addr).copied() {
+    if let Some(pk) = ADDR_MAP.guard().get(&addr).copied() {
         let mut map = peer_metrics_guard();
         maybe_consolidate(&mut map);
         let now = now_secs();
@@ -915,7 +919,7 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
                         remove_peer_metrics(&_old);
                         if crate::telemetry::should_log("p2p") {
                             let id = overlay_peer_label(&_old);
-                            tracing::info!(peer = id.as_str(), "evict_peer_metrics");
+                            diagnostics::tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                         }
                     }
                 }
@@ -984,7 +988,7 @@ pub fn record_request(pk: &[u8; 32]) {
                     remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
                         let id = overlay_peer_label(&_old);
-                        tracing::info!(peer = id.as_str(), "evict_peer_metrics");
+                        diagnostics::tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
             }
@@ -1047,7 +1051,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
                     remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
                         let id = overlay_peer_label(&_old);
-                        tracing::info!(peer = id.as_str(), "evict_peer_metrics");
+                        diagnostics::tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
             }
@@ -1105,7 +1109,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
                     remove_peer_metrics(&_old);
                     if crate::telemetry::should_log("p2p") {
                         let id = overlay_peer_label(&_old);
-                        tracing::info!(peer = id.as_str(), "evict_peer_metrics");
+                        diagnostics::tracing::info!(peer = id.as_str(), "evict_peer_metrics");
                     }
                 }
             }
@@ -1139,7 +1143,7 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         }
     }
     let ts = now_secs();
-    let mut log = HANDSHAKE_LOG.lock();
+    let mut log = HANDSHAKE_LOG.guard();
     log.push_back((ts, overlay_peer_label(pk), reason));
     if log.len() > HANDSHAKE_LOG_CAP {
         log.pop_front();
@@ -1197,7 +1201,7 @@ pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
 }
 
 pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
-    ADDR_MAP.lock().get(addr).copied()
+    ADDR_MAP.guard().get(addr).copied()
 }
 
 #[cfg_attr(not(any(test, feature = "integration-tests")), allow(dead_code))]
@@ -1205,14 +1209,14 @@ pub fn inject_addr_mapping_for_tests(addr: SocketAddr, peer: super::OverlayPeerI
     let mut buf = [0u8; 32];
     let bytes = super::overlay_peer_to_bytes(&peer);
     buf.copy_from_slice(&bytes);
-    ADDR_MAP.lock().insert(addr, buf);
+    ADDR_MAP.guard().insert(addr, buf);
 }
 
 #[cfg(feature = "quic")]
 pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeError) {
     let ts = now_secs();
     {
-        let mut last = LAST_HANDSHAKE_ADDR.lock();
+        let mut last = LAST_HANDSHAKE_ADDR.guard();
         if let Some(prev) = last.get(&addr) {
             if ts.saturating_sub(*prev) < HANDSHAKE_DEBOUNCE_SECS {
                 return;
@@ -1220,7 +1224,7 @@ pub(crate) fn record_handshake_fail_addr(addr: SocketAddr, reason: HandshakeErro
         }
         last.insert(addr, ts);
     }
-    if let Some(pk) = ADDR_MAP.lock().get(&addr).copied() {
+    if let Some(pk) = ADDR_MAP.guard().get(&addr).copied() {
         record_handshake_fail(&pk, reason);
     }
 }
@@ -1230,7 +1234,7 @@ pub fn simulate_handshake_fail(pk: [u8; 32], reason: HandshakeError) {
 }
 
 pub fn recent_handshake_failures() -> Vec<(u64, String, HandshakeError)> {
-    HANDSHAKE_LOG.lock().iter().cloned().collect()
+    HANDSHAKE_LOG.guard().iter().cloned().collect()
 }
 
 fn update_reputation_metric(pk: &[u8; 32], score: f64) {
@@ -1262,7 +1266,7 @@ pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
                     .with_label_values(&[id.as_str()])
                     .inc();
                 if crate::telemetry::should_log("p2p") {
-                    tracing::info!(peer = id.as_str(), "reset_peer_metrics");
+                    diagnostics::tracing::info!(peer = id.as_str(), "reset_peer_metrics");
                 }
             }
         }
@@ -1280,7 +1284,7 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
         update_active_gauge(map.len());
         update_memory_usage(map.len());
         drop(map);
-        let mut addr_map = ADDR_MAP.lock();
+        let mut addr_map = ADDR_MAP.guard();
         for val in addr_map.values_mut() {
             if *val == *old {
                 *val = new;
@@ -1288,7 +1292,7 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
         }
         drop(addr_map);
         {
-            let path = KEY_HISTORY_PATH.lock().clone();
+            let path = KEY_HISTORY_PATH.guard().clone();
             if let Some(parent) = std::path::Path::new(&path).parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
@@ -1305,8 +1309,8 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
             let _ = writeln!(file, "{}", entry.to_string());
         }
         let revoke = now_secs() + KEY_GRACE_SECS;
-        ROTATED_KEYS.lock().insert(*old, (new, revoke));
-        let mut ids = PEER_IDENTITIES.lock();
+        ROTATED_KEYS.guard().insert(*old, (new, revoke));
+        let mut ids = PEER_IDENTITIES.guard();
         if let Some(mut ident) = ids.remove(old) {
             ident.old_key = Some(*old);
             ident.public_key = new;
@@ -1362,7 +1366,7 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
                 "invalid extension",
             ));
         }
-        let dir = METRICS_EXPORT_DIR.lock().clone();
+        let dir = METRICS_EXPORT_DIR.guard().clone();
         std::fs::create_dir_all(&dir)?;
         let path = Path::new(&dir).join(rel);
         if path
@@ -1384,14 +1388,14 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
         let metrics =
             metrics.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "peer"))?;
         let json = serde_json::to_vec(&metrics)?;
-        let tmp_dir = tempfile::tempdir_in(&dir)?;
-        let mut tmp = NamedTempFile::new_in(tmp_dir.path())?;
-        tmp.as_file().lock_exclusive()?;
+        let tmp_dir = tempfile::tempdir_in(&dir).map_err(sys_to_io_error)?;
+        let mut tmp = NamedTempFile::new_in(tmp_dir.path()).map_err(sys_to_io_error)?;
+        tmp.as_file().lock_exclusive().map_err(sys_to_io_error)?;
         tmp.write_all(&json)?;
         tmp.flush()?;
         let overwritten = path.exists();
-        tmp.persist(&path)?;
-        tmp_dir.close()?;
+        tmp.persist(&path).map_err(|e| e.error)?;
+        tmp_dir.close().map_err(sys_to_io_error)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
@@ -1462,7 +1466,7 @@ pub fn export_all_peer_stats(
                 "invalid extension",
             ));
         }
-        let base = METRICS_EXPORT_DIR.lock().clone();
+        let base = METRICS_EXPORT_DIR.guard().clone();
         std::fs::create_dir_all(&base)?;
         let quota = PEER_METRICS_EXPORT_QUOTA.load(Ordering::Relaxed);
         let path = Path::new(&base).join(rel);
@@ -1487,14 +1491,11 @@ pub fn export_all_peer_stats(
         let mut total_bytes = 0u64;
 
         if compress {
-            let tmp_dir = tempfile::tempdir_in(&base)?;
-            let mut tmp = NamedTempFile::new_in(tmp_dir.path())?;
-            tmp.as_file().lock_exclusive()?;
+            let tmp_dir = tempfile::tempdir_in(&base).map_err(sys_to_io_error)?;
+            let mut tmp = NamedTempFile::new_in(tmp_dir.path()).map_err(sys_to_io_error)?;
+            tmp.as_file().lock_exclusive().map_err(sys_to_io_error)?;
             {
-                let enc = flate2::write::GzEncoder::new(
-                    tmp.as_file_mut(),
-                    flate2::Compression::default(),
-                );
+                let enc = flate2::write::GzEncoder::new(&mut tmp, flate2::Compression::default());
                 let mut tar = Builder::new(enc);
                 for pk in &keys {
                     let m = {
@@ -1543,8 +1544,8 @@ pub fn export_all_peer_stats(
                 ));
             }
             let overwritten = path.exists();
-            tmp.persist(&path)?;
-            tmp_dir.close()?;
+            tmp.persist(&path).map_err(|e| e.error)?;
+            tmp_dir.close().map_err(sys_to_io_error)?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::OpenOptionsExt;
@@ -1564,14 +1565,17 @@ pub fn export_all_peer_stats(
                 std::fs::File::open(&path)?;
             }
             #[cfg(feature = "telemetry")]
-            log::info!(
+            diagnostics::log::info!(
                 "peer_stats_export_all count={} bytes={}",
                 initial_len,
                 total_bytes
             );
             Ok(overwritten)
         } else {
-            let tmp_dir = TempBuilder::new().prefix("export").tempdir_in(&base)?;
+            let tmp_dir = TempBuilder::new()
+                .prefix("export")
+                .tempdir_in(&base)
+                .map_err(sys_to_io_error)?;
             for pk in &keys {
                 let m = {
                     let map = peer_metrics_guard();
@@ -1638,7 +1642,7 @@ pub fn export_all_peer_stats(
                 std::fs::File::open(&path)?;
             }
             #[cfg(feature = "telemetry")]
-            log::info!(
+            diagnostics::log::info!(
                 "peer_stats_export_all count={} bytes={} ",
                 initial_len,
                 total_bytes
@@ -1667,7 +1671,7 @@ pub struct PeerStat {
 }
 
 pub fn peer_stats_all(offset: usize, limit: usize) -> Vec<PeerStat> {
-    let metrics = PEER_METRICS.lock();
+    let metrics = PEER_METRICS.guard();
     metrics
         .iter()
         .skip(offset)
@@ -1684,7 +1688,7 @@ pub fn peer_stats_map(
     active_within: Option<u64>,
 ) -> HashMap<String, PeerMetrics> {
     let now = now_secs();
-    let metrics = PEER_METRICS.lock();
+    let metrics = PEER_METRICS.guard();
     metrics
         .iter()
         .filter(|(_, m)| min_rep.map_or(true, |r| m.reputation.score >= r))
@@ -1718,7 +1722,7 @@ static RECORDED_DROPS: Lazy<Mutex<Vec<SocketAddr>>> = Lazy::new(|| Mutex::new(Ve
 
 #[cfg(test)]
 pub(crate) fn take_recorded_drops() -> Vec<SocketAddr> {
-    RECORDED_DROPS.lock().drain(..).collect()
+    RECORDED_DROPS.guard().drain(..).collect()
 }
 
 pub fn record_ip_drop(ip: &SocketAddr) {
@@ -1735,7 +1739,7 @@ pub fn record_ip_drop(ip: &SocketAddr) {
     }
     #[cfg(test)]
     {
-        RECORDED_DROPS.lock().push(*ip);
+        RECORDED_DROPS.guard().push(*ip);
     }
 }
 
@@ -2003,8 +2007,8 @@ static P2P_SHARD_BURST: Lazy<u64> = Lazy::new(|| {
 static PEER_METRICS: Lazy<Mutex<IndexMap<[u8; 32], PeerMetrics>>> =
     Lazy::new(|| Mutex::new(IndexMap::new()));
 
-fn peer_metrics_guard() -> parking_lot::MutexGuard<'static, IndexMap<[u8; 32], PeerMetrics>> {
-    PEER_METRICS.lock()
+fn peer_metrics_guard() -> std::sync::MutexGuard<'static, IndexMap<[u8; 32], PeerMetrics>> {
+    PEER_METRICS.guard()
 }
 
 static ADDR_MAP: Lazy<Mutex<HashMap<SocketAddr, [u8; 32]>>> =
@@ -2127,8 +2131,8 @@ impl AggregatorClient {
 
 static AGGREGATOR: Lazy<Mutex<Option<AggregatorClient>>> = Lazy::new(|| Mutex::new(None));
 
-fn aggregator_guard() -> parking_lot::MutexGuard<'static, Option<AggregatorClient>> {
-    AGGREGATOR.lock()
+fn aggregator_guard() -> std::sync::MutexGuard<'static, Option<AggregatorClient>> {
+    AGGREGATOR.guard()
 }
 
 #[cfg(feature = "telemetry")]
@@ -2145,7 +2149,7 @@ pub fn publish_telemetry_summary(summary: crate::telemetry::summary::TelemetrySu
 pub fn publish_telemetry_summary<T>(_summary: T) {}
 
 fn ban_store_guard() -> std::sync::MutexGuard<'static, ban_store::BanStore> {
-    ban_store::store().lock().unwrap_or_else(|e| e.into_inner())
+    ban_store::store().guard()
 }
 
 pub struct MetricsReceiver {
@@ -2300,7 +2304,7 @@ pub fn set_peer_metrics_sample_rate(rate: u64) {
 }
 
 pub fn set_peer_metrics_path(path: String) {
-    *PEER_METRICS_PATH.lock() = path;
+    *PEER_METRICS_PATH.guard() = path;
 }
 
 pub fn set_peer_metrics_retention(ttl: u64) {
@@ -2308,7 +2312,7 @@ pub fn set_peer_metrics_retention(ttl: u64) {
 }
 
 pub fn set_metrics_export_dir(dir: String) {
-    *METRICS_EXPORT_DIR.lock() = dir;
+    *METRICS_EXPORT_DIR.guard() = dir;
 }
 
 pub fn set_peer_metrics_compress(val: bool) {
@@ -2354,7 +2358,12 @@ pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
             .inc();
         if crate::telemetry::should_log("p2p") {
             let id = overlay_peer_label(pk);
-            tracing::warn!(peer = id.as_str(), reason, duration = dur, "peer_throttled");
+            diagnostics::tracing::warn!(
+                peer = id.as_str(),
+                reason,
+                duration = dur,
+                "peer_throttled"
+            );
         }
     }
 }
@@ -2380,7 +2389,7 @@ fn is_throttled(pk: &[u8; 32]) -> bool {
 }
 
 pub(crate) fn is_throttled_addr(addr: &SocketAddr) -> bool {
-    if let Some(pk) = ADDR_MAP.lock().get(addr) {
+    if let Some(pk) = ADDR_MAP.guard().get(addr) {
         is_throttled(pk)
     } else {
         false

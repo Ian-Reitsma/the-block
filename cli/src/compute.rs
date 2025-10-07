@@ -4,7 +4,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use serde_json::json;
+use foundation_serialization::json::json;
 use std::io::{self, Write};
 use the_block::simple_db::EngineKind;
 
@@ -147,12 +147,12 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
     match cmd {
         ComputeCmd::Cancel { job_id, url } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -188,19 +188,19 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Stats { url, accelerator } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
             let params = accelerator
                 .as_ref()
-                .map(|acc| serde_json::json!({"accelerator": acc}))
-                .unwrap_or(serde_json::Value::Null);
+                .map(|acc| foundation_serialization::json::json!({"accelerator": acc}))
+                .unwrap_or(foundation_serialization::json::Value::Null);
             let payload = Payload {
                 jsonrpc: "2.0",
                 id: 1,
@@ -210,7 +210,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             };
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = json_from_str::<serde_json::Value>(&text) {
+                    if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
                         if let Some(res) = val.get("result") {
                             if let Some(engine) =
                                 res.get("settlement_engine").and_then(|v| v.as_object())
@@ -348,12 +348,12 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
                 jsonrpc: "2.0",
                 id: 2,
                 method: "compute_market.provider_balances",
-                params: serde_json::Value::Null,
+                params: foundation_serialization::json::Value::Null,
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &balance_payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = json_from_str::<serde_json::Value>(&text) {
+                    if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
                         if let Some(providers) = val
                             .get("result")
                             .and_then(|res| res.get("providers"))
@@ -377,12 +377,12 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Queue { url } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -390,12 +390,12 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
                 jsonrpc: "2.0",
                 id: 1,
                 method: "compute_market.stats",
-                params: serde_json::Value::Null,
+                params: foundation_serialization::json::Value::Null,
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
-                    if let Ok(val) = json_from_str::<serde_json::Value>(&text) {
+                    if let Ok(val) = json_from_str::<foundation_serialization::json::Value>(&text) {
                         if let Some(res) = val.get("result") {
                             if let Some(pending) = res.get("pending").and_then(|v| v.as_array()) {
                                 for job in pending {
@@ -417,12 +417,12 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
         }
         ComputeCmd::Status { job_id, url } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }

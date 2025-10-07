@@ -20,7 +20,7 @@ use the_block::{
 };
 
 #[cfg(feature = "telemetry-json")]
-use serde_json::Value;
+use foundation_serialization::json::Value;
 
 mod util;
 use util::temp::temp_dir;
@@ -106,7 +106,7 @@ fn scenario_accept_and_reject(logger: &mut Logger) {
         let mut saw_nonce = false;
         let mut saw_balance = false;
         for rec in logs {
-            let v: Value = serde_json::from_str(rec.args()).unwrap();
+            let v: Value = foundation_serialization::json::from_str(rec.args()).unwrap();
             let code = v.get("code").and_then(Value::as_u64).expect("numeric code");
             if v.get("cid").is_none() {
                 panic!("missing cid");
@@ -178,7 +178,7 @@ fn scenario_eviction(logger: &mut Logger) {
     #[cfg(feature = "telemetry-json")]
     {
         assert!(logs.iter().any(|r| {
-            let v: Value = serde_json::from_str(r.args()).unwrap();
+            let v: Value = foundation_serialization::json::from_str(r.args()).unwrap();
             v.get("op") == Some(&Value::String("evict".into()))
                 && v.get("reason") == Some(&Value::String("priority".into()))
                 && v.get("cid").is_some()
@@ -261,7 +261,7 @@ fn scenario_purge_loop_counters(logger: &mut Logger) {
         let mut saw_ttl = false;
         let mut saw_orphan = false;
         for rec in logs {
-            if let Ok(v) = serde_json::from_str::<Value>(rec.args()) {
+            if let Ok(v) = foundation_serialization::json::from_str::<Value>(rec.args()) {
                 if v.get("op") == Some(&Value::String("purge_loop".into())) {
                     if v.get("reason") == Some(&Value::String("ttl_drop_total".into()))
                         && v.get("fpb").and_then(Value::as_u64) == Some(1)

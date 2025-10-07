@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 use std::collections::HashMap;
 use std::env;
 use std::sync::atomic::{AtomicU64, Ordering};

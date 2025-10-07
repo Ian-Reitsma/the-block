@@ -663,7 +663,7 @@ impl StoragePipeline {
                         );
                         #[cfg(feature = "telemetry")]
                         {
-                            tracing::warn!(%err, provider = %provider_id, "storage shard send failed");
+                            diagnostics::tracing::warn!(%err, provider = %provider_id, "storage shard send failed");
                         }
                         #[cfg(not(feature = "telemetry"))]
                         {

@@ -87,6 +87,12 @@ impl StdRng {
         rng.try_fill_bytes(&mut seed)?;
         Ok(Self::from_seed(seed))
     }
+
+    pub fn seed_from_u64(seed: u64) -> Self {
+        let mut buf = [0u8; 32];
+        buf[..8].copy_from_slice(&seed.to_le_bytes());
+        Self::from_seed(buf)
+    }
 }
 
 impl RngCore for StdRng {
@@ -142,6 +148,11 @@ pub trait Rng: RngCore + Sized {
         R: SampleRange<T>,
     {
         range.sample(self)
+    }
+
+    fn gen_bool(&mut self, p: f64) -> bool {
+        let threshold = if p.is_nan() { 0.0 } else { p.clamp(0.0, 1.0) };
+        self.gen::<f64>() < threshold
     }
 }
 

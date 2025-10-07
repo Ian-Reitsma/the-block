@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use foundation_serialization::json::{json, Map, Value};
 
 use crate::scheduler::{self, ServiceClass};
 

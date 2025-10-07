@@ -2,11 +2,12 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{toml, Deserialize, Serialize};
 
 use crate::device::DeviceFallback;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct LightClientConfig {
     #[serde(default)]
     pub ignore_charging_requirement: bool,

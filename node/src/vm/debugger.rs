@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 use serde::Serialize;
 
 use super::{

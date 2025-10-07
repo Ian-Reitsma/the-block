@@ -61,7 +61,8 @@ fn block_lookup_via_router() {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        let result: Option<Block> = serde_json::from_slice(response.body()).unwrap();
+        let result: Option<Block> =
+            foundation_serialization::json::from_slice(response.body()).unwrap();
         assert!(result.is_some());
     });
 }

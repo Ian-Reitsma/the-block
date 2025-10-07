@@ -2,8 +2,8 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
+use foundation_serialization::json::Value;
 use hex;
-use serde_json::Value;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
     config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
@@ -38,7 +38,7 @@ fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
         let body = &resp[body_idx + 4..];
-        serde_json::from_str::<Value>(body).unwrap()
+        foundation_serialization::json::from_str::<Value>(body).unwrap()
     })
 }
 
@@ -412,7 +412,7 @@ fn rpc_error_responses() {
             .unwrap();
         let body = String::from_utf8(resp).unwrap();
         let body = body.split("\r\n\r\n").nth(1).unwrap();
-        let val: Value = serde_json::from_str(body).unwrap();
+        let val: Value = foundation_serialization::json::from_str(body).unwrap();
         assert_eq!(val["error"]["code"].as_i64().unwrap(), -32700);
 
         // unknown method
@@ -464,7 +464,7 @@ fn rpc_fragmented_request() {
         read_to_end(&mut stream, &mut resp).await.unwrap();
         let resp = String::from_utf8(resp).unwrap();
         let body_idx = resp.find("\r\n\r\n").unwrap();
-        let val: Value = serde_json::from_str(&resp[body_idx + 4..]).unwrap();
+        let val: Value = foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap();
         assert_eq!(val["result"]["status"], "ok");
 
         handle.abort();

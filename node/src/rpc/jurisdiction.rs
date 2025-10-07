@@ -5,21 +5,26 @@ use crate::Blockchain;
 use crypto_suite::signatures::ed25519::VerifyingKey;
 use std::sync::{Arc, Mutex};
 
-pub fn status(bc: &Arc<Mutex<Blockchain>>) -> Result<serde_json::Value, RpcError> {
+pub fn status(
+    bc: &Arc<Mutex<Blockchain>>,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let j = bc.lock().unwrap().config.jurisdiction.clone();
     if let Some(ref region) = j {
         if let Some(pack) = jurisdiction::PolicyPack::template(region) {
-            return Ok(serde_json::json!({
+            return Ok(foundation_serialization::json::json!({
                 "jurisdiction": pack.region,
                 "consent_required": pack.consent_required,
                 "features": pack.features,
             }));
         }
     }
-    Ok(serde_json::json!({"jurisdiction": j}))
+    Ok(foundation_serialization::json::json!({"jurisdiction": j}))
 }
 
-pub fn set(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json::Value, RpcError> {
+pub fn set(
+    bc: &Arc<Mutex<Blockchain>>,
+    path: &str,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let pack_res = if path.starts_with("http") {
         // placeholder: use zero key for demo
         let pk = VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
@@ -39,7 +44,7 @@ pub fn set(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json::Value,
                 "le_jurisdiction.log",
                 &format!("rpc set {}", pack.region),
             );
-            Ok(serde_json::json!({
+            Ok(foundation_serialization::json::json!({
                 "status": "ok",
                 "jurisdiction": pack.region,
             }))
@@ -51,7 +56,10 @@ pub fn set(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json::Value,
     }
 }
 
-pub fn policy_diff(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json::Value, RpcError> {
+pub fn policy_diff(
+    bc: &Arc<Mutex<Blockchain>>,
+    path: &str,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let current = {
         let g = bc.lock().unwrap();
         g.config

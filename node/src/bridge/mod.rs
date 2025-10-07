@@ -12,10 +12,10 @@ use bridges::{
 use crypto_suite::hashing::blake3::Hasher;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use thiserror::Error;
 
 const STATE_KEY: &str = "bridge/state";
 const RECEIPT_RETENTION: usize = 512;
@@ -29,27 +29,36 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum BridgeError {
-    #[error("bridge channel not found: {0}")]
     UnknownChannel(String),
-    #[error("bridge storage error: {0}")]
     Storage(String),
-    #[error("bridge proof rejected")]
     InvalidProof,
-    #[error("proof already processed")]
     Replay,
-    #[error("withdrawal already pending")]
     DuplicateWithdrawal,
-    #[error("withdrawal not found")]
     WithdrawalMissing,
-    #[error("withdrawal already challenged")]
     AlreadyChallenged,
-    #[error("challenge window still open")]
     ChallengeWindowOpen,
-    #[error("release not authorized")]
     UnauthorizedRelease,
 }
+
+impl fmt::Display for BridgeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BridgeError::UnknownChannel(name) => write!(f, "bridge channel not found: {name}"),
+            BridgeError::Storage(reason) => write!(f, "bridge storage error: {reason}"),
+            BridgeError::InvalidProof => write!(f, "bridge proof rejected"),
+            BridgeError::Replay => write!(f, "proof already processed"),
+            BridgeError::DuplicateWithdrawal => write!(f, "withdrawal already pending"),
+            BridgeError::WithdrawalMissing => write!(f, "withdrawal not found"),
+            BridgeError::AlreadyChallenged => write!(f, "withdrawal already challenged"),
+            BridgeError::ChallengeWindowOpen => write!(f, "challenge window still open"),
+            BridgeError::UnauthorizedRelease => write!(f, "release not authorized"),
+        }
+    }
+}
+
+impl std::error::Error for BridgeError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelConfig {

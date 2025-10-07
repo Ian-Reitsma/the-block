@@ -15,7 +15,7 @@ use std::{
     time::Instant,
 };
 mod rate_limit;
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 use rate_limit::RateLimitFilter;
 use std::fs;
 use sys::signals::{Signals, SIGHUP};
@@ -128,7 +128,7 @@ pub async fn run(
     addr: SocketAddr,
     stake: Arc<dyn StakeTable + Send + Sync>,
     read_tx: mpsc::Sender<ReadAck>,
-) -> anyhow::Result<()> {
+) -> diagnostics::anyhow::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     let state = GatewayState {
         stake,

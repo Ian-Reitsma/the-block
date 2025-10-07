@@ -127,13 +127,13 @@ impl Miner {
         };
         #[cfg(feature = "telemetry")]
         if let Some(ref s) = span {
-            tracing::info!(parent: s, "pow_start");
+            diagnostics::tracing::info!(parent: s, "pow_start");
         }
         header.difficulty = self.difficulty;
         let mined = solve(header, self.target_value);
         #[cfg(feature = "telemetry")]
         if let Some(s) = span {
-            tracing::info!(parent: &s, nonce = mined.nonce, "pow_end");
+            diagnostics::tracing::info!(parent: &s, nonce = mined.nonce, "pow_end");
         }
         self.timestamps.push(mined.timestamp_millis);
         if self.timestamps.len() > DIFFICULTY_WINDOW {

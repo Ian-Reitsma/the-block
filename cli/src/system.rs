@@ -213,7 +213,7 @@ node: node-a\n  codec_deserialize_fail_total{codec=\"json\",profile=\"none\",ver
 
     #[test]
     fn fetch_dependencies_parses_response() {
-        let body = serde_json::to_string(&sample_summary()).unwrap();
+        let body = foundation_serialization::json::to_string(&sample_summary()).unwrap();
         let (url, handle) = start_wrappers_server(body);
         let report = fetch_dependencies(&url).expect("report");
         assert!(report.starts_with("node: node-a"));

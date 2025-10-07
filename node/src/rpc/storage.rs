@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
-use once_cell::sync::Lazy;
-use serde_json::json;
+use concurrency::Lazy;
+use foundation_serialization::json::json;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use storage::{contract::ContractError, StorageContract, StorageOffer};
@@ -19,7 +19,10 @@ static ALLOCATIONS: Lazy<Mutex<BTreeMap<String, Vec<String>>>> =
     Lazy::new(|| Mutex::new(BTreeMap::new()));
 
 /// Register a new storage contract for the given object and allocate shards.
-pub fn upload(contract: StorageContract, offers: Vec<StorageOffer>) -> serde_json::Value {
+pub fn upload(
+    contract: StorageContract,
+    offers: Vec<StorageOffer>,
+) -> foundation_serialization::json::Value {
     let allocation = crate::gateway::storage_alloc::allocate(&offers, contract.shares);
     let providers: Vec<String> = allocation.iter().map(|(p, _)| p.clone()).collect();
     let object_id = contract.object_id.clone();
@@ -42,7 +45,7 @@ pub fn challenge(
     chunk_idx: u64,
     proof: [u8; 32],
     current_block: u64,
-) -> serde_json::Value {
+) -> foundation_serialization::json::Value {
     let store = CONTRACTS.lock().unwrap();
     if let Some(contract) = store.get(object_id) {
         match contract.verify_proof(chunk_idx, proof, current_block) {
@@ -80,11 +83,11 @@ pub fn challenge(
 }
 
 /// Return provider profile snapshots including quotas and recent upload stats.
-pub fn provider_profiles() -> serde_json::Value {
+pub fn provider_profiles() -> foundation_serialization::json::Value {
     let pipeline = StoragePipeline::open(&pipeline_path());
     let engine = pipeline.engine_summary();
     let legacy_mode = crate::simple_db::legacy_mode();
-    let profiles: Vec<serde_json::Value> = pipeline
+    let profiles: Vec<foundation_serialization::json::Value> = pipeline
         .provider_profile_snapshots()
         .into_iter()
         .map(|snap| {
@@ -116,7 +119,7 @@ pub fn provider_profiles() -> serde_json::Value {
 }
 
 /// Return recent storage repair log entries.
-pub fn repair_history(limit: Option<usize>) -> serde_json::Value {
+pub fn repair_history(limit: Option<usize>) -> foundation_serialization::json::Value {
     let pipeline = StoragePipeline::open(&pipeline_path());
     let log = pipeline.repair_log();
     let limit = limit.unwrap_or(25).min(500);
@@ -132,7 +135,7 @@ pub fn repair_history(limit: Option<usize>) -> serde_json::Value {
 }
 
 /// Trigger a manual repair loop iteration and return the summary.
-pub fn repair_run() -> serde_json::Value {
+pub fn repair_run() -> foundation_serialization::json::Value {
     let mut pipeline = StoragePipeline::open(&pipeline_path());
     let log = pipeline.repair_log();
     match crate::storage::repair::run_once(pipeline.db_mut(), &log, RepairRequest::default()) {
@@ -152,7 +155,11 @@ pub fn repair_run() -> serde_json::Value {
 }
 
 /// Force a repair attempt for a specific manifest and chunk index.
-pub fn repair_chunk(manifest_hex: &str, chunk_idx: u32, force: bool) -> serde_json::Value {
+pub fn repair_chunk(
+    manifest_hex: &str,
+    chunk_idx: u32,
+    force: bool,
+) -> foundation_serialization::json::Value {
     let bytes = match hex::decode(manifest_hex) {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -189,7 +196,10 @@ pub fn repair_chunk(manifest_hex: &str, chunk_idx: u32, force: bool) -> serde_js
 }
 
 /// Toggle maintenance mode for a provider, updating the persisted profile.
-pub fn set_provider_maintenance(provider: &str, maintenance: bool) -> serde_json::Value {
+pub fn set_provider_maintenance(
+    provider: &str,
+    maintenance: bool,
+) -> foundation_serialization::json::Value {
     let mut pipeline = StoragePipeline::open(&pipeline_path());
     match pipeline.set_provider_maintenance(provider, maintenance) {
         Ok(()) => json!({
@@ -202,7 +212,7 @@ pub fn set_provider_maintenance(provider: &str, maintenance: bool) -> serde_json
 }
 
 /// Return manifest metadata including coding algorithm choices for stored objects.
-pub fn manifest_summaries(limit: Option<usize>) -> serde_json::Value {
+pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::json::Value {
     let pipeline = StoragePipeline::open(&pipeline_path());
     let max_entries = limit.unwrap_or(100).min(1000);
     let manifests = pipeline.manifest_summaries(max_entries);
@@ -245,7 +255,7 @@ pub fn manifest_summaries(limit: Option<usize>) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use foundation_serialization::json::json;
     use storage::{StorageContract, StorageOffer};
     use sys::tempfile::tempdir;
 

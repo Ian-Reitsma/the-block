@@ -2,9 +2,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
+use foundation_serialization::json::Value;
 use runtime::io::read_to_end;
 use runtime::net::TcpStream;
-use serde_json::Value;
 use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use util::timeout::expect_timeout;
@@ -28,7 +28,7 @@ fn rpc(addr: &str, body: &str) -> Value {
             .await
             .unwrap();
         let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        serde_json::from_slice(&resp[body_idx + 4..]).unwrap()
+        foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap()
     })
 }
 

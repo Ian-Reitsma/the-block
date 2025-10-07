@@ -2,6 +2,8 @@ use super::ParamKey;
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
 use bincode;
+#[cfg(feature = "telemetry")]
+use diagnostics::tracing::info;
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     validate_runtime_backend_policy, validate_storage_engine_policy,
@@ -13,8 +15,6 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
-#[cfg(feature = "telemetry")]
-use tracing::info;
 
 const fn mask_all(len: usize) -> i64 {
     ((1u64 << len) - 1) as i64
@@ -1012,7 +1012,7 @@ pub fn retune_multipliers(
         theta[2].round() as i64,
         theta[3].round() as i64,
     ];
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::{rngs::StdRng, Rng};
     let b = supply * (1.0 / (1u64 << 20) as f64);
     let mut rng: StdRng = match rng_seed {
         Some(seed) => StdRng::seed_from_u64(seed),
@@ -1021,9 +1021,9 @@ pub fn retune_multipliers(
     let noisy: [i64; 4] = raw.map(|v| {
         let u: f64 = rng.gen::<f64>() - 0.5;
         let noise = if u >= 0.0 {
-            -b * (1.0 - 2.0 * u).ln()
+            -b * (1.0_f64 - 2.0_f64 * u).ln()
         } else {
-            b * (1.0 + 2.0 * u).ln()
+            b * (1.0_f64 + 2.0_f64 * u).ln()
         };
         (v as f64 + noise).round() as i64
     });

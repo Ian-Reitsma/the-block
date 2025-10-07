@@ -5,8 +5,8 @@ use crate::{
     SimpleDb,
 };
 use bridges::{header::PowHeader, light_client::Proof, RelayerBundle, RelayerProof};
-use once_cell::sync::Lazy;
-use serde_json::json;
+use concurrency::Lazy;
+use foundation_serialization::json::json;
 use std::sync::Mutex;
 
 static SERVICE: Lazy<Mutex<Bridge>> = Lazy::new(|| {
@@ -37,7 +37,7 @@ fn convert_err(err: BridgeError) -> RpcError {
     RpcError { code, message }
 }
 
-pub fn relayer_status(asset: Option<&str>, relayer: &str) -> serde_json::Value {
+pub fn relayer_status(asset: Option<&str>, relayer: &str) -> foundation_serialization::json::Value {
     if let Ok(bridge) = SERVICE.lock() {
         if let Some((asset_id, stake, slashes, bond)) = bridge.relayer_status(relayer, asset) {
             return json!({
@@ -56,7 +56,10 @@ pub fn relayer_status(asset: Option<&str>, relayer: &str) -> serde_json::Value {
     })
 }
 
-pub fn bond_relayer(relayer: &str, amount: u64) -> Result<serde_json::Value, RpcError> {
+pub fn bond_relayer(
+    relayer: &str,
+    amount: u64,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let mut bridge = guard()?;
     bridge.bond_relayer(relayer, amount).map_err(convert_err)?;
     Ok(json!({ "status": "ok" }))
@@ -70,7 +73,7 @@ pub fn verify_deposit(
     header: PowHeader,
     proof: Proof,
     proofs: Vec<RelayerProof>,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     if proofs.is_empty() {
         return Err(RpcError {
             code: -32602,
@@ -96,7 +99,7 @@ pub fn request_withdrawal(
     user: &str,
     amount: u64,
     proofs: Vec<RelayerProof>,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     if proofs.is_empty() {
         return Err(RpcError {
             code: -32602,
@@ -118,7 +121,7 @@ pub fn challenge_withdrawal(
     asset: &str,
     commitment_hex: &str,
     challenger: &str,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let bytes = hex::decode(commitment_hex).map_err(|_| RpcError {
         code: -32602,
         message: "invalid commitment",
@@ -145,7 +148,7 @@ pub fn challenge_withdrawal(
 pub fn finalize_withdrawal(
     asset: &str,
     commitment_hex: &str,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let bytes = hex::decode(commitment_hex).map_err(|_| RpcError {
         code: -32602,
         message: "invalid commitment",
@@ -165,14 +168,18 @@ pub fn finalize_withdrawal(
     Ok(json!({"status": "finalized"}))
 }
 
-pub fn pending_withdrawals(asset: Option<&str>) -> Result<serde_json::Value, RpcError> {
+pub fn pending_withdrawals(
+    asset: Option<&str>,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
     Ok(json!({
         "withdrawals": bridge.pending_withdrawals(asset),
     }))
 }
 
-pub fn active_challenges(asset: Option<&str>) -> Result<serde_json::Value, RpcError> {
+pub fn active_challenges(
+    asset: Option<&str>,
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
     let challenges: Vec<_> = bridge
         .challenges(asset)
@@ -189,7 +196,7 @@ pub fn active_challenges(asset: Option<&str>) -> Result<serde_json::Value, RpcEr
     Ok(json!({ "challenges": challenges }))
 }
 
-pub fn relayer_quorum(asset: &str) -> Result<serde_json::Value, RpcError> {
+pub fn relayer_quorum(asset: &str) -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
     bridge.relayer_quorum(asset).ok_or(RpcError {
         code: -32012,
@@ -201,7 +208,7 @@ pub fn deposit_history(
     asset: &str,
     cursor: Option<u64>,
     limit: usize,
-) -> Result<serde_json::Value, RpcError> {
+) -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
     let receipts: Vec<_> = bridge
         .deposit_history(asset, cursor, limit)
@@ -224,7 +231,7 @@ pub fn deposit_history(
     Ok(json!({ "receipts": receipts }))
 }
 
-pub fn slash_log() -> Result<serde_json::Value, RpcError> {
+pub fn slash_log() -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
     let records: Vec<_> = bridge
         .slash_log()

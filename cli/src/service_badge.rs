@@ -5,7 +5,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use serde_json::json;
+use foundation_serialization::json::json;
 
 pub enum ServiceBadgeCmd {
     /// Verify a badge token via RPC
@@ -94,12 +94,12 @@ pub fn handle(cmd: ServiceBadgeCmd) {
     match cmd {
         ServiceBadgeCmd::Verify { badge, url } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -118,12 +118,12 @@ pub fn handle(cmd: ServiceBadgeCmd) {
         }
         ServiceBadgeCmd::Issue { url } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
@@ -142,12 +142,12 @@ pub fn handle(cmd: ServiceBadgeCmd) {
         }
         ServiceBadgeCmd::Revoke { url } => {
             let client = RpcClient::from_env();
-            #[derive(serde::Serialize)]
+            #[derive(Serialize)]
             struct Payload<'a> {
                 jsonrpc: &'static str,
                 id: u32,
                 method: &'static str,
-                params: serde_json::Value,
+                params: foundation_serialization::json::Value,
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }

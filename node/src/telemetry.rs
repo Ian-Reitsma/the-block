@@ -1,19 +1,19 @@
+use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry")]
 use codec::{self, Codec, Direction};
+#[cfg(feature = "telemetry")]
+use concurrency::DashMap;
+use concurrency::Lazy;
 use crypto_suite::hashing::blake3;
 #[cfg(feature = "telemetry")]
 use crypto_suite::{self, signatures::ed25519};
-#[cfg(feature = "telemetry")]
-use dashmap::DashMap;
 use hex;
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
-use once_cell::sync::Lazy;
 use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
     IntGaugeVec, Opts, Registry, TextEncoder,
 };
-use python_bridge::{Error as PyError, Result as PyResult};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use std::collections::HashMap;
@@ -249,16 +249,15 @@ impl ReadStats {
     }
 
     pub fn memory_snapshot_all(&self) -> HashMap<&'static str, MemorySnapshot> {
-        self.memory
-            .iter()
-            .map(|entry| (entry.key().as_str(), entry.value().snapshot()))
-            .collect()
+        let mut snapshots = HashMap::new();
+        self.memory.for_each(|component, hist| {
+            snapshots.insert(component.as_str(), hist.snapshot());
+        });
+        snapshots
     }
 
     pub fn reset_memory(&self) {
-        for mut entry in self.memory.iter_mut() {
-            entry.value_mut().reset();
-        }
+        self.memory.for_each_mut(|_, hist| hist.reset());
     }
 }
 
@@ -408,10 +407,10 @@ fn push_metric(
 pub fn init_wrapper_metrics() {
     WRAPPER_INIT.call_once(|| {
         if let Err(err) = codec::install_metrics_hook(codec_metrics_hook) {
-            tracing::warn!(reason = %err, "codec_metrics_hook_install_failed");
+            diagnostics::tracing::warn!(reason = %err, "codec_metrics_hook_install_failed");
         }
         if let Err(err) = ed25519::install_telemetry_hook(crypto_metrics_hook) {
-            tracing::warn!(reason = %err, "crypto_metrics_hook_install_failed");
+            diagnostics::tracing::warn!(reason = %err, "crypto_metrics_hook_install_failed");
         }
         record_runtime_backend(crate::runtime::handle().backend_name());
         record_crypto_backend();
@@ -465,7 +464,7 @@ pub fn record_dependency_policy(kind: &str, allowed: &[String]) {
             .set(value);
     }
     if crate::telemetry::should_log("governance") {
-        tracing::info!(kind, allowed = ?allowed, "dependency_policy_recorded");
+        diagnostics::tracing::info!(kind, allowed = ?allowed, "dependency_policy_recorded");
     }
 }
 
@@ -876,7 +875,7 @@ fn adaptive_sampling_loop() {
                 SAMPLE_RATE.store(target, Ordering::Relaxed);
                 current = target;
                 changed = true;
-                tracing::warn!(
+                diagnostics::tracing::warn!(
                     sample_rate_ppm = current,
                     fails,
                     "adaptive_sampling_throttled"
@@ -891,13 +890,16 @@ fn adaptive_sampling_loop() {
                     SAMPLE_RATE.store(target, Ordering::Relaxed);
                     current = target;
                     changed = true;
-                    tracing::info!(sample_rate_ppm = current, "adaptive_sampling_recovering");
+                    diagnostics::tracing::info!(
+                        sample_rate_ppm = current,
+                        "adaptive_sampling_recovering"
+                    );
                 }
             }
         }
 
         if !changed && current != last_rate {
-            tracing::debug!(sample_rate_ppm = current, "adaptive_sampling_updated");
+            diagnostics::tracing::debug!(sample_rate_ppm = current, "adaptive_sampling_updated");
         }
         last_rate = current;
     }
@@ -963,16 +965,16 @@ pub fn current_alloc_bytes() -> u64 {
 pub fn update_memory_usage(_component: MemoryComponent) {}
 
 #[cfg(feature = "telemetry")]
-pub fn log_context() -> tracing::Span {
+pub fn log_context() -> diagnostics::tracing::Span {
     use rand::RngCore;
     let mut buf = [0u8; 8];
     rand::thread_rng().fill_bytes(&mut buf);
-    tracing::info_span!("trace", trace_id = %hex::encode(buf))
+    diagnostics::tracing::info_span!("trace", trace_id = %hex::encode(buf))
 }
 
 #[cfg(not(feature = "telemetry"))]
-pub fn log_context() -> tracing::Span {
-    tracing::info_span!("trace")
+pub fn log_context() -> diagnostics::tracing::Span {
+    diagnostics::tracing::info_span!("trace")
 }
 
 pub static HAAR_ETA_MILLI: Lazy<IntGauge> = Lazy::new(|| {
@@ -2903,7 +2905,7 @@ pub fn trigger_anomaly(reason: &str) {
     #[cfg(feature = "telemetry")]
     {
         ANOMALY_ALARM_TOTAL.inc();
-        tracing::warn!(reason, "anomaly_alarm");
+        diagnostics::tracing::warn!(reason, "anomaly_alarm");
     }
 }
 

@@ -15,8 +15,8 @@ facade that exposes `spawn`, `spawn_blocking`, `sleep`, `interval`, `timeout`,
 and `block_on`. The wrapper selects a backend at process start, defaulting to
 the in-house executor while keeping Tokio and the stub backend available for
 compatibility. The active backend can be overridden by setting
-`TB_RUNTIME_BACKEND=inhouse`, `TB_RUNTIME_BACKEND=tokio`, or
-`TB_RUNTIME_BACKEND=stub`; unsupported values fall back to the default while
+`TB_RUNTIME_BACKEND=inhouse` or `TB_RUNTIME_BACKEND=stub`; unsupported values
+fall back to the default while
 logging a warning.
 
 Crates consuming the abstraction should import the helpers from the facade

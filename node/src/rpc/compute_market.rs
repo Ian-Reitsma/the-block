@@ -1,4 +1,4 @@
-use serde_json::json;
+use foundation_serialization::json::json;
 
 use crate::compute_market::{
     matcher, price_board, scheduler, settlement::Settlement, total_units_processed,
@@ -7,7 +7,9 @@ use crate::transaction::FeeLane;
 use std::time::UNIX_EPOCH;
 
 /// Return compute market backlog and utilisation metrics.
-pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::Value {
+pub fn stats(
+    _accel: Option<crate::compute_market::Accelerator>,
+) -> foundation_serialization::json::Value {
     let (backlog, util) = price_board::backlog_utilization();
     let weighted = price_board::bands(FeeLane::Industrial).map(|(_, m, _)| m);
     let raw = price_board::raw_bands(FeeLane::Industrial).map(|(_, m, _)| m);
@@ -18,13 +20,13 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
     let sched = scheduler::stats();
     let lane_status = matcher::lane_statuses();
     let lane_warnings = matcher::starvation_warnings();
-    let mut recent = serde_json::Map::new();
+    let mut recent = foundation_serialization::json::Map::new();
     for status in &lane_status {
         let receipts = matcher::recent_matches(status.lane, 5);
         let entries: Vec<_> = receipts
             .into_iter()
             .map(|r| {
-                serde_json::json!({
+                foundation_serialization::json::json!({
                     "job_id": r.job_id,
                     "provider": r.provider,
                     "buyer": r.buyer,
@@ -36,13 +38,13 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
             .collect();
         recent.insert(
             status.lane.as_str().to_string(),
-            serde_json::Value::Array(entries),
+            foundation_serialization::json::Value::Array(entries),
         );
     }
     let lanes_json: Vec<_> = lane_status
         .iter()
         .map(|status| {
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "lane": status.lane.as_str(),
                 "bids": status.bids,
                 "asks": status.asks,
@@ -59,7 +61,7 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or_default();
-            serde_json::json!({
+            foundation_serialization::json::json!({
                 "lane": warning.lane.as_str(),
                 "job_id": warning.oldest_job,
                 "waited_for_secs": warning.waited_for.as_secs(),
@@ -87,17 +89,17 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> serde_json::
 }
 
 /// Return scheduler reputation and capability utilisation metrics.
-pub fn scheduler_metrics() -> serde_json::Value {
+pub fn scheduler_metrics() -> foundation_serialization::json::Value {
     scheduler::metrics()
 }
 
 /// Return aggregated scheduler statistics over recent matches.
-pub fn scheduler_stats() -> serde_json::Value {
-    serde_json::to_value(scheduler::stats()).unwrap()
+pub fn scheduler_stats() -> foundation_serialization::json::Value {
+    foundation_serialization::json::to_value(scheduler::stats()).unwrap()
 }
 
 /// Return current reputation score for a provider.
-pub fn reputation_get(provider: &str) -> serde_json::Value {
+pub fn reputation_get(provider: &str) -> foundation_serialization::json::Value {
     json!({
         "provider": provider,
         "score": scheduler::reputation_get(provider),
@@ -105,16 +107,16 @@ pub fn reputation_get(provider: &str) -> serde_json::Value {
 }
 
 /// Return capability requirements for an active job.
-pub fn job_requirements(job_id: &str) -> serde_json::Value {
+pub fn job_requirements(job_id: &str) -> foundation_serialization::json::Value {
     if let Some(cap) = scheduler::job_requirements(job_id) {
-        serde_json::to_value(cap).unwrap()
+        foundation_serialization::json::to_value(cap).unwrap()
     } else {
         json!({})
     }
 }
 
 /// Cancel an active job and release resources.
-pub fn job_cancel(job_id: &str) -> serde_json::Value {
+pub fn job_cancel(job_id: &str) -> foundation_serialization::json::Value {
     if let Some(provider) = scheduler::active_provider(job_id) {
         scheduler::cancel_job(job_id, &provider, scheduler::CancelReason::Client);
         json!({ "status": "ok" })
@@ -124,26 +126,26 @@ pub fn job_cancel(job_id: &str) -> serde_json::Value {
 }
 
 /// Return advertised hardware capability for a provider.
-pub fn provider_hardware(provider: &str) -> serde_json::Value {
+pub fn provider_hardware(provider: &str) -> foundation_serialization::json::Value {
     if let Some(cap) = scheduler::provider_capability(provider) {
-        serde_json::to_value(cap).unwrap()
+        foundation_serialization::json::to_value(cap).unwrap()
     } else {
         json!({})
     }
 }
 
 /// Return the recent settlement audit log.
-pub fn settlement_audit() -> serde_json::Value {
-    serde_json::to_value(Settlement::audit()).unwrap_or_else(|_| json!([]))
+pub fn settlement_audit() -> foundation_serialization::json::Value {
+    foundation_serialization::json::to_value(Settlement::audit()).unwrap_or_else(|_| json!([]))
 }
 
 /// Return split token balances for providers.
-pub fn provider_balances() -> serde_json::Value {
+pub fn provider_balances() -> foundation_serialization::json::Value {
     json!({ "providers": Settlement::balances() })
 }
 
 /// Return recent settlement merkle roots encoded as hex strings.
-pub fn recent_roots(limit: usize) -> serde_json::Value {
+pub fn recent_roots(limit: usize) -> foundation_serialization::json::Value {
     let roots: Vec<String> = Settlement::recent_roots(limit)
         .into_iter()
         .map(|r| hex::encode(r))

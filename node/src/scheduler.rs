@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 
 use crate::utxo::{OutPoint, Transaction};
 

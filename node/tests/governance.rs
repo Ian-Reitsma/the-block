@@ -1,8 +1,8 @@
 #![cfg(feature = "integration-tests")]
+use foundation_serialization::json::json;
 use governance_spec::{
     encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,
 };
-use serde_json::json;
 use tempfile::tempdir;
 use the_block::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,

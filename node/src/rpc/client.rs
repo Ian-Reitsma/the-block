@@ -166,7 +166,7 @@ impl RpcClient {
             jsonrpc: &'static str,
             id: u32,
             method: &'static str,
-            params: serde_json::Value,
+            params: foundation_serialization::json::Value,
             #[serde(skip_serializing_if = "Option::is_none")]
             auth: Option<&'a str>,
         }
@@ -175,7 +175,7 @@ impl RpcClient {
             result: T,
         }
 
-        let params = serde_json::json!({ "lane": lane.as_str() });
+        let params = foundation_serialization::json::json!({ "lane": lane.as_str() });
         let payload = Payload {
             jsonrpc: "2.0",
             id: 1,
@@ -260,13 +260,13 @@ impl RpcClient {
             jsonrpc: &'static str,
             id: u32,
             method: &'static str,
-            params: &'a serde_json::Value,
+            params: &'a foundation_serialization::json::Value,
         }
         #[derive(Deserialize)]
         struct Envelope<T> {
             result: T,
         }
-        let params = serde_json::Value::Null;
+        let params = foundation_serialization::json::Value::Null;
         let payload = Payload {
             jsonrpc: "2.0",
             id: 1,
@@ -286,13 +286,13 @@ impl RpcClient {
             jsonrpc: &'static str,
             id: u32,
             method: &'static str,
-            params: serde_json::Value,
+            params: foundation_serialization::json::Value,
         }
         #[derive(Deserialize)]
         struct Envelope {
-            result: serde_json::Value,
+            result: foundation_serialization::json::Value,
         }
-        let params = serde_json::json!({"id": id, "role": role});
+        let params = foundation_serialization::json::json!({"id": id, "role": role});
         let payload = Payload {
             jsonrpc: "2.0",
             id: 1,
@@ -385,7 +385,7 @@ impl From<RpcClientError> for WalletQosError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use foundation_serialization::json::json;
 
     struct EnvGuard {
         key: &'static str,

@@ -1,15 +1,14 @@
 use crate::compute_market::courier_store::ReceiptStore;
 use crate::compute_market::receipt::Receipt;
 use crate::transaction::FeeLane;
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
+use concurrency::{DashMap, Lazy};
 use runtime::sync::CancellationToken;
 use runtime::yield_now;
 use std::collections::VecDeque;
 use std::env;
+use std::fmt;
 use std::sync::RwLock;
 use std::time::{Duration, Instant, SystemTime};
-use thiserror::Error;
 
 #[derive(Clone)]
 pub struct Bid {
@@ -50,15 +49,31 @@ pub struct LaneSeed {
     pub metadata: LaneMetadata,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum SeedError {
-    #[error("lane {lane} exceeds capacity {max} (attempted {attempted})")]
     CapacityExceeded {
         lane: FeeLane,
         attempted: usize,
         max: usize,
     },
 }
+
+impl fmt::Display for SeedError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SeedError::CapacityExceeded {
+                lane,
+                attempted,
+                max,
+            } => write!(
+                f,
+                "lane {lane} exceeds capacity {max} (attempted {attempted})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SeedError {}
 
 #[derive(Clone)]
 pub struct LaneStatus {
@@ -193,7 +208,7 @@ impl OrderBook {
     }
 
     fn lane_keys(&self) -> Vec<FeeLane> {
-        let mut lanes: Vec<_> = self.lanes.iter().map(|entry| *entry.key()).collect();
+        let mut lanes: Vec<_> = self.lanes.keys();
         lanes.sort();
         lanes
     }
@@ -398,10 +413,7 @@ pub fn lane_statuses() -> Vec<LaneStatus> {
 }
 
 pub fn starvation_warnings() -> Vec<LaneWarning> {
-    STARVATION
-        .iter()
-        .map(|entry| entry.value().clone())
-        .collect()
+    STARVATION.values()
 }
 
 pub fn recent_matches(lane: FeeLane, limit: usize) -> Vec<Receipt> {
@@ -426,7 +438,7 @@ fn refresh_starvation() {
         STARVATION.insert(warning.lane, warning.clone());
         if should_log {
             #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-            tracing::warn!(lane = %warning.lane, job = %warning.oldest_job, waited = warning.waited_for.as_secs_f32(), "lane starvation");
+            diagnostics::tracing::warn!(lane = %warning.lane, job = %warning.oldest_job, waited = warning.waited_for.as_secs_f32(), "lane starvation");
         }
     }
     STARVATION.retain(|lane, _| keep.contains(lane));
@@ -464,7 +476,7 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
                         ])
                         .inc();
                     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                    tracing::info!(
+                    diagnostics::tracing::info!(
                         job = %receipt.job_id,
                         buyer = %receipt.buyer,
                         provider = %receipt.provider,
@@ -479,7 +491,7 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
                     #[cfg(feature = "telemetry")]
                     crate::telemetry::RECEIPT_PERSIST_FAIL_TOTAL.inc();
                     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
-                    tracing::error!("receipt insert failed: {err}");
+                    diagnostics::tracing::error!("receipt insert failed: {err}");
                     #[cfg(all(not(feature = "telemetry"), not(feature = "test-telemetry")))]
                     let _ = err;
                 }

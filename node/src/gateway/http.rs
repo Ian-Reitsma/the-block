@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 
 // lightweight HTTP request parsing for fuzzing
 use httparse;

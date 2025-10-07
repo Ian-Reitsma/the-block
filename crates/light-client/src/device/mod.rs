@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
+use foundation_serialization::{Deserialize, Serialize};
 use runtime::sync::Mutex;
-use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 #[cfg(feature = "telemetry")]
@@ -35,6 +35,7 @@ pub use ios::IosProbe;
 pub type DynDeviceStatusProbe = Arc<dyn DeviceStatusProbe>;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DeviceStatus {
     pub on_wifi: bool,
     pub is_charging: bool,
@@ -63,6 +64,7 @@ impl From<DeviceFallback> for DeviceStatus {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DeviceFallback {
     pub on_wifi: bool,
     pub is_charging: bool,
@@ -80,6 +82,7 @@ impl Default for DeviceFallback {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum DeviceStatusFreshness {
     Fresh,
     Cached,
@@ -97,6 +100,7 @@ impl DeviceStatusFreshness {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DeviceStatusSnapshot {
     pub status: DeviceStatus,
     pub observed_at: SystemTime,

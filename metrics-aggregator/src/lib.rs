@@ -1,12 +1,14 @@
 use concurrency::Lazy;
 use diagnostics::tracing::{info, warn};
+use httpd::metrics as http_metrics;
+use httpd::uri::form_urlencoded;
 use httpd::{HttpClient, HttpError, Method, Request, Response, Router, StatusCode};
 use runtime::telemetry::{Counter, Gauge, Registry};
 use runtime::{spawn, spawn_blocking};
 use std::error::Error as StdError;
 use std::fmt;
 use std::str::FromStr;
-use urlencoding::encode;
+use sys::archive::zip::ZipBuilder;
 
 use crypto_suite::encryption::{
     envelope::{self, EnvelopeError, PASSWORD_CONTENT_TYPE, RECIPIENT_CONTENT_TYPE},
@@ -400,6 +402,12 @@ struct AggregatorMetrics {
     retention_pruned_total: Counter,
 }
 
+impl AggregatorMetrics {
+    fn registry(&self) -> &Registry {
+        &self.registry
+    }
+}
+
 static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let registry = Registry::new();
     let ingest_total = registry
@@ -551,12 +559,11 @@ async fn fetch_and_dump_logs(
 ) -> Result<(), String> {
     let client = HttpClient::default();
     let base = api.trim_end_matches('/');
-    let url = format!(
-        "{}/logs/search?db={}&correlation={}&limit=50",
-        base,
-        encode(&db),
-        encode(&record.correlation_id)
-    );
+    let mut serializer = form_urlencoded::Serializer::new(String::new());
+    serializer.append_pair("db", &db);
+    serializer.append_pair("correlation", &record.correlation_id);
+    serializer.append_pair("limit", "50");
+    let url = format!("{}/logs/search?{}", base, serializer.finish());
     let response = client
         .request(Method::Get, &url)
         .map_err(|e| format!("request build failed: {e}"))?
@@ -749,7 +756,7 @@ async fn cluster(request: Request<AppState>) -> Result<Response, HttpError> {
 #[derive(Debug)]
 enum ExportError {
     Serialization(String),
-    Zip(zip::result::ZipError),
+    Archive(sys::archive::zip::ZipError),
     Io(io::Error),
     Envelope(EnvelopeError),
 }
@@ -758,7 +765,7 @@ impl fmt::Display for ExportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExportError::Serialization(err) => write!(f, "serialization error: {err}"),
-            ExportError::Zip(err) => write!(f, "zip error: {err}"),
+            ExportError::Archive(err) => write!(f, "archive error: {err}"),
             ExportError::Io(err) => write!(f, "io error: {err}"),
             ExportError::Envelope(err) => write!(f, "envelope error: {err}"),
         }
@@ -769,16 +776,16 @@ impl StdError for ExportError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             ExportError::Serialization(_) => None,
-            ExportError::Zip(err) => Some(err),
+            ExportError::Archive(err) => Some(err),
             ExportError::Io(err) => Some(err),
             ExportError::Envelope(err) => Some(err),
         }
     }
 }
 
-impl From<zip::result::ZipError> for ExportError {
-    fn from(value: zip::result::ZipError) -> Self {
-        ExportError::Zip(value)
+impl From<sys::archive::zip::ZipError> for ExportError {
+    fn from(value: sys::archive::zip::ZipError) -> Self {
+        ExportError::Archive(value)
     }
 }
 
@@ -805,21 +812,14 @@ fn build_export_payload(
     password: Option<String>,
     bucket: Option<String>,
 ) -> Result<ExportPayload, ExportError> {
-    use zip::write::FileOptions;
-
-    let mut cursor = io::Cursor::new(Vec::new());
-    {
-        let mut writer = zip::ZipWriter::new(&mut cursor);
-        for (peer_id, deque) in map {
-            let json = serde_json::to_vec(&deque)
-                .map_err(|err| ExportError::Serialization(err.to_string()))?;
-            writer.start_file(format!("{peer_id}.json"), FileOptions::default())?;
-            writer.write_all(&json)?;
-        }
-        writer.finish()?;
+    let mut builder = ZipBuilder::new();
+    for (peer_id, deque) in map {
+        let json = serde_json::to_vec(&deque)
+            .map_err(|err| ExportError::Serialization(err.to_string()))?;
+        builder.add_file(&format!("{peer_id}.json"), &json)?;
     }
 
-    let bytes = cursor.into_inner();
+    let bytes = builder.finish()?;
     let (data, content_type) = match (recipient, password) {
         (Some(recipient), None) => {
             let recipient = x25519::PublicKey::from_str(&recipient)
@@ -922,10 +922,7 @@ async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
 }
 
 async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
-    let body = aggregator_metrics().registry.render();
-    Ok(Response::new(StatusCode::OK)
-        .with_header("content-type", "text/plain; version=0.0.4")
-        .with_body(body.into_bytes()))
+    Ok(http_metrics::prometheus(aggregator_metrics().registry()))
 }
 
 pub fn router(state: AppState) -> Router<AppState> {
@@ -988,46 +985,9 @@ mod tests {
     use httpd::{Method, StatusCode};
     use rand::rngs::OsRng;
     use std::collections::HashMap;
-    use std::fs;
     use std::future::Future;
-    use std::io::{self, Cursor};
-    use std::path::{Path, PathBuf};
-    use zip::ZipArchive;
-
-    struct TestTempDir {
-        path: PathBuf,
-    }
-
-    impl TestTempDir {
-        fn new() -> io::Result<Self> {
-            let mut base = std::env::temp_dir();
-            let nanos = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?
-                .as_nanos();
-            base.push(format!(
-                "metrics-aggregator-test-{}-{}",
-                std::process::id(),
-                nanos
-            ));
-            fs::create_dir_all(&base)?;
-            Ok(Self { path: base })
-        }
-
-        fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TestTempDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    fn tempdir() -> io::Result<TestTempDir> {
-        TestTempDir::new()
-    }
+    use sys::archive::zip::ZipReader;
+    use sys::tempfile;
 
     fn run_async<T>(future: impl Future<Output = T>) -> T {
         runtime::block_on(future)
@@ -1036,7 +996,7 @@ mod tests {
     #[test]
     fn dedupes_by_peer() {
         run_async(async {
-            let dir = tempdir().unwrap();
+            let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("token".into(), dir.path().join("m.json"), 60);
             let app = router(state.clone());
             let payload = serde_json::json!([
@@ -1067,7 +1027,7 @@ mod tests {
     #[test]
     fn persists_and_prunes() {
         run_async(async {
-            let dir = tempdir().unwrap();
+            let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("m.json");
             {
                 let state = AppState::new("t".into(), &path, 1);
@@ -1107,7 +1067,7 @@ mod tests {
     #[test]
     fn export_all_zips_and_checksums() {
         run_async(async {
-            let dir = tempdir().unwrap();
+            let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
@@ -1131,14 +1091,10 @@ mod tests {
             let body_bytes = resp.body().to_vec();
             let hash = blake3::hash(&body_bytes);
             assert_ne!(hash.as_bytes(), &[0u8; 32]);
-            let cursor = Cursor::new(body_bytes);
-            let mut zip = ZipArchive::new(cursor).unwrap();
-            assert_eq!(zip.len(), 2);
-            let mut file = zip.by_name("p1.json").unwrap();
-            let mut contents = String::new();
-            use std::io::Read;
-            file.read_to_string(&mut contents).unwrap();
-            let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
+            let archive = ZipReader::from_bytes(&body_bytes).unwrap();
+            assert_eq!(archive.len(), 2);
+            let file = archive.file("p1.json").unwrap();
+            let v: Vec<(u64, serde_json::Value)> = serde_json::from_slice(file).unwrap();
             assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
         });
     }
@@ -1146,7 +1102,7 @@ mod tests {
     #[test]
     fn export_all_encrypts() {
         run_async(async {
-            let dir = tempdir().unwrap();
+            let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
@@ -1177,13 +1133,10 @@ mod tests {
             assert_eq!(resp.header("content-type"), Some(RECIPIENT_CONTENT_TYPE));
             let body_bytes = resp.body().to_vec();
             let plain = envelope::decrypt_with_secret(&body_bytes, &secret).unwrap();
-            let mut zip = ZipArchive::new(Cursor::new(plain)).unwrap();
-            assert_eq!(zip.len(), 1);
-            let mut file = zip.by_name("p1.json").unwrap();
-            let mut contents = String::new();
-            use std::io::Read;
-            file.read_to_string(&mut contents).unwrap();
-            let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
+            let archive = ZipReader::from_bytes(&plain).unwrap();
+            assert_eq!(archive.len(), 1);
+            let file = archive.file("p1.json").unwrap();
+            let v: Vec<(u64, serde_json::Value)> = serde_json::from_slice(file).unwrap();
             assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
         });
     }
@@ -1191,7 +1144,7 @@ mod tests {
     #[test]
     fn export_all_password_encrypts() {
         run_async(async {
-            let dir = tempdir().unwrap();
+            let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
@@ -1219,13 +1172,10 @@ mod tests {
             assert_eq!(resp.header("content-type"), Some(PASSWORD_CONTENT_TYPE));
             let body_bytes = resp.body().to_vec();
             let plain = envelope::decrypt_with_password(&body_bytes, b"secret").unwrap();
-            let mut zip = ZipArchive::new(Cursor::new(plain)).unwrap();
-            assert_eq!(zip.len(), 1);
-            let mut file = zip.by_name("p1.json").unwrap();
-            let mut contents = String::new();
-            use std::io::Read;
-            file.read_to_string(&mut contents).unwrap();
-            let v: Vec<(u64, serde_json::Value)> = serde_json::from_str(&contents).unwrap();
+            let archive = ZipReader::from_bytes(&plain).unwrap();
+            assert_eq!(archive.len(), 1);
+            let file = archive.file("p1.json").unwrap();
+            let v: Vec<(u64, serde_json::Value)> = serde_json::from_slice(file).unwrap();
             assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
         });
     }
@@ -1233,7 +1183,7 @@ mod tests {
     #[test]
     fn wrappers_endpoint_returns_latest_metrics() {
         run_async(async {
-            let dir = tempdir().unwrap();
+            let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             state.record_telemetry(TelemetrySummaryEntry {
                 node_id: "node-a".into(),
