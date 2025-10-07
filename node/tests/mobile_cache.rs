@@ -22,7 +22,7 @@ fn persistent_config(dir: &std::path::Path, key: [u8; 32]) -> MobileCacheConfig 
 fn mobile_cache_persists_across_restarts() {
     let tmp = tempdir().expect("temp dir");
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    OsRng::default().fill_bytes(&mut key);
     let cfg = persistent_config(tmp.path(), key);
 
     {
@@ -55,7 +55,7 @@ fn mobile_cache_updates_telemetry_counters() {
 
     let tmp = tempdir().expect("temp dir");
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    OsRng::default().fill_bytes(&mut key);
     let cfg = persistent_config(tmp.path(), key);
 
     let mut cache = MobileCache::open(cfg).expect("open cache");
@@ -77,7 +77,7 @@ fn mobile_cache_updates_telemetry_counters() {
 fn expired_entries_are_swept() {
     let tmp = tempdir().expect("temp dir");
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    OsRng::default().fill_bytes(&mut key);
     let cfg = MobileCacheConfig::ephemeral(tmp.path(), Duration::from_millis(50), key);
 
     let mut cache = MobileCache::open(cfg).expect("open cache");

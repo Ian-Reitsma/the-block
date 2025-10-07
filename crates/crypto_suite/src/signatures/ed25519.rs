@@ -1,7 +1,7 @@
 use core::fmt;
 use core::hash::{Hash, Hasher};
 
-use rand_core::{CryptoRng, RngCore};
+use rand::{CryptoRng, RngCore};
 use thiserror::Error;
 
 use crate::signatures::{Signer, Verifier};

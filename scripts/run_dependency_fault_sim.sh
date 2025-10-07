@@ -12,7 +12,7 @@ if [[ $# -eq 0 ]]; then
   args+=("--runtime" "inhouse")
   args+=("--transport" "quinn")
   args+=("--overlay" "inhouse")
-  args+=("--storage" "rocksdb")
+  args+=("--storage" "inhouse")
   args+=("--coding" "reed-solomon")
   args+=("--crypto" "dalek")
   args+=("--codec" "bincode")

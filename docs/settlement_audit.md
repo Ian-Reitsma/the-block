@@ -43,7 +43,7 @@ The CLI forwards the same data when compiled with settlement support:
 cargo run -p contract-cli --features full -- compute stats --url http://127.0.0.1:26658
 ```
 
-The stats command first issues `compute_market.stats`, then fetches provider balances and recent audit entries to present CT exposure per provider (legacy `industrial` columns are retained for tooling compatibility). Use the `--features sqlite-storage` build when only the RocksDB-backed ledger support is required.
+The stats command first issues `compute_market.stats`, then fetches provider balances and recent audit entries to present CT exposure per provider (legacy `industrial` columns are retained for tooling compatibility). No additional feature flags are required; enable `sqlite-migration` only when importing historical SQLite snapshots.
 
 ## Monitoring Consensus Receipt Audits
 

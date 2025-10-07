@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  FIRST_PARTY_ONLY: 1
+
 jobs:
   gate:
     uses: ./.github/workflows/release_gate.yml

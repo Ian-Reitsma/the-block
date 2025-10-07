@@ -1,3 +1,5 @@
+#![cfg(feature = "allow-third-party")]
+
 use coding::{
     decrypt_xchacha20_poly1305, default_compressor, default_encryptor, encrypt_xchacha20_poly1305,
     ErasureCoder, FountainCoder, CHACHA20_POLY1305_KEY_LEN, XCHACHA20_POLY1305_NONCE_LEN,

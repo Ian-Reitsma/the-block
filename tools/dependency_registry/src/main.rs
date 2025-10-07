@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context, Result};
 use cli_core::{
     command::Command,
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use diagnostics::anyhow as diag_anyhow;
+use diagnostics::anyhow::{Context, Result};
 use std::env;
 
 use dependency_registry::{build_registry, output, BuildOptions, Cli, PolicyConfig};
@@ -30,7 +31,7 @@ fn main() -> Result<()> {
             print_help_for_path(&command, &path);
             return Ok(());
         }
-        Err(err) => return Err(anyhow!(err)),
+        Err(err) => return Err(diag_anyhow::anyhow!(err)),
     };
 
     let cli = Cli::from_matches(&matches)?;
@@ -57,6 +58,7 @@ fn main() -> Result<()> {
     })?;
 
     output::write_registry_json(&build.registry, &cli.out_dir)?;
+    output::write_crate_manifest(&build.registry, &cli.manifest_out)?;
     if let Some(snapshot_path) = &cli.snapshot {
         output::write_snapshot(&build.registry, snapshot_path)?;
     }
@@ -69,13 +71,13 @@ fn main() -> Result<()> {
         let baseline = output::load_registry(&cli.baseline)
             .with_context(|| format!("unable to load baseline from {}", cli.baseline.display()))?;
         if baseline.comparison_key() != build.registry.comparison_key() {
-            anyhow::bail!(
+            diag_anyhow::bail!(
                 "dependency registry drift detected relative to baseline {}",
                 cli.baseline.display()
             );
         }
         if !build.violations.is_empty() {
-            anyhow::bail!(
+            diag_anyhow::bail!(
                 "policy violations detected; see {}",
                 cli.out_dir.join("dependency-violations.json").display()
             );

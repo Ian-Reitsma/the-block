@@ -317,7 +317,10 @@ impl SettlementState {
                     reason: reason.to_string(),
                 }
             }
-            SlaOutcome::Violated { reason, automated } => {
+            SlaOutcome::Violated {
+                reason,
+                automated: _,
+            } => {
                 let memo = format!("sla_violation_{reason}");
                 match self.ct.debit(&record.provider, record.provider_bond) {
                     Ok(_) => {
@@ -486,9 +489,9 @@ impl Settlement {
         }
 
         let base = if path.is_empty() {
-            tempfile::tempdir()
+            sys::tempfile::tempdir()
                 .expect("create settlement tempdir")
-                .into_path()
+                .keep()
         } else {
             PathBuf::from(path)
         };

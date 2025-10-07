@@ -9,7 +9,7 @@ use std::time::Duration;
 fn cache_and_queue() {
     let tmp = tempfile::tempdir().unwrap();
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    OsRng::default().fill_bytes(&mut key);
     let cfg = MobileCacheConfig::ephemeral(tmp.path(), Duration::from_secs(10), key);
     let mut cache = MobileCache::open(cfg).expect("open cache");
     cache

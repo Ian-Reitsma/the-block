@@ -179,7 +179,7 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 
 ### Implementation Summary
 
-- `Settlement::init` now opens (or creates) `compute_settlement.db` inside the configured settlement directory, wiring sled-style helpers that load or default each sub-tree (`ledger_ct`, `ledger_it`, `metadata`, `audit_log`, `recent_roots`, `next_seq`). Test builds without `storage-rocksdb` transparently fall back to an ephemeral directory.
+- `Settlement::init` now opens (or creates) `compute_settlement.db` inside the configured settlement directory, wiring sled-style helpers that load or default each sub-tree (`ledger_ct`, `ledger_it`, `metadata`, `audit_log`, `recent_roots`, `next_seq`). Test builds without the legacy `storage-rocksdb` toggle transparently fall back to an ephemeral directory while production deployments rely on the in-house engine.
 - Every accrual, refund, or penalty updates both the in-memory ledger and the persisted state via `persist_all`, bumping a monotonic sequence and recomputing the Merkle root (`compute_root`).
 - `Settlement::shutdown` always calls `persist_all` on the active state and flushes RocksDB handles before dropping them, ensuring integration harnesses (and crash recovery drills) see fully durable CT balances (with zeroed industrial fields) even if the node exits between accruals.
 - `Settlement::submit_anchor` hashes submitted receipts, records the anchor in `metadata.last_anchor_hex`, pushes a marker into the audit deque, and appends a JSON line to the on-disk audit log through `state::append_audit`.
@@ -196,5 +196,5 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 ### Migration Notes
 
 - Nodes upgrading from the in-memory shim should point `settlement_dir` (or the default data directory) at persistent storage before enabling `Real` mode. The first startup migrates balances into RocksDB with a zeroed sequence.
-- Automation that previously scraped in-process metrics must switch to the RPC surfaces described above. CLI invocations now require the `sqlite-storage` feature (or the `full` bundle) to display the persisted audit snapshots.
+- Automation that previously scraped in-process metrics must switch to the RPC surfaces described above. CLI invocations use the default build; enable the optional `sqlite-migration` feature only when importing legacy SQLite snapshots before returning to the minimal configuration.
 - Backups should include `compute_settlement.db` and the `audit.log` file written by `state::append_audit` so post-incident reviews retain both ledger state and anchor evidence.

@@ -4,10 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-base64 = "0.22"
+base64_fp = { path = "../../crates/base64_fp" }
 crypto_suite = { path = "../../crates/crypto_suite" }
 cli_core = { path = "../../crates/cli_core" }
-rusqlite = { version = "0.30", features = ["bundled"] }
+rusqlite = { version = "0.30", features = ["bundled"], optional = true }
+sled = { path = "../../sled" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 coding = { path = "../crates/coding" }
+
+[features]
+default = []
+sqlite-migration = ["dep:rusqlite"]

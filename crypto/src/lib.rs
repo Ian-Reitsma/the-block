@@ -1,6 +1,7 @@
 #[cfg(feature = "quantum")]
 pub mod dilithium;
 
+pub mod primitives;
 pub mod session;
 
 /// Temporary compatibility re-export so downstream crates that previously used

@@ -247,7 +247,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use storage::{StorageContract, StorageOffer};
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     fn reset_state() {
         CONTRACTS.lock().unwrap().clear();

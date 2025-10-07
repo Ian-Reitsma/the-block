@@ -2,9 +2,11 @@
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |
+> **2025-10-07 note**: Workspace crates now consume the first-party `base64_fp` encoder/decoder; the remaining `base64` entries
+> below are transitive pulls scheduled for replacement once upstream dependencies are rewritten or patched to accept the in-house
+> implementation.
 | strategic | `rustls` | 0.23.32 | crates.io | Apache-2.0 OR ISC OR MIT | 2 |
 | replaceable | `bincode` | 1.3.3 | crates.io | MIT | 1 |
-| replaceable | `rocksdb` | 0.21.0 | path | Apache-2.0 | 1 |
 | replaceable | `serde` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 1 |
 | replaceable | `sled` | 0.34.7 | crates.io | MIT/Apache-2.0 | 1 |
 | unclassified | `addr2line` | 0.22.0 | crates.io | Apache-2.0 OR MIT | 2 |
@@ -173,7 +175,7 @@
 | unclassified | `hashbrown` | 0.15.5 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `hashbrown` | 0.16.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `hashlink` | 0.8.4 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `hdrhistogram` | 7.5.4 | crates.io | MIT/Apache-2.0 | 1 |
+| workspace | `histogram_fp` | 0.1.0 | workspace | — | 1 |
 | unclassified | `heck` | 0.4.1 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `heck` | 0.5.0 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `hermit-abi` | 0.3.9 | crates.io | MIT OR Apache-2.0 | 4 |

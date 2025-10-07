@@ -120,7 +120,7 @@ impl RentEscrow {
 #[cfg(test)]
 mod tests {
     use super::RentEscrow;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn release_refunds_and_burns() {

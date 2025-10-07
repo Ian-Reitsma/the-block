@@ -2,15 +2,19 @@
 > **Review (2025-09-25):** Synced WASM Contracts guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
-Smart contracts can now be authored in WebAssembly and executed through a
-Wasmtime interpreter configured for determinism. The engine enables fuel-based
-gas metering and rejects any nondeterministic features such as host time or
-randomness.
+Smart contracts can now be authored in WebAssembly and executed through the
+first-party interpreter. Modules begin with the `TBW1` magic header followed by
+bytecode instructions (`push_i64`, `push_input`, arithmetic, `eq`, `return`).
+Each instruction consumes one unit of gas, so execution remains deterministic
+and easy to profile without the Wasmtime/Cranelift stack.
 
 ## Determinism
 
-- Execution uses Wasmtime with `consume_fuel` and NaN canonicalization enabled.
-- Gas is tracked via Wasmtime fuel and mirrored to chain gas units.
+- Execution relies entirely on the in-house interpreter—no Wasmtime/wasmi
+  dependency is linked. Contracts produce deterministic output and may return
+  multiple values via `return N`.
+- Gas accounting remains deterministic through `GasMeter`, so higher layers can
+  simulate success/failure paths without depending on external crates.
 - Contracts interact with the host only through the exposed memory and
   exported `entry` function.
 

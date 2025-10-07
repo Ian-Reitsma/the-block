@@ -3,6 +3,9 @@ name: release-gate
 on:
   workflow_call:
 
+env:
+  FIRST_PARTY_ONLY: 1
+
 jobs:
   gate:
     runs-on: ubuntu-22.04

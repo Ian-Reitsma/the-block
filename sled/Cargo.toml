@@ -1,0 +1,20 @@
+[package]
+name = "sled"
+version = "0.34.0"
+edition = "2021"
+
+[features]
+default = []
+legacy-format = ["dep:sled-legacy"]
+
+[dependencies]
+storage_engine = { path = "../crates/storage_engine" }
+thiserror = "1"
+tempfile = "3"
+once_cell = "1"
+hex = "0.4"
+
+[dependencies.sled-legacy]
+package = "sled"
+version = "0.34"
+optional = true

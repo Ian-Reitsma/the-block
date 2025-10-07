@@ -25,7 +25,7 @@ const fn default_max_snapshot_bytes() -> u64 {
 }
 
 pub fn config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|mut dir| {
+    sys::paths::home_dir().map(|mut dir| {
         dir.push(".the_block");
         dir.push("light_client.toml");
         dir
@@ -33,7 +33,7 @@ pub fn config_path() -> Option<PathBuf> {
 }
 
 pub fn state_cache_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|mut dir| {
+    sys::paths::home_dir().map(|mut dir| {
         dir.push(".the_block");
         dir.push("light_state.cache");
         dir

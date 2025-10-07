@@ -8,12 +8,10 @@ use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
 use ::time::{Duration, OffsetDateTime};
 use anyhow::{anyhow, Context, Result};
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine;
+use base64_fp::{decode_standard, encode_standard};
 use crypto_suite::signatures::ed25519::{KeyEncodingError, SigningKey};
-use dirs;
 use once_cell::sync::Lazy;
-use rand_core::{OsRng, RngCore};
+use rand::{OsRng, RngCore};
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair, SanType};
 pub use s2n_quic::{client::Connect, provider::tls, Client, Server};
 use serde::{Deserialize, Serialize};
@@ -262,7 +260,7 @@ fn generate_local_cert(signing_key: &SigningKey) -> Result<LocalCert> {
 
 fn random_serial() -> rcgen::SerialNumber {
     let mut buf = [0u8; 16];
-    OsRng.fill_bytes(&mut buf);
+    OsRng::default().fill_bytes(&mut buf);
     buf[0] &= 0x7F;
     rcgen::SerialNumber::from_slice(&buf)
 }
@@ -313,9 +311,7 @@ fn persist_state(state: &CertState) -> Result<()> {
 }
 
 fn stored_to_hist(stored: StoredCert) -> Result<HistoricalCert> {
-    let cert = B64
-        .decode(stored.cert.as_bytes())
-        .map_err(|e| anyhow!("invalid stored cert: {e}"))?;
+    let cert = decode_standard(&stored.cert).map_err(|e| anyhow!("invalid stored cert: {e}"))?;
     let bytes =
         hex::decode(stored.fingerprint).map_err(|e| anyhow!("invalid stored fingerprint: {e}"))?;
     if bytes.len() != 32 {
@@ -332,7 +328,7 @@ fn stored_to_hist(stored: StoredCert) -> Result<HistoricalCert> {
 
 fn hist_to_stored(hist: &HistoricalCert) -> StoredCert {
     StoredCert {
-        cert: B64.encode(&hist.cert),
+        cert: encode_standard(&hist.cert),
         fingerprint: hex::encode(hist.fingerprint),
         issued_at: hist.issued_at,
     }
@@ -340,7 +336,7 @@ fn hist_to_stored(hist: &HistoricalCert) -> StoredCert {
 
 fn local_to_stored(local: &LocalCert) -> StoredCert {
     StoredCert {
-        cert: B64.encode(&local.cert),
+        cert: encode_standard(&local.cert),
         fingerprint: hex::encode(local.fingerprint),
         issued_at: local.issued_at,
     }
@@ -353,7 +349,7 @@ fn cert_store_path() -> PathBuf {
     if let Ok(path) = std::env::var("TB_NET_CERT_STORE_PATH") {
         return PathBuf::from(path);
     }
-    dirs::home_dir()
+    sys::paths::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".the_block")
         .join(CERT_STORE_FILE)
@@ -421,7 +417,7 @@ pub fn record_retransmit(count: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand_core::OsRng;
+    use rand::OsRng;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -439,7 +435,7 @@ mod tests {
         reset_state();
 
         let mut secret = [0u8; 32];
-        OsRng.fill_bytes(&mut secret);
+        OsRng::default().fill_bytes(&mut secret);
         let signing = SigningKey::from_bytes(&secret);
         let advert = initialize(&signing).expect("initialize transport certs");
         let mut peer_key = signing.verifying_key().to_bytes();

@@ -1,11 +1,15 @@
 #![cfg(feature = "integration-tests")]
-use rusqlite::Connection;
+use sled;
 use std::fs::File;
 use std::io::Write;
 use tempfile::tempdir;
 use the_block::log_indexer::{
     index_logs, index_logs_with_options, search_logs, IndexOptions, LogFilter, LogIndexerError,
 };
+
+fn entry_key(id: u64) -> String {
+    format!("entry:{id:016x}")
+}
 
 #[test]
 fn parse_and_index() {
@@ -26,11 +30,9 @@ fn parse_and_index() {
     .unwrap();
     let db_path = dir.path().join("logs.db");
     index_logs(&log_path, &db_path).unwrap();
-    let conn = Connection::open(&db_path).unwrap();
-    let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(count, 2);
+
+    let rows = search_logs(&db_path, &LogFilter::default()).unwrap();
+    assert_eq!(rows.len(), 2);
 
     let mut filter = LogFilter::default();
     filter.correlation = Some("b".into());
@@ -53,12 +55,13 @@ fn surfaces_decryption_errors() {
     .unwrap();
     index_logs(&log_path, &db_path).unwrap();
 
-    let conn = Connection::open(&db_path).unwrap();
-    conn.execute("DROP TABLE logs", []).unwrap();
+    let db = sled::open(&db_path).unwrap();
+    let tree = db.open_tree("entries").unwrap();
+    tree.insert(entry_key(1), b"not-json").unwrap();
 
     let err = search_logs(&db_path, &LogFilter::default()).unwrap_err();
     match err {
-        LogIndexerError::Sqlite(_) => {}
+        LogIndexerError::Json(_) => {}
         other => panic!("unexpected error variant: {:?}", other),
     }
 }

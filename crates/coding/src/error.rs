@@ -30,6 +30,8 @@ pub enum EncryptError {
     InvalidKeyLength { expected: usize, actual: usize },
     #[error("ciphertext too short: {len} bytes")]
     InvalidCiphertext { len: usize },
+    #[error("secure randomness unavailable: {reason}")]
+    EntropyUnavailable { reason: &'static str },
     #[error("encryption failed")]
     EncryptionFailed,
     #[error("decryption failed")]

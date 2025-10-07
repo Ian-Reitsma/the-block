@@ -40,14 +40,9 @@ fn package(os: String, out: PathBuf) -> std::io::Result<()> {
 }
 
 fn update() -> anyhow::Result<()> {
-    self_update::backends::github::Update::configure()
-        .repo_owner("the-block")
-        .repo_name("node")
-        .bin_name("the-block")
-        .show_download_progress(true)
-        .build()?
-        .update()?;
-    Ok(())
+    anyhow::bail!(
+        "first-party self-update tooling is not yet available; download releases manually"
+    )
 }
 
 fn main() {

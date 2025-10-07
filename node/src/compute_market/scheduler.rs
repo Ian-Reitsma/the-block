@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use sys::paths;
 
 use super::{courier, Accelerator};
 #[cfg(feature = "telemetry")]
@@ -1058,7 +1059,7 @@ fn pending_path() -> PathBuf {
     std::env::var("TB_PENDING_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("pending_jobs.json")
@@ -1144,7 +1145,7 @@ fn reputation_db_path() -> PathBuf {
     std::env::var("TB_REPUTATION_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("reputation.json")
@@ -1155,7 +1156,7 @@ fn cancel_log_path() -> PathBuf {
     std::env::var("TB_CANCEL_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("cancellations.log")

@@ -25,14 +25,13 @@ crypto = { path = "../crypto" }
 crypto_suite = { path = "../crates/crypto_suite" }
 codec = { path = "../crates/codec" }
 cli_core = { path = "../crates/cli_core" }
-wasmtime = { version = "24", optional = true }
-base64 = "0.22"
+base64_fp = { path = "../crates/base64_fp" }
 rusqlite = { version = "0.30", features = ["bundled"], optional = true }
 rpassword = "7"
-rand = "0.8"
+rand = { path = "../crates/rand" }
+sys = { path = "../crates/sys" }
 once_cell = "1"
 state = { path = "../state" }
-dirs = "5"
 httpd = { path = "../crates/httpd" }
 coding = { path = "../crates/coding" }
 
@@ -41,9 +40,9 @@ default = []
 wallet = ["dep:wallet"]
 quantum = ["wallet"]
 telemetry = ["the_block/telemetry"]
-wasm-metadata = ["dep:wasmtime"]
+wasm-metadata = []
 sqlite-storage = ["dep:rusqlite"]
-full = ["wasm-metadata", "sqlite-storage"]
+full = ["sqlite-storage"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

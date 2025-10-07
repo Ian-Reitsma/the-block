@@ -372,7 +372,7 @@ pub fn apply_rebates(block: &mut Block, amount: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     fn tracker_with_tempdir() -> ProofTracker {
         let dir = tempdir().expect("tempdir");

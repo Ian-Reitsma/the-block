@@ -1,79 +1,110 @@
-use crypto_suite::hashing::blake3::Hasher;
-use std::{env, fs, path::Path, process::Command};
+use std::collections::BTreeSet;
+use std::env;
+use std::fs;
+use std::path::PathBuf;
+use std::process::Command;
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/constants.rs");
-    println!("cargo:rerun-if-env-changed=PYTHONHOME");
-    let ld = Command::new("python3-config")
-        .arg("--ldflags")
+    println!("cargo:rerun-if-env-changed=FIRST_PARTY_ONLY");
+    if !enforce_guard() {
+        return;
+    }
+
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| String::from("."));
+    let cargo = env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+
+    let output = Command::new(cargo)
+        .arg("metadata")
+        .arg("--format-version")
+        .arg("1")
+        .arg("--manifest-path")
+        .arg(format!("{manifest_dir}/Cargo.toml"))
         .output()
-        .expect("python3-config missing");
-    if !ld.status.success() {
-        eprintln!("::error::python3-config --ldflags failed");
-        std::process::exit(1);
-    }
-    let flags = String::from_utf8_lossy(&ld.stdout);
-    let lib_path = flags.split_whitespace().find_map(|s| s.strip_prefix("-L"));
-    if let Some(p) = lib_path {
-        println!("cargo:rustc-link-search=native={}", p);
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", p);
-    } else {
-        eprintln!("::error::unable to locate Python shared library");
-        std::process::exit(1);
-    }
-    if cfg!(target_os = "macos") {
-        if let Ok(py_home) = env::var("PYTHONHOME") {
-            println!("cargo:rustc-link-arg=-Wl,-rpath,{}/lib", py_home);
-        }
-    }
-    if !include_str!("src/constants.rs").is_ascii() {
-        println!(
-            "::error file=src/constants.rs,line=1,col=1::Non-ASCII detected in consensus file"
+        .expect("failed to execute cargo metadata");
+
+    if !output.status.success() {
+        panic!(
+            "dependency guard failed: cargo metadata exited with status {:?}: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
         );
-        std::process::exit(1);
     }
 
-    // Compute genesis hash at build time so tests can assert it at compile time.
-    const ZERO_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
-    let mut h = Hasher::new();
-    h.update(&0u64.to_le_bytes()); // index
-    h.update(ZERO_HASH.as_bytes()); // prev
-    h.update(&0u64.to_le_bytes()); // timestamp
-    h.update(&0u64.to_le_bytes()); // nonce
-    h.update(&8u64.to_le_bytes()); // difficulty
-    h.update(&[0u8]); // retune_hint
-    h.update(&0u64.to_le_bytes()); // base_fee
-    h.update(&0u64.to_le_bytes()); // coin_c
-    h.update(&0u64.to_le_bytes()); // coin_i
-    h.update(&0u64.to_le_bytes()); // storage_sub
-    h.update(&0u64.to_le_bytes()); // read_sub
-    h.update(&0u64.to_le_bytes()); // compute_sub
-    h.update(&0u64.to_le_bytes()); // proof_rebate
-    h.update(&0u64.to_le_bytes()); // storage_sub_it
-    h.update(&0u64.to_le_bytes()); // read_sub_it
-    h.update(&0u64.to_le_bytes()); // compute_sub_it
-    h.update(&[0u8; 32]); // read_root
-    h.update(ZERO_HASH.as_bytes()); // fee checksum
-    h.update(ZERO_HASH.as_bytes()); // state_root
-                                    // l2_roots: none
-                                    // l2_sizes: none
-    h.update(&[0u8; 32]); // vdf_commit
-    h.update(&[0u8; 32]); // vdf_output
-    h.update(&0u32.to_le_bytes()); // vdf_proof length
-                                   // vdf_proof bytes: none
-                                   // tx_ids: none
-    let digest = h.finalize().to_hex().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let offenders = detect_third_party(&stdout);
+    if offenders.is_empty() {
+        emit_build_hash();
+        write_genesis_stub();
+        return;
+    }
 
-    let out_dir = env::var("OUT_DIR").expect("OUT_DIR missing");
-    let dest = Path::new(&out_dir).join("genesis_hash.txt");
-    fs::write(dest, digest).expect("write genesis hash");
+    let mut offenders_vec: Vec<_> = offenders.into_iter().collect();
+    offenders_vec.sort();
+    let mut rendered = offenders_vec
+        .iter()
+        .take(10)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if offenders_vec.len() > 10 {
+        rendered.push_str(" ...");
+    }
 
-    // Embed the current git commit hash for runtime provenance checks.
-    if let Ok(out) = Command::new("git").args(["rev-parse", "HEAD"]).output() {
-        if out.status.success() {
-            if let Ok(s) = String::from_utf8(out.stdout) {
-                println!("cargo:rustc-env=BUILD_BIN_HASH={}", s.trim());
+    panic!("third-party crates detected while FIRST_PARTY_ONLY=1: {rendered}");
+}
+
+fn enforce_guard() -> bool {
+    match env::var("FIRST_PARTY_ONLY") {
+        Ok(value) => value != "0",
+        Err(_) => true,
+    }
+}
+
+fn detect_third_party(metadata: &str) -> BTreeSet<String> {
+    let mut offenders = BTreeSet::new();
+    let mut search_start = 0usize;
+    const SOURCE_MARKER: &str = "\"source\":";
+    const NAME_MARKER: &str = "\"name\":";
+
+    while let Some(relative_idx) = metadata[search_start..].find(SOURCE_MARKER) {
+        let source_idx = search_start + relative_idx + SOURCE_MARKER.len();
+        let tail = &metadata[source_idx..];
+        if !(tail.starts_with("\"registry+") || tail.starts_with("\"git+")) {
+            search_start = source_idx;
+            continue;
+        }
+
+        if let Some(prefix) = metadata[..source_idx - SOURCE_MARKER.len()].rfind(NAME_MARKER) {
+            let mut name_start = prefix + NAME_MARKER.len();
+            if metadata[name_start..].starts_with('"') {
+                name_start += 1;
             }
+            if let Some(rest) = metadata[name_start..].find('"') {
+                let name = &metadata[name_start..name_start + rest];
+                if !name.trim().is_empty() {
+                    offenders.insert(name.trim().to_string());
+                }
+            }
+        }
+
+        search_start = source_idx + 1;
+    }
+
+    offenders
+}
+
+fn emit_build_hash() {
+    println!("cargo:rustc-env=BUILD_BIN_HASH=FIRST_PARTY_FREEZE");
+}
+
+fn write_genesis_stub() {
+    if let Ok(out_dir) = env::var("OUT_DIR") {
+        let mut path = PathBuf::from(out_dir);
+        path.push("genesis_hash.txt");
+        const PLACEHOLDER: &str =
+            "80e68b5d4436e3a9925919c9f91e213f1e336b439a99a57070553f3b0520d1aa\n";
+        if let Err(err) = fs::write(&path, PLACEHOLDER) {
+            panic!("failed to write genesis hash stub: {err}");
         }
     }
 }

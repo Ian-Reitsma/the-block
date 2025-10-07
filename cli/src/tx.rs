@@ -174,7 +174,7 @@ impl TxDidAnchor {
 /// Generate a new Ed25519 keypair (private, public).
 #[allow(dead_code)]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
     rng.fill_bytes(&mut priv_bytes);
     let sk = SigningKey::from_bytes(&priv_bytes);

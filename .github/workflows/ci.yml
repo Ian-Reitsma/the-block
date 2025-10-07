@@ -5,6 +5,7 @@ on:
 
 env:
   FSTAR_VERSION: v2025.08.07
+  FIRST_PARTY_ONLY: 1
 
 jobs:
   test:

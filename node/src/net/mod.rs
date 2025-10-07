@@ -32,8 +32,7 @@ use crate::{
     BlobTx, Blockchain, ShutdownFlag, SignedTransaction,
 };
 use anyhow::anyhow;
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine;
+use base64_fp::{decode_standard, encode_standard};
 use coding::default_encryptor;
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
@@ -45,8 +44,7 @@ use p2p_overlay::OverlayDiagnostics;
 use p2p_overlay::{
     InhouseOverlay, InhousePeerId, OverlayResult, OverlayService, PeerEndpoint, StubOverlay,
 };
-use rand::Rng;
-use rand_core::{OsRng, RngCore};
+use rand::{OsRng, Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::fs;
@@ -57,6 +55,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
+use sys::paths;
 
 use runtime::fs::watch::{
     RecursiveMode as WatchRecursiveMode, WatchEventKind, Watcher as FsWatcher,
@@ -203,7 +202,7 @@ fn default_overlay_path() -> PathBuf {
     std::env::var("TB_OVERLAY_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("overlay")
@@ -651,7 +650,7 @@ fn peer_cert_store_path() -> PathBuf {
     if let Ok(path) = std::env::var("TB_PEER_CERT_CACHE_PATH") {
         return PathBuf::from(path);
     }
-    dirs::home_dir()
+    paths::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".the_block")
         .join(PEER_CERT_STORE_FILE)
@@ -733,21 +732,25 @@ fn encrypt_cert_blob(cert: &[u8]) -> Option<String> {
     if let Some(key) = peer_cert_encryption_key() {
         if let Ok(encryptor) = default_encryptor(&key) {
             if let Ok(ciphertext) = encryptor.encrypt(cert) {
-                return Some(format!("{}{}", CERT_BLOB_PREFIX, B64.encode(ciphertext)));
+                return Some(format!(
+                    "{}{}",
+                    CERT_BLOB_PREFIX,
+                    encode_standard(&ciphertext)
+                ));
             }
         }
     }
-    Some(B64.encode(cert))
+    Some(encode_standard(cert))
 }
 
 fn decrypt_cert_blob(data: &str) -> Option<Vec<u8>> {
     if data.starts_with(CERT_BLOB_PREFIX) {
-        let payload = B64.decode(data[CERT_BLOB_PREFIX.len()..].as_bytes()).ok()?;
+        let payload = decode_standard(&data[CERT_BLOB_PREFIX.len()..]).ok()?;
         let key = peer_cert_encryption_key()?;
         let encryptor = default_encryptor(&key).ok()?;
         encryptor.decrypt(&payload).ok()
     } else {
-        B64.decode(data.as_bytes()).ok()
+        decode_standard(data).ok()
     }
 }
 
@@ -1414,7 +1417,7 @@ impl Node {
         let peers = self.peers.bootstrap();
         // send handshake to each peer
         let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
-        let nonce = OsRng.next_u64();
+        let nonce = OsRng::default().next_u64();
         let transport = if self.quic_addr.is_some() {
             Transport::Quic
         } else {
@@ -1631,7 +1634,7 @@ pub fn load_net_key() -> SigningKey {
     let path = std::env::var("TB_NET_KEY_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            dirs::home_dir()
+            paths::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".the_block")
                 .join("net_key")
@@ -1650,7 +1653,7 @@ pub fn load_net_key() -> SigningKey {
         let hash = blake3::hash(s.as_bytes());
         seed.copy_from_slice(hash.as_bytes());
     } else {
-        let mut rng = OsRng;
+        let mut rng = OsRng::default();
         rng.fill_bytes(&mut seed);
     }
     let sk = SigningKey::from_bytes(&seed);

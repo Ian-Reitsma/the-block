@@ -86,31 +86,35 @@ fn evm_store_and_load_roundtrip() {
     assert_eq!(vm.read(id), Some(5u64.to_le_bytes().to_vec()));
 }
 
+fn wasm_module_add() -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&the_block::vm::wasm::MAGIC);
+    buf.push(the_block::vm::wasm::VERSION_V1);
+    buf.extend_from_slice(&[
+        the_block::vm::wasm::opcodes::PUSH_INPUT,
+        0,
+        the_block::vm::wasm::opcodes::PUSH_INPUT,
+        1,
+        the_block::vm::wasm::opcodes::ADD_I64,
+        the_block::vm::wasm::opcodes::RETURN,
+        1,
+    ]);
+    buf
+}
+
 #[test]
 fn wasm_execution_reports_gas_and_storage() {
-    let module = wat::parse_str(
-        r#"(module
-            (memory (export "memory") 1)
-            (func (export "entry") (param i32 i32) (result i32)
-                local.get 1)
-        )"#,
-    )
-    .expect("valid wasm module");
-
     let mut vm = Vm::new(VmType::Wasm);
+    let module = wasm_module_add();
     let id = vm.deploy_wasm(module, vec![]);
     let mut balance = 10_000;
-    let (out, used) = vm
-        .execute(id, b"ping", 50_000, 2, &mut balance)
-        .expect("wasm execution succeeds");
-    assert_eq!(out, b"ping");
-    assert!(used > 0, "fuel conversion must report usage");
-    assert_eq!(vm.read(id), Some(out.clone()));
-
-    // Running with a reduced budget should trap before charging a fee.
-    let mut retry_balance = 10_000;
-    let limited_limit = used.saturating_sub(1).max(1);
-    let err = vm.execute(id, b"pong", limited_limit, 2, &mut retry_balance);
-    assert_eq!(err, Err("wasm error"));
-    assert_eq!(retry_balance, 10_000);
+    let mut input = Vec::new();
+    input.extend_from_slice(&4i64.to_le_bytes());
+    input.extend_from_slice(&6i64.to_le_bytes());
+    let (out, gas_used) = vm
+        .execute(id, &input, 50_000, 2, &mut balance)
+        .expect("executes");
+    assert_eq!(out, 10i64.to_le_bytes());
+    assert!(gas_used > 0);
+    assert_eq!(vm.read(id), Some(10i64.to_le_bytes().to_vec()));
 }

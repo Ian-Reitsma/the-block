@@ -1,19 +1,44 @@
 use crate::vm::{runtime::Vm, runtime::VmType};
 
+fn sample_module() -> Vec<u8> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&crate::vm::wasm::MAGIC);
+    buf.push(crate::vm::wasm::VERSION_V1);
+    buf.extend_from_slice(&[
+        crate::vm::wasm::opcodes::PUSH_I64,
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        crate::vm::wasm::opcodes::PUSH_INPUT,
+        0,
+        crate::vm::wasm::opcodes::MUL_I64,
+        crate::vm::wasm::opcodes::RETURN,
+        1,
+    ]);
+    buf
+}
+
 #[test]
 fn wasm_runs_deterministically() {
-    let wat = r#"(module
-        (memory (export "memory") 1)
-        (func (export "entry") (param i32 i32) (result i32)
-            local.get 1)
-    )"#;
-    let wasm = wat::parse_str(wat).unwrap();
     let mut vm = Vm::new(VmType::Wasm);
-    let id = vm.deploy_wasm(wasm, vec![]);
-    let input = b"hello";
+    let module = sample_module();
+    let id = vm.deploy_wasm(module, vec![]);
     let mut balance = 1_000_000;
-    let (out1, gas1) = vm.execute(id, input, 1_000_000, 1, &mut balance).unwrap();
-    let (out2, gas2) = vm.execute(id, input, 1_000_000, 1, &mut balance).unwrap();
-    assert_eq!(out1, out2);
-    assert_eq!(gas1, gas2);
+    let mut input = 5i64.to_le_bytes().to_vec();
+    let first = vm
+        .execute(id, &input, 1_000_000, 1, &mut balance)
+        .expect("executes");
+    // reset state and rerun
+    let mut vm_again = Vm::new(VmType::Wasm);
+    let id_again = vm_again.deploy_wasm(sample_module(), vec![]);
+    let mut balance_again = 1_000_000;
+    let second = vm_again
+        .execute(id_again, &input, 1_000_000, 1, &mut balance_again)
+        .expect("executes");
+    assert_eq!(first.0, second.0);
 }

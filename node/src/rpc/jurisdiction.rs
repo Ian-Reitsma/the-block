@@ -82,7 +82,7 @@ pub fn policy_diff(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<serde_json
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn policy_diff_reports_missing_pack() {

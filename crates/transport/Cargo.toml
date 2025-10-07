@@ -18,11 +18,11 @@ quinn = [
 ]
 "s2n-quic" = [
     "dep:anyhow",
-    "dep:base64",
+    "dep:base64_fp",
     "dep:crypto_suite",
-    "dep:dirs",
+    "dep:sys",
     "dep:hex",
-    "dep:rand_core",
+    "dep:rand",
     "dep:rcgen",
     "dep:s2n-quic",
     "dep:serde",
@@ -35,14 +35,13 @@ quic = ["quinn", "s2n-quic"]
 [dependencies]
 anyhow = { version = "1", optional = true }
 async-trait = "0.1"
-base64 = { version = "0.22", optional = true }
+base64_fp = { path = "../base64_fp", optional = true }
 dashmap = { version = "5", optional = true }
-dirs = { version = "5", optional = true }
+sys = { path = "../sys", optional = true }
 crypto_suite = { path = "../crypto_suite", optional = true }
 hex = { version = "0.4", optional = true }
 once_cell = "1"
-rand = { version = "0.8", optional = true }
-rand_core = { version = "0.6", optional = true }
+rand = { path = "../rand", optional = true }
 rcgen = { version = "0.12", optional = true }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 quinn = { version = "0.10", features = ["rustls"], optional = true }

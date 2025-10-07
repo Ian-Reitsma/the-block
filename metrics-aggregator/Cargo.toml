@@ -12,7 +12,6 @@ thiserror = "1"
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 zip = "0.6"
 crypto_suite = { path = "../crates/crypto_suite" }
-notify = "6"
 urlencoding = "2"
 tracing = "0.1"
 storage_engine = { path = "../crates/storage_engine" }
@@ -21,7 +20,7 @@ time = { version = "0.3", default-features = false, features = ["formatting", "m
 [dev-dependencies]
 regex = "1"
 tempfile = "3"
-rand = "0.8"
+rand = { path = "../crates/rand" }
 
 
 [features]

@@ -19,7 +19,7 @@ fn shard_rate_limiting() {
 
     let peers = PeerSet::new(vec![]);
     let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
+    OsRng::default().fill_bytes(&mut bytes);
     let sk = SigningKey::from_bytes(&bytes);
     let addr: SocketAddr = "127.0.0.1:9".parse().unwrap();
 

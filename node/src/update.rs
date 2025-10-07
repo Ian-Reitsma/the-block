@@ -8,7 +8,7 @@ use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
+use sys::tempfile::NamedTempFile;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn persist_temp_file_converts_permission_error() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = sys::tempfile::tempdir().unwrap();
         let readonly = dir.path().join("readonly");
         fs::create_dir(&readonly).unwrap();
         let mut perms = fs::metadata(&readonly).unwrap().permissions();

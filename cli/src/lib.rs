@@ -6,3 +6,4 @@ pub mod parse_utils;
 pub mod rpc;
 pub mod tx;
 pub mod wallet;
+pub mod wasm;

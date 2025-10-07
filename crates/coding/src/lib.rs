@@ -4,6 +4,7 @@ mod encrypt;
 mod erasure;
 mod error;
 mod fountain;
+mod primitives;
 
 pub use compression::{
     compressor_for, default_compressor, Compressor, InhouseHybrid, NoopCompressor, RleCompressor,
@@ -28,6 +29,10 @@ pub use error::{
 pub use fountain::{
     default_fountain_coder, fountain_coder_for, FountainBatch, FountainCoder, FountainMetadata,
     FountainPacket, InhouseLtFountain,
+};
+pub use primitives::{
+    base as primitives_base, hash as primitives_hash, math as primitives_math,
+    rng as primitives_rng,
 };
 
 #[cfg(test)]

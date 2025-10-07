@@ -7,6 +7,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use sys::cpu;
 
 pub mod admission;
 pub mod cbm;
@@ -193,7 +194,7 @@ impl WorkloadRunner {
 
     /// Detect host hardware capability for scheduling.
     pub fn hardware_capability() -> scheduler::Capability {
-        let cpu = num_cpus::get() as u8;
+        let cpu = cpu::logical_count() as u8;
         let gpu = std::env::var("TB_GPU_MODEL").ok();
         let frameworks = std::env::var("TB_FRAMEWORKS")
             .ok()
@@ -755,6 +756,7 @@ mod tests {
     use super::*;
     use crypto_suite::hashing::blake3::Hasher;
     use std::sync::{Mutex, MutexGuard, OnceLock};
+    use sys::tempfile;
 
     static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 

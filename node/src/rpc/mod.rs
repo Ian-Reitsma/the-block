@@ -14,8 +14,7 @@ use crate::{
     Blockchain, SignedTransaction,
 };
 use ::storage::{contract::StorageContract, offer::StorageOffer};
-use base64::engine::general_purpose;
-use base64::Engine;
+use base64_fp::decode_standard;
 use bincode;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use hex;
@@ -526,24 +525,27 @@ fn execute_rpc(
                 })
             } else {
                 if method_str == "net.peer_stats_export" {
-                    if let Some(path) = request.params.get("path").and_then(|v| v.as_str()) {
-                        #[cfg(feature = "telemetry")]
-                        log::info!("peer_stats_export operator={peer_ip:?} path={path}");
-                    } else {
-                        #[cfg(feature = "telemetry")]
-                        log::info!("peer_stats_export operator={peer_ip:?}");
+                    #[cfg(feature = "telemetry")]
+                    {
+                        if let Some(path) = request.params.get("path").and_then(|v| v.as_str()) {
+                            log::info!("peer_stats_export operator={peer_ip:?} path={path}");
+                        } else {
+                            log::info!("peer_stats_export operator={peer_ip:?}");
+                        }
                     }
                 } else if method_str == "net.peer_stats_export_all" {
                     #[cfg(feature = "telemetry")]
                     log::info!("peer_stats_export_all operator={peer_ip:?}");
                 } else if method_str == "net.peer_throttle" {
-                    let clear = request
-                        .params
-                        .get("clear")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(false);
                     #[cfg(feature = "telemetry")]
-                    log::info!("peer_throttle operator={peer_ip:?} clear={clear}");
+                    {
+                        let clear = request
+                            .params
+                            .get("clear")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        log::info!("peer_throttle operator={peer_ip:?} clear={clear}");
+                    }
                 } else if method_str == "net.backpressure_clear" {
                     #[cfg(feature = "telemetry")]
                     log::info!("backpressure_clear operator={peer_ip:?}");
@@ -607,7 +609,6 @@ async fn handle_rpc_options(request: Request<RpcState>) -> Result<Response, Http
 }
 
 async fn handle_rpc_post(request: Request<RpcState>) -> Result<Response, HttpError> {
-    let mut request = request;
     let state = Arc::clone(request.state());
     let _permit = state.acquire().await?;
     let remote = request.remote_addr();
@@ -2052,7 +2053,7 @@ fn dispatch(
                 .get("evidence")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let data = match general_purpose::STANDARD.decode(data_b64) {
+            let data = match decode_standard(data_b64) {
                 Ok(d) => d,
                 Err(_) => return Ok(serde_json::json!({"error": "decode"})),
             };

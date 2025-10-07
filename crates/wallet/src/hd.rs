@@ -5,7 +5,7 @@ use rand::RngCore;
 /// Generate a pseudo master seed for HD wallets.
 pub fn generate_master() -> [u8; 32] {
     let mut seed = [0u8; 32];
-    OsRng.fill_bytes(&mut seed);
+    OsRng::default().fill_bytes(&mut seed);
     seed
 }
 

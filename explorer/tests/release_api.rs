@@ -13,7 +13,7 @@ fn release_api_paginates_and_filters() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
 
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let signer_a = SigningKey::generate(&mut rng);
     let signer_b = SigningKey::generate(&mut rng);
     let signer_env = format!(

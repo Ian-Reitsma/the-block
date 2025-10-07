@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 crypto_suite = { path = "../crypto_suite" }
-rand = "0.8"
+rand = { path = "../rand" }
 thiserror = "1"
 httpd = { path = "../httpd" }
 serde = { version = "1", features = ["derive"] }
@@ -15,7 +15,7 @@ uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 ledger = { path = "../../ledger" }
 once_cell = "1"
-base64 = "0.22"
+base64_fp = { path = "../base64_fp" }
 sha1 = "0.10"
 url = "2"
 native-tls = "0.2"

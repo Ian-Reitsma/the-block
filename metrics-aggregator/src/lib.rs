@@ -1124,7 +1124,7 @@ mod tests {
                     .build();
                 let _ = app.handle(req).await.unwrap();
             }
-            let mut rng = OsRng;
+            let mut rng = OsRng::default();
             let secret = SecretKey::generate(&mut rng);
             let recipient = secret.public_key().to_string();
             let app = router(state);

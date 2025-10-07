@@ -333,7 +333,9 @@ impl MobileCache {
         let mut max_id = 0u64;
         for item in self.queue_tree.iter() {
             let (key_bytes, val_bytes) = item?;
-            let id = u64::from_be_bytes(key_bytes.as_ref().try_into().unwrap());
+            let mut id_bytes = [0u8; 8];
+            id_bytes.copy_from_slice(key_bytes.as_ref());
+            let id = u64::from_be_bytes(id_bytes);
             match self.deserialize_queue_item(&val_bytes) {
                 Ok(record) => {
                     let enqueued = UNIX_EPOCH + Duration::from_secs(record.enqueued_at);
@@ -755,7 +757,7 @@ static GLOBAL_CACHE: Lazy<Mutex<MobileCache>> = Lazy::new(|| {
         log::warn!("mobile cache config from env failed: {err}; using ephemeral fallback");
         let tmp = std::env::temp_dir().join("mobile_cache_ephemeral");
         let mut key = [0u8; 32];
-        OsRng.fill_bytes(&mut key);
+        OsRng::default().fill_bytes(&mut key);
         MobileCacheConfig {
             ttl: Duration::from_secs(300),
             sweep_interval: Duration::from_secs(30),

@@ -21,17 +21,17 @@ fn storage_policy_enforces_fallbacks() {
         .insert("bridge".into(), EngineKind::Memory);
 
     set_current(cfg.clone());
-    set_storage_engine_policy(&["sled".to_string()]);
+    set_storage_engine_policy(&["inhouse".to_string()]);
 
     let updated = current();
-    assert_eq!(updated.storage.default_engine, EngineKind::Sled);
+    assert_eq!(updated.storage.default_engine, EngineKind::Inhouse);
     assert_eq!(
         updated.storage.overrides.get("bridge").copied().unwrap(),
-        EngineKind::Sled
+        EngineKind::Inhouse
     );
 
     set_current(original.clone());
-    set_storage_engine_policy(&["sled".to_string()]);
+    set_storage_engine_policy(&["inhouse".to_string()]);
 }
 
 #[test]

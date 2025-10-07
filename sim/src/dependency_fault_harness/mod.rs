@@ -58,8 +58,8 @@ pub enum OverlayBackendChoice {
 /// Storage engine options.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum StorageBackendChoice {
-    RocksDb,
-    Sled,
+    LegacyRocksDb,
+    Inhouse,
     Memory,
 }
 
@@ -146,7 +146,7 @@ impl Default for BackendSelections {
             runtime: RuntimeBackendChoice::Inhouse,
             transport: TransportBackendChoice::Quinn,
             overlay: OverlayBackendChoice::Inhouse,
-            storage: StorageBackendChoice::RocksDb,
+            storage: StorageBackendChoice::LegacyRocksDb,
             coding: CodingBackendChoice::ReedSolomon,
             crypto: CryptoBackendChoice::Dalek,
             codec: CodecBackendChoice::Bincode,
@@ -1207,8 +1207,8 @@ impl KeyValue for SimulatedStorage {
     fn metrics(&self) -> StorageResult<StorageMetrics> {
         Ok(StorageMetrics {
             backend: match self.backend {
-                StorageBackendChoice::RocksDb => "rocksdb",
-                StorageBackendChoice::Sled => "sled",
+                StorageBackendChoice::LegacyRocksDb => "rocksdb-compat",
+                StorageBackendChoice::Inhouse => "inhouse",
                 StorageBackendChoice::Memory => "memory",
             },
             ..StorageMetrics::default()
@@ -1373,13 +1373,13 @@ impl OverlayBackendChoice {
 
 impl StorageBackendChoice {
     pub const fn variants() -> &'static [&'static str] {
-        &["rocksdb", "sled", "memory"]
+        &["rocksdb-compat", "inhouse", "memory"]
     }
 
     fn as_str(&self) -> &'static str {
         match self {
-            StorageBackendChoice::RocksDb => "rocksdb",
-            StorageBackendChoice::Sled => "sled",
+            StorageBackendChoice::LegacyRocksDb => "rocksdb-compat",
+            StorageBackendChoice::Inhouse => "inhouse",
             StorageBackendChoice::Memory => "memory",
         }
     }
@@ -1466,8 +1466,8 @@ impl std::str::FromStr for StorageBackendChoice {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "rocksdb" => Ok(Self::RocksDb),
-            "sled" => Ok(Self::Sled),
+            "rocksdb-compat" | "rocksdb" => Ok(Self::LegacyRocksDb),
+            "inhouse" => Ok(Self::Inhouse),
             "memory" => Ok(Self::Memory),
             other => Err(other.to_string()),
         }

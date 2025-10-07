@@ -20,17 +20,3 @@ impl StorageError {
         StorageError::Backend(err.to_string())
     }
 }
-
-#[cfg(feature = "rocksdb")]
-impl From<rocksdb::Error> for StorageError {
-    fn from(err: rocksdb::Error) -> Self {
-        StorageError::backend(err)
-    }
-}
-
-#[cfg(feature = "sled")]
-impl From<sled::Error> for StorageError {
-    fn from(err: sled::Error) -> Self {
-        StorageError::backend(err)
-    }
-}

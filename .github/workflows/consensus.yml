@@ -2,6 +2,9 @@ name: consensus-guard
 on:
   pull_request:
 
+env:
+  FIRST_PARTY_ONLY: 1
+
 jobs:
   guard:
     strategy:

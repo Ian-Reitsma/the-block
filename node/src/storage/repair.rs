@@ -958,7 +958,7 @@ fn should_stop() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn spawn_runs_loop_and_signals_iterations() {

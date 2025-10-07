@@ -22,6 +22,21 @@ and compaction activity regardless of the configured backend. Introducing a new
 engine requires implementing the trait and registering it inside `SimpleDb`;
 call sites outside the module stay unchanged.
 
+> **2025-10 update.** The workspace now ships a first-party `sled` crate that
+> reuses the `storage_engine::inhouse_engine` backend while keeping the familiar
+> `Config`/`Db`/`Tree` APIs. Existing directories produced by the third-party
+> crate are auto-migrated when the optional `legacy-format` feature is enabled;
+> otherwise the opener emits a clear error instructing operators to rebuild with
+> the flag or run `tools/storage_migrate` ahead of time.
+
+> **2025-11 update.** Serialization for manifests, manifests, and configuration
+> files is being rebuilt on top of the new `foundation_serialization` crate. The
+> crate currently exposes placeholder traits plus JSON/CBOR/TOML helpers that
+> return explicit `unimplemented` errors while the first-party encoder is
+> authored. Downstream crates should start importing the new traits now so the
+> swap away from `serde`/`toml` can be completed incrementally without pulling
+> the third-party toolchain into default builds.
+
 ### 0.1 In-house LSM tree
 
 - **Memtable + WAL.** Each column family keeps a BTreeMap memtable mirrored to a
@@ -46,9 +61,10 @@ call sites outside the module stay unchanged.
 ### 0.2 Migration helper
 
 `tools/storage_migrate` reads legacy RocksDB or sled directories and rewrites
-their column families into the in-house format. The tool walks each CF, streams
-entries into the new engine, and writes tombstones for missing keys so deletes
-are preserved. Invoke it with:
+their column families into the in-house format (the same format used by the
+first-party `sled` crate). The tool walks each CF, streams entries into the new
+engine, and writes tombstones for missing keys so deletes are preserved. Invoke
+it with:
 
 ```
 cargo run -p storage-migrate -- <legacy-path> <inhouse-path>

@@ -60,7 +60,7 @@
 - Modular wallet crate, hardware signer support, and CLI tooling ([crates/wallet](../crates/wallet), [node/src/bin/wallet.rs](../node/src/bin/wallet.rs)).
 - Cross-chain exchange adapters for Uniswap and Osmosis with slippage tests ([node/src/dex/exchange_hooks.rs](../node/src/dex/exchange_hooks.rs), [node/tests/dex_hooks.rs](../node/tests/dex_hooks.rs)).
 - Light-client library with FFI helpers and mobile example ([crates/light-client](../crates/light-client), [examples/mobile](../examples/mobile)).
-- SQLite-backed indexer and web explorer ([tools/indexer](../tools/indexer)).
+- In-house log indexer and web explorer ([tools/indexer](../tools/indexer)).
 - Distributed benchmark harness for multi-node deployments ([tools/bench-harness](../tools/bench-harness)).
 - Simulation modules for inflation, liquidity, bridging, and demand with governance exports ([sim/src](../sim/src)).
 - Installer CLI producing signed archives and auto-update stubs ([tools/installer](../tools/installer)).

@@ -90,7 +90,7 @@ fn dependency_policy_activation_records_history() {
 
     let runtime_mask = encode_runtime_backend_policy(["inhouse", "stub"]).unwrap();
     let transport_mask = encode_transport_provider_policy(["quinn"]).unwrap();
-    let storage_mask = encode_storage_engine_policy(["rocksdb", "sled"]).unwrap();
+    let storage_mask = encode_storage_engine_policy(["rocksdb-compat", "inhouse"]).unwrap();
 
     let specs = [
         (

@@ -344,7 +344,7 @@ fn emit_missing_sqlite_feature() {
 mod sqlite {
     use super::LogCmd;
     use anyhow::{anyhow, Result as AnyResult};
-    use base64::{engine::general_purpose, Engine as _};
+    use base64_fp::{decode_standard, encode_standard};
     use coding::{
         decrypt_xchacha20_poly1305, encrypt_xchacha20_poly1305, ChaCha20Poly1305Encryptor,
         CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
@@ -669,7 +669,7 @@ mod sqlite {
         let payload = encrypt_xchacha20_poly1305(key, message.as_bytes())
             .map_err(|e| anyhow!("encrypt: {e}"))?;
         let (nonce, body) = payload.split_at(XCHACHA20_POLY1305_NONCE_LEN);
-        Ok((general_purpose::STANDARD.encode(body), nonce.to_vec()))
+        Ok((encode_standard(body), nonce.to_vec()))
     }
 
     fn decrypt_message(
@@ -677,7 +677,7 @@ mod sqlite {
         data: &str,
         nonce: &[u8],
     ) -> Option<String> {
-        let body = general_purpose::STANDARD.decode(data).ok()?;
+        let body = decode_standard(data).ok()?;
         if nonce.is_empty() {
             return decrypt_xchacha20_poly1305(key, &body)
                 .ok()

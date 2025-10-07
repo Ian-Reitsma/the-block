@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 mod util;
 use crypto_suite::signatures::ed25519::SigningKey;
-use rand_core::{OsRng, RngCore};
+use rand::{OsRng, RngCore};
 use serial_test::serial;
 use std::fs;
 use std::io::Write;
@@ -259,7 +259,7 @@ fn invalid_gossip_tx_rejected() {
     let node = make_node(&dir, 1, addr, vec![], Blockchain::default());
     let flag = ShutdownFlag::new();
     let jh = node.start_with_flag(&flag);
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
@@ -308,7 +308,7 @@ fn invalid_gossip_block_rejected() {
     let node = make_node(&dir, 1, addr, vec![], Blockchain::default());
     let flag = ShutdownFlag::new();
     let jh = node.start_with_flag(&flag);
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
@@ -376,7 +376,7 @@ fn forged_identity_rejected() {
     let jh = node.start_with_flag(&flag);
 
     // Forge a block with an unauthorized key and no handshake
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
@@ -425,7 +425,7 @@ fn handshake_version_mismatch_rejected() {
     let flag = ShutdownFlag::new();
     let jh = node.start_with_flag(&flag);
 
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
@@ -475,7 +475,7 @@ fn handshake_feature_mismatch_rejected() {
     let node = Node::new(addr, vec![], Blockchain::default());
     let _h = node.start();
 
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let kp = SigningKey::from_bytes(&seed);
@@ -547,7 +547,7 @@ fn peer_rate_limit_and_ban() {
     let node = make_node(&dir, 1, addr, vec![], bc);
     let flag = ShutdownFlag::new();
     let jh = node.start_with_flag(&flag);
-    let mut rng = OsRng;
+    let mut rng = OsRng::default();
     let mut seed = [0u8; 32];
     rng.fill_bytes(&mut seed);
     let sk = SigningKey::from_bytes(&seed);

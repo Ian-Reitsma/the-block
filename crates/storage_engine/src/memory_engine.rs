@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64_fp::{decode_url_no_pad, encode_url_no_pad};
 use bincode;
 use tempfile::{NamedTempFile, TempDir};
 
@@ -406,12 +406,11 @@ fn cf_file_name(cf: &str) -> String {
 }
 
 fn encode_cf_name(cf: &str) -> String {
-    URL_SAFE_NO_PAD.encode(cf.as_bytes())
+    encode_url_no_pad(cf.as_bytes())
 }
 
 fn decode_cf_name(name: &str) -> Option<String> {
-    URL_SAFE_NO_PAD
-        .decode(name.as_bytes())
+    decode_url_no_pad(name)
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
 }

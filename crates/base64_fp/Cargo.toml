@@ -1,0 +1,10 @@
+[package]
+name = "base64_fp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "base64_fp"
+path = "src/lib.rs"
+
+[dependencies]

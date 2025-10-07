@@ -130,7 +130,7 @@ pub fn show(file: Option<PathBuf>, key: Option<String>) -> Result<()> {
 }
 
 fn default_config_path() -> PathBuf {
-    if let Some(mut dir) = dirs::home_dir() {
+    if let Some(mut dir) = sys::paths::home_dir() {
         dir.push(".the_block");
         dir.push("config.cfg");
         dir

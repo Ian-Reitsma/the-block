@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use anyhow::Context;
+use diagnostics::anyhow::Context;
 use serde::Deserialize;
 
 use crate::model::RiskTier;
@@ -16,7 +16,7 @@ pub struct PolicyConfig {
 }
 
 impl PolicyConfig {
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
+    pub fn load(path: &Path) -> diagnostics::Result<Self> {
         let raw = fs::read_to_string(path).with_context(|| {
             format!("unable to read policy configuration at {}", path.display())
         })?;

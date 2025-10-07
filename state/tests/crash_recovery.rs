@@ -1,19 +1,19 @@
-use rocksdb::{Options, DB};
+use storage_engine::{inhouse_engine::InhouseEngine, KeyValue};
 
 #[test]
-fn rocksdb_recovers_after_crash() {
+fn inhouse_recovers_after_restart() {
     let dir = tempfile::tempdir().unwrap();
     {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        let db = DB::open(&opts, dir.path()).expect("open db");
-        db.put(b"k", b"v").unwrap();
-        // drop without explicit flush to simulate crash
-        std::mem::drop(db);
+        let db = InhouseEngine::open(dir.path().to_string_lossy().as_ref()).expect("open db");
+        db.ensure_cf("default").expect("ensure cf");
+        db.put("default", b"k", b"v").expect("write value");
+        db.flush().expect("flush");
     }
-    let mut opts = Options::default();
-    opts.create_if_missing(false);
-    let db = DB::open(&opts, dir.path()).expect("reopen db");
-    let val = db.get(b"k").unwrap().unwrap();
+    let db = InhouseEngine::open(dir.path().to_string_lossy().as_ref()).expect("reopen db");
+    db.ensure_cf("default").expect("ensure cf");
+    let val = db
+        .get("default", b"k")
+        .expect("read value")
+        .expect("value exists");
     assert_eq!(val.as_slice(), b"v");
 }

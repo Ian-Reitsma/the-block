@@ -199,7 +199,7 @@ mod tests {
             record("runtime_backend", 10, 1, &["inhouse"]),
             record("transport_provider", 12, 2, &["quinn"]),
             record("runtime_backend", 15, 3, &["inhouse", "stub"]),
-            record("storage_engine", 20, 4, &["rocksdb", "sled"]),
+            record("storage_engine", 20, 3, &["inhouse", "rocksdb-compat"]),
         ];
 
         let summary = summarise(&records, Filter::default());
@@ -235,7 +235,7 @@ mod tests {
         let records = vec![
             record("runtime_backend", 10, 1, &["inhouse"]),
             record("runtime_backend", 11, 2, &["inhouse", "stub"]),
-            record("storage_engine", 12, 3, &["rocksdb"]),
+            record("storage_engine", 12, 3, &["rocksdb-compat"]),
         ];
 
         let summary = summarise(

@@ -13,8 +13,6 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
 use storage_engine::rocksdb_engine::RocksDbEngine;
-#[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-use storage_engine::sled_engine::SledEngine;
 use storage_engine::{
     inhouse_engine::InhouseEngine, memory_engine::MemoryEngine, KeyValue, KeyValueBatch,
     KeyValueIterator, StorageError, StorageMetrics, StorageResult,
@@ -42,6 +40,7 @@ pub mod names {
     pub const LIGHT_CLIENT_PROOFS: &str = "light_client_proofs";
     pub const LOCALNET_RECEIPTS: &str = "localnet_receipts";
     pub const NET_PEER_CHUNKS: &str = "net_peer_chunks";
+    pub const NET_BANS: &str = "net_bans";
     pub const RPC_BRIDGE: &str = "rpc_bridge";
     pub const STORAGE_FS: &str = "storage_fs";
     pub const STORAGE_PIPELINE: &str = "storage_pipeline";
@@ -54,7 +53,6 @@ pub enum EngineKind {
     Memory,
     Inhouse,
     RocksDb,
-    Sled,
 }
 
 impl EngineKind {
@@ -71,7 +69,6 @@ impl EngineKind {
             EngineKind::Memory => "memory",
             EngineKind::Inhouse => "inhouse",
             EngineKind::RocksDb => "rocksdb",
-            EngineKind::Sled => "sled",
         }
     }
 
@@ -83,12 +80,6 @@ impl EngineKind {
                 cfg!(all(
                     not(feature = "lightweight-integration"),
                     feature = "storage-rocksdb"
-                ))
-            }
-            EngineKind::Sled => {
-                cfg!(all(
-                    not(feature = "lightweight-integration"),
-                    feature = "sled"
                 ))
             }
         }
@@ -175,8 +166,6 @@ enum Engine {
     Inhouse(InhouseEngine),
     #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
     RocksDb(RocksDbEngine),
-    #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-    Sled(SledEngine),
 }
 
 enum EngineBatch {
@@ -184,8 +173,6 @@ enum EngineBatch {
     Inhouse(<InhouseEngine as KeyValue>::Batch),
     #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
     RocksDb(<RocksDbEngine as KeyValue>::Batch),
-    #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-    Sled(<SledEngine as KeyValue>::Batch),
 }
 
 impl EngineBatch {
@@ -195,8 +182,6 @@ impl EngineBatch {
             EngineBatch::Inhouse(inner) => inner.put(cf, key, value),
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             EngineBatch::RocksDb(inner) => inner.put(cf, key, value),
-            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-            EngineBatch::Sled(inner) => inner.put(cf, key, value),
         }
     }
 
@@ -206,8 +191,6 @@ impl EngineBatch {
             EngineBatch::Inhouse(inner) => inner.delete(cf, key),
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             EngineBatch::RocksDb(inner) => inner.delete(cf, key),
-            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-            EngineBatch::Sled(inner) => inner.delete(cf, key),
         }
     }
 }
@@ -219,8 +202,6 @@ macro_rules! dispatch {
             Engine::Inhouse($inner) => $body,
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             Engine::RocksDb($inner) => $body,
-            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-            Engine::Sled($inner) => $body,
         }
     }};
 }
@@ -255,16 +236,6 @@ impl Engine {
                     Err(StorageError::backend("rocksdb engine not available"))
                 }
             }
-            EngineKind::Sled => {
-                #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-                {
-                    SledEngine::open(path).map(Engine::Sled)
-                }
-                #[cfg(not(all(not(feature = "lightweight-integration"), feature = "sled")))]
-                {
-                    Err(StorageError::backend("sled engine not available"))
-                }
-            }
         }
     }
 
@@ -288,16 +259,6 @@ impl Engine {
                     Err(StorageError::backend("rocksdb engine not available"))
                 }
             }
-            EngineKind::Sled => {
-                #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-                {
-                    Ok(Engine::Sled(SledEngine::default()))
-                }
-                #[cfg(not(all(not(feature = "lightweight-integration"), feature = "sled")))]
-                {
-                    Err(StorageError::backend("sled engine not available"))
-                }
-            }
         }
     }
 
@@ -311,8 +272,6 @@ impl Engine {
             Engine::Inhouse(engine) => EngineBatch::Inhouse(engine.make_batch()),
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             Engine::RocksDb(engine) => EngineBatch::RocksDb(engine.make_batch()),
-            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-            Engine::Sled(engine) => EngineBatch::Sled(engine.make_batch()),
         }
     }
 
@@ -322,8 +281,6 @@ impl Engine {
             (Engine::Inhouse(engine), EngineBatch::Inhouse(batch)) => engine.write_batch(batch),
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             (Engine::RocksDb(engine), EngineBatch::RocksDb(batch)) => engine.write_batch(batch),
-            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-            (Engine::Sled(engine), EngineBatch::Sled(batch)) => engine.write_batch(batch),
             #[allow(unreachable_patterns)]
             _ => Err(StorageError::backend("mismatched engine batch")),
         }
@@ -383,14 +340,13 @@ impl Engine {
             Engine::Inhouse(_) => "inhouse",
             #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
             Engine::RocksDb(_) => "rocksdb",
-            #[cfg(all(not(feature = "lightweight-integration"), feature = "sled"))]
-            Engine::Sled(_) => "sled",
         }
     }
 }
 
 /// Thin wrapper that adapts the storage-engine traits to the historical SimpleDb API.
 pub struct SimpleDb {
+    #[cfg(feature = "telemetry")]
     name: String,
     engine: Engine,
 }
@@ -427,6 +383,20 @@ impl SimpleDbBatch {
 }
 
 impl SimpleDb {
+    #[cfg(feature = "telemetry")]
+    fn from_parts(name: &str, engine: Engine) -> Self {
+        Self {
+            name: name.to_string(),
+            engine,
+        }
+    }
+
+    #[cfg(not(feature = "telemetry"))]
+    fn from_parts(_name: &str, engine: Engine) -> Self {
+        let _ = _name;
+        Self { engine }
+    }
+
     /// Open (or create) a database at the given path.
     pub fn open(path: &str) -> Self {
         Self::open_named(names::DEFAULT, path)
@@ -443,10 +413,7 @@ impl SimpleDb {
         let engine = Engine::open(kind, path)
             .or_else(|_| Engine::open(EngineKind::default(), path))
             .unwrap_or_else(|e| panic!("open simple db {name}: {e}"));
-        let db = Self {
-            name: name.to_string(),
-            engine,
-        };
+        let db = Self::from_parts(name, engine);
         db.record_metrics_if_enabled();
         db
     }
@@ -666,10 +633,7 @@ impl Default for SimpleDb {
         let engine = Engine::temporary(kind)
             .or_else(|_| Engine::temporary(EngineKind::default()))
             .unwrap_or_else(|e| panic!("open temp simple db: {e}"));
-        let db = Self {
-            name: names::DEFAULT.to_string(),
-            engine,
-        };
+        let db = Self::from_parts(names::DEFAULT, engine);
         db.record_metrics_if_enabled();
         db
     }
@@ -682,11 +646,6 @@ fn to_io_error(err: StorageError) -> io::Error {
 #[cfg(feature = "telemetry")]
 fn is_disk_full(err: &StorageError) -> bool {
     err.to_string().contains("No space")
-}
-
-#[cfg(not(feature = "telemetry"))]
-fn is_disk_full(_: &StorageError) -> bool {
-    false
 }
 
 impl SimpleDb {
@@ -712,7 +671,7 @@ impl SimpleDb {
             STORAGE_ENGINE_SIZE_BYTES
                 .with_label_values(labels)
                 .set(to_gauge(metrics.size_on_disk_bytes));
-            for engine in ["memory", "rocksdb", "sled"] {
+            for engine in ["memory", "rocksdb", "rocksdb-compat", "inhouse"] {
                 let value = if engine == self.engine.backend_name() {
                     1
                 } else {
@@ -754,7 +713,7 @@ mod tests {
     use once_cell::sync::Lazy;
     use std::collections::HashMap;
     use std::sync::Mutex;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -767,7 +726,6 @@ mod tests {
             EngineKind::Memory => "memory",
             EngineKind::Inhouse => "inhouse",
             EngineKind::RocksDb => "rocksdb",
-            EngineKind::Sled => "sled",
         }
     }
 
@@ -775,7 +733,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("probe");
         let path = path.to_string_lossy().into_owned();
-        for kind in [EngineKind::RocksDb, EngineKind::Sled] {
+        for kind in [EngineKind::RocksDb] {
             if let Ok(engine) = Engine::open(kind, &path) {
                 drop(engine);
                 return Some(kind);
@@ -789,7 +747,7 @@ mod tests {
         let mut overrides = HashMap::new();
         overrides.insert("custom".to_string(), EngineKind::Memory);
         let config = EngineConfig {
-            default_engine: EngineKind::Sled,
+            default_engine: EngineKind::Inhouse,
             overrides,
         };
         assert_eq!(config.resolve("custom"), EngineKind::Memory);
@@ -818,7 +776,7 @@ mod tests {
         let mut overrides = HashMap::new();
         overrides.insert(names::GOSSIP_RELAY.to_string(), EngineKind::Memory);
         let config = EngineConfig {
-            default_engine: EngineKind::Sled,
+            default_engine: EngineKind::Inhouse,
             overrides,
         };
         configure_engines(config);

@@ -60,7 +60,6 @@ pub fn check_client(
         if until > now {
             #[cfg(feature = "telemetry")]
             telemetry::RPC_RATE_LIMIT_REJECT_TOTAL.inc();
-            #[cfg(feature = "log")]
             log::warn!("rate_limit_exceeded client={}", addr);
             return Err(RpcClientErrorCode::Banned);
         } else {
@@ -87,7 +86,6 @@ pub fn check_client(
         telemetry::RPC_BANS_TOTAL.inc();
         telemetry::RPC_RATE_LIMIT_REJECT_TOTAL.inc();
     }
-    #[cfg(feature = "log")]
     log::warn!("rate_limit_exceeded client={}", addr);
     Err(RpcClientErrorCode::RateLimit)
 }

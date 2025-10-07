@@ -180,7 +180,7 @@ pub struct Certificate {
 impl Certificate {
     fn generate() -> Result<Self> {
         let mut random = [0u8; 64];
-        OsRng.fill_bytes(&mut random);
+        OsRng::default().fill_bytes(&mut random);
         let mut hasher = Hasher::new();
         hasher.update(&random);
         let mut fingerprint = [0u8; 32];
