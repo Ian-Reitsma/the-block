@@ -1,5 +1,5 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use std::fs;
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
@@ -39,8 +39,7 @@ fn build_signed_tx(
     sign_tx(sk.to_vec(), payload).expect("valid key")
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn invalid_selector_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_invalid_selector");
@@ -70,8 +69,7 @@ fn invalid_selector_rejects_and_counts() {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn balance_overflow_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_balance_overflow");
@@ -106,8 +104,7 @@ fn balance_overflow_rejects_and_counts() {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn drop_not_found_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_drop_not_found");

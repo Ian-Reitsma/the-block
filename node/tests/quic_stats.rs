@@ -4,7 +4,6 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use hex;
 use runtime::{io::read_to_end, net::TcpStream};
-use serial_test::serial;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
@@ -54,8 +53,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_stats_rpc() {
     runtime::block_on(async {
         let dir = init_env();

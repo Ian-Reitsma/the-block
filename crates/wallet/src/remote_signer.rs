@@ -1,15 +1,17 @@
 use crate::{WalletError, WalletSigner};
 use base64_fp::encode_standard;
-use crypto_suite::signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH};
+use crypto_suite::{
+    hashing::sha1,
+    signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH},
+};
 use hex;
-use httpd::{BlockingClient, Method};
+use httpd::{join_path, BlockingClient, Method, Uri};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
 use native_tls::{Certificate as NativeCertificate, HandshakeError, Identity, TlsConnector};
 use once_cell::sync::Lazy;
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};
@@ -18,7 +20,6 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
-use url::Url;
 use uuid::Uuid;
 
 /// Cache of signer public keys with an expiry.
@@ -120,7 +121,7 @@ impl BlockingWebSocket {
     }
 
     fn read_handshake_response(&mut self, key: &str) -> io::Result<()> {
-        let expected_accept = handshake_accept(key);
+        let expected_accept = handshake_accept(key)?;
         let mut buf = Vec::with_capacity(512);
         let mut tmp = [0u8; 128];
         while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
@@ -263,11 +264,12 @@ impl BlockingWebSocket {
     }
 }
 
-fn handshake_accept(key: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(key.as_bytes());
-    hasher.update(WS_GUID.as_bytes());
-    encode_standard(&hasher.finalize())
+fn handshake_accept(key: &str) -> io::Result<String> {
+    let mut data = key.as_bytes().to_vec();
+    data.extend_from_slice(WS_GUID.as_bytes());
+    sha1::hash(&data)
+        .map(|digest| encode_standard(&digest))
+        .map_err(|err| io::Error::new(ErrorKind::Other, err))
 }
 
 impl RemoteSigner {
@@ -311,32 +313,31 @@ impl RemoteSigner {
                 }
             }
         }
-        let mut url = Url::parse(endpoint)
+        let endpoint_uri = Uri::parse(endpoint)
             .map_err(|err| WalletError::Failure(format!("invalid signer url: {err}")))?;
-        match url.scheme() {
-            "ws" => {
-                url.set_scheme("http")
-                    .map_err(|_| WalletError::Failure("invalid ws url".into()))?;
-            }
-            "wss" => {
-                url.set_scheme("https")
-                    .map_err(|_| WalletError::Failure("invalid wss url".into()))?;
-            }
-            "http" | "https" => {}
-            scheme => {
+        let (scheme, use_https) = match endpoint_uri.scheme() {
+            "ws" => ("http", false),
+            "wss" => ("https", true),
+            "http" => ("http", false),
+            "https" => ("https", true),
+            other => {
                 return Err(WalletError::Failure(format!(
-                    "unsupported signer scheme: {scheme}"
+                    "unsupported signer scheme: {other}"
                 )));
             }
-        }
-        let pubkey_url = url
-            .join("pubkey")
-            .map_err(|err| WalletError::Failure(err.to_string()))?;
-        let pk: PubKeyResp = if pubkey_url.scheme() == "https" {
-            fetch_pubkey_https(&pubkey_url, tls)?
+        };
+        let authority = endpoint_uri
+            .authority()
+            .ok_or_else(|| WalletError::Failure("missing signer host".into()))?;
+        let pubkey_path = join_path(endpoint_uri.path(), "pubkey");
+        let pubkey_url = format!("{scheme}://{authority}{pubkey_path}");
+        let pubkey_uri =
+            Uri::parse(&pubkey_url).map_err(|err| WalletError::Failure(err.to_string()))?;
+        let pk: PubKeyResp = if use_https {
+            fetch_pubkey_https(&pubkey_uri, tls)?
         } else {
             let resp = client
-                .request(Method::Get, pubkey_url.as_str())
+                .request(Method::Get, &pubkey_url)
                 .map_err(|e| WalletError::Failure(e.to_string()))?
                 .timeout(Duration::from_secs(5))
                 .send()
@@ -469,12 +470,13 @@ impl RemoteSigner {
 
     fn sign_ws(&self, endpoint: &str, payload: &SignReq) -> Result<Signature, WalletError> {
         let url = format!("{endpoint}/sign");
-        let url = Url::parse(&url).map_err(|e| WalletError::Failure(e.to_string()))?;
+        let url = Uri::parse(&url).map_err(|e| WalletError::Failure(e.to_string()))?;
         let host = url
             .host_str()
             .ok_or_else(|| WalletError::Failure("missing host".into()))?;
-        let port = url.port_or_known_default().unwrap_or(443);
-        let addr = format!("{host}:{port}");
+        let addr = url
+            .socket_addr()
+            .ok_or_else(|| WalletError::Failure("missing address".into()))?;
         let tcp =
             std::net::TcpStream::connect(&addr).map_err(|e| WalletError::Failure(e.to_string()))?;
         let mut ws = if let Some(connector) = &self.tls {
@@ -494,11 +496,7 @@ impl RemoteSigner {
             path.push('?');
             path.push_str(query);
         }
-        let host_header = if let Some(port) = url.port() {
-            format!("{host}:{port}")
-        } else {
-            host.to_string()
-        };
+        let host_header = url.host_header().unwrap_or_else(|| host.to_string());
 
         ws.handshake(&host_header, &path)
             .map_err(|e| WalletError::Failure(e.to_string()))?;
@@ -521,14 +519,16 @@ impl RemoteSigner {
     }
 }
 
-fn fetch_pubkey_https(url: &Url, tls: Option<&TlsConnector>) -> Result<PubKeyResp, WalletError> {
+fn fetch_pubkey_https(url: &Uri, tls: Option<&TlsConnector>) -> Result<PubKeyResp, WalletError> {
     use std::net::TcpStream as StdTcpStream;
 
     let host = url
         .host_str()
         .ok_or_else(|| WalletError::Failure("missing host".into()))?;
     let port = url.port_or_known_default().unwrap_or(443);
-    let addr = format!("{host}:{port}");
+    let addr = url
+        .socket_addr()
+        .ok_or_else(|| WalletError::Failure("no socket addresses".into()))?;
     let timeout = Duration::from_secs(5);
     let mut addrs = addr
         .to_socket_addrs()
@@ -578,9 +578,13 @@ fn fetch_pubkey_https(url: &Url, tls: Option<&TlsConnector>) -> Result<PubKeyRes
     }
 
     let host_header = if port == 443 {
-        host.to_string()
+        if url.host_is_ipv6() {
+            format!("[{host}]")
+        } else {
+            host.to_string()
+        }
     } else {
-        format!("{host}:{port}")
+        url.host_header().unwrap_or_else(|| host.to_string())
     };
     let request = format!(
         "GET {path} HTTP/1.1\r\nHost: {host_header}\r\nConnection: close\r\nAccept: application/json\r\n\r\n"

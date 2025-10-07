@@ -4,6 +4,13 @@
 
 Structured telemetry logs include the following fields. All identifiers are privacy-scrubbed with BLAKE3 before emission.
 
+The telemetry surface now runs through the shared `diagnostics` facade. Use the
+`diagnostics::tracing` re-exports in new modules so log events continue to flow
+through the first-party sinks. Custom collectors can register an in-process
+sink if they need to batch or redact records before forwarding them to the
+aggregator; otherwise the default stderr sink keeps behaviour identical to the
+previous `tracing` configuration.
+
 - `subsystem`: originating subsystem (`mempool`, `storage`, `p2p`, or `compute`).
 - `op`: short operation code describing the event.
 - `sender`: scrubbed sender identifier or account address.

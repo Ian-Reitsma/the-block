@@ -29,73 +29,14 @@ if os.getenv("TB_SAVE_LOGS") == "1":
     sys.stderr = _err
 
 
-def _ensure_build_tools() -> None:
-    """Install maturin and (on Linux) patchelf if missing."""
-    try:
-        importlib.import_module("maturin")
-    except ModuleNotFoundError:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--quiet",
-                "--root-user-action=ignore",
-                "maturin==1.9.2",
-            ],
-            check=True,
-        )
-    if sys.platform != "darwin" and shutil.which("patchelf") is None:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--quiet",
-                "--root-user-action=ignore",
-                "patchelf==0.17.2.1",
-            ],
-            check=True,
-        )
-
-
 def _load_the_block():
     """Import the_block, building it on demand if needed."""
     try:
         return importlib.import_module("the_block")
-    except ModuleNotFoundError:
-        repo_root = pathlib.Path(__file__).resolve().parent
-        _ensure_build_tools()
-        env = os.environ.copy()
-        env["MATURIN_PYTHON"] = sys.executable
-        env["PYO3_PYTHON"] = sys.executable
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "maturin",
-                "develop",
-                "--release",
-                "-F",
-                "pyo3/extension-module",
-                "-F",
-                "telemetry",
-            ],
-            cwd=repo_root,
-            check=True,
-            env=env,
-        )
-        venv_site = (
-            repo_root
-            / ".venv"
-            / "lib"
-            / f"python{sys.version_info.major}.{sys.version_info.minor}"
-            / "site-packages"
-        )
-        sys.path.append(str(venv_site))
-        return importlib.import_module("the_block")
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "the first-party python bridge is not yet available; rerun the demo once the `python-bindings` feature ships"
+        ) from exc
 
 
 the_block = _load_the_block()

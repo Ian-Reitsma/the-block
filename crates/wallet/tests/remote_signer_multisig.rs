@@ -4,13 +4,12 @@ use std::time::Duration;
 
 use httpd::StatusCode;
 use ledger::crypto::remote_tag;
-use serial_test::serial;
 use wallet::{remote_signer::RemoteSigner, WalletError, WalletSigner};
 
 use support::HttpSignerMock;
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn multisig_success_and_failure() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -33,7 +32,7 @@ fn multisig_success_and_failure() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn multisig_threshold_fails_when_signer_returns_error() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -53,7 +52,7 @@ fn multisig_threshold_fails_when_signer_returns_error() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn multisig_rejects_invalid_signatures() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -73,7 +72,7 @@ fn multisig_rejects_invalid_signatures() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn multisig_times_out_slow_signers() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");

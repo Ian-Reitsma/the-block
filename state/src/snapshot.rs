@@ -1,5 +1,4 @@
 use crate::{audit, trie::MerkleTrie};
-use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -10,16 +9,14 @@ use thiserror::Error;
 pub enum SnapshotError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("serialization error: {0}")]
-    Bincode(#[from] Box<bincode::ErrorKind>),
+    #[error("corrupt snapshot: {0}")]
+    Corrupt(String),
 }
 
 /// Serializable snapshot of the trie.
-#[derive(Serialize, Deserialize, Clone)]
 pub struct Snapshot {
     pub root: [u8; 32],
     pub entries: Vec<(Vec<u8>, Vec<u8>)>,
-    #[serde(default)]
     pub engine_backend: Option<String>,
 }
 
@@ -73,7 +70,7 @@ impl SnapshotManager {
         }
         let path = self.dir.join(format!("{}.bin", hex::encode(snap.root)));
         let mut file = File::create(&path)?;
-        let bytes = bincode::serialize(&snap)?;
+        let bytes = snap.encode();
         file.write_all(&bytes)?;
         self.prune()?;
         Ok(path)
@@ -83,7 +80,7 @@ impl SnapshotManager {
         let mut file = File::open(path)?;
         let mut buf = Vec::new();
         file.read_to_end(&mut buf)?;
-        let snap: Snapshot = bincode::deserialize(&buf)?;
+        let snap = Snapshot::decode(&buf)?;
         if let (Some(created), Some(target)) =
             (snap.engine_backend.as_ref(), self.engine_backend.as_ref())
         {
@@ -137,4 +134,97 @@ impl SnapshotManager {
 
         Ok(())
     }
+}
+
+impl Snapshot {
+    fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&self.root);
+        out.extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
+        for (key, value) in &self.entries {
+            out.extend_from_slice(&(key.len() as u32).to_be_bytes());
+            out.extend_from_slice(key);
+            out.extend_from_slice(&(value.len() as u32).to_be_bytes());
+            out.extend_from_slice(value);
+        }
+        match &self.engine_backend {
+            Some(engine) => {
+                out.push(1);
+                let bytes = engine.as_bytes();
+                out.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+                out.extend_from_slice(bytes);
+            }
+            None => out.push(0),
+        }
+        out
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self, SnapshotError> {
+        let mut cursor = 0usize;
+        if bytes.len() < 32 {
+            return Err(SnapshotError::Corrupt("missing root".into()));
+        }
+        let mut root = [0u8; 32];
+        root.copy_from_slice(&bytes[..32]);
+        cursor += 32;
+
+        let entry_count = read_u32(bytes, &mut cursor, "missing entry count")? as usize;
+        let mut entries = Vec::with_capacity(entry_count);
+        for _ in 0..entry_count {
+            let key_len = read_u32(bytes, &mut cursor, "missing key length")? as usize;
+            let key = read_bytes(bytes, &mut cursor, key_len, "truncated key")?.to_vec();
+            let value_len = read_u32(bytes, &mut cursor, "missing value length")? as usize;
+            let value = read_bytes(bytes, &mut cursor, value_len, "truncated value")?.to_vec();
+            entries.push((key, value));
+        }
+
+        let engine_backend = if cursor >= bytes.len() {
+            None
+        } else {
+            let flag = bytes[cursor];
+            cursor += 1;
+            match flag {
+                0 => None,
+                1 => {
+                    let len = read_u32(bytes, &mut cursor, "missing engine length")? as usize;
+                    let raw = read_bytes(bytes, &mut cursor, len, "truncated engine label")?;
+                    Some(
+                        String::from_utf8(raw.to_vec())
+                            .map_err(|_| SnapshotError::Corrupt("invalid engine utf8".into()))?,
+                    )
+                }
+                _ => return Err(SnapshotError::Corrupt("invalid engine flag".into())),
+            }
+        };
+
+        Ok(Snapshot {
+            root,
+            entries,
+            engine_backend,
+        })
+    }
+}
+
+fn read_u32(bytes: &[u8], cursor: &mut usize, message: &str) -> Result<u32, SnapshotError> {
+    if bytes.len().saturating_sub(*cursor) < 4 {
+        return Err(SnapshotError::Corrupt(message.into()));
+    }
+    let mut buf = [0u8; 4];
+    buf.copy_from_slice(&bytes[*cursor..*cursor + 4]);
+    *cursor += 4;
+    Ok(u32::from_be_bytes(buf))
+}
+
+fn read_bytes<'a>(
+    bytes: &'a [u8],
+    cursor: &mut usize,
+    len: usize,
+    message: &str,
+) -> Result<&'a [u8], SnapshotError> {
+    if bytes.len().saturating_sub(*cursor) < len {
+        return Err(SnapshotError::Corrupt(message.into()));
+    }
+    let slice = &bytes[*cursor..*cursor + len];
+    *cursor += len;
+    Ok(slice)
 }

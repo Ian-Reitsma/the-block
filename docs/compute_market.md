@@ -590,6 +590,12 @@ Logs emit `loaded price board` and `saved price board` messages, while metrics
 track quantile bands. Suggested bids are adjusted by a backlog factor of
 `1 + backlog/window` computed per lane, excluding deferred industrial jobs.
 
+> **First-party CRC reminder:** `encode_blob`/`decode_blob` now depend on the
+> in-house CRC32 helper exposed from `crypto_suite::hashing::crc32`. The
+> current implementation intentionally returns `Err(Unimplemented)` until the
+> checksum backend lands, so manual migrations should surface that error instead
+> of silently succeeding with stale third-party code.
+
 ## Receipt Settlement
 
 Matches between bids and asks produce `Receipt` objects that debit CT from the

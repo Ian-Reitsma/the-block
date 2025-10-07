@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "fuzzy")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -8,12 +9,12 @@
 
 use base64_fp::decode_standard;
 use crypto_suite::hashing::blake3;
-use proptest::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{fs, path::Path};
+use testkit::tb_prop_test;
 use the_block::hashlayout::{BlockEncoder, ZERO_HASH};
 use the_block::{
     fee, generate_keypair, sign_tx, vrf_min_delay_slots, Blockchain, ChainDisk, MempoolEntryDisk,
@@ -112,96 +113,102 @@ macro_rules! read_lock {
 }
 
 // 1. Property-based: supply/balance never negative, never over cap
-proptest! {
-    #![proptest_config(ProptestConfig { cases: 16, failure_persistence: None, .. ProptestConfig::default() })]
-    #[test]
-    fn prop_supply_and_balances_never_negative(
-        miners in prop::collection::vec("a".prop_map(|c| format!("miner_{c}")), 1..5),
-        alice in "alice_.*",
-        tx_count in 1usize..10,
-        amt_cons in 1u64..10_000,
-        amt_ind in 1u64..10_000,
-        fee in 0u64..100,
-    ) {
-        init();
-        let (_dir, mut bc) = temp_blockchain("temp_chain");
-        let miner = &miners[0];
-        bc.add_account(miner.clone(), 0, 0).unwrap();
-        bc.add_account(alice.clone(), 0, 0).unwrap();
-        bc.mine_block(miner).unwrap();
-        let (priv_bytes, _pub_bytes) = generate_keypair();
+tb_prop_test!(prop_supply_and_balances_never_negative, |runner| {
+    runner
+        .add_random_case("supply invariants", 24, |rng| {
+            init();
+            let (_dir, mut bc) = temp_blockchain("temp_chain");
+            let miner = format!("miner{}", rng.range_u32(0..=1024));
+            let alice = format!("alice{}", rng.range_u32(0..=1024));
+            let tx_count = rng.range_usize(1..=8);
+            let amt_cons = rng.range_u64(0..=1_000);
+            let amt_ind = rng.range_u64(0..=1_000);
+            let fee = rng.range_u64(0..=500);
+            bc.add_account(miner.clone(), 0, 0).unwrap();
+            bc.add_account(alice.clone(), 0, 0).unwrap();
+            bc.mine_block(&miner).unwrap();
+            let (priv_bytes, _pub_bytes) = generate_keypair();
 
-        for n in 0..tx_count {
-            let tx = testutil::build_signed_tx(&priv_bytes, miner, &alice, amt_cons, amt_ind, fee, n as u64 + 1);
-            let _ = bc.submit_transaction(tx);
-        }
+            for n in 0..tx_count {
+                let tx = testutil::build_signed_tx(
+                    &priv_bytes,
+                    &miner,
+                    &alice,
+                    amt_cons,
+                    amt_ind,
+                    fee,
+                    n as u64 + 1,
+                );
+                let _ = bc.submit_transaction(tx);
+            }
 
-        bc.mine_block(miner).unwrap();
+            bc.mine_block(&miner).unwrap();
 
-        let mb = bc.get_account_balance(miner).unwrap();
-        let ab = bc.get_account_balance(&alice).unwrap();
-        assert!(mb.consumer as i128 >= 0 && ab.consumer as i128 >= 0);
-        assert!(mb.industrial as i128 >= 0 && ab.industrial as i128 >= 0);
+            let mb = bc.get_account_balance(&miner).unwrap();
+            let ab = bc.get_account_balance(&alice).unwrap();
+            assert!(mb.consumer as i128 >= 0 && ab.consumer as i128 >= 0);
+            assert!(mb.industrial as i128 >= 0 && ab.industrial as i128 >= 0);
 
-        let (em_cons, em_ind) = bc.circulating_supply();
-        assert!(em_cons <= 20_000_000_000_000);
-        assert!(em_ind <= 20_000_000_000_000);
-    }
-}
+            let (em_cons, em_ind) = bc.circulating_supply();
+            assert!(em_cons <= 20_000_000_000_000);
+            assert!(em_ind <= 20_000_000_000_000);
+        })
+        .expect("register random case");
+});
 
 // 1b. Concurrent mempool operations should not leave pending reservations
-proptest! {
-  #![proptest_config(ProptestConfig { cases: 16, failure_persistence: None, .. ProptestConfig::default() })]
-  #[test]
-  fn prop_mempool_concurrency(ops in prop::collection::vec(0u8..3, 1..10)) {
-      init();
-      let (_dir, bc_init) = temp_blockchain_with_difficulty("temp_prop", 0);
-      let bc = Arc::new(RwLock::new(bc_init));
-      {
-          let mut w = bc.write().unwrap();
-          w.add_account("miner".into(), 0, 0).unwrap();
-          w.mine_block("miner").unwrap();
-      }
-      let (priv_bytes, _pub) = generate_keypair();
-      let ops_vec = ops.clone();
-      let handles: Vec<_> = ops_vec.into_iter().enumerate().map(|(i, op)| {
-          let bc = bc.clone();
-          let priv_bytes = priv_bytes.clone();
-          std::thread::spawn(move || {
-              match op % 3 {
-                  0 => {
-                      let tx = testutil::build_signed_tx(
-                          &priv_bytes,
-                          "miner",
-                          "miner",
-                          0,
-                          0,
-                          0,
-                          i as u64 + 1,
-                      );
-                      let _ = bc.write().unwrap().submit_transaction(tx);
-                  }
-                  1 => {
-                      let _ = bc
-                          .write()
-                          .unwrap()
-                          .drop_transaction("miner", i as u64 + 1);
-                  }
-                  _ => {
-                      let _ = bc.write().unwrap().mine_block("miner");
-                  }
-              }
-          })
-      }).collect();
-      for h in handles { let _ = h.join(); }
-        let guard = bc.read().unwrap();
-        let miner = guard.accounts.get("miner").unwrap();
-        assert_eq!(miner.pending_consumer, 0);
-        assert_eq!(miner.pending_industrial, 0);
-        drop(guard);
-        drop(bc);
-    }
-}
+tb_prop_test!(prop_mempool_concurrency, |runner| {
+    runner
+        .add_random_case("parallel mempool operations", 20, |rng| {
+            init();
+            let (_dir, bc_init) = temp_blockchain_with_difficulty("temp_prop", 0);
+            let bc = Arc::new(RwLock::new(bc_init));
+            {
+                let mut w = bc.write().unwrap();
+                w.add_account("miner".into(), 0, 0).unwrap();
+                w.mine_block("miner").unwrap();
+            }
+            let (priv_bytes, _pub) = generate_keypair();
+            let op_count = rng.range_usize(1..=32);
+            let ops: Vec<u8> = (0..op_count).map(|_| rng.range_u8(0..=u8::MAX)).collect();
+            let handles: Vec<_> = ops
+                .into_iter()
+                .enumerate()
+                .map(|(i, op)| {
+                    let bc = bc.clone();
+                    let priv_bytes = priv_bytes.clone();
+                    std::thread::spawn(move || match op % 3 {
+                        0 => {
+                            let tx = testutil::build_signed_tx(
+                                &priv_bytes,
+                                "miner",
+                                "miner",
+                                0,
+                                0,
+                                0,
+                                i as u64 + 1,
+                            );
+                            let _ = bc.write().unwrap().submit_transaction(tx);
+                        }
+                        1 => {
+                            let _ = bc.write().unwrap().drop_transaction("miner", i as u64 + 1);
+                        }
+                        _ => {
+                            let _ = bc.write().unwrap().mine_block("miner");
+                        }
+                    })
+                })
+                .collect();
+            for handle in handles {
+                let _ = handle.join();
+            }
+            let guard = bc.read().unwrap();
+            let miner = guard.accounts.get("miner").unwrap();
+            assert_eq!(miner.pending_consumer, 0);
+            assert_eq!(miner.pending_industrial, 0);
+        })
+        .expect("register random case");
+});
 
 // 2. Invalid signature rejected
 #[test]

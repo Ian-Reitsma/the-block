@@ -97,10 +97,7 @@ Function Ensure-Maturin {
         Write-Color Yellow "pip not found in venv. Installing pip."
         python -m ensurepip
     }
-    if (-not (& $pipPath show maturin -q)) {
-        Write-Color Cyan "Installing maturin (Rust-Python bridge)..."
-        & $pipPath install maturin
-    }
+    Write-Color Yellow "Skipping maturin install; python bridge is disabled"
 }
 
 Function Ensure-Nextest {
@@ -138,12 +135,7 @@ Function Ensure-CargoFuzz {
 
 Function Run-Maturin-Develop {
     $maturinPath = ".\$PYTHON_VENV\Scripts\maturin.exe"
-    if (Test-Path $maturinPath -and (Test-Path "Cargo.toml")) {
-        Write-Color Cyan "Running 'maturin develop --release' to build Python native module..."
-        & $maturinPath develop --release --manifest-path node/Cargo.toml
-    } else {
-        Write-Color Yellow "maturin or Cargo.toml missing. Skipping Rust-Python build."
-    }
+    Write-Color Yellow "Skipping 'maturin develop'; python bridge is disabled"
 }
 
 # Main steps

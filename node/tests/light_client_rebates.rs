@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 
-use serial_test::serial;
 use the_block::{light_client::proof_tracker::ProofTracker, Blockchain, TokenAmount};
 
 mod util;
@@ -13,8 +12,7 @@ impl Drop for PreserveGuard {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rebate_persistence_across_restart() {
     std::env::set_var("TB_PRESERVE", "1");
     let _reset = PreserveGuard;
@@ -41,8 +39,7 @@ fn rebate_persistence_across_restart() {
     assert_eq!(receipt.relayers[0].amount, 4);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rebate_rollback_restores_pending_balances() {
     let dir = util::temp::temp_dir("rebate_reorg_state");
     let path = dir.path().to_str().expect("path");
@@ -66,8 +63,7 @@ fn rebate_rollback_restores_pending_balances() {
     assert!(history.receipts.is_empty());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rebate_double_claim_rejected_after_restart() {
     let dir = util::temp::temp_dir("rebate_double_claim");
     let path = dir.path().join("rebates");

@@ -5,10 +5,10 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use httpd::Uri;
 use light_client::{load_user_config, LightClientConfig, StateChunk, StateStream};
 use runtime::net::TcpStream;
 use runtime::ws::{self, ClientStream, Message as WsMessage};
-use url::Url;
 
 pub enum LightSyncCmd {
     /// Start light-client synchronization over a websocket URL
@@ -107,7 +107,7 @@ pub fn handle(cmd: LightSyncCmd) {
 }
 
 async fn connect_state_ws(url: &str) -> Result<ClientStream, String> {
-    let parsed = Url::parse(url).map_err(|e| e.to_string())?;
+    let parsed = Uri::parse(url).map_err(|e| e.to_string())?;
     if parsed.scheme() != "ws" {
         return Err(format!("unsupported scheme {}", parsed.scheme()));
     }
@@ -146,7 +146,7 @@ async fn connect_state_ws(url: &str) -> Result<ClientStream, String> {
         .write_all(request.as_bytes())
         .await
         .map_err(|e| e.to_string())?;
-    let expected_accept = ws::handshake_accept(&key);
+    let expected_accept = ws::handshake_accept(&key).map_err(|err| err.to_string())?;
     ws::read_client_handshake(&mut stream, &expected_accept)
         .await
         .map_err(|e| e.to_string())?;

@@ -32,5 +32,5 @@ in `state::schema`, preserving existing data.
 
 The `sim` crate can replay scenarios against RocksDB by selecting the
 `Backend::RocksDb` option and setting `SIM_DB_PATH`. Each simulation step is
-serialized with `bincode` and stored keyed by step number for later analysis.
+serialized with a compact first-party binary format and stored keyed by step number for later analysis.
 

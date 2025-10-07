@@ -3,14 +3,13 @@ mod support;
 use crypto_suite::signatures::ed25519::{Signature, SIGNATURE_LENGTH};
 use httpd::{ServerTlsConfig, StatusCode};
 use ledger::crypto::remote_tag;
-use serial_test::serial;
 use std::time::Duration;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletError, WalletSigner};
 
 use support::{HttpSignerMock, TlsWebSocketSignerMock};
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_roundtrip() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -24,7 +23,7 @@ fn remote_signer_roundtrip() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_signature_roundtrip_bytes() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -43,7 +42,7 @@ fn remote_signer_signature_roundtrip_bytes() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_connect_error() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -53,7 +52,7 @@ fn remote_signer_connect_error() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_threshold_error() {
     std::env::remove_var("REMOTE_SIGNER_TLS_CERT");
     std::env::remove_var("REMOTE_SIGNER_TLS_KEY");
@@ -68,7 +67,7 @@ fn remote_signer_threshold_error() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_invalid_signature() {
     std::env::remove_var("REMOTE_SIGNER_TIMEOUT_MS");
     let server = HttpSignerMock::invalid_signature();
@@ -78,7 +77,7 @@ fn remote_signer_invalid_signature() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_timeout() {
     std::env::set_var("REMOTE_SIGNER_TIMEOUT_MS", "100");
     let server = HttpSignerMock::delayed(Duration::from_secs(2));
@@ -89,7 +88,7 @@ fn remote_signer_timeout() {
 }
 
 #[test]
-#[serial]
+#[testkit::tb_serial]
 fn remote_signer_mtls_ws() {
     use rcgen::{BasicConstraints, Certificate, CertificateParams, IsCa};
 
@@ -102,9 +101,9 @@ fn remote_signer_mtls_ws() {
     let client_params = CertificateParams::new(vec!["client".to_string()]);
     let client_cert = Certificate::from_params(client_params).unwrap();
 
-    let cert_file = tempfile::NamedTempFile::new().unwrap();
-    let key_file = tempfile::NamedTempFile::new().unwrap();
-    let ca_file = tempfile::NamedTempFile::new().unwrap();
+    let cert_file = sys::temp::NamedTempFile::new().unwrap();
+    let key_file = sys::temp::NamedTempFile::new().unwrap();
+    let ca_file = sys::temp::NamedTempFile::new().unwrap();
     std::fs::write(
         cert_file.path(),
         client_cert.serialize_pem_with_signer(&ca).unwrap(),
@@ -120,8 +119,8 @@ fn remote_signer_mtls_ws() {
         .serialize_pem_with_signer(&ca)
         .expect("server cert pem");
     let server_key_pem = server_cert.serialize_private_key_pem();
-    let server_cert_file = tempfile::NamedTempFile::new().unwrap();
-    let server_key_file = tempfile::NamedTempFile::new().unwrap();
+    let server_cert_file = sys::temp::NamedTempFile::new().unwrap();
+    let server_key_file = sys::temp::NamedTempFile::new().unwrap();
     std::fs::write(server_cert_file.path(), server_cert_pem).unwrap();
     std::fs::write(server_key_file.path(), server_key_pem).unwrap();
     let tls = ServerTlsConfig::from_pem_files_with_client_auth(

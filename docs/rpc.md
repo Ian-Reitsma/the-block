@@ -33,6 +33,12 @@ offers `is_timeout()` for parity with the legacy `reqwest` checks.
 > place. Remote signer deployments that rely on HTTPS should retain their
 > existing TLS termination layer (e.g. stunnel or nginx) until then.
 
+> **URI helpers:** All clients now depend on the new `httpd::uri` primitives for
+> parsing and encoding. The helpers currently validate only the `http`, `https`,
+> `ws`, and `wss` schemes and intentionally return `Err(UriError::InvalidAuthority)`
+> for exotic authority strings. Until the full router ships, integrations should
+> stick to the documented schemes to avoid 501 responses from the stub parser.
+
 The CLI and internal tooling continue to use `node/src/rpc/client.rs`, which
 reads several environment variables. Operators can tune request behaviour with:
 

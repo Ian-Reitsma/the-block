@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::fs;
+use std::io::Write;
 use the_block::{canonical_payload_bytes, RawTxPayload};
 
 fn random_hex(rng: &mut StdRng) -> String {
@@ -12,7 +13,7 @@ fn random_hex(rng: &mut StdRng) -> String {
 #[test]
 fn serialize_roundtrip_vectors() {
     let mut rng = StdRng::seed_from_u64(42);
-    let mut w = csv::Writer::from_path("../target/serialization_equiv.csv").unwrap();
+    let mut file = fs::File::create("../target/serialization_equiv.csv").unwrap();
     for _ in 0..1000 {
         let payload = RawTxPayload {
             from_: random_hex(&mut rng),
@@ -30,8 +31,8 @@ fn serialize_roundtrip_vectors() {
             },
         };
         let bytes = canonical_payload_bytes(&payload);
-        w.write_record([hex::encode(bytes)]).unwrap();
+        writeln!(file, "{}", hex::encode(bytes)).unwrap();
     }
-    w.flush().unwrap();
+    file.flush().unwrap();
     assert!(fs::metadata("../target/serialization_equiv.csv").is_ok());
 }

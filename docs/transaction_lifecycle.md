@@ -4,6 +4,11 @@
 
 The transaction subsystem coordinates account debits, signatures, and fee calculation while respecting dual fee lanes and the legacy industrial sub-ledger (retained for compatibility). This document walks through the full lifecycle from payload construction to on-chain inclusion and provides references for Python bindings and mempool behavior.
 
+> **Bridge status:** The legacy PyO3 bindings have been retired. Until the
+> first-party `python_bridge` crate exposes the new FFI behind the
+> `python-bindings` feature, Python helpers such as `sign_tx_py` return
+> feature-disabled errors so tooling can detect the gap early.
+
 ## 1. Raw Payload Structure
 
 `node/src/transaction.rs` defines the `RawTxPayload` struct which is serialised with the canonical bincode configuration. Fields:

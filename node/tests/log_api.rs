@@ -151,7 +151,7 @@ fn tail_streams_indexed_rows() -> Result<()> {
             host = addr
         );
         stream.write_all(request.as_bytes()).await?;
-        let expected_accept = ws::handshake_accept(&key);
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
         ws::read_client_handshake(&mut stream, &expected_accept).await?;
         let mut ws = ClientStream::new(stream);
         let message = ws.recv().await?.expect("websocket message");

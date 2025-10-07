@@ -1,7 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
 use runtime::{io::read_to_end, net::TcpStream};
-use serial_test::serial;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
@@ -45,8 +44,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rpc_reports_handshake_failures() {
     runtime::block_on(async {
         let dir = init_env();

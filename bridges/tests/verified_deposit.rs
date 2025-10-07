@@ -2,7 +2,7 @@ use bridges::light_client::{header_hash, Header, Proof};
 use bridges::{
     header::PowHeader, relayer::RelayerSet, Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
-use tempfile::tempdir;
+use sys::temp;
 
 #[cfg(feature = "telemetry")]
 use bridges::{PROOF_VERIFY_FAILURE_TOTAL, PROOF_VERIFY_SUCCESS_TOTAL};
@@ -52,7 +52,7 @@ fn sample_proof_valid() -> Proof {
 
 #[test]
 fn deposit_valid_proof() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()
@@ -91,7 +91,7 @@ fn deposit_valid_proof() {
 
 #[test]
 fn deposit_invalid_proof() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()
@@ -123,7 +123,7 @@ fn deposit_invalid_proof() {
 
 #[test]
 fn deposit_replay_fails() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()

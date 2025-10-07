@@ -58,7 +58,12 @@ DEX, storage repair, and trie commitments share the same audited implementation.
 An optional SHA3-256 fallback lives under `crypto_suite::hashing::sha3` for
 deployments requiring the NIST sponge; it exposes identical APIs and shares the
 same RFC 6234 vectors. Commitment proofs still record the algorithm so clients
-can validate Merkle branches off-chain.
+can validate Merkle branches off-chain. Legacy RIPEMD-160, SHA-1 compatibility,
+and CRC32 helpers now surface through `hashing::ripemd160`,
+`hashing::sha1`, and `hashing::crc32` stubs that deliberately return
+`Err(Unimplemented)` until the in-house backends land. Downstream crates should
+plumb those errors to operators so the dependency freeze is visible during the
+transition.
 
 ### Key Derivation
 

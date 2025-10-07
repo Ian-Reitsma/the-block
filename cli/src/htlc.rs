@@ -6,9 +6,8 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use crypto_suite::hashing::sha3::Sha3_256;
+use crypto_suite::hashing::{ripemd160, sha3::Sha3_256};
 use hex::{decode, encode};
-use ripemd::{Digest as RipemdDigest, Ripemd160};
 use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 pub enum HtlcCmd {
@@ -109,11 +108,13 @@ pub fn handle(cmd: HtlcCmd) {
         } => {
             let bytes = preimage.into_bytes();
             let (hash, algo) = match algo.as_str() {
-                "ripemd" => {
-                    let mut h = Ripemd160::new();
-                    RipemdDigest::update(&mut h, &bytes);
-                    (RipemdDigest::finalize(h).to_vec(), HashAlgo::Ripemd160)
-                }
+                "ripemd" => match ripemd160::hash(&bytes) {
+                    Ok(hash) => (hash.to_vec(), HashAlgo::Ripemd160),
+                    Err(err) => {
+                        eprintln!("ripemd160 hashing unavailable: {err}");
+                        return;
+                    }
+                },
                 _ => {
                     let mut h = Sha3_256::new();
                     h.update(&bytes);
@@ -139,8 +140,10 @@ pub fn handle(cmd: HtlcCmd) {
                 _ => HashAlgo::Sha3,
             };
             let mut htlc = Htlc::new(hash_bytes, algo, timeout);
-            let ok = htlc.redeem(preimage.as_bytes(), timeout.saturating_sub(1));
-            println!("{}", ok);
+            match htlc.redeem(preimage.as_bytes(), timeout.saturating_sub(1)) {
+                Ok(ok) => println!("{}", ok),
+                Err(err) => eprintln!("failed to redeem HTLC: {err}"),
+            }
         }
     }
 }

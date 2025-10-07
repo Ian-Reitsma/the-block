@@ -1,13 +1,12 @@
 use crypto_suite::hashing::blake3::Hasher;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Merkle proof represented as sibling hashes with orientation.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proof(pub Vec<([u8; 32], bool)>); // (sibling, is_left)
 
 /// Simple in-memory Merkle trie backed by a `BTreeMap`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct MerkleTrie {
     pub(crate) map: BTreeMap<Vec<u8>, Vec<u8>>, // sorted for deterministic hashing
 }

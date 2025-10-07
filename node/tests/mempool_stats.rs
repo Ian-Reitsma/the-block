@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 use runtime::{io::read_to_end, net::TcpStream};
-use serial_test::serial;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use tempfile::tempdir;
@@ -39,8 +38,7 @@ fn rpc(addr: &str, body: &str) -> serde_json::Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn mempool_stats_rpc() {
     runtime::block_on(async {
         let dir = tempdir().unwrap();
@@ -91,8 +89,7 @@ fn mempool_stats_rpc() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn mempool_qos_event_public_rpc() {
     runtime::block_on(async {
         use std::net::TcpListener;

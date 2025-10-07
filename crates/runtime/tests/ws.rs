@@ -98,7 +98,8 @@ fn server_unmasks_payloads() {
             .write_all(request.as_bytes())
             .await
             .expect("write request");
-        ws::read_client_handshake(&mut stream, &ws::handshake_accept(&key))
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
+        ws::read_client_handshake(&mut stream, &expected_accept)
             .await
             .expect("validate handshake");
         let mut client = ws::ClientStream::new(stream);
@@ -144,7 +145,8 @@ fn fragmented_frames_are_joined() {
             .write_all(request.as_bytes())
             .await
             .expect("write request");
-        ws::read_client_handshake(&mut stream, &ws::handshake_accept(&key))
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
+        ws::read_client_handshake(&mut stream, &expected_accept)
             .await
             .expect("handshake");
         write_fragmented_text(&mut stream, "hello world").await;
@@ -187,7 +189,8 @@ fn ping_pong_cycle() {
             .write_all(request.as_bytes())
             .await
             .expect("write request");
-        ws::read_client_handshake(&mut stream, &ws::handshake_accept(&key))
+        let expected_accept = ws::handshake_accept(&key).expect("handshake accept");
+        ws::read_client_handshake(&mut stream, &expected_accept)
             .await
             .expect("handshake");
         let mut client = ws::ClientStream::new(stream);

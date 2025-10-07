@@ -19,7 +19,7 @@ use bincode;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use hex;
 use httpd::{
-    serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
+    form_urlencoded, serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
 };
 use once_cell::sync::Lazy;
@@ -40,7 +40,6 @@ use std::sync::{
 };
 use std::time::Duration;
 use subtle::ConstantTimeEq;
-use url::form_urlencoded;
 
 pub mod ledger;
 pub mod limiter;

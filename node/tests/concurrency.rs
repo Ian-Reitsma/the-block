@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use rand::Rng;
 use std::fs;

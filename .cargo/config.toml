@@ -2,7 +2,9 @@
 RUST_TEST_THREADS = "1"
 PROPTEST_CASES = "64"
 PROPTEST_DISABLE_FAILURE_PERSISTENCE = "1"
-FIRST_PARTY_ONLY = { value = "1", force = true }
+# Enable the in-house dependency guard by default. Developers can temporarily
+# opt-out when porting crates by exporting `FIRST_PARTY_ONLY=0`.
+FIRST_PARTY_ONLY = { value = "1" }
 
 [build]
 # Limit build parallelism when running the full test suite so the linker and

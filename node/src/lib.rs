@@ -26,11 +26,7 @@ use hex;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
 use lru::LruCache;
-use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyRuntimeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::wrap_pyfunction;
-use pyo3::PyTypeInfo;
+use python_bridge::{Error as PyError, ErrorKind as PyErrorKind, Result as PyResult};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -77,6 +73,14 @@ const BLOCK_ENERGY_J: f64 = 6.58e-33; // median compute energy per block
 const TAU_B: f64 = 1.0; // block interval in seconds
 static VDF_KAPPA: AtomicU64 = AtomicU64::new(1u64 << 28);
 const F_HW_BASE: f64 = 3.0e9; // reference 3 GHz hardware
+
+fn py_value_err(msg: impl Into<String>) -> PyError {
+    PyError::value(msg)
+}
+
+fn py_runtime_err(msg: impl Into<String>) -> PyError {
+    PyError::runtime(msg)
+}
 
 pub fn set_vdf_kappa(k: u64) {
     VDF_KAPPA.store(k, AtomicOrdering::Relaxed);
@@ -218,28 +222,13 @@ impl TxAdmissionError {
     }
 }
 
-create_exception!(the_block, ErrUnknownSender, PyException);
-create_exception!(the_block, ErrInsufficientBalance, PyException);
-create_exception!(the_block, ErrNonceGap, PyException);
-create_exception!(the_block, ErrBadSignature, PyException);
-create_exception!(the_block, ErrDuplicateTx, PyException);
-create_exception!(the_block, ErrTxNotFound, PyException);
-create_exception!(the_block, ErrFeeTooLarge, PyException);
-create_exception!(the_block, ErrFeeTooLow, PyException);
-create_exception!(the_block, ErrMempoolFull, PyException);
-create_exception!(the_block, ErrLockPoisoned, PyException);
-create_exception!(the_block, ErrPendingLimit, PyException);
-create_exception!(the_block, ErrPendingSignatures, PyException);
-create_exception!(the_block, ErrSessionExpired, PyException);
-create_exception!(the_block, ErrBalanceUnderflow, PyException);
-
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error("balance underflow")]
 pub struct BalanceUnderflow;
 
-impl From<BalanceUnderflow> for PyErr {
+impl From<BalanceUnderflow> for PyError {
     fn from(_: BalanceUnderflow) -> Self {
-        ErrBalanceUnderflow::new_err("balance underflow")
+        PyError::value("balance underflow")
     }
 }
 
@@ -248,61 +237,28 @@ fn checked_sub_assign(target: &mut u64, val: u64) -> Result<(), BalanceUnderflow
     Ok(())
 }
 
-impl From<TxAdmissionError> for PyErr {
+impl From<TxAdmissionError> for PyError {
     fn from(e: TxAdmissionError) -> Self {
         let code = e.code();
-        Python::with_gil(|py| {
-            let (ty, msg) = match e {
-                TxAdmissionError::UnknownSender => {
-                    (py.get_type::<ErrUnknownSender>(), "unknown sender")
-                }
-                TxAdmissionError::InsufficientBalance => (
-                    py.get_type::<ErrInsufficientBalance>(),
-                    "insufficient balance",
-                ),
-                TxAdmissionError::NonceGap => (py.get_type::<ErrNonceGap>(), "nonce gap"),
-                TxAdmissionError::InvalidSelector => {
-                    (py.get_type::<ErrInvalidSelector>(), "invalid selector")
-                }
-                TxAdmissionError::BadSignature => {
-                    (py.get_type::<ErrBadSignature>(), "bad signature")
-                }
-                TxAdmissionError::Duplicate => {
-                    (py.get_type::<ErrDuplicateTx>(), "duplicate transaction")
-                }
-                TxAdmissionError::NotFound => {
-                    (py.get_type::<ErrTxNotFound>(), "transaction not found")
-                }
-                TxAdmissionError::BalanceOverflow => {
-                    (py.get_type::<PyValueError>(), "balance overflow")
-                }
-                TxAdmissionError::FeeOverflow => (py.get_type::<ErrFeeOverflow>(), "fee overflow"),
-                TxAdmissionError::FeeTooLarge => (py.get_type::<ErrFeeTooLarge>(), "fee too large"),
-                TxAdmissionError::FeeTooLow => (py.get_type::<ErrFeeTooLow>(), "fee below minimum"),
-                TxAdmissionError::MempoolFull => (py.get_type::<ErrMempoolFull>(), "mempool full"),
-                TxAdmissionError::LockPoisoned => {
-                    (py.get_type::<ErrLockPoisoned>(), "lock poisoned")
-                }
-                TxAdmissionError::PendingLimitReached => {
-                    (py.get_type::<ErrPendingLimit>(), "pending limit reached")
-                }
-                TxAdmissionError::PendingSignatures => (
-                    py.get_type::<ErrPendingSignatures>(),
-                    "additional signatures required",
-                ),
-                TxAdmissionError::SessionExpired => {
-                    (py.get_type::<ErrSessionExpired>(), "session expired")
-                }
-            };
-            let err = match ty.call1((msg,)) {
-                Ok(e) => e,
-                Err(e) => panic!("exception construction failed: {e}"),
-            };
-            if let Err(e) = err.setattr("code", code) {
-                panic!("set code attr: {e}");
-            }
-            PyErr::from_value(err)
-        })
+        let message = match e {
+            TxAdmissionError::UnknownSender => "unknown sender",
+            TxAdmissionError::InsufficientBalance => "insufficient balance",
+            TxAdmissionError::NonceGap => "nonce gap",
+            TxAdmissionError::InvalidSelector => "invalid selector",
+            TxAdmissionError::BadSignature => "bad signature",
+            TxAdmissionError::Duplicate => "duplicate transaction",
+            TxAdmissionError::NotFound => "transaction not found",
+            TxAdmissionError::BalanceOverflow => "balance overflow",
+            TxAdmissionError::FeeOverflow => "fee overflow",
+            TxAdmissionError::FeeTooLarge => "fee too large",
+            TxAdmissionError::FeeTooLow => "fee below minimum",
+            TxAdmissionError::MempoolFull => "mempool full",
+            TxAdmissionError::LockPoisoned => "lock poisoned",
+            TxAdmissionError::PendingLimitReached => "pending limit reached",
+            TxAdmissionError::PendingSignatures => "additional signatures required",
+            TxAdmissionError::SessionExpired => "session expired",
+        };
+        PyError::runtime(message).with_message(format!("{message} (code {code})"))
     }
 }
 
@@ -397,18 +353,14 @@ fn snapshot_interval_from_env() -> u64 {
 /// See `AGENTS.md` §10.3. All monetary values in consensus code use this
 /// wrapper to make a future switch to `u128` trivial and to forbid accidental
 /// arithmetic on raw integers.
-#[pyclass]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct TokenAmount(pub u64);
 
-#[pymethods]
 impl TokenAmount {
-    #[new]
     pub fn py_new(v: u64) -> Self {
         Self(v)
     }
-    #[getter]
     pub fn value(&self) -> u64 {
         self.0
     }
@@ -444,32 +396,22 @@ impl TokenAmount {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct TokenBalance {
-    #[pyo3(get, set)]
     pub consumer: u64,
-    #[pyo3(get, set)]
     pub industrial: u64,
 }
 
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Account {
-    #[pyo3(get)]
     pub address: String,
-    #[pyo3(get)]
     pub balance: TokenBalance,
-    #[pyo3(get, set)]
     #[serde(default)]
     pub nonce: u64,
-    #[pyo3(get)]
     #[serde(default)]
     pub pending_consumer: u64,
-    #[pyo3(get)]
     #[serde(default)]
     pub pending_industrial: u64,
-    #[pyo3(get)]
     #[serde(default)]
     pub pending_nonce: u64,
     #[serde(default)]
@@ -573,109 +515,80 @@ impl<'a> ReservationGuard<'a> {
 
 /// Per-block ledger entry. `coinbase_*` mirrors the first transaction
 /// but is the canonical source for light clients.
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct Block {
-    #[pyo3(get)]
     pub index: u64,
-    #[pyo3(get)]
     pub previous_hash: String,
-    #[pyo3(get)]
     #[serde(default)]
     /// UNIX timestamp in milliseconds when the block was mined
     pub timestamp_millis: u64,
-    #[pyo3(get)]
     pub transactions: Vec<SignedTransaction>,
-    #[pyo3(get)]
     #[serde(default)]
     pub difficulty: u64,
-    #[pyo3(get)]
     #[serde(default)]
     /// Miner-provided hint about recent hash-rate trend
     pub retune_hint: i8,
-    #[pyo3(get)]
     pub nonce: u64,
-    #[pyo3(get)]
     pub hash: String,
-    #[pyo3(get)]
     #[serde(default)]
     /// Canonical consumer reward recorded in the header. Must match tx[0].
     pub coinbase_consumer: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// Canonical industrial reward recorded in the header. Must match tx[0].
     pub coinbase_industrial: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// CT subsidy minted for storage operations in this block
     pub storage_sub_ct: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// CT subsidy minted for read delivery in this block
     pub read_sub_ct: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// CT subsidy minted for compute in this block
     pub compute_sub_ct: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// CT rebates paid to proof relayers in this block
     pub proof_rebate_ct: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// IT subsidy minted for storage operations in this block
     pub storage_sub_it: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// IT subsidy minted for read delivery in this block
     pub read_sub_it: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// IT subsidy minted for compute in this block
     pub compute_sub_it: TokenAmount,
-    #[pyo3(get)]
     #[serde(default)]
     /// Merkle root of all `ReadAck`s batched for this block
     pub read_root: [u8; 32],
-    #[pyo3(get)]
     #[serde(default)]
     /// blake3(total_fee_ct || total_fee_it) in hex
     pub fee_checksum: String,
-    #[pyo3(get)]
     #[serde(default, alias = "snapshot_root")]
     /// Merkle root of account state
     pub state_root: String,
-    #[pyo3(get)]
     #[serde(default)]
     /// Base fee in effect for this block.
     pub base_fee: u64,
-    #[pyo3(get)]
     #[serde(default)]
     /// L2 blob commitment roots anchored in this block
     pub l2_roots: Vec<[u8; 32]>,
-    #[pyo3(get)]
     #[serde(default)]
     /// Corresponding total byte sizes per root
     pub l2_sizes: Vec<u32>,
-    #[pyo3(get)]
     #[serde(default)]
     /// Commitment to VDF preimage for randomness fuse
     pub vdf_commit: [u8; 32],
-    #[pyo3(get)]
     #[serde(default)]
     /// VDF output revealed for commitment two blocks prior
     pub vdf_output: [u8; 32],
-    #[pyo3(get)]
     #[serde(default)]
     /// Pietrzak proof bytes for the VDF evaluation
     pub vdf_proof: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[pyo3(get)]
     #[serde(default)]
     /// Optional Dilithium public key for the miner.
     pub dilithium_pubkey: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[pyo3(get)]
     #[serde(default)]
     /// Optional Dilithium signature over the header hash.
     pub dilithium_sig: Vec<u8>,
@@ -739,10 +652,8 @@ pub fn mempool_cmp(a: &MempoolEntry, b: &MempoolEntry, ttl_secs: u64) -> Orderin
 /// `Blockchain` exposes high level methods for transaction submission,
 /// mining, and persistence. It backs the Python API used throughout the
 /// demo script and tests.
-#[pyclass]
 pub struct Blockchain {
     pub chain: Vec<Block>,
-    #[pyo3(get)]
     pub accounts: HashMap<String, Account>,
     /// Latest state root per shard.
     pub shard_roots: HashMap<ShardId, [u8; 32]>,
@@ -750,7 +661,6 @@ pub struct Blockchain {
     pub shard_heights: HashMap<ShardId, u64>,
     /// LRU cache for recent shard state entries keyed by `(ShardId, key)`.
     pub shard_cache: Mutex<lru::LruCache<(ShardId, Vec<u8>), Vec<u8>>>,
-    #[pyo3(get, set)]
     pub difficulty: u64,
     /// Hint from previous retune summarizing hash-rate trend
     pub retune_hint: i8,
@@ -769,36 +679,24 @@ pub struct Blockchain {
     panic_on_evict: std::sync::atomic::AtomicBool,
     panic_on_admit: std::sync::atomic::AtomicI32,
     panic_on_purge: std::sync::atomic::AtomicBool,
-    #[pyo3(get, set)]
     pub max_mempool_size_consumer: usize,
     pub max_mempool_size_industrial: usize,
-    #[pyo3(get, set)]
     pub min_fee_per_byte_consumer: u64,
-    #[pyo3(get, set)]
     pub min_fee_per_byte_industrial: u64,
-    #[pyo3(get, set)]
     pub comfort_threshold_p90: u64,
-    #[pyo3(get, set)]
     pub tx_ttl: u64,
-    #[pyo3(get, set)]
     pub max_pending_per_account: usize,
     admission_locks: DashMap<String, Arc<Mutex<()>>>,
     db: Db,
-    #[pyo3(get)]
     pub path: String,
-    #[pyo3(get, set)]
     pub emission_consumer: u64,
-    #[pyo3(get, set)]
     pub emission_industrial: u64,
     /// Total consumer emissions from one year ago used for rolling inflation.
     pub emission_consumer_year_ago: u64,
     /// Block height when the rolling inflation window started.
     pub inflation_epoch_marker: u64,
-    #[pyo3(get, set)]
     pub block_reward_consumer: TokenAmount,
-    #[pyo3(get, set)]
     pub block_reward_industrial: TokenAmount,
-    #[pyo3(get, set)]
     pub block_height: u64,
     /// Pending messages across shards.
     pub inter_shard: MessageQueue,
@@ -808,17 +706,13 @@ pub struct Blockchain {
     /// Stored macro blocks.
     pub macro_blocks: Vec<MacroBlock>,
     /// Interval in blocks between macro block emissions.
-    #[pyo3(get, set)]
     pub macro_interval: u64,
     pub snapshot: SnapshotManager,
-    #[pyo3(get)]
     pub skipped: Vec<SignedTransaction>,
-    #[pyo3(get)]
     pub skipped_nonce_gap: u64,
     badge_tracker: ServiceBadgeTracker,
     pub config: NodeConfig,
     /// Current base fee used for transaction admission and recorded in mined blocks.
-    #[pyo3(get, set)]
     pub base_fee: u64,
     /// Governance-controlled economic parameters
     pub params: Params,
@@ -826,16 +720,12 @@ pub struct Blockchain {
     pub gamma_read_sub_ct_raw: i64,
     pub kappa_cpu_sub_ct_raw: i64,
     pub lambda_bytes_out_sub_ct_raw: i64,
-    #[pyo3(get, set)]
     /// Bytes stored during the current epoch
     pub epoch_storage_bytes: u64,
-    #[pyo3(get, set)]
     /// Bytes served during the current epoch
     pub epoch_read_bytes: u64,
-    #[pyo3(get, set)]
     /// CPU milliseconds consumed during the current epoch
     pub epoch_cpu_ms: u64,
-    #[pyo3(get, set)]
     /// Bytes of dynamic compute output during the current epoch
     pub epoch_bytes_out: u64,
     /// Pending blob transactions awaiting anchoring
@@ -859,7 +749,6 @@ pub struct Blockchain {
     logistic_factor: f64,
 }
 
-#[pyclass]
 #[derive(Serialize, Deserialize)]
 pub struct ChainDisk {
     #[serde(default)]
@@ -1313,7 +1202,6 @@ impl Blockchain {
     }
 }
 
-#[pymethods]
 impl Blockchain {
     /// Default Python constructor opens ./chain_db
     #[new]
@@ -1354,7 +1242,7 @@ impl Blockchain {
             match bincode::deserialize::<ChainDisk>(&raw) {
                 Ok(mut disk) => {
                     if disk.schema_version > 7 {
-                        return Err(PyValueError::new_err("DB schema too new"));
+                        return Err(py_value_err("DB schema too new"));
                     }
                     if disk.schema_version < 3 {
                         let mut migrated_chain = disk.chain.clone();
@@ -2195,7 +2083,7 @@ impl Blockchain {
             recent_timestamps: self.recent_timestamps.iter().copied().collect(),
         };
         let bytes = bincode::serialize(&disk)
-            .map_err(|e| PyValueError::new_err(format!("Serialization error: {e}")))?;
+            .map_err(|e| py_value_err(format!("Serialization error: {e}")))?;
         self.db.insert(DB_CHAIN, bytes);
         // ensure no legacy column families linger on disk
         self.db.remove(DB_ACCOUNTS);
@@ -2246,8 +2134,7 @@ impl Blockchain {
         self.chain.push(g);
         self.recent_timestamps.push_back(0);
         self.block_height = 1;
-        let bytes =
-            bincode::serialize(&self.chain).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let bytes = bincode::serialize(&self.chain).map_err(|e| py_value_err(e.to_string()))?;
         self.db.insert(DB_CHAIN, bytes);
         self.db.flush();
         Ok(())
@@ -2259,7 +2146,7 @@ impl Blockchain {
     /// Returns [`PyValueError`] if the account already exists.
     pub fn add_account(&mut self, address: String, consumer: u64, industrial: u64) -> PyResult<()> {
         if self.accounts.contains_key(&address) {
-            return Err(PyValueError::new_err("Account already exists"));
+            return Err(py_value_err("Account already exists"));
         }
         let acc = Account {
             address: address.clone(),
@@ -2287,7 +2174,7 @@ impl Blockchain {
         self.accounts
             .remove(address)
             .map(|_| ())
-            .ok_or_else(|| PyValueError::new_err("Account not found"))
+            .ok_or_else(|| py_value_err("Account not found"))
     }
 
     /// Register a session key for an account.
@@ -2300,7 +2187,7 @@ impl Blockchain {
         let acc = self
             .accounts
             .get_mut(&address)
-            .ok_or_else(|| PyValueError::new_err("Account not found"))?;
+            .ok_or_else(|| py_value_err("Account not found"))?;
         acc.sessions.push(accounts::SessionPolicy {
             public_key,
             expires_at,
@@ -2334,7 +2221,7 @@ impl Blockchain {
         self.accounts
             .get(address)
             .map(|a| a.balance.clone())
-            .ok_or_else(|| PyValueError::new_err("Account not found"))
+            .ok_or_else(|| py_value_err("Account not found"))
     }
 
     /// Submit a signed transaction to the mempool.
@@ -3378,7 +3265,7 @@ impl Blockchain {
     /// Submit a blob transaction to the pending blob queue.
     pub fn submit_blob_tx(&mut self, tx: BlobTx) -> PyResult<()> {
         if self.pending_blob_bytes + tx.blob_size > crate::constants::MAX_UNFINALIZED_BLOB_BYTES {
-            return Err(PyValueError::new_err("blob mempool full"));
+            return Err(py_value_err("blob mempool full"));
         }
         self.pending_blob_bytes += tx.blob_size;
         self.blob_scheduler.push(tx.blob_root, tx.fractal_lvl > 1);
@@ -3408,7 +3295,7 @@ impl Blockchain {
             self.chain
                 .last()
                 .map(|b| b.hash.clone())
-                .ok_or_else(|| PyValueError::new_err("empty chain"))?
+                .ok_or_else(|| py_value_err("empty chain"))?
         };
 
         // apply decay first so reward reflects current height
@@ -3417,14 +3304,14 @@ impl Blockchain {
                 (u128::from(self.block_reward_consumer.0) * u128::from(DECAY_NUMERATOR))
                     / u128::from(DECAY_DENOMINATOR),
             )
-            .map_err(|_| PyValueError::new_err("reward overflow"))?,
+            .map_err(|_| py_value_err("reward overflow"))?,
         );
         self.block_reward_industrial = TokenAmount::new(
             u64::try_from(
                 (u128::from(self.block_reward_industrial.0) * u128::from(DECAY_NUMERATOR))
                     / u128::from(DECAY_DENOMINATOR),
             )
-            .map_err(|_| PyValueError::new_err("reward overflow"))?,
+            .map_err(|_| py_value_err("reward overflow"))?,
         );
         let active_eff = {
             let mut counts: HashMap<String, u64> = HashMap::new();
@@ -3554,9 +3441,9 @@ impl Blockchain {
             }
         }
         let fee_consumer_u64 =
-            u64::try_from(fee_sum_consumer).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            u64::try_from(fee_sum_consumer).map_err(|_| py_value_err("Fee overflow"))?;
         let fee_industrial_u64 =
-            u64::try_from(fee_sum_industrial).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            u64::try_from(fee_sum_industrial).map_err(|_| py_value_err("Fee overflow"))?;
         let (cpu_ms, bytes_out) = crate::exec::take_metrics();
         self.epoch_cpu_ms = self.epoch_cpu_ms.saturating_add(cpu_ms);
         self.epoch_bytes_out = self.epoch_bytes_out.saturating_add(bytes_out);
@@ -3574,16 +3461,16 @@ impl Blockchain {
             .and_then(|v| v.checked_add(read_sub_ct))
             .and_then(|v| v.checked_add(compute_sub_ct))
             .and_then(|v| v.checked_add(fee_consumer_u64))
-            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+            .ok_or_else(|| py_value_err("Fee overflow"))?;
         let coinbase_industrial_total = reward_industrial
             .0
             .checked_add(fee_industrial_u64)
-            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+            .ok_or_else(|| py_value_err("Fee overflow"))?;
 
         let rebate_ct = self.proof_tracker.claim_all(index);
         let coinbase_consumer_total = base_coinbase_consumer
             .checked_add(rebate_ct)
-            .ok_or_else(|| PyValueError::new_err("Fee overflow"))?;
+            .ok_or_else(|| py_value_err("Fee overflow"))?;
 
         let mut fee_hasher = blake3::Hasher::new();
         fee_hasher.update(&fee_consumer_u64.to_le_bytes());
@@ -3679,12 +3566,12 @@ impl Blockchain {
             .balance
             .consumer
             .checked_add(coinbase_consumer_total)
-            .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
+            .ok_or_else(|| py_value_err("miner consumer overflow"))?;
         miner_shadow.balance.industrial = miner_shadow
             .balance
             .industrial
             .checked_add(coinbase_industrial_total)
-            .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
+            .ok_or_else(|| py_value_err("miner industrial overflow"))?;
 
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
@@ -3879,7 +3766,7 @@ impl Blockchain {
                     span.in_scope(|| self.mempool_mutex.lock()).map_err(|_| {
                         telemetry::LOCK_POISON_TOTAL.inc();
                         self.record_reject("lock_poison");
-                        PyValueError::new_err("Lock poisoned")
+                        py_value_err("Lock poisoned")
                     })?
                 };
                 #[cfg(not(feature = "telemetry"))]
@@ -3889,7 +3776,7 @@ impl Blockchain {
                         telemetry::LOCK_POISON_TOTAL.inc();
                         self.record_reject("lock_poison");
                     }
-                    PyValueError::new_err("Lock poisoned")
+                    py_value_err("Lock poisoned")
                 })?;
                 let mut changed: HashSet<String> = HashSet::new();
                 for tx in txs.iter().skip(1) {
@@ -3909,7 +3796,7 @@ impl Blockchain {
                         span.in_scope(|| lock.lock()).map_err(|_| {
                             telemetry::LOCK_POISON_TOTAL.inc();
                             self.record_reject("lock_poison");
-                            PyValueError::new_err("Lock poisoned")
+                            py_value_err("Lock poisoned")
                         })?
                     };
                     #[cfg(not(feature = "telemetry"))]
@@ -3919,7 +3806,7 @@ impl Blockchain {
                             telemetry::LOCK_POISON_TOTAL.inc();
                             self.record_reject("lock_poison");
                         }
-                        PyValueError::new_err("Lock poisoned")
+                        py_value_err("Lock poisoned")
                     })?;
 
                     if tx.payload.from_ != "0".repeat(34) {
@@ -4012,12 +3899,12 @@ impl Blockchain {
                     .balance
                     .consumer
                     .checked_add(coinbase_consumer_total)
-                    .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
+                    .ok_or_else(|| py_value_err("miner consumer overflow"))?;
                 miner.balance.industrial = miner
                     .balance
                     .industrial
                     .checked_add(coinbase_industrial_total)
-                    .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
+                    .ok_or_else(|| py_value_err("miner industrial overflow"))?;
                 changed.insert(miner_addr.to_owned());
                 let mut touched_shards: HashSet<ShardId> = HashSet::new();
                 for addr in &changed {
@@ -4032,7 +3919,7 @@ impl Blockchain {
                     let bytes = ShardState::new(shard, root).to_bytes();
                     let mut deltas = Vec::new();
                     self.write_shard_state(shard, key, bytes, &mut deltas)
-                        .map_err(|e| PyValueError::new_err(format!("shard state write: {e}")))?;
+                        .map_err(|e| py_value_err(format!("shard state write: {e}")))?;
                 }
 
                 let minted_consumer = reward_consumer.0.saturating_add(rebate_ct);
@@ -4068,7 +3955,7 @@ impl Blockchain {
                     let r = self
                         .snapshot
                         .write_snapshot(self.block_height, &self.accounts)
-                        .map_err(|e| PyValueError::new_err(format!("snapshot error: {e}")))?;
+                        .map_err(|e| py_value_err(format!("snapshot error: {e}")))?;
                     debug_assert_eq!(r, block.state_root);
                 } else {
                     let changes: HashMap<String, Account> = changed
@@ -4078,7 +3965,7 @@ impl Blockchain {
                     let r = self
                         .snapshot
                         .write_diff(self.block_height, &changes, &self.accounts)
-                        .map_err(|e| PyValueError::new_err(format!("snapshot diff error: {e}")))?;
+                        .map_err(|e| py_value_err(format!("snapshot diff error: {e}")))?;
                     debug_assert_eq!(r, block.state_root);
                 }
 
@@ -4096,7 +3983,7 @@ impl Blockchain {
             }
             nonce = nonce
                 .checked_add(1)
-                .ok_or_else(|| PyValueError::new_err("Nonce overflow"))?;
+                .ok_or_else(|| py_value_err("Nonce overflow"))?;
         }
     }
 
@@ -4106,7 +3993,7 @@ impl Blockchain {
         } else if let Some(pb) = self.chain.get(block.index as usize - 1) {
             pb.hash.clone()
         } else {
-            return Err(PyValueError::new_err("Missing previous block"));
+            return Err(py_value_err("Missing previous block"));
         };
         if block.previous_hash != expected_prev {
             return Ok(false);
@@ -4202,9 +4089,9 @@ impl Blockchain {
         }
         let mut h = blake3::Hasher::new();
         let fee_consumer_u64 =
-            u64::try_from(fee_tot_consumer).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            u64::try_from(fee_tot_consumer).map_err(|_| py_value_err("Fee overflow"))?;
         let fee_industrial_u64 =
-            u64::try_from(fee_tot_industrial).map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            u64::try_from(fee_tot_industrial).map_err(|_| py_value_err("Fee overflow"))?;
         h.update(&fee_consumer_u64.to_le_bytes());
         h.update(&fee_industrial_u64.to_le_bytes());
         if h.finalize().to_hex().to_string() != block.fee_checksum {
@@ -4241,10 +4128,10 @@ impl Blockchain {
 
     pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
         if new_chain.len() <= self.chain.len() {
-            return Err(PyValueError::new_err("Incoming chain not longer"));
+            return Err(py_value_err("Incoming chain not longer"));
         }
         if !self.is_valid_chain_rust(&new_chain) {
-            return Err(PyValueError::new_err("Invalid incoming chain"));
+            return Err(py_value_err("Invalid incoming chain"));
         }
 
         let old_chain = self.chain.clone();
@@ -4282,16 +4169,16 @@ impl Blockchain {
             for tx in block.transactions.iter().skip(1) {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = to_array_32(&tx.public_key)
-                        .ok_or_else(|| PyValueError::new_err("Invalid pubkey in chain"))?;
+                        .ok_or_else(|| py_value_err("Invalid pubkey in chain"))?;
                     let vk = VerifyingKey::from_bytes(&pk)
-                        .map_err(|_| PyValueError::new_err("Invalid pubkey in chain"))?;
+                        .map_err(|_| py_value_err("Invalid pubkey in chain"))?;
                     let sig_bytes = to_array_64(&tx.signature.ed25519)
-                        .ok_or_else(|| PyValueError::new_err("Invalid signature in chain"))?;
+                        .ok_or_else(|| py_value_err("Invalid signature in chain"))?;
                     let sig = Signature::from_bytes(&sig_bytes);
                     let mut msg = domain_tag().to_vec();
                     msg.extend(canonical_payload_bytes(&tx.payload));
                     if vk.verify(&msg, &sig).is_err() {
-                        return Err(PyValueError::new_err("Bad tx signature in chain"));
+                        return Err(py_value_err("Bad tx signature in chain"));
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                         let (fee_consumer, fee_industrial) =
@@ -4329,21 +4216,21 @@ impl Blockchain {
                 r.balance.industrial += tx.payload.amount_industrial;
             }
             let mut h = blake3::Hasher::new();
-            let fee_consumer_u64 = u64::try_from(fee_tot_consumer)
-                .map_err(|_| PyValueError::new_err("Fee overflow"))?;
-            let fee_industrial_u64 = u64::try_from(fee_tot_industrial)
-                .map_err(|_| PyValueError::new_err("Fee overflow"))?;
+            let fee_consumer_u64 =
+                u64::try_from(fee_tot_consumer).map_err(|_| py_value_err("Fee overflow"))?;
+            let fee_industrial_u64 =
+                u64::try_from(fee_tot_industrial).map_err(|_| py_value_err("Fee overflow"))?;
             h.update(&fee_consumer_u64.to_le_bytes());
             h.update(&fee_industrial_u64.to_le_bytes());
             if h.finalize().to_hex().to_string() != block.fee_checksum {
-                return Err(PyValueError::new_err("Fee checksum mismatch"));
+                return Err(py_value_err("Fee checksum mismatch"));
             }
             let coinbase_consumer_total = block.coinbase_consumer.0 as u128;
             let coinbase_industrial_total = block.coinbase_industrial.0 as u128;
             if coinbase_consumer_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
             {
-                return Err(PyValueError::new_err("Fee mismatch"));
+                return Err(py_value_err("Fee mismatch"));
             }
             let expected_consumer = self.block_reward_consumer.0 as u128
                 + block.storage_sub_ct.0 as u128
@@ -4355,7 +4242,7 @@ impl Blockchain {
             if coinbase_consumer_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
-                return Err(PyValueError::new_err("Coinbase mismatch"));
+                return Err(py_value_err("Coinbase mismatch"));
             }
             let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
                 address: miner_addr.clone(),
@@ -4374,18 +4261,18 @@ impl Blockchain {
                 .balance
                 .consumer
                 .checked_add(block.coinbase_consumer.0)
-                .ok_or_else(|| PyValueError::new_err("miner consumer overflow"))?;
+                .ok_or_else(|| py_value_err("miner consumer overflow"))?;
             miner.balance.industrial = miner
                 .balance
                 .industrial
                 .checked_add(block.coinbase_industrial.0)
-                .ok_or_else(|| PyValueError::new_err("miner industrial overflow"))?;
+                .ok_or_else(|| py_value_err("miner industrial overflow"))?;
             if let Some(cb) = block.transactions.first() {
                 if cb.payload.amount_consumer != block.coinbase_consumer.0
                     || cb.payload.amount_industrial != block.coinbase_industrial.0
                 {
                     // reject forks that tamper with recorded coinbase totals
-                    return Err(PyValueError::new_err("Coinbase mismatch"));
+                    return Err(py_value_err("Coinbase mismatch"));
                 }
             }
             self.block_reward_consumer = TokenAmount::new(
@@ -4393,14 +4280,14 @@ impl Blockchain {
                     (u128::from(self.block_reward_consumer.0) * u128::from(DECAY_NUMERATOR))
                         / u128::from(DECAY_DENOMINATOR),
                 )
-                .map_err(|_| PyValueError::new_err("reward overflow"))?,
+                .map_err(|_| py_value_err("reward overflow"))?,
             );
             self.block_reward_industrial = TokenAmount::new(
                 u64::try_from(
                     (u128::from(self.block_reward_industrial.0) * u128::from(DECAY_NUMERATOR))
                         / u128::from(DECAY_DENOMINATOR),
                 )
-                .map_err(|_| PyValueError::new_err("reward overflow"))?,
+                .map_err(|_| py_value_err("reward overflow"))?,
             );
             self.emission_consumer += block.coinbase_consumer.0;
             self.emission_industrial += block.coinbase_industrial.0;
@@ -4438,7 +4325,7 @@ impl Blockchain {
     pub fn account_proof(&self, address: String) -> PyResult<(String, Vec<(String, bool)>)> {
         let root = crate::blockchain::snapshot::state_root(&self.accounts);
         let proof = crate::blockchain::snapshot::account_proof(&self.accounts, &address)
-            .ok_or_else(|| PyValueError::new_err("unknown account"))?;
+            .ok_or_else(|| py_value_err("unknown account"))?;
         Ok((root, proof))
     }
 
@@ -4682,81 +4569,14 @@ pub fn spawn_purge_loop_thread(
 ///
 /// Returns:
 ///     PurgeLoopHandle: handle to the purge thread.
-#[pyfunction(text_signature = "(bc, interval_secs, shutdown)")]
-pub fn spawn_purge_loop(
-    bc: Py<Blockchain>,
-    interval_secs: u64,
-    shutdown: &ShutdownFlag,
+pub fn spawn_purge_loop<T>(
+    _bc: T,
+    _interval_secs: u64,
+    _shutdown: &ShutdownFlag,
 ) -> PyResult<PurgeLoopHandle> {
-    let bc_py = Python::with_gil(|py| bc.clone_ref(py));
-    let thread_flag = shutdown.clone();
-    let handle_shutdown = shutdown.clone();
-    let handle = thread::spawn(move || {
-        while !thread_flag.0.load(AtomicOrdering::SeqCst) {
-            Python::with_gil(|py| {
-                let mut bc = bc_py.borrow_mut(py);
-                #[cfg(feature = "telemetry")]
-                {
-                    let (ttl_before, orphan_before) = (
-                        telemetry::TTL_DROP_TOTAL.get(),
-                        telemetry::ORPHAN_SWEEP_TOTAL.get(),
-                    );
-                    let _ = bc.purge_expired();
-                    let ttl_after = telemetry::TTL_DROP_TOTAL.get();
-                    let orphan_after = telemetry::ORPHAN_SWEEP_TOTAL.get();
-                    let ttl_delta = ttl_after.saturating_sub(ttl_before);
-                    let orphan_delta = orphan_after.saturating_sub(orphan_before);
-                    #[cfg(not(feature = "telemetry-json"))]
-                    if telemetry::should_log("mempool") {
-                        if ttl_delta > 0 {
-                            info!("ttl_drop_total={ttl_after}");
-                        }
-                        if orphan_delta > 0 {
-                            info!("orphan_sweep_total={orphan_after}");
-                        }
-                    }
-                    #[cfg(feature = "telemetry-json")]
-                    {
-                        if ttl_delta > 0 {
-                            log_event(
-                                "mempool",
-                                log::Level::Info,
-                                "purge_loop",
-                                "",
-                                0,
-                                "ttl_drop_total",
-                                ERR_OK,
-                                Some(ttl_after),
-                                None,
-                            );
-                        }
-                        if orphan_delta > 0 {
-                            log_event(
-                                "mempool",
-                                log::Level::Info,
-                                "purge_loop",
-                                "",
-                                0,
-                                "orphan_sweep_total",
-                                ERR_OK,
-                                Some(orphan_after),
-                                None,
-                            );
-                        }
-                    }
-                }
-                #[cfg(not(feature = "telemetry"))]
-                {
-                    let _ = bc.purge_expired();
-                }
-            });
-            thread::sleep(Duration::from_secs(interval_secs));
-        }
-    });
-    Ok(PurgeLoopHandle {
-        handle: Some(handle),
-        shutdown: handle_shutdown,
-    })
+    Err(PyError::feature_disabled().with_message(
+        "python-facing purge loop is unavailable without the `python-bindings` feature",
+    ))
 }
 
 const ENV_PURGE_LOOP_SECS: &str = "TB_PURGE_LOOP_SECS";
@@ -4798,14 +4618,11 @@ pub fn maybe_spawn_purge_loop(
 }
 
 /// Thread-safe flag used to signal background threads to shut down.
-#[pyclass]
 #[derive(Clone)]
 pub struct ShutdownFlag(Arc<AtomicBool>);
 
-#[pymethods]
 impl ShutdownFlag {
     #[new]
-    #[pyo3(text_signature = "()")]
     /// Create a new unset shutdown flag.
     ///
     /// Returns:
@@ -4820,7 +4637,6 @@ impl ShutdownFlag {
     ///     None
     ///
     /// Once triggered the flag remains set.
-    #[pyo3(text_signature = "()")]
     pub fn trigger(&self) {
         self.0.store(true, AtomicOrdering::SeqCst);
     }
@@ -4837,117 +4653,36 @@ impl ShutdownFlag {
 /// Dropping the handle triggers shutdown and joins the purge thread,
 /// ensuring it terminates even if ``trigger``/``join`` are never called
 /// explicitly.
-#[pyclass]
-pub struct PurgeLoopHandle {
-    handle: Option<thread::JoinHandle<()>>,
-    shutdown: ShutdownFlag,
-}
+pub struct PurgeLoopHandle;
 
-#[pymethods]
 impl PurgeLoopHandle {
-    /// Join the underlying thread, blocking until completion.
-    ///
-    /// Returns:
-    ///     None
-    ///
-    /// Raises:
-    ///     RuntimeError: if the purge thread panicked.
-    ///
-    /// Safe to call multiple times; subsequent calls are no-ops.
-    #[pyo3(text_signature = "()")]
     pub fn join(&mut self) -> PyResult<()> {
-        if let Some(h) = self.handle.take() {
-            if let Err(panic) = h.join() {
-                let msg = Self::format_panic(panic);
-                return Err(PyRuntimeError::new_err(msg));
-            }
-        }
-        Ok(())
+        Err(PyError::feature_disabled()
+            .with_message("no purge loop thread was spawned; python bindings are disabled"))
     }
 }
 
 impl Drop for PurgeLoopHandle {
-    fn drop(&mut self) {
-        self.shutdown.trigger();
-        let _ = self.join();
-    }
-}
-impl PurgeLoopHandle {
-    fn format_panic(panic: Box<dyn Any + Send>) -> String {
-        let mut msg = if let Some(s) = panic.downcast_ref::<&str>() {
-            (*s).to_string()
-        } else if let Some(s) = panic.downcast_ref::<String>() {
-            s.clone()
-        } else {
-            "purge loop panicked".to_string()
-        };
-
-        if std::env::var("RUST_BACKTRACE").map_or(false, |v| v != "0") {
-            use std::backtrace::Backtrace;
-            use std::fmt::Write as _;
-            let bt = Backtrace::capture();
-            let _ = writeln!(msg, "\nBacktrace:\n{bt}");
-        }
-
-        msg
-    }
+    fn drop(&mut self) {}
 }
 
-/// Context manager that spawns and manages the mempool purge loop.
-///
-/// The loop interval is read from ``TB_PURGE_LOOP_SECS`` which must be a
-/// positive integer. Exiting the context triggers ``shutdown`` and joins the
-/// thread.
-///
-/// Args:
-///     bc (Blockchain): chain instance to operate on.
-#[pyclass]
 pub struct PurgeLoop {
-    shutdown: ShutdownFlag,
-    handle: Option<PurgeLoopHandle>,
+    _private: (),
 }
 
-#[pymethods]
 impl PurgeLoop {
-    #[new]
-    #[pyo3(text_signature = "(bc)")]
-    pub fn new(bc: Py<Blockchain>) -> PyResult<Self> {
-        let shutdown = ShutdownFlag::new();
-        let handle = maybe_spawn_purge_loop_py(bc, &shutdown)?;
-        Ok(Self {
-            shutdown,
-            handle: Some(handle),
-        })
+    pub fn new<T>(_bc: T) -> PyResult<Self> {
+        Err(PyError::feature_disabled()
+            .with_message("PurgeLoop is only available once python bindings ship"))
     }
 
-    /// Enter the purge loop context.
-    ///
-    /// Returns:
-    ///     PurgeLoop: this instance.
-    pub fn __enter__(slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
-        slf
+    pub fn __enter__(&self) -> &Self {
+        self
     }
 
-    /// Exit the purge loop context, triggering shutdown and joining the thread.
-    ///
-    /// Args:
-    ///     exc_type (type | None): Exception type if raised.
-    ///     exc (BaseException | None): Exception instance.
-    ///     tb (Traceback | None): Traceback object.
-    ///
-    /// Returns:
-    ///     bool: ``False`` to propagate exceptions.
-    pub fn __exit__(
-        &mut self,
-        _exc_type: &Bound<'_, PyAny>,
-        _exc: &Bound<'_, PyAny>,
-        _tb: &Bound<'_, PyAny>,
-    ) -> PyResult<bool> {
-        self.shutdown.trigger();
-        if let Some(mut h) = self.handle.take() {
-            h.join()?;
-        }
-        Ok(false)
+    pub fn __exit__<T1, T2, T3>(&self, _exc_type: &T1, _exc: &T2, _tb: &T3) -> PyResult<bool> {
+        Err(PyError::feature_disabled()
+            .with_message("PurgeLoop context exit is unreachable without python bindings"))
     }
 }
 
@@ -4962,16 +4697,11 @@ impl PurgeLoop {
 ///
 /// Raises:
 ///     ValueError: if ``TB_PURGE_LOOP_SECS`` is unset, non-numeric, or ≤ 0.
-#[pyfunction(name = "maybe_spawn_purge_loop", text_signature = "(bc, shutdown)")]
-pub fn maybe_spawn_purge_loop_py(
-    bc: Py<Blockchain>,
-    shutdown: &ShutdownFlag,
-) -> PyResult<PurgeLoopHandle> {
-    let secs = parse_purge_interval().map_err(PyValueError::new_err)?;
-    spawn_purge_loop(bc, secs, shutdown)
+pub fn maybe_spawn_purge_loop_py<T>(_bc: T, _shutdown: &ShutdownFlag) -> PyResult<PurgeLoopHandle> {
+    Err(PyError::feature_disabled()
+        .with_message("python purge loop helpers are disabled until the bridge is implemented"))
 }
 
-#[pyfunction]
 #[doc(hidden)]
 pub fn poison_mempool(bc: &Blockchain) {
     bc.poison_mempool();
@@ -5130,7 +4860,6 @@ fn calculate_hash(
 /// Returns the private and public key as raw byte vectors. The keys are
 /// suitable for both transaction signing and simple message authentication.
 #[must_use]
-#[pyfunction]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
@@ -5145,18 +4874,16 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
 /// The returned signature is a 64-byte array in raw form.
 /// # Errors
 /// Returns [`PyValueError`] if the private key length is invalid.
-#[pyfunction]
 #[allow(clippy::needless_pass_by_value)]
 pub fn sign_message(private: Vec<u8>, message: Vec<u8>) -> PyResult<Vec<u8>> {
     let sk_bytes =
-        to_array_32(&private).ok_or_else(|| PyValueError::new_err("Invalid private key length"))?;
+        to_array_32(&private).ok_or_else(|| py_value_err("Invalid private key length"))?;
     let sk = SigningKey::from_bytes(&sk_bytes);
     Ok(sk.sign(&message).to_bytes().to_vec())
 }
 
 /// Verify a message signature produced by [`sign_message`].
 #[must_use]
-#[pyfunction]
 #[allow(clippy::needless_pass_by_value)]
 pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -> bool {
     if let (Some(pk), Some(sig_bytes)) = (to_array_32(&public), to_array_64(&signature)) {
@@ -5174,7 +4901,6 @@ pub fn verify_signature(public: Vec<u8>, message: Vec<u8>, signature: Vec<u8>) -
 /// fee-per-byte floor, seeds missing sender accounts with large balances,
 /// admits the provided transactions, and mines a block to the hardcoded
 /// miner address "miner".
-#[pyfunction(name = "mine_block")]
 pub fn mine_block_py(txs: Vec<SignedTransaction>) -> PyResult<Block> {
     let mut bc = Blockchain::default();
     bc.genesis_block()?;
@@ -5185,7 +4911,7 @@ pub fn mine_block_py(txs: Vec<SignedTransaction>) -> PyResult<Block> {
         if sender != "0".repeat(34) && !bc.accounts.contains_key(&sender) {
             bc.add_account(sender.clone(), u64::MAX / 2, u64::MAX / 2)?;
         }
-        bc.submit_transaction(tx).map_err(PyErr::from)?;
+        bc.submit_transaction(tx).map_err(PyError::from)?;
     }
     bc.mine_block("miner")
 }
@@ -5211,17 +4937,14 @@ pub const ERR_DNS_SIG_INVALID: u16 = 16;
 pub const ERR_PENDING_SIGNATURES: u16 = 17;
 pub const ERR_SESSION_EXPIRED: u16 = 18;
 
-#[pyclass]
 pub struct PyRemoteSigner {
     inner: WalletRemoteSigner,
 }
 
-#[pymethods]
 impl PyRemoteSigner {
     #[new]
     pub fn new(url: String) -> PyResult<Self> {
-        let inner = WalletRemoteSigner::connect(&url)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        let inner = WalletRemoteSigner::connect(&url).map_err(|e| py_runtime_err(e.to_string()))?;
         Ok(Self { inner })
     }
 
@@ -5235,7 +4958,7 @@ impl PyRemoteSigner {
         record_remote_signer_result(&telemetry_outcome);
         result
             .map(|s| s.to_bytes().to_vec())
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+            .map_err(|e| py_runtime_err(e.to_string()))
     }
 }
 
@@ -5259,92 +4982,18 @@ fn record_remote_signer_result(outcome: &Result<(), String>) {
 
 /// Return the integer network identifier used in domain separation.
 #[must_use]
-#[pyfunction]
 pub fn chain_id_py() -> u32 {
     CHAIN_ID
 }
 
 /// Initialize the Python module.
 ///
-/// # Errors
-/// Returns [`PyErr`] if registering classes or functions with the module fails.
-#[pymodule]
-pub fn the_block(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<Blockchain>()?;
-    m.add_class::<Block>()?;
-    m.add_class::<Account>()?;
-    m.add_class::<SignedTransaction>()?;
-    m.add_class::<FeeLane>()?;
-    m.add_class::<RawTxPayload>()?;
-    m.add_class::<TokenBalance>()?;
-    m.add_class::<PyRemoteSigner>()?;
-    m.add_class::<ShutdownFlag>()?;
-    m.add_class::<PurgeLoopHandle>()?;
-    m.add_class::<PurgeLoop>()?;
-    m.add_function(wrap_pyfunction!(generate_keypair, m)?)?;
-    m.add_function(wrap_pyfunction!(sign_message, m)?)?;
-    m.add_function(wrap_pyfunction!(verify_signature, m)?)?;
-    m.add_function(wrap_pyfunction!(chain_id_py, m)?)?;
-    m.add_function(wrap_pyfunction!(sign_tx_py, m)?)?;
-    m.add_function(wrap_pyfunction!(verify_signed_tx_py, m)?)?;
-    m.add_function(wrap_pyfunction!(canonical_payload_py, m)?)?;
-    m.add_function(wrap_pyfunction!(decode_payload_py, m)?)?;
-    m.add_function(wrap_pyfunction!(mine_block_py, m)?)?;
-    m.add_function(wrap_pyfunction!(fee::decompose_py, m)?)?;
-    m.add_function(wrap_pyfunction!(spawn_purge_loop, m)?)?;
-    m.add_function(wrap_pyfunction!(maybe_spawn_purge_loop_py, m)?)?;
-    m.add_function(wrap_pyfunction!(poison_mempool, m)?)?;
-    #[cfg(feature = "telemetry")]
-    m.add_function(wrap_pyfunction!(redact_at_rest, m)?)?;
-    m.add("ErrFeeOverflow", fee::ErrFeeOverflow::type_object(m.py()))?;
-    m.add(
-        "ErrInvalidSelector",
-        fee::ErrInvalidSelector::type_object(m.py()),
-    )?;
-    m.add("ErrUnknownSender", ErrUnknownSender::type_object(m.py()))?;
-    m.add(
-        "ErrInsufficientBalance",
-        ErrInsufficientBalance::type_object(m.py()),
-    )?;
-    m.add("ErrNonceGap", ErrNonceGap::type_object(m.py()))?;
-    m.add("ErrBadSignature", ErrBadSignature::type_object(m.py()))?;
-    m.add("ErrDuplicateTx", ErrDuplicateTx::type_object(m.py()))?;
-    m.add("ErrTxNotFound", ErrTxNotFound::type_object(m.py()))?;
-    m.add("ErrFeeTooLarge", ErrFeeTooLarge::type_object(m.py()))?;
-    m.add("ErrFeeTooLow", ErrFeeTooLow::type_object(m.py()))?;
-    m.add("ErrMempoolFull", ErrMempoolFull::type_object(m.py()))?;
-    m.add("ErrLockPoisoned", ErrLockPoisoned::type_object(m.py()))?;
-    m.add("ErrPendingLimit", ErrPendingLimit::type_object(m.py()))?;
-    m.add(
-        "ErrPendingSignatures",
-        ErrPendingSignatures::type_object(m.py()),
-    )?;
-    m.add("ErrSessionExpired", ErrSessionExpired::type_object(m.py()))?;
-    m.add("ERR_OK", ERR_OK)?;
-    m.add("ERR_UNKNOWN_SENDER", ERR_UNKNOWN_SENDER)?;
-    m.add("ERR_INSUFFICIENT_BALANCE", ERR_INSUFFICIENT_BALANCE)?;
-    m.add("ERR_NONCE_GAP", ERR_NONCE_GAP)?;
-    m.add("ERR_INVALID_SELECTOR", ERR_INVALID_SELECTOR)?;
-    m.add("ERR_BAD_SIGNATURE", ERR_BAD_SIGNATURE)?;
-    m.add("ERR_DUPLICATE", ERR_DUPLICATE)?;
-    m.add("ERR_NOT_FOUND", ERR_NOT_FOUND)?;
-    m.add("ERR_BALANCE_OVERFLOW", ERR_BALANCE_OVERFLOW)?;
-    m.add("ERR_FEE_OVERFLOW", ERR_FEE_OVERFLOW)?;
-    m.add("ERR_FEE_TOO_LARGE", ERR_FEE_TOO_LARGE)?;
-    m.add("ERR_FEE_TOO_LOW", ERR_FEE_TOO_LOW)?;
-    m.add("ERR_SESSION_EXPIRED", ERR_SESSION_EXPIRED)?;
-    m.add("ERR_MEMPOOL_FULL", ERR_MEMPOOL_FULL)?;
-    m.add("ERR_LOCK_POISONED", ERR_LOCK_POISONED)?;
-    m.add("ERR_PENDING_LIMIT", ERR_PENDING_LIMIT)?;
-    m.add("ERR_RENT_ESCROW_INSUFFICIENT", ERR_RENT_ESCROW_INSUFFICIENT)?;
-    m.add("ERR_DNS_SIG_INVALID", ERR_DNS_SIG_INVALID)?;
-    m.add("ERR_PENDING_SIGNATURES", ERR_PENDING_SIGNATURES)?;
-    #[cfg(feature = "telemetry")]
-    {
-        m.add_function(wrap_pyfunction!(gather_metrics, m)?)?;
-        m.add_function(wrap_pyfunction!(serve_metrics, m)?)?;
-    }
-    Ok(())
+/// The first-party bridge is not yet available, so this function surfaces a
+/// clear error explaining how to enable bindings once the implementation ships.
+pub fn the_block() -> PyResult<()> {
+    Err(PyError::feature_disabled().with_message(
+        "python bindings are not available; enable the `python-bindings` feature once the first-party bridge lands",
+    ))
 }
 
 #[cfg(test)]
@@ -5424,39 +5073,45 @@ mod shard_cache_tests {
 #[cfg(test)]
 mod reservation_tests {
     use super::*;
-    use proptest::prelude::*;
+    use testkit::tb_prop_test;
 
-    proptest! {
-        #[test]
-        fn reservation_rollback_on_panic(cons in 0u64..1000, ind in 0u64..1000) {
-            let mut acc = Account {
-                address: "a".into(),
-                balance: TokenBalance { consumer: 0, industrial: 0 },
-                nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
-                pending_nonce: 0,
-                pending_nonces: HashSet::new(),
-                sessions: Vec::new(),
-            };
-            let lock = Mutex::new(());
-            let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-            let res = ReservationGuard::new(guard, &mut acc, cons, ind, 1);
+    tb_prop_test!(reservation_rollback_on_panic, |runner| {
+        runner
+            .add_random_case("reservation rollback", 32, |rng| {
+                let cons = rng.range_u64(0..=5_000);
+                let ind = rng.range_u64(0..=5_000);
+                let mut acc = Account {
+                    address: "a".into(),
+                    balance: TokenBalance {
+                        consumer: 0,
+                        industrial: 0,
+                    },
+                    nonce: 0,
+                    pending_consumer: 0,
+                    pending_industrial: 0,
+                    pending_nonce: 0,
+                    pending_nonces: HashSet::new(),
+                    sessions: Vec::new(),
+                };
+                let lock = Mutex::new(());
+                let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+                let res = ReservationGuard::new(guard, &mut acc, cons, ind, 1);
 
-            // Silence the expected panic to avoid noisy output when telemetry is enabled.
-            let hook = std::panic::take_hook();
-            std::panic::set_hook(Box::new(|_| {}));
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
-                drop(res);
-                panic!("boom");
-            }));
-            std::panic::set_hook(hook);
+                // Silence the expected panic to avoid noisy output when telemetry is enabled.
+                let hook = std::panic::take_hook();
+                std::panic::set_hook(Box::new(|_| {}));
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    drop(res);
+                    panic!("boom");
+                }));
+                std::panic::set_hook(hook);
 
-            assert!(result.is_err());
-            assert_eq!(acc.pending_consumer, 0);
-            assert_eq!(acc.pending_industrial, 0);
-            assert_eq!(acc.pending_nonce, 0);
-            assert!(acc.pending_nonces.is_empty());
-        }
-    }
+                assert!(result.is_err());
+                assert_eq!(acc.pending_consumer, 0);
+                assert_eq!(acc.pending_industrial, 0);
+                assert_eq!(acc.pending_nonce, 0);
+                assert!(acc.pending_nonces.is_empty());
+            })
+            .expect("register random case");
+    });
 }

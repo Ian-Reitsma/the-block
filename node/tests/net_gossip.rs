@@ -2,7 +2,6 @@
 mod util;
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{OsRng, RngCore};
-use serial_test::serial;
 use std::fs;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -109,8 +108,7 @@ fn broadcast_until(node: &Node, group: &[&Node]) {
 
 /// Spin up three nodes that exchange transactions and blocks, ensuring
 /// they converge to the same chain height even after a temporary fork.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn gossip_converges_to_longest_chain() {
     runtime::block_on(async {
@@ -196,8 +194,7 @@ fn gossip_converges_to_longest_chain() {
 
 /// Start two nodes, then introduce a third with a longer fork to ensure
 /// the network adopts the longest chain after reconnection.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn partition_rejoins_longest_chain() {
     runtime::block_on(async {
@@ -251,8 +248,7 @@ fn partition_rejoins_longest_chain() {
 }
 
 /// Invalid transactions broadcast over the network are ignored.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn invalid_gossip_tx_rejected() {
     let dir = init_env();
     let addr = free_addr();
@@ -300,8 +296,7 @@ fn invalid_gossip_tx_rejected() {
 }
 
 /// Invalid blocks are ignored and do not crash peers.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn invalid_gossip_block_rejected() {
     let dir = init_env();
     let addr = free_addr();
@@ -366,8 +361,7 @@ fn invalid_gossip_block_rejected() {
 }
 
 /// Blocks signed with unknown keys are discarded.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn forged_identity_rejected() {
     let dir = init_env();
     let addr = free_addr();
@@ -416,8 +410,7 @@ fn forged_identity_rejected() {
 }
 
 /// Peers advertising an unsupported protocol version are ignored.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn handshake_version_mismatch_rejected() {
     let dir = init_env();
     let addr = free_addr();
@@ -467,8 +460,7 @@ fn handshake_version_mismatch_rejected() {
 }
 
 /// Peers missing required feature bits are ignored.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn handshake_feature_mismatch_rejected() {
     let _dir = init_env();
     let addr = free_addr();
@@ -515,8 +507,7 @@ fn handshake_feature_mismatch_rejected() {
 }
 
 /// Nodes can load seed peers from a config file.
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn discover_peers_from_file_loads_seeds() {
     let dir = init_env();
     let addr1 = free_addr();
@@ -533,8 +524,7 @@ fn discover_peers_from_file_loads_seeds() {
     jh2.join().unwrap();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn peer_rate_limit_and_ban() {
     std::env::set_var("TB_P2P_MAX_PER_SEC", "3");
     the_block::net::set_p2p_max_per_sec(3);
@@ -595,8 +585,7 @@ fn peer_rate_limit_and_ban() {
     jh.join().unwrap();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn partition_state_replay() {
     runtime::block_on(async {

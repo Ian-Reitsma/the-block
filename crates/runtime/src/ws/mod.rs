@@ -7,13 +7,16 @@
 
 use crate::net::TcpStream;
 use base64_fp::encode_standard;
+use crypto_suite::hashing::sha1;
+use crypto_suite::Error as CryptoError;
 use rand::RngCore;
-use sha1::{Digest, Sha1};
 use std::future::Future;
 use std::io::{self, Error, ErrorKind};
 use std::pin::Pin;
 
 const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+type Result<T> = core::result::Result<T, CryptoError>;
 
 pub type IoFuture<'a, T> = Pin<Box<dyn Future<Output = io::Result<T>> + Send + 'a>>;
 
@@ -84,12 +87,11 @@ impl WebSocketIo for TcpStream {
 }
 
 /// Generate the Sec-WebSocket-Accept header value for a given client key.
-pub fn handshake_accept(key: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(key.as_bytes());
-    hasher.update(GUID.as_bytes());
-    let digest = hasher.finalize();
-    encode_standard(&digest)
+pub fn handshake_accept(key: &str) -> Result<String> {
+    let mut data = key.as_bytes().to_vec();
+    data.extend_from_slice(GUID.as_bytes());
+    let digest = sha1::hash(&data)?;
+    Ok(encode_standard(&digest))
 }
 
 /// Generate a random Sec-WebSocket-Key suitable for initiating a client
@@ -117,7 +119,7 @@ pub async fn write_server_handshake<I>(
 where
     I: WebSocketIo,
 {
-    let accept = handshake_accept(key);
+    let accept = handshake_accept(key).map_err(|err| io::Error::new(ErrorKind::Other, err))?;
     let mut response = format!(
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n"
     );

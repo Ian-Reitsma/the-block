@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
-use serial_test::serial;
 use tempfile::tempdir;
 use the_block::{
     fees::policy,
@@ -31,8 +30,7 @@ fn build_signed_tx(
     tx
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn rejects_industrial_when_consumer_fees_high() {
     let dir = tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());

@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
@@ -82,8 +81,7 @@ impl TestNode {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn converges_under_loss() {
     runtime::block_on(async {
         let _env = init_env();
@@ -114,8 +112,7 @@ fn converges_under_loss() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn kill_node_recovers() {
     runtime::block_on(async {
@@ -214,8 +211,7 @@ fn kill_node_recovers() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn partition_heals_to_majority() {
     runtime::block_on(async {

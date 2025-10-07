@@ -1,8 +1,9 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use std::fs;
 use std::sync::{Arc, RwLock};
 
-use proptest::prelude::*;
+use testkit::tb_prop_test;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
 
 mod util;
@@ -43,54 +44,60 @@ enum Op {
 
 const ACCOUNTS: usize = 8;
 
-proptest! {
-    #![proptest_config(ProptestConfig { cases: 16, failure_persistence: None, .. ProptestConfig::default() })]
-    #[test]
-    fn orphan_counter_never_exceeds_mempool(
-        ops in prop::collection::vec(
-            prop_oneof![
-                (0usize..ACCOUNTS).prop_map(Op::Remove),
-                Just(Op::Purge)
-            ],
-            1..20
-        )
-    ) {
-        init();
-        let dir = temp_dir("temp_orphan_fuzz");
-        let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-        bc.min_fee_per_byte_consumer = 0;
-        bc.min_fee_per_byte_industrial = 0;
-        bc.add_account("sink".into(), 0, 0).unwrap();
-        for i in 0..ACCOUNTS {
-            let name = format!("acc{i}");
-            bc.add_account(name.clone(), 1_000_000, 0).unwrap();
-            let (sk, _pk) = generate_keypair();
-            let tx = build_signed_tx(&sk, &name, "sink", 1, 0, 1_000, 1);
-            bc.submit_transaction(tx).unwrap();
-        }
-        for mut entry in bc.mempool_consumer.iter_mut() {
-            entry.value_mut().timestamp_millis = 0;
-        }
-        let bc = Arc::new(RwLock::new(bc));
-        let handles: Vec<_> = ops.into_iter().map(|op| {
-            let bc_cl = Arc::clone(&bc);
-            std::thread::spawn(move || match op {
-                Op::Remove(idx) => {
-                    let key = format!("acc{idx}");
-                    bc_cl.write().unwrap().accounts.remove(&key);
-                }
-                Op::Purge => {
-                    let _ = bc_cl.write().unwrap().purge_expired();
-                }
-            })
-        }).collect();
-        for h in handles {
-            h.join().unwrap();
-        }
-        let guard = bc.read().unwrap();
-        let orphans = guard.orphan_count();
-        let size = guard.mempool_consumer.len();
-        assert_ne!(orphans, usize::MAX);
-        assert!(orphans <= size);
-    }
-}
+tb_prop_test!(orphan_counter_never_exceeds_mempool, |runner| {
+    runner
+        .add_random_case("orphan counter", 16, |rng| {
+            init();
+            let dir = temp_dir("temp_orphan_fuzz");
+            let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+            bc.min_fee_per_byte_consumer = 0;
+            bc.min_fee_per_byte_industrial = 0;
+            bc.add_account("sink".into(), 0, 0).unwrap();
+            for i in 0..ACCOUNTS {
+                let name = format!("acc{i}");
+                bc.add_account(name.clone(), 1_000_000, 0).unwrap();
+                let (sk, _pk) = generate_keypair();
+                let tx = build_signed_tx(&sk, &name, "sink", 1, 0, 1_000, 1);
+                bc.submit_transaction(tx).unwrap();
+            }
+            for mut entry in bc.mempool_consumer.iter_mut() {
+                entry.value_mut().timestamp_millis = 0;
+            }
+            let bc = Arc::new(RwLock::new(bc));
+            let op_count = rng.range_usize(1..=64);
+            let ops: Vec<Op> = (0..op_count)
+                .map(|_| {
+                    if rng.bool() {
+                        let idx = rng.range_usize(0..=ACCOUNTS - 1);
+                        Op::Remove(idx)
+                    } else {
+                        Op::Purge
+                    }
+                })
+                .collect();
+            let handles: Vec<_> = ops
+                .into_iter()
+                .map(|op| {
+                    let bc_cl = Arc::clone(&bc);
+                    std::thread::spawn(move || match op {
+                        Op::Remove(idx) => {
+                            let key = format!("acc{idx}");
+                            bc_cl.write().unwrap().accounts.remove(&key);
+                        }
+                        Op::Purge => {
+                            let _ = bc_cl.write().unwrap().purge_expired();
+                        }
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap();
+            }
+            let guard = bc.read().unwrap();
+            let orphans = guard.orphan_count();
+            let size = guard.mempool_consumer.len();
+            assert_ne!(orphans, usize::MAX);
+            assert!(orphans <= size);
+        })
+        .expect("register random case");
+});

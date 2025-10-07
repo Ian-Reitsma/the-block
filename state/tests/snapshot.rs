@@ -2,7 +2,7 @@ use state::{MerkleTrie, SnapshotManager};
 use std::collections::BTreeSet;
 use std::thread;
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::temp;
 
 #[test]
 fn snapshot_roundtrip() {
@@ -10,7 +10,7 @@ fn snapshot_roundtrip() {
     trie.insert(b"a", b"1");
     trie.insert(b"b", b"2");
     let root = trie.root_hash();
-    let tmp = tempdir().expect("tmpdir");
+    let tmp = temp::tempdir().expect("tmpdir");
     let dir = tmp.path().to_path_buf();
     let mgr = SnapshotManager::new(dir.clone(), 2);
     let path = mgr.snapshot(&trie).expect("snapshot");
@@ -30,7 +30,7 @@ fn proof_verification() {
 
 #[test]
 fn prune_keeps_newest_snapshots() {
-    let tmp = tempdir().expect("tmpdir");
+    let tmp = temp::tempdir().expect("tmpdir");
     let dir = tmp.path().to_path_buf();
     let keep = 2;
     let mgr = SnapshotManager::new(dir.clone(), keep);
@@ -66,7 +66,7 @@ fn prune_keeps_newest_snapshots() {
 
 #[test]
 fn prune_removes_all_snapshots_when_keep_zero() {
-    let tmp = tempdir().expect("tmpdir");
+    let tmp = temp::tempdir().expect("tmpdir");
     let dir = tmp.path().to_path_buf();
     let mut trie = MerkleTrie::new();
     trie.insert(b"only", b"snapshot");

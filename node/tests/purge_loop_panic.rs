@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use std::fs;
 
@@ -11,7 +12,6 @@ use std::ffi::CString;
 mod util;
 use util::temp::temp_dir;
 
-use serial_test::serial;
 use the_block::{maybe_spawn_purge_loop_py, Blockchain, ShutdownFlag};
 
 fn init() {
@@ -69,8 +69,7 @@ def trigger(handle):
     msg
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn purge_loop_join_surfaces_panic() {
     init();
     let msg = run_purge_panic(false);
@@ -87,8 +86,7 @@ fn thread_count() -> usize {
 }
 
 #[cfg(target_os = "linux")]
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn purge_loop_joins_on_drop() {
     init();
     let dir = temp_dir("purge_loop_drop_join");
@@ -134,7 +132,7 @@ fn purge_loop_joins_on_drop() {
 #[cfg(target_os = "linux")]
 #[test]
 #[ignore]
-#[serial]
+#[testkit::tb_serial]
 fn purge_loop_drop_without_trigger_stops_thread() {
     init();
     let dir = temp_dir("purge_loop_drop_no_trigger");

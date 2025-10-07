@@ -2,7 +2,11 @@
 name = "storage_migrate"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 crypto_suite = { path = "../../crates/crypto_suite" }
 storage_engine = { path = "../../crates/storage_engine" }
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

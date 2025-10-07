@@ -2,6 +2,7 @@
 name = "xtask"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
@@ -18,3 +19,6 @@ path = "../refcheck.rs"
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

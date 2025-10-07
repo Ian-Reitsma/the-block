@@ -1,10 +1,9 @@
 #![forbid(unsafe_code)]
 
-#[allow(unused_imports)]
-use crypto_suite::hashing::sha3::Sha3_256;
-#[allow(unused_imports)]
-use ripemd::Digest as _;
-use ripemd::Ripemd160;
+use crypto_suite::hashing::{ripemd160, sha3::Sha3_256};
+use crypto_suite::Error as CryptoError;
+
+type Result<T> = core::result::Result<T, CryptoError>;
 
 /// Hash algorithms supported by the HTLC contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,9 +33,9 @@ impl Htlc {
 
     /// Attempts to redeem the HTLC with a preimage at a given time.
     /// Returns true on success.
-    pub fn redeem(&mut self, preimage: &[u8], now: u64) -> bool {
+    pub fn redeem(&mut self, preimage: &[u8], now: u64) -> Result<bool> {
         if self.redeemed || now > self.timeout {
-            return false;
+            return Ok(false);
         }
         let computed = match self.algo {
             HashAlgo::Sha3 => {
@@ -44,17 +43,13 @@ impl Htlc {
                 h.update(preimage);
                 h.finalize().to_vec()
             }
-            HashAlgo::Ripemd160 => {
-                let mut h = Ripemd160::new();
-                h.update(preimage);
-                h.finalize().to_vec()
-            }
+            HashAlgo::Ripemd160 => ripemd160::hash(preimage)?.to_vec(),
         };
         if computed == self.hash {
             self.redeemed = true;
-            true
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 

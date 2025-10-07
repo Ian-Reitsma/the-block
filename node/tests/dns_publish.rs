@@ -2,7 +2,6 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use runtime::{io::read_to_end, net::TcpStream};
 use serde_json::Value;
-use serial_test::serial;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
@@ -40,8 +39,7 @@ fn rpc(addr: &str, body: &str) -> Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn dns_publish_invalid_sig_rejected() {
     runtime::block_on(async {
         let dir = temp_dir("dns_publish");

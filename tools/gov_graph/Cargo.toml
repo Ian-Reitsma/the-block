@@ -2,8 +2,12 @@
 name = "gov-graph"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 bincode = "1"
 serde = { version = "1", features = ["derive"] }
 the_block = { path = "../../node" }
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

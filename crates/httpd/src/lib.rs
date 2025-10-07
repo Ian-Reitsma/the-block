@@ -20,14 +20,15 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use url::form_urlencoded;
 
 pub mod blocking;
 pub mod client;
 pub mod jsonrpc;
+pub mod uri;
 pub use blocking::{BlockingClient, BlockingRequestBuilder};
 pub use client::{Client as HttpClient, ClientConfig, ClientError, ClientResponse};
 pub use jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcRouter};
+pub use uri::{Uri, UriError, form_urlencoded, join_path};
 
 pub(crate) const JSON_CODEC: codec::Codec = codec::Codec::Json(JsonProfile::Canonical);
 
@@ -855,10 +856,13 @@ impl<State> Request<State> {
         keep_alive: bool,
     ) -> Self {
         let (clean_path, query) = match target.split_once('?') {
-            Some((path, qs)) => (
-                path.to_string(),
-                form_urlencoded::parse(qs.as_bytes()).into_owned().collect(),
-            ),
+            Some((path, qs)) => {
+                let mut map = HashMap::new();
+                for (key, value) in form_urlencoded::parse(qs.as_bytes()) {
+                    map.insert(key, value);
+                }
+                (path.to_string(), map)
+            }
             None => (target, HashMap::new()),
         };
         Self {
@@ -1069,8 +1073,8 @@ impl WebSocketRequest {
     }
 
     /// Returns the Sec-WebSocket-Accept value derived from the client key.
-    fn accept_value(&self) -> String {
-        ws::handshake_accept(&self.key)
+    fn accept_value(&self) -> Result<String, HttpError> {
+        ws::handshake_accept(&self.key).map_err(|err| HttpError::Handler(err.to_string()))
     }
 
     /// Returns the list of requested subprotocols in the order supplied by
@@ -1456,7 +1460,7 @@ where
                 stream.shutdown().await?;
                 return Ok(());
             }
-            let accept_header = handshake.accept_value();
+            let accept_header = handshake.accept_value()?;
             let decision = (upgrade_handler)(request, handshake).await?;
             match decision {
                 WebSocketResponse::Reject(mut response) => {

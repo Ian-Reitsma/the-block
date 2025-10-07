@@ -1,15 +1,13 @@
 #![cfg(feature = "integration-tests")]
 
 use governance_spec::{decode_transport_provider_policy, DEFAULT_TRANSPORT_PROVIDER_POLICY};
-use serial_test::serial;
 use the_block::config::{
     self, current, set_current, set_storage_engine_policy, set_transport_provider_policy,
     NodeConfig, OverlayBackend,
 };
 use the_block::simple_db::EngineKind;
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn storage_policy_enforces_fallbacks() {
     let original = current();
 
@@ -34,8 +32,7 @@ fn storage_policy_enforces_fallbacks() {
     set_storage_engine_policy(&["inhouse".to_string()]);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn transport_policy_updates_provider() {
     let original = current();
 

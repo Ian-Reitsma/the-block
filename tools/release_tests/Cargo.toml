@@ -2,6 +2,10 @@
 name = "release_tests"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

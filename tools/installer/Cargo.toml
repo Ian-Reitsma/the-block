@@ -2,6 +2,7 @@
 name = "installer"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
@@ -9,3 +10,6 @@ zip = "0.6"
 crypto_suite = { path = "../../crates/crypto_suite" }
 which = "5"
 anyhow = "1"
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

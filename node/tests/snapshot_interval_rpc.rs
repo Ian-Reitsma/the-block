@@ -5,7 +5,6 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use serial_test::serial;
 use the_block::{
     config::NodeConfig, rpc::run_rpc_server, telemetry, Blockchain, DEFAULT_SNAPSHOT_INTERVAL,
 };
@@ -42,8 +41,7 @@ fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     })
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn snapshot_interval_persist() {
     runtime::block_on(async {
@@ -100,15 +98,14 @@ fn snapshot_interval_persist() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 #[ignore]
 fn snapshot_interval_restart_cycle() {
     runtime::block_on(async {
         std::env::set_var("TB_PRESERVE", "1");
         let start = Instant::now();
         let dir = util::temp::temp_dir("snapshot_interval_cycle");
-        let mut logger = logtest::Logger::start();
+        let mut logger = Logger::start();
         let mut bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         for interval in [30u64, 40, 50] {
             let mining = Arc::new(AtomicBool::new(false));
@@ -148,6 +145,36 @@ fn snapshot_interval_restart_cycle() {
         }
         assert!(start.elapsed() < Duration::from_secs(10));
     });
+}
+
+#[derive(Default)]
+struct Logger {
+    records: Vec<LogRecord>,
+}
+
+impl Logger {
+    fn start() -> Self {
+        Self {
+            records: Vec::new(),
+        }
+    }
+
+    fn any<F>(&mut self, mut predicate: F) -> bool
+    where
+        F: FnMut(&LogRecord) -> bool,
+    {
+        self.records.iter().any(|rec| predicate(rec))
+    }
+}
+
+struct LogRecord {
+    message: String,
+}
+
+impl LogRecord {
+    fn args(&self) -> &str {
+        &self.message
+    }
 }
 
 #[test]

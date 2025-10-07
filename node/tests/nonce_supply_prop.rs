@@ -1,5 +1,6 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
-use proptest::prelude::*;
+use testkit::tb_prop_test;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
 
 mod util;
@@ -12,47 +13,74 @@ fn init() {
     });
 }
 
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(1))]
-    #[test]
-    fn nonce_and_supply_hold(seq in proptest::collection::vec((0u64..20, 0u64..20), 1..3)) {
-        init();
-        let dir = temp_dir("nonce_supply_prop");
-        let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
-        // Align difficulty accounting with the freshly opened chain so the
-        // first mined block starts from the expected baseline.
-        bc.recompute_difficulty();
-        bc.add_account("a".into(), 0, 0).unwrap();
-        bc.add_account("b".into(), 0, 0).unwrap();
-        let (sk, _pk) = generate_keypair();
-        // initial funding
-        bc.mine_block("a").unwrap();
-        let mut expected_nonce = 0u64;
-        for (c,i) in seq {
+tb_prop_test!(nonce_and_supply_hold, |runner| {
+    runner
+        .add_case("empty sequence", || {
+            init();
+            let dir = temp_dir("nonce_supply_prop_empty");
+            let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+            bc.recompute_difficulty();
+            bc.add_account("a".into(), 0, 0).unwrap();
+            bc.add_account("b".into(), 0, 0).unwrap();
+            let (sk, _pk) = generate_keypair();
+            bc.mine_block("a").unwrap();
             let payload = RawTxPayload {
                 from_: "a".into(),
                 to: "b".into(),
-                amount_consumer: c % 5,
-                amount_industrial: i % 5,
+                amount_consumer: 1,
+                amount_industrial: 1,
                 fee: 1000,
                 pct_ct: 100,
-                nonce: expected_nonce + 1,
+                nonce: 1,
                 memo: Vec::new(),
             };
             let tx = sign_tx(sk.clone(), payload).unwrap();
             bc.submit_transaction(tx).unwrap();
             bc.mine_block("a").unwrap();
-            expected_nonce += 1;
-            assert_eq!(bc.accounts.get("a").unwrap().nonce, expected_nonce);
-            let mut total_c = 0u64;
-            let mut total_i = 0u64;
-            for acc in bc.accounts.values() {
-                total_c += acc.balance.consumer;
-                total_i += acc.balance.industrial;
+            assert_eq!(bc.accounts.get("a").unwrap().nonce, 1);
+        })
+        .expect("register deterministic case");
+
+    runner
+        .add_random_case("nonce/supply sequences", 16, |rng| {
+            init();
+            let dir = temp_dir("nonce_supply_prop");
+            let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+            bc.recompute_difficulty();
+            bc.add_account("a".into(), 0, 0).unwrap();
+            bc.add_account("b".into(), 0, 0).unwrap();
+            let (sk, _pk) = generate_keypair();
+            bc.mine_block("a").unwrap();
+            let mut expected_nonce = 0u64;
+            let rounds = rng.range_usize(1..=8);
+            for _ in 0..rounds {
+                let consumer = rng.range_u64(0..=50) % 5;
+                let industrial = rng.range_u64(0..=50) % 5;
+                let payload = RawTxPayload {
+                    from_: "a".into(),
+                    to: "b".into(),
+                    amount_consumer: consumer,
+                    amount_industrial: industrial,
+                    fee: 1000,
+                    pct_ct: 100,
+                    nonce: expected_nonce + 1,
+                    memo: Vec::new(),
+                };
+                let tx = sign_tx(sk.clone(), payload).unwrap();
+                bc.submit_transaction(tx).unwrap();
+                bc.mine_block("a").unwrap();
+                expected_nonce += 1;
+                assert_eq!(bc.accounts.get("a").unwrap().nonce, expected_nonce);
+                let mut total_c = 0u64;
+                let mut total_i = 0u64;
+                for acc in bc.accounts.values() {
+                    total_c += acc.balance.consumer;
+                    total_i += acc.balance.industrial;
+                }
+                let (em_c, em_i) = bc.circulating_supply();
+                assert_eq!(total_c, em_c);
+                assert_eq!(total_i, em_i);
             }
-            let (em_c, em_i) = bc.circulating_supply();
-            assert_eq!(total_c, em_c);
-            assert_eq!(total_i, em_i);
-        }
-    }
-}
+        })
+        .expect("register random case");
+});

@@ -2,8 +2,12 @@
 name = "tb-debugger"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 cli_core = { path = "../../crates/cli_core" }
 the_block = { path = "../../node" }
 hex = "0.4"
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

@@ -1,13 +1,11 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use tempfile::tempdir;
 use the_block::{
     config::{rate_limit_cfg, reputation_cfg, set_current, watch, NodeConfig},
     net::{p2p_max_per_sec, peer_reputation_decay, set_p2p_max_per_sec, set_peer_reputation_decay},
 };
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn reload_updates_limits() {
     let dir = tempdir().unwrap();
     let path = dir.path().to_str().unwrap();

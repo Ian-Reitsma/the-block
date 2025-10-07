@@ -29,13 +29,12 @@ call sites outside the module stay unchanged.
 > otherwise the opener emits a clear error instructing operators to rebuild with
 > the flag or run `tools/storage_migrate` ahead of time.
 
-> **2025-11 update.** Serialization for manifests, manifests, and configuration
-> files is being rebuilt on top of the new `foundation_serialization` crate. The
-> crate currently exposes placeholder traits plus JSON/CBOR/TOML helpers that
-> return explicit `unimplemented` errors while the first-party encoder is
-> authored. Downstream crates should start importing the new traits now so the
-> swap away from `serde`/`toml` can be completed incrementally without pulling
-> the third-party toolchain into default builds.
+> **2025-11 update.** The first-party serialization stack now handles state
+> snapshots, contract stores, schema markers, and audit appenders directly.
+> These flows emit deterministic binary blobs or escaped JSON without touching
+> `serde`/`bincode`. The remaining crates keep targeting the
+> `foundation_serialization` helpers, which still return `Err(Unimplemented)`
+> until their respective codecs are ported.
 
 ### 0.1 In-house LSM tree
 

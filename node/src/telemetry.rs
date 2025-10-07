@@ -13,7 +13,7 @@ use prometheus::{
     Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
     IntGaugeVec, Opts, Registry, TextEncoder,
 };
-use pyo3::prelude::*;
+use python_bridge::{Error as PyError, Result as PyResult};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use std::collections::HashMap;
@@ -4797,25 +4797,26 @@ pub fn reset_log_counters() {
     }
 }
 
-#[pyfunction]
 pub fn redact_at_rest(dir: &str, hours: u64, hash: bool) -> PyResult<()> {
     use std::fs;
     use std::time::Duration;
 
     let cutoff = SystemTime::now() - Duration::from_secs(hours * 3600);
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
+    for entry in fs::read_dir(dir).map_err(|e| PyError::runtime(e.to_string()))? {
+        let entry = entry.map_err(|e| PyError::runtime(e.to_string()))?;
         let path = entry.path();
         if path.is_file() {
-            let meta = entry.metadata()?;
+            let meta = entry
+                .metadata()
+                .map_err(|e| PyError::runtime(e.to_string()))?;
             if let Ok(modified) = meta.modified() {
                 if modified < cutoff {
                     if hash {
-                        let data = fs::read(&path)?;
+                        let data = fs::read(&path).map_err(|e| PyError::runtime(e.to_string()))?;
                         let digest = blake3::hash(&data).to_hex().to_string();
-                        fs::write(&path, digest)?;
+                        fs::write(&path, digest).map_err(|e| PyError::runtime(e.to_string()))?;
                     } else {
-                        let _ = fs::remove_file(&path);
+                        let _ = fs::remove_file(&path).map_err(|e| PyError::runtime(e.to_string()));
                     }
                 }
             }
@@ -4883,7 +4884,6 @@ fn gather() -> String {
     String::from_utf8(buffer).unwrap_or_default()
 }
 
-#[pyfunction]
 pub fn gather_metrics() -> PyResult<String> {
     Ok(gather())
 }
@@ -4928,11 +4928,13 @@ pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServe
     use std::sync::{atomic::AtomicBool, Arc};
     use std::time::Duration;
 
-    let listener = TcpListener::bind(addr)?;
+    let listener = TcpListener::bind(addr).map_err(|e| PyError::runtime(e.to_string()))?;
     listener
         .set_nonblocking(true)
         .unwrap_or_else(|e| panic!("nonblocking: {e}"));
-    let local = listener.local_addr()?;
+    let local = listener
+        .local_addr()
+        .map_err(|e| PyError::runtime(e.to_string()))?;
     let shutdown = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&shutdown);
     let handle = std::thread::spawn(move || {
@@ -4942,7 +4944,7 @@ pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServe
                 Ok((mut stream, _)) => {
                     let mut _req = [0u8; 512];
                     let _ = stream.read(&mut _req);
-                    let body = gather_metrics().unwrap_or_else(|e| e.to_string());
+                    let body = gather_metrics().unwrap_or_else(|e| e.message().to_string());
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
                         body.len(), body
@@ -4965,7 +4967,6 @@ pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServe
     ))
 }
 
-#[pyfunction]
 pub fn serve_metrics(addr: &str) -> PyResult<String> {
     let (addr, handle) = serve_metrics_with_shutdown(addr)?;
     std::mem::forget(handle);

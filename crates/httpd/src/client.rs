@@ -1,4 +1,4 @@
-use crate::{JSON_CODEC, Method, StatusCode};
+use crate::{JSON_CODEC, Method, StatusCode, Uri};
 use codec::Codec;
 use runtime::io::BufferedTcpStream;
 use runtime::net::TcpStream;
@@ -11,7 +11,6 @@ use std::net::ToSocketAddrs;
 use std::string::FromUtf8Error;
 use std::time::Duration;
 use thiserror::Error;
-use url::Url;
 
 /// Configuration toggles applied to outbound HTTP requests.
 #[derive(Debug, Clone)]
@@ -53,7 +52,7 @@ impl Client {
 
     /// Prepare an outbound request to the provided URL.
     pub fn request(&self, method: Method, url: &str) -> Result<RequestBuilder<'_>, ClientError> {
-        let parsed = Url::parse(url).map_err(|err| ClientError::InvalidUrl(err.to_string()))?;
+        let parsed = Uri::parse(url).map_err(|err| ClientError::InvalidUrl(err.to_string()))?;
         if parsed.scheme() != "http" {
             return Err(ClientError::UnsupportedScheme(parsed.scheme().to_string()));
         }
@@ -72,7 +71,7 @@ impl Client {
 pub struct RequestBuilder<'a> {
     client: &'a Client,
     method: Method,
-    url: Url,
+    url: Uri,
     headers: HashMap<String, String>,
     body: Vec<u8>,
     timeout: Option<Duration>,
@@ -202,7 +201,7 @@ impl ClientError {
 async fn execute(
     client: &Client,
     method: Method,
-    url: Url,
+    url: Uri,
     mut headers: HashMap<String, String>,
     body: Vec<u8>,
     timeout_override: Option<Duration>,
@@ -210,10 +209,11 @@ async fn execute(
     let host = url
         .host_str()
         .ok_or_else(|| ClientError::InvalidResponse("missing host"))?;
-    let port = url.port_or_known_default().unwrap_or(80);
-    let addr = format!("{host}:{port}");
+    let socket = url
+        .socket_addr()
+        .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
     let addr =
-        resolve_addr(&addr).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+        resolve_addr(&socket).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
     let connect_timeout = client.config.connect_timeout;
     let request_timeout = timeout_override.unwrap_or(client.config.request_timeout);
     let stream = timeout(connect_timeout, TcpStream::connect(addr))
@@ -223,11 +223,7 @@ async fn execute(
 
     let path = request_target(&url);
     let mut request = format!("{} {} HTTP/1.1\r\n", method.as_str(), path);
-    let host_header = if let Some(specified) = url.port() {
-        format!("{host}:{specified}")
-    } else {
-        host.to_string()
-    };
+    let host_header = url.host_header().unwrap_or_else(|| host.to_string());
     headers.insert("host".into(), host_header);
     headers
         .entry("connection".into())
@@ -274,7 +270,7 @@ fn resolve_addr(target: &str) -> Option<std::net::SocketAddr> {
     target.to_socket_addrs().ok()?.next()
 }
 
-fn request_target(url: &Url) -> String {
+fn request_target(url: &Uri) -> String {
     let mut path = url.path().to_string();
     if path.is_empty() {
         path.push('/');

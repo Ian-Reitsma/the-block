@@ -1,7 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use serde_json::json;
-use serial_test::serial;
 use tempfile::tempdir;
 use the_block::gateway::dns::{
     clear_verify_cache, dns_lookup, gateway_policy, publish_record, set_allow_external,
@@ -31,8 +30,7 @@ fn setup(domain: &str) -> (tempfile::TempDir, String, SigningKey) {
     (dir, hex::encode(pk.to_bytes()), sk)
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn block_tld_trusted() {
     let (_dir, _pk_hex, _sk) = setup("good.block");
     let l = dns_lookup(&json!({"domain":"good.block"}));
@@ -41,8 +39,7 @@ fn block_tld_trusted() {
     assert!(p["record"].is_string());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn external_domain_verified() {
     let (_dir, pk_hex, _sk) = setup("example.com");
     set_allow_external(true);
@@ -54,8 +51,7 @@ fn external_domain_verified() {
     assert!(p["record"].is_string());
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn external_domain_rejected() {
     let (_dir, _pk_hex, _sk) = setup("bad.com");
     set_allow_external(true);

@@ -1,11 +1,9 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use the_block::{Blockchain, TokenAmount};
 
 mod util;
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn coinbase_tip_defaults_to_zero() {
     let dir = util::temp::temp_dir("coinbase_tip");
     let mut bc = Blockchain::new(dir.path().to_str().expect("path"));
@@ -15,8 +13,7 @@ fn coinbase_tip_defaults_to_zero() {
     assert_eq!(block.transactions[0].tip, 0);
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn coinbase_claims_proof_rebates() {
     let dir = util::temp::temp_dir("coinbase_rebates");
     let mut bc = Blockchain::new(dir.path().to_str().expect("path"));

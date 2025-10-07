@@ -2,6 +2,10 @@
 name = "provenance-verify"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [dependencies]
 crypto_suite = { path = "../../crates/crypto_suite" }
+
+[build-dependencies]
+dependency_guard = { path = "../../crates/dependency_guard" }

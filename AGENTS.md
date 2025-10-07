@@ -208,7 +208,8 @@ Tests and benches live under `node/`. If your tree differs, run the repo re‑la
 
 ## 3 · System Requirements
 
-- Rust 1.86+, `cargo-nextest`, `cargo-fuzz` (nightly), and `maturin` for Python bindings.
+- Rust 1.86+, `cargo-nextest`, and `cargo-fuzz` (nightly). `maturin` is no
+  longer required while the first-party Python bridge is stubbed.
 - Python 3.12.3 in a virtualenv; bootstrap creates `bin/python` shim and prepends `.venv/bin` to `PATH`.
 - Node 18+ for the monitoring stack; `npm ci --prefix monitoring` must succeed when `monitoring/**` changes.
 - On Linux, `patchelf` is required for wheel installs (bootstrap installs it automatically).

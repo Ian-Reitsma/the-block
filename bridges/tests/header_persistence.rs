@@ -4,7 +4,7 @@ use bridges::{
     relayer::RelayerSet,
     Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
-use tempfile::tempdir;
+use sys::temp;
 
 fn sample() -> (PowHeader, Proof) {
     let merkle_root = [0u8; 32];
@@ -32,7 +32,7 @@ fn sample() -> (PowHeader, Proof) {
 
 #[test]
 fn persists_and_loads_headers() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()

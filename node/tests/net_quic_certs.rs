@@ -2,7 +2,6 @@
 
 use crypto_suite::signatures::ed25519::SigningKey;
 use runtime;
-use serial_test::serial;
 use std::time::Duration;
 use tempfile::tempdir;
 use the_block::net::{
@@ -31,8 +30,7 @@ fn teardown_env() {
     std::env::remove_var("TB_NET_CERT_STORE_PATH");
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn encrypts_and_reloads_quic_peer_certs() {
     let dir = tempdir().expect("tempdir");
     setup_env(&dir);
@@ -75,8 +73,7 @@ fn encrypts_and_reloads_quic_peer_certs() {
     teardown_env();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn prunes_stale_quic_cert_history() {
     let dir = tempdir().expect("tempdir");
     setup_env(&dir);
@@ -132,8 +129,7 @@ fn prunes_stale_quic_cert_history() {
     teardown_env();
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn refresh_clears_removed_quic_cert_store() {
     let dir = tempdir().expect("tempdir");
     setup_env(&dir);

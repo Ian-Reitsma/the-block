@@ -302,12 +302,8 @@ else
   run_step "verify cargo-nextest" cargo nextest --version
 fi
 
-# Only install maturin/pip if Python build is not broken
-if (( BROKEN_PYTHON == 0 )); then
-  run_step "pip install maturin" pip install --upgrade maturin
-else
-  skip_step "maturin/pip install (Python broken: sqlite3 missing)"
-fi
+# The in-house python bridge is stubbed; skip maturin installs for now
+skip_step "maturin/pip install (python bridge disabled)"
 
 # Run database migrations and compaction now that Rust and Python are ready
 if [[ -x ./db_compact.sh ]]; then
@@ -384,13 +380,9 @@ fi
 # --------------------------------------------------------------------
 # 11. Build and install the Rust Python native extension (via maturin)
 # --------------------------------------------------------------------
-# Only build if Python is not broken, maturin is installed, and Cargo.toml exists (i.e. this is a Rust/PyO3 project)
-if (( BROKEN_PYTHON == 0 )) && command -v maturin &>/dev/null && [[ -f Cargo.toml ]]; then
-  command -v patchelf &>/dev/null || run_step "pip install patchelf" pip install patchelf
-  run_step "maturin develop --release (build Python native module)" maturin develop --release --manifest-path node/Cargo.toml
-else
-  skip_step "maturin develop (no maturin, no Cargo.toml, or Python is broken)"
-fi
+# The python bridge is currently disabled; surface a reminder instead of
+# attempting to run maturin.
+skip_step "maturin develop (python bridge disabled)"
 
 # Misc checks, diagnostics, output
 if [[ -f .env ]] && grep -q 'changeme' .env; then

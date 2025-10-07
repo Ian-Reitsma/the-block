@@ -1,0 +1,9 @@
+[package]
+name = "dependency_guard"
+version = "0.1.0"
+edition = "2021"
+authors = ["The Block Dev Team"]
+description = "Shared build-script helpers enforcing first-party dependency freezes"
+license = "MIT"
+
+[dependencies]

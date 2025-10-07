@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use std::fs;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};

@@ -1,10 +1,8 @@
 #![cfg(feature = "integration-tests")]
-use serial_test::serial;
 use the_block::compute_market::price_board::{backlog_adjusted_bid, record_price, reset};
 use the_block::transaction::FeeLane;
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn backlog_adjusts_per_lane() {
     reset();
     for _ in 0..10 {

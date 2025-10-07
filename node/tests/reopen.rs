@@ -1,3 +1,4 @@
+#![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -168,7 +169,7 @@ fn ttl_expired_purged_on_restart() {
 
 #[test]
 #[ignore]
-#[serial_test::serial]
+#[testkit::tb_serial]
 fn startup_ttl_purge_increments_metrics() {
     init();
     let (sk, _pk) = generate_keypair();
@@ -231,7 +232,7 @@ fn startup_ttl_purge_increments_metrics() {
 
 #[test]
 #[ignore]
-#[serial_test::serial]
+#[testkit::tb_serial]
 fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
     init();
     let dir = temp_dir("startup_orphan_metrics");

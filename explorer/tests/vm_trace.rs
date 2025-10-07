@@ -1,10 +1,10 @@
 use codec::{self, profiles};
 use explorer::Explorer;
-use tempfile::tempdir;
+use sys::temp;
 
 #[test]
 fn load_trace() {
-    let dir = tempdir().unwrap();
+    let dir = temp::tempdir().unwrap();
     struct DirGuard(std::path::PathBuf);
     impl Drop for DirGuard {
         fn drop(&mut self) {

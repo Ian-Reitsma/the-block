@@ -163,7 +163,8 @@ fn save_to_path(path: &Path) -> io::Result<()> {
     let board = BOARD.read().unwrap_or_else(|e| e.into_inner());
     let payload =
         bincode::serialize(&*board).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    let blob = encode_blob(MAGIC, VERSION, &payload);
+    let blob = encode_blob(MAGIC, VERSION, &payload)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     write_atomic(path, &blob)
 }
 

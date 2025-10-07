@@ -1,7 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "quic")]
 use crypto_suite::signatures::ed25519::SigningKey;
-use serial_test::serial;
 use std::io::Read;
 #[cfg(feature = "s2n-quic")]
 use tempfile::tempdir;
@@ -59,8 +58,7 @@ impl Drop for S2nTransportGuard {
     }
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_handshake_roundtrip() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -116,8 +114,7 @@ fn quic_handshake_roundtrip() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_gossip_roundtrip() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -185,8 +182,7 @@ fn quic_gossip_roundtrip() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_disconnect() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -233,8 +229,7 @@ fn quic_disconnect() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_fallback_to_tcp() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -285,8 +280,7 @@ fn quic_fallback_to_tcp() {
 }
 
 #[cfg(feature = "s2n-quic")]
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn s2n_quic_connect_roundtrip() {
     runtime::block_on(async {
         let _guard = S2nTransportGuard::install();
@@ -321,8 +315,7 @@ fn s2n_quic_connect_roundtrip() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_endpoint_reuse() {
     runtime::block_on(async {
         let addr: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -345,8 +338,7 @@ fn quic_endpoint_reuse() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_handshake_failure_metric() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -373,8 +365,7 @@ fn quic_handshake_failure_metric() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_handshake_timeout() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -402,8 +393,7 @@ fn quic_handshake_timeout() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_version_mismatch() {
     runtime::block_on(async {
         #[cfg(feature = "telemetry")]
@@ -462,8 +452,7 @@ fn quic_version_mismatch() {
     });
 }
 
-#[test]
-#[serial]
+#[testkit::tb_serial]
 fn quic_packet_loss_env() {
     runtime::block_on(async {
         std::env::set_var("TB_QUIC_PACKET_LOSS", "1.0");

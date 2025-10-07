@@ -17,9 +17,18 @@ use ledger::address::{self, ShardId};
 use lru::LruCache;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use python_bridge::{Error as PyError, Result as PyResult};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::num::NonZeroUsize;
+
+fn py_value_err(msg: impl Into<String>) -> PyError {
+    PyError::value(msg)
+}
+
+fn py_type_err(msg: impl Into<String>) -> PyError {
+    PyError::value(msg)
+}
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum TxVersion {
@@ -52,134 +61,7 @@ impl Default for TxSignature {
     }
 }
 
-impl<'py> IntoPyObject<'py> for TxSignature {
-    type Target = PyDict;
-    type Output = Bound<'py, PyDict>;
-    type Error = PyErr;
-
-    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
-        let dict = PyDict::new(py);
-        dict.set_item("ed25519", PyBytes::new(py, &self.ed25519))?;
-        #[cfg(feature = "quantum")]
-        {
-            dict.set_item("dilithium", PyBytes::new(py, &self.dilithium))?;
-        }
-        Ok(dict)
-    }
-}
-
-impl<'py> FromPyObject<'py> for TxSignature {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        if let Ok(dict) = obj.downcast::<PyDict>() {
-            let ed25519 = dict
-                .get_item("ed25519")?
-                .map(|value| value.extract::<Vec<u8>>())
-                .transpose()?
-                .unwrap_or_default();
-            #[cfg(feature = "quantum")]
-            {
-                let dilithium = dict
-                    .get_item("dilithium")?
-                    .map(|value| value.extract::<Vec<u8>>())
-                    .transpose()?
-                    .unwrap_or_default();
-                return Ok(TxSignature { ed25519, dilithium });
-            }
-            #[cfg(not(feature = "quantum"))]
-            {
-                return Ok(TxSignature { ed25519 });
-            }
-        }
-
-        if let Ok(ed25519) = obj.extract::<Vec<u8>>() {
-            #[cfg(feature = "quantum")]
-            {
-                return Ok(TxSignature {
-                    ed25519,
-                    dilithium: Vec::new(),
-                });
-            }
-            #[cfg(not(feature = "quantum"))]
-            {
-                return Ok(TxSignature { ed25519 });
-            }
-        }
-
-        if let Ok(ed_attr) = obj.getattr("ed25519") {
-            let ed25519 = ed_attr.extract::<Vec<u8>>()?;
-            #[cfg(feature = "quantum")]
-            {
-                let dilithium = obj
-                    .getattr_opt("dilithium")?
-                    .map(|value| value.extract::<Vec<u8>>())
-                    .transpose()?
-                    .unwrap_or_default();
-                return Ok(TxSignature { ed25519, dilithium });
-            }
-            #[cfg(not(feature = "quantum"))]
-            {
-                return Ok(TxSignature { ed25519 });
-            }
-        }
-
-        Err(PyTypeError::new_err(
-            "TxSignature must be bytes or a mapping/object with an 'ed25519' attribute",
-        ))
-    }
-}
-
-impl<'py> IntoPyObject<'py> for TxVersion {
-    type Target = PyString;
-    type Output = Bound<'py, PyString>;
-    type Error = PyErr;
-
-    fn into_pyobject(self, py: Python<'py>) -> PyResult<Self::Output> {
-        let value = match self {
-            TxVersion::Ed25519Only => "ed25519_only",
-            TxVersion::Dual => "dual",
-            TxVersion::DilithiumOnly => "dilithium_only",
-        };
-        Ok(PyString::new(py, value))
-    }
-}
-
-impl<'py> FromPyObject<'py> for TxVersion {
-    fn extract_bound(obj: &Bound<'py, PyAny>) -> PyResult<Self> {
-        if let Ok(name) = obj.extract::<&str>() {
-            let normalized = name.replace('-', "_").to_ascii_lowercase();
-            return match normalized.as_str() {
-                "ed25519_only" | "ed25519" | "ed25519only" => Ok(TxVersion::Ed25519Only),
-                "dual" => Ok(TxVersion::Dual),
-                "dilithium_only" | "dilithium" | "dilithiumonly" => Ok(TxVersion::DilithiumOnly),
-                other => Err(PyValueError::new_err(format!(
-                    "invalid TxVersion string: {other}"
-                ))),
-            };
-        }
-
-        if let Ok(value) = obj.extract::<u8>() {
-            return match value {
-                0 => Ok(TxVersion::Ed25519Only),
-                1 => Ok(TxVersion::Dual),
-                2 => Ok(TxVersion::DilithiumOnly),
-                other => Err(PyValueError::new_err(format!(
-                    "invalid TxVersion value: {other}"
-                ))),
-            };
-        }
-
-        Err(PyTypeError::new_err(
-            "TxVersion must be specified as a string (e.g. 'dual') or integer (0, 1, 2)",
-        ))
-    }
-}
-
 use crate::{fee, fee::FeeError, TxAdmissionError};
-use pyo3::exceptions::{PyTypeError, PyValueError};
-use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyAnyMethods, PyBytes, PyDict, PyDictMethods, PyString};
-use pyo3::Bound;
-use pyo3::PyErr;
 
 static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> = Lazy::new(|| {
     Mutex::new(LruCache::new(
@@ -255,7 +137,6 @@ impl TxDidAnchor {
 }
 
 /// Distinct fee lanes for transaction scheduling.
-#[pyclass]
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum FeeLane {
     /// Standard retail transactions sharing the consumer lane.
@@ -285,30 +166,19 @@ impl Default for FeeLane {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct RawTxPayload {
-    #[pyo3(get, set)]
     pub from_: String,
-    #[pyo3(get, set)]
     pub to: String,
-    #[pyo3(get, set)]
     pub amount_consumer: u64,
-    #[pyo3(get, set)]
     pub amount_industrial: u64,
-    #[pyo3(get, set)]
     pub fee: u64,
-    #[pyo3(get, set)]
     pub pct_ct: u8,
-    #[pyo3(get, set)]
     pub nonce: u64,
-    #[pyo3(get, set)]
     pub memo: Vec<u8>,
 }
 
-#[pymethods]
 impl RawTxPayload {
-    #[new]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         from_: String,
@@ -380,41 +250,30 @@ impl<T> CrossShardEnvelope<T> {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct SignedTransaction {
-    #[pyo3(get, set)]
     pub payload: RawTxPayload,
-    #[pyo3(get, set)]
     pub public_key: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[pyo3(get, set)]
     #[serde(default)]
     pub dilithium_public_key: Vec<u8>,
-    #[pyo3(get, set)]
     pub signature: TxSignature,
     /// Priority fee paid to the miner above the base fee.
-    #[pyo3(get, set)]
     #[serde(default)]
     pub tip: u64,
     /// Optional set of signer public keys for multisig.
-    #[pyo3(get, set)]
     #[serde(default)]
     pub signer_pubkeys: Vec<Vec<u8>>,
     /// Aggregated signatures concatenated in order.
-    #[pyo3(get, set)]
     #[serde(default)]
     pub aggregate_signature: Vec<u8>,
     /// Required number of signatures.
-    #[pyo3(get, set)]
     #[serde(default)]
     pub threshold: u8,
     /// Fee lane classification for admission and scheduling.
-    #[pyo3(get, set)]
     #[serde(default)]
     pub lane: FeeLane,
     /// Signature mode for the transaction.
-    #[pyo3(get, set)]
     #[serde(default)]
     pub version: TxVersion,
 }
@@ -468,10 +327,7 @@ pub fn verify_stateless(tx: &SignedTransaction) -> Result<(), TxAdmissionError> 
     }
 }
 
-#[pymethods]
 impl SignedTransaction {
-    #[new]
-    #[pyo3(signature = (payload, public_key, signature, lane, tip=None))]
     pub fn new(
         payload: RawTxPayload,
         public_key: Vec<u8>,
@@ -517,32 +373,23 @@ impl SignedTransaction {
 }
 
 /// Blob transaction committing an opaque data blob by root hash.
-#[pyclass]
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct BlobTx {
     /// Owner account identifier.
-    #[pyo3(get, set)]
     pub owner: String,
     /// Globally unique blob identifier derived from parent hash and nonce.
-    #[pyo3(get, set)]
     pub blob_id: [u8; 32],
     /// BLAKE3 commitment to the blob contents or erasure-coded shards.
-    #[pyo3(get, set)]
     pub blob_root: [u8; 32],
     /// Total uncompressed size of the blob in bytes.
-    #[pyo3(get, set)]
     pub blob_size: u64,
     /// Fractal layer the blob targets (0=L1,1=L2,2=L3).
-    #[pyo3(get, set)]
     pub fractal_lvl: u8,
     /// Optional expiry epoch after which the blob can be pruned.
-    #[pyo3(get, set)]
     pub expiry: Option<u64>,
 }
 
-#[pymethods]
 impl BlobTx {
-    #[new]
     pub fn new(
         owner: String,
         blob_id: [u8; 32],
@@ -768,21 +615,18 @@ pub fn verify_signed_txs_batch(txs: &[SignedTransaction]) -> Vec<bool> {
 }
 
 /// Python wrapper for [`sign_tx`]. Raises `ValueError` on invalid key length.
-#[pyfunction(name = "sign_tx")]
 /// Python wrapper for [`sign_tx`], raising ``ValueError`` on key size mismatch.
 pub fn sign_tx_py(sk_bytes: Vec<u8>, payload: RawTxPayload) -> PyResult<SignedTransaction> {
-    sign_tx(&sk_bytes, &payload).ok_or_else(|| PyValueError::new_err("Invalid private key length"))
+    sign_tx(&sk_bytes, &payload).ok_or_else(|| py_value_err("Invalid private key length"))
 }
 
 /// Python wrapper for [`verify_signed_tx`].
-#[pyfunction(name = "verify_signed_tx")]
 /// Python wrapper for [`verify_signed_tx`]. Returns ``True`` on success.
 pub fn verify_signed_tx_py(tx: SignedTransaction) -> bool {
     verify_signed_tx(&tx)
 }
 
 /// Python-accessible canonical payload serializer.
-#[pyfunction(name = "canonical_payload")]
 /// Python helper returning canonical bytes for a payload.
 pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
     canonical_payload_bytes(&payload)
@@ -799,13 +643,12 @@ pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
 ///
 /// Raises:
 ///     ValueError: If ``bytes`` cannot be deserialized.
-#[pyfunction(name = "decode_payload", text_signature = "(bytes)")]
 pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
     codec::deserialize(profiles::transaction(), &bytes)
-        .map_err(|e| PyValueError::new_err(format!("decode: {e}")))
+        .map_err(|e| py_value_err(format!("decode: {e}")))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "python-bindings"))]
 mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::SIGNATURE_LENGTH;

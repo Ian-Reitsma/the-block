@@ -148,7 +148,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    use serial_test::serial;
+    use testkit::tb_serial;
     use the_block::telemetry::{BANNED_PEERS_TOTAL, BANNED_PEER_EXPIRATION};
 
     #[derive(Default)]
@@ -215,8 +215,7 @@ mod tests {
         BANNED_PEER_EXPIRATION.reset();
     }
 
-    #[test]
-    #[serial]
+    #[testkit::tb_serial]
     fn ban_and_unban_update_metrics() {
         reset_metrics();
         let store = MockStore::default();
@@ -235,8 +234,7 @@ mod tests {
         assert_eq!(BANNED_PEERS_TOTAL.get(), 0);
     }
 
-    #[test]
-    #[serial]
+    #[testkit::tb_serial]
     fn list_purges_expired_bans() {
         reset_metrics();
         let store = MockStore::default();
