@@ -5,8 +5,8 @@ use cli_core::{
     command::{Command as CliCommand, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::json::{self, Value};
 use httpd::{BlockingClient, Method};
-use serde_json::Value;
 use std::collections::VecDeque;
 
 mod cli_support;
@@ -46,8 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut total = 0u64;
             for item in db.iter() {
                 let (k, v) = item?;
-                let mut deque: VecDeque<(u64, Value)> =
-                    serde_json::from_slice(&v).unwrap_or_default();
+                let mut deque: VecDeque<(u64, Value)> = json::from_slice(&v).unwrap_or_default();
                 let before_len = deque.len();
                 deque.retain(|(ts, _)| *ts >= before);
                 let after_len = deque.len();
@@ -55,7 +54,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if after_len == 0 {
                     db.remove(&k)?;
                 } else {
-                    db.insert(&k, serde_json::to_vec(&deque)?)?;
+                    db.insert(&k, json::to_vec(&deque)?)?;
                 }
             }
             db.flush()?;

@@ -1,19 +1,13 @@
 # Status & Roadmap
-> **Review (2025-10-01):** Logged first-party Ed25519 backend rollout and reconfirmed HTTP server migration gaps.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
+> **Review (2025-10-08):** Logged the first-party serialization rollout across governance, ledger, metrics-aggregator, and overlay persistence while highlighting the tooling crates that still depend on serde/bincode.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
 
 Mainnet readiness: 98.3/100 · Vision completion: 93.3/100.
 The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI stacks, and the aggregator, gateway, explorer, and indexer surfaces all serve via the in-house `httpd` router. Tracking that migration, alongside the TLS layer, keeps the dependency-sovereignty
 pivot and wrapper rollout plan are central to every
 milestone; see [`docs/pivot_dependency_strategy.md`](pivot_dependency_strategy.md)
 for the canonical phase breakdown referenced by subsystem guides.
-Known focus areas: surface treasury disbursements in explorer dashboards and aggregator alerts,
-integrate compute-market SLA metrics with automated alerting, extend
-governance-driven dependency rollout reporting for third-party operators,
-complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale
-QUIC chaos drills with published mitigation guides, extend bridge/DEX docs with
-multisig signer-set payloads plus release-verifier walkthroughs, stand up the
-dependency fault simulation harness, and finish the multisig wallet UX polish.
+Known focus areas: finish migrating remaining tooling (monitoring dashboards, remote signer, snapshot scripts) off serde/bincode, surface treasury disbursements in explorer dashboards and aggregator alerts, integrate compute-market SLA metrics with automated alerting, extend governance-driven dependency rollout reporting for third-party operators, complete storage migration tooling for RocksDB↔sled swaps, continue WAN-scale QUIC chaos drills with published mitigation guides, extend bridge/DEX docs with multisig signer-set payloads plus release-verifier walkthroughs, stand up the dependency fault simulation harness, and finish the multisig wallet UX polish.
 
 ### Tooling migrations
 
@@ -23,6 +17,10 @@ dependency fault simulation harness, and finish the multisig wallet UX polish.
 - The indexer CLI has moved from Clap/Axum to `cli_core` plus `httpd`, reusing
   the shared router helpers and optional TLS wiring for the serve subcommand
   (`tools/indexer/src/main.rs`, `tools/indexer/src/lib.rs`).
+- Governance, ledger, metrics-aggregator, and overlay peer stores now rely on
+  the `foundation_serialization` facade (JSON/binary/base58); remaining
+  serde_json/bincode usage is isolated to monitoring dashboards, remote signer,
+  and snapshot tooling tracked in `docs/pivot_dependency_strategy.md`.
 - A workspace-local `rand` crate and stubbed `rand_core` now back all
   randomness helpers, allowing node/CLI/runtime components to compile without
   pulling external RNG stacks while the in-house engines are completed.

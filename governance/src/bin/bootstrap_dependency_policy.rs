@@ -1,3 +1,4 @@
+use foundation_serialization::json;
 use governance::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     DependencyPolicyRecord, DEFAULT_RUNTIME_BACKEND_POLICY, DEFAULT_STORAGE_ENGINE_POLICY,
@@ -75,7 +76,7 @@ fn main() {
         },
     ];
 
-    match serde_json::to_vec_pretty(&records) {
+    match json::to_vec_pretty(&records) {
         Ok(bytes) => {
             if let Err(err) = fs::write(&output, bytes) {
                 eprintln!("failed to write {}: {err}", output.display());

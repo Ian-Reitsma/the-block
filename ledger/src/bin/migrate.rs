@@ -4,9 +4,30 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
-use ledger::utxo_account::migrate_accounts;
-use serde_json;
-use std::{collections::HashMap, fs};
+use foundation_serialization::json::{self, Map, Number, Value};
+use ledger::utxo_account::{migrate_accounts, UtxoLedger};
+use std::{collections::HashMap, fs, path::Path};
+
+#[derive(Debug)]
+struct MigrateError(String);
+
+impl From<String> for MigrateError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for MigrateError {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl std::fmt::Display for MigrateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 fn main() {
     if let Err(err) = run() {
@@ -15,7 +36,7 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), String> {
+fn run() -> Result<(), MigrateError> {
     let mut argv = std::env::args();
     let bin = argv.next().unwrap_or_else(|| "migrate".to_string());
     let args: Vec<String> = argv.collect();
@@ -33,7 +54,7 @@ fn run() -> Result<(), String> {
             print_help_for_path(&command, &path);
             return Ok(());
         }
-        Err(err) => return Err(err.to_string()),
+        Err(err) => return Err(MigrateError(err.to_string())),
     };
 
     let input = matches
@@ -43,12 +64,76 @@ fn run() -> Result<(), String> {
         .get_string("output")
         .ok_or_else(|| "missing required '--output' option".to_string())?;
 
-    let data = fs::read_to_string(&input).map_err(|err| err.to_string())?;
-    let balances: HashMap<String, u64> = serde_json::from_str(&data).expect("parse input");
+    let balances = read_balances(&input)?;
     let utxo = migrate_accounts(&balances);
-    let out = serde_json::to_string_pretty(&utxo).expect("serialize");
-    fs::write(&output, out).map_err(|err| err.to_string())?;
+    write_utxo(&output, &utxo)?;
     Ok(())
+}
+
+fn read_balances(path: &str) -> Result<HashMap<String, u64>, MigrateError> {
+    let raw = read_file(path)?;
+    json::from_str(&raw)
+        .map_err(|err| MigrateError(format!("failed to parse balances from '{}': {err}", path)))
+}
+
+fn write_utxo(path: &str, utxo: &UtxoLedger) -> Result<(), MigrateError> {
+    let mut entries: Vec<_> = utxo.utxos.iter().collect();
+    entries.sort_by(|a, b| {
+        let order = a.0.txid.cmp(&b.0.txid);
+        if order == std::cmp::Ordering::Equal {
+            a.0.index.cmp(&b.0.index)
+        } else {
+            order
+        }
+    });
+
+    let mut array = Vec::with_capacity(entries.len());
+    for (point, entry) in entries {
+        let mut obj = Map::new();
+        obj.insert("txid".to_string(), Value::String(hex_encode(&point.txid)));
+        obj.insert(
+            "index".to_string(),
+            Value::Number(Number::from(point.index)),
+        );
+        obj.insert("owner".to_string(), Value::String(entry.owner.clone()));
+        obj.insert(
+            "value".to_string(),
+            Value::Number(Number::from(entry.value)),
+        );
+        array.push(Value::Object(obj));
+    }
+
+    let mut encoded = json::to_string_value(&Value::Array(array));
+    if !encoded.ends_with('\n') {
+        encoded.push('\n');
+    }
+    fs::write(path, encoded).map_err(|err| {
+        MigrateError(format!(
+            "failed to write migrated balances to '{}': {err}",
+            path
+        ))
+    })
+}
+
+fn read_file(path: &str) -> Result<String, MigrateError> {
+    let path_ref = Path::new(path);
+    fs::read_to_string(path_ref).map_err(|err| {
+        if path_ref.exists() {
+            MigrateError(format!("failed to read '{}': {err}", path))
+        } else {
+            MigrateError(format!("input file '{}' does not exist", path))
+        }
+    })
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 fn build_command() -> Command {

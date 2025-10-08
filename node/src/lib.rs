@@ -31,14 +31,15 @@ use hex;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
 use lru::LruCache;
+mod legacy_cbor;
 mod py;
 
 use crate::py::{PyError, PyResult};
+#[cfg(feature = "telemetry-json")]
+use foundation_serialization::json::{self, json, Map as JsonMap, Value as JsonValue};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "telemetry-json")]
-use serde_json::json;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -310,7 +311,7 @@ fn log_event(
     if !telemetry::should_log(subsystem) {
         return;
     }
-    let mut obj = serde_json::Map::new();
+    let mut obj = JsonMap::new();
     obj.insert("subsystem".into(), json!(subsystem));
     obj.insert("op".into(), json!(op));
     obj.insert("sender".into(), json!(scrub(sender)));
@@ -323,7 +324,7 @@ fn log_event(
     if let Some(c) = cid {
         obj.insert("cid".into(), json!(c));
     }
-    let msg = serde_json::Value::Object(obj).to_string();
+    let msg = JsonValue::Object(obj).to_string();
     telemetry::observe_log_size(msg.len());
     diagnostics::log::log!(level, "{}", msg);
 }

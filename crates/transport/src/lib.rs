@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 #[cfg(any(feature = "inhouse", all(feature = "quinn", not(feature = "s2n-quic"))))]
 use crypto_suite::hashing::blake3;
+use diagnostics::{anyhow, Result as DiagResult};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -764,6 +765,7 @@ pub fn provider_kind_from_id(id: &str) -> Option<ProviderKind> {
 }
 
 pub fn available_providers() -> Vec<ProviderMetadata> {
+    #[allow(unused_mut)]
     let mut providers = Vec::new();
     #[cfg(feature = "quinn")]
     providers.push(ProviderMetadata {

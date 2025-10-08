@@ -1,6 +1,9 @@
 # Node Dependency Tree
-> **Review (2025-10-01):** Removed ed25519-dalek/blake3/sha3/bellman_ce entries and noted first-party crypto suite dependencies.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25). Runtime-native WebSockets (`runtime::ws`) now back `/logs/tail`, `/state/stream`, `/vm.trace`, the gateway peer-metrics feed, and CLI consumers, eliminating the `tokio-tungstenite`/`hyper-tungstenite` stack across the workspace (2025-10-02).
+> **Review (2025-10-08):** Refreshed the captured dependency tree to reflect the removal of the third-party `bs58` crate and the
+> migration of `state` and `p2p_overlay` onto the in-house serialization and storage layers. Runtime, transport, overlay,
+> storage_engine, coding, crypto_suite, and codec wrappers remain governed by serialization-policy overrides (2025-09-25), and
+> runtime-native WebSockets (`runtime::ws`) continue to back `/logs/tail`, `/state/stream`, `/vm.trace`, the gateway peer-metrics
+> feed, and CLI consumers, eliminating the `tokio-tungstenite`/`hyper-tungstenite` stack across the workspace (2025-10-02).
 
 This document lists the dependency hierarchy for the `the_block` node crate. It is generated via `cargo tree --manifest-path node/Cargo.toml`.
 
@@ -583,12 +586,10 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── runtime v0.1.0 (/workspace/the-block/crates/runtime) (*)
 │   ├── serde v1.0.228 (*)
 │   ├── state v0.1.0 (/workspace/the-block/state)
-│   │   ├── bincode v1.3.3 (*)
 │   │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
 │   │   ├── hex v0.4.3
-│   │   ├── rocksdb v0.21.0 (/workspace/the-block/vendor/rocksdb-0.21.0/rocksdb-0.21.0) (*)
-│   │   ├── serde v1.0.228 (*)
-│   │   ├── serde_json v1.0.145 (*)
+│   │   ├── storage_engine v0.1.0 (/workspace/the-block/crates/storage_engine) (*)
+│   │   ├── sys v0.1.0 (/workspace/the-block/crates/sys) (*)
 │   │   └── thiserror v1.0.69 (*)
 │   ├── thiserror v1.0.69 (*)
 │   ├── toml v0.8.23 (*)
@@ -604,11 +605,8 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   └── libc v0.2.176
 ├── once_cell v1.21.3
 ├── p2p_overlay v0.1.0 (/workspace/the-block/crates/p2p_overlay)
-│   ├── bs58 v0.4.0
 │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
-│   ├── serde v1.0.228 (*)
-│   ├── serde_json v1.0.145 (*)
-│   └── thiserror v1.0.69 (*)
+│   └── foundation_serialization v0.1.0 (/workspace/the-block/crates/foundation_serialization) (*)
 ├── parking_lot v0.12.4 (*)
 ├── pprof v0.13.0
 │   ├── backtrace v0.3.76 (*)

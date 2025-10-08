@@ -31,8 +31,6 @@ p2p_overlay = { path = "../crates/p2p_overlay" }
 pqcrypto-dilithium = { version = "0.5", optional = true }
 privacy = { path = "../privacy", optional = true }
 cli_core = { path = "../crates/cli_core" }
-serde_json = "1"
-serde_cbor = "0.11"
 serde_bytes = "0.11"
 foundation_serialization = { path = "../crates/foundation_serialization" }
 icu_normalizer = "2"

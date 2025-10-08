@@ -1,4 +1,5 @@
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
+use foundation_serialization::json::{self, json, Value};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::cmp::Reverse;
@@ -651,8 +652,8 @@ impl SchedulerState {
         })
     }
 
-    fn metrics(&self) -> serde_json::Value {
-        serde_json::json!({
+    fn metrics(&self) -> Value {
+        json!({
             "reputation": self.reputation,
             "utilization": self.utilization,
         })
@@ -805,7 +806,7 @@ impl SchedulerState {
         if let Some(dir) = path.parent() {
             let _ = fs::create_dir_all(dir);
         }
-        if let Ok(json) = serde_json::to_vec(&self.pending.clone().into_vec()) {
+        if let Ok(json) = json::to_vec(&self.pending.clone().into_vec()) {
             let _ = fs::write(path, json);
         }
     }
@@ -858,7 +859,7 @@ pub struct ReputationStore {
 impl ReputationStore {
     pub fn load(path: PathBuf) -> Self {
         if let Ok(bytes) = fs::read(&path) {
-            if let Ok(data) = serde_json::from_slice(&bytes) {
+            if let Ok(data) = json::from_slice(&bytes) {
                 return Self { path, data };
             }
         }
@@ -869,7 +870,7 @@ impl ReputationStore {
     }
 
     fn save(&self) {
-        if let Ok(json) = serde_json::to_vec(&self.data) {
+        if let Ok(json) = json::to_vec(&self.data) {
             if let Some(parent) = self.path.parent() {
                 let _ = fs::create_dir_all(parent);
             }
@@ -1033,16 +1034,16 @@ fn lookup_cancellation(job_id: &str) -> Option<String> {
     None
 }
 
-pub fn job_status(job_id: &str) -> serde_json::Value {
+pub fn job_status(job_id: &str) -> Value {
     let sched = scheduler();
     if sched.active.contains_key(job_id) {
-        serde_json::json!({"status": "active"})
+        json!({"status": "active"})
     } else if sched.pending.iter().any(|j| j.job_id == job_id) {
-        serde_json::json!({"status": "queued"})
+        json!({"status": "queued"})
     } else if let Some(reason) = lookup_cancellation(job_id) {
-        serde_json::json!({"status": "canceled", "reason": reason})
+        json!({"status": "canceled", "reason": reason})
     } else {
-        serde_json::json!({"status": "unknown"})
+        json!({"status": "unknown"})
     }
 }
 
@@ -1075,7 +1076,7 @@ fn pending_path() -> PathBuf {
 
 fn load_pending() -> BinaryHeap<QueuedJob> {
     if let Ok(bytes) = fs::read(pending_path()) {
-        if let Ok(mut jobs) = serde_json::from_slice::<Vec<QueuedJob>>(&bytes) {
+        if let Ok(mut jobs) = json::from_slice::<Vec<QueuedJob>>(&bytes) {
             for j in &mut jobs {
                 j.recompute_effective();
             }
@@ -1274,7 +1275,7 @@ pub fn record_failure(provider: &str) {
     scheduler().record_failure(provider);
 }
 
-pub fn metrics() -> serde_json::Value {
+pub fn metrics() -> Value {
     scheduler().metrics()
 }
 

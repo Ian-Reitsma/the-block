@@ -4,36 +4,58 @@ use crate::{
     OverlayStore, PeerId, UptimeHandle, UptimeMetrics,
 };
 use crypto_suite::hashing::blake3::hash;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::base58;
+use foundation_serialization::json::{self, Map, Value};
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use thiserror::Error;
 
 const PEER_ID_LEN: usize = 32;
 const CHECKSUM_LEN: usize = 4;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 enum InhouseOverlayError {
-    #[error("invalid peer id length: {0}")]
     InvalidPeerLength(usize),
-    #[error("peer checksum mismatch")]
     ChecksumMismatch,
-    #[error("invalid peer encoding: {0}")]
     InvalidEncoding(String),
-    #[error("invalid socket address: {0}")]
     InvalidSocket(String),
-    #[error("persist error: {0}")]
     Persist(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct InhousePeerId(
-    #[serde(with = "crate::inhouse_overlay::serde_bytes32")] [u8; PEER_ID_LEN],
-);
+impl fmt::Display for InhouseOverlayError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InhouseOverlayError::InvalidPeerLength(len) => {
+                write!(f, "invalid peer id length: {len}")
+            }
+            InhouseOverlayError::ChecksumMismatch => write!(f, "peer checksum mismatch"),
+            InhouseOverlayError::InvalidEncoding(err) => {
+                write!(f, "invalid peer encoding: {err}")
+            }
+            InhouseOverlayError::InvalidSocket(addr) => {
+                write!(f, "invalid socket address: {addr}")
+            }
+            InhouseOverlayError::Persist(err) => write!(f, "persist error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for InhouseOverlayError {}
+
+fn overlay_err(err: InhouseOverlayError) -> OverlayError {
+    Box::new(err)
+}
+
+fn persist_err(message: impl Into<String>) -> OverlayError {
+    overlay_err(InhouseOverlayError::Persist(message.into()))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct InhousePeerId([u8; PEER_ID_LEN]);
 
 impl InhousePeerId {
     pub fn new(bytes: [u8; PEER_ID_LEN]) -> Self {
@@ -41,11 +63,8 @@ impl InhousePeerId {
     }
 
     pub fn from_base58(value: &str) -> OverlayResult<Self> {
-        let raw = bs58::decode(value).into_vec().map_err(|e| {
-            OverlayError::from(Box::new(InhouseOverlayError::InvalidEncoding(
-                e.to_string(),
-            )))
-        })?;
+        let raw = base58::decode(value)
+            .map_err(|err| overlay_err(InhouseOverlayError::InvalidEncoding(err.to_string())))?;
         if raw.len() < PEER_ID_LEN + CHECKSUM_LEN {
             return Err(Box::new(InhouseOverlayError::InvalidPeerLength(raw.len())));
         }
@@ -66,7 +85,7 @@ impl InhousePeerId {
         data.extend_from_slice(&self.0);
         let checksum = checksum_bytes(&self.0);
         data.extend_from_slice(&checksum);
-        bs58::encode(data).into_string()
+        base58::encode(&data)
     }
 
     pub fn as_bytes(&self) -> &[u8; PEER_ID_LEN] {
@@ -91,7 +110,7 @@ impl PeerId for InhousePeerId {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct PeerEndpoint {
     pub socket: SocketAddr,
     pub last_seen: u64,
@@ -125,64 +144,101 @@ impl InhouseOverlayStore {
     }
 }
 
-#[derive(Default, Serialize, Deserialize)]
-struct PersistedPeers {
-    peers: Vec<PersistedPeer>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PersistedPeer {
-    id: String,
-    address: String,
-    last_seen: u64,
-}
-
 impl OverlayStore<InhousePeerId, PeerEndpoint> for InhouseOverlayStore {
     fn load(&self) -> OverlayResult<Vec<(InhousePeerId, PeerEndpoint)>> {
         let bytes = match fs::read(&self.path) {
             Ok(bytes) => bytes,
             Err(_) => return Ok(Vec::new()),
         };
-        let persisted: PersistedPeers = serde_json::from_slice(&bytes).map_err(|e| {
-            OverlayError::from(Box::new(InhouseOverlayError::Persist(e.to_string())))
-        })?;
-        let mut peers = Vec::with_capacity(persisted.peers.len());
-        for entry in persisted.peers {
-            let peer = InhousePeerId::from_base58(&entry.id)?;
-            let socket: SocketAddr = entry.address.parse().map_err(|_| {
-                Box::new(InhouseOverlayError::InvalidSocket(entry.address.clone())) as OverlayError
-            })?;
-            peers.push((
-                peer,
-                PeerEndpoint {
-                    socket,
-                    last_seen: entry.last_seen,
-                },
-            ));
-        }
-        Ok(peers)
+        let value = json::value_from_slice(&bytes).map_err(|err| persist_err(err.to_string()))?;
+        extract_peers(value)
     }
 
     fn persist(&self, peers: &[(InhousePeerId, PeerEndpoint)]) -> OverlayResult<()> {
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                Box::new(InhouseOverlayError::Persist(e.to_string())) as OverlayError
-            })?;
+            fs::create_dir_all(parent).map_err(|err| persist_err(err.to_string()))?;
         }
-        let persisted = PersistedPeers {
-            peers: peers
-                .iter()
-                .map(|(peer, endpoint)| PersistedPeer {
-                    id: peer.to_base58(),
-                    address: endpoint.socket.to_string(),
-                    last_seen: endpoint.last_seen,
-                })
-                .collect(),
+        let mut entries = Vec::with_capacity(peers.len());
+        for (peer, endpoint) in peers {
+            let mut map = Map::new();
+            map.insert("id".to_owned(), Value::from(peer.to_base58()));
+            map.insert(
+                "address".to_owned(),
+                Value::from(endpoint.socket.to_string()),
+            );
+            map.insert("last_seen".to_owned(), Value::from(endpoint.last_seen));
+            entries.push(Value::Object(map));
+        }
+        let mut root = Map::new();
+        root.insert("peers".to_owned(), Value::Array(entries));
+        let rendered = json::to_vec_pretty(&Value::Object(root))
+            .map_err(|err| persist_err(err.to_string()))?;
+        fs::write(&self.path, rendered).map_err(|err| persist_err(err.to_string()))
+    }
+}
+
+fn extract_peers(value: Value) -> OverlayResult<Vec<(InhousePeerId, PeerEndpoint)>> {
+    let entries = match value {
+        Value::Object(mut root) => match root.remove("peers") {
+            Some(Value::Array(items)) => items,
+            Some(Value::Null) | None => Vec::new(),
+            Some(other) => {
+                return Err(persist_err(format!(
+                    "peers must be an array, found {other:?}"
+                )))
+            }
+        },
+        Value::Null => Vec::new(),
+        other => {
+            return Err(persist_err(format!(
+                "expected object while loading peers, found {other:?}"
+            )))
+        }
+    };
+
+    let mut peers = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let mut map = match entry {
+            Value::Object(map) => map,
+            other => {
+                return Err(persist_err(format!(
+                    "peer entry must be an object, found {other:?}"
+                )))
+            }
         };
-        let data = serde_json::to_vec_pretty(&persisted)
-            .map_err(|e| Box::new(InhouseOverlayError::Persist(e.to_string())) as OverlayError)?;
-        fs::write(&self.path, data)
-            .map_err(|e| Box::new(InhouseOverlayError::Persist(e.to_string())) as OverlayError)
+        let id = take_string(&mut map, "id")?;
+        let address = take_string(&mut map, "address")?;
+        let last_seen = take_u64(&mut map, "last_seen")?;
+        let peer = InhousePeerId::from_base58(&id)?;
+        let socket: SocketAddr = address
+            .parse()
+            .map_err(|_| overlay_err(InhouseOverlayError::InvalidSocket(address.clone())))?;
+        peers.push((peer, PeerEndpoint { socket, last_seen }));
+    }
+
+    Ok(peers)
+}
+
+fn take_string(map: &mut Map, key: &str) -> OverlayResult<String> {
+    match map.remove(key) {
+        Some(Value::String(value)) => Ok(value),
+        Some(other) => Err(persist_err(format!(
+            "expected string for field '{key}', found {other:?}"
+        ))),
+        None => Err(persist_err(format!("missing field '{key}'"))),
+    }
+}
+
+fn take_u64(map: &mut Map, key: &str) -> OverlayResult<u64> {
+    let value = map
+        .remove(key)
+        .ok_or_else(|| persist_err(format!("missing field '{key}'")))?;
+    match value {
+        Value::Number(_) | Value::String(_) => json::from_value::<u64>(value)
+            .map_err(|err| persist_err(format!("invalid {key}: {err}"))),
+        other => Err(persist_err(format!(
+            "expected number for field '{key}', found {other:?}"
+        ))),
     }
 }
 
@@ -376,28 +432,4 @@ fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-mod serde_bytes32 {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S>(bytes: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_bytes(bytes)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let bytes: Vec<u8> = <Vec<u8>>::deserialize(deserializer)?;
-        if bytes.len() != 32 {
-            return Err(serde::de::Error::invalid_length(bytes.len(), &"32"));
-        }
-        let mut out = [0u8; 32];
-        out.copy_from_slice(&bytes);
-        Ok(out)
-    }
 }

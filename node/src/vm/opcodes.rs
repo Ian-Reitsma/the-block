@@ -72,11 +72,11 @@ impl OpCode {
 
 /// Write a JSON ABI mapping opcode names to discriminants.
 pub fn write_abi(path: &std::path::Path) -> std::io::Result<()> {
-    use serde_json::json;
-    let mut map = serde_json::Map::new();
+    use foundation_serialization::json::{self, json};
+    let mut map = json::Map::new();
     for op in OpCode::all() {
         map.insert(format!("{:?}", op).to_lowercase(), (*op as u8).into());
     }
     std::fs::create_dir_all(path.parent().unwrap())?;
-    std::fs::write(path, serde_json::to_vec_pretty(&json!(map))?)
+    std::fs::write(path, json::to_vec_pretty(&json!(map))?)
 }

@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-codec = { path = "../codec" }
+base64_fp = { path = "../base64_fp" }
+crypto_suite = { path = "../crypto_suite" }
+diagnostics = { path = "../diagnostics" }
+foundation_serialization = { path = "../foundation_serialization" }
+rand = { path = "../rand" }
 runtime = { path = "../runtime" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "1"
-tracing = "0.1"
-rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
-rustls-pemfile = "2"
-regex-lite = "0.1"
+
+[dev-dependencies]
+sys = { path = "../sys" }

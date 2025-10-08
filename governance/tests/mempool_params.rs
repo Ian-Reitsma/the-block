@@ -1,6 +1,7 @@
 use std::fs;
 use std::time::Duration;
 
+use foundation_serialization::json;
 use governance::{
     controller, registry, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime,
     RuntimeAdapter, Vote, VoteChoice,
@@ -20,7 +21,7 @@ struct FeeFloorEvent {
 fn read_fee_floor_history(base: &std::path::Path) -> Vec<FeeFloorEvent> {
     let path = base.join("governance/history/fee_floor_policy.json");
     let bytes = fs::read(path).expect("history file");
-    serde_json::from_slice(&bytes).expect("fee floor history json")
+    json::from_slice(&bytes).expect("fee floor history json")
 }
 
 fn submit_and_activate(

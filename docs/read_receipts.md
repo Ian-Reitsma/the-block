@@ -27,8 +27,10 @@ replay batches and confirm on‑chain totals.
   fields. `ReadAck::verify()` recomputes the message hash and rejects malformed
   signatures or keys.
 
-All fields are serialized with `serde_cbor` so that gateways can append raw
-CBOR blobs to on‑disk batches without per‑acknowledgement framing overhead.
+All fields serialize through the first-party binary codec exposed by
+`foundation_serialization::binary`, producing fixed-width records that append to
+disk without additional framing. Gateways still accept the historical CBOR
+format when replaying archives, but new batches emit `.bin` payloads only.
 
 ## 2. Batching and Merkle roots
 
@@ -42,7 +44,7 @@ Merkle root. The batch header records:
 - `count` – number of acknowledgements included.
 
 The serialized batch is written to
-`receipts/read/<epoch>/<sequence>.cbor` and the root is exposed via the
+`receipts/read/<epoch>/<sequence>.bin` and the root is exposed via the
 `read_batch_root` field in the block header (`node/src/lib.rs`). When the
 containing block finalizes, gateways claim `READ_SUB_CT` proportional to
 `total_bytes`.

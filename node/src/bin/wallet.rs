@@ -2,9 +2,9 @@
 
 use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
+use foundation_serialization::json::{self, json, Value};
 use hex::{decode, encode};
 use httpd::{BlockingClient, Method};
-use serde_json::json;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
@@ -502,7 +502,7 @@ fn main() {
             let role_str = format!("{:?}", role).to_lowercase();
             let sig;
             let id;
-            let signers_payload: Vec<serde_json::Value>;
+            let signers_payload: Vec<Value>;
             let threshold_value: usize;
             if !remote_signer.is_empty() {
                 if let Some(cert) = signer_cert {
@@ -552,7 +552,7 @@ fn main() {
                 threshold_value = 1;
             }
             let sig_hex = encode(sig.to_bytes());
-            let body = serde_json::json!({
+            let body = json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
@@ -571,7 +571,7 @@ fn main() {
                 .and_then(|builder| builder.json(&body))
                 .and_then(|builder| builder.send())
             {
-                Ok(resp) => match resp.json::<serde_json::Value>() {
+                Ok(resp) => match resp.json::<Value>() {
                     Ok(v) => println!("{}", v["result"].to_string()),
                     Err(e) => eprintln!("parse error: {e}"),
                 },
@@ -579,7 +579,7 @@ fn main() {
             }
         }
         Commands::EscrowBalance { account, url } => {
-            let payload = serde_json::json!({
+            let payload = json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "rent.escrow.balance",
@@ -591,7 +591,7 @@ fn main() {
                 .and_then(|builder| builder.json(&payload))
                 .and_then(|builder| builder.send())
             {
-                Ok(resp) => match resp.json::<serde_json::Value>() {
+                Ok(resp) => match resp.json::<Value>() {
                     Ok(v) => println!("{}", v["result"].as_u64().unwrap_or(0)),
                     Err(e) => eprintln!("parse error: {e}"),
                 },
@@ -611,13 +611,13 @@ fn main() {
                 .and_then(|builder| builder.json(&payload))
                 .and_then(|builder| builder.send())
             {
-                Ok(resp) => match resp.json::<serde_json::Value>() {
+                Ok(resp) => match resp.json::<Value>() {
                     Ok(v) => {
                         if let Some(res) = v.get("result") {
                             let proof: PaymentProof =
-                                serde_json::from_value(res["proof"].clone()).expect("proof");
+                                json::from_value(res["proof"].clone()).expect("proof");
                             let root: [u8; 32] =
-                                serde_json::from_value(res["root"].clone()).expect("root");
+                                json::from_value(res["root"].clone()).expect("root");
                             let idx = res["idx"].as_u64().unwrap_or(0) as usize;
                             if verify_proof(proof.leaf, idx, &proof.path, root, proof.algo) {
                                 println!("released");

@@ -21,6 +21,7 @@ use std::fs;
 use sys::signals::{Signals, SIGHUP};
 
 use crate::{storage::pipeline, vm::wasm, ReadAck, StakeTable};
+use foundation_serialization::json;
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
@@ -220,7 +221,7 @@ async fn ws_peer_metrics(
                     msg = rx.recv() => {
                         match msg {
                             Ok(snap) => {
-                                let payload = serde_json::to_string(&snap).unwrap();
+                                let payload = json::to_string(&snap).unwrap();
                                 stream.send(WsMessage::Text(payload)).await?;
                             }
                             Err(_) => break,

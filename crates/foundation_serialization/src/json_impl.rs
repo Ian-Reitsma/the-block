@@ -170,22 +170,24 @@ impl Number {
         }
     }
 
-    fn as_u64(&self) -> Option<u64> {
+    pub fn as_u64(&self) -> Option<u64> {
         match self.0 {
             NumberRepr::PosInt(v) => Some(v),
+            NumberRepr::Float(v) if v.is_finite() && v >= 0.0 && v.fract() == 0.0 => Some(v as u64),
             _ => None,
         }
     }
 
-    fn as_i64(&self) -> Option<i64> {
+    pub fn as_i64(&self) -> Option<i64> {
         match self.0 {
             NumberRepr::PosInt(v) => v.try_into().ok(),
             NumberRepr::NegInt(v) => Some(v),
+            NumberRepr::Float(v) if v.is_finite() && v.fract() == 0.0 => Some(v as i64),
             _ => None,
         }
     }
 
-    fn as_f64(&self) -> f64 {
+    pub fn as_f64(&self) -> f64 {
         match self.0 {
             NumberRepr::PosInt(v) => v as f64,
             NumberRepr::NegInt(v) => v as f64,
@@ -270,6 +272,12 @@ pub enum Value {
     Object(Map),
 }
 
+impl Default for Value {
+    fn default() -> Self {
+        Value::Null
+    }
+}
+
 impl Serialize for Number {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -338,6 +346,66 @@ impl<'de> Deserialize<'de> for Number {
 }
 
 impl Value {
+    pub fn is_object(&self) -> bool {
+        matches!(self, Value::Object(_))
+    }
+
+    pub fn as_object(&self) -> Option<&Map> {
+        if let Value::Object(map) = self {
+            Some(map)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_object_mut(&mut self) -> Option<&mut Map> {
+        if let Value::Object(map) = self {
+            Some(map)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&[Value]> {
+        if let Value::Array(values) = self {
+            Some(values)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        if let Value::String(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        if let Value::Number(num) = self {
+            Some(num.as_f64())
+        } else {
+            None
+        }
+    }
+
+    pub fn as_i64(&self) -> Option<i64> {
+        if let Value::Number(num) = self {
+            num.as_i64()
+        } else {
+            None
+        }
+    }
+
+    pub fn as_u64(&self) -> Option<u64> {
+        if let Value::Number(num) = self {
+            num.as_u64()
+        } else {
+            None
+        }
+    }
+
     fn render_compact(&self, out: &mut String) {
         match self {
             Value::Null => out.push_str("null"),
@@ -564,6 +632,18 @@ pub fn to_vec_pretty<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
     Ok(to_string_pretty(value)?.into_bytes())
 }
 
+/// Serialize a JSON [`Value`] into a compact byte vector.
+pub fn to_vec_value(value: &Value) -> Vec<u8> {
+    to_string_value(value).into_bytes()
+}
+
+/// Serialize a JSON [`Value`] into a compact string.
+pub fn to_string_value(value: &Value) -> String {
+    let mut rendered = String::new();
+    value.render_compact(&mut rendered);
+    rendered
+}
+
 /// Deserialize a value from a JSON string slice.
 pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T> {
     let mut parser = Parser::new(input);
@@ -581,6 +661,25 @@ pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T> {
 pub fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
     let text = std::str::from_utf8(input).map_err(|_| Error::unexpected_token("utf-8", None))?;
     from_str(text)
+}
+
+/// Deserialize a JSON [`Value`] from a string slice.
+pub fn value_from_str(input: &str) -> Result<Value> {
+    let mut parser = Parser::new(input);
+    let value = parser.parse_value()?;
+    parser.skip_whitespace();
+    if parser.peek_char().is_some() {
+        return Err(Error {
+            kind: ErrorKind::TrailingCharacters,
+        });
+    }
+    Ok(value)
+}
+
+/// Deserialize a JSON [`Value`] from a byte slice containing JSON.
+pub fn value_from_slice(input: &[u8]) -> Result<Value> {
+    let text = std::str::from_utf8(input).map_err(|_| Error::unexpected_token("utf-8", None))?;
+    value_from_str(text)
 }
 
 /// Convert a serializable value into a JSON [`Value`].
@@ -1801,5 +1900,30 @@ mod tests {
         let string = to_string(&value).expect("serialize value");
         let parsed: Value = from_str(&string).expect("parse");
         assert_eq!(parsed, value);
+    }
+
+    #[test]
+    fn numeric_accessors_respect_integer_boundaries() {
+        let positive = Value::from(42_u64);
+        assert_eq!(positive.as_u64(), Some(42));
+        assert_eq!(positive.as_i64(), Some(42));
+        assert_eq!(positive.as_f64(), Some(42.0));
+
+        let negative = Value::from(-7_i64);
+        assert_eq!(negative.as_i64(), Some(-7));
+        assert_eq!(negative.as_u64(), None);
+
+        let integral_float = Value::from(5.0_f64);
+        assert_eq!(integral_float.as_i64(), Some(5));
+        assert_eq!(integral_float.as_u64(), Some(5));
+
+        let fractional_float = Value::from(5.25_f64);
+        assert_eq!(fractional_float.as_i64(), None);
+        assert_eq!(fractional_float.as_u64(), None);
+
+        let text = Value::from("not-a-number");
+        assert_eq!(text.as_i64(), None);
+        assert_eq!(text.as_u64(), None);
+        assert_eq!(text.as_f64(), None);
     }
 }

@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use base64_fp::{decode_url_no_pad, encode_url_no_pad};
-use bincode;
-use tempfile::{NamedTempFile, TempDir};
+use sys::tempfile::{NamedTempFile, TempDir};
 
 use crate::{
     KeyValue, KeyValueBatch, KeyValueIterator, StorageError, StorageMetrics, StorageResult,
@@ -104,12 +103,12 @@ impl MemoryEngine {
                     let _ = fs::remove_file(&legacy_path);
                 }
             } else {
-                let bytes = bincode::serialize(map)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                let bytes = encode_cf_entries(map);
 
-                let mut temp = NamedTempFile::new_in(&self.path)?;
-                temp.as_file_mut().write_all(&bytes)?;
-                temp.as_file().sync_all()?;
+                let mut temp = NamedTempFile::new_in(&self.path)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+                temp.write_all(&bytes)?;
+                temp.flush()?;
 
                 let mut backup_path = None;
                 if path.exists() {
@@ -342,7 +341,7 @@ impl KeyValueBatch for MemoryBatch {
 
 impl Default for MemoryEngine {
     fn default() -> Self {
-        let dir = tempfile::tempdir().expect("tmpdb");
+        let dir = sys::tempfile::tempdir().expect("tmpdb");
         Self::open_from_tempdir(dir).expect("open temp memory engine")
     }
 }
@@ -370,7 +369,7 @@ fn load_column_families(path: &Path) -> io::Result<HashMap<String, HashMap<Vec<u
             };
             let path = entry.path();
             if let Some(decoded) = decode_cf_name(cf) {
-                if let Ok(map) = bincode::deserialize::<HashMap<Vec<u8>, Vec<u8>>>(&bytes) {
+                if let Ok(map) = decode_cf_entries(&bytes) {
                     if let Some(legacy_path) = legacy_paths.remove(&decoded) {
                         let _ = fs::remove_file(legacy_path);
                     }
@@ -381,7 +380,7 @@ fn load_column_families(path: &Path) -> io::Result<HashMap<String, HashMap<Vec<u
             }
 
             legacy_paths.insert(cf.to_string(), path);
-            if let Ok(map) = bincode::deserialize::<HashMap<Vec<u8>, Vec<u8>>>(&bytes) {
+            if let Ok(map) = decode_cf_entries(&bytes) {
                 result.insert(cf.to_string(), map);
             }
         }
@@ -393,7 +392,7 @@ fn load_column_families(path: &Path) -> io::Result<HashMap<String, HashMap<Vec<u
             continue;
         }
         if let Ok(bytes) = fs::read(&path) {
-            if let Ok(map) = bincode::deserialize::<HashMap<Vec<u8>, Vec<u8>>>(&bytes) {
+            if let Ok(map) = decode_cf_entries(&bytes) {
                 result.insert(cf.clone(), map);
             }
         }
@@ -415,11 +414,89 @@ fn decode_cf_name(name: &str) -> Option<String> {
         .and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
+fn encode_cf_entries(map: &HashMap<Vec<u8>, Vec<u8>>) -> Vec<u8> {
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = Vec::with_capacity(8 + entries.len() * 32);
+    out.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    for (key, value) in entries {
+        write_len_prefixed(&mut out, key);
+        write_len_prefixed(&mut out, value);
+    }
+    out
+}
+
+fn decode_cf_entries(data: &[u8]) -> io::Result<HashMap<Vec<u8>, Vec<u8>>> {
+    if data.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut decoder = MapDecoder::new(data);
+    let count = decoder.read_u64()? as usize;
+    let mut map = HashMap::with_capacity(count);
+    for _ in 0..count {
+        let key = decoder.read_bytes()?;
+        let value = decoder.read_bytes()?;
+        map.insert(key, value);
+    }
+    if decoder.remaining() != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trailing bytes in column family file",
+        ));
+    }
+    Ok(map)
+}
+
+fn write_len_prefixed(buffer: &mut Vec<u8>, bytes: &[u8]) {
+    buffer.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    buffer.extend_from_slice(bytes);
+}
+
+struct MapDecoder<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> MapDecoder<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    fn read_exact(&mut self, len: usize) -> io::Result<&'a [u8]> {
+        if self.pos + len > self.data.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unexpected end of column family data",
+            ));
+        }
+        let slice = &self.data[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(slice)
+    }
+
+    fn read_u64(&mut self) -> io::Result<u64> {
+        let bytes = self.read_exact(8)?;
+        let mut array = [0u8; 8];
+        array.copy_from_slice(bytes);
+        Ok(u64::from_le_bytes(array))
+    }
+
+    fn read_bytes(&mut self) -> io::Result<Vec<u8>> {
+        let len = self.read_u64()? as usize;
+        let bytes = self.read_exact(len)?;
+        Ok(bytes.to_vec())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::KeyValue;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     #[test]
     fn persists_across_reopen() {

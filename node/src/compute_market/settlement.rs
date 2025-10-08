@@ -17,6 +17,7 @@ use bincode;
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::error;
+use foundation_serialization::json::json;
 use ledger::utxo_account::AccountLedger;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -611,7 +612,7 @@ impl Settlement {
 
     pub fn submit_anchor(anchor: &[u8]) {
         let hash = blake3::hash(anchor).to_hex().to_string();
-        let line = serde_json::json!({
+        let line = json!({
             "kind": "compute_anchor",
             "hash": hash,
         })

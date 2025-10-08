@@ -37,6 +37,7 @@ use concurrency::{Lazy, OnceCell};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
+use foundation_serialization::json::{self, json, Value};
 use hex;
 use ledger::address::ShardId;
 #[cfg(feature = "telemetry")]
@@ -780,7 +781,7 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
     }
     let now = unix_now();
     match fs::read(path) {
-        Ok(data) => match serde_json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
+        Ok(data) => match json::from_slice::<Vec<PeerCertDiskEntry>>(&data) {
             Ok(entries) => {
                 let mut rebuilt = HashMap::new();
                 let legacy_provider = default_legacy_provider_id();
@@ -957,7 +958,7 @@ fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
             }
         })
         .collect();
-    if let Ok(json) = serde_json::to_vec_pretty(&entries) {
+    if let Ok(json) = json::to_vec_pretty(&entries) {
         let _ = fs::write(path, json);
     }
 }
@@ -1220,10 +1221,10 @@ pub fn current_peer_fingerprint_for_provider(
 }
 
 /// Manually verify DNS TXT record for `domain`.
-pub fn dns_verify(domain: &str) -> serde_json::Value {
-    let v = crate::gateway::dns::dns_lookup(&serde_json::json!({ "domain": domain }));
+pub fn dns_verify(domain: &str) -> Value {
+    let v = crate::gateway::dns::dns_lookup(&json!({ "domain": domain }));
     let verified = v.get("verified").and_then(|b| b.as_bool()).unwrap_or(false);
-    serde_json::json!({ "domain": domain, "verified": verified })
+    json!({ "domain": domain, "verified": verified })
 }
 
 pub fn record_ip_drop(ip: &std::net::SocketAddr) {
@@ -1265,8 +1266,8 @@ pub fn reputation_sync() {
 }
 
 /// Return current reputation score for `peer`.
-pub fn reputation_show(peer: &str) -> serde_json::Value {
-    serde_json::json!({
+pub fn reputation_show(peer: &str) -> Value {
+    json!({
         "peer": peer,
         "score": crate::compute_market::scheduler::reputation_get(peer),
     })

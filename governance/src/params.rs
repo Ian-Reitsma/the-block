@@ -1,7 +1,6 @@
 use super::ParamKey;
-use bincode;
+use foundation_serialization::{binary, json};
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
@@ -953,7 +952,7 @@ impl EncryptedUtilization {
         for (b, k) in buf.iter_mut().zip(key.iter().cycle()) {
             *b ^= k;
         }
-        bincode::deserialize(&buf).unwrap_or_default()
+        binary::decode(&buf).unwrap_or_default()
     }
 }
 
@@ -986,7 +985,7 @@ pub fn retune_multipliers(
 
     // Load previous Kalman filter state or initialise from current params.
     let mut state: KalmanState = if let Ok(bytes) = fs::read(&state_path) {
-        serde_json::from_slice(&bytes).unwrap_or(KalmanState {
+        json::from_slice(&bytes).unwrap_or(KalmanState {
             x: [
                 params.beta_storage_sub_ct as f64,
                 params.gamma_read_sub_ct as f64,
@@ -1019,7 +1018,7 @@ pub fn retune_multipliers(
     const MAX_HIST: usize = 256;
     let hist_path = hist_dir.join("util_history.json");
     let mut hist: UtilHistory = if let Ok(bytes) = fs::read(&hist_path) {
-        serde_json::from_slice(&bytes).unwrap_or_default()
+        json::from_slice(&bytes).unwrap_or_default()
     } else {
         UtilHistory::default()
     };
@@ -1160,8 +1159,8 @@ pub fn retune_multipliers(
     params.kappa_cpu_sub_ct = noisy[2];
     params.lambda_bytes_out_sub_ct = noisy[3];
 
-    let _ = serde_json::to_vec(&state).map(|bytes| fs::write(&state_path, bytes));
-    let _ = serde_json::to_vec(&hist).map(|bytes| fs::write(&hist_path, bytes));
+    let _ = json::to_vec(&state).map(|bytes| fs::write(&state_path, bytes));
+    let _ = json::to_vec(&hist).map(|bytes| fs::write(&hist_path, bytes));
     let events_path = hist_dir.join("events.log");
     if rolling_inflation > 0.02 {
         if let Ok(mut f) = OpenOptions::new()
@@ -1216,7 +1215,7 @@ pub fn retune_multipliers(
         );
     }
     let snap_path = hist_dir.join(format!("inflation_{}.json", current_epoch));
-    if let Ok(bytes) = serde_json::to_vec(params) {
+    if let Ok(bytes) = json::to_vec(params) {
         let _ = fs::write(snap_path, bytes);
     }
 

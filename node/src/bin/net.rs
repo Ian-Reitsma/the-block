@@ -1,5 +1,6 @@
 use colored::*;
 use crypto_suite::signatures::Signer;
+use foundation_serialization::json::{self, json, Value};
 use hex;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
 use regex::Regex;
@@ -8,7 +9,6 @@ use runtime::{
     self,
     ws::{self, ClientStream, Message as WsMessage},
 };
-use serde_json::json;
 use std::fs::File;
 use std::io::Write;
 use std::net::ToSocketAddrs;
@@ -86,7 +86,7 @@ impl std::str::FromStr for CompletionShell {
     }
 }
 
-fn ratio(v: &serde_json::Value) -> f64 {
+fn ratio(v: &Value) -> f64 {
     let reqs = v["requests"].as_u64().unwrap_or(0);
     if reqs > 0 {
         v["drops"].as_u64().unwrap_or(0) as f64 / reqs as f64
@@ -889,7 +889,7 @@ fn top_level_commands() -> Vec<&'static str> {
     ]
 }
 
-fn post_json(rpc: &str, req: serde_json::Value) -> Result<serde_json::Value, HttpClientError> {
+fn post_json(rpc: &str, req: Value) -> Result<Value, HttpClientError> {
     BlockingClient::default()
         .request(Method::Post, rpc)?
         .timeout(Duration::from_secs(5))
@@ -1034,7 +1034,7 @@ fn main() {
                         }
                         match format {
                             OutputFormat::Json => {
-                                println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+                                println!("{}", json::to_string_pretty(&rows).unwrap());
                             }
                             OutputFormat::Table => {
                                 for r in &rows {
@@ -1146,7 +1146,7 @@ fn main() {
                         match format {
                             OutputFormat::Json => {
                                 let out = json!({
-                                    "peers": if summary { serde_json::Value::Array(vec![]) } else { serde_json::Value::Array(rows.clone()) },
+                                    "peers": if summary { Value::Array(vec![]) } else { Value::Array(rows.clone()) },
                                     "summary": {
                                         "total_peers": rows.len(),
                                         "active": active,
@@ -1155,7 +1155,7 @@ fn main() {
                                         "drops": total_drop,
                                     }
                                 });
-                                println!("{}", serde_json::to_string_pretty(&out).unwrap());
+                                println!("{}", json::to_string_pretty(&out).unwrap());
                             }
                             OutputFormat::Table => {
                                 let width = terminal_size()
@@ -1249,7 +1249,7 @@ fn main() {
                                 }
                                 match format {
                                     OutputFormat::Json => {
-                                        println!("{}", serde_json::to_string_pretty(res).unwrap());
+                                        println!("{}", json::to_string_pretty(res).unwrap());
                                     }
                                     OutputFormat::Table => {
                                         let reqs = res["requests"].as_u64().unwrap_or(0);
@@ -1459,9 +1459,7 @@ fn main() {
                             loop {
                                 match socket.recv().await {
                                     Ok(Some(WsMessage::Text(txt))) => {
-                                        if let Ok(snap) =
-                                            serde_json::from_str::<serde_json::Value>(&txt)
-                                        {
+                                        if let Ok(snap) = json::from_str::<Value>(&txt) {
                                             if peer_id.as_ref().map_or(true, |p| {
                                                 snap["peer_id"].as_str() == Some(p)
                                             }) {
