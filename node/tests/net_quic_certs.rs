@@ -106,7 +106,7 @@ fn prunes_stale_quic_cert_history() {
         if let Some(entry) = array.first_mut() {
             if let Some(history) = entry.get_mut("history") {
                 if let Some(first) = history.as_array_mut().and_then(|v| v.first_mut()) {
-                    first["updated_at"] = foundation_serialization::json::json!(0);
+                    first["updated_at"] = foundation_serialization::json!(0);
                 }
             }
         }

@@ -122,7 +122,7 @@ pub fn handle(cmd: GatewayCmd) {
             let client = RpcClient::from_env();
             match action {
                 MobileCacheAction::Status { url, auth, pretty } => {
-                    let payload = foundation_serialization::json::json!({
+                    let payload = foundation_serialization::json!({
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "gateway.mobile_cache_status",
@@ -159,7 +159,7 @@ pub fn handle(cmd: GatewayCmd) {
                     }
                 }
                 MobileCacheAction::Flush { url, auth } => {
-                    let payload = foundation_serialization::json::json!({
+                    let payload = foundation_serialization::json!({
                         "jsonrpc": "2.0",
                         "id": 1,
                         "method": "gateway.mobile_cache_flush",

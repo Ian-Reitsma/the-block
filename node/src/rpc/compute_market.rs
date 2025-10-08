@@ -26,7 +26,7 @@ pub fn stats(
         let entries: Vec<_> = receipts
             .into_iter()
             .map(|r| {
-                foundation_serialization::json::json!({
+                foundation_serialization::json!({
                     "job_id": r.job_id,
                     "provider": r.provider,
                     "buyer": r.buyer,
@@ -44,7 +44,7 @@ pub fn stats(
     let lanes_json: Vec<_> = lane_status
         .iter()
         .map(|status| {
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "lane": status.lane.as_str(),
                 "bids": status.bids,
                 "asks": status.asks,
@@ -61,7 +61,7 @@ pub fn stats(
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or_default();
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "lane": warning.lane.as_str(),
                 "job_id": warning.oldest_job,
                 "waited_for_secs": warning.waited_for.as_secs(),

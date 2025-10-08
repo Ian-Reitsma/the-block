@@ -307,7 +307,7 @@ pub fn handle(cmd: WalletCmd) {
                 let ed = ed_handle.join().expect("ed25519");
                 let (pq_pk, pq_sk) = pq_handle.join().expect("dilithium");
                 let mut f = File::create(&out).expect("write");
-                let json = foundation_serialization::json::json!({
+                let json = foundation_serialization::json!({
                     "ed25519_pub": hex::encode(ed.public_key().to_bytes()),
                     "dilithium_pub": hex::encode(pq_pk.as_bytes()),
                     "dilithium_sk": hex::encode(pq_sk.as_bytes()),
@@ -364,7 +364,7 @@ pub fn handle(cmd: WalletCmd) {
                 Ok(lane) => lane,
                 Err(err) => {
                     if json {
-                        let payload = foundation_serialization::json::json!({
+                        let payload = foundation_serialization::json!({
                             "status": "error",
                             "message": err.to_string(),
                         });
@@ -447,7 +447,7 @@ pub fn handle(cmd: WalletCmd) {
                 }
                 Err(err) => {
                     if json {
-                        let payload = foundation_serialization::json::json!({
+                        let payload = foundation_serialization::json!({
                             "status": "error",
                             "message": err.to_string(),
                         });
@@ -463,7 +463,13 @@ pub fn handle(cmd: WalletCmd) {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let sk = SessionKey::generate(now + ttl);
+            let sk = match SessionKey::generate(now + ttl) {
+                Ok(sk) => sk,
+                Err(err) => {
+                    eprintln!("failed to generate session key: {err}");
+                    return;
+                }
+            };
             println!(
                 "session key issued pk={} expires_at={}",
                 hex::encode(&sk.public_key),

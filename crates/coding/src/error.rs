@@ -1,3 +1,4 @@
+use foundation_serialization::Error as SerializationError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,7 +22,7 @@ pub enum ConfigError {
     #[error("coding config io failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("coding config parse failed: {0}")]
-    Parse(#[from] toml::de::Error),
+    Parse(#[from] SerializationError),
 }
 
 #[derive(Debug, Error)]

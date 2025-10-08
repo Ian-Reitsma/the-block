@@ -772,7 +772,7 @@ async fn handle_badge_status(request: Request<RpcState>) -> Result<Response, Htt
         chain.check_badges();
         chain.badge_status()
     };
-    let body = foundation_serialization::json::json!({
+    let body = foundation_serialization::json!({
         "active": active,
         "last_mint": last_mint,
         "last_burn": last_burn,
@@ -841,9 +841,9 @@ fn dispatch(
             match bc.lock() {
                 Ok(mut guard) => {
                     guard.difficulty = val;
-                    foundation_serialization::json::json!({"status": "ok"})
+                    foundation_serialization::json!({"status": "ok"})
                 }
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "balance" => {
@@ -854,12 +854,12 @@ fn dispatch(
                 .unwrap_or("");
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(acct) = guard.accounts.get(addr) {
-                foundation_serialization::json::json!({
+                foundation_serialization::json!({
                     "consumer": acct.balance.consumer,
                     "industrial": acct.balance.industrial,
                 })
             } else {
-                foundation_serialization::json::json!({"consumer": 0, "industrial": 0})
+                foundation_serialization::json!({"consumer": 0, "industrial": 0})
             }
         }
         "ledger.shard_of" => {
@@ -869,7 +869,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let shard = ledger::shard_of(addr);
-            foundation_serialization::json::json!({"shard": shard})
+            foundation_serialization::json!({"shard": shard})
         }
         "anomaly.label" => {
             let _label = req
@@ -879,7 +879,7 @@ fn dispatch(
                 .unwrap_or("");
             #[cfg(feature = "telemetry")]
             crate::telemetry::ANOMALY_LABEL_TOTAL.inc();
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "settlement_status" => {
             let provider = req.params.get("provider").and_then(|v| v.as_str());
@@ -890,9 +890,9 @@ fn dispatch(
             };
             if let Some(p) = provider {
                 let (ct, industrial) = Settlement::balance_split(p);
-                foundation_serialization::json::json!({"mode": mode, "balance": ct, "ct": ct, "industrial": industrial})
+                foundation_serialization::json!({"mode": mode, "balance": ct, "ct": ct, "industrial": industrial})
             } else {
-                foundation_serialization::json::json!({"mode": mode})
+                foundation_serialization::json!({"mode": mode})
             }
         }
         "settlement.audit" => compute_market::settlement_audit(),
@@ -1120,10 +1120,10 @@ fn dispatch(
             let key = format!("localnet_receipts/{}", hash);
             let mut db = LOCALNET_RECEIPTS.lock().unwrap_or_else(|e| e.into_inner());
             if db.get(&key).is_some() {
-                foundation_serialization::json::json!({"status":"ignored"})
+                foundation_serialization::json!({"status":"ignored"})
             } else {
                 db.insert(&key, Vec::new());
-                foundation_serialization::json::json!({"status":"ok"})
+                foundation_serialization::json!({"status":"ok"})
             }
         }
         "dns.publish_record" => match gateway::dns::publish_record(&req.params) {
@@ -1160,7 +1160,7 @@ fn dispatch(
             if let Some(secs) = cfg.compaction_secs {
                 crate::telemetry::set_compaction_interval(secs);
             }
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "status": "ok",
                 "sample_rate_ppm": crate::telemetry::sample_rate_ppm(),
                 "compaction_secs": crate::telemetry::compaction_interval_secs(),
@@ -1200,7 +1200,7 @@ fn dispatch(
             };
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             let stats = guard.mempool_stats(lane);
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "size": stats.size,
                 "age_p50": stats.age_p50,
                 "age_p95": stats.age_p95,
@@ -1247,11 +1247,11 @@ fn dispatch(
             {
                 let _ = (lane, event, fee, floor);
             }
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "net.overlay_status" => {
             let status = net::overlay_status();
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "backend": status.backend,
                 "active_peers": status.active_peers,
                 "persisted_peers": status.persisted_peers,
@@ -1269,7 +1269,7 @@ fn dispatch(
                 code: -32602,
                 message: "unknown peer",
             })?;
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "requests": m.requests,
                 "bytes_sent": m.bytes_sent,
                 "drops": m.drops,
@@ -1301,7 +1301,7 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             if net::reset_peer_metrics(&pk) {
-                foundation_serialization::json::json!({"status": "ok"})
+                foundation_serialization::json!({"status": "ok"})
             } else {
                 return Err(RpcError {
                     code: -32602,
@@ -1325,7 +1325,7 @@ fn dispatch(
             if all {
                 match net::export_all_peer_stats(path, min_rep, active) {
                     Ok(over) => {
-                        foundation_serialization::json::json!({"status": "ok", "overwritten": over})
+                        foundation_serialization::json!({"status": "ok", "overwritten": over})
                     }
                     Err(e) => {
                         return Err(RpcError {
@@ -1343,7 +1343,7 @@ fn dispatch(
                 let pk = parse_overlay_peer_param(id)?;
                 match net::export_peer_stats(&pk, path) {
                     Ok(over) => {
-                        foundation_serialization::json::json!({"status": "ok", "overwritten": over})
+                        foundation_serialization::json!({"status": "ok", "overwritten": over})
                     }
                     Err(e) => {
                         return Err(RpcError {
@@ -1361,7 +1361,7 @@ fn dispatch(
             foundation_serialization::json::to_value(map).unwrap()
         }
         "net.peer_stats_persist" => match net::persist_peer_metrics() {
-            Ok(()) => foundation_serialization::json::json!({"status": "ok"}),
+            Ok(()) => foundation_serialization::json!({"status": "ok"}),
             Err(_) => {
                 return Err(RpcError {
                     code: -32603,
@@ -1383,7 +1383,7 @@ fn dispatch(
             let pk = parse_overlay_peer_param(id)?;
             if clear {
                 if net::clear_throttle(&pk) {
-                    foundation_serialization::json::json!({"status": "ok"})
+                    foundation_serialization::json!({"status": "ok"})
                 } else {
                     return Err(RpcError {
                         code: -32602,
@@ -1392,7 +1392,7 @@ fn dispatch(
                 }
             } else {
                 net::throttle_peer(&pk, "manual");
-                foundation_serialization::json::json!({"status": "ok"})
+                foundation_serialization::json!({"status": "ok"})
             }
         }
         "net.backpressure_clear" => {
@@ -1403,7 +1403,7 @@ fn dispatch(
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
             if net::clear_throttle(&pk) {
-                foundation_serialization::json::json!({"status": "ok"})
+                foundation_serialization::json!({"status": "ok"})
             } else {
                 return Err(RpcError {
                     code: -32602,
@@ -1413,7 +1413,7 @@ fn dispatch(
         }
         "net.reputation_sync" => {
             net::reputation_sync();
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "net.rotate_cert" => {
             #[cfg(feature = "quic")]
@@ -1423,7 +1423,7 @@ fn dispatch(
                     Ok(advert) => {
                         let previous: Vec<String> =
                             advert.previous.iter().map(|fp| hex::encode(fp)).collect();
-                        foundation_serialization::json::json!({
+                        foundation_serialization::json!({
                             "status": "ok",
                             "fingerprint": hex::encode(advert.fingerprint),
                             "previous": previous,
@@ -1518,7 +1518,7 @@ fn dispatch(
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
                     .with_label_values(&["ok"])
                     .inc();
-                foundation_serialization::json::json!({"status":"ok"})
+                foundation_serialization::json!({"status":"ok"})
             } else {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
@@ -1532,7 +1532,7 @@ fn dispatch(
         }
         "net.handshake_failures" => {
             let entries = net::recent_handshake_failures();
-            foundation_serialization::json::json!({"failures": entries})
+            foundation_serialization::json!({"failures": entries})
         }
         "net.quic_stats" => match foundation_serialization::json::to_value(net::quic_stats()) {
             Ok(val) => val,
@@ -1564,7 +1564,7 @@ fn dispatch(
         }
         "net.quic_certs_refresh" => {
             let refreshed = net::refresh_peer_cert_store_from_disk();
-            foundation_serialization::json::json!({ "reloaded": refreshed })
+            foundation_serialization::json!({ "reloaded": refreshed })
         }
         "peer.rebate_status" => {
             let peer = req
@@ -1589,7 +1589,7 @@ fn dispatch(
                 },
             )?;
             let eligible = net::uptime::eligible(&pk, threshold, epoch);
-            foundation_serialization::json::json!({"eligible": eligible})
+            foundation_serialization::json!({"eligible": eligible})
         }
         "peer.rebate_claim" => {
             let peer = req
@@ -1619,11 +1619,11 @@ fn dispatch(
                 },
             )?;
             let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
-            foundation_serialization::json::json!({"voucher": voucher})
+            foundation_serialization::json!({"voucher": voucher})
         }
         "net.config_reload" => {
             if crate::config::reload() {
-                foundation_serialization::json::json!({"status": "ok"})
+                foundation_serialization::json!({"status": "ok"})
             } else {
                 return Err(RpcError {
                     code: -32603,
@@ -1638,8 +1638,8 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             match kyc::verify(user) {
-                Ok(true) => foundation_serialization::json::json!({"status": "verified"}),
-                Ok(false) => foundation_serialization::json::json!({"status": "denied"}),
+                Ok(true) => foundation_serialization::json!({"status": "verified"}),
+                Ok(false) => foundation_serialization::json!({"status": "denied"}),
                 Err(_) => {
                     return Err(RpcError {
                         code: -32080,
@@ -1651,7 +1651,7 @@ fn dispatch(
         "pow.get_template" => {
             // simplistic template: zero prev/merkle
             let tmpl = pow::template([0u8; 32], [0u8; 32], [0u8; 32], 1_000_000, 1, 0);
-            foundation_serialization::json::json!({
+            foundation_serialization::json!({
                 "prev_hash": hex::encode(tmpl.prev_hash),
                 "merkle_root": hex::encode(tmpl.merkle_root),
                 "checkpoint_hash": hex::encode(tmpl.checkpoint_hash),
@@ -1715,7 +1715,7 @@ fn dispatch(
             let hash = hdr.hash();
             let val = u64::from_le_bytes(hash[..8].try_into().unwrap_or_default());
             if val <= u64::MAX / difficulty.max(1) {
-                foundation_serialization::json::json!({"status":"accepted"})
+                foundation_serialization::json!({"status":"accepted"})
             } else {
                 return Err(RpcError {
                     code: -32082,
@@ -1816,15 +1816,15 @@ fn dispatch(
         "rent.escrow.balance" => {
             let esc = RentEscrow::open("rent_escrow.db");
             if let Some(id) = req.params.get("id").and_then(|v| v.as_str()) {
-                foundation_serialization::json::json!({"balance": esc.balance(id)})
+                foundation_serialization::json!({"balance": esc.balance(id)})
             } else if let Some(acct) = req.params.get("account").and_then(|v| v.as_str()) {
-                foundation_serialization::json::json!({"balance": esc.balance_account(acct)})
+                foundation_serialization::json!({"balance": esc.balance_account(acct)})
             } else {
-                foundation_serialization::json::json!({"balance": 0})
+                foundation_serialization::json!({"balance": 0})
             }
         }
         "mesh.peers" => {
-            foundation_serialization::json::json!({"peers": range_boost::peers()})
+            foundation_serialization::json!({"peers": range_boost::peers()})
         }
         "inflation.params" => inflation::params(&bc),
         "compute_market.stats" => {
@@ -1899,9 +1899,9 @@ fn dispatch(
         "net.gossip_status" => {
             if let Some(status) = net::gossip_status() {
                 foundation_serialization::json::to_value(status)
-                    .unwrap_or_else(|_| foundation_serialization::json::json!({}))
+                    .unwrap_or_else(|_| foundation_serialization::json!({}))
             } else {
-                foundation_serialization::json::json!({"status": "unavailable"})
+                foundation_serialization::json!({"status": "unavailable"})
             }
         }
         "net.dns_verify" => {
@@ -1915,16 +1915,16 @@ fn dispatch(
         "stake.role" => pos::role(&req.params)?,
         "config.reload" => {
             let ok = crate::config::reload();
-            foundation_serialization::json::json!({"reloaded": ok})
+            foundation_serialization::json!({"reloaded": ok})
         }
         "register_handle" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             match handles.lock() {
                 Ok(mut reg) => match identity::register_handle(&req.params, &mut reg) {
                     Ok(v) => v,
-                    Err(e) => foundation_serialization::json::json!({"error": e.code()}),
+                    Err(e) => foundation_serialization::json!({"error": e.code()}),
                 },
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "identity.anchor" => {
@@ -1938,18 +1938,18 @@ fn dispatch(
             match dids.lock() {
                 Ok(mut reg) => match identity::anchor_did(&req.params, &mut reg, &GOV_STORE) {
                     Ok(v) => v,
-                    Err(e) => foundation_serialization::json::json!({"error": e.code()}),
+                    Err(e) => foundation_serialization::json!({"error": e.code()}),
                 },
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "resolve_handle" => match handles.lock() {
             Ok(reg) => identity::resolve_handle(&req.params, &reg),
-            Err(_) => foundation_serialization::json::json!({"address": null}),
+            Err(_) => foundation_serialization::json!({"address": null}),
         },
         "identity.resolve" => match dids.lock() {
             Ok(reg) => identity::resolve_did(&req.params, &reg),
-            Err(_) => foundation_serialization::json::json!({
+            Err(_) => foundation_serialization::json!({
                 "address": foundation_serialization::json::Value::Null,
                 "document": foundation_serialization::json::Value::Null,
                 "hash": foundation_serialization::json::Value::Null,
@@ -1959,7 +1959,7 @@ fn dispatch(
         },
         "whoami" => match handles.lock() {
             Ok(reg) => identity::whoami(&req.params, &reg),
-            Err(_) => foundation_serialization::json::json!({"address": null, "handle": null}),
+            Err(_) => foundation_serialization::json!({"address": null, "handle": null}),
         },
         "record_le_request" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -1984,11 +1984,11 @@ fn dispatch(
                         .unwrap_or("en");
                     match crate::le_portal::record_request(&base, agency, case, jurisdiction, lang)
                     {
-                        Ok(_) => foundation_serialization::json::json!({"status": "ok"}),
-                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
+                        Ok(_) => foundation_serialization::json!({"status": "ok"}),
+                        Err(_) => foundation_serialization::json!({"error": "io"}),
                     }
                 }
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "warrant_canary" => {
@@ -2002,11 +2002,11 @@ fn dispatch(
                 Ok(guard) => {
                     let base = guard.path.clone();
                     match crate::le_portal::record_canary(&base, msg) {
-                        Ok(hash) => foundation_serialization::json::json!({"hash": hash}),
-                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
+                        Ok(hash) => foundation_serialization::json!({"hash": hash}),
+                        Err(_) => foundation_serialization::json!({"error": "io"}),
                     }
                 }
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "le.list_requests" => match bc.lock() {
@@ -2014,10 +2014,10 @@ fn dispatch(
                 let base = guard.path.clone();
                 match crate::le_portal::list_requests(&base) {
                     Ok(v) => foundation_serialization::json::to_value(v).unwrap_or_default(),
-                    Err(_) => foundation_serialization::json::json!({"error": "io"}),
+                    Err(_) => foundation_serialization::json!({"error": "io"}),
                 }
             }
-            Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+            Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
         },
         "le.record_action" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -2042,11 +2042,11 @@ fn dispatch(
                         .unwrap_or("en");
                     match crate::le_portal::record_action(&base, agency, action, jurisdiction, lang)
                     {
-                        Ok(hash) => foundation_serialization::json::json!({"hash": hash}),
-                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
+                        Ok(hash) => foundation_serialization::json!({"hash": hash}),
+                        Err(_) => foundation_serialization::json!({"error": "io"}),
                     }
                 }
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "le.upload_evidence" => {
@@ -2068,7 +2068,7 @@ fn dispatch(
                 .unwrap_or("");
             let data = match decode_standard(data_b64) {
                 Ok(d) => d,
-                Err(_) => return Ok(foundation_serialization::json::json!({"error": "decode"})),
+                Err(_) => return Ok(foundation_serialization::json!({"error": "decode"})),
             };
             match bc.lock() {
                 Ok(guard) => {
@@ -2087,26 +2087,26 @@ fn dispatch(
                         lang,
                         &data,
                     ) {
-                        Ok(hash) => foundation_serialization::json::json!({"hash": hash}),
-                        Err(_) => foundation_serialization::json::json!({"error": "io"}),
+                        Ok(hash) => foundation_serialization::json!({"hash": hash}),
+                        Err(_) => foundation_serialization::json!({"error": "io"}),
                     }
                 }
-                Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "service_badge_issue" => match bc.lock() {
             Ok(mut guard) => {
                 let token = guard.badge_tracker_mut().force_issue();
-                foundation_serialization::json::json!({"badge": token})
+                foundation_serialization::json!({"badge": token})
             }
-            Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+            Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
         },
         "service_badge_revoke" => match bc.lock() {
             Ok(mut guard) => {
                 guard.badge_tracker_mut().revoke();
-                foundation_serialization::json::json!({"revoked": true})
+                foundation_serialization::json!({"revoked": true})
             }
-            Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+            Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
         },
         "service_badge_verify" => {
             let badge = req
@@ -2114,7 +2114,7 @@ fn dispatch(
                 .get("badge")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            foundation_serialization::json::json!({"valid": crate::service_badge::verify(badge)})
+            foundation_serialization::json!({"valid": crate::service_badge::verify(badge)})
         }
         "submit_tx" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
@@ -2132,12 +2132,12 @@ fn dispatch(
                     }
                     match bc.lock() {
                         Ok(mut guard) => match guard.submit_transaction(tx) {
-                            Ok(()) => foundation_serialization::json::json!({"status": "ok"}),
+                            Ok(()) => foundation_serialization::json!({"status": "ok"}),
                             Err(e) => {
-                                foundation_serialization::json::json!({"error": format!("{e:?}")})
+                                foundation_serialization::json!({"error": format!("{e:?}")})
                             }
                         },
-                        Err(_) => foundation_serialization::json::json!({"error": "lock poisoned"}),
+                        Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
                     }
                 }
                 None => {
@@ -2177,11 +2177,11 @@ fn dispatch(
             }
             #[cfg(feature = "telemetry")]
             diagnostics::log::info!("snapshot_interval_changed {interval}");
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "start_mining" => {
             if runtime_cfg.relay_only {
-                foundation_serialization::json::json!({
+                foundation_serialization::json!({
                     "error": {"code": -32075, "message": "relay_only"}
                 })
             } else {
@@ -2203,13 +2203,13 @@ fn dispatch(
                         }
                     });
                 }
-                foundation_serialization::json::json!({"status": "ok"})
+                foundation_serialization::json!({"status": "ok"})
             }
         }
         "stop_mining" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             mining.store(false, Ordering::SeqCst);
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "jurisdiction.status" => jurisdiction::status(&bc)?,
         "jurisdiction.set" => {
@@ -2239,11 +2239,11 @@ fn dispatch(
             #[cfg(feature = "telemetry")]
             {
                 let m = crate::gather_metrics().unwrap_or_default();
-                foundation_serialization::json::json!(m)
+                foundation_serialization::json!(m)
             }
             #[cfg(not(feature = "telemetry"))]
             {
-                foundation_serialization::json::json!("telemetry disabled")
+                foundation_serialization::json!("telemetry disabled")
             }
         }
         "price_board_get" => {
@@ -2259,7 +2259,7 @@ fn dispatch(
             };
             match crate::compute_market::price_board::bands(lane) {
                 Some((p25, median, p75)) => {
-                    foundation_serialization::json::json!({"p25": p25, "median": median, "p75": p75})
+                    foundation_serialization::json!({"p25": p25, "median": median, "p75": p75})
                 }
                 None => {
                     return Err(crate::compute_market::MarketError::NoPriceData.into());
@@ -2274,11 +2274,11 @@ fn dispatch(
                 .unwrap_or(0);
             let height = bc.lock().unwrap_or_else(|e| e.into_inner()).block_height;
             crate::compute_market::settlement::Settlement::arm(delay, height);
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "compute_cancel_arm" => {
             crate::compute_market::settlement::Settlement::cancel_arm();
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "compute_back_to_dry_run" => {
             let reason = req
@@ -2287,7 +2287,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             crate::compute_market::settlement::Settlement::back_to_dry_run(reason);
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         "dex_escrow_status" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2603,7 +2603,7 @@ fn dispatch(
                 message: "invalid params",
             })?;
             let gas = vm::estimate_gas(code);
-            foundation_serialization::json::json!({"gas_used": gas})
+            foundation_serialization::json!({"gas_used": gas})
         }
         "vm.exec_trace" => {
             let code_hex = req
@@ -2616,12 +2616,12 @@ fn dispatch(
                 message: "invalid params",
             })?;
             let trace = vm::exec_trace(code);
-            foundation_serialization::json::json!({"trace": trace})
+            foundation_serialization::json!({"trace": trace})
         }
         "vm.storage_read" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
             let data = vm::storage_read(id).unwrap_or_default();
-            foundation_serialization::json::json!({"data": hex::encode(data)})
+            foundation_serialization::json!({"data": hex::encode(data)})
         }
         "vm.storage_write" => {
             let id = req.params.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -2635,7 +2635,7 @@ fn dispatch(
                 message: "invalid params",
             })?;
             vm::storage_write(id, bytes);
-            foundation_serialization::json::json!({"status": "ok"})
+            foundation_serialization::json!({"status": "ok"})
         }
         _ => {
             return Err(RpcError {

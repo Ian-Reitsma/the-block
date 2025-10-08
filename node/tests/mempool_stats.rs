@@ -119,7 +119,7 @@ fn mempool_qos_event_public_rpc() {
         let client_ack = client.clone();
         let url_ack = url.clone();
         let ack = the_block::spawn_blocking(move || {
-            let payload = foundation_serialization::json::json!({
+            let payload = foundation_serialization::json!({
                 "jsonrpc": "2.0",
                 "id": 7,
                 "method": "mempool.qos_event",

@@ -1,111 +1,62 @@
 #![forbid(unsafe_code)]
 
-use std::fmt;
+//! First-party serialization facade used across the workspace.
+//!
+//! The helpers exposed by this crate intentionally avoid third-party
+//! implementations so downstream crates can opt into deterministic, auditable
+//! encoders without depending on serde_json, bincode, or toml.  JSON and binary
+//! helpers rely on the implementations located in `json.rs` and `binary.rs`
+//! respectively while continuing to interoperate with `serde` derives.
 
-use ::toml as external_toml;
-use external_toml::{de as toml_de, ser as toml_ser};
+mod binary_impl;
+mod json_impl;
+mod toml_impl;
 
-/// Result alias used by the first-party serialization routines.
+/// Result alias shared by the serialization helpers.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// Unified error type covering the supported serialization backends.
+/// Unified error returned by the serialization facade.
 #[derive(Debug)]
-pub struct Error {
-    kind: ErrorKind,
-}
-
-#[derive(Debug)]
-enum ErrorKind {
-    Json(serde_json::Error),
-    Cbor(serde_cbor::Error),
-    Binary(bincode::Error),
-    TomlSerialize(toml_ser::Error),
-    TomlDeserialize(toml_de::Error),
+pub enum Error {
+    /// JSON serialization failure.
+    Json(json_impl::Error),
+    /// Binary serialization failure.
+    Binary(binary_impl::Error),
+    /// TOML serialization failure.
+    Toml(toml_impl::Error),
 }
 
 impl Error {
-    fn json(err: serde_json::Error) -> Self {
-        Self {
-            kind: ErrorKind::Json(err),
-        }
+    fn json(err: json_impl::Error) -> Self {
+        Self::Json(err)
     }
 
-    fn cbor(err: serde_cbor::Error) -> Self {
-        Self {
-            kind: ErrorKind::Cbor(err),
-        }
+    fn binary(err: binary_impl::Error) -> Self {
+        Self::Binary(err)
     }
 
-    fn binary(err: bincode::Error) -> Self {
-        Self {
-            kind: ErrorKind::Binary(err),
-        }
-    }
-
-    fn toml_ser(err: toml_ser::Error) -> Self {
-        Self {
-            kind: ErrorKind::TomlSerialize(err),
-        }
-    }
-
-    fn toml_de(err: toml_de::Error) -> Self {
-        Self {
-            kind: ErrorKind::TomlDeserialize(err),
-        }
+    fn toml(err: toml_impl::Error) -> Self {
+        Self::Toml(err)
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
-            ErrorKind::Json(err) => write!(f, "json serialization failed: {err}"),
-            ErrorKind::Cbor(err) => write!(f, "cbor serialization failed: {err}"),
-            ErrorKind::Binary(err) => write!(f, "binary serialization failed: {err}"),
-            ErrorKind::TomlSerialize(err) => write!(f, "toml serialization failed: {err}"),
-            ErrorKind::TomlDeserialize(err) => write!(f, "toml deserialization failed: {err}"),
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Json(err) => err.fmt(f),
+            Error::Binary(err) => err.fmt(f),
+            Error::Toml(err) => err.fmt(f),
         }
     }
 }
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.kind {
-            ErrorKind::Json(err) => Some(err),
-            ErrorKind::Cbor(err) => Some(err),
-            ErrorKind::Binary(err) => Some(&**err),
-            ErrorKind::TomlSerialize(err) => Some(err),
-            ErrorKind::TomlDeserialize(err) => Some(err),
+        match self {
+            Error::Json(err) => Some(err),
+            Error::Binary(err) => Some(err),
+            Error::Toml(err) => Some(err),
         }
-    }
-}
-
-impl From<serde_json::Error> for Error {
-    fn from(value: serde_json::Error) -> Self {
-        Self::json(value)
-    }
-}
-
-impl From<serde_cbor::Error> for Error {
-    fn from(value: serde_cbor::Error) -> Self {
-        Self::cbor(value)
-    }
-}
-
-impl From<bincode::Error> for Error {
-    fn from(value: bincode::Error) -> Self {
-        Self::binary(value)
-    }
-}
-
-impl From<toml_ser::Error> for Error {
-    fn from(value: toml_ser::Error) -> Self {
-        Self::toml_ser(value)
-    }
-}
-
-impl From<toml_de::Error> for Error {
-    fn from(value: toml_de::Error) -> Self {
-        Self::toml_de(value)
     }
 }
 
@@ -114,114 +65,126 @@ pub use serde::{de, ser, Deserialize, Serialize};
 pub mod serde {
     pub use serde::*;
 }
+
 pub use serde_bytes;
 
-/// JSON helpers backed by the first-party implementation.
+/// JSON helpers backed by the first-party encoder/decoder.
 pub mod json {
-    use serde::de::DeserializeOwned;
-    use serde::Serialize;
+    use std::io::{Read, Write};
 
-    use super::{Error, Result};
+    use serde::{de::DeserializeOwned, Serialize};
 
-    pub use serde_json::{json, Map, Number, Value};
+    use super::{json_impl, Error, Result};
 
+    pub use crate::json_impl::{Map, Number, Value};
+
+    /// Serialize a value into a compact JSON string.
     pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
-        serde_json::to_string(value).map_err(Error::from)
+        json_impl::to_string(value).map_err(Error::json)
     }
 
+    /// Serialize a value into a pretty-printed JSON string.
     pub fn to_string_pretty<T: Serialize>(value: &T) -> Result<String> {
-        serde_json::to_string_pretty(value).map_err(Error::from)
+        json_impl::to_string_pretty(value).map_err(Error::json)
     }
 
+    /// Deserialize a value from a JSON string slice.
     pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T> {
-        serde_json::from_str(input).map_err(Error::from)
+        json_impl::from_str(input).map_err(Error::json)
     }
 
+    /// Serialize a value to a byte vector.
     pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-        serde_json::to_vec(value).map_err(Error::from)
+        json_impl::to_vec(value).map_err(Error::json)
     }
 
+    /// Serialize a value to a pretty-printed byte vector.
     pub fn to_vec_pretty<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-        serde_json::to_vec_pretty(value).map_err(Error::from)
+        json_impl::to_vec_pretty(value).map_err(Error::json)
     }
 
+    /// Deserialize a value from a byte slice containing JSON data.
     pub fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
-        serde_json::from_slice(input).map_err(Error::from)
+        json_impl::from_slice(input).map_err(Error::json)
     }
 
-    pub fn to_value<T: Serialize>(value: T) -> Result<Value> {
-        serde_json::to_value(value).map_err(Error::from)
-    }
-
-    pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
-        serde_json::from_value(value).map_err(Error::from)
-    }
-
-    pub fn from_reader<R, T>(reader: R) -> Result<T>
+    /// Deserialize a value from a reader containing JSON text.
+    pub fn from_reader<R, T>(mut reader: R) -> Result<T>
     where
-        R: std::io::Read,
+        R: Read,
         T: DeserializeOwned,
     {
-        serde_json::from_reader(reader).map_err(Error::from)
+        let mut buffer = String::new();
+        reader
+            .read_to_string(&mut buffer)
+            .map_err(|err| Error::json(json_impl::Error::io(err)))?;
+        json_impl::from_str(&buffer).map_err(Error::json)
     }
 
-    pub fn to_writer_pretty<W, T>(writer: W, value: &T) -> Result<()>
+    /// Serialize a value into a pretty JSON representation and write it to the
+    /// provided writer.
+    pub fn to_writer_pretty<W, T>(mut writer: W, value: &T) -> Result<()>
     where
-        W: std::io::Write,
+        W: Write,
         T: Serialize,
     {
-        serde_json::to_writer_pretty(writer, value).map_err(Error::from)
+        let rendered = json_impl::to_string_pretty(value).map_err(Error::json)?;
+        writer
+            .write_all(rendered.as_bytes())
+            .map_err(|err| Error::json(json_impl::Error::io(err)))
+    }
+
+    /// Convert a serializable value into a JSON [`Value`].
+    pub fn to_value<T: Serialize>(value: T) -> Result<Value> {
+        json_impl::to_value(&value).map_err(Error::json)
+    }
+
+    /// Deserialize a JSON [`Value`] into a strongly typed structure.
+    pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
+        json_impl::from_value(value).map_err(Error::json)
     }
 }
 
-/// CBOR helpers routed through the first-party implementation.
-pub mod cbor {
-    use serde::de::DeserializeOwned;
-    use serde::Serialize;
-
-    use super::{Error, Result};
-
-    pub fn to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-        serde_cbor::to_vec(value).map_err(Error::from)
-    }
-
-    pub fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
-        serde_cbor::from_slice(input).map_err(Error::from)
-    }
-}
-
-/// Binary helpers covering legacy bincode-like flows.
+/// Binary helpers backed by the first-party encoder/decoder.
 pub mod binary {
-    use serde::de::DeserializeOwned;
-    use serde::Serialize;
+    use serde::{de::DeserializeOwned, Serialize};
 
-    use super::{Error, Result};
+    use super::{binary_impl, Error, Result};
 
+    /// Serialize a value into an owned byte vector.
     pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-        bincode::serialize(value).map_err(Error::from)
+        binary_impl::encode(value).map_err(Error::binary)
     }
 
+    /// Deserialize a value from the provided binary slice.
     pub fn decode<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
-        bincode::deserialize(input).map_err(Error::from)
+        binary_impl::decode(input).map_err(Error::binary)
     }
 }
 
-/// TOML helpers for configuration parsing.
+/// TOML helpers backed by the first-party encoder/decoder.
 pub mod toml {
-    use serde::de::DeserializeOwned;
-    use serde::Serialize;
+    use serde::{de::DeserializeOwned, Serialize};
 
-    use super::{external_toml, Error, Result};
+    use super::{toml_impl, Error, Result};
 
-    pub fn to_string<T: Serialize>(value: &T) -> Result<String> {
-        external_toml::to_string(value).map_err(Error::from)
+    /// Deserialize a value from a TOML string slice.
+    pub fn from_str<T: DeserializeOwned>(input: &str) -> Result<T> {
+        toml_impl::from_str(input).map_err(Error::toml)
     }
 
-    pub fn to_string_pretty<T: Serialize>(value: &T) -> Result<String> {
-        external_toml::to_string_pretty(value).map_err(Error::from)
+    /// Serialize a value into a compact TOML string.
+    pub fn to_string<T: Serialize + ?Sized>(value: &T) -> Result<String> {
+        toml_impl::to_string(value).map_err(Error::toml)
     }
 
-    pub fn from_str<T: DeserializeOwned>(value: &str) -> Result<T> {
-        external_toml::from_str(value).map_err(Error::from)
+    /// Serialize a value into a pretty TOML string with section headers grouped.
+    pub fn to_string_pretty<T: Serialize + ?Sized>(value: &T) -> Result<String> {
+        toml_impl::to_string_pretty(value).map_err(Error::toml)
+    }
+
+    /// Serialize a value into a byte vector containing TOML text.
+    pub fn to_vec<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
+        toml_impl::to_vec(value).map_err(Error::toml)
     }
 }

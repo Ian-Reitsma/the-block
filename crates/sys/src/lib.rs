@@ -116,6 +116,68 @@ pub mod process {
     }
 }
 
+pub mod random {
+    use crate::error::{Result, SysError};
+    use std::io;
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+    use std::io::Read;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn fill_bytes(dest: &mut [u8]) -> Result<()> {
+        use libc::{c_void, getrandom};
+
+        let mut offset = 0;
+        while offset < dest.len() {
+            let remaining = dest.len() - offset;
+            let ptr = dest[offset..].as_mut_ptr() as *mut c_void;
+            let filled = unsafe { getrandom(ptr, remaining, 0) };
+            if filled < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(SysError::from(err));
+            }
+            offset += filled as usize;
+        }
+        Ok(())
+    }
+
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+    pub fn fill_bytes(dest: &mut [u8]) -> Result<()> {
+        use std::fs::File;
+        use std::sync::{Mutex, OnceLock};
+
+        static URANDOM: OnceLock<Mutex<File>> = OnceLock::new();
+
+        let reader = URANDOM.get_or_try_init(|| {
+            File::open("/dev/urandom")
+                .map(Mutex::new)
+                .map_err(SysError::from)
+        })?;
+
+        let mut guard = reader
+            .lock()
+            .map_err(|_| SysError::unsupported("/dev/urandom mutex poisoned"))?;
+        guard.read_exact(dest)?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    pub fn fill_bytes(dest: &mut [u8]) -> Result<()> {
+        if dest.is_empty() {
+            return Ok(());
+        }
+        Err(SysError::unsupported("os randomness"))
+    }
+
+    pub fn fill_u64() -> Result<u64> {
+        let mut buf = [0u8; 8];
+        fill_bytes(&mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+}
+
 pub mod signals {
     use crate::error::{Result, SysError};
     use std::vec::IntoIter;
