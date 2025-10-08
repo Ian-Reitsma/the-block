@@ -111,7 +111,7 @@ fn identity_anchor_nonces_are_scoped_per_address() {
 
         assert_ne!(addr1_hex, addr2_hex, "distinct addresses required");
 
-        let req1 = foundation_serialization::json::json!({
+        let req1 = foundation_serialization::json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "identity.anchor",
@@ -122,7 +122,7 @@ fn identity_anchor_nonces_are_scoped_per_address() {
         assert_eq!(resp1["result"]["nonce"].as_u64(), Some(1));
         assert!(resp1.get("error").is_none());
 
-        let req2 = foundation_serialization::json::json!({
+        let req2 = foundation_serialization::json!({
             "jsonrpc": "2.0",
             "id": 2,
             "method": "identity.anchor",
@@ -133,7 +133,7 @@ fn identity_anchor_nonces_are_scoped_per_address() {
         assert_eq!(resp2["result"]["nonce"].as_u64(), Some(1));
         assert!(resp2.get("error").is_none());
 
-        let replay_req = foundation_serialization::json::json!({
+        let replay_req = foundation_serialization::json!({
             "jsonrpc": "2.0",
             "id": 3,
             "method": "identity.anchor",

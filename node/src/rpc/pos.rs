@@ -174,7 +174,7 @@ pub fn register(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.register(id);
-    Ok(foundation_serialization::json::json!({"status": "ok"}))
+    Ok(foundation_serialization::json!({"status": "ok"}))
 }
 
 pub fn bond(params: &Value) -> Result<Value, RpcError> {
@@ -186,7 +186,7 @@ pub fn bond(params: &Value) -> Result<Value, RpcError> {
     verify("bond", &role, amount, &payload)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.bond(&id, &role, amount);
-    Ok(foundation_serialization::json::json!({"stake": pos.stake_of(&id, &role)}))
+    Ok(foundation_serialization::json!({"stake": pos.stake_of(&id, &role)}))
 }
 
 pub fn unbond(params: &Value) -> Result<Value, RpcError> {
@@ -198,7 +198,7 @@ pub fn unbond(params: &Value) -> Result<Value, RpcError> {
     verify("unbond", &role, amount, &payload)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.unbond(&id, &role, amount);
-    Ok(foundation_serialization::json::json!({"stake": pos.stake_of(&id, &role)}))
+    Ok(foundation_serialization::json!({"stake": pos.stake_of(&id, &role)}))
 }
 
 pub fn slash(params: &Value) -> Result<Value, RpcError> {
@@ -207,7 +207,7 @@ pub fn slash(params: &Value) -> Result<Value, RpcError> {
     let amount = get_amount(params)?;
     let mut pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
     pos.slash(&id, &role, amount);
-    Ok(foundation_serialization::json::json!({"stake": pos.stake_of(&id, &role)}))
+    Ok(foundation_serialization::json!({"stake": pos.stake_of(&id, &role)}))
 }
 
 /// Expose for tests.
@@ -219,9 +219,7 @@ pub fn role(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
     let role = get_role(params);
     let pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(
-        foundation_serialization::json::json!({"id": id, "role": role, "stake": pos.stake_of(&id, &role)}),
-    )
+    Ok(foundation_serialization::json!({"id": id, "role": role, "stake": pos.stake_of(&id, &role)}))
 }
 
 #[cfg(test)]

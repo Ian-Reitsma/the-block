@@ -11,14 +11,14 @@ pub fn status(
     let j = bc.lock().unwrap().config.jurisdiction.clone();
     if let Some(ref region) = j {
         if let Some(pack) = jurisdiction::PolicyPack::template(region) {
-            return Ok(foundation_serialization::json::json!({
+            return Ok(foundation_serialization::json!({
                 "jurisdiction": pack.region,
                 "consent_required": pack.consent_required,
                 "features": pack.features,
             }));
         }
     }
-    Ok(foundation_serialization::json::json!({"jurisdiction": j}))
+    Ok(foundation_serialization::json!({"jurisdiction": j}))
 }
 
 pub fn set(
@@ -44,7 +44,7 @@ pub fn set(
                 "le_jurisdiction.log",
                 &format!("rpc set {}", pack.region),
             );
-            Ok(foundation_serialization::json::json!({
+            Ok(foundation_serialization::json!({
                 "status": "ok",
                 "jurisdiction": pack.region,
             }))

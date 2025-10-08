@@ -27,7 +27,7 @@ fn session_nonce_and_expiry() {
     );
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let sess = SessionKey::generate(now + 60);
+    let sess = SessionKey::generate(now + 60).expect("session key");
     bc.issue_session_key("alice".into(), sess.public_key.clone(), sess.expires_at).unwrap();
     let payload = RawTxPayload {
         from_: "alice".into(),
@@ -46,7 +46,7 @@ fn session_nonce_and_expiry() {
     assert_eq!(bc.submit_transaction(tx2), Err(TxAdmissionError::Duplicate));
 
     // expired session fails
-    let expired = SessionKey::generate(now - 1);
+    let expired = SessionKey::generate(now - 1).expect("expired session key");
     bc.issue_session_key("alice".into(), expired.public_key.clone(), expired.expires_at).unwrap();
     let payload2 = RawTxPayload { nonce: 2, ..payload };
     let tx3 = sign_tx(&expired.secret.to_bytes(), &payload2).unwrap();

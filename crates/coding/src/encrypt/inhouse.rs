@@ -438,8 +438,9 @@ fn seal_with_nonce(
 
 pub fn encrypt(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>, EncryptError> {
     let mut nonce = [0u8; NONCE_LEN];
-    rng::fill_secure_bytes(&mut nonce)
-        .map_err(|err| EncryptError::EntropyUnavailable { reason: err.reason })?;
+    rng::fill_secure_bytes(&mut nonce).map_err(|err| EncryptError::EntropyUnavailable {
+        reason: err.reason(),
+    })?;
     seal_with_nonce(key, &nonce, plaintext)
 }
 
@@ -477,8 +478,9 @@ fn seal_xchacha_with_nonce(
 
 pub fn encrypt_xchacha(key: &[u8; KEY_LEN], plaintext: &[u8]) -> Result<Vec<u8>, EncryptError> {
     let mut nonce = [0u8; XNONCE_LEN];
-    rng::fill_secure_bytes(&mut nonce)
-        .map_err(|err| EncryptError::EntropyUnavailable { reason: err.reason })?;
+    rng::fill_secure_bytes(&mut nonce).map_err(|err| EncryptError::EntropyUnavailable {
+        reason: err.reason(),
+    })?;
     seal_xchacha_with_nonce(key, &nonce, plaintext)
 }
 

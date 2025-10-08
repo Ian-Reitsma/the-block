@@ -9,6 +9,7 @@ pqcrypto-dilithium = { version = "0.5", optional = true }
 pqcrypto-traits = { version = "0.3", optional = true }
 base64_fp = { path = "../crates/base64_fp" }
 crypto_suite = { path = "../crates/crypto_suite" }
+sys = { path = "../crates/sys" }
 
 [features]
 quantum = ["pqcrypto-dilithium", "pqcrypto-traits"]

@@ -616,7 +616,7 @@ fn query_rebate_status(client: &RpcClient, url: &str) -> Result<()> {
         jsonrpc: "2.0",
         id: 1,
         method: "light_client.rebate_status",
-        params: foundation_serialization::json::json!({}),
+        params: foundation_serialization::json!({}),
         auth: None,
     };
     let response = client
@@ -692,7 +692,7 @@ fn run_device_status(json: bool) -> Result<()> {
         Ok(p) => p,
         Err(err) => {
             if json {
-                let payload = foundation_serialization::json::json!({
+                let payload = foundation_serialization::json!({
                     "error": err.to_string(),
                     "gating": opts
                         .gating_reason(&light_client::DeviceStatus::from(opts.fallback))
@@ -709,7 +709,7 @@ fn run_device_status(json: bool) -> Result<()> {
     let snapshot = runtime::block_on(async { watcher.poll().await });
     let gating = opts.gating_reason(&snapshot.status);
     if json {
-        let payload = foundation_serialization::json::json!({
+        let payload = foundation_serialization::json!({
             "wifi": snapshot.status.on_wifi,
             "charging": snapshot.status.is_charging,
             "battery": snapshot.status.battery_level,
@@ -1024,7 +1024,7 @@ pub fn latest_header(client: &RpcClient, url: &str) -> Result<LightHeader> {
 }
 
 pub fn resolve_did_record(client: &RpcClient, url: &str, address: &str) -> Result<ResolvedDid> {
-    let params = foundation_serialization::json::json!({ "address": address });
+    let params = foundation_serialization::json!({ "address": address });
     let payload = Payload {
         jsonrpc: "2.0",
         id: 1,

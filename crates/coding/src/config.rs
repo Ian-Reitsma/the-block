@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use foundation_serialization::toml;
 use serde::{Deserialize, Serialize};
 
 use crate::compression::{compressor_for, default_compressor};

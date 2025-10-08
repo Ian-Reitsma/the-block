@@ -38,7 +38,6 @@ foundation_serialization = { path = "../crates/foundation_serialization" }
 icu_normalizer = "2"
 prometheus = { version = "0.13", optional = true }
 static_assertions = "1"
-toml = "0.8"
 tar = "0.4"
 jsonrpc-core = "18"
 flate2 = "1"

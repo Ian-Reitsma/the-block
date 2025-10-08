@@ -3,6 +3,7 @@
 use std::fs;
 use std::time::Duration;
 
+use foundation_serialization::toml;
 use runtime;
 use tempfile::tempdir;
 use the_block::config::{self, NodeConfig};

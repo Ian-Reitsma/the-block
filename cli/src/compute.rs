@@ -199,7 +199,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
             }
             let params = accelerator
                 .as_ref()
-                .map(|acc| foundation_serialization::json::json!({"accelerator": acc}))
+                .map(|acc| foundation_serialization::json!({"accelerator": acc}))
                 .unwrap_or(foundation_serialization::json::Value::Null);
             let payload = Payload {
                 jsonrpc: "2.0",

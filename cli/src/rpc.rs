@@ -133,7 +133,7 @@ impl RpcClient {
         struct Envelope<T> {
             result: T,
         }
-        let params = foundation_serialization::json::json!({ "lane": lane.as_str() });
+        let params = foundation_serialization::json!({ "lane": lane.as_str() });
         let payload = Payload {
             jsonrpc: "2.0",
             id: 1,
