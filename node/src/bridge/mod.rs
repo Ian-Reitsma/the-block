@@ -10,6 +10,7 @@ use bridges::{
     Bridge as ExternalBridge, BridgeConfig, PendingWithdrawal, RelayerBundle, TokenBridge,
 };
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::json::{self, json, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -564,7 +565,7 @@ impl Bridge {
             .and_then(|c| c.bridge.locked.get(user).copied())
     }
 
-    pub fn pending_withdrawals(&self, asset: Option<&str>) -> Vec<serde_json::Value> {
+    pub fn pending_withdrawals(&self, asset: Option<&str>) -> Vec<Value> {
         let mut out = Vec::new();
         for (chan_asset, channel) in &self.state.channels {
             if asset.is_some() && asset != Some(chan_asset.as_str()) {
@@ -572,7 +573,7 @@ impl Bridge {
             }
             for (commitment, pending) in &channel.bridge.pending_withdrawals {
                 let deadline = pending.initiated_at + channel.config.challenge_period_secs;
-                out.push(serde_json::json!({
+                out.push(json!({
                     "asset": chan_asset,
                     "commitment": hex::encode(commitment),
                     "user": pending.user,
@@ -588,9 +589,9 @@ impl Bridge {
         out
     }
 
-    pub fn relayer_quorum(&self, asset: &str) -> Option<serde_json::Value> {
+    pub fn relayer_quorum(&self, asset: &str) -> Option<Value> {
         let channel = self.state.channels.get(asset)?;
-        let mut relayers: Vec<serde_json::Value> = channel
+        let mut relayers: Vec<Value> = channel
             .relayers
             .snapshot()
             .into_iter()
@@ -601,7 +602,7 @@ impl Bridge {
                     .get(&id)
                     .copied()
                     .unwrap_or_default();
-                serde_json::json!({
+                json!({
                     "id": id,
                     "stake": rel.stake,
                     "slashes": rel.slashes,
@@ -610,7 +611,7 @@ impl Bridge {
             })
             .collect();
         relayers.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
-        Some(serde_json::json!({
+        Some(json!({
             "asset": asset,
             "quorum": channel.config.relayer_quorum,
             "relayers": relayers,

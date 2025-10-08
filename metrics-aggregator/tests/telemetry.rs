@@ -1,6 +1,6 @@
+use foundation_serialization::json::{self, Value};
 use httpd::{Method, StatusCode};
 use metrics_aggregator::{router, AppState};
-use serde_json::json;
 use std::future::Future;
 use sys::tempfile;
 
@@ -15,18 +15,21 @@ fn telemetry_round_trip() {
         let state = AppState::new("token".into(), dir.path().join("metrics.db"), 60);
         let app = router(state.clone());
 
-        let payload = json!({
-            "node_id": "node-a",
-            "seq": 1,
-            "timestamp": 1_700_000_000u64,
-            "sample_rate_ppm": 500_000u64,
-            "compaction_secs": 30u64,
-            "memory": {
-                "mempool": {"latest": 1024u64, "p50": 800u64, "p90": 900u64, "p99": 1000u64},
-                "storage": {"latest": 2048u64, "p50": 1500u64, "p90": 1800u64, "p99": 1900u64},
-                "compute": {"latest": 512u64, "p50": 400u64, "p90": 450u64, "p99": 500u64}
-            }
-        });
+        let payload = json::value_from_str(
+            r#"{
+                "node_id": "node-a",
+                "seq": 1,
+                "timestamp": 1700000000,
+                "sample_rate_ppm": 500000,
+                "compaction_secs": 30,
+                "memory": {
+                    "mempool": {"latest": 1024, "p50": 800, "p90": 900, "p99": 1000},
+                    "storage": {"latest": 2048, "p50": 1500, "p90": 1800, "p99": 1900},
+                    "compute": {"latest": 512, "p50": 400, "p90": 450, "p99": 500}
+                }
+            }"#,
+        )
+        .unwrap();
 
         let req = app
             .request_builder()
@@ -44,15 +47,15 @@ fn telemetry_round_trip() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let map: serde_json::Value = serde_json::from_slice(resp.body()).unwrap();
-        assert!(map.get("node-a").is_some());
+        let map: Value = json::from_slice(resp.body()).unwrap();
+        assert!(map.as_object().unwrap().get("node-a").is_some());
 
         let resp = app
             .handle(app.request_builder().path("/telemetry/node-a").build())
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let history: serde_json::Value = serde_json::from_slice(resp.body()).unwrap();
+        let history: Value = json::from_slice(resp.body()).unwrap();
         assert_eq!(history.as_array().unwrap().len(), 1);
 
         let resp = app

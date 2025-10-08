@@ -1,4 +1,5 @@
 use crypto_suite::hashing::blake3;
+use foundation_serialization::json;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -63,8 +64,7 @@ pub fn record_request(
         jurisdiction: jurisdiction.to_string(),
         language: language.to_string(),
     };
-    let line =
-        serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE request: {e}"));
+    let line = json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE request: {e}"));
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
@@ -86,7 +86,7 @@ pub fn list_requests(base: &str) -> std::io::Result<Vec<LeRequest>> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(req) = serde_json::from_str::<LeRequest>(line) {
+        if let Ok(req) = json::from_str::<LeRequest>(line) {
             out.push(req);
         }
     }
@@ -112,7 +112,7 @@ pub fn record_action(
         jurisdiction: jurisdiction.to_string(),
         language: language.to_string(),
     };
-    let line = serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE action: {e}"));
+    let line = json::to_string(&entry).unwrap_or_else(|e| panic!("serialize LE action: {e}"));
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
@@ -134,7 +134,7 @@ pub fn list_actions(base: &str) -> std::io::Result<Vec<LeAction>> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(act) = serde_json::from_str::<LeAction>(line) {
+        if let Ok(act) = json::from_str::<LeAction>(line) {
             out.push(act);
         }
     }
@@ -180,7 +180,7 @@ pub fn record_evidence(
         jurisdiction: jurisdiction.to_string(),
         language: language.to_string(),
     };
-    let line = serde_json::to_string(&entry).unwrap_or_else(|e| panic!("serialize evidence: {e}"));
+    let line = json::to_string(&entry).unwrap_or_else(|e| panic!("serialize evidence: {e}"));
     let mut file = OpenOptions::new()
         .append(true)
         .create(true)
@@ -202,7 +202,7 @@ pub fn list_evidence(base: &str) -> std::io::Result<Vec<EvidenceRecord>> {
         if line.is_empty() {
             continue;
         }
-        if let Ok(ev) = serde_json::from_str::<EvidenceRecord>(line) {
+        if let Ok(ev) = json::from_str::<EvidenceRecord>(line) {
             out.push(ev);
         }
     }

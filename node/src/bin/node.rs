@@ -2,8 +2,8 @@
 #![allow(clippy::expect_used)]
 
 use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
+use foundation_serialization::json::{self, json, Map as JsonMap};
 use runtime::sync::CancellationToken;
-use serde_json::{json, Map as JsonMap};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -168,7 +168,14 @@ impl CliLogSink {
             }
             obj.insert("fields".into(), json!(fields));
         }
-        let _ = serde_json::to_writer(stderr, &obj);
+        match json::to_string(&obj) {
+            Ok(rendered) => {
+                let _ = stderr.write_all(rendered.as_bytes());
+            }
+            Err(_) => {
+                let _ = stderr.write_all(b"{}");
+            }
+        }
         let _ = stderr.write_all(b"\n");
     }
 }
@@ -257,7 +264,14 @@ impl TraceWriter {
             "ts": ts,
             "args": args,
         });
-        let _ = serde_json::to_writer(&mut guard.file, &event);
+        match json::to_string(&event) {
+            Ok(rendered) => {
+                let _ = guard.file.write_all(rendered.as_bytes());
+            }
+            Err(_) => {
+                let _ = guard.file.write_all(b"{}");
+            }
+        }
         let _ = guard.file.write_all(b"\n");
     }
 
@@ -1352,7 +1366,7 @@ async fn async_main() -> std::process::ExitCode {
         }
         Commands::SignTx { key_id, tx_json } => {
             let sk = load_key(&key_id);
-            let payload: RawTxPayload = serde_json::from_str(&tx_json).expect("parse tx payload");
+            let payload: RawTxPayload = json::from_str(&tx_json).expect("parse tx payload");
             let signed = sign_tx(sk.to_bytes().to_vec(), payload).expect("sign tx");
             let bytes = bincode::serialize(&signed).expect("serialize tx");
             println!("{}", hex::encode(bytes));

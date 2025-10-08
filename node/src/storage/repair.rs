@@ -8,6 +8,7 @@ use crate::telemetry::{
 };
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::json;
 use rayon::prelude::*;
 use rayon::ThreadPool;
 use rayon::ThreadPoolBuilder;
@@ -186,8 +187,7 @@ impl RepairLog {
         fs::create_dir_all(&self.dir)?;
         let path = self.current_file_path();
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-        let line =
-            serde_json::to_vec(entry).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        let line = json::to_vec(entry).map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
         file.write_all(&line)?;
         file.write_all(b"\n")?;
         self.prune_old_files()?;
@@ -207,7 +207,7 @@ impl RepairLog {
             let fh = OpenOptions::new().read(true).open(&file)?;
             let reader = BufReader::new(fh);
             for line in reader.lines().flatten() {
-                if let Ok(entry) = serde_json::from_slice::<RepairLogEntry>(line.as_bytes()) {
+                if let Ok(entry) = json::from_slice::<RepairLogEntry>(line.as_bytes()) {
                     entries.push(entry);
                     if entries.len() >= limit {
                         break;

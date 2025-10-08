@@ -1,6 +1,12 @@
 # Changelog
-> **Review (2025-09-25):** Synced Changelog guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-10-08):** Logged the migration to the `foundation_serialization` facade across governance, ledger, and the metrics aggregator plus new JSON `Value` helpers.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
+
+## 2025-10-08 — Foundation Serialization Rollout
+
+- Extended the first-party JSON `Value` and `Number` helpers (`as_i64`, `as_u64`, `as_f64`) so callers can traverse payloads without manual pattern matching.
+- Migrated governance parameter persistence, the ledger migration CLI, and the metrics aggregator ingest/tests to `foundation_serialization::json`, removing the remaining direct `serde_json` usage from those crates.
+- Updated serialization guardrails to reflect the new facade, documenting the JSON value APIs and the binary/TOML helpers now shared across tooling.
 
 ## 2025-09-25 — Wrapper Telemetry & Codec Consolidation
 

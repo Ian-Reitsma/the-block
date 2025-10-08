@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use storage_engine::{inhouse_engine::InhouseEngine, KeyValue, KeyValueIterator};
+use sys::tempfile;
 
 fn temp_dir(name: &str) -> PathBuf {
     let mut base = std::env::temp_dir();
@@ -21,6 +22,32 @@ fn temp_dir(name: &str) -> PathBuf {
 
 fn cleanup(path: &Path) {
     let _ = fs::remove_dir_all(path);
+}
+
+#[test]
+fn loads_legacy_manifest_and_wal_fixture() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let root = tempdir.path();
+    let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_cf");
+
+    fs::copy(
+        fixture_root.join("manifest.json"),
+        root.join("manifest.json"),
+    )
+    .expect("copy manifest");
+
+    let cf_dir = root.join("default");
+    fs::create_dir_all(&cf_dir).expect("create cf dir");
+    fs::copy(fixture_root.join("wal.log"), cf_dir.join("wal.log")).expect("copy wal");
+
+    let engine = InhouseEngine::open(root.to_string_lossy().as_ref()).expect("open");
+    engine.ensure_cf("default").expect("load cf");
+
+    assert_eq!(engine.get("default", b"foo").unwrap(), None);
+    assert_eq!(
+        engine.get("default", b"baz").unwrap(),
+        Some(b"baz".to_vec())
+    );
 }
 
 #[test]

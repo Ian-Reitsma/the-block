@@ -296,12 +296,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bs58"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "771fe0050b883fcc3ea2359b1a96bcfbc090b7116eae7c3c512c7a083fdf23d3"
-
-[[package]]
 name = "bstr"
 version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1166,13 +1160,12 @@ dependencies = [
 name = "governance"
 version = "0.1.0"
 dependencies = [
- "bincode",
+ "foundation_serialization",
  "nalgebra 0.32.6",
  "once_cell",
  "rand 0.1.0",
  "rustdct",
  "serde",
- "serde_json",
  "sled 0.34.0",
  "statrs",
  "tempfile",
@@ -1272,15 +1265,13 @@ checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 name = "httpd"
 version = "0.1.0"
 dependencies = [
- "codec",
- "regex-lite",
+ "base64_fp",
+ "crypto_suite",
+ "diagnostics",
+ "foundation_serialization",
+ "rand 0.1.0",
  "runtime",
- "rustls 0.23.32",
- "rustls-pemfile 2.2.0",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
+ "sys",
 ]
 
 [[package]]
@@ -1640,11 +1631,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 name = "ledger"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "cli_core",
  "crypto_suite",
- "serde",
- "serde_json",
+ "foundation_serialization",
  "storage_engine",
 ]
 
@@ -1870,11 +1859,11 @@ dependencies = [
  "crypto_suite",
  "dependency_guard",
  "diagnostics",
+ "foundation_serialization",
  "httpd",
  "rand 0.1.0",
  "runtime",
  "serde",
- "serde_json",
  "storage_engine",
  "sys",
  "time",
@@ -2288,12 +2277,9 @@ dependencies = [
 name = "p2p_overlay"
 version = "0.1.0"
 dependencies = [
- "bs58",
  "crypto_suite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
+ "foundation_serialization",
+ "sys",
 ]
 
 [[package]]
@@ -2881,12 +2867,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "regex-lite"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "943f41321c63ef1c92fd763bfe054d2668f7f225a5c29f0105903dc2fc04ba30"
-
-[[package]]
 name = "regex-syntax"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3135,7 +3115,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile 1.0.4",
+ "rustls-pemfile",
  "schannel",
  "security-framework",
 ]
@@ -3147,15 +3127,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c"
 dependencies = [
  "base64 0.21.7",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
@@ -3533,13 +3504,10 @@ name = "storage_engine"
 version = "0.1.0"
 dependencies = [
  "base64_fp",
- "bincode",
  "dependency_guard",
- "parking_lot 0.12.5",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
+ "diagnostics",
+ "foundation_serialization",
+ "sys",
 ]
 
 [[package]]
@@ -3816,8 +3784,6 @@ dependencies = [
  "rustdct",
  "serde",
  "serde_bytes",
- "serde_cbor",
- "serde_json",
  "sled 0.34.0",
  "state",
  "static_assertions",
@@ -4001,6 +3967,7 @@ dependencies = [
  "crypto_suite",
  "dashmap",
  "diagnostics",
+ "foundation_serialization",
  "hex",
  "once_cell",
  "quinn",
@@ -4008,8 +3975,6 @@ dependencies = [
  "rcgen 0.12.1",
  "runtime",
  "rustls 0.21.12",
- "serde",
- "serde_json",
  "sys",
  "time",
  "x509-parser",

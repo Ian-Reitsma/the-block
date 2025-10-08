@@ -8,10 +8,9 @@ default = []
 inhouse = [
     "dep:crypto_suite",
     "dep:rand",
-    "dep:serde",
-    "dep:serde_json",
     "dep:runtime",
     "dep:sys",
+    "dep:foundation_serialization",
 ]
 quinn = [
     "dep:crypto_suite",
@@ -29,11 +28,10 @@ quinn = [
     "dep:rand",
     "dep:rcgen",
     "dep:runtime",
-    "dep:serde",
-    "dep:serde_json",
     "dep:sys",
     "dep:time",
     "dep:x509-parser",
+    "dep:foundation_serialization",
 ]
 quic = ["quinn", "s2n-quic"]
 
@@ -51,8 +49,7 @@ rcgen = { version = "0.12", optional = true }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }
 quinn = { version = "0.10", features = ["rustls"], optional = true }
 rustls = { version = "0.21", features = ["dangerous_configuration"], optional = true }
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
 time = { version = "0.3", optional = true }
 x509-parser = { version = "0.16", optional = true }
+foundation_serialization = { path = "../foundation_serialization", optional = true }
 

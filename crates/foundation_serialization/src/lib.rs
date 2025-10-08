@@ -8,6 +8,7 @@
 //! helpers rely on the implementations located in `json.rs` and `binary.rs`
 //! respectively while continuing to interoperate with `serde` derives.
 
+mod base58_impl;
 mod binary_impl;
 mod json_impl;
 mod toml_impl;
@@ -103,9 +104,29 @@ pub mod json {
         json_impl::to_vec_pretty(value).map_err(Error::json)
     }
 
+    /// Serialize a JSON [`Value`] to a byte vector without requiring serde traits.
+    pub fn to_vec_value(value: &Value) -> Vec<u8> {
+        json_impl::to_vec_value(value)
+    }
+
+    /// Serialize a JSON [`Value`] into a string without requiring serde traits.
+    pub fn to_string_value(value: &Value) -> String {
+        json_impl::to_string_value(value)
+    }
+
     /// Deserialize a value from a byte slice containing JSON data.
     pub fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
         json_impl::from_slice(input).map_err(Error::json)
+    }
+
+    /// Deserialize a JSON [`Value`] from a byte slice.
+    pub fn value_from_slice(input: &[u8]) -> Result<Value> {
+        json_impl::value_from_slice(input).map_err(Error::json)
+    }
+
+    /// Deserialize a JSON [`Value`] from a string slice.
+    pub fn value_from_str(input: &str) -> Result<Value> {
+        json_impl::value_from_str(input).map_err(Error::json)
     }
 
     /// Deserialize a value from a reader containing JSON text.
@@ -143,6 +164,11 @@ pub mod json {
     pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T> {
         json_impl::from_value(value).map_err(Error::json)
     }
+}
+
+/// Base58 helpers implemented without third-party dependencies.
+pub mod base58 {
+    pub use crate::base58_impl::{decode, encode, Error};
 }
 
 /// Binary helpers backed by the first-party encoder/decoder.

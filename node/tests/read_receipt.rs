@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::gateway::read_receipt::{append, reads_since};
 
 #[test]

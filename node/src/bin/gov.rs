@@ -8,6 +8,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use foundation_serialization::json::{self, Value};
+
 use cli_core::{
     arg::{ArgSpec, PositionalSpec},
     command::{Command as CliCommand, CommandBuilder, CommandId},
@@ -83,7 +85,7 @@ fn main() {
     match cli.cmd {
         Command::Submit { file } => {
             let text = fs::read_to_string(file).expect("read");
-            let v: serde_json::Value = serde_json::from_str(&text).expect("json");
+            let v: Value = json::from_str(&text).expect("json");
             let start = v["start"].as_u64().unwrap_or(0);
             let end = v["end"].as_u64().unwrap_or(0);
             let id = gov.submit(start, end);

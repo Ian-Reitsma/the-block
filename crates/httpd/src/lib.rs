@@ -1,38 +1,31 @@
-use codec::{self, JsonProfile};
+use diagnostics::{debug, info};
+use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::{Error as SerializationError, Serialize, json};
 use runtime::net::{TcpListener, TcpStream};
 use runtime::ws::{self, ServerStream};
 use runtime::{spawn, timeout};
-use rustls::crypto::{self, CryptoProvider};
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::server::WebPkiClientVerifier;
-use rustls::{RootCertStore, ServerConfig as RustlsServerConfig, ServerConnection};
-use rustls_pemfile::{certs, pkcs8_private_keys, rsa_private_keys};
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::fmt;
-use std::fs::File;
 use std::future::Future;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind};
 use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use thiserror::Error;
 
 pub mod blocking;
 pub mod client;
 pub mod filters;
 pub mod jsonrpc;
 pub mod metrics;
+mod tls;
+use crate::tls::{AES_BLOCK, MAC_LEN};
 pub mod uri;
 pub use blocking::{BlockingClient, BlockingRequestBuilder};
 pub use client::{Client as HttpClient, ClientConfig, ClientError, ClientResponse};
 pub use jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcRouter};
 pub use uri::{Uri, UriError, form_urlencoded, join_path};
-
-pub(crate) const JSON_CODEC: codec::Codec = codec::Codec::Json(JsonProfile::Canonical);
 
 /// Asynchronous IO abstraction allowing the HTTP server to operate over raw
 /// TCP streams as well as TLS sessions that decrypt into an in-memory
@@ -341,183 +334,148 @@ impl Default for ServerConfig {
     }
 }
 
-/// TLS configuration wrapper that loads certificates and keys while keeping the
-/// underlying `rustls` configuration shareable across connection tasks.
 #[derive(Clone)]
 pub struct ServerTlsConfig {
-    config: Arc<RustlsServerConfig>,
+    inner: Arc<ServerTlsConfigInner>,
+}
+
+struct ServerTlsConfigInner {
+    identity: tls::ServerIdentity,
+    client_auth: tls::ClientAuthPolicy,
 }
 
 impl ServerTlsConfig {
-    /// Creates a TLS configuration from an existing `rustls` server config.
-    pub fn new(config: RustlsServerConfig) -> io::Result<Self> {
-        ensure_crypto_provider()?;
-        Ok(Self {
-            config: Arc::new(config),
-        })
+    fn new(identity: tls::ServerIdentity, client_auth: tls::ClientAuthPolicy) -> Self {
+        Self {
+            inner: Arc::new(ServerTlsConfigInner {
+                identity,
+                client_auth,
+            }),
+        }
     }
 
-    /// Loads certificate and private key PEM files into a `rustls` server
-    /// configuration with no client authentication requirements.
+    pub fn from_identity_files(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let identity = tls::ServerIdentity::from_files(cert_path, key_path)?;
+        Ok(Self::new(identity, tls::ClientAuthPolicy::None))
+    }
+
     pub fn from_pem_files(
         cert_path: impl AsRef<Path>,
         key_path: impl AsRef<Path>,
     ) -> io::Result<Self> {
-        let certs = load_certs(cert_path)?;
-        let key = load_private_key(key_path)?;
-        let config = RustlsServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-        Self::new(config)
+        Self::from_identity_files(cert_path, key_path)
     }
 
-    /// Loads certificates, keys, and a client CA to enforce mutual TLS.
+    pub fn from_identity_files_with_client_auth(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+        registry_path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let identity = tls::ServerIdentity::from_files(cert_path, key_path)?;
+        let registry = tls::ClientRegistry::from_path(registry_path)?;
+        Ok(Self::new(
+            identity,
+            tls::ClientAuthPolicy::Required(registry),
+        ))
+    }
+
     pub fn from_pem_files_with_client_auth(
         cert_path: impl AsRef<Path>,
         key_path: impl AsRef<Path>,
-        client_ca_path: impl AsRef<Path>,
+        registry_path: impl AsRef<Path>,
     ) -> io::Result<Self> {
-        let config = build_server_config_with_client_auth(
-            cert_path,
-            key_path,
-            client_ca_path,
-            ClientAuthMode::Required,
-        )?;
-        Self::new(config)
+        Self::from_identity_files_with_client_auth(cert_path, key_path, registry_path)
     }
 
-    /// Loads certificates, keys, and a client CA while allowing optional client
-    /// authentication.
+    pub fn from_identity_files_with_optional_client_auth(
+        cert_path: impl AsRef<Path>,
+        key_path: impl AsRef<Path>,
+        registry_path: impl AsRef<Path>,
+    ) -> io::Result<Self> {
+        let identity = tls::ServerIdentity::from_files(cert_path, key_path)?;
+        let registry = tls::ClientRegistry::from_path(registry_path)?;
+        Ok(Self::new(
+            identity,
+            tls::ClientAuthPolicy::Optional(registry),
+        ))
+    }
+
     pub fn from_pem_files_with_optional_client_auth(
         cert_path: impl AsRef<Path>,
         key_path: impl AsRef<Path>,
-        client_ca_path: impl AsRef<Path>,
+        registry_path: impl AsRef<Path>,
     ) -> io::Result<Self> {
-        let config = build_server_config_with_client_auth(
-            cert_path,
-            key_path,
-            client_ca_path,
-            ClientAuthMode::Optional,
-        )?;
-        Self::new(config)
+        Self::from_identity_files_with_optional_client_auth(cert_path, key_path, registry_path)
     }
 
-    /// Returns a clone of the underlying `rustls` configuration.
-    pub fn config(&self) -> Arc<RustlsServerConfig> {
-        self.config.clone()
+    fn inner(&self) -> Arc<ServerTlsConfigInner> {
+        self.inner.clone()
     }
-}
-
-fn ensure_crypto_provider() -> io::Result<()> {
-    if CryptoProvider::get_default().is_none() {
-        if let Err(err) = crypto::ring::default_provider().install_default() {
-            if CryptoProvider::get_default().is_none() {
-                return Err(io::Error::new(
-                    ErrorKind::Other,
-                    format!("failed to install rustls crypto provider: {err:?}"),
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn load_certs(path: impl AsRef<Path>) -> io::Result<Vec<CertificateDer<'static>>> {
-    let mut reader = io::BufReader::new(File::open(path)?);
-    certs(&mut reader)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
-}
-
-fn load_private_key(path: impl AsRef<Path>) -> io::Result<PrivateKeyDer<'static>> {
-    let path = path.as_ref();
-    let mut reader = io::BufReader::new(File::open(path)?);
-    let mut keys = pkcs8_private_keys(&mut reader)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-    if let Some(key) = keys.pop() {
-        return Ok(PrivateKeyDer::from(key));
-    }
-    let mut reader = io::BufReader::new(File::open(path)?);
-    let mut keys = rsa_private_keys(&mut reader)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-    keys.pop()
-        .map(PrivateKeyDer::from)
-        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "missing private key"))
-}
-
-fn load_root_store(path: impl AsRef<Path>) -> io::Result<RootCertStore> {
-    let ca_certs = load_certs(path)?;
-    if ca_certs.is_empty() {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            "client CA bundle is empty",
-        ));
-    }
-    let mut store = RootCertStore::empty();
-    for cert in ca_certs {
-        store
-            .add(cert)
-            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-    }
-    Ok(store)
-}
-
-enum ClientAuthMode {
-    Required,
-    Optional,
-}
-
-fn build_server_config_with_client_auth(
-    cert_path: impl AsRef<Path>,
-    key_path: impl AsRef<Path>,
-    client_ca_path: impl AsRef<Path>,
-    mode: ClientAuthMode,
-) -> io::Result<RustlsServerConfig> {
-    let certs = load_certs(cert_path)?;
-    let key = load_private_key(key_path)?;
-    let store = load_root_store(client_ca_path)?;
-    let builder = WebPkiClientVerifier::builder(Arc::new(store));
-    let verifier = match mode {
-        ClientAuthMode::Required => builder.build(),
-        ClientAuthMode::Optional => builder.allow_unauthenticated().build(),
-    }
-    .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-    RustlsServerConfig::builder()
-        .with_client_cert_verifier(verifier)
-        .with_single_cert(certs, key)
-        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))
 }
 
 /// Error type returned by the HTTP server implementation.
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum HttpError {
-    #[error("io error: {0}")]
-    Io(#[from] io::Error),
-    #[error("malformed request line")]
+    Io(io::Error),
     MalformedRequestLine,
-    #[error("unsupported http method")]
     UnsupportedMethod,
-    #[error("malformed header")]
     MalformedHeader,
-    #[error("missing host header")]
     MissingHost,
-    #[error("unsupported http version")]
     UnsupportedVersion,
-    #[error("payload too large")]
     BodyTooLarge,
-    #[error("timeout")]
     Timeout,
-    #[error("handler error: {0}")]
     Handler(String),
-    #[error("codec error: {0}")]
-    Codec(#[from] codec::Error),
-    #[error("websocket upgrade failed: {0}")]
+    Serialization(SerializationError),
     WebSocketUpgrade(&'static str),
-    #[error("websocket upgrades are not supported over tls listeners")]
     WebSocketTlsUnsupported,
+}
+
+impl From<io::Error> for HttpError {
+    fn from(value: io::Error) -> Self {
+        HttpError::Io(value)
+    }
+}
+
+impl From<SerializationError> for HttpError {
+    fn from(value: SerializationError) -> Self {
+        HttpError::Serialization(value)
+    }
+}
+
+impl fmt::Display for HttpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HttpError::Io(err) => write!(f, "io error: {err}"),
+            HttpError::MalformedRequestLine => write!(f, "malformed request line"),
+            HttpError::UnsupportedMethod => write!(f, "unsupported http method"),
+            HttpError::MalformedHeader => write!(f, "malformed header"),
+            HttpError::MissingHost => write!(f, "missing host header"),
+            HttpError::UnsupportedVersion => write!(f, "unsupported http version"),
+            HttpError::BodyTooLarge => write!(f, "payload too large"),
+            HttpError::Timeout => write!(f, "timeout"),
+            HttpError::Handler(msg) => write!(f, "handler error: {msg}"),
+            HttpError::Serialization(err) => write!(f, "serialization error: {err}"),
+            HttpError::WebSocketUpgrade(reason) => {
+                write!(f, "websocket upgrade failed: {reason}")
+            }
+            HttpError::WebSocketTlsUnsupported => {
+                write!(f, "websocket upgrades are not supported over tls listeners")
+            }
+        }
+    }
+}
+
+impl std::error::Error for HttpError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            HttpError::Io(err) => Some(err),
+            HttpError::Serialization(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -561,113 +519,133 @@ enum Segment {
 
 struct TlsStream {
     stream: TcpStream,
-    connection: ServerConnection,
+    session: tls::SessionKeys,
+    read_buffer: Vec<u8>,
+    read_offset: usize,
+    read_seq: u64,
+    write_seq: u64,
     eof: bool,
-    write_buf: Vec<u8>,
 }
 
 impl TlsStream {
-    async fn accept(stream: TcpStream, config: Arc<RustlsServerConfig>) -> io::Result<Self> {
-        let connection = ServerConnection::new(config)
-            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-        let mut this = Self {
-            stream,
-            connection,
-            eof: false,
-            write_buf: Vec::with_capacity(2048),
-        };
-        this.complete_handshake().await?;
-        Ok(this)
-    }
-
-    async fn complete_handshake(&mut self) -> io::Result<()> {
-        while self.connection.is_handshaking() {
-            if self.connection.wants_write() {
-                self.flush_tls().await?;
-            }
-            if self.connection.wants_read() {
-                self.read_tls_frame().await?;
-            } else {
-                // Even if no read is requested we still need to process any
-                // outstanding handshake messages before re-checking state.
-                self.process_new_packets().await?;
-            }
+    async fn accept(mut stream: TcpStream, config: Arc<ServerTlsConfigInner>) -> io::Result<Self> {
+        let outcome =
+            tls::perform_handshake(&mut stream, &config.identity, &config.client_auth).await?;
+        if let Some(client) = outcome.client_key {
+            let encoded = base64_fp::encode_standard(&client.to_bytes());
+            info!("tls client authenticated", %encoded);
         }
-        self.flush_tls().await
+        Ok(Self {
+            stream,
+            session: outcome.session,
+            read_buffer: Vec::new(),
+            read_offset: 0,
+            read_seq: 0,
+            write_seq: 0,
+            eof: false,
+        })
     }
 
     async fn read_plain(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        loop {
-            {
-                let mut reader = self.connection.reader();
-                match reader.read(buf) {
-                    Ok(0) => {}
-                    Ok(n) => return Ok(n),
-                    Err(err) if err.kind() == ErrorKind::WouldBlock => {}
-                    Err(err) => return Err(io::Error::new(ErrorKind::InvalidData, err)),
+        if self.read_offset < self.read_buffer.len() {
+            let available = &self.read_buffer[self.read_offset..];
+            let to_copy = available.len().min(buf.len());
+            buf[..to_copy].copy_from_slice(&available[..to_copy]);
+            self.read_offset += to_copy;
+            if self.read_offset >= self.read_buffer.len() {
+                self.read_buffer.clear();
+                self.read_offset = 0;
+            }
+            return Ok(to_copy);
+        }
+        if self.eof {
+            return Ok(0);
+        }
+        match self.read_record().await? {
+            Some(plain) => {
+                let to_copy = plain.len().min(buf.len());
+                buf[..to_copy].copy_from_slice(&plain[..to_copy]);
+                if to_copy < plain.len() {
+                    self.read_buffer = plain;
+                    self.read_offset = to_copy;
                 }
+                Ok(to_copy)
             }
-            if self.eof {
-                return Ok(0);
+            None => {
+                self.eof = true;
+                Ok(0)
             }
-            self.read_tls_frame().await?;
         }
     }
 
-    async fn write_plain(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let written = {
-            let mut writer = self.connection.writer();
-            writer
-                .write(buf)
-                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?
-        };
-        self.flush_tls().await?;
+    async fn read_record(&mut self) -> io::Result<Option<Vec<u8>>> {
+        let mut header = [0u8; 12];
+        match self.stream.read_exact(&mut header).await {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::UnexpectedEof => return Ok(None),
+            Err(err) => return Err(err),
+        }
+        let length = u32::from_be_bytes(header[..4].try_into().unwrap()) as usize;
+        let seq = u64::from_be_bytes(header[4..12].try_into().unwrap());
+        let padded = ((length / AES_BLOCK) + 1) * AES_BLOCK;
+        let mut iv = [0u8; AES_BLOCK];
+        self.stream.read_exact(&mut iv).await?;
+        let mut ciphertext = vec![0u8; padded];
+        self.stream.read_exact(&mut ciphertext).await?;
+        let mut mac = [0u8; MAC_LEN];
+        self.stream.read_exact(&mut mac).await?;
+        let mut frame = Vec::with_capacity(12 + AES_BLOCK + padded + MAC_LEN);
+        frame.extend_from_slice(&header);
+        frame.extend_from_slice(&iv);
+        frame.extend_from_slice(&ciphertext);
+        frame.extend_from_slice(&mac);
+        let plain = tls::decrypt_record(
+            &self.session.client_write,
+            &self.session.client_mac,
+            self.read_seq,
+            &frame,
+        )?;
+        if seq != self.read_seq {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "tls sequence mismatch",
+            ));
+        }
+        self.read_seq = self.read_seq.wrapping_add(1);
+        Ok(Some(plain))
+    }
+
+    async fn write_plain(&mut self, mut buf: &[u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let mut written = 0usize;
+        while !buf.is_empty() {
+            let chunk = buf.len().min(16 * 1024);
+            let frame = tls::encrypt_record(
+                &self.session.server_write,
+                &self.session.server_mac,
+                self.write_seq,
+                &buf[..chunk],
+            )?;
+            self.stream.write_all(&frame).await?;
+            self.write_seq = self.write_seq.wrapping_add(1);
+            buf = &buf[chunk..];
+            written += chunk;
+        }
         Ok(written)
     }
 
     async fn shutdown_plain(&mut self) -> io::Result<()> {
-        self.connection.send_close_notify();
-        self.flush_tls().await?;
+        let frame = tls::encrypt_record(
+            &self.session.server_write,
+            &self.session.server_mac,
+            self.write_seq,
+            &[],
+        )?;
+        self.stream.write_all(&frame).await?;
+        self.stream.flush().await?;
         self.stream.shutdown().await
-    }
-
-    async fn flush_tls(&mut self) -> io::Result<()> {
-        while self.connection.wants_write() {
-            self.write_buf.clear();
-            self.connection
-                .write_tls(&mut self.write_buf)
-                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-            if self.write_buf.is_empty() {
-                break;
-            }
-            self.stream.write_all(&self.write_buf).await?;
-        }
-        self.stream.flush().await
-    }
-
-    async fn read_tls_frame(&mut self) -> io::Result<()> {
-        let mut buf = [0u8; 2048];
-        let read = self.stream.read(&mut buf).await?;
-        if read == 0 {
-            self.eof = true;
-        } else {
-            let mut cursor = io::Cursor::new(&buf[..read]);
-            self.connection
-                .read_tls(&mut cursor)
-                .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?;
-        }
-        self.process_new_packets().await
-    }
-
-    async fn process_new_packets(&mut self) -> io::Result<()> {
-        match self.connection.process_new_packets() {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                let io_err = io::Error::new(ErrorKind::InvalidData, err);
-                let _ = self.flush_tls().await;
-                Err(io_err)
-            }
-        }
     }
 }
 
@@ -681,7 +659,7 @@ impl ConnectionIo for TlsStream {
     }
 
     fn flush<'a>(&'a mut self) -> IoFuture<'a, ()> {
-        Box::pin(async move { self.flush_tls().await })
+        Box::pin(async move { self.stream.flush().await })
     }
 
     fn shutdown<'a>(&'a mut self) -> IoFuture<'a, ()> {
@@ -693,11 +671,11 @@ impl UpgradeIo for TlsStream {
     type WebSocket = Self;
 
     fn supports_websocket(&self) -> bool {
-        true
+        false
     }
 
     fn into_websocket(self) -> Result<Self::WebSocket, HttpError> {
-        Ok(self)
+        Err(HttpError::WebSocketTlsUnsupported)
     }
 }
 
@@ -711,7 +689,7 @@ impl ws::WebSocketIo for TlsStream {
     }
 
     fn flush<'a>(&'a mut self) -> ws::IoFuture<'a, ()> {
-        Box::pin(async move { self.flush_tls().await })
+        Box::pin(async move { self.stream.flush().await })
     }
 
     fn shutdown<'a>(&'a mut self) -> ws::IoFuture<'a, ()> {
@@ -932,7 +910,7 @@ impl<State> Request<State> {
     }
 
     pub fn json<T: DeserializeOwned>(&self) -> Result<T, HttpError> {
-        codec::deserialize(JSON_CODEC, &self.body).map_err(HttpError::from)
+        json::from_slice(&self.body).map_err(HttpError::from)
     }
 
     pub fn take_body(mut self) -> Vec<u8> {
@@ -1005,7 +983,7 @@ impl<State> RequestBuilder<State> {
     }
 
     pub fn json<T: Serialize>(mut self, value: &T) -> Result<Self, HttpError> {
-        self.body = codec::serialize(JSON_CODEC, value)?;
+        self.body = json::to_vec(value)?;
         self.headers
             .insert("content-type".into(), "application/json".into());
         Ok(self)
@@ -1170,7 +1148,7 @@ impl Response {
     }
 
     pub fn json<T: Serialize>(mut self, value: &T) -> Result<Self, HttpError> {
-        self.body = codec::serialize(JSON_CODEC, value)?;
+        self.body = json::to_vec(value)?;
         self.headers
             .insert("content-type".into(), "application/json".into());
         Ok(self)
@@ -1362,7 +1340,7 @@ where
         let config = config.clone();
         spawn(async move {
             if let Err(err) = handle_connection(stream, remote, router, config).await {
-                tracing::debug!(?err, "http connection error");
+                debug!(?err, "http connection error");
             }
         });
     }
@@ -1385,14 +1363,14 @@ where
         let config = config.clone();
         let tls = tls.clone();
         spawn(async move {
-            match TlsStream::accept(stream, tls.config()).await {
+            match TlsStream::accept(stream, tls.inner()).await {
                 Ok(tls_stream) => {
                     if let Err(err) = handle_connection(tls_stream, remote, router, config).await {
-                        tracing::debug!(?err, "http tls connection error");
+                        debug!(?err, "http tls connection error");
                     }
                 }
                 Err(err) => {
-                    tracing::debug!(?err, "tls handshake failed");
+                    debug!(?err, "tls handshake failed");
                 }
             }
         });
@@ -1510,7 +1488,7 @@ where
                     let raw_stream = stream.into_inner().into_websocket()?;
                     spawn(async move {
                         if let Err(err) = on_upgrade(ServerStream::from_io(raw_stream)).await {
-                            tracing::debug!(?err, "websocket handler error");
+                            debug!(?err, "websocket handler error");
                         }
                     });
                     return Ok(());

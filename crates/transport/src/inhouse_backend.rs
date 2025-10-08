@@ -5,12 +5,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crypto_suite::hashing::blake3::{hash, Hasher};
 use diagnostics::{anyhow, Result as DiagResult, TbError};
+use foundation_serialization::json::{self, Map, Value};
 use rand::{rngs::OsRng, RngCore};
-use serde::{Deserialize, Serialize};
 
 use crate::{CertificateStore, ProviderCapability, ProviderMetadata, RetryPolicy};
 
@@ -263,10 +263,226 @@ pub struct InhouseCertificateStore {
     current: Arc<Mutex<Option<Advertisement>>>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 pub struct Advertisement {
     pub fingerprint: [u8; 32],
     pub issued_at: SystemTime,
+}
+
+impl Advertisement {
+    fn to_value(&self) -> DiagResult<Value> {
+        let mut map = Map::new();
+        map.insert(
+            "fingerprint".to_string(),
+            Value::Array(self.fingerprint.iter().copied().map(Value::from).collect()),
+        );
+        map.insert(
+            "issued_at".to_string(),
+            Value::Object(system_time_to_map(self.issued_at)?),
+        );
+        Ok(Value::Object(map))
+    }
+
+    fn from_value(value: Value) -> DiagResult<Self> {
+        let mut object = match value {
+            Value::Object(map) => map,
+            other => {
+                return Err(anyhow!(
+                    "advertisement must be a JSON object, found {}",
+                    describe_json(&other)
+                ))
+            }
+        };
+        let fingerprint_value = object
+            .remove("fingerprint")
+            .ok_or_else(|| anyhow!("advertisement missing fingerprint"))?;
+        let issued_at_value = object
+            .remove("issued_at")
+            .ok_or_else(|| anyhow!("advertisement missing issued_at"))?;
+        Ok(Advertisement {
+            fingerprint: parse_fingerprint(fingerprint_value)?,
+            issued_at: parse_system_time(issued_at_value)?,
+        })
+    }
+}
+
+fn describe_json(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn parse_fingerprint(value: Value) -> DiagResult<[u8; 32]> {
+    let values = match value {
+        Value::Array(values) => values,
+        other => {
+            return Err(anyhow!(
+                "advertisement fingerprint must be an array, found {}",
+                describe_json(&other)
+            ))
+        }
+    };
+    if values.len() != 32 {
+        return Err(anyhow!(
+            "advertisement fingerprint must contain 32 entries, found {}",
+            values.len()
+        ));
+    }
+    let mut out = [0u8; 32];
+    for (idx, value) in values.into_iter().enumerate() {
+        out[idx] = parse_byte(value)?;
+    }
+    Ok(out)
+}
+
+fn parse_byte(value: Value) -> DiagResult<u8> {
+    let number = match value {
+        Value::Number(n) => n,
+        Value::String(s) => {
+            let parsed: u64 = s
+                .parse()
+                .map_err(|err| anyhow!("invalid fingerprint byte: {err}"))?;
+            return byte_from_u64(parsed);
+        }
+        other => {
+            return Err(anyhow!(
+                "fingerprint entries must be numbers, found {}",
+                describe_json(&other)
+            ))
+        }
+    };
+    let value = number
+        .as_u64()
+        .ok_or_else(|| anyhow!("fingerprint entries must be unsigned integers"))?;
+    byte_from_u64(value)
+}
+
+fn byte_from_u64(value: u64) -> DiagResult<u8> {
+    if value > u8::MAX as u64 {
+        return Err(anyhow!("fingerprint entries must fit in a byte"));
+    }
+    Ok(value as u8)
+}
+
+fn system_time_to_map(time: SystemTime) -> DiagResult<Map> {
+    let duration = time
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| anyhow!("timestamp predates unix epoch"))?;
+    let mut map = Map::new();
+    map.insert(
+        "secs_since_epoch".to_string(),
+        Value::from(duration.as_secs()),
+    );
+    map.insert(
+        "nanos_since_epoch".to_string(),
+        Value::from(duration.subsec_nanos()),
+    );
+    Ok(map)
+}
+
+fn parse_system_time(value: Value) -> DiagResult<SystemTime> {
+    let mut object = match value {
+        Value::Object(map) => map,
+        other => {
+            return Err(anyhow!(
+                "issued_at must be an object, found {}",
+                describe_json(&other)
+            ))
+        }
+    };
+    let secs = parse_u64_field(
+        object
+            .remove("secs_since_epoch")
+            .ok_or_else(|| anyhow!("issued_at missing secs_since_epoch"))?,
+        "secs_since_epoch",
+    )?;
+    let nanos = parse_u64_field(
+        object
+            .remove("nanos_since_epoch")
+            .ok_or_else(|| anyhow!("issued_at missing nanos_since_epoch"))?,
+        "nanos_since_epoch",
+    )?;
+    if nanos >= 1_000_000_000 {
+        return Err(anyhow!(
+            "nanos_since_epoch must be less than 1_000_000_000, found {nanos}"
+        ));
+    }
+    let duration = std::time::Duration::new(secs, nanos as u32);
+    Ok(UNIX_EPOCH + duration)
+}
+
+fn parse_u64_field(value: Value, field: &str) -> DiagResult<u64> {
+    match value {
+        Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| anyhow!("{field} must be an unsigned integer")),
+        Value::String(s) => s
+            .parse::<u64>()
+            .map_err(|err| anyhow!("invalid {field}: {err}")),
+        other => Err(anyhow!(
+            "{field} must be a number, found {}",
+            describe_json(&other)
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn advertisement_decodes_legacy_json() {
+        let json = r#"{"fingerprint":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31],"issued_at":{"secs_since_epoch":123,"nanos_since_epoch":456}}"#;
+        let value = json::value_from_str(json).expect("parse legacy json");
+        let advert = Advertisement::from_value(value).expect("decode advertisement");
+        assert_eq!(advert.fingerprint[0], 0);
+        assert_eq!(advert.fingerprint[31], 31);
+        let duration = advert
+            .issued_at
+            .duration_since(UNIX_EPOCH)
+            .expect("issued_at after epoch");
+        assert_eq!(duration.as_secs(), 123);
+        assert_eq!(duration.subsec_nanos(), 456);
+    }
+
+    #[test]
+    fn advertisement_serializes_expected_shape() {
+        let mut fingerprint = [0u8; 32];
+        fingerprint[0] = 42;
+        fingerprint[31] = 7;
+        let advert = Advertisement {
+            fingerprint,
+            issued_at: UNIX_EPOCH + std::time::Duration::new(5, 9),
+        };
+        let value = advert.to_value().expect("serialize advertisement");
+        let object = match value {
+            Value::Object(map) => map,
+            other => panic!("expected object, found {:?}", other),
+        };
+        let fingerprint_value = object.get("fingerprint").expect("fingerprint present");
+        let array = match fingerprint_value {
+            Value::Array(values) => values,
+            _ => panic!("fingerprint not serialized as array"),
+        };
+        assert_eq!(array.len(), 32);
+        assert_eq!(array[0], Value::from(42u8));
+        assert_eq!(array[31], Value::from(7u8));
+        let issued_at = object.get("issued_at").expect("issued_at present");
+        let issued_map = match issued_at {
+            Value::Object(map) => map,
+            _ => panic!("issued_at not serialized as object"),
+        };
+        assert_eq!(issued_map.get("secs_since_epoch"), Some(&Value::from(5u64)));
+        assert_eq!(
+            issued_map.get("nanos_since_epoch"),
+            Some(&Value::from(9u32))
+        );
+    }
 }
 
 impl InhouseCertificateStore {
@@ -280,8 +496,8 @@ impl InhouseCertificateStore {
     fn persist(&self, advert: &Advertisement) -> DiagResult<()> {
         let mut file =
             File::create(&self.path).map_err(|err| anyhow!("create cert store: {err}"))?;
-        let json =
-            serde_json::to_vec(advert).map_err(|err| anyhow!("serialize cert store: {err}"))?;
+        let json_value = advert.to_value()?;
+        let json = json::to_vec_value(&json_value);
         file.write_all(&json)
             .map_err(|err| anyhow!("write cert store: {err}"))?;
         file.sync_all()
@@ -300,8 +516,9 @@ impl InhouseCertificateStore {
         if buf.is_empty() {
             return Ok(None);
         }
-        let advert: Advertisement =
-            serde_json::from_slice(&buf).map_err(|err| anyhow!("decode cert store: {err}"))?;
+        let value =
+            json::value_from_slice(&buf).map_err(|err| anyhow!("decode cert store: {err}"))?;
+        let advert = Advertisement::from_value(value)?;
         Ok(Some(advert))
     }
 

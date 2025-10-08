@@ -854,39 +854,39 @@ pub fn purge_policy(domain: &str) {
     }
 }
 
-pub fn status_snapshot() -> serde_json::Value {
+pub fn status_snapshot() -> Value {
     match lock_cache() {
-        Some(cache) => serde_json::json!({
+        Some(cache) => json!({
             "status": "ok",
             "cache": cache.status(),
         }),
-        None => serde_json::json!({
+        None => json!({
             "status": "error",
             "error": "lock",
         }),
     }
 }
 
-pub fn flush_cache() -> serde_json::Value {
+pub fn flush_cache() -> Value {
     match lock_cache() {
         Some(mut cache) => match cache.flush() {
-            Ok(()) => serde_json::json!({
+            Ok(()) => json!({
                 "status": "ok",
             }),
-            Err(err) => serde_json::json!({
+            Err(err) => json!({
                 "status": "error",
                 "error": err.to_string(),
             }),
         },
-        None => serde_json::json!({
+        None => json!({
             "status": "error",
             "error": "lock",
         }),
     }
 }
 
-pub fn cache_policy(domain: &str, value: &serde_json::Value) {
-    if let Ok(json) = serde_json::to_string(value) {
+pub fn cache_policy(domain: &str, value: &Value) {
+    if let Ok(json) = json::to_string(value) {
         if let Err(err) = cache_insert(policy_key(domain), json) {
             #[cfg(not(feature = "telemetry"))]
             let _ = &err;
@@ -896,8 +896,8 @@ pub fn cache_policy(domain: &str, value: &serde_json::Value) {
     }
 }
 
-pub fn cached_policy(domain: &str) -> Option<serde_json::Value> {
-    cache_get(&policy_key(domain)).and_then(|val| serde_json::from_str(&val).ok())
+pub fn cached_policy(domain: &str) -> Option<Value> {
+    cache_get(&policy_key(domain)).and_then(|val| json::from_str(&val).ok())
 }
 
 pub fn invalidate_prefix(prefix: &str) {

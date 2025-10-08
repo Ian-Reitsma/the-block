@@ -12,13 +12,13 @@ use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
 use concurrency::{Lazy, MutexExt};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use foundation_serialization::json::{self, json, Value};
 use hex;
 use indexmap::IndexMap;
 use rand::{rngs::StdRng, seq::SliceRandom};
 use runtime::net::lookup_srv;
 use runtime::sync::broadcast;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
 use std::fs;
@@ -1387,7 +1387,7 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
         };
         let metrics =
             metrics.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "peer"))?;
-        let json = serde_json::to_vec(&metrics)?;
+        let json = json::to_vec(&metrics)?;
         let tmp_dir = tempfile::tempdir_in(&dir).map_err(sys_to_io_error)?;
         let mut tmp = NamedTempFile::new_in(tmp_dir.path()).map_err(sys_to_io_error)?;
         tmp.as_file().lock_exclusive().map_err(sys_to_io_error)?;
@@ -1522,7 +1522,7 @@ pub fn export_all_peer_stats(
                         }
                     }
                     let id = overlay_peer_label(pk);
-                    let data = serde_json::to_vec(&m)?;
+                    let data = json::to_vec(&m)?;
                     total_bytes += data.len() as u64;
                     if total_bytes > quota {
                         return Err(std::io::Error::new(
@@ -1601,7 +1601,7 @@ pub fn export_all_peer_stats(
                     }
                 }
                 let id = overlay_peer_label(pk);
-                let data = serde_json::to_vec(&m)?;
+                let data = json::to_vec(&m)?;
                 total_bytes += data.len() as u64;
                 if total_bytes > quota {
                     return Err(std::io::Error::new(
@@ -2093,17 +2093,17 @@ impl AggregatorClient {
     }
 
     async fn ingest(&self, snaps: Vec<PeerSnapshot>) {
-        let body = serde_json::to_value(snaps).unwrap();
+        let body = json::to_value(snaps).unwrap();
         self.post("ingest", body).await;
     }
 
     #[cfg(feature = "telemetry")]
     async fn telemetry_summary(&self, summary: crate::telemetry::summary::TelemetrySummary) {
-        let body = serde_json::to_value(summary).unwrap();
+        let body = json::to_value(summary).unwrap();
         self.post("telemetry", body).await;
     }
 
-    async fn post(&self, path: &str, body: serde_json::Value) {
+    async fn post(&self, path: &str, body: Value) {
         for i in 0..self.urls.len() {
             let idx = (self.idx.load(Ordering::Relaxed) + i) % self.urls.len();
             let url = &self.urls[idx];
@@ -2217,7 +2217,7 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
         #[derive(Serialize)]
         struct RotationEvent {
             peer_id: String,
-            metrics: serde_json::Value,
+            metrics: Value,
         }
         let event = RotationEvent {
             peer_id: overlay_peer_label(old),
@@ -2225,7 +2225,7 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
         };
         let fut_client = client.clone();
         client.spawn(async move {
-            let body = serde_json::to_value(vec![event]).unwrap();
+            let body = json::to_value(vec![event]).unwrap();
             fut_client.post("ingest", body).await;
         });
     }

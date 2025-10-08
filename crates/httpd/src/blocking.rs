@@ -1,7 +1,7 @@
 use crate::Method;
 use crate::client::{Client, ClientConfig, ClientError, ClientResponse, RequestBuilder};
+use foundation_serialization::Serialize;
 use runtime::RuntimeHandle;
-use serde::Serialize;
 use std::time::Duration;
 
 /// Blocking wrapper around the async HTTP client.

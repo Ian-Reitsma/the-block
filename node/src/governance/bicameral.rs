@@ -1,3 +1,4 @@
+use foundation_serialization::json;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -92,7 +93,7 @@ impl Governance {
 
     pub fn load(path: &str, quorum_ops: u32, quorum_builders: u32, timelock_secs: u64) -> Self {
         if let Ok(bytes) = fs::read(path) {
-            if let Ok((next_id, props)) = serde_json::from_slice::<(u64, Vec<Proposal>)>(&bytes) {
+            if let Ok((next_id, props)) = json::from_slice::<(u64, Vec<Proposal>)>(&bytes) {
                 let mut map = std::collections::HashMap::new();
                 for p in props {
                     map.insert(p.id, p);
@@ -109,7 +110,7 @@ impl Governance {
 
     pub fn persist(&self, path: &str) -> std::io::Result<()> {
         let props: Vec<&Proposal> = self.proposals.values().collect();
-        let bytes = serde_json::to_vec(&(self.next_id, props))
+        let bytes = json::to_vec(&(self.next_id, props))
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         fs::write(path, bytes)
     }

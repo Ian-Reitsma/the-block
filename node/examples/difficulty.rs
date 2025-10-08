@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use foundation_serialization::json::{json, Value};
 use the_block::rpc::client::{RpcClient, RpcClientError};
 
 /// Query the node's current difficulty via JSON-RPC.

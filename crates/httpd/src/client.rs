@@ -1,16 +1,15 @@
-use crate::{JSON_CODEC, Method, StatusCode, Uri};
-use codec::Codec;
+use crate::{Method, StatusCode, Uri};
+use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::{Error as SerializationError, Serialize, json};
 use runtime::io::BufferedTcpStream;
 use runtime::net::TcpStream;
 use runtime::timeout;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::string::FromUtf8Error;
 use std::time::Duration;
-use thiserror::Error;
 
 /// Configuration toggles applied to outbound HTTP requests.
 #[derive(Debug, Clone)]
@@ -96,7 +95,7 @@ impl<'a> RequestBuilder<'a> {
     /// Convenience helper that serializes `value` using the canonical JSON
     /// codec and sets the appropriate content-type header.
     pub fn json<T: Serialize>(mut self, value: &T) -> Result<Self, ClientError> {
-        self.body = codec::serialize(JSON_CODEC, value)?;
+        self.body = json::to_vec(value)?;
         self.headers
             .insert("content-type".into(), "application/json".into());
         Ok(self)
@@ -124,24 +123,64 @@ impl<'a> RequestBuilder<'a> {
 
 /// HTTP client error surface mirroring the failure modes exposed by the server
 /// utilities.
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum ClientError {
-    #[error("io error: {0}")]
-    Io(#[from] io::Error),
-    #[error("timeout")]
+    Io(io::Error),
     Timeout,
-    #[error("invalid url: {0}")]
     InvalidUrl(String),
-    #[error("unsupported url scheme: {0}")]
     UnsupportedScheme(String),
-    #[error("malformed http response: {0}")]
     InvalidResponse(&'static str),
-    #[error("response exceeds configured limit")]
     ResponseTooLarge,
-    #[error("codec error: {0}")]
-    Codec(#[from] codec::Error),
-    #[error("utf-8 error: {0}")]
-    Utf8(#[from] FromUtf8Error),
+    Serialization(SerializationError),
+    Utf8(FromUtf8Error),
+}
+
+impl From<io::Error> for ClientError {
+    fn from(value: io::Error) -> Self {
+        ClientError::Io(value)
+    }
+}
+
+impl From<SerializationError> for ClientError {
+    fn from(value: SerializationError) -> Self {
+        ClientError::Serialization(value)
+    }
+}
+
+impl From<FromUtf8Error> for ClientError {
+    fn from(value: FromUtf8Error) -> Self {
+        ClientError::Utf8(value)
+    }
+}
+
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ClientError::Io(err) => write!(f, "io error: {err}"),
+            ClientError::Timeout => write!(f, "timeout"),
+            ClientError::InvalidUrl(url) => write!(f, "invalid url: {url}"),
+            ClientError::UnsupportedScheme(scheme) => {
+                write!(f, "unsupported url scheme: {scheme}")
+            }
+            ClientError::InvalidResponse(reason) => {
+                write!(f, "malformed http response: {reason}")
+            }
+            ClientError::ResponseTooLarge => write!(f, "response exceeds configured limit"),
+            ClientError::Serialization(err) => write!(f, "serialization error: {err}"),
+            ClientError::Utf8(err) => write!(f, "utf-8 error: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ClientError::Io(err) => Some(err),
+            ClientError::Serialization(err) => Some(err),
+            ClientError::Utf8(err) => Some(err),
+            _ => None,
+        }
+    }
 }
 
 /// Structured representation of an HTTP response.
@@ -172,12 +211,7 @@ impl ClientResponse {
 
     /// Deserialize the payload using the canonical JSON codec.
     pub fn json<T: DeserializeOwned>(&self) -> Result<T, ClientError> {
-        codec::deserialize(JSON_CODEC, &self.body).map_err(ClientError::from)
-    }
-
-    /// Deserialize the payload using an arbitrary codec profile.
-    pub fn decode<T: DeserializeOwned>(&self, codec: Codec) -> Result<T, ClientError> {
-        codec::deserialize(codec, &self.body).map_err(ClientError::from)
+        json::from_slice(&self.body).map_err(ClientError::from)
     }
 
     /// Interpret the payload as UTF-8 text, returning an owned string.

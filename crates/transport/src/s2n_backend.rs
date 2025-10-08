@@ -14,6 +14,7 @@ use ::time::{Duration, OffsetDateTime};
 use base64_fp::{decode_standard, encode_standard};
 use crypto_suite::signatures::ed25519::{SigningKey, PUBLIC_KEY_LENGTH, SECRET_KEY_LENGTH};
 use diagnostics::{anyhow, Context, Result};
+use foundation_serialization::json::{self, Map, Value};
 use rand::{OsRng, RngCore};
 use rcgen::{
     Certificate, CertificateParams, DistinguishedName, DnType, KeyPair, RemoteKeyPair, SanType,
@@ -21,7 +22,6 @@ use rcgen::{
 use runtime::net::UdpSocket;
 use runtime::sync::Mutex as AsyncMutex;
 use runtime::{sleep, timeout, TimeoutError};
-use serde::{Deserialize, Serialize};
 use x509_parser::prelude::*;
 use x509_parser::time::ASN1Time;
 
@@ -142,17 +142,234 @@ struct HistoricalCert {
     issued_at: u64,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone)]
 struct StoredState {
     current: Option<StoredCert>,
     previous: Vec<StoredCert>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone)]
 struct StoredCert {
     cert: String,
     fingerprint: String,
     issued_at: u64,
+}
+
+impl StoredState {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "current".to_string(),
+            match &self.current {
+                Some(cert) => cert.to_value(),
+                None => Value::Null,
+            },
+        );
+        map.insert(
+            "previous".to_string(),
+            Value::Array(self.previous.iter().map(StoredCert::to_value).collect()),
+        );
+        Value::Object(map)
+    }
+
+    fn from_value(value: Value) -> Result<Self> {
+        let mut object = match value {
+            Value::Object(map) => map,
+            other => {
+                return Err(anyhow!(
+                    "stored certificate state must be a JSON object, found {}",
+                    describe_json(&other)
+                ))
+            }
+        };
+        let current = match object.remove("current") {
+            Some(Value::Null) | None => None,
+            Some(value) => Some(StoredCert::from_value(value)?),
+        };
+        let previous_value = object
+            .remove("previous")
+            .unwrap_or_else(|| Value::Array(vec![]));
+        let previous = match previous_value {
+            Value::Array(values) => {
+                let mut out = Vec::with_capacity(values.len());
+                for value in values {
+                    out.push(StoredCert::from_value(value)?);
+                }
+                out
+            }
+            other => {
+                return Err(anyhow!(
+                    "stored certificate history must be an array, found {}",
+                    describe_json(&other)
+                ))
+            }
+        };
+        Ok(StoredState { current, previous })
+    }
+}
+
+impl StoredCert {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("cert".to_string(), Value::String(self.cert.clone()));
+        map.insert(
+            "fingerprint".to_string(),
+            Value::String(self.fingerprint.clone()),
+        );
+        map.insert("issued_at".to_string(), Value::from(self.issued_at));
+        Value::Object(map)
+    }
+
+    fn from_value(value: Value) -> Result<Self> {
+        let mut object = match value {
+            Value::Object(map) => map,
+            other => {
+                return Err(anyhow!(
+                    "stored certificate entries must be objects, found {}",
+                    describe_json(&other)
+                ))
+            }
+        };
+        let cert = parse_string_field(
+            object
+                .remove("cert")
+                .ok_or_else(|| anyhow!("stored certificate missing cert"))?,
+            "cert",
+        )?;
+        let fingerprint = parse_string_field(
+            object
+                .remove("fingerprint")
+                .ok_or_else(|| anyhow!("stored certificate missing fingerprint"))?,
+            "fingerprint",
+        )?;
+        let issued_at = parse_u64_field(
+            object
+                .remove("issued_at")
+                .ok_or_else(|| anyhow!("stored certificate missing issued_at"))?,
+            "issued_at",
+        )?;
+        Ok(StoredCert {
+            cert,
+            fingerprint,
+            issued_at,
+        })
+    }
+}
+
+fn describe_json(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn parse_string_field(value: Value, field: &str) -> Result<String> {
+    match value {
+        Value::String(s) => Ok(s),
+        other => Err(anyhow!(
+            "{field} must be a string, found {}",
+            describe_json(&other)
+        )),
+    }
+}
+
+fn parse_u64_field(value: Value, field: &str) -> Result<u64> {
+    match value {
+        Value::Number(n) => n
+            .as_u64()
+            .ok_or_else(|| anyhow!("{field} must be an unsigned integer")),
+        Value::String(s) => s
+            .parse::<u64>()
+            .map_err(|err| anyhow!("invalid {field}: {err}")),
+        other => Err(anyhow!(
+            "{field} must be a number, found {}",
+            describe_json(&other)
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn expect_string<'a>(value: &'a Value, field: &str) -> &'a str {
+        match value {
+            Value::String(s) => s,
+            other => panic!("{field} expected string, found {:?}", other),
+        }
+    }
+
+    fn expect_u64(value: &Value, field: &str) -> u64 {
+        match value {
+            Value::Number(n) => n.as_u64().expect("unsigned integer"),
+            other => panic!("{field} expected number, found {:?}", other),
+        }
+    }
+
+    #[test]
+    fn stored_state_decodes_legacy_json() {
+        let json = r#"{"current":{"cert":"cert0","fingerprint":"ff00","issued_at":9},"previous":[{"cert":"cert1","fingerprint":"aa11","issued_at":5}]}"#;
+        let value = json::value_from_str(json).expect("parse legacy");
+        let state = StoredState::from_value(value).expect("decode state");
+        let current = state.current.expect("current advert");
+        assert_eq!(current.cert, "cert0");
+        assert_eq!(current.fingerprint, "ff00");
+        assert_eq!(current.issued_at, 9);
+        assert_eq!(state.previous.len(), 1);
+        assert_eq!(state.previous[0].cert, "cert1");
+    }
+
+    #[test]
+    fn stored_state_serializes_expected_shape() {
+        let state = StoredState {
+            current: Some(StoredCert {
+                cert: "cert2".into(),
+                fingerprint: "beef".into(),
+                issued_at: 11,
+            }),
+            previous: vec![StoredCert {
+                cert: "cert3".into(),
+                fingerprint: "face".into(),
+                issued_at: 7,
+            }],
+        };
+        let value = state.to_value();
+        let object = match value {
+            Value::Object(map) => map,
+            other => panic!("expected object, found {:?}", other),
+        };
+        match object.get("current") {
+            Some(Value::Object(map)) => {
+                assert_eq!(expect_string(map.get("cert").unwrap(), "cert"), "cert2");
+                assert_eq!(
+                    expect_string(map.get("fingerprint").unwrap(), "fingerprint"),
+                    "beef"
+                );
+                assert_eq!(expect_u64(map.get("issued_at").unwrap(), "issued_at"), 11);
+            }
+            _ => panic!("current not encoded as object"),
+        }
+        let previous = match object.get("previous") {
+            Some(Value::Array(values)) => values,
+            _ => panic!("previous not encoded as array"),
+        };
+        assert_eq!(previous.len(), 1);
+        match &previous[0] {
+            Value::Object(map) => {
+                assert_eq!(expect_string(map.get("cert").unwrap(), "cert"), "cert3");
+                assert_eq!(
+                    expect_string(map.get("fingerprint").unwrap(), "fingerprint"),
+                    "face"
+                );
+                assert_eq!(expect_u64(map.get("issued_at").unwrap(), "issued_at"), 7);
+            }
+            _ => panic!("previous entry not encoded as object"),
+        }
+    }
 }
 
 static STATE: OnceLock<RwLock<CertState>> = OnceLock::new();
@@ -327,8 +544,9 @@ fn load_from_disk(state: &mut CertState) -> Result<()> {
         }
         Err(e) => return Err(anyhow!("read cert store failed: {e}")),
     };
-    let stored: StoredState =
-        serde_json::from_slice(&data).map_err(|e| anyhow!("decode cert store failed: {e}"))?;
+    let stored_value =
+        json::value_from_slice(&data).map_err(|e| anyhow!("decode cert store failed: {e}"))?;
+    let stored = StoredState::from_value(stored_value)?;
     let mut queue = VecDeque::new();
     if let Some(curr) = stored.current {
         if let Ok(hist) = stored_to_hist(curr) {
@@ -354,7 +572,7 @@ fn persist_state(state: &CertState) -> Result<()> {
         current: state.current.as_ref().map(local_to_stored),
         previous: state.previous.iter().map(hist_to_stored).collect(),
     };
-    let data = serde_json::to_vec_pretty(&stored).map_err(|err| anyhow!(err))?;
+    let data = json::to_vec_value(&stored.to_value());
     fs::write(path, data).context("write cert store")?;
     Ok(())
 }

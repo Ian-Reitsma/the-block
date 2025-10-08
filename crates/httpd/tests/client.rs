@@ -1,5 +1,5 @@
+use foundation_serialization::json::{self, Value};
 use httpd::{BlockingClient, HttpClient, Method};
-use serde::Deserialize;
 use std::io::Write;
 use std::net::TcpListener;
 use std::thread;
@@ -35,11 +35,6 @@ fn async_get_returns_text() {
 
 #[test]
 fn blocking_client_parses_json() {
-    #[derive(Deserialize, PartialEq, Eq, Debug)]
-    struct Payload {
-        value: u32,
-    }
-
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     thread::spawn(move || {
@@ -60,6 +55,13 @@ fn blocking_client_parses_json() {
         .expect("request")
         .send()
         .expect("response");
-    let payload: Payload = response.json().expect("json");
-    assert_eq!(payload, Payload { value: 7 });
+    let payload: Value = response.json().expect("json");
+    match payload {
+        Value::Object(map) => {
+            let raw_value = map.get("value").cloned().expect("value field");
+            let value: u64 = json::from_value(raw_value).expect("decode value");
+            assert_eq!(value, 7);
+        }
+        other => panic!("unexpected payload: {:?}", other),
+    }
 }

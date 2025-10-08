@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 pub type ShardId = u16;
 
 /// Encode an account address with shard prefix as `hhhh:acct` where `hhhh` is hex shard id.
@@ -21,7 +19,7 @@ pub fn account(addr: &str) -> &str {
 }
 
 /// Parsed address type with shard and account fields.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Address {
     pub shard: ShardId,
     pub account: String,

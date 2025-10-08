@@ -2,13 +2,8 @@
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |
-> **2025-10-07 note**: Workspace crates now consume the first-party `base64_fp` encoder/decoder; the remaining `base64` entries
-> below are transitive pulls scheduled for replacement once upstream dependencies are rewritten or patched to accept the in-house
-> implementation.
-> **2025-10-09 update**: Removed third-party dev/test crates (Criterion, Proptest,
-> Insta, SerialTest, env_logger, logtest, tracing-test, wait-timeout) after
-> landing the `testkit` macros. The inventory below reflects only runtime or
-> build-time dependencies that remain in the tree.
+> **2025-10-08 review**: Governance, ledger, metrics-aggregator, and overlay persistence now round-trip through the first-party `foundation_serialization` facade (JSON, binary, base58). Remaining direct `serde_json`/`bincode` usage is limited to tooling crates tracked in `docs/pivot_dependency_strategy.md`.
+> **2025-10-08 delta**: Removed the third-party base58 crate from the workspace after migrating overlay peer storage to `foundation_serialization::base58`; transitive `base64` entries remain until upstream crates accept the in-house encoder.
 | strategic | `rustls` | 0.23.32 | crates.io | Apache-2.0 OR ISC OR MIT | 2 |
 | replaceable | `bincode` | 1.3.3 | crates.io | MIT | 1 |
 | replaceable | `serde` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 1 |
@@ -48,7 +43,6 @@
 | unclassified | `bitflags` | 2.9.4 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `block-buffer` | 0.10.4 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `bridges` | 0.1.0 | workspace | — | 1 |
-| unclassified | `bs58` | 0.4.0 | crates.io | MIT/Apache-2.0 | 2 |
 | unclassified | `bstr` | 1.12.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `bumpalo` | 3.19.0 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `bytemuck` | 1.24.0 | crates.io | Zlib OR Apache-2.0 OR MIT | 4 |

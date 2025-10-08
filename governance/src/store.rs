@@ -6,6 +6,7 @@ use crate::params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
 use crate::treasury::{mark_cancelled, mark_executed, TreasuryDisbursement};
+use foundation_serialization::{binary, json};
 use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
@@ -91,11 +92,11 @@ static GOV_DB_REGISTRY: Lazy<Mutex<HashMap<PathBuf, Weak<sled::Db>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
-    bincode::serialize(value).map_err(|e| sled::Error::Unsupported(format!("ser: {e}").into()))
+    binary::encode(value).map_err(|e| sled::Error::Unsupported(format!("ser: {e}").into()))
 }
 
 fn de<T: DeserializeOwned>(bytes: &[u8]) -> sled::Result<T> {
-    bincode::deserialize(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
+    binary::decode(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
 }
 
 fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {
@@ -149,13 +150,13 @@ impl GovStore {
         let path = hist_dir.join("did_revocations.json");
         let mut history: Vec<DidRevocationRecord> = std::fs::read(&path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| json::from_slice(&bytes).ok())
             .unwrap_or_default();
         history.push(record.clone());
         if history.len() > DID_REVOCATION_HISTORY_LIMIT {
             history.drain(0..history.len() - DID_REVOCATION_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = serde_json::to_vec(&history) {
+        if let Ok(bytes) = json::to_vec(&history) {
             let _ = std::fs::write(&path, bytes);
         }
     }
@@ -173,7 +174,7 @@ impl GovStore {
                 if bytes.is_empty() {
                     Ok(Vec::new())
                 } else {
-                    serde_json::from_slice(&bytes).map_err(|e| {
+                    json::from_slice(&bytes).map_err(|e| {
                         sled::Error::Unsupported(
                             format!("decode treasury disbursements: {e}").into(),
                         )
@@ -194,7 +195,7 @@ impl GovStore {
             let drop = trimmed.len() - TREASURY_HISTORY_LIMIT;
             trimmed.drain(0..drop);
         }
-        let bytes = serde_json::to_vec(&trimmed).map_err(|e| {
+        let bytes = json::to_vec(&trimmed).map_err(|e| {
             sled::Error::Unsupported(format!("encode treasury disbursements: {e}").into())
         })?;
         let path = self.treasury_disbursement_path();
@@ -216,7 +217,7 @@ impl GovStore {
         let path = hist_dir.join("fee_floor_policy.json");
         let mut history: Vec<FeeFloorPolicyRecord> = std::fs::read(&path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| json::from_slice(&bytes).ok())
             .unwrap_or_default();
         history.push(FeeFloorPolicyRecord {
             epoch,
@@ -227,7 +228,7 @@ impl GovStore {
         if history.len() > PARAM_HISTORY_LIMIT {
             history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = serde_json::to_vec(&history) {
+        if let Ok(bytes) = json::to_vec(&history) {
             let _ = std::fs::write(&path, bytes);
         }
     }
@@ -242,7 +243,7 @@ impl GovStore {
         let path = hist_dir.join("dependency_policy.json");
         let mut history: Vec<DependencyPolicyRecord> = std::fs::read(&path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| json::from_slice(&bytes).ok())
             .unwrap_or_default();
         history.push(DependencyPolicyRecord {
             epoch,
@@ -253,7 +254,7 @@ impl GovStore {
         if history.len() > PARAM_HISTORY_LIMIT {
             history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = serde_json::to_vec(&history) {
+        if let Ok(bytes) = json::to_vec(&history) {
             let _ = std::fs::write(&path, bytes);
         }
     }
@@ -307,13 +308,13 @@ impl GovStore {
         let path = hist_dir.join("param_changes.json");
         let mut history: Vec<ParamChangeRecord> = std::fs::read(&path)
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| json::from_slice(&bytes).ok())
             .unwrap_or_default();
         history.push(record);
         if history.len() > PARAM_HISTORY_LIMIT {
             history.drain(0..history.len() - PARAM_HISTORY_LIMIT);
         }
-        if let Ok(bytes) = serde_json::to_vec(&history) {
+        if let Ok(bytes) = json::to_vec(&history) {
             let _ = std::fs::write(&path, bytes);
         }
 
@@ -392,7 +393,7 @@ impl GovStore {
         let hist_dir = self.base_path.join("governance/history");
         let path = hist_dir.join("did_revocations.json");
         if let Ok(bytes) = std::fs::read(&path) {
-            serde_json::from_slice(&bytes).map_err(|e| {
+            json::from_slice(&bytes).map_err(|e| {
                 sled::Error::Unsupported(format!("de did revocation history: {e}").into())
             })
         } else {
@@ -404,7 +405,7 @@ impl GovStore {
         let hist_dir = self.base_path.join("governance/history");
         let path = hist_dir.join("dependency_policy.json");
         if let Ok(bytes) = std::fs::read(&path) {
-            serde_json::from_slice(&bytes).map_err(|e| {
+            json::from_slice(&bytes).map_err(|e| {
                 sled::Error::Unsupported(format!("de dependency policy history: {e}").into())
             })
         } else {
@@ -770,7 +771,7 @@ impl GovStore {
         let hist_dir = self.base_path.join("governance/history");
         let _ = std::fs::create_dir_all(&hist_dir);
         let snap_path = hist_dir.join(format!("{}.json", current_epoch));
-        if let Ok(bytes) = serde_json::to_vec(params) {
+        if let Ok(bytes) = json::to_vec(params) {
             let _ = std::fs::write(&snap_path, bytes);
         }
 
@@ -946,7 +947,7 @@ impl GovStore {
         let bytes =
             std::fs::read(&snap_path).map_err(|_| sled::Error::Unsupported("snapshot".into()))?;
         let prev: Params =
-            serde_json::from_slice(&bytes).map_err(|_| sled::Error::Unsupported("parse".into()))?;
+            json::from_slice(&bytes).map_err(|_| sled::Error::Unsupported("parse".into()))?;
         *params = prev.clone();
         rt.set_current_params(params);
         for spec in registry() {

@@ -10,19 +10,17 @@ web frameworks.
 ## Serving HTTP and HTTPS
 
 Use [`serve`](src/lib.rs) to bind plain HTTP listeners and
-[`serve_tls`](src/lib.rs) when TLS is required. The TLS helper wraps
-`rustls`, loads certificate and key material via [`ServerTlsConfig`], and hands
-fully decrypted streams to the shared request loop so that downstream services
-can migrate without changing their handler logic. Mutual TLS is supported via
-[`ServerTlsConfig::from_pem_files_with_client_auth`] for mandatory client
-certificates or
-[`ServerTlsConfig::from_pem_files_with_optional_client_auth`] when clients may
-connect without presenting a certificate.
+[`serve_tls`](src/lib.rs) when TLS is required. The TLS helper is backed by the
+first-party implementation under [`tls.rs`](src/tls.rs), loading Ed25519
+certificates, performing X25519 handshakes, and sealing records with the in-house
+AEAD pipeline. [`ServerTlsConfig`] exposes convenience constructors for plain or
+mutual-authentication deployments so callers can swap existing services onto the
+custom stack without rewriting their routing logic.
 
 ```rust
+use foundation_serialization::json::json;
 use httpd::{serve_tls, Response, Router, ServerConfig, ServerTlsConfig, StatusCode};
 use runtime::net::TcpListener;
-use serde_json::json;
 
 # async fn start() -> std::io::Result<()> {
 let listener = TcpListener::bind("127.0.0.1:8443".parse().unwrap()).await?;

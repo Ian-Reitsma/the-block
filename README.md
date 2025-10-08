@@ -1,6 +1,6 @@
 # Readme
-> **Review (2025-09-30):** Documented in-house encryption/compression rollout and refreshed navigation policy pointers.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
+> **Review (2025-10-08):** Captured the first-party serialization rollout across governance, ledger, and the metrics aggregator and flagged the remaining serde_json/bincode usage isolated to tooling crates.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
 ## Table of Contents
 
 1. [What is The Block?](#what-is-the-block)
@@ -28,7 +28,7 @@
 
 ---
 
-> **Review (2025-09-30):** Highlighted overlay peer-store migrator across operator release docs.
+> **Review (2025-10-08):** Noted the base58 facade swap and refreshed operator pointers to the peer-store migrator and serialization facade guidance.
 
 ## What is The Block?
 
@@ -617,6 +617,15 @@ tooling so operators can replace third-party services without downtime. Review t
 playbook, including onboarding checklists, operator runbooks, troubleshooting guidance,
 and diagrams showing wrapper control flow across runtime, transport, overlay, storage,
 coding, crypto, and codec crates.
+
+**2025-10-08 status.** Governance, ledger, and the metrics aggregator now encode
+exclusively through the `foundation_serialization` facade—first-party JSON, binary,
+TOML, and base58 helpers replaced every remaining `serde_json`/`bincode` call in these
+production crates. The in-house base58 encoder also supplanted `bs58` across the
+workspace. Residual serde_json/bincode dependencies live in tooling (`tools/*`,
+`sim/`, `examples/`) and are tracked in `docs/pivot_dependency_strategy.md` with
+assigned owners; removing them is the next dependency-guard milestone before we can
+ban the crates globally.
 
 ### Staged Rollout Plan (At a Glance)
 

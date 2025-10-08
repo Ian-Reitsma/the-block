@@ -1,7 +1,6 @@
+use foundation_serialization::{json, Deserialize};
 use httpd::{Method, StatusCode};
 use metrics_aggregator::{router, AppState};
-use serde::Deserialize;
-use serde_json::json;
 use std::future::Future;
 use sys::tempfile;
 
@@ -24,18 +23,23 @@ fn indexes_correlation_entries() {
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("token".into(), dir.path().join("correlation.db"), 60);
         let app = router(state.clone());
-        let payload = json!([{
-            "peer_id": "peer-1",
-            "metrics": {
-                "quic_handshake_fail_total": [
-                    {"labels": {"correlation_id": "abc123"}, "value": 2.0}
-                ],
-                "anomaly_metric": {
-                    "labels": {"correlation_id": "def456"},
-                    "value": 1.0
+        let payload = json::value_from_str(
+            r#"[
+                {
+                    "peer_id": "peer-1",
+                    "metrics": {
+                        "quic_handshake_fail_total": [
+                            {"labels": {"correlation_id": "abc123"}, "value": 2.0}
+                        ],
+                        "anomaly_metric": {
+                            "labels": {"correlation_id": "def456"},
+                            "value": 1.0
+                        }
+                    }
                 }
-            }
-        }]);
+            ]"#,
+        )
+        .unwrap();
         let req = app
             .request_builder()
             .method(Method::Post)
@@ -56,7 +60,7 @@ fn indexes_correlation_entries() {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let entries: Vec<ApiCorrelation> = serde_json::from_slice(resp.body()).unwrap();
+        let entries: Vec<ApiCorrelation> = json::from_slice(resp.body()).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].correlation_id, "abc123");
         assert_eq!(entries[0].peer_id, "peer-1");

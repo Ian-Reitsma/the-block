@@ -1,7 +1,7 @@
 use crate::{AppState, LeaderSnapshot};
 use diagnostics::tracing::{info, warn};
+use foundation_serialization::{json, Deserialize, Error as SerializationError, Serialize};
 use runtime::sleep;
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::error::Error as StdError;
 use std::fmt;
@@ -169,7 +169,7 @@ impl Default for LeaderElectionConfig {
 #[derive(Debug)]
 pub enum LeaderElectionError {
     Storage(storage_engine::StorageError),
-    Encoding(serde_json::Error),
+    Encoding(SerializationError),
     Time(std::time::SystemTimeError),
     InvalidConfig(String),
 }
@@ -204,8 +204,8 @@ impl From<storage_engine::StorageError> for LeaderElectionError {
     }
 }
 
-impl From<serde_json::Error> for LeaderElectionError {
-    fn from(value: serde_json::Error) -> Self {
+impl From<SerializationError> for LeaderElectionError {
+    fn from(value: SerializationError) -> Self {
         LeaderElectionError::Encoding(value)
     }
 }
@@ -379,7 +379,7 @@ impl LeaderElection {
         raw: Option<Vec<u8>>,
     ) -> Result<Option<LeaderRecord>, LeaderElectionError> {
         if let Some(bytes) = raw {
-            match serde_json::from_slice::<LeaderRecord>(&bytes) {
+            match json::from_slice::<LeaderRecord>(&bytes) {
                 Ok(record) => Ok(Some(record)),
                 Err(err) => {
                     warn!(
@@ -398,7 +398,7 @@ impl LeaderElection {
     }
 
     fn write_record(&self, record: &LeaderRecord) -> Result<(), LeaderElectionError> {
-        let bytes = serde_json::to_vec(record)?;
+        let bytes = json::to_vec(record)?;
         self.store.put_bytes(LEADER_CF, LEADER_KEY, &bytes)?;
         self.store.flush()?;
         Ok(())

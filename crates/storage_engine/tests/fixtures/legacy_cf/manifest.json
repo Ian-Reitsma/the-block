@@ -1,0 +1,9 @@
+{
+  "cfs": {
+    "default": {
+      "next_file_id": 1,
+      "sequence": 3,
+      "sstables": []
+    }
+  }
+}

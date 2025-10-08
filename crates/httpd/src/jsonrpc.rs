@@ -1,8 +1,6 @@
-use crate::{HttpError, JSON_CODEC, Request, Response, Router, StatusCode};
-use codec;
-use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use crate::{HttpError, Request, Response, Router, StatusCode};
+use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::json::{self, Map, Number, Value};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -94,9 +92,13 @@ where
         if body.is_empty() {
             return self.error_response(None, JsonRpcError::invalid_request());
         }
-        let envelope = match codec::deserialize::<JsonRpcEnvelope>(JSON_CODEC, body) {
-            Ok(payload) => payload,
+        let raw = match json::value_from_slice(body) {
+            Ok(value) => value,
             Err(_) => return self.error_response(None, JsonRpcError::parse_error()),
+        };
+        let envelope = match JsonRpcEnvelope::from_value(raw) {
+            Ok(envelope) => envelope,
+            Err(error) => return self.error_response(None, error),
         };
         match envelope {
             JsonRpcEnvelope::Single(call) => self.handle_single(call, &context).await,
@@ -192,19 +194,16 @@ where
     }
 
     fn response_for(&self, reply: JsonRpcReply) -> Result<Response, HttpError> {
-        let envelope = reply.into_envelope();
-        let body = codec::serialize(JSON_CODEC, &envelope)?;
+        let envelope = reply.into_value();
+        let body = json::to_vec_value(&envelope);
         Ok(Response::new(StatusCode::OK)
             .with_body(body)
             .with_header("content-type", "application/json"))
     }
 
     fn batch_response(&self, replies: Vec<JsonRpcReply>) -> Result<Response, HttpError> {
-        let envelopes: Vec<JsonRpcResponseEnvelope> = replies
-            .into_iter()
-            .map(JsonRpcReply::into_envelope)
-            .collect();
-        let body = codec::serialize(JSON_CODEC, &envelopes)?;
+        let envelope = Value::Array(replies.into_iter().map(JsonRpcReply::into_value).collect());
+        let body = json::to_vec_value(&envelope);
         Ok(Response::new(StatusCode::OK)
             .with_body(body)
             .with_header("content-type", "application/json"))
@@ -215,8 +214,8 @@ where
         id: Option<Value>,
         error: JsonRpcError,
     ) -> Result<Response, HttpError> {
-        let identifier = id.or_else(|| Some(Value::Null));
-        self.response_for(JsonRpcReply::error(identifier, error))
+        let identifier = id.unwrap_or(Value::Null);
+        self.response_for(JsonRpcReply::error(Some(identifier), error))
     }
 }
 
@@ -226,55 +225,86 @@ struct JsonRpcContext<State> {
     headers: HashMap<String, String>,
 }
 
-#[derive(Deserialize)]
-#[serde(untagged)]
+#[derive(Clone)]
 enum JsonRpcEnvelope {
     Single(JsonRpcCall),
     Batch(Vec<JsonRpcCall>),
 }
 
-#[derive(Deserialize)]
+impl JsonRpcEnvelope {
+    fn from_value(value: Value) -> Result<Self, JsonRpcError> {
+        match value {
+            Value::Object(_) => JsonRpcCall::from_value(value).map(JsonRpcEnvelope::Single),
+            Value::Array(values) => {
+                let mut calls = Vec::with_capacity(values.len());
+                for value in values {
+                    calls.push(JsonRpcCall::from_value(value)?);
+                }
+                Ok(JsonRpcEnvelope::Batch(calls))
+            }
+            _ => Err(JsonRpcError::invalid_request()),
+        }
+    }
+}
+
+#[derive(Clone)]
 struct JsonRpcCall {
-    #[serde(default)]
     jsonrpc: Option<String>,
     method: String,
-    #[serde(default)]
     params: Value,
-    #[serde(default)]
     id: Option<Value>,
-    #[serde(default)]
     badge: Option<String>,
 }
 
-#[derive(Serialize)]
-#[serde(untagged)]
-enum JsonRpcResponseEnvelope {
-    Success(JsonRpcSuccess),
-    Error(JsonRpcFailure),
-}
+impl JsonRpcCall {
+    fn from_value(value: Value) -> Result<Self, JsonRpcError> {
+        let map = match value {
+            Value::Object(map) => map,
+            _ => return Err(JsonRpcError::invalid_request()),
+        };
 
-#[derive(Serialize)]
-struct JsonRpcSuccess {
-    jsonrpc: &'static str,
-    result: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<Value>,
-}
+        let mut jsonrpc = None;
+        let mut method = None;
+        let mut params = Value::Null;
+        let mut id = None;
+        let mut badge = None;
 
-#[derive(Serialize)]
-struct JsonRpcFailure {
-    jsonrpc: &'static str,
-    error: JsonRpcErrorPayload,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<Value>,
-}
+        for (key, value) in map {
+            match key.as_str() {
+                "jsonrpc" => match value {
+                    Value::String(text) => jsonrpc = Some(text),
+                    Value::Null => {}
+                    _ => return Err(JsonRpcError::invalid_request()),
+                },
+                "method" => match value {
+                    Value::String(text) => method = Some(text),
+                    _ => return Err(JsonRpcError::invalid_request()),
+                },
+                "params" => {
+                    params = value;
+                }
+                "id" => {
+                    id = Some(value);
+                }
+                "badge" => match value {
+                    Value::String(text) => badge = Some(text),
+                    Value::Null => badge = None,
+                    _ => return Err(JsonRpcError::invalid_request()),
+                },
+                _ => {}
+            }
+        }
 
-#[derive(Serialize)]
-struct JsonRpcErrorPayload {
-    code: i32,
-    message: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<Value>,
+        let method = method.ok_or_else(JsonRpcError::invalid_request)?;
+
+        Ok(JsonRpcCall {
+            jsonrpc,
+            method,
+            params,
+            id,
+            badge,
+        })
+    }
 }
 
 enum JsonRpcReply {
@@ -297,21 +327,27 @@ impl JsonRpcReply {
         JsonRpcReply::Error { id, error }
     }
 
-    fn into_envelope(self) -> JsonRpcResponseEnvelope {
+    fn into_value(self) -> Value {
+        let mut envelope = Map::new();
+        envelope.insert(
+            "jsonrpc".to_string(),
+            Value::String(JSON_VERSION.to_string()),
+        );
         match self {
             JsonRpcReply::Success { id, result } => {
-                JsonRpcResponseEnvelope::Success(JsonRpcSuccess {
-                    jsonrpc: JSON_VERSION,
-                    result,
-                    id,
-                })
+                envelope.insert("result".to_string(), result);
+                if let Some(id) = id {
+                    envelope.insert("id".to_string(), id);
+                }
             }
-            JsonRpcReply::Error { id, error } => JsonRpcResponseEnvelope::Error(JsonRpcFailure {
-                jsonrpc: JSON_VERSION,
-                error: error.payload(),
-                id,
-            }),
+            JsonRpcReply::Error { id, error } => {
+                envelope.insert("error".to_string(), error.into_payload());
+                if let Some(id) = id {
+                    envelope.insert("id".to_string(), id);
+                }
+            }
         }
+        Value::Object(envelope)
     }
 }
 
@@ -369,12 +405,17 @@ impl JsonRpcError {
         Self::new(-32700, "parse error")
     }
 
-    fn payload(&self) -> JsonRpcErrorPayload {
-        JsonRpcErrorPayload {
-            code: self.code,
-            message: self.message,
-            data: self.data.clone(),
+    fn into_payload(self) -> Value {
+        let mut payload = Map::new();
+        payload.insert("code".to_string(), Value::Number(Number::from(self.code)));
+        payload.insert(
+            "message".to_string(),
+            Value::String(self.message.to_string()),
+        );
+        if let Some(data) = self.data {
+            payload.insert("data".to_string(), data);
         }
+        Value::Object(payload)
     }
 }
 
@@ -412,9 +453,7 @@ impl<State> JsonRpcRequest<State> {
     }
 
     pub fn params_as<T: DeserializeOwned>(&self) -> Result<T, JsonRpcError> {
-        let bytes = codec::serialize(JSON_CODEC, &self.params)
-            .map_err(|_| JsonRpcError::invalid_params())?;
-        codec::deserialize(JSON_CODEC, &bytes).map_err(|_| JsonRpcError::invalid_params())
+        json::from_value(self.params.clone()).map_err(|_| JsonRpcError::invalid_params())
     }
 
     pub fn id(&self) -> Option<&Value> {

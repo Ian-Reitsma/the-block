@@ -7,8 +7,8 @@ use crypto_suite::signatures::ed25519::{
 };
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::warn;
+use foundation_serialization::json::{self, json, Value};
 use hex;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{
@@ -81,7 +81,7 @@ impl DnsError {
     }
 }
 
-pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
+pub fn publish_record(params: &Value) -> Result<Value, DnsError> {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let txt = params.get("txt").and_then(|v| v.as_str()).unwrap_or("");
     let pk_hex = params.get("pubkey").and_then(|v| v.as_str()).unwrap_or("");
@@ -111,7 +111,7 @@ pub fn publish_record(params: &Value) -> Result<serde_json::Value, DnsError> {
     );
     db.insert(&format!("dns_last/{}", domain), 0u64.to_le_bytes().to_vec());
     mobile_cache::purge_policy(domain);
-    Ok(serde_json::json!({"status":"ok"}))
+    Ok(json!({"status":"ok"}))
 }
 
 pub fn verify_txt(domain: &str, node_id: &str) -> bool {
@@ -153,7 +153,7 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
     ok
 }
 
-pub fn gateway_policy(params: &Value) -> serde_json::Value {
+pub fn gateway_policy(params: &Value) -> Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let key = format!("dns_records/{}", domain);
     let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
@@ -178,7 +178,7 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
                     .as_secs();
                 db.insert(&last_key, ts.to_le_bytes().to_vec());
                 let _ = read_receipt::append(domain, "gateway", txt.len() as u64, false, true);
-                let response = serde_json::json!({
+                let response = json!({
                     "record": txt,
                     "reads_total": reads,
                     "last_access_ts": ts,
@@ -191,7 +191,7 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
     if let Some(cached) = mobile_cache::cached_policy(domain) {
         return cached;
     }
-    let miss = serde_json::json!({
+    let miss = json!({
         "record": null,
         "reads_total": 0,
         "last_access_ts": 0,
@@ -200,14 +200,14 @@ pub fn gateway_policy(params: &Value) -> serde_json::Value {
     miss
 }
 
-pub fn reads_since(params: &Value) -> serde_json::Value {
+pub fn reads_since(params: &Value) -> Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let epoch = params.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0);
     let (total, last) = read_receipt::reads_since(epoch, domain);
-    serde_json::json!({"reads_total": total, "last_access_ts": last})
+    json!({"reads_total": total, "last_access_ts": last})
 }
 
-pub fn dns_lookup(params: &Value) -> serde_json::Value {
+pub fn dns_lookup(params: &Value) -> Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
     let txt = db
@@ -221,5 +221,5 @@ pub fn dns_lookup(params: &Value) -> serde_json::Value {
         .as_ref()
         .map(|_| verify_txt(domain, &pk))
         .unwrap_or(false);
-    serde_json::json!({"record": txt, "verified": verified})
+    json!({"record": txt, "verified": verified})
 }

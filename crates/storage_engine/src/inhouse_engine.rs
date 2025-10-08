@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::json::{self, Map, Number, Value};
 
 use crate::{
     KeyValue, KeyValueBatch, KeyValueIterator, StorageError, StorageMetrics, StorageResult,
@@ -17,7 +17,7 @@ const WAL_FILE: &str = "wal.log";
 const DEFAULT_MEMTABLE_LIMIT: usize = 8 * 1024 * 1024;
 const DEFAULT_CACHE_CAPACITY: usize = 32;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct Manifest {
     cfs: HashMap<String, CfManifest>,
 }
@@ -31,19 +31,45 @@ impl Manifest {
             });
         }
         let data = fs::read(&manifest_path).map_err(StorageError::from)?;
-        serde_json::from_slice(&data).map_err(StorageError::backend)
+        let value = json::value_from_slice(&data)
+            .map_err(|err| StorageError::backend(format!("failed to parse manifest: {err}")))?;
+        Manifest::from_value(value)
     }
 
     fn store(&self, path: &Path) -> StorageResult<()> {
         let manifest_path = path.join(MANIFEST_FILE);
         let tmp_path = manifest_path.with_extension("tmp");
-        let data = serde_json::to_vec_pretty(self).map_err(StorageError::backend)?;
+        let value = self.to_value();
+        let data = json::to_vec_value(&value);
         fs::write(&tmp_path, data).map_err(StorageError::from)?;
         fs::rename(&tmp_path, &manifest_path).map_err(StorageError::from)
     }
+
+    fn to_value(&self) -> Value {
+        let mut manifest = Map::new();
+        let mut cfs_map = Map::new();
+        for (name, cf) in &self.cfs {
+            cfs_map.insert(name.clone(), cf.to_value());
+        }
+        manifest.insert("cfs".to_string(), Value::Object(cfs_map));
+        Value::Object(manifest)
+    }
+
+    fn from_value(value: Value) -> StorageResult<Self> {
+        let mut manifest = expect_object(value, "manifest")?;
+        let cfs_value = manifest
+            .remove("cfs")
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let cfs_map = expect_object(cfs_value, "manifest.cfs")?;
+        let mut cfs = HashMap::new();
+        for (name, cf_value) in cfs_map {
+            cfs.insert(name, CfManifest::from_value(cf_value)?);
+        }
+        Ok(Manifest { cfs })
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct CfManifest {
     next_file_id: u64,
     sstables: Vec<SstMeta>,
@@ -58,16 +84,129 @@ impl CfManifest {
             sequence: 0,
         }
     }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert(
+            "next_file_id".to_string(),
+            Value::Number(Number::from(self.next_file_id)),
+        );
+        map.insert(
+            "sequence".to_string(),
+            Value::Number(Number::from(self.sequence)),
+        );
+        let sstables = self.sstables.iter().map(SstMeta::to_value).collect();
+        map.insert("sstables".to_string(), Value::Array(sstables));
+        Value::Object(map)
+    }
+
+    fn from_value(value: Value) -> StorageResult<Self> {
+        let mut map = expect_object(value, "cf manifest")?;
+        let next_file_id = take_u64(&mut map, "next_file_id", "cf manifest")?;
+        let sequence = take_u64(&mut map, "sequence", "cf manifest")?;
+        let sstables_value = map
+            .remove("sstables")
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let sstable_array = expect_array(sstables_value, "cf manifest sstables")?;
+        let mut sstables = Vec::with_capacity(sstable_array.len());
+        for entry in sstable_array {
+            sstables.push(SstMeta::from_value(entry)?);
+        }
+        Ok(Self {
+            next_file_id,
+            sstables,
+            sequence,
+        })
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct SstMeta {
     file: String,
     max_sequence: u64,
-    #[serde(default)]
     min_key: Vec<u8>,
-    #[serde(default)]
     max_key: Vec<u8>,
+}
+
+impl SstMeta {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("file".to_string(), Value::String(self.file.clone()));
+        map.insert(
+            "max_sequence".to_string(),
+            Value::Number(Number::from(self.max_sequence)),
+        );
+        map.insert("min_key".to_string(), encode_bytes(&self.min_key));
+        map.insert("max_key".to_string(), encode_bytes(&self.max_key));
+        Value::Object(map)
+    }
+
+    fn from_value(value: Value) -> StorageResult<Self> {
+        let mut map = expect_object(value, "sstable metadata")?;
+        let file = take_string(&mut map, "file", "sstable metadata")?;
+        let max_sequence = take_u64(&mut map, "max_sequence", "sstable metadata")?;
+        let min_key = match map.remove("min_key") {
+            Some(value) => decode_bytes(value, "sstable metadata min_key")?,
+            None => Vec::new(),
+        };
+        let max_key = match map.remove("max_key") {
+            Some(value) => decode_bytes(value, "sstable metadata max_key")?,
+            None => Vec::new(),
+        };
+        Ok(Self {
+            file,
+            max_sequence,
+            min_key,
+            max_key,
+        })
+    }
+}
+
+fn expect_object(value: Value, context: &str) -> StorageResult<Map> {
+    match value {
+        Value::Object(map) => Ok(map),
+        _ => Err(StorageError::backend(format!(
+            "{context} must be an object"
+        ))),
+    }
+}
+
+fn expect_array(value: Value, context: &str) -> StorageResult<Vec<Value>> {
+    match value {
+        Value::Array(items) => Ok(items),
+        Value::Null => Ok(Vec::new()),
+        _ => Err(StorageError::backend(format!("{context} must be an array"))),
+    }
+}
+
+fn take_u64(map: &mut Map, field: &str, context: &str) -> StorageResult<u64> {
+    let value = map
+        .remove(field)
+        .ok_or_else(|| StorageError::backend(format!("missing field '{field}' in {context}")))?;
+    json::from_value::<u64>(value)
+        .map_err(|err| StorageError::backend(format!("invalid {field} in {context}: {err}")))
+}
+
+fn take_string(map: &mut Map, field: &str, context: &str) -> StorageResult<String> {
+    let value = map
+        .remove(field)
+        .ok_or_else(|| StorageError::backend(format!("missing field '{field}' in {context}")))?;
+    json::from_value::<String>(value)
+        .map_err(|err| StorageError::backend(format!("invalid {field} in {context}: {err}")))
+}
+
+fn decode_bytes(value: Value, context: &str) -> StorageResult<Vec<u8>> {
+    json::from_value::<Vec<u8>>(value)
+        .map_err(|err| StorageError::backend(format!("invalid byte array for {context}: {err}")))
+}
+
+fn encode_bytes(bytes: &[u8]) -> Value {
+    Value::Array(
+        bytes
+            .iter()
+            .map(|b| Value::Number(Number::from(*b)))
+            .collect(),
+    )
 }
 
 #[derive(Clone)]
@@ -122,7 +261,7 @@ struct SstCache {
     limit: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 struct TableEntry {
     key: Vec<u8>,
     sequence: u64,
@@ -172,7 +311,7 @@ impl SstCache {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ValueState {
     Present(Vec<u8>),
     Tombstone,
@@ -341,7 +480,9 @@ impl CfState {
             if line.trim().is_empty() {
                 continue;
             }
-            let record: WalRecord = serde_json::from_str(line).map_err(StorageError::backend)?;
+            let value = json::value_from_str(line)
+                .map_err(|err| StorageError::backend(format!("invalid wal record: {err}")))?;
+            let record = WalRecord::from_value(value)?;
             self.apply_record(record);
         }
         Ok(())
@@ -388,8 +529,9 @@ impl CfState {
             .append(true)
             .open(cf_path.join(WAL_FILE))
             .map_err(StorageError::from)?;
-        let encoded = serde_json::to_vec(record).map_err(StorageError::backend)?;
-        file.write_all(&encoded).map_err(StorageError::from)?;
+        let line = json::to_string_value(&record.to_value());
+        file.write_all(line.as_bytes())
+            .map_err(StorageError::from)?;
         file.write_all(b"\n").map_err(StorageError::from)?;
         file.sync_all().map_err(StorageError::from)
     }
@@ -418,7 +560,7 @@ impl CfState {
         self.manifest.next_file_id += 1;
         let max_sequence = entries.iter().map(|e| e.sequence).max().unwrap_or(0);
         let table_path = cf_path.join(&filename);
-        let data = bincode::serialize(&entries).map_err(StorageError::backend)?;
+        let data = encode_table(&entries);
         fs::write(&table_path, data).map_err(StorageError::from)?;
         let min_key = entries.first().map(|e| e.key.clone()).unwrap_or_default();
         let max_key = entries.last().map(|e| e.key.clone()).unwrap_or_default();
@@ -458,7 +600,7 @@ impl CfState {
         let filename = format!("sst-{:020}.bin", self.manifest.next_file_id);
         self.manifest.next_file_id += 1;
         let max_sequence = entries.iter().map(|e| e.sequence).max().unwrap_or(0);
-        let data = bincode::serialize(&entries).map_err(StorageError::backend)?;
+        let data = encode_table(&entries);
         let table_path = cf_path.join(&filename);
         fs::write(&table_path, data).map_err(StorageError::from)?;
         let min_key = entries.first().map(|e| e.key.clone()).unwrap_or_default();
@@ -558,7 +700,109 @@ fn read_table(path: &Path) -> StorageResult<Vec<TableEntry>> {
         return Ok(Vec::new());
     }
     let data = fs::read(path).map_err(StorageError::from)?;
-    bincode::deserialize(&data).map_err(StorageError::backend)
+    decode_table(&data)
+}
+
+fn encode_table(entries: &[TableEntry]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + entries.len() * 32);
+    out.extend_from_slice(&(entries.len() as u64).to_le_bytes());
+    for entry in entries {
+        write_bytes(&mut out, &entry.key);
+        out.extend_from_slice(&entry.sequence.to_le_bytes());
+        match &entry.value {
+            ValueState::Present(value) => {
+                out.extend_from_slice(&0u32.to_le_bytes());
+                write_bytes(&mut out, value);
+            }
+            ValueState::Tombstone => {
+                out.extend_from_slice(&1u32.to_le_bytes());
+            }
+        }
+    }
+    out
+}
+
+fn write_bytes(buffer: &mut Vec<u8>, bytes: &[u8]) {
+    buffer.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    buffer.extend_from_slice(bytes);
+}
+
+fn decode_table(data: &[u8]) -> StorageResult<Vec<TableEntry>> {
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut decoder = TableDecoder::new(data);
+    let count = decoder.read_u64()? as usize;
+    let mut entries = Vec::with_capacity(count);
+    for _ in 0..count {
+        let key = decoder.read_bytes()?;
+        let sequence = decoder.read_u64()?;
+        let variant = decoder.read_u32()?;
+        let value = match variant {
+            0 => ValueState::Present(decoder.read_bytes()?),
+            1 => ValueState::Tombstone,
+            other => {
+                return Err(StorageError::backend(format!(
+                    "unknown value variant {other} in table"
+                )))
+            }
+        };
+        entries.push(TableEntry {
+            key,
+            sequence,
+            value,
+        });
+    }
+    if decoder.remaining() != 0 {
+        return Err(StorageError::backend("corrupt table: trailing bytes"));
+    }
+    Ok(entries)
+}
+
+struct TableDecoder<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> TableDecoder<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    fn read_exact(&mut self, len: usize) -> StorageResult<&'a [u8]> {
+        if self.pos + len > self.data.len() {
+            return Err(StorageError::backend(
+                "corrupt table: unexpected end of data",
+            ));
+        }
+        let slice = &self.data[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(slice)
+    }
+
+    fn read_u64(&mut self) -> StorageResult<u64> {
+        let bytes = self.read_exact(8)?;
+        let mut array = [0u8; 8];
+        array.copy_from_slice(bytes);
+        Ok(u64::from_le_bytes(array))
+    }
+
+    fn read_u32(&mut self) -> StorageResult<u32> {
+        let bytes = self.read_exact(4)?;
+        let mut array = [0u8; 4];
+        array.copy_from_slice(bytes);
+        Ok(u32::from_le_bytes(array))
+    }
+
+    fn read_bytes(&mut self) -> StorageResult<Vec<u8>> {
+        let len = self.read_u64()? as usize;
+        let bytes = self.read_exact(len)?;
+        Ok(bytes.to_vec())
+    }
 }
 
 fn byte_cost(entry: &TableEntry) -> usize {
@@ -566,17 +810,91 @@ fn byte_cost(entry: &TableEntry) -> usize {
     entry.key.len() + value_len + std::mem::size_of::<u64>() + 1
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 struct WalRecord {
     key: Vec<u8>,
     sequence: u64,
     kind: WalKind,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 enum WalKind {
     Put { value: Vec<u8> },
     Delete,
+}
+
+impl WalRecord {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("key".to_string(), encode_bytes(&self.key));
+        map.insert(
+            "sequence".to_string(),
+            Value::Number(Number::from(self.sequence)),
+        );
+        map.insert("kind".to_string(), self.kind.to_value());
+        Value::Object(map)
+    }
+
+    fn from_value(value: Value) -> StorageResult<Self> {
+        let mut map = expect_object(value, "wal record")?;
+        let key = map
+            .remove("key")
+            .map(|value| decode_bytes(value, "wal record key"))
+            .transpose()?
+            .ok_or_else(|| StorageError::backend("missing field 'key' in wal record"))?;
+        let sequence = take_u64(&mut map, "sequence", "wal record")?;
+        let kind_value = map
+            .remove("kind")
+            .ok_or_else(|| StorageError::backend("missing field 'kind' in wal record"))?;
+        let kind = WalKind::from_value(kind_value)?;
+        Ok(Self {
+            key,
+            sequence,
+            kind,
+        })
+    }
+}
+
+impl WalKind {
+    fn to_value(&self) -> Value {
+        match self {
+            WalKind::Put { value } => {
+                let mut inner = Map::new();
+                inner.insert("value".to_string(), encode_bytes(value));
+                let mut outer = Map::new();
+                outer.insert("Put".to_string(), Value::Object(inner));
+                Value::Object(outer)
+            }
+            WalKind::Delete => Value::String("Delete".to_string()),
+        }
+    }
+
+    fn from_value(value: Value) -> StorageResult<Self> {
+        match value {
+            Value::String(s) if s == "Delete" => Ok(WalKind::Delete),
+            Value::Object(mut outer) => {
+                if let Some(inner) = outer.remove("Put") {
+                    let mut inner = expect_object(inner, "wal kind Put")?;
+                    let value = inner
+                        .remove("value")
+                        .map(|value| decode_bytes(value, "wal kind Put value"))
+                        .transpose()?
+                        .ok_or_else(|| {
+                            StorageError::backend("missing field 'value' for wal kind Put")
+                        })?;
+                    Ok(WalKind::Put { value })
+                } else if let Some(inner) = outer.remove("Delete") {
+                    // Older serde_json encodings for unit variants sometimes rendered
+                    // {"Delete":{}}; accept that as well.
+                    let _ = expect_object(inner, "wal kind Delete")?;
+                    Ok(WalKind::Delete)
+                } else {
+                    Err(StorageError::backend("unknown wal kind variant"))
+                }
+            }
+            _ => Err(StorageError::backend("invalid wal kind encoding")),
+        }
+    }
 }
 
 impl KeyValue for InhouseEngine {

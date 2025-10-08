@@ -1,58 +1,103 @@
 # Serialization Guardrails
-> **Review (2025-09-25):** Synced Serialization Guardrails guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
-> touching persistence or wire formats.
+> **Review (2025-10-08):** Documented the `foundation_serialization` facade adoption across governance, ledger, and the metrics aggregator alongside new JSON `Value` accessor guidance.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08). Governance, ledger, and metrics aggregator now encode exclusively through `foundation_serialization`.
 
-The `codec` crate fronts every workspace serialization call so that bincode, JSON, and CBOR payloads all use consistent
-configuration, error handling, and telemetry. Direct `serde_json`, `serde_cbor`, or `bincode` calls are considered legacy
-and must be routed through the wrapper before landing.
+The `foundation_serialization` crate fronts every workspace serialization call so
+binary, JSON, TOML, and base58 payloads all use deterministic, auditable, and
+first-party codecs. Direct `serde_json`, `serde_cbor`, or `bincode` calls are
+considered legacy and must be routed through this facade before landing.
 
-## Available codecs
+## Available helpers
 
-The crate exposes a `Codec` enum plus named profiles under `codec::profiles`:
+The crate exposes dedicated modules for each supported format:
 
-- `profiles::transaction()` – canonical bincode configuration for signed transactions and payload hashing.
-- `profiles::gossip()` – bincode profile for gossip relay persistence.
-- `profiles::storage_manifest()` – bincode profile for storage manifests.
-- `profiles::json()` – canonical JSON encoder/decoder.
-- `profiles::cbor()` – canonical CBOR encoder/decoder.
+- `json` – streaming JSON encoder/decoder plus `Value` utilities.
+- `binary` – compact binary encoder/decoder used for snapshot and state
+  persistence.
+- `toml` – configuration loader backing operator- and test-facing config files.
+- `base58` – first-party base58 encoder/decoder reused by the overlay store and
+  tooling crates.
 
-Helper APIs provide the common ergonomics:
+### JSON
 
 ```rust
-let bytes = codec::serialize(profiles::transaction(), &payload)?;
-let value: Payload = codec::deserialize(profiles::transaction(), &bytes)?;
-let json = codec::serialize_to_string(profiles::json(), &value)?;
-let pretty = codec::serialize_json_pretty(&value)?;
-let parsed: serde_json::Value = codec::deserialize_from_str(profiles::json(), &json_str)?;
+use foundation_serialization::json::{self, Value};
+
+let payload = json::to_string(&request)?;
+let pretty = json::to_string_pretty(&request)?;
+let decoded: Response = json::from_str(&payload)?;
+let value: Value = json::value_from_str(&payload)?;
+let bytes = json::to_vec(&request)?;
+let same: Response = json::from_slice(&bytes)?;
 ```
 
-Types that implement `serde::Serialize`/`Deserialize` can opt into the blanket `CodecMessage` trait for convenience when a
-`Codec` value is already in scope.
+`json::to_value`/`json::from_value` provide ergonomic bridges between strongly
+typed structs and `Value`, while `json::to_vec_value`/`json::to_string_value`
+render raw `Value` trees without requiring `Serialize`/`Deserialize` derives.
+Tests and RPC helpers should use `json::value_from_str` when constructing manual
+payloads so malformed fixtures fail loudly.
+
+#### JSON `Value` convenience APIs
+
+`Value` mirrors serde’s API surface and now exposes public numeric accessors so
+callers can avoid ad-hoc pattern matching:
+
+- `Value::as_object()` / `as_array()` / `as_str()` – borrow structured data.
+- `Value::as_i64()` / `as_u64()` / `as_f64()` – extract numeric fields via the
+  canonical `Number` wrapper.
+- `Number::as_i64()` / `as_u64()` / `as_f64()` – convert to primitive types while
+  rejecting non-finite or fractional inputs when a whole number is required.
+
+These helpers back the metrics aggregator, governance history loader, and
+ledger migration CLI. Use them instead of indexing into maps (`value["field"]`)
+so tests surface missing or misspelled keys immediately.
+
+### Binary
+
+```rust
+use foundation_serialization::binary;
+
+let bytes = binary::encode(&snapshot)?;
+let snapshot: Snapshot = binary::decode(&bytes)?;
+```
+
+Binary helpers guarantee deterministic layout and reject trailing data, making
+it safe to persist validator and storage-engine state without third-party
+codecs.
+
+### TOML
+
+```rust
+use foundation_serialization::toml;
+
+let config: OperatorConfig = toml::from_str(&contents)?;
+```
+
+Configuration loaders surface the shared `foundation_serialization::Error`
+variant and reuse the TOML parser that backs runtime configuration and tests.
 
 ## Error model
 
-All helpers return `codec::Result<T>` using the shared `codec::Error` type. Errors include the codec profile, operation
-(`serialize`/`deserialize`), and any wrapped serde or UTF-8 failures so downstream callers can surface actionable messages.
-
-## Telemetry hooks
-
-When the crate’s optional `telemetry` feature is enabled it emits:
-
-- `codec_payload_bytes` – histogram tracking serialized byte length with `codec`, `direction`, and optional `profile` labels.
-- `codec_operation_fail_total` – counter incremented whenever a serialization or deserialization attempt fails.
-
-These hooks power dashboards that highlight codec regressions and keep payload sizes within expected bounds.
+All helpers return `foundation_serialization::Result<T>` using the shared
+`Error` enum. Errors encode the failing codec (JSON, binary, or TOML), the
+operation, and the underlying reason so downstream callers can attach context or
+bubble the message into diagnostics.
 
 ## Review checklist
 
-Before merging changes that touch persistence or network payloads:
+Before merging changes that touch persistence, network payloads, or operator
+configuration:
 
-1. Import `codec` helpers instead of calling `serde_json`, `serde_cbor`, or `bincode` directly.
-2. Select an existing profile (`transaction`, `gossip`, `storage_manifest`, `json`, or `cbor`) or add a new one with docs.
-3. Ensure human-facing output goes through `codec::serialize_to_string`/`serialize_json_pretty` to retain the unified
-   error type.
-4. Update or add tests in `crates/codec` for new formats, including corrupted payload cases.
-5. Document any new profiles or helpers in this file and reference the relevant metrics labels when appropriate.
+1. Import `foundation_serialization` helpers instead of calling `serde_json`,
+   `serde_cbor`, or `bincode` directly.
+2. Select an existing helper (`json`, `binary`, `toml`, or `base58`) or extend
+   the crate with new functionality and document it here.
+3. Prefer `json::value_from_*` when parsing ad-hoc fixtures so malformed data
+   fails the test harness.
+4. When working with JSON trees, use the `Value::as_*` accessors rather than
+   indexing into objects to avoid silent defaulting.
+5. Update or add unit tests in `crates/foundation_serialization` for new helpers
+   including corrupted payload cases.
 
-Following this checklist keeps the codec abstraction authoritative and prevents format drift across the workspace.
+Following this checklist keeps the serialization facade authoritative and
+prevents format drift across the workspace.

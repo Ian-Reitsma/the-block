@@ -1378,21 +1378,6 @@
       ]
     },
     {
-      "name": "bs58",
-      "version": "0.4.0",
-      "tier": "unclassified",
-      "origin": "crates.io",
-      "license": "MIT/Apache-2.0",
-      "depth": 2,
-      "dependencies": [],
-      "dependents": [
-        {
-          "name": "p2p_overlay",
-          "version": "0.1.0"
-        }
-      ]
-    },
-    {
       "name": "bstr",
       "version": "1.12.0",
       "tier": "unclassified",

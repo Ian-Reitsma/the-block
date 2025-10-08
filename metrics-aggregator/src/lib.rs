@@ -33,7 +33,8 @@ fn upload_sync(bucket: &str, data: Vec<u8>) {
     }
 }
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::json::{Map, Number, Value};
+use foundation_serialization::{json, Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -61,7 +62,7 @@ const METRICS_CF: &str = "peer_metrics";
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PeerStat {
     pub peer_id: String,
-    pub metrics: serde_json::Value,
+    pub metrics: Value,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -114,7 +115,7 @@ struct RawCorrelation {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub data: Arc<Mutex<HashMap<String, VecDeque<(u64, serde_json::Value)>>>>,
+    pub data: Arc<Mutex<HashMap<String, VecDeque<(u64, Value)>>>>,
     pub token: Arc<RwLock<String>>,
     token_path: Option<PathBuf>,
     store: Arc<InhouseEngine>,
@@ -160,7 +161,7 @@ impl AppState {
             .expect("scan metrics store");
         while let Some((k, v)) = iter.next().expect("iterate metrics store") {
             if let Ok(key) = String::from_utf8(k) {
-                if let Ok(deque) = serde_json::from_slice(&v) {
+                if let Ok(deque) = json::from_slice(&v) {
                     data.insert(key, deque);
                 }
             }
@@ -207,7 +208,7 @@ impl AppState {
                     let _ = self.store.delete(METRICS_CF, peer.as_bytes());
                     false
                 } else {
-                    let value = serde_json::to_vec(deque).unwrap();
+                    let value = json::to_vec(deque).unwrap();
                     let _ = self.store.put_bytes(METRICS_CF, peer.as_bytes(), &value);
                     true
                 }
@@ -451,21 +452,21 @@ fn aggregator_metrics() -> &'static AggregatorMetrics {
 #[cfg(feature = "s3")]
 static S3_BUCKET: Lazy<Option<String>> = Lazy::new(|| std::env::var("S3_BUCKET").ok());
 
-fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
-    use serde_json::{Map, Value};
+fn merge(a: &mut Value, b: &Value) {
     match b {
         Value::Object(bm) => {
             if !a.is_object() {
                 *a = Value::Object(Map::new());
             }
-            let am = a.as_object_mut().unwrap();
-            for (k, bv) in bm {
-                merge(am.entry(k.clone()).or_insert(Value::Null), bv);
+            if let Some(am) = a.as_object_mut() {
+                for (k, bv) in bm {
+                    merge(am.entry(k.clone()).or_insert(Value::Null), bv);
+                }
             }
         }
         Value::Number(bn) => {
-            let sum = a.as_f64().unwrap_or(0.0) + bn.as_f64().unwrap_or(0.0);
-            *a = Value::from(sum);
+            let sum = a.as_f64().unwrap_or(0.0) + bn.as_f64();
+            *a = Value::from(Number::from(sum));
         }
         _ => {
             *a = b.clone();
@@ -473,10 +474,10 @@ fn merge(a: &mut serde_json::Value, b: &serde_json::Value) {
     }
 }
 
-fn collect_correlations(value: &serde_json::Value) -> Vec<RawCorrelation> {
-    fn walk(value: &serde_json::Value, metric: Option<&str>, out: &mut Vec<RawCorrelation>) {
+fn collect_correlations(value: &Value) -> Vec<RawCorrelation> {
+    fn walk(value: &Value, metric: Option<&str>, out: &mut Vec<RawCorrelation>) {
         match value {
-            serde_json::Value::Object(map) => {
+            Value::Object(map) => {
                 if let Some(correlation) = map
                     .get("correlation_id")
                     .and_then(|v| v.as_str())
@@ -510,7 +511,7 @@ fn collect_correlations(value: &serde_json::Value) -> Vec<RawCorrelation> {
                     walk(v, next_metric, out);
                 }
             }
-            serde_json::Value::Array(items) => {
+            Value::Array(items) => {
                 for item in items {
                     walk(item, metric, out);
                 }
@@ -648,8 +649,8 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
             if let Some((ts, last)) = entry.back_mut() {
                 if *ts == now {
                     merge(last, &stat.metrics);
-                    let value = serde_json::to_vec(entry)
-                        .map_err(|err| HttpError::Handler(err.to_string()))?;
+                    let value =
+                        json::to_vec(entry).map_err(|err| HttpError::Handler(err.to_string()))?;
                     let _ = state
                         .store
                         .put_bytes(METRICS_CF, stat.peer_id.as_bytes(), &value);
@@ -673,8 +674,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
             if entry.len() > 1024 {
                 entry.pop_front();
             }
-            let value =
-                serde_json::to_vec(entry).map_err(|err| HttpError::Handler(err.to_string()))?;
+            let value = json::to_vec(entry).map_err(|err| HttpError::Handler(err.to_string()))?;
             let _ = state
                 .store
                 .put_bytes(METRICS_CF, stat.peer_id.as_bytes(), &value);
@@ -706,7 +706,7 @@ async fn ingest(request: Request<AppState>) -> Result<Response, HttpError> {
             Err(err) => warn!(target: "aggregator", error = %err, "failed to append to wal"),
         }
     }
-    if let Ok(blob) = serde_json::to_string(&payload) {
+    if let Ok(blob) = json::to_string(&payload) {
         archive_metrics(&blob);
     }
 
@@ -718,7 +718,7 @@ async fn peer(request: Request<AppState>) -> Result<Response, HttpError> {
     let Some(id) = request.param("id") else {
         return Ok(Response::new(StatusCode::BAD_REQUEST));
     };
-    let data: Vec<(u64, serde_json::Value)> = state
+    let data: Vec<(u64, Value)> = state
         .data
         .lock()
         .unwrap()
@@ -730,7 +730,7 @@ async fn peer(request: Request<AppState>) -> Result<Response, HttpError> {
 
     #[cfg(feature = "s3")]
     if let Some(bucket) = S3_BUCKET.as_ref() {
-        if let Ok(bytes) = serde_json::to_vec(&data) {
+        if let Ok(bytes) = json::to_vec(&data) {
             upload_sync(bucket, bytes);
         }
     }
@@ -807,15 +807,15 @@ struct ExportPayload {
 }
 
 fn build_export_payload(
-    map: HashMap<String, VecDeque<(u64, serde_json::Value)>>,
+    map: HashMap<String, VecDeque<(u64, Value)>>,
     recipient: Option<String>,
     password: Option<String>,
     bucket: Option<String>,
 ) -> Result<ExportPayload, ExportError> {
     let mut builder = ZipBuilder::new();
     for (peer_id, deque) in map {
-        let json = serde_json::to_vec(&deque)
-            .map_err(|err| ExportError::Serialization(err.to_string()))?;
+        let json =
+            json::to_vec(&deque).map_err(|err| ExportError::Serialization(err.to_string()))?;
         builder.add_file(&format!("{peer_id}.json"), &json)?;
     }
 
@@ -967,7 +967,8 @@ impl Wal {
 
     fn append(&self, stats: &[PeerStat]) -> io::Result<()> {
         let mut guard = self.file.lock().unwrap();
-        let line = serde_json::to_vec(stats)?;
+        let line = json::to_vec(&stats.to_vec())
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
         guard.write_all(&line)?;
         guard.write_all(b"\n")?;
         guard.flush()
@@ -993,16 +994,22 @@ mod tests {
         runtime::block_on(future)
     }
 
+    fn parse_json(input: &str) -> Value {
+        json::value_from_str(input).expect("valid test json")
+    }
+
     #[test]
     fn dedupes_by_peer() {
         run_async(async {
             let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("token".into(), dir.path().join("m.json"), 60);
             let app = router(state.clone());
-            let payload = serde_json::json!([
-                {"peer_id": "a", "metrics": {"r":1}},
-                {"peer_id": "a", "metrics": {"r":2}}
-            ]);
+            let payload = parse_json(
+                r#"[
+                {"peer_id":"a","metrics":{"r":1}},
+                {"peer_id":"a","metrics":{"r":2}}
+            ]"#,
+            );
             let ingest = app
                 .request_builder()
                 .method(Method::Post)
@@ -1018,9 +1025,15 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(resp.status(), StatusCode::OK);
-            let vals: Vec<(u64, serde_json::Value)> = serde_json::from_slice(resp.body()).unwrap();
+            let vals: Vec<(u64, Value)> = json::from_slice(resp.body()).unwrap();
             assert_eq!(vals.len(), 1);
-            assert_eq!(vals[0].1["r"].as_f64().unwrap() as i64, 3);
+            let metrics = vals[0]
+                .1
+                .as_object()
+                .and_then(|map| map.get("r"))
+                .and_then(|value| value.as_i64())
+                .unwrap();
+            assert_eq!(metrics, 3);
         });
     }
 
@@ -1032,7 +1045,7 @@ mod tests {
             {
                 let state = AppState::new("t".into(), &path, 1);
                 let app = router(state.clone());
-                let payload = serde_json::json!([{ "peer_id": "p", "metrics": {"v": 1}}]);
+                let payload = parse_json(r#"[{"peer_id":"p","metrics":{"v":1}}]"#);
                 let req = app
                     .request_builder()
                     .method(Method::Post)
@@ -1071,7 +1084,12 @@ mod tests {
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
-                let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}, {"peer_id": "p2", "metrics": {"v": 2}}]);
+                let payload = parse_json(
+                    r#"[
+                        {"peer_id":"p1","metrics":{"v":1}},
+                        {"peer_id":"p2","metrics":{"v":2}}
+                    ]"#,
+                );
                 let req = app
                     .request_builder()
                     .method(Method::Post)
@@ -1094,8 +1112,14 @@ mod tests {
             let archive = ZipReader::from_bytes(&body_bytes).unwrap();
             assert_eq!(archive.len(), 2);
             let file = archive.file("p1.json").unwrap();
-            let v: Vec<(u64, serde_json::Value)> = serde_json::from_slice(file).unwrap();
-            assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
+            let v: Vec<(u64, Value)> = json::from_slice(file).unwrap();
+            let metric = v[0]
+                .1
+                .as_object()
+                .and_then(|map| map.get("v"))
+                .and_then(|value| value.as_i64())
+                .unwrap();
+            assert_eq!(metric, 1);
         });
     }
 
@@ -1106,7 +1130,7 @@ mod tests {
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
-                let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}]);
+                let payload = parse_json(r#"[{"peer_id":"p1","metrics":{"v":1}}]"#);
                 let req = app
                     .request_builder()
                     .method(Method::Post)
@@ -1136,8 +1160,14 @@ mod tests {
             let archive = ZipReader::from_bytes(&plain).unwrap();
             assert_eq!(archive.len(), 1);
             let file = archive.file("p1.json").unwrap();
-            let v: Vec<(u64, serde_json::Value)> = serde_json::from_slice(file).unwrap();
-            assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
+            let v: Vec<(u64, Value)> = json::from_slice(file).unwrap();
+            let metric = v[0]
+                .1
+                .as_object()
+                .and_then(|map| map.get("v"))
+                .and_then(|value| value.as_i64())
+                .unwrap();
+            assert_eq!(metric, 1);
         });
     }
 
@@ -1148,7 +1178,7 @@ mod tests {
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
             {
                 let app = router(state.clone());
-                let payload = serde_json::json!([{ "peer_id": "p1", "metrics": {"v": 1}}]);
+                let payload = parse_json(r#"[{"peer_id":"p1","metrics":{"v":1}}]"#);
                 let req = app
                     .request_builder()
                     .method(Method::Post)
@@ -1175,8 +1205,14 @@ mod tests {
             let archive = ZipReader::from_bytes(&plain).unwrap();
             assert_eq!(archive.len(), 1);
             let file = archive.file("p1.json").unwrap();
-            let v: Vec<(u64, serde_json::Value)> = serde_json::from_slice(file).unwrap();
-            assert_eq!(v[0].1["v"].as_i64().unwrap(), 1);
+            let v: Vec<(u64, Value)> = json::from_slice(file).unwrap();
+            let metric = v[0]
+                .1
+                .as_object()
+                .and_then(|map| map.get("v"))
+                .and_then(|value| value.as_i64())
+                .unwrap();
+            assert_eq!(metric, 1);
         });
     }
 
@@ -1213,7 +1249,7 @@ mod tests {
 
             assert_eq!(resp.status(), StatusCode::OK);
             let parsed: HashMap<String, WrapperSummaryEntry> =
-                serde_json::from_slice(resp.body()).unwrap();
+                json::from_slice(resp.body()).unwrap();
             let entry = parsed.get("node-a").expect("wrapper entry");
             assert_eq!(entry.metrics.len(), 1);
             assert_eq!(entry.metrics[0].metric, "codec_serialize_fail_total");

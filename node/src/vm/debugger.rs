@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use concurrency::Lazy;
+use foundation_serialization::json::{self, json};
 use serde::Serialize;
 
 use super::{
@@ -227,7 +228,7 @@ impl Debugger {
         if let Some(parent) = path.as_ref().parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(json) = serde_json::to_vec_pretty(&self.trace) {
+        if let Ok(json) = json::to_vec_pretty(&self.trace) {
             let _ = std::fs::write(path, json);
         }
     }
@@ -238,15 +239,15 @@ impl Debugger {
         }
         let mut events = Vec::new();
         for (i, step) in self.trace.iter().enumerate() {
-            events.push(serde_json::json!({
+            events.push(json!({
                 "name": step.op,
                 "ph": "X",
                 "ts": i as u64,
                 "dur": 1,
             }));
         }
-        let out = serde_json::json!({"traceEvents": events});
-        let _ = std::fs::write(path, serde_json::to_vec_pretty(&out).unwrap());
+        let out = json!({"traceEvents": events});
+        let _ = std::fs::write(path, json::to_vec_pretty(&out).unwrap());
     }
 
     pub fn trace(&self) -> &[TraceStep] {

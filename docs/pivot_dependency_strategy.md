@@ -1,6 +1,6 @@
 # Pivot Dependency Strategy Runbook
-> **Review (2025-09-30):** Captured the in-house Reed–Solomon/LT fountain rollout and refreshed coding wrapper notes.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-10-08):** Logged the foundation_serialization rollout across governance, ledger, and the metrics aggregator and documented the remaining serde_json/bincode clean-up in tooling crates.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
 
 This runbook aligns engineering and operations on the hybrid dependency strategy that
 pairs runtime-selectable wrappers with policy-governed in-house fallbacks. It expands on
@@ -27,7 +27,13 @@ summaries, letting governance stage cutovers with confidence.
 vendor hashes, and policy attestations. The `tools/vendor_sync` helper keeps the vendored
 tree reproducible, while `tools/dependency_registry` records policy-compliant snapshots
 for auditing.
-Recent updates removed third-party Reed–Solomon and RaptorQ dependencies in favour of the in-house `coding` crate implementations; wrapper telemetry and policy rollout now track the `lt-inhouse` fountain and GF(256) Reed–Solomon identifiers so governance can audit the swap.
+Recent updates removed third-party Reed–Solomon and RaptorQ dependencies in favour of the in-house `coding` crate implementations; wrapper telemetry and policy rollout now track the `lt-inhouse` fountain and GF(256) Reed–Solomon identifiers so governance can audit the swap. As of 2025-10-08 the ledger migration CLI, governance history store, and metrics aggregator persist through `foundation_serialization` and the base58 facade, eliminating direct `serde_json`, `bincode`, and `bs58` usage from production crates. Remaining serde_json/bincode links are isolated to tooling (`tools/*`, `sim/`, `examples/`) with owners listed below—dropping them is prerequisite to enforcing the guard at the workspace level.
+
+**Serialization facade checkpoint — 2025-10-08**
+
+- ✅ Governance (store/bootstrap helpers), ledger (migration CLI, shard/UTXO persistence), and metrics aggregator (leader election, correlation/naming/telemetry suites) call only into `foundation_serialization`.
+- ✅ Base58 peer IDs now flow through `foundation_serialization::base58`, allowing removal of the `bs58` crate from the workspace.
+- ⚠️ Tooling crates (`tools/indexer`, `tools/remote-signer`, `tools/dependency_registry`, `tools/log_indexer_cli`, `tools/release_notes`, `tools/bench-harness`, `tools/dual-key-migrate`, `tools/gov_graph`, `sim/`, `examples/*`, `bridges/`, `inflation/`, `crates/cli_core`, `crates/probe`, `crates/wallet`, `crates/codec`, `crates/jurisdiction`) still depend on `serde_json`/`bincode`. Each owner must stage migrations to the facade before we flip the dependency guard.
 
 The CLI, light-client, node, and metrics-aggregator crates now ride the runtime facade end-to-end—DNS resolution flows through `runtime::net::lookup_host`/`lookup_txt`, device probes rely on the in-house async mutex, and all async tests execute via `runtime::block_on`—so the workspace builds without Tokio while the runtime crate keeps a compatibility stub for policy-gated rollbacks. The metrics aggregator’s object-store integration now signs uploads with the first-party SigV4 helper layered on `httpd::HttpClient`, eliminating the AWS SDK while preserving S3 compatibility for our in-house bucket service. Leader election no longer depends on `etcd-client`; aggregators coordinate through the shared `InhouseEngine` lease table with first-party fencing tokens, keeping tonic/hyper/Tokio out of the build graph entirely. Bulk metric exports now encrypt via `crypto_suite::encryption::envelope`, replacing the `age` and OpenSSL stacks with X25519/HKDF/AES primitives that live alongside the rest of the in-house crypto suite.
 
