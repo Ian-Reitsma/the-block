@@ -4,6 +4,7 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use foundation_serialization::json;
 #[cfg(feature = "hid")]
 use hidapi::HidApi;
 use qrcode::{render::unicode, QrCode};
@@ -60,11 +61,15 @@ fn run() -> Result<(), RunError> {
     let qr = matches.get_flag("qr");
 
     let data = fs::read(&input).map_err(|err| RunError::Failure(err.to_string()))?;
-    let mut psbt: Psbt = serde_json::from_slice(&data).expect("parse psbt");
+    let mut psbt: Psbt = json::from_slice(&data)
+        .map_err(|err| RunError::Failure(format!("failed to parse PSBT: {err}")))?;
     let wallet = Wallet::generate();
-    let sig = wallet.sign(&psbt.payload).expect("sign");
+    let sig = wallet
+        .sign(&psbt.payload)
+        .map_err(|err| RunError::Failure(format!("failed to sign PSBT payload: {err}")))?;
     psbt.add_signature(sig);
-    let out = serde_json::to_vec(&psbt).expect("serialize");
+    let out = json::to_vec(&psbt)
+        .map_err(|err| RunError::Failure(format!("failed to encode PSBT: {err}")))?;
     fs::write(&output, &out).map_err(|err| RunError::Failure(err.to_string()))?;
     if qr {
         if let Ok(code) = QrCode::new(&out) {

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::env;
 
+#[derive(Debug)]
 struct Metrics {
     avg_latency_ms: u64,
 }
@@ -56,8 +57,7 @@ mod tests {
 
     #[test]
     fn parses_with_whitespace() {
-        let metrics =
-            parse_metrics("{  \n  \"avg_latency_ms\"  :  1200  } ").expect("parse");
+        let metrics = parse_metrics("{  \n  \"avg_latency_ms\"  :  1200  } ").expect("parse");
         assert_eq!(metrics.avg_latency_ms, 1200);
     }
 

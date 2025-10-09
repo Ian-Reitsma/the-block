@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use anyhow::Context;
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
@@ -7,9 +8,10 @@ use cli_core::{
     parse::{Matches, ParseError, Parser},
 };
 use coding::{compressor_for, erasure_coder_for};
-use rand::{rngs::StdRng, RngCore, SeedableRng};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::json::{self, Number, Value};
+use rand::{rngs::StdRng, RngCore};
 use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -18,10 +20,65 @@ enum RunError {
     Failure(anyhow::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 struct Metrics {
     latency_ms: f64,
     throughput_tps: f64,
+}
+
+impl Metrics {
+    fn to_value(self) -> anyhow::Result<Value> {
+        fn encode(label: &str, value: f64) -> anyhow::Result<Value> {
+            Number::from_f64(value)
+                .map(Value::Number)
+                .ok_or_else(|| anyhow::anyhow!("metrics.{label} must be finite"))
+        }
+
+        let mut map = json::Map::new();
+        map.insert("latency_ms".into(), encode("latency_ms", self.latency_ms)?);
+        map.insert(
+            "throughput_tps".into(),
+            encode("throughput_tps", self.throughput_tps)?,
+        );
+        Ok(Value::Object(map))
+    }
+
+    fn from_value(value: Value) -> anyhow::Result<Self> {
+        match value {
+            Value::Object(map) => {
+                let latency = require_number(&map, "latency_ms")?;
+                let throughput = require_number(&map, "throughput_tps")?;
+                Ok(Self {
+                    latency_ms: latency,
+                    throughput_tps: throughput,
+                })
+            }
+            other => Err(anyhow::anyhow!(
+                "expected metrics object, got {}",
+                describe_type(&other)
+            )),
+        }
+    }
+}
+
+fn require_number(map: &json::Map, key: &str) -> anyhow::Result<f64> {
+    let value = map
+        .get(key)
+        .ok_or_else(|| anyhow::anyhow!("metrics.{key} missing"))?;
+    value
+        .as_f64()
+        .ok_or_else(|| anyhow::anyhow!("metrics.{key} is not a number"))
+}
+
+fn describe_type(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 fn main() {
@@ -217,7 +274,12 @@ fn run_workload_mode(
     if let Some(base) = &baseline {
         regression_check(&metrics, base)?;
     }
-    fs::write(&report, serde_json::to_vec_pretty(&metrics)?)?;
+    let payload = metrics.to_value()?;
+    let mut file = fs::File::create(&report)?;
+    json::to_writer_pretty(&mut file, &payload)
+        .map_err(anyhow::Error::from)
+        .with_context(|| format!("failed to write benchmark report to {}", report.display()))?;
+    writeln!(file)?;
     Ok(())
 }
 
@@ -231,7 +293,7 @@ fn deploy_nodes(nodes: u32) -> anyhow::Result<()> {
 
 fn run_workload(workload: Option<PathBuf>) -> anyhow::Result<Metrics> {
     if let Some(path) = workload {
-        let _cfg: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+        json::value_from_str(&fs::read_to_string(path)?).map_err(anyhow::Error::from)?;
     }
     // In lieu of real metrics, return deterministic placeholder values.
     Ok(Metrics {
@@ -241,8 +303,16 @@ fn run_workload(workload: Option<PathBuf>) -> anyhow::Result<Metrics> {
 }
 
 fn regression_check(metrics: &Metrics, baseline_path: &PathBuf) -> anyhow::Result<()> {
-    let data = fs::read_to_string(baseline_path)?;
-    let baseline: Metrics = serde_json::from_str(&data)?;
+    let data = fs::read(baseline_path)?;
+    let baseline_value = json::value_from_slice(&data)
+        .map_err(anyhow::Error::from)
+        .with_context(|| {
+            format!(
+                "failed to decode baseline report {}",
+                baseline_path.display()
+            )
+        })?;
+    let baseline = Metrics::from_value(baseline_value)?;
     if metrics.throughput_tps < baseline.throughput_tps {
         eprintln!(
             "throughput regression: {} < {}",
@@ -384,15 +454,96 @@ fn print_timing(label: &str, total: Duration, iterations: u32, bytes: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sys::tempfile::NamedTempFile;
+
+    fn number(value: f64) -> Value {
+        Value::Number(Number::from_f64(value).expect("finite"))
+    }
+
+    #[test]
+    fn metrics_to_value_round_trip() {
+        let metrics = Metrics {
+            latency_ms: 12.5,
+            throughput_tps: 987.0,
+        };
+
+        let value = metrics.to_value().expect("encode metrics");
+        let parsed = Metrics::from_value(value.clone()).expect("decode metrics");
+
+        assert_eq!(parsed.latency_ms, metrics.latency_ms);
+        assert_eq!(parsed.throughput_tps, metrics.throughput_tps);
+
+        match value {
+            Value::Object(map) => {
+                assert_eq!(map.get("latency_ms"), Some(&number(12.5)));
+                assert_eq!(map.get("throughput_tps"), Some(&number(987.0)));
+            }
+            other => panic!("expected object, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn metrics_to_value_rejects_non_finite() {
+        let metrics = Metrics {
+            latency_ms: f64::NAN,
+            throughput_tps: 1.0,
+        };
+
+        let err = metrics.to_value().expect_err("nan should fail");
+        assert!(err
+            .to_string()
+            .contains("metrics.latency_ms must be finite"));
+
+        let metrics = Metrics {
+            latency_ms: 1.0,
+            throughput_tps: f64::INFINITY,
+        };
+
+        let err = metrics.to_value().expect_err("infinity should fail");
+        assert!(err
+            .to_string()
+            .contains("metrics.throughput_tps must be finite"));
+    }
+
+    #[test]
+    fn metrics_from_value_missing_field() {
+        let mut map = json::Map::new();
+        map.insert("latency_ms".into(), number(5.0));
+
+        let err = Metrics::from_value(Value::Object(map)).expect_err("missing field must fail");
+        assert!(err.to_string().contains("metrics.throughput_tps missing"));
+    }
+
+    #[test]
+    fn metrics_from_value_rejects_non_number() {
+        let mut map = json::Map::new();
+        map.insert("latency_ms".into(), number(5.0));
+        map.insert("throughput_tps".into(), Value::String("fast".into()));
+
+        let err = Metrics::from_value(Value::Object(map)).expect_err("string should fail");
+        assert!(err
+            .to_string()
+            .contains("metrics.throughput_tps is not a number"));
+    }
+
+    #[test]
+    fn metrics_from_value_rejects_non_object() {
+        let err = Metrics::from_value(Value::Array(vec![])).expect_err("array should fail");
+        assert!(err
+            .to_string()
+            .contains("expected metrics object, got array"));
+    }
 
     #[test]
     fn detects_regression() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let tmp = NamedTempFile::new().unwrap();
         let baseline = Metrics {
             latency_ms: 10.0,
             throughput_tps: 2_000.0,
         };
-        fs::write(tmp.path(), serde_json::to_string(&baseline).unwrap()).unwrap();
+        let baseline_value = baseline.to_value().unwrap();
+        let baseline_json = json::to_string_value_pretty(&baseline_value);
+        fs::write(tmp.path(), baseline_json).unwrap();
         let metrics = Metrics {
             latency_ms: 10.0,
             throughput_tps: 1_000.0,

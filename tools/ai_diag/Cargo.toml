@@ -1,0 +1,12 @@
+[package]
+name = "ai_diag"
+version = "0.1.0"
+edition = "2021"
+authors = ["The Block"]
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+
+[dev-dependencies]
+anyhow = "1"

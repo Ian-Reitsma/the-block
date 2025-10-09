@@ -6,9 +6,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use coding::{ChaCha20Poly1305Encryptor, Encryptor, CHACHA20_POLY1305_NONCE_LEN};
 use concurrency::{mutex, Lazy, MutexGuard, MutexT};
+use foundation_serialization::{binary, json, Deserialize, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -431,14 +431,14 @@ impl MobileCache {
             expires_at,
             value: entry.value.as_bytes().to_vec(),
         };
-        let plain = bincode::serialize(&payload)
-            .map_err(|e| MobileCacheError::Serialization(e.to_string()))?;
+        let plain =
+            binary::encode(&payload).map_err(|e| MobileCacheError::Serialization(e.to_string()))?;
         self.encrypt(&plain)
     }
 
     fn deserialize_response(&self, data: &[u8]) -> Result<PersistedResponse, MobileCacheError> {
         let plain = self.decrypt(data)?;
-        bincode::deserialize(&plain).map_err(|e| MobileCacheError::Serialization(e.to_string()))
+        binary::decode(&plain).map_err(|e| MobileCacheError::Serialization(e.to_string()))
     }
 
     fn serialize_queue_item(&self, item: &QueueItem) -> Result<Vec<u8>, MobileCacheError> {
@@ -452,14 +452,14 @@ impl MobileCache {
             enqueued_at,
             value: item.value.as_bytes().to_vec(),
         };
-        let plain = bincode::serialize(&payload)
-            .map_err(|e| MobileCacheError::Serialization(e.to_string()))?;
+        let plain =
+            binary::encode(&payload).map_err(|e| MobileCacheError::Serialization(e.to_string()))?;
         self.encrypt(&plain)
     }
 
     fn deserialize_queue_item(&self, data: &[u8]) -> Result<PersistedQueueItem, MobileCacheError> {
         let plain = self.decrypt(data)?;
-        bincode::deserialize(&plain).map_err(|e| MobileCacheError::Serialization(e.to_string()))
+        binary::decode(&plain).map_err(|e| MobileCacheError::Serialization(e.to_string()))
     }
 
     fn persist_entry(&self, key: &str, entry: &CacheEntry) -> Result<(), MobileCacheError> {

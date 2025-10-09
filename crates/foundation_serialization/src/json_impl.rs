@@ -346,6 +346,10 @@ impl<'de> Deserialize<'de> for Number {
 }
 
 impl Value {
+    pub fn is_array(&self) -> bool {
+        matches!(self, Value::Array(_))
+    }
+
     pub fn is_object(&self) -> bool {
         matches!(self, Value::Object(_))
     }
@@ -369,6 +373,22 @@ impl Value {
     pub fn as_array(&self) -> Option<&[Value]> {
         if let Value::Array(values) = self {
             Some(values)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_array_mut(&mut self) -> Option<&mut Vec<Value>> {
+        if let Value::Array(values) = self {
+            Some(values)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        if let Value::Bool(flag) = self {
+            Some(*flag)
         } else {
             None
         }
@@ -403,6 +423,34 @@ impl Value {
             num.as_u64()
         } else {
             None
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        match self {
+            Value::Object(map) => map.get(key),
+            _ => None,
+        }
+    }
+
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+        match self {
+            Value::Object(map) => map.get_mut(key),
+            _ => None,
+        }
+    }
+
+    pub fn get_index(&self, index: usize) -> Option<&Value> {
+        match self {
+            Value::Array(values) => values.get(index),
+            _ => None,
+        }
+    }
+
+    pub fn get_index_mut(&mut self, index: usize) -> Option<&mut Value> {
+        match self {
+            Value::Array(values) => values.get_mut(index),
+            _ => None,
         }
     }
 
@@ -641,6 +689,13 @@ pub fn to_vec_value(value: &Value) -> Vec<u8> {
 pub fn to_string_value(value: &Value) -> String {
     let mut rendered = String::new();
     value.render_compact(&mut rendered);
+    rendered
+}
+
+/// Serialize a JSON [`Value`] into a pretty-printed string.
+pub fn to_string_value_pretty(value: &Value) -> String {
+    let mut rendered = String::new();
+    value.render_pretty(&mut rendered, 0);
     rendered
 }
 
@@ -1925,5 +1980,72 @@ mod tests {
         assert_eq!(text.as_i64(), None);
         assert_eq!(text.as_u64(), None);
         assert_eq!(text.as_f64(), None);
+    }
+
+    #[test]
+    fn key_accessors_follow_object_and_array_semantics() {
+        let mut object = Map::new();
+        object.insert("flag".to_string(), Value::from(true));
+        object.insert("count".to_string(), Value::from(3u64));
+        let mut value = Value::Object(object);
+
+        assert!(value.is_object());
+        assert!(!value.is_array());
+        assert_eq!(value.get("missing"), None);
+        assert_eq!(value.get("flag").and_then(Value::as_bool), Some(true));
+
+        if let Some(entry) = value.get_mut("count") {
+            *entry = Value::from(4u64);
+        } else {
+            panic!("count missing");
+        }
+
+        assert_eq!(value.get("count").and_then(Value::as_u64), Some(4));
+
+        let mut array = Value::Array(vec![Value::from("zero"), Value::from("one")]);
+        assert!(array.is_array());
+        assert!(!array.is_object());
+        assert_eq!(array.get_index(1).and_then(Value::as_str), Some("one"));
+        assert_eq!(array.get_index(2), None);
+
+        if let Some(slot) = array.get_index_mut(0) {
+            *slot = Value::from("updated");
+        } else {
+            panic!("index 0 missing");
+        }
+
+        match array {
+            Value::Array(ref elements) => {
+                assert_eq!(elements.len(), 2);
+                assert_eq!(elements[0].as_str(), Some("updated"));
+            }
+            _ => panic!("array mutated to non-array"),
+        }
+    }
+
+    #[test]
+    fn pretty_value_indents_arrays() {
+        let value = Value::Array(vec![Value::from(1u64), Value::from("two")]);
+        let pretty = to_string_value_pretty(&value);
+        assert!(pretty.starts_with("[\n"));
+        assert!(pretty.contains("  1"));
+        assert!(pretty.contains("  \"two\""));
+        let compact = to_string_value(&value);
+        let trimmed_pretty: String = pretty.chars().filter(|c| !c.is_whitespace()).collect();
+        let trimmed_compact: String = compact.chars().filter(|c| !c.is_whitespace()).collect();
+        assert_eq!(trimmed_pretty, trimmed_compact);
+    }
+
+    #[test]
+    fn pretty_value_handles_objects() {
+        let mut map = Map::new();
+        map.insert("alpha".to_string(), Value::from(true));
+        map.insert("beta".to_string(), Value::from(3u64));
+        let value = Value::Object(map);
+        let pretty = to_string_value_pretty(&value);
+        assert!(pretty.starts_with("{\n"));
+        assert!(pretty.contains("  \"alpha\": true"));
+        assert!(pretty.contains("  \"beta\": 3"));
+        assert!(pretty.trim_end().ends_with('}'));
     }
 }

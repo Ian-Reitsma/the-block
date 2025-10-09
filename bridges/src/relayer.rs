@@ -1,34 +1,30 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[cfg(feature = "telemetry")]
-use crate::BRIDGE_SLASHES_TOTAL;
+use crate::{telemetry_counter, BRIDGE_SLASHES_TOTAL};
 #[cfg(feature = "telemetry")]
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use prometheus::{IntCounter, Opts, Registry};
+use runtime::telemetry::Counter;
 
 #[cfg(feature = "telemetry")]
-static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
-
-#[cfg(feature = "telemetry")]
-pub static RELAYER_SLASH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::with_opts(Opts::new(
+fn relayer_slash_counter() -> Counter {
+    telemetry_counter(
         "relayer_slash_total",
         "Total slashing events for bridge relayers",
-    ))
-    .expect("counter");
-    REGISTRY.register(Box::new(c.clone())).expect("register");
-    c
-});
+    )
+}
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg(feature = "telemetry")]
+pub static RELAYER_SLASH_TOTAL: Lazy<Counter> = Lazy::new(relayer_slash_counter);
+
+#[derive(Debug, Clone, Default)]
 pub struct Relayer {
     pub stake: u64,
     pub slashes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RelayerSet {
     relayers: HashMap<String, Relayer>,
 }
@@ -65,5 +61,9 @@ impl RelayerSet {
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Relayer)> {
         self.relayers.iter()
+    }
+
+    pub(crate) fn insert_state(&mut self, id: String, relayer: Relayer) {
+        self.relayers.insert(id, relayer);
     }
 }

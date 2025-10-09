@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
 use crypto_suite::hashing::blake3::Hasher;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{hex, json};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod codec;
 pub mod header;
 pub mod light_client;
 pub mod lock;
@@ -21,75 +22,89 @@ pub use relayer::{Relayer, RelayerSet as Relayers};
 pub use token_bridge::TokenBridge;
 
 #[cfg(feature = "telemetry")]
-use once_cell::sync::Lazy;
+use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use prometheus::{IntCounter, Opts, Registry};
+use runtime::telemetry::Counter;
 
 #[cfg(feature = "telemetry")]
-static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+mod telemetry_support {
+    use concurrency::Lazy;
+    use runtime::telemetry::{Counter, Registry};
+
+    pub(super) static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
+
+    pub(super) fn counter(name: &'static str, help: &'static str) -> Counter {
+        REGISTRY
+            .get()
+            .register_counter(name, help)
+            .expect("register bridge telemetry counter")
+    }
+}
 
 #[cfg(feature = "telemetry")]
-pub static PROOF_VERIFY_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::with_opts(Opts::new(
+use telemetry_support::counter;
+
+#[cfg(feature = "telemetry")]
+fn proof_verify_success_counter() -> Counter {
+    counter(
         "bridge_proof_verify_success_total",
         "Bridge proofs successfully verified",
-    ))
-    .expect("counter");
-    REGISTRY.register(Box::new(c.clone())).expect("register");
-    c
-});
+    )
+}
 
 #[cfg(feature = "telemetry")]
-pub static PROOF_VERIFY_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::with_opts(Opts::new(
+fn proof_verify_failure_counter() -> Counter {
+    counter(
         "bridge_proof_verify_failure_total",
         "Bridge proofs rejected",
-    ))
-    .expect("counter");
-    REGISTRY.register(Box::new(c.clone())).expect("register");
-    c
-});
+    )
+}
 
 #[cfg(feature = "telemetry")]
-pub static BRIDGE_INVALID_PROOF_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::with_opts(Opts::new(
+fn bridge_invalid_proof_counter() -> Counter {
+    counter(
         "bridge_invalid_proof_total",
         "Bridge proofs rejected as invalid",
-    ))
-    .expect("counter");
-    REGISTRY.register(Box::new(c.clone())).expect("register");
-    c
-});
+    )
+}
 
 #[cfg(feature = "telemetry")]
-pub static BRIDGE_CHALLENGES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::with_opts(
-        Opts::new(
-            "bridge_challenges_total",
-            "Number of bridge withdrawals challenged",
-        )
-        .namespace("bridge"),
+fn bridge_challenges_counter() -> Counter {
+    counter(
+        "bridge_challenges_total",
+        "Number of bridge withdrawals challenged",
     )
-    .expect("counter");
-    REGISTRY.register(Box::new(c.clone())).expect("register");
-    c
-});
+}
 
 #[cfg(feature = "telemetry")]
-pub static BRIDGE_SLASHES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-    let c = IntCounter::with_opts(
-        Opts::new(
-            "bridge_slashes_total",
-            "Relayer slashes triggered by bridge security rules",
-        )
-        .namespace("bridge"),
+fn bridge_slashes_counter() -> Counter {
+    counter(
+        "bridge_slashes_total",
+        "Relayer slashes triggered by bridge security rules",
     )
-    .expect("counter");
-    REGISTRY.register(Box::new(c.clone())).expect("register");
-    c
-});
+}
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg(feature = "telemetry")]
+pub static PROOF_VERIFY_SUCCESS_TOTAL: Lazy<Counter> = Lazy::new(proof_verify_success_counter);
+
+#[cfg(feature = "telemetry")]
+pub static PROOF_VERIFY_FAILURE_TOTAL: Lazy<Counter> = Lazy::new(proof_verify_failure_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_INVALID_PROOF_TOTAL: Lazy<Counter> = Lazy::new(bridge_invalid_proof_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_CHALLENGES_TOTAL: Lazy<Counter> = Lazy::new(bridge_challenges_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_SLASHES_TOTAL: Lazy<Counter> = Lazy::new(bridge_slashes_counter);
+
+#[cfg(feature = "telemetry")]
+pub(crate) fn telemetry_counter(name: &'static str, help: &'static str) -> Counter {
+    counter(name, help)
+}
+
+#[derive(Debug, Clone)]
 pub struct RelayerProof {
     pub relayer: String,
     pub commitment: [u8; 32],
@@ -112,7 +127,7 @@ impl RelayerProof {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RelayerBundle {
     pub proofs: Vec<RelayerProof>,
 }
@@ -152,7 +167,7 @@ impl RelayerBundle {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PendingWithdrawal {
     pub user: String,
     pub amount: u64,
@@ -182,14 +197,11 @@ impl Default for BridgeConfig {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Clone)]
 pub struct Bridge {
     pub locked: HashMap<String, u64>,
-    #[serde(default)]
     pub verified_headers: HashSet<[u8; 32]>,
-    #[serde(default)]
     pub pending_withdrawals: HashMap<[u8; 32], PendingWithdrawal>,
-    #[serde(skip)]
     pub cfg: BridgeConfig,
 }
 
@@ -205,14 +217,16 @@ impl Bridge {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
                 if let Ok(bytes) = std::fs::read(e.path()) {
-                    if let Ok(hdr) = serde_json::from_slice::<PowHeader>(&bytes) {
-                        let h = light_client::Header {
-                            chain_id: hdr.chain_id.clone(),
-                            height: hdr.height,
-                            merkle_root: hdr.merkle_root,
-                            signature: hdr.signature,
-                        };
-                        set.insert(light_client::header_hash(&h));
+                    if let Ok(value) = json::value_from_slice(&bytes) {
+                        if let Ok(hdr) = PowHeader::from_value(&value) {
+                            let h = light_client::Header {
+                                chain_id: hdr.chain_id.clone(),
+                                height: hdr.height,
+                                merkle_root: hdr.merkle_root,
+                                signature: hdr.signature,
+                            };
+                            set.insert(light_client::header_hash(&h));
+                        }
                     }
                 }
             }

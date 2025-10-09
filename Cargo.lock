@@ -51,6 +51,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai_diag"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -238,10 +245,9 @@ dependencies = [
  "cli_core",
  "coding",
  "dependency_guard",
+ "foundation_serialization",
  "rand 0.1.0",
- "serde",
- "serde_json",
- "tempfile",
+ "sys",
 ]
 
 [[package]]
@@ -284,14 +290,12 @@ dependencies = [
 name = "bridges"
 version = "0.1.0"
 dependencies = [
+ "concurrency",
  "crypto_suite",
  "dex",
- "hex",
+ "foundation_serialization",
  "ledger",
- "once_cell",
- "prometheus",
- "serde",
- "serde_json",
+ "runtime",
  "sys",
 ]
 
@@ -710,7 +714,6 @@ dependencies = [
  "foundation_serialization",
  "indexmap",
  "serde",
- "serde_json",
  "tempfile",
 ]
 
@@ -810,10 +813,7 @@ version = "0.1.0"
 dependencies = [
  "crypto",
  "dependency_guard",
- "hex",
- "serde",
- "serde_json",
- "wallet",
+ "foundation_serialization",
 ]
 
 [[package]]
@@ -1426,17 +1426,13 @@ dependencies = [
 name = "indexer"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "bincode",
  "cli_core",
  "dependency_guard",
- "hex",
+ "foundation_serialization",
  "httpd",
  "runtime",
  "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
+ "sys",
  "the_block",
 ]
 
@@ -1475,9 +1471,8 @@ name = "inflation"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "foundation_serialization",
  "rand 0.1.0",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1787,6 +1782,20 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+
+[[package]]
+name = "log-indexer-cli"
+version = "0.1.0"
+dependencies = [
+ "base64_fp",
+ "cli_core",
+ "coding",
+ "crypto_suite",
+ "dependency_guard",
+ "foundation_serialization",
+ "rusqlite",
+ "sled 0.34.0",
+]
 
 [[package]]
 name = "lru"
@@ -2879,8 +2888,7 @@ dependencies = [
  "anyhow",
  "cli_core",
  "dependency_guard",
- "serde",
- "serde_json",
+ "foundation_serialization",
 ]
 
 [[package]]
@@ -2897,10 +2905,9 @@ version = "0.1.0"
 dependencies = [
  "cli_core",
  "dependency_guard",
+ "foundation_serialization",
  "hidapi",
  "qrcode",
- "serde",
- "serde_json",
  "wallet",
 ]
 
@@ -3774,7 +3781,6 @@ dependencies = [
  "pprof 0.13.0",
  "pqcrypto-dilithium",
  "privacy",
- "prometheus",
  "python_bridge",
  "rand 0.1.0",
  "rayon",
@@ -4719,10 +4725,9 @@ dependencies = [
  "assert_cmd",
  "cli_core",
  "dependency_guard",
+ "foundation_serialization",
  "git2",
  "predicates",
- "serde",
- "serde_json",
  "tempfile",
 ]
 

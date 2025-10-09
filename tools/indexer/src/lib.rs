@@ -1,25 +1,74 @@
+use foundation_serialization::{
+    binary,
+    json::{self, Map, Number, Value},
+};
 use httpd::{HttpError, Request, Response, Router, StatusCode};
 use rusqlite::{params, Connection, Result};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use hex::encode as hex_encode;
 use the_block::compute_market::receipt::Receipt;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct BlockRecord {
     pub hash: String,
     pub height: u64,
     pub timestamp: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ReceiptRecord {
     pub key: String,
     pub epoch: u64,
     pub provider: String,
     pub buyer: String,
     pub amount: u64,
+}
+
+impl BlockRecord {
+    pub fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("hash".to_string(), Value::String(self.hash.clone()));
+        map.insert(
+            "height".to_string(),
+            Value::Number(Number::from(self.height)),
+        );
+        map.insert(
+            "timestamp".to_string(),
+            Value::Number(Number::from(self.timestamp)),
+        );
+        Value::Object(map)
+    }
+
+    pub fn from_value(value: &Value) -> Result<Self, String> {
+        let map = value
+            .as_object()
+            .ok_or_else(|| format!("expected object, found {}", describe_value(value)))?;
+
+        let hash = expect_string(map, "hash")?;
+        let height = expect_u64(map, "height")?;
+        let timestamp = expect_u64(map, "timestamp")?;
+
+        Ok(Self {
+            hash,
+            height,
+            timestamp,
+        })
+    }
+}
+
+impl ReceiptRecord {
+    pub fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("key".to_string(), Value::String(self.key.clone()));
+        map.insert("epoch".to_string(), Value::Number(Number::from(self.epoch)));
+        map.insert("provider".to_string(), Value::String(self.provider.clone()));
+        map.insert("buyer".to_string(), Value::String(self.buyer.clone()));
+        map.insert(
+            "amount".to_string(),
+            Value::Number(Number::from(self.amount)),
+        );
+        Value::Object(map)
+    }
 }
 
 /// Simple SQLite-backed indexer.
@@ -130,10 +179,10 @@ impl Indexer {
             for ent in entries.flatten() {
                 if let Ok(epoch) = ent.file_name().to_string_lossy().parse::<u64>() {
                     if let Ok(bytes) = std::fs::read(ent.path()) {
-                        if let Ok(list) = bincode::deserialize::<Vec<Receipt>>(&bytes) {
+                        if let Ok(list) = binary::decode::<Vec<Receipt>>(&bytes) {
                             for r in list {
                                 let rec = ReceiptRecord {
-                                    key: hex_encode(r.idempotency_key),
+                                    key: hex_encode(&r.idempotency_key),
                                     epoch,
                                     provider: r.provider.clone(),
                                     buyer: r.buyer.clone(),
@@ -159,7 +208,63 @@ async fn list_blocks(request: Request<Indexer>) -> Result<Response, HttpError> {
     let blocks = indexer
         .all_blocks()
         .map_err(|err| HttpError::Handler(err.to_string()))?;
-    Response::new(StatusCode::OK).json(&blocks)
+    let mut values = Vec::with_capacity(blocks.len());
+    for record in &blocks {
+        values.push(record.to_value());
+    }
+
+    let body = json::to_vec_value(&Value::Array(values));
+    Ok(Response::new(StatusCode::OK)
+        .with_body(body)
+        .with_header("content-type", "application/json"))
+}
+
+fn expect_string(map: &Map, key: &str) -> Result<String, String> {
+    match map.get(key) {
+        Some(Value::String(value)) => Ok(value.clone()),
+        Some(other) => Err(format!(
+            "expected '{key}' to be a string, found {}",
+            describe_value(other)
+        )),
+        None => Err(format!("missing '{key}' field")),
+    }
+}
+
+fn expect_u64(map: &Map, key: &str) -> Result<u64, String> {
+    match map.get(key) {
+        Some(Value::Number(number)) => number.as_u64().ok_or_else(|| {
+            format!(
+                "expected '{key}' to be a non-negative integer, found {}",
+                number.as_f64()
+            )
+        }),
+        Some(other) => Err(format!(
+            "expected '{key}' to be a number, found {}",
+            describe_value(other)
+        )),
+        None => Err(format!("missing '{key}' field")),
+    }
+}
+
+fn describe_value(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(TABLE[(byte >> 4) as usize] as char);
+        out.push(TABLE[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -169,7 +274,7 @@ mod tests {
 
     #[test]
     fn index_and_query() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = sys::tempfile::tempdir().unwrap();
         let db = dir.path().join("idx.db");
         let idx = Indexer::open(&db).unwrap();
         let rec = BlockRecord {
@@ -185,7 +290,7 @@ mod tests {
 
     #[test]
     fn index_receipts() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = sys::tempfile::tempdir().unwrap();
         let db = dir.path().join("idx.db");
         let idx = Indexer::open(&db).unwrap();
         let rec = ReceiptRecord {
@@ -202,7 +307,7 @@ mod tests {
     #[test]
     fn router_lists_blocks() {
         runtime::block_on(async {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = sys::tempfile::tempdir().unwrap();
             let db = dir.path().join("idx.db");
             let idx = Indexer::open(&db).unwrap();
             let rec = BlockRecord {
@@ -218,9 +323,11 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK);
-            let blocks: Vec<BlockRecord> = serde_json::from_slice(response.body()).unwrap();
-            assert_eq!(blocks.len(), 1);
-            assert_eq!(blocks[0].hash, "abc");
+            let value = json::value_from_slice(response.body()).unwrap();
+            let entries = value.as_array().unwrap();
+            assert_eq!(entries.len(), 1);
+            let block = BlockRecord::from_value(&entries[0]).unwrap();
+            assert_eq!(block.hash, "abc");
         });
     }
 }

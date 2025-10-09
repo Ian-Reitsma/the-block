@@ -10,6 +10,7 @@
 
 mod base58_impl;
 mod binary_impl;
+mod hex_impl;
 mod json_impl;
 mod toml_impl;
 
@@ -114,6 +115,11 @@ pub mod json {
         json_impl::to_string_value(value)
     }
 
+    /// Serialize a JSON [`Value`] into a pretty-printed string without requiring serde traits.
+    pub fn to_string_value_pretty(value: &Value) -> String {
+        json_impl::to_string_value_pretty(value)
+    }
+
     /// Deserialize a value from a byte slice containing JSON data.
     pub fn from_slice<T: DeserializeOwned>(input: &[u8]) -> Result<T> {
         json_impl::from_slice(input).map_err(Error::json)
@@ -171,11 +177,18 @@ pub mod base58 {
     pub use crate::base58_impl::{decode, encode, Error};
 }
 
+/// Hex helpers implemented without third-party dependencies.
+pub mod hex {
+    pub use crate::hex_impl::{decode, decode_array, encode, Error};
+}
+
 /// Binary helpers backed by the first-party encoder/decoder.
 pub mod binary {
     use serde::{de::DeserializeOwned, Serialize};
 
     use super::{binary_impl, Error, Result};
+
+    pub use crate::binary_impl::Error as CodecError;
 
     /// Serialize a value into an owned byte vector.
     pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {

@@ -213,7 +213,7 @@ fn decode_legacy_receipt(bytes: &[u8]) -> Result<ReadReceipt, legacy_cbor::Error
 enum ReceiptDecodeError {
     Io(io::Error),
     LegacyFallback {
-        binary: binary::Error,
+        binary: binary::CodecError,
         legacy: legacy_cbor::Error,
     },
 }

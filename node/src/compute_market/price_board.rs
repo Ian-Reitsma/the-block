@@ -21,7 +21,7 @@ use crate::util::versioned_blob::{decode_blob, encode_blob, DecodeErr, MAGIC_PRI
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use diagnostics::tracing::{info, warn};
 #[cfg(feature = "telemetry")]
-use prometheus::{IntCounterVec, IntGauge, IntGaugeVec, Opts};
+use runtime::telemetry::{IntCounterVec, IntGauge, IntGaugeVec, Opts};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{INDUSTRIAL_BACKLOG, INDUSTRIAL_PRICE_PER_UNIT, INDUSTRIAL_UTILIZATION};
