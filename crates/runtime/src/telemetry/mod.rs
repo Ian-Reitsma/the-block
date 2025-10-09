@@ -77,6 +77,8 @@ impl Default for Registry {
     }
 }
 
+pub const TEXT_MIME: &str = "text/plain; charset=utf-8";
+
 impl Registry {
     pub fn new() -> Self {
         Self {
@@ -137,15 +139,20 @@ impl Registry {
         guard.iter().map(|c| c.collect()).collect()
     }
 
-    /// Render all registered metrics to the Prometheus text exposition format.
-    pub fn render(&self) -> String {
+    /// Render all registered metrics into a UTF-8 text payload.
+    pub fn render_bytes(&self) -> Vec<u8> {
         let families = self.gather();
         let encoder = TextEncoder::new();
         let mut buffer = Vec::new();
         encoder
             .encode(&families, &mut buffer)
             .expect("encoding telemetry snapshot");
-        String::from_utf8(buffer).expect("telemetry output must be valid utf8")
+        buffer
+    }
+
+    /// Render all registered metrics to a UTF-8 string payload.
+    pub fn render(&self) -> String {
+        String::from_utf8(self.render_bytes()).expect("telemetry output must be valid utf8")
     }
 
     /// Capture an immutable snapshot of the registered metrics.

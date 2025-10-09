@@ -1,7 +1,8 @@
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Simple emission schedule enum.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Emission {
     /// Fixed total supply minted at genesis
     Fixed(u64),
@@ -21,14 +22,14 @@ impl Emission {
 }
 
 /// Information about a registered token.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenInfo {
     pub symbol: String,
     pub emission: Emission,
 }
 
 /// Registry for native tokens with pluggable emission schedules.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TokenRegistry {
     tokens: HashMap<String, TokenInfo>,
 }

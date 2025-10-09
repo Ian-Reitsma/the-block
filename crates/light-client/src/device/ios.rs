@@ -1,12 +1,12 @@
 #![allow(unsafe_code)]
 
-use async_trait::async_trait;
 use core_foundation::array::CFArray;
 use core_foundation::base::TCFType;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::string::CFString;
 use objc::runtime::{Object, YES};
 use objc::{class, msg_send, sel, sel_impl};
+use std::pin::Pin;
 use tracing::debug;
 
 use super::{DeviceStatus, DeviceStatusProbe, ProbeError};
@@ -53,23 +53,27 @@ fn wifi_connected() -> bool {
     }
 }
 
-#[async_trait]
 impl DeviceStatusProbe for IosProbe {
-    async fn poll_status(&self) -> Result<DeviceStatus, ProbeError> {
-        unsafe {
-            let device: *mut Object = msg_send![class!(UIDevice), currentDevice];
-            let _: () = msg_send![device, setBatteryMonitoringEnabled: YES];
-            let state: i32 = msg_send![device, batteryState];
-            let level: f32 = msg_send![device, batteryLevel];
-            if level < 0.0 {
-                debug!(target: "light_client_device", "battery level unavailable");
+    fn poll_status(
+        &self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<DeviceStatus, ProbeError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            unsafe {
+                let device: *mut Object = msg_send![class!(UIDevice), currentDevice];
+                let _: () = msg_send![device, setBatteryMonitoringEnabled: YES];
+                let state: i32 = msg_send![device, batteryState];
+                let level: f32 = msg_send![device, batteryLevel];
+                if level < 0.0 {
+                    debug!(target: "light_client_device", "battery level unavailable");
+                }
+                let wifi = wifi_connected();
+                Ok(DeviceStatus {
+                    on_wifi: wifi,
+                    is_charging: state == 2 || state == 3,
+                    battery_level: if level < 0.0 { 0.0 } else { level },
+                })
             }
-            let wifi = wifi_connected();
-            Ok(DeviceStatus {
-                on_wifi: wifi,
-                is_charging: state == 2 || state == 3,
-                battery_level: if level < 0.0 { 0.0 } else { level },
-            })
-        }
+        })
     }
 }

@@ -4,12 +4,13 @@ use crypto_suite::{
     hashing::sha1,
     signatures::ed25519::{Signature, VerifyingKey, SIGNATURE_LENGTH},
 };
+use foundation_lazy::sync::Lazy;
+use foundation_serialization::json;
 use hex;
 use httpd::{join_path, BlockingClient, Method, Uri};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
 use native_tls::{Certificate as NativeCertificate, HandshakeError, Identity, TlsConnector};
-use once_cell::sync::Lazy;
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -500,13 +501,12 @@ impl RemoteSigner {
 
         ws.handshake(&host_header, &path)
             .map_err(|e| WalletError::Failure(e.to_string()))?;
-        ws.send_text(&serde_json::to_string(payload).unwrap())
+        ws.send_text(&json::to_string(payload).expect("serialize sign payload"))
             .map_err(|e| WalletError::Failure(e.to_string()))?;
         let txt = ws
             .read_text()
             .map_err(|e| WalletError::Failure(e.to_string()))?;
-        let r: SignResp =
-            serde_json::from_str(&txt).map_err(|e| WalletError::Failure(e.to_string()))?;
+        let r: SignResp = json::from_str(&txt).map_err(|e| WalletError::Failure(e.to_string()))?;
         let sig_bytes = hex::decode(r.sig).map_err(|e| WalletError::Failure(e.to_string()))?;
         if sig_bytes.len() != SIGNATURE_LENGTH {
             return Err(WalletError::Failure("invalid signature length".into()));
@@ -642,7 +642,7 @@ fn fetch_pubkey_https(url: &Uri, tls: Option<&TlsConnector>) -> Result<PubKeyRes
     }
     body.truncate(content_length);
     let body_text = String::from_utf8(body).map_err(|err| WalletError::Failure(err.to_string()))?;
-    serde_json::from_str(&body_text).map_err(|err| WalletError::Failure(err.to_string()))
+    json::from_str(&body_text).map_err(|err| WalletError::Failure(err.to_string()))
 }
 
 fn map_tls_error(err: io::Error) -> WalletError {

@@ -21,20 +21,14 @@ fn get_id(params: &Value) -> Result<String, RpcError> {
         .get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or(RpcError {
-            code: -32602,
-            message: "missing id",
-        })
+        .ok_or_else(|| RpcError::new(-32602, "missing id"))
 }
 
 fn get_amount(params: &Value) -> Result<u64, RpcError> {
     params
         .get("amount")
         .and_then(|v| v.as_u64())
-        .ok_or(RpcError {
-            code: -32602,
-            message: "missing amount",
-        })
+        .ok_or_else(|| RpcError::new(-32602, "missing amount"))
 }
 
 fn get_role(params: &Value) -> String {
@@ -46,63 +40,44 @@ fn get_role(params: &Value) -> String {
 }
 
 fn get_sig(params: &Value) -> Result<Vec<u8>, RpcError> {
-    let sig_hex = params.get("sig").and_then(|v| v.as_str()).ok_or(RpcError {
-        code: -32602,
-        message: "missing sig",
-    })?;
-    hex::decode(sig_hex).map_err(|_| RpcError {
-        code: -32602,
-        message: "invalid sig",
-    })
+    let sig_hex = params
+        .get("sig")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| RpcError::new(-32602, "missing sig"))?;
+    hex::decode(sig_hex).map_err(|_| RpcError::new(-32602, "invalid sig"))
 }
 
 fn parse_key(hex: &str, err: &'static str) -> Result<VerifyingKey, RpcError> {
-    let bytes = hex::decode(hex).map_err(|_| RpcError {
-        code: -32602,
-        message: err,
-    })?;
-    let raw: [u8; 32] = bytes.try_into().map_err(|_| RpcError {
-        code: -32602,
-        message: err,
-    })?;
-    VerifyingKey::from_bytes(&raw).map_err(|_| RpcError {
-        code: -32602,
-        message: err,
-    })
+    let bytes = hex::decode(hex).map_err(|_| RpcError::new(-32602, err))?;
+    let raw: [u8; 32] = bytes.try_into().map_err(|_| RpcError::new(-32602, err))?;
+    VerifyingKey::from_bytes(&raw).map_err(|_| RpcError::new(-32602, err))
 }
 
 fn parse_signers(params: &Value, id_key: &VerifyingKey) -> Result<SignerPayload, RpcError> {
     if let Some(signers) = params.get("signers") {
-        let entries = signers.as_array().ok_or(RpcError {
-            code: -32602,
-            message: "invalid signers",
-        })?;
+        let entries = signers
+            .as_array()
+            .ok_or_else(|| RpcError::new(-32602, "invalid signers"))?;
         if entries.is_empty() {
-            return Err(RpcError {
-                code: -32602,
-                message: "missing signers",
-            });
+            return Err(RpcError::new(-32602, "missing signers"));
         }
         let mut approvals = Vec::with_capacity(entries.len());
         for entry in entries {
-            let pk_hex = entry.get("pk").and_then(|v| v.as_str()).ok_or(RpcError {
-                code: -32602,
-                message: "invalid signers",
-            })?;
-            let sig_hex = entry.get("sig").and_then(|v| v.as_str()).ok_or(RpcError {
-                code: -32602,
-                message: "invalid signers",
-            })?;
+            let pk_hex = entry
+                .get("pk")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| RpcError::new(-32602, "invalid signers"))?;
+            let sig_hex = entry
+                .get("sig")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| RpcError::new(-32602, "invalid signers"))?;
             let pk = parse_key(pk_hex, "invalid signer pk")?;
-            let sig_bytes = hex::decode(sig_hex).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid sig",
-            })?;
-            let arr: [u8; SIGNATURE_LENGTH] =
-                sig_bytes.as_slice().try_into().map_err(|_| RpcError {
-                    code: -32602,
-                    message: "invalid sig",
-                })?;
+            let sig_bytes =
+                hex::decode(sig_hex).map_err(|_| RpcError::new(-32602, "invalid sig"))?;
+            let arr: [u8; SIGNATURE_LENGTH] = sig_bytes
+                .as_slice()
+                .try_into()
+                .map_err(|_| RpcError::new(-32602, "invalid sig"))?;
             let sig = Signature::from_bytes(&arr);
             approvals.push((pk, sig));
         }
@@ -112,16 +87,10 @@ fn parse_signers(params: &Value, id_key: &VerifyingKey) -> Result<SignerPayload,
             .map(|v| v as usize)
             .unwrap_or_else(|| approvals.len());
         if threshold == 0 || threshold > approvals.len() {
-            return Err(RpcError {
-                code: -32602,
-                message: "invalid threshold",
-            });
+            return Err(RpcError::new(-32602, "invalid threshold"));
         }
         if !approvals.iter().any(|(pk, _)| pk == id_key) {
-            return Err(RpcError {
-                code: -32602,
-                message: "id not authorized",
-            });
+            return Err(RpcError::new(-32602, "id not authorized"));
         }
         Ok(SignerPayload {
             approvals,
@@ -130,16 +99,12 @@ fn parse_signers(params: &Value, id_key: &VerifyingKey) -> Result<SignerPayload,
     } else {
         let sig_bytes = get_sig(params)?;
         if sig_bytes.len() != SIGNATURE_LENGTH {
-            return Err(RpcError {
-                code: -32602,
-                message: "invalid sig",
-            });
+            return Err(RpcError::new(-32602, "invalid sig"));
         }
-        let arr: [u8; SIGNATURE_LENGTH] =
-            sig_bytes.as_slice().try_into().map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid sig",
-            })?;
+        let arr: [u8; SIGNATURE_LENGTH] = sig_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| RpcError::new(-32602, "invalid sig"))?;
         let sig = Signature::from_bytes(&arr);
         Ok(SignerPayload {
             approvals: vec![(id_key.clone(), sig)],
@@ -164,10 +129,7 @@ fn verify(action: &str, role: &str, amount: u64, payload: &SignerPayload) -> Res
             }
         }
     }
-    Err(RpcError {
-        code: -32602,
-        message: "bad signature",
-    })
+    Err(RpcError::new(-32602, "bad signature"))
 }
 
 pub fn register(params: &Value) -> Result<Value, RpcError> {
@@ -219,14 +181,18 @@ pub fn role(params: &Value) -> Result<Value, RpcError> {
     let id = get_id(params)?;
     let role = get_role(params);
     let pos = POS_STATE.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(foundation_serialization::json!({"id": id, "role": role, "stake": pos.stake_of(&id, &role)}))
+    let stake = pos.stake_of(&id, &role);
+    Ok(foundation_serialization::json!({
+        "id": id.clone(),
+        "role": role.clone(),
+        "stake": stake,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crypto_suite::signatures::{ed25519::SigningKey, Signer};
-    use foundation_serialization::json::json;
 
     fn reset_state() {
         let mut state = POS_STATE.lock().unwrap();
@@ -246,7 +212,7 @@ mod tests {
         let amount = 10u64;
         let msg = format!("bond:{role}:{amount}");
         let sig = sk.sign(msg.as_bytes());
-        let params = json!({
+        let params = foundation_serialization::json!({
             "id": hex::encode(pk.to_bytes()),
             "role": role,
             "amount": amount,
@@ -270,7 +236,7 @@ mod tests {
             (&signer_b, signer_b.sign(msg.as_bytes())),
             (&signer_c, signer_c.sign(b"other")),
         ];
-        let params = json!({
+        let params = foundation_serialization::json!({
             "id": hex::encode(signer_a.verifying_key().to_bytes()),
             "role": role,
             "amount": amount,
@@ -286,7 +252,7 @@ mod tests {
 
         // Fails when fewer than threshold signatures are valid.
         reset_state();
-        let bad_params = json!({
+        let bad_params = foundation_serialization::json!({
             "id": hex::encode(signer_a.verifying_key().to_bytes()),
             "role": role,
             "amount": amount,

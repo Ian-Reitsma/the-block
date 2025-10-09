@@ -8,7 +8,7 @@ fn main() {
     let mut snark_ms = 0u128;
     let mut plain_ms = 0u128;
     for _ in 0..samples {
-        let data: Vec<u8> = (0..1024).map(|_| rng.gen()).collect();
+        let data: Vec<u8> = (0..1024).map(|_| rng.gen::<u32>() as u8).collect();
         let start = Instant::now();
         // pretend to verify SNARK
         let proof = the_block::compute_market::snark::prove(&data, &data);

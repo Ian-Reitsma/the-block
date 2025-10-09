@@ -65,7 +65,7 @@ fn main() -> Result<()> {
     let markdown_path = PathBuf::from("docs/dependency_inventory.md");
     output::write_markdown(&build.registry, &markdown_path)?;
     output::write_violations(&build.violations, &cli.out_dir)?;
-    output::write_prometheus_metrics(&build.violations, &cli.out_dir)?;
+    output::write_telemetry_metrics(&build.violations, &cli.out_dir)?;
 
     if cli.check {
         let baseline = output::load_registry(&cli.baseline)

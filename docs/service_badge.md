@@ -28,7 +28,7 @@ systems may call `record_epoch` with a provider identifier for test harnesses.
 ## Telemetry & RPC
 
 - Metrics: `badge_active`, `badge_last_change_seconds`, and
-  `badge_latency_ms{quantile}` are exported for Prometheus.
+  `badge_latency_ms{quantile}` are exported via the runtime telemetry registry.
 - RPC: `/badge/status` returns `{ "active": bool, "last_mint": u64,
   "last_burn": Option<u64> }`.
 - CLI: `tb-cli badge status` queries the RPC endpoint and prints a human‑readable
@@ -44,7 +44,7 @@ included in snapshots.
 
 | Symptom | Resolution |
 | --- | --- |
-| `badge_active` absent from metrics | Ensure telemetry is enabled and Prometheus scrapes the correct port. |
+| `badge_active` absent from metrics | Ensure telemetry is enabled and the runtime registry snapshot is being collected. |
 | Progress stalls | Verify blocks are mined; badge tracking only advances every 600 blocks. |
 | Unexpected revocation | Check for gaps in heartbeat logs or latency spikes above SLA. |
 

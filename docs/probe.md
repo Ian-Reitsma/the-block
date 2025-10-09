@@ -18,8 +18,8 @@ Global flags:
 - `--timeout` – maximum seconds to wait before declaring failure (default 5).
 - `--expect` – expected value for latency or height depending on subcommand.
   Exceeding the threshold returns a timeout error.
-- `--prom` – print Prometheus formatted metrics (`probe_success` and
-  `probe_duration_seconds`) for scraping.
+- `--prom` – print first-party telemetry snapshots (`probe_success` and
+  `probe_duration_seconds`) for the metrics aggregator.
 
 Exit codes: `0` on success, `1` on error, `2` on timeout.
 
@@ -54,7 +54,8 @@ probe_success 1
 probe_duration_seconds 0.134
 ```
 
-These counters integrate with Prometheus alert rules for external monitoring.
+These counters feed the foundation metrics aggregator and surface in the
+rendered dashboard without requiring Prometheus.
 
 ## Examples
 
@@ -71,4 +72,4 @@ probe --prom gossip-check 10.0.0.8:3030
 The implementation lives in
 [`crates/probe/src/main.rs`](../crates/probe/src/main.rs). Unit tests mock network
 responses and confirm timeout paths. Operators can schedule probes via `cron` or
-systemd timers and forward metrics to a central Prometheus instance.
+systemd timers and stream the snapshots to the foundation metrics aggregator.

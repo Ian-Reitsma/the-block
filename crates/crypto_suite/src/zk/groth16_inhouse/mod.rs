@@ -3,9 +3,9 @@
 use core::fmt;
 use std::ops::{Add, AddAssign, Mul, Sub};
 
+use foundation_lazy::sync::Lazy;
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
-use once_cell::sync::Lazy;
 use thiserror::Error;
 
 const MODULUS_DEC: &str =

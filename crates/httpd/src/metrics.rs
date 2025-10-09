@@ -1,37 +1,39 @@
-//! Shared helpers for emitting Prometheus metrics payloads.
+//! Shared helpers for emitting first-party telemetry payloads.
 //!
-//! The node, CLI, and metrics aggregator all expose Prometheus endpoints. The
-//! logic is simple but duplicated, so we provide a small utility here that keeps
-//! content negotiation consistent and centralises the text response format.
+//! The node, CLI, and metrics aggregator all expose textual metric snapshots.
+//! The logic is simple but duplicated, so we provide a small utility here that
+//! keeps content negotiation consistent and centralises the text response
+//! format.
 
 use crate::{Response, StatusCode};
 use runtime::telemetry::Registry;
 
-/// Render the supplied telemetry registry as a Prometheus text response.
+/// Render the supplied telemetry registry as a text response understood by the
+/// first-party monitoring stack.
 #[must_use]
-pub fn prometheus(registry: &Registry) -> Response {
+pub fn telemetry_snapshot(registry: &Registry) -> Response {
     Response::new(StatusCode::OK)
-        .with_header("content-type", "text/plain; version=0.0.4")
-        .with_body(registry.render().into_bytes())
+        .with_header("content-type", runtime::telemetry::TEXT_MIME)
+        .with_body(registry.render_bytes())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::prometheus;
+    use super::telemetry_snapshot;
     use runtime::telemetry::Registry;
 
     #[test]
-    fn renders_prometheus_payload() {
+    fn renders_text_payload() {
         let registry = Registry::new();
         let counter = registry
             .register_counter("test_counter_total", "counter for testing")
             .expect("register counter");
         counter.inc();
-        let response = prometheus(&registry);
+        let response = telemetry_snapshot(&registry);
         assert_eq!(response.status(), crate::StatusCode::OK);
         assert_eq!(
             response.header("content-type"),
-            Some("text/plain; version=0.0.4")
+            Some(runtime::telemetry::TEXT_MIME)
         );
         let body = String::from_utf8(response.body().to_vec()).expect("utf8 body");
         assert!(body.contains("test_counter_total"));

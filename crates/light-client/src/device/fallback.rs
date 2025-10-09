@@ -1,4 +1,4 @@
-use async_trait::async_trait;
+use std::pin::Pin;
 
 use super::{DeviceFallback, DeviceStatus, DeviceStatusProbe, ProbeError};
 
@@ -12,11 +12,15 @@ impl DesktopProbe {
     }
 }
 
-#[async_trait]
 impl DeviceStatusProbe for DesktopProbe {
-    async fn poll_status(&self) -> Result<DeviceStatus, ProbeError> {
-        Err(ProbeError::not_available(
-            "desktop builds rely on fallback device policy",
-        ))
+    fn poll_status(
+        &self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<DeviceStatus, ProbeError>> + Send + '_>>
+    {
+        Box::pin(async {
+            Err(ProbeError::not_available(
+                "desktop builds rely on fallback device policy",
+            ))
+        })
     }
 }

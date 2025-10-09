@@ -6,7 +6,6 @@ use crate::{
 };
 use bridges::{header::PowHeader, light_client::Proof, RelayerBundle, RelayerProof};
 use concurrency::Lazy;
-use foundation_serialization::json::json;
 use std::sync::Mutex;
 
 static SERVICE: Lazy<Mutex<Bridge>> = Lazy::new(|| {
@@ -16,10 +15,9 @@ static SERVICE: Lazy<Mutex<Bridge>> = Lazy::new(|| {
 });
 
 fn guard() -> Result<std::sync::MutexGuard<'static, Bridge>, RpcError> {
-    SERVICE.lock().map_err(|_| RpcError {
-        code: -32000,
-        message: "bridge busy",
-    })
+    SERVICE
+        .lock()
+        .map_err(|_| RpcError::new(-32000, "bridge busy"))
 }
 
 fn convert_err(err: BridgeError) -> RpcError {
@@ -34,13 +32,13 @@ fn convert_err(err: BridgeError) -> RpcError {
         BridgeError::UnknownChannel(_) => (-32012, "unknown bridge channel"),
         BridgeError::Storage(_) => (-32013, "bridge storage failure"),
     };
-    RpcError { code, message }
+    RpcError::new(code, message)
 }
 
 pub fn relayer_status(asset: Option<&str>, relayer: &str) -> foundation_serialization::json::Value {
     if let Ok(bridge) = SERVICE.lock() {
         if let Some((asset_id, stake, slashes, bond)) = bridge.relayer_status(relayer, asset) {
-            return json!({
+            return foundation_serialization::json!({
                 "asset": asset_id,
                 "stake": stake,
                 "slashes": slashes,
@@ -48,7 +46,7 @@ pub fn relayer_status(asset: Option<&str>, relayer: &str) -> foundation_serializ
             });
         }
     }
-    json!({
+    foundation_serialization::json!({
         "asset": asset.unwrap_or_default(),
         "stake": 0,
         "slashes": 0,
@@ -62,7 +60,7 @@ pub fn bond_relayer(
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     let mut bridge = guard()?;
     bridge.bond_relayer(relayer, amount).map_err(convert_err)?;
-    Ok(json!({ "status": "ok" }))
+    Ok(foundation_serialization::json!({ "status": "ok" }))
 }
 
 pub fn verify_deposit(
@@ -75,17 +73,14 @@ pub fn verify_deposit(
     proofs: Vec<RelayerProof>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     if proofs.is_empty() {
-        return Err(RpcError {
-            code: -32602,
-            message: "no relayer proofs",
-        });
+        return Err(RpcError::new(-32602, "no relayer proofs"));
     }
     let bundle = RelayerBundle::new(proofs);
     let mut bridge = guard()?;
     let receipt = bridge
         .deposit(asset, relayer, user, amount, &header, &proof, &bundle)
         .map_err(convert_err)?;
-    Ok(json!({
+    Ok(foundation_serialization::json!({
         "status": "ok",
         "nonce": receipt.nonce,
         "commitment": hex::encode(receipt.relayer_commitment),
@@ -101,17 +96,14 @@ pub fn request_withdrawal(
     proofs: Vec<RelayerProof>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     if proofs.is_empty() {
-        return Err(RpcError {
-            code: -32602,
-            message: "no relayer proofs",
-        });
+        return Err(RpcError::new(-32602, "no relayer proofs"));
     }
     let bundle = RelayerBundle::new(proofs);
     let mut bridge = guard()?;
     let commitment = bridge
         .request_withdrawal(asset, relayer, user, amount, &bundle)
         .map_err(convert_err)?;
-    Ok(json!({
+    Ok(foundation_serialization::json!({
         "status": "pending",
         "commitment": hex::encode(commitment),
     }))
@@ -122,15 +114,10 @@ pub fn challenge_withdrawal(
     commitment_hex: &str,
     challenger: &str,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    let bytes = hex::decode(commitment_hex).map_err(|_| RpcError {
-        code: -32602,
-        message: "invalid commitment",
-    })?;
+    let bytes =
+        hex::decode(commitment_hex).map_err(|_| RpcError::new(-32602, "invalid commitment"))?;
     if bytes.len() != 32 {
-        return Err(RpcError {
-            code: -32602,
-            message: "invalid commitment",
-        });
+        return Err(RpcError::new(-32602, "invalid commitment"));
     }
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
@@ -138,7 +125,7 @@ pub fn challenge_withdrawal(
     let record = bridge
         .challenge_withdrawal(asset, key, challenger)
         .map_err(convert_err)?;
-    Ok(json!({
+    Ok(foundation_serialization::json!({
         "status": "challenged",
         "challenger": record.challenger,
         "timestamp": record.challenged_at,
@@ -149,15 +136,10 @@ pub fn finalize_withdrawal(
     asset: &str,
     commitment_hex: &str,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    let bytes = hex::decode(commitment_hex).map_err(|_| RpcError {
-        code: -32602,
-        message: "invalid commitment",
-    })?;
+    let bytes =
+        hex::decode(commitment_hex).map_err(|_| RpcError::new(-32602, "invalid commitment"))?;
     if bytes.len() != 32 {
-        return Err(RpcError {
-            code: -32602,
-            message: "invalid commitment",
-        });
+        return Err(RpcError::new(-32602, "invalid commitment"));
     }
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
@@ -165,14 +147,14 @@ pub fn finalize_withdrawal(
     bridge
         .finalize_withdrawal(asset, key)
         .map_err(convert_err)?;
-    Ok(json!({"status": "finalized"}))
+    Ok(foundation_serialization::json!({"status": "finalized"}))
 }
 
 pub fn pending_withdrawals(
     asset: Option<&str>,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
-    Ok(json!({
+    Ok(foundation_serialization::json!({
         "withdrawals": bridge.pending_withdrawals(asset),
     }))
 }
@@ -185,7 +167,7 @@ pub fn active_challenges(
         .challenges(asset)
         .into_iter()
         .map(|c| {
-            json!({
+            foundation_serialization::json!({
                 "asset": c.asset,
                 "commitment": hex::encode(c.commitment),
                 "challenger": c.challenger,
@@ -193,15 +175,14 @@ pub fn active_challenges(
             })
         })
         .collect();
-    Ok(json!({ "challenges": challenges }))
+    Ok(foundation_serialization::json!({ "challenges": challenges }))
 }
 
 pub fn relayer_quorum(asset: &str) -> Result<foundation_serialization::json::Value, RpcError> {
     let bridge = guard()?;
-    bridge.relayer_quorum(asset).ok_or(RpcError {
-        code: -32012,
-        message: "unknown bridge channel",
-    })
+    bridge
+        .relayer_quorum(asset)
+        .ok_or_else(|| RpcError::new(-32012, "unknown bridge channel"))
 }
 
 pub fn deposit_history(
@@ -214,7 +195,7 @@ pub fn deposit_history(
         .deposit_history(asset, cursor, limit)
         .into_iter()
         .map(|r| {
-            json!({
+            foundation_serialization::json!({
                 "asset": r.asset,
                 "nonce": r.nonce,
                 "user": r.user,
@@ -228,7 +209,7 @@ pub fn deposit_history(
             })
         })
         .collect();
-    Ok(json!({ "receipts": receipts }))
+    Ok(foundation_serialization::json!({ "receipts": receipts }))
 }
 
 pub fn slash_log() -> Result<foundation_serialization::json::Value, RpcError> {
@@ -237,14 +218,14 @@ pub fn slash_log() -> Result<foundation_serialization::json::Value, RpcError> {
         .slash_log()
         .iter()
         .map(|r| {
-            json!({
-                "relayer": r.relayer,
-                "asset": r.asset,
+            foundation_serialization::json!({
+                "relayer": &r.relayer,
+                "asset": &r.asset,
                 "slashes": r.slashes,
                 "remaining_bond": r.remaining_bond,
                 "timestamp": r.occurred_at,
             })
         })
         .collect();
-    Ok(json!({ "slashes": records }))
+    Ok(foundation_serialization::json!({ "slashes": records }))
 }

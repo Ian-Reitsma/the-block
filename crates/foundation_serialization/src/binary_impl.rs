@@ -107,13 +107,18 @@ impl std::error::Error for Error {
 /// Serialize a structure into an owned byte vector.
 pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let mut output = Vec::new();
+    encode_into(value, &mut output)?;
+    Ok(output)
+}
+
+/// Serialize a structure into the provided buffer, reusing the allocation.
+pub fn encode_into<T: Serialize>(value: &T, output: &mut Vec<u8>) -> Result<()> {
+    output.clear();
     {
-        let mut serializer = Serializer {
-            output: &mut output,
-        };
+        let mut serializer = Serializer { output };
         value.serialize(&mut serializer)?;
     }
-    Ok(output)
+    Ok(())
 }
 
 /// Deserialize a structure from the provided byte slice.

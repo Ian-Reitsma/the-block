@@ -9,7 +9,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::json;
 use httpd::ClientResponse;
 use std::fs;
 
@@ -440,7 +439,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.verify_deposit",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                     "relayer": primary,
                     "user": user,
@@ -481,7 +480,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.request_withdrawal",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                     "relayer": primary,
                     "user": user,
@@ -513,7 +512,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.challenge_withdrawal",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                     "commitment": commitment,
                     "challenger": challenger,
@@ -538,7 +537,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.pending_withdrawals",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                 }),
                 auth: None,
@@ -561,7 +560,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.active_challenges",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                 }),
                 auth: None,
@@ -584,7 +583,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.relayer_quorum",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                 }),
                 auth: None,
@@ -612,7 +611,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.deposit_history",
-                params: json!({
+                params: foundation_serialization::json!({
                     "asset": asset,
                     "cursor": cursor,
                     "limit": limit,
@@ -637,7 +636,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.slash_log",
-                params: json!({}),
+                params: foundation_serialization::json!({}),
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &payload) {
@@ -662,7 +661,7 @@ pub fn handle(action: BridgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "bridge.bond_relayer",
-                params: json!({
+                params: foundation_serialization::json!({
                     "relayer": relayer,
                     "amount": amount,
                 }),

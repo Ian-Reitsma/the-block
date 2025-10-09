@@ -1902,24 +1902,6 @@ fn decode_surrogate_pair(high: u16, low: u16) -> Option<char> {
     }
 }
 
-#[macro_export]
-macro_rules! json {
-    ({ $($key:tt : $value:tt),* $(,)? }) => {{
-        let mut map = $crate::json::Map::new();
-        $( map.insert($key.to_string(), json!($value)); )*
-        $crate::json::Value::Object(map)
-    }};
-    ([ $($element:tt),* $(,)? ]) => {{
-        let mut vec = Vec::new();
-        $( vec.push(json!($element)); )*
-        $crate::json::Value::Array(vec)
-    }};
-    (null) => { $crate::json::Value::Null };
-    (true) => { $crate::json::Value::Bool(true) };
-    (false) => { $crate::json::Value::Bool(false) };
-    ($other:expr) => { $crate::json::Value::from($other) };
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1947,7 +1929,7 @@ mod tests {
 
     #[test]
     fn json_macro_objects() {
-        let value = json!({
+        let value = foundation_serialization::json!({
             "id": 1,
             "name": "test",
             "flags": [true, false, null],

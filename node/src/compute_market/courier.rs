@@ -1,6 +1,7 @@
 use super::scheduler::{self, Capability};
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::binary;
 use rand::RngCore;
 use runtime::{block_on, sleep};
 use serde::{Deserialize, Serialize};
@@ -48,8 +49,7 @@ impl CourierStore {
             timestamp: ts,
             acknowledged: false,
         };
-        let bytes =
-            bincode::serialize(&receipt).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+        let bytes = binary::encode(&receipt).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
         let _ = self.tree.insert(id.to_be_bytes(), bytes);
         receipt
     }
@@ -74,7 +74,7 @@ impl CourierStore {
             .collect::<Result<Vec<_>, _>>()?;
         for k in keys {
             if let Some(v) = self.tree.get(&k)? {
-                if let Ok(mut rec) = bincode::deserialize::<CourierReceipt>(&v) {
+                if let Ok(mut rec) = binary::decode::<CourierReceipt>(&v) {
                     if rec.acknowledged {
                         continue;
                     }
@@ -87,7 +87,7 @@ impl CourierStore {
                         diagnostics::tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec) {
                             rec.acknowledged = true;
-                            let bytes = bincode::serialize(&rec)
+                            let bytes = binary::encode(&rec)
                                 .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
@@ -137,7 +137,7 @@ impl CourierStore {
             .collect::<Result<Vec<_>, _>>()?;
         for k in keys {
             if let Some(v) = self.tree.get(&k)? {
-                if let Ok(mut rec) = bincode::deserialize::<CourierReceipt>(&v) {
+                if let Ok(mut rec) = binary::decode::<CourierReceipt>(&v) {
                     if rec.acknowledged {
                         continue;
                     }
@@ -150,7 +150,7 @@ impl CourierStore {
                         diagnostics::tracing::info!(id = rec.id, sender = %rec.sender, attempt, "courier flush attempt");
                         if forward(&rec).await {
                             rec.acknowledged = true;
-                            let bytes = bincode::serialize(&rec)
+                            let bytes = binary::encode(&rec)
                                 .unwrap_or_else(|e| panic!("serialize receipt: {e}"));
                             if let Err(e) = self.tree.insert(&k, bytes) {
                                 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
@@ -192,7 +192,7 @@ impl CourierStore {
             .get(id.to_be_bytes())
             .ok()
             .flatten()
-            .and_then(|v| bincode::deserialize(&v).ok())
+            .and_then(|v| binary::decode(&v).ok())
     }
 }
 

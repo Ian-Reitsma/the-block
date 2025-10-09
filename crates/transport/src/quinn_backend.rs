@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use dashmap::DashMap;
 use diagnostics::{anyhow, Result, TbError};
-use once_cell::sync::{Lazy, OnceCell};
+use foundation_lazy::sync::{Lazy, OnceCell};
 pub use quinn::{Connection, Endpoint};
 use rand::Rng;
 use rcgen::generate_simple_self_signed;

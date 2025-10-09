@@ -3,18 +3,21 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use foundation_serialization::{
+    json::{self, Value},
+    Serialize,
+};
 
 use hex;
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct PersistedPeer {
     id: String,
     address: String,
     last_seen: u64,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Serialize)]
 struct PersistedPeers {
     peers: Vec<PersistedPeer>,
 }
@@ -50,7 +53,7 @@ fn parse_pairs(bytes: &[u8]) -> Vec<(String, String)> {
     if bytes.is_empty() {
         return Vec::new();
     }
-    if let Ok(value) = serde_json::from_slice::<Value>(bytes) {
+    if let Ok(value) = json::value_from_slice(bytes) {
         return extract_pairs(&value);
     }
     let mut pairs = Vec::new();
@@ -135,6 +138,6 @@ fn main() {
         let _ = fs::create_dir_all(parent);
     }
     let payload = PersistedPeers { peers };
-    let json = serde_json::to_vec_pretty(&payload).expect("serialize overlay peers");
+    let json = json::to_vec_pretty(&payload).expect("serialize overlay peers");
     fs::write(&new_path, json).expect("write migrated overlay store");
 }

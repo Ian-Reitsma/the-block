@@ -4,7 +4,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::json;
 use std::io::{self, Write};
 use the_block::simple_db::EngineKind;
 
@@ -156,7 +155,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
-            let params = json!({"job_id": job_id});
+            let params = foundation_serialization::json!({"job_id": job_id});
             let payload = Payload {
                 jsonrpc: "2.0",
                 id: 1,
@@ -426,7 +425,7 @@ pub fn handle_with_writer(cmd: ComputeCmd, out: &mut dyn Write) -> io::Result<()
                 #[serde(skip_serializing_if = "Option::is_none")]
                 auth: Option<&'a str>,
             }
-            let params = json!({"job_id": job_id});
+            let params = foundation_serialization::json!({"job_id": job_id});
             let payload = Payload {
                 jsonrpc: "2.0",
                 id: 1,

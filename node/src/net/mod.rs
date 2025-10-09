@@ -37,7 +37,7 @@ use concurrency::{Lazy, OnceCell};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::json::{self, Value};
 use hex;
 use ledger::address::ShardId;
 #[cfg(feature = "telemetry")]
@@ -1222,9 +1222,9 @@ pub fn current_peer_fingerprint_for_provider(
 
 /// Manually verify DNS TXT record for `domain`.
 pub fn dns_verify(domain: &str) -> Value {
-    let v = crate::gateway::dns::dns_lookup(&json!({ "domain": domain }));
+    let v = crate::gateway::dns::dns_lookup(&foundation_serialization::json!({ "domain": domain }));
     let verified = v.get("verified").and_then(|b| b.as_bool()).unwrap_or(false);
-    json!({ "domain": domain, "verified": verified })
+    foundation_serialization::json!({ "domain": domain, "verified": verified })
 }
 
 pub fn record_ip_drop(ip: &std::net::SocketAddr) {
@@ -1267,7 +1267,7 @@ pub fn reputation_sync() {
 
 /// Return current reputation score for `peer`.
 pub fn reputation_show(peer: &str) -> Value {
-    json!({
+    foundation_serialization::json!({
         "peer": peer,
         "score": crate::compute_market::scheduler::reputation_get(peer),
     })

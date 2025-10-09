@@ -1,6 +1,7 @@
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowHeader {
     pub chain_id: String,
     pub height: u64,

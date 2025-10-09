@@ -4,8 +4,7 @@ CMD=${1:-}
 SWARM_DIR=${SWARM_DIR:-swarm}
 N=${SWARM_NODES:-5}
 BASE=${SWARM_BASE:-35000}
-PROM_PORT=${PROM_PORT:-$((BASE+300))}
-GRAF_PORT=${GRAF_PORT:-$((BASE+400))}
+DASH_PORT=${DASH_PORT:-$((BASE+300))}
 
 case "$CMD" in
   up)
@@ -26,14 +25,12 @@ case "$CMD" in
       ./target/release/node --config "$dir/config.toml" >"$SWARM_DIR/logs/node$i.log" 2>&1 &
       echo $! > "$SWARM_DIR/pids/node$i.pid"
     done
-    prometheus --config.file=monitoring/prometheus.yml --web.listen-address=":$PROM_PORT" >"$SWARM_DIR/logs/prometheus.log" 2>&1 &
-    echo $! > "$SWARM_DIR/pids/prometheus.pid"
-    if command -v grafana-server >/dev/null 2>&1; then
-      grafana-server --homepath monitoring/grafana --config monitoring/grafana/grafana.ini --port "$GRAF_PORT" >"$SWARM_DIR/logs/grafana.log" 2>&1 &
-      echo $! > "$SWARM_DIR/pids/grafana.pid"
-    fi
-    echo "Prometheus: http://localhost:$PROM_PORT"
-    echo "Grafana: http://localhost:$GRAF_PORT"
+    first_metrics=$((BASE + 200 + 1))
+    python monitoring/tools/render_foundation_dashboard.py "http://127.0.0.1:${first_metrics}/metrics" >"$SWARM_DIR/logs/dashboard.log" 2>&1 &
+    echo $! > "$SWARM_DIR/pids/dashboard.pid"
+    python -m http.server "$DASH_PORT" --bind 127.0.0.1 --directory monitoring/output >"$SWARM_DIR/logs/dashboard_http.log" 2>&1 &
+    echo $! > "$SWARM_DIR/pids/dashboard_http.pid"
+    echo "Dashboard: http://localhost:$DASH_PORT"
     ;;
   down)
     if [ -d "$SWARM_DIR/pids" ]; then
@@ -61,7 +58,6 @@ case "$CMD" in
         kill "$(cat "$pidfile")" 2>/dev/null || true
         rpc=$((BASE + idx))
         p2p=$((BASE + 100 + idx))
-        prom=$((BASE + 200 + idx))
         dir="$SWARM_DIR/node$idx"
         ./target/release/node --config "$dir/config.toml" >"$SWARM_DIR/logs/node$idx.log" 2>&1 &
         echo $! > "$pidfile"

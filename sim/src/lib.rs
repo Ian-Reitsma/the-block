@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use foundation_serialization::json;
 use rand::{rngs::StdRng, Rng};
 use serde::Serialize;
 
@@ -124,7 +125,7 @@ impl Simulation {
             nodes: self.nodes,
             _p: std::marker::PhantomData,
         };
-        let data = serde_json::to_vec_pretty(&g).expect("serialize governance");
+        let data = json::to_vec_pretty(&g).expect("serialize governance");
         std::fs::write(path, data)
     }
 

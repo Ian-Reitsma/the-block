@@ -1,8 +1,10 @@
 #[cfg(feature = "pq")]
 use base64_fp::encode_standard;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use serde::{Deserialize, Serialize};
+use foundation_lazy::sync::Lazy;
+use foundation_serialization::{json, Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{self, ErrorKind};
 use std::path::Path;
 
 /// Region specific policy pack controlling default consent and feature toggles.
@@ -29,7 +31,12 @@ impl SignedPack {
         if let Ok(bytes) = <[u8; 64]>::try_from(self.signature.as_slice()) {
             let sig = Signature::from_bytes(&bytes);
             return pk
-                .verify(serde_json::to_string(&self.pack).unwrap().as_bytes(), &sig)
+                .verify(
+                    json::to_string(&self.pack)
+                        .expect("policy pack should be serializable")
+                        .as_bytes(),
+                    &sig,
+                )
                 .is_ok();
         }
         false
@@ -37,8 +44,9 @@ impl SignedPack {
 }
 
 /// Simple in-memory cache keyed by region.
-static CACHE: once_cell::sync::Lazy<std::sync::Mutex<HashMap<String, PolicyPack>>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+static CACHE: Lazy<std::sync::Mutex<HashMap<String, PolicyPack>>> =
+    Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
 /// Fetch a signed policy pack from a URL and cache it.
 pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack> {
@@ -48,7 +56,8 @@ pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack>
     let body = resp
         .into_string()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-    let signed: SignedPack = serde_json::from_str(&body)?;
+    let signed: SignedPack = json::from_str(&body)
+        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
     if !signed.verify(pk) {
         return Err(std::io::Error::new(std::io::ErrorKind::Other, "bad sig"));
     }
@@ -64,7 +73,8 @@ impl PolicyPack {
     /// Load a policy pack from a JSON file.
     pub fn load(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let bytes = std::fs::read(path)?;
-        Ok(serde_json::from_slice(&bytes)?)
+        json::from_slice(&bytes)
+            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))
     }
 
     /// Built-in template for a given region code (e.g. "US").
@@ -74,7 +84,7 @@ impl PolicyPack {
             "EU" => Some(include_str!("../policies/eu.json")),
             _ => None,
         }?;
-        serde_json::from_str(raw).ok()
+        json::from_str(raw).ok()
     }
 
     /// Resolve inheritance chain, merging parent features and consent flags.
@@ -100,21 +110,27 @@ impl PolicyPack {
     }
 
     /// Compute a semantic diff between two packs for RPC consumption.
-    pub fn diff(old: &Self, new: &Self) -> serde_json::Value {
-        let mut changed = serde_json::Map::new();
+    pub fn diff(old: &Self, new: &Self) -> json::Value {
+        let mut changed = json::Map::new();
         if old.consent_required != new.consent_required {
             changed.insert(
                 "consent_required".into(),
-                serde_json::json!({"old": old.consent_required, "new": new.consent_required}),
+                foundation_serialization::json!({
+                    "old": old.consent_required,
+                    "new": new.consent_required
+                }),
             );
         }
         if old.features != new.features {
             changed.insert(
                 "features".into(),
-                serde_json::json!({"old": old.features, "new": new.features}),
+                foundation_serialization::json!({
+                    "old": old.features.clone(),
+                    "new": new.features.clone()
+                }),
             );
         }
-        serde_json::Value::Object(changed)
+        json::Value::Object(changed)
     }
 }
 

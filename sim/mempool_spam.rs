@@ -1,4 +1,5 @@
-use the_block::{generate_keypair, sign_tx, Blockchain, FeeLane, RawTxPayload, TxAdmissionError};
+use the_block::transaction;
+use the_block::{generate_keypair, Blockchain, FeeLane, RawTxPayload, TxAdmissionError};
 
 fn main() {
     let (sk, _pk) = generate_keypair();
@@ -26,7 +27,7 @@ fn main() {
             nonce,
             memo: Vec::new(),
         };
-        let mut tx = sign_tx(&sk, &payload).expect("sign");
+        let mut tx = transaction::sign_tx(&sk, &payload).expect("sign");
         tx.tip = fee;
         tx.lane = FeeLane::Consumer;
         match chain.submit_transaction(tx) {

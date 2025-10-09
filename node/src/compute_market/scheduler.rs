@@ -1,5 +1,5 @@
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::json::{self, Value};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::cmp::Reverse;
@@ -653,9 +653,9 @@ impl SchedulerState {
     }
 
     fn metrics(&self) -> Value {
-        json!({
-            "reputation": self.reputation,
-            "utilization": self.utilization,
+        foundation_serialization::json!({
+            "reputation": self.reputation.clone(),
+            "utilization": self.utilization.clone(),
         })
     }
 
@@ -1037,13 +1037,13 @@ fn lookup_cancellation(job_id: &str) -> Option<String> {
 pub fn job_status(job_id: &str) -> Value {
     let sched = scheduler();
     if sched.active.contains_key(job_id) {
-        json!({"status": "active"})
+        foundation_serialization::json!({"status": "active"})
     } else if sched.pending.iter().any(|j| j.job_id == job_id) {
-        json!({"status": "queued"})
+        foundation_serialization::json!({"status": "queued"})
     } else if let Some(reason) = lookup_cancellation(job_id) {
-        json!({"status": "canceled", "reason": reason})
+        foundation_serialization::json!({"status": "canceled", "reason": reason})
     } else {
-        json!({"status": "unknown"})
+        foundation_serialization::json!({"status": "unknown"})
     }
 }
 

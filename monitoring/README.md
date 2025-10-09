@@ -2,19 +2,23 @@
 > **Review (2025-09-25):** Synced Monitoring guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
 
-Dashboards are generated from `metrics.json`.
+Dashboards are generated from `metrics.json`. The native and Docker scripts
+run `monitoring/tools/render_foundation_dashboard.py` in a loop, producing
+`monitoring/output/index.html` that summarises the latest telemetry snapshot.
 
 ```bash
 npm ci --prefix monitoring
 make -C monitoring lint
+python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/metrics
 ```
 
-`make -C monitoring lint` rebuilds `grafana/dashboard.json` via the Rust build
-script and validates the result with `jq` and `jsonnet-lint`. Custom overrides
-in `dashboard_overrides.json` are merged during generation.
+`make -C monitoring lint` still rebuilds `grafana/dashboard.json` via the Rust
+build script so historical Grafana dashboards remain reproducible, but the
+first-party viewer consumes the JSON schema directly. Custom overrides in
+`dashboard_overrides.json` are merged during generation.
 
-Use `make dashboard` at the repository root to regenerate the dashboard manually.
-Edits to `metrics.json` or the overrides file automatically trigger
+Use `make dashboard` at the repository root to regenerate the dashboard schema
+manually. Edits to `metrics.json` or the overrides file automatically trigger
 regeneration during builds.
 
 Wrapper metrics appear in the generated dashboards under the **Other** row. The

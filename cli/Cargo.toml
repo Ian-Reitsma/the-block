@@ -27,7 +27,7 @@ rusqlite = { version = "0.30", features = ["bundled"], optional = true }
 rpassword = "7"
 rand = { path = "../crates/rand" }
 sys = { path = "../crates/sys" }
-once_cell = "1"
+foundation_lazy = { path = "../crates/foundation_lazy" }
 state = { path = "../state" }
 httpd = { path = "../crates/httpd" }
 coding = { path = "../crates/coding" }

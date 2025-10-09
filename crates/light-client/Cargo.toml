@@ -13,13 +13,11 @@ ios-probe = [
     "dep:objc_id",
     "dep:core-foundation",
 ]
-telemetry = ["dep:once_cell", "dep:prometheus"]
+telemetry = ["dep:foundation_lazy"]
 
 [dependencies]
 foundation_serialization = { path = "../foundation_serialization" }
-once_cell = { version = "1", optional = true }
-prometheus = { version = "0.13", optional = true }
-async-trait = "0.1"
+foundation_lazy = { path = "../foundation_lazy", optional = true }
 flate2 = "1"
 futures = "0.3"
 coding = { path = "../coding" }

@@ -94,7 +94,7 @@ are explicitly requested:
   CPU/memory tuning pass should compile with
   `cargo build -p the_block --features "cli telemetry" --bin node`.
 - Supplying `--metrics-addr` without the `telemetry` feature now fails fast in
-  the same way, preventing silent runs with missing Prometheus exporters.
+  the same way, preventing silent runs with missing runtime telemetry exporters.
 - `--status-addr` spins up the HTTP status page only when the binary is built
   with the `gateway` feature. Plain builds print
   `gateway feature not enabled; status server unavailable` and continue
@@ -135,7 +135,7 @@ net stats --backpressure
 
 `net stats` prints request, byte, and drop counters for the given peer. `net
 stats reset` clears all counters, incrementing `peer_stats_reset_total{peer_id}`
-and removing the peer from Prometheus until traffic resumes. `net stats export`
+and removing the peer from the runtime telemetry snapshot until traffic resumes. `net stats export`
 writes a JSON snapshot for offline analysis. `net stats --all` paginates through
 all tracked peers, while `net stats reputation` shows the current reputation
 score used for adaptive rate limits.
@@ -271,7 +271,7 @@ curl -s localhost:26658/consensus.difficulty
 # {"difficulty":12345,"retune_hint":2,"timestamp_millis":1700000000000}
 ```
 
-Prometheus metrics expose per-window EMAs for the Kalman retune:
+Runtime telemetry metrics expose per-window EMAs for the Kalman retune:
 
 ```bash
 curl -s localhost:9898/metrics | rg '^difficulty_window'

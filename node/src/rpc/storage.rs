@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
 use concurrency::Lazy;
-use foundation_serialization::json::json;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 use storage::{contract::ContractError, StorageContract, StorageOffer};
@@ -36,7 +35,7 @@ pub fn upload(
     {
         crate::telemetry::STORAGE_CONTRACT_CREATED_TOTAL.inc();
     }
-    json!({"status": "ok", "providers": providers})
+    foundation_serialization::json!({"status": "ok", "providers": providers})
 }
 
 /// Challenge a provider to prove retrievability of an object.
@@ -54,14 +53,14 @@ pub fn challenge(
                 {
                     crate::telemetry::RETRIEVAL_SUCCESS_TOTAL.inc();
                 }
-                json!({"status": "ok"})
+                foundation_serialization::json!({"status": "ok"})
             }
             Err(ContractError::Expired) => {
                 #[cfg(feature = "telemetry")]
                 {
                     crate::telemetry::RETRIEVAL_FAILURE_TOTAL.inc();
                 }
-                json!({"error": "expired"})
+                foundation_serialization::json!({"error": "expired"})
             }
             Err(ContractError::ChallengeFailed) => {
                 #[cfg(feature = "telemetry")]
@@ -74,11 +73,11 @@ pub fn challenge(
                         crate::compute_market::scheduler::merge_reputation(first, rep, u64::MAX);
                     }
                 }
-                json!({"error": "challenge_failed"})
+                foundation_serialization::json!({"error": "challenge_failed"})
             }
         }
     } else {
-        json!({"error": "not_found"})
+        foundation_serialization::json!({"error": "not_found"})
     }
 }
 
@@ -91,7 +90,7 @@ pub fn provider_profiles() -> foundation_serialization::json::Value {
         .provider_profile_snapshots()
         .into_iter()
         .map(|snap| {
-            json!({
+            foundation_serialization::json!({
                 "provider": snap.provider,
                 "quota_bytes": snap.quota_bytes,
                 "preferred_chunk": snap.profile.preferred_chunk,
@@ -108,7 +107,7 @@ pub fn provider_profiles() -> foundation_serialization::json::Value {
             })
         })
         .collect();
-    json!({
+    foundation_serialization::json!({
         "profiles": profiles,
         "engine": {
             "pipeline": engine.pipeline,
@@ -124,11 +123,11 @@ pub fn repair_history(limit: Option<usize>) -> foundation_serialization::json::V
     let log = pipeline.repair_log();
     let limit = limit.unwrap_or(25).min(500);
     match log.recent_entries(limit) {
-        Ok(entries) => json!({
+        Ok(entries) => foundation_serialization::json!({
             "status": "ok",
             "entries": entries,
         }),
-        Err(err) => json!({
+        Err(err) => foundation_serialization::json!({
             "error": err.to_string(),
         }),
     }
@@ -139,7 +138,7 @@ pub fn repair_run() -> foundation_serialization::json::Value {
     let mut pipeline = StoragePipeline::open(&pipeline_path());
     let log = pipeline.repair_log();
     match crate::storage::repair::run_once(pipeline.db_mut(), &log, RepairRequest::default()) {
-        Ok(summary) => json!({
+        Ok(summary) => foundation_serialization::json!({
             "status": "ok",
             "manifests": summary.manifests,
             "attempts": summary.attempts,
@@ -148,7 +147,7 @@ pub fn repair_run() -> foundation_serialization::json::Value {
             "skipped": summary.skipped,
             "bytes_repaired": summary.bytes_repaired,
         }),
-        Err(err) => json!({
+        Err(err) => foundation_serialization::json!({
             "error": err.label(),
         }),
     }
@@ -163,13 +162,13 @@ pub fn repair_chunk(
     let bytes = match hex::decode(manifest_hex) {
         Ok(bytes) => bytes,
         Err(err) => {
-            return json!({
+            return foundation_serialization::json!({
                 "error": format!("invalid manifest hash: {err}"),
             });
         }
     };
     if bytes.len() != 32 {
-        return json!({"error": "manifest hash must be 32 bytes"});
+        return foundation_serialization::json!({"error": "manifest hash must be 32 bytes"});
     }
     let mut manifest = [0u8; 32];
     manifest.copy_from_slice(&bytes);
@@ -181,7 +180,7 @@ pub fn repair_chunk(
     request.chunk = Some(chunk_idx as usize);
     request.force = force;
     match crate::storage::repair::run_once(pipeline.db_mut(), &log, request) {
-        Ok(summary) => json!({
+        Ok(summary) => foundation_serialization::json!({
             "status": "ok",
             "attempts": summary.attempts,
             "successes": summary.successes,
@@ -189,7 +188,7 @@ pub fn repair_chunk(
             "skipped": summary.skipped,
             "bytes_repaired": summary.bytes_repaired,
         }),
-        Err(err) => json!({
+        Err(err) => foundation_serialization::json!({
             "error": err.label(),
         }),
     }
@@ -202,12 +201,12 @@ pub fn set_provider_maintenance(
 ) -> foundation_serialization::json::Value {
     let mut pipeline = StoragePipeline::open(&pipeline_path());
     match pipeline.set_provider_maintenance(provider, maintenance) {
-        Ok(()) => json!({
+        Ok(()) => foundation_serialization::json!({
             "status": "ok",
             "provider": provider,
             "maintenance": maintenance,
         }),
-        Err(err) => json!({"error": err}),
+        Err(err) => foundation_serialization::json!({"error": err}),
     }
 }
 
@@ -217,7 +216,7 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
     let max_entries = limit.unwrap_or(100).min(1000);
     let manifests = pipeline.manifest_summaries(max_entries);
     let algorithms = crate::storage::settings::algorithms();
-    let policy = json!({
+    let policy = foundation_serialization::json!({
         "erasure": {
             "algorithm": algorithms.erasure(),
             "fallback": algorithms.erasure_fallback(),
@@ -232,7 +231,7 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
     let entries: Vec<_> = manifests
         .into_iter()
         .map(|entry| {
-            json!({
+            foundation_serialization::json!({
                 "manifest": entry.manifest,
                 "total_len": entry.total_len,
                 "chunk_count": entry.chunk_count,
@@ -245,7 +244,7 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
             })
         })
         .collect();
-    json!({
+    foundation_serialization::json!({
         "status": "ok",
         "policy": policy,
         "manifests": entries,
@@ -255,7 +254,6 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
 #[cfg(test)]
 mod tests {
     use super::*;
-    use foundation_serialization::json::json;
     use storage::{StorageContract, StorageOffer};
     use sys::tempfile::tempdir;
 
@@ -291,7 +289,7 @@ mod tests {
         let contract = sample_contract();
         let object_id = contract.object_id.clone();
         let response = upload(contract.clone(), sample_offers());
-        assert_eq!(response["status"], json!("ok"));
+        assert_eq!(response["status"], foundation_serialization::json!("ok"));
         let providers_json = response["providers"].as_array().expect("providers array");
         assert_eq!(providers_json.len(), 2);
         assert!(providers_json.iter().any(|p| p == "prov-a"));
@@ -321,7 +319,7 @@ mod tests {
         upload(contract.clone(), sample_offers());
 
         let ok = challenge(&object_id, 0, proof, contract.start_block);
-        assert_eq!(ok, json!({"status": "ok"}));
+        assert_eq!(ok, foundation_serialization::json!({"status": "ok"}));
 
         let expired = challenge(
             &object_id,
@@ -329,10 +327,16 @@ mod tests {
             proof,
             contract.start_block + contract.retention_blocks + 1,
         );
-        assert_eq!(expired, json!({"error": "expired"}));
+        assert_eq!(
+            expired,
+            foundation_serialization::json!({"error": "expired"})
+        );
 
         let wrong = challenge(&object_id, 0, [0u8; 32], contract.start_block);
-        assert_eq!(wrong, json!({"error": "challenge_failed"}));
+        assert_eq!(
+            wrong,
+            foundation_serialization::json!({"error": "challenge_failed"})
+        );
 
         reset_state();
     }
@@ -342,7 +346,7 @@ mod tests {
         let dir = tempdir().expect("dir");
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
         let resp = repair_history(Some(5));
-        assert_eq!(resp["status"], json!("ok"));
+        assert_eq!(resp["status"], foundation_serialization::json!("ok"));
         assert!(resp["entries"].as_array().unwrap().is_empty());
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
@@ -352,8 +356,8 @@ mod tests {
         let dir = tempdir().expect("dir");
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
         let resp = repair_run();
-        assert_eq!(resp["status"], json!("ok"));
-        assert_eq!(resp["attempts"], json!(0));
+        assert_eq!(resp["status"], foundation_serialization::json!("ok"));
+        assert_eq!(resp["attempts"], foundation_serialization::json!(0));
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
 
@@ -363,7 +367,7 @@ mod tests {
         std::env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path().to_str().unwrap());
         let manifest_hex = hex::encode([0u8; 32]);
         let resp = repair_chunk(&manifest_hex, 0, true);
-        assert_eq!(resp["status"], json!("ok"));
+        assert_eq!(resp["status"], foundation_serialization::json!("ok"));
         std::env::remove_var("TB_STORAGE_PIPELINE_DIR");
     }
 }

@@ -10,6 +10,7 @@ foundation_serialization = { path = "../crates/foundation_serialization" }
 ledger = { path = "../ledger" }
 runtime = { path = "../crates/runtime", optional = true }
 sys = { path = "../crates/sys" }
+serde = { version = "1", features = ["derive"] }
 
 [features]
 telemetry = ["concurrency", "runtime"]

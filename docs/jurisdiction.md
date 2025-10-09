@@ -56,7 +56,7 @@ Transactions processed while a policy is active are tagged with the region in
 the `tx_jurisdiction_total{jurisdiction="US"}` metric.
 
 For multi‑jurisdiction deployments run separate node instances with distinct
-policy packs and Prometheus labels, or use orchestration tooling to mount the
+policy packs and telemetry labels, or use orchestration tooling to mount the
 appropriate pack per region.
 
 Example packs live under [`examples/jurisdiction/`](../examples/jurisdiction/)

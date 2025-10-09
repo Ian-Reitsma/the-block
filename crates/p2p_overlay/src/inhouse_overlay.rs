@@ -4,8 +4,11 @@ use crate::{
     OverlayStore, PeerId, UptimeHandle, UptimeMetrics,
 };
 use crypto_suite::hashing::blake3::hash;
-use foundation_serialization::base58;
-use foundation_serialization::json::{self, Map, Value};
+use foundation_serialization::{
+    base58,
+    json::{self, Map, Value},
+    Deserialize, Serialize,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
@@ -54,7 +57,7 @@ fn persist_err(message: impl Into<String>) -> OverlayError {
     overlay_err(InhouseOverlayError::Persist(message.into()))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct InhousePeerId([u8; PEER_ID_LEN]);
 
 impl InhousePeerId {
@@ -110,7 +113,7 @@ impl PeerId for InhousePeerId {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PeerEndpoint {
     pub socket: SocketAddr,
     pub last_seen: u64,

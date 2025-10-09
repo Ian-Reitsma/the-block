@@ -6,6 +6,6 @@ edition = "2021"
 [dependencies]
 cli_core = { path = "../cli_core" }
 httpd = { path = "../httpd" }
-serde_json = "1"
+foundation_serialization = { path = "../foundation_serialization" }
 thiserror = "1"
 

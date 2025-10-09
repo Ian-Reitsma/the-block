@@ -1,5 +1,3 @@
-use foundation_serialization::json::json;
-
 use crate::compute_market::{
     matcher, price_board, scheduler, settlement::Settlement, total_units_processed,
 };
@@ -63,14 +61,14 @@ pub fn stats(
                 .unwrap_or_default();
             foundation_serialization::json!({
                 "lane": warning.lane.as_str(),
-                "job_id": warning.oldest_job,
+                "job_id": &warning.oldest_job,
                 "waited_for_secs": warning.waited_for.as_secs(),
                 "updated_at": updated,
             })
         })
         .collect();
     let settlement_engine = Settlement::engine_info();
-    json!({
+    foundation_serialization::json!({
         "industrial_backlog": backlog,
         "industrial_utilization": util,
         "industrial_units_total": total_units_processed(),
@@ -100,7 +98,7 @@ pub fn scheduler_stats() -> foundation_serialization::json::Value {
 
 /// Return current reputation score for a provider.
 pub fn reputation_get(provider: &str) -> foundation_serialization::json::Value {
-    json!({
+    foundation_serialization::json!({
         "provider": provider,
         "score": scheduler::reputation_get(provider),
     })
@@ -111,7 +109,7 @@ pub fn job_requirements(job_id: &str) -> foundation_serialization::json::Value {
     if let Some(cap) = scheduler::job_requirements(job_id) {
         foundation_serialization::json::to_value(cap).unwrap()
     } else {
-        json!({})
+        foundation_serialization::json!({})
     }
 }
 
@@ -119,9 +117,9 @@ pub fn job_requirements(job_id: &str) -> foundation_serialization::json::Value {
 pub fn job_cancel(job_id: &str) -> foundation_serialization::json::Value {
     if let Some(provider) = scheduler::active_provider(job_id) {
         scheduler::cancel_job(job_id, &provider, scheduler::CancelReason::Client);
-        json!({ "status": "ok" })
+        foundation_serialization::json!({ "status": "ok" })
     } else {
-        json!({ "status": "unknown" })
+        foundation_serialization::json!({ "status": "unknown" })
     }
 }
 
@@ -130,18 +128,19 @@ pub fn provider_hardware(provider: &str) -> foundation_serialization::json::Valu
     if let Some(cap) = scheduler::provider_capability(provider) {
         foundation_serialization::json::to_value(cap).unwrap()
     } else {
-        json!({})
+        foundation_serialization::json!({})
     }
 }
 
 /// Return the recent settlement audit log.
 pub fn settlement_audit() -> foundation_serialization::json::Value {
-    foundation_serialization::json::to_value(Settlement::audit()).unwrap_or_else(|_| json!([]))
+    foundation_serialization::json::to_value(Settlement::audit())
+        .unwrap_or_else(|_| foundation_serialization::json!([]))
 }
 
 /// Return split token balances for providers.
 pub fn provider_balances() -> foundation_serialization::json::Value {
-    json!({ "providers": Settlement::balances() })
+    foundation_serialization::json!({ "providers": Settlement::balances() })
 }
 
 /// Return recent settlement merkle roots encoded as hex strings.
@@ -150,5 +149,5 @@ pub fn recent_roots(limit: usize) -> foundation_serialization::json::Value {
         .into_iter()
         .map(|r| hex::encode(r))
         .collect();
-    json!({ "roots": roots })
+    foundation_serialization::json!({ "roots": roots })
 }

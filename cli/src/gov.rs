@@ -7,7 +7,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::{binary, json::json};
+use foundation_serialization::{binary, json};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,
@@ -820,7 +820,7 @@ pub fn handle(cmd: GovCmd) {
                 let store = GovStore::open(state);
                 match store.disbursements() {
                     Ok(records) => {
-                        let payload = json!({ "disbursements": records });
+                        let payload = foundation_serialization::json!({ "disbursements": records });
                         match foundation_serialization::json::to_string_pretty(&payload) {
                             Ok(serialized) => println!("{serialized}"),
                             Err(err) => eprintln!("format failed: {err}"),

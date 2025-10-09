@@ -2,9 +2,10 @@ use std::{collections::HashMap, fs, path::Path};
 
 use diagnostics::anyhow as diag_anyhow;
 use diagnostics::anyhow::{Context, Result};
-use foundation_serialization::json;
 
 use crate::model::{DependencyEntry, DependencyRegistry, ViolationReport};
+use foundation_serialization::json;
+use runtime::telemetry::{IntGaugeVec, Opts, Registry};
 
 pub fn write_registry_json(registry: &DependencyRegistry, out_dir: &Path) -> Result<()> {
     fs::create_dir_all(out_dir)
@@ -103,46 +104,53 @@ pub fn write_violations(report: &ViolationReport, out_dir: &Path) -> Result<()> 
     Ok(())
 }
 
-pub fn write_prometheus_metrics(report: &ViolationReport, out_dir: &Path) -> Result<()> {
+pub fn write_telemetry_metrics(report: &ViolationReport, out_dir: &Path) -> Result<()> {
     fs::create_dir_all(out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
-    let path = out_dir.join("dependency-metrics.prom");
-    let mut buffer = String::from(
-        "# HELP dependency_policy_violation Policy violations grouped by crate\n# TYPE dependency_policy_violation gauge\n",
-    );
-    if report.entries.is_empty() {
-        buffer.push_str("dependency_policy_violation_total 0\n");
-    } else {
-        for entry in &report.entries {
-            let mut labels = vec![
-                ("crate", escape_label(&entry.name)),
-                ("version", escape_label(&entry.version)),
-                ("kind", entry.kind.to_string()),
-                ("detail", escape_label(&entry.detail)),
-            ];
-            if let Some(depth) = entry.depth {
-                labels.push(("depth", depth.to_string()));
-            }
-            let formatted = labels
-                .iter()
-                .map(|(k, v)| format!("{}=\"{}\"", k, v))
-                .collect::<Vec<_>>()
-                .join(",");
-            buffer.push_str(&format!("dependency_policy_violation{{{}}} 1\n", formatted));
-        }
-        buffer.push_str(&format!(
-            "dependency_policy_violation_total {}\n",
-            report.entries.len()
-        ));
-    }
-    fs::write(&path, buffer).with_context(|| format!("unable to write {}", path.display()))
-}
+    let path = out_dir.join("dependency-metrics.telemetry");
+    let registry = Registry::new();
+    let gauge_vec = IntGaugeVec::new(
+        Opts::new(
+            "dependency_policy_violation",
+            "Policy violations grouped by crate",
+        ),
+        &["crate", "version", "kind", "detail", "depth"],
+    )
+    .map_err(|err| diag_anyhow::anyhow!(err))?;
+    registry
+        .register(Box::new(gauge_vec.clone()))
+        .map_err(|err| diag_anyhow::anyhow!(err))?;
+    let total = registry
+        .register_counter(
+            "dependency_policy_violation_total",
+            "Total dependency policy violations",
+        )
+        .map_err(|err| diag_anyhow::anyhow!(err))?;
+    total.reset();
 
-fn escape_label(input: &str) -> String {
-    input
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace('\n', " ")
+    for entry in &report.entries {
+        let kind_owned = entry.kind.to_string();
+        let detail_owned = entry.detail.clone();
+        let depth_owned = entry
+            .depth
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "n/a".to_string());
+        let labels = [
+            entry.name.as_str(),
+            entry.version.as_str(),
+            kind_owned.as_str(),
+            detail_owned.as_str(),
+            depth_owned.as_str(),
+        ];
+        let gauge = gauge_vec
+            .with_label_values(&labels)
+            .map_err(|err| diag_anyhow::anyhow!(err))?;
+        gauge.set(1);
+        total.inc();
+    }
+
+    fs::write(&path, registry.render_bytes())
+        .with_context(|| format!("unable to write {}", path.display()))
 }
 
 pub fn diff_registries(old_path: &Path, new_path: &Path) -> Result<()> {
@@ -231,18 +239,18 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn prometheus_metrics_empty_report_emits_zero_total() {
+    fn telemetry_metrics_empty_report_emits_zero_total() {
         let dir = tempdir().unwrap();
         let report = ViolationReport::default();
-        write_prometheus_metrics(&report, dir.path()).expect("write metrics");
-        let contents = std::fs::read_to_string(dir.path().join("dependency-metrics.prom"))
+        write_telemetry_metrics(&report, dir.path()).expect("write metrics");
+        let contents = std::fs::read_to_string(dir.path().join("dependency-metrics.telemetry"))
             .expect("read metrics");
         assert!(contents.contains("# TYPE dependency_policy_violation gauge"));
         assert!(contents.contains("dependency_policy_violation_total 0"));
     }
 
     #[test]
-    fn prometheus_metrics_include_labels() {
+    fn telemetry_metrics_include_labels() {
         let dir = tempdir().unwrap();
         let mut report = ViolationReport::default();
         report.push(ViolationEntry {
@@ -252,8 +260,8 @@ mod tests {
             detail: "GPL".into(),
             depth: Some(2),
         });
-        write_prometheus_metrics(&report, dir.path()).expect("write metrics");
-        let contents = std::fs::read_to_string(dir.path().join("dependency-metrics.prom"))
+        write_telemetry_metrics(&report, dir.path()).expect("write metrics");
+        let contents = std::fs::read_to_string(dir.path().join("dependency-metrics.telemetry"))
             .expect("read metrics");
         assert!(contents.contains(
             "dependency_policy_violation{crate=\"serde\",version=\"1.0.0\",kind=\"license\",detail=\"GPL\",depth=\"2\"} 1"

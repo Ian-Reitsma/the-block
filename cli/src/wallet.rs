@@ -11,9 +11,9 @@ use cli_core::{
     parse::Matches,
 };
 use crypto::session::SessionKey;
+use foundation_lazy::sync::Lazy;
 use foundation_serialization::{binary, Serialize};
 use hex;
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 #[cfg(feature = "quantum")]
 use std::fs::File;

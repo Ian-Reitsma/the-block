@@ -13,11 +13,10 @@ use crate::telemetry::{
     COMPUTE_SLA_VIOLATIONS_TOTAL, SETTLE_APPLIED_TOTAL, SETTLE_FAILED_TOTAL,
     SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_CT_TOTAL,
 };
-use bincode;
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::error;
-use foundation_serialization::json::json;
+use foundation_serialization::binary;
 use ledger::utxo_account::AccountLedger;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -410,12 +409,12 @@ where
     F: FnOnce() -> T,
 {
     db.get(key)
-        .and_then(|bytes| bincode::deserialize(&bytes).ok())
+        .and_then(|bytes| binary::decode(&bytes).ok())
         .unwrap_or_else(default)
 }
 
 fn enqueue_value<T: Serialize>(batch: &mut SimpleDbBatch, key: &str, value: &T) -> io::Result<()> {
-    let bytes = bincode::serialize(value)
+    let bytes = binary::encode(value)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
     batch.put(key, &bytes)
 }
@@ -612,11 +611,11 @@ impl Settlement {
 
     pub fn submit_anchor(anchor: &[u8]) {
         let hash = blake3::hash(anchor).to_hex().to_string();
-        let line = json!({
-            "kind": "compute_anchor",
-            "hash": hash,
-        })
-        .to_string();
+        let line =
+            foundation_serialization::json::to_string_value(&foundation_serialization::json!({
+                "kind": "compute_anchor",
+                "hash": hash.clone(),
+            }));
         with_state_mut(|state| {
             state.metadata.last_anchor_hex = Some(hash.clone());
             state.push_anchor_record(hash.clone());

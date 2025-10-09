@@ -1,3 +1,4 @@
+use foundation_serialization::json;
 use serde::Serialize;
 use std::io::Write;
 use std::time::Duration;
@@ -61,7 +62,7 @@ pub fn write_summary_json(
     mut writer: impl Write,
 ) -> std::io::Result<()> {
     let summary = summarize(records);
-    let payload = serde_json::to_vec_pretty(&summary)
+    let payload = json::to_vec_pretty(&summary)
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?;
     writer.write_all(&payload)?;
     writer.write_all(b"\n")?;

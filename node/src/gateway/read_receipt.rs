@@ -151,7 +151,7 @@ fn is_receipt_file(ext: Option<&str>) -> bool {
 }
 
 fn next_sequence(dir: &PathBuf) -> IoResult<u64> {
-    let mut max_id = None;
+    let mut max_id: Option<u64> = None;
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -213,7 +213,7 @@ fn decode_legacy_receipt(bytes: &[u8]) -> Result<ReadReceipt, legacy_cbor::Error
 enum ReceiptDecodeError {
     Io(io::Error),
     LegacyFallback {
-        binary: binary::CodecError,
+        binary: foundation_serialization::Error,
         legacy: legacy_cbor::Error,
     },
 }

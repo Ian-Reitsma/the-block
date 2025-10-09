@@ -8,6 +8,6 @@ wallet = { path = "../../crates/wallet" }
 ledger = { path = "../../ledger" }
 hex = "0.4"
 serde = { version = "1", features=["derive"] }
-serde_json = "1"
+foundation_serialization = { path = "../../crates/foundation_serialization" }
 httpd = { path = "../../crates/httpd" }
 runtime = { path = "../../crates/runtime" }

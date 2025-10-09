@@ -21,7 +21,6 @@ use std::fs;
 use sys::signals::{Signals, SIGHUP};
 
 use crate::{storage::pipeline, vm::wasm, ReadAck, StakeTable};
-use foundation_serialization::json;
 use httpd::{
     serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,

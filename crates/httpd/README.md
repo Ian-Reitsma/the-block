@@ -18,7 +18,6 @@ mutual-authentication deployments so callers can swap existing services onto the
 custom stack without rewriting their routing logic.
 
 ```rust
-use foundation_serialization::json::json;
 use httpd::{serve_tls, Response, Router, ServerConfig, ServerTlsConfig, StatusCode};
 use runtime::net::TcpListener;
 
@@ -26,7 +25,10 @@ use runtime::net::TcpListener;
 let listener = TcpListener::bind("127.0.0.1:8443".parse().unwrap()).await?;
 let router = Router::new(())
     .get("/healthz", |_req| async move {
-        Ok(Response::new(StatusCode::OK).json(&json!({ "status": "ok" }))?)
+        Ok(
+            Response::new(StatusCode::OK)
+                .json(&foundation_serialization::json!({ "status": "ok" }))?,
+        )
     });
 let tls = ServerTlsConfig::from_pem_files("certs/server.pem", "certs/server-key.pem")?;
 serve_tls(listener, router, ServerConfig::default(), tls).await?;

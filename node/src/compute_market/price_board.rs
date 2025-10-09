@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::util::atomic_file::write_atomic;
 use crate::util::clock::{Clock, MonotonicClock};
 use crate::util::versioned_blob::{decode_blob, encode_blob, DecodeErr, MAGIC_PRICE_BOARD};
+use foundation_serialization::binary;
 
 #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
 use diagnostics::tracing::{info, warn};
@@ -162,8 +163,7 @@ fn save_to_path(path: &Path) -> io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let board = BOARD.read().unwrap_or_else(|e| e.into_inner());
-    let payload =
-        bincode::serialize(&*board).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let payload = binary::encode(&*board).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let blob = encode_blob(MAGIC, VERSION, &payload)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
     write_atomic(path, &blob)
@@ -257,7 +257,7 @@ pub fn init_with_clock<C: Clock>(path: String, window: usize, save_interval_secs
         Ok(bytes) => match decode_blob(&bytes, MAGIC) {
             Ok((ver, payload)) => {
                 if ver == VERSION {
-                    match bincode::deserialize::<PriceBoard>(payload) {
+                    match binary::decode::<PriceBoard>(payload) {
                         Ok(saved) => {
                             let mut guard = BOARD.write().unwrap_or_else(|e| e.into_inner());
                             *guard = saved;
@@ -413,7 +413,7 @@ fn migrate(from_ver: u16, bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
             consumer: VecDeque<u64>,
             industrial: VecDeque<u64>,
         }
-        let v1: V1 = bincode::deserialize(bytes).map_err(|_| MigrateErr::Unsupported(from_ver))?;
+        let v1: V1 = binary::decode(bytes).map_err(|_| MigrateErr::Unsupported(from_ver))?;
         Ok(PriceBoard {
             window: v1.window,
             consumer: v1
@@ -445,7 +445,7 @@ fn migrate(from_ver: u16, bytes: &[u8]) -> Result<PriceBoard, MigrateErr> {
             consumer: VecDeque<V2Entry>,
             industrial: VecDeque<V2Entry>,
         }
-        let v2: V2 = bincode::deserialize(bytes).map_err(|_| MigrateErr::Unsupported(from_ver))?;
+        let v2: V2 = binary::decode(bytes).map_err(|_| MigrateErr::Unsupported(from_ver))?;
         Ok(PriceBoard {
             window: v2.window,
             consumer: v2

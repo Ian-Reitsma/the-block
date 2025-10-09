@@ -2,7 +2,6 @@
 
 use crate::vm::contracts::htlc::Htlc;
 use concurrency::Lazy;
-use foundation_serialization::json::json;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -20,13 +19,13 @@ pub fn insert(id: u64, h: Htlc) {
 pub fn status(id: u64) -> foundation_serialization::json::Value {
     let store = STORE.lock().unwrap();
     if let Some(h) = store.get(&id) {
-        json!({
+        foundation_serialization::json!({
             "hash": hex::encode(&h.hash),
             "timeout": h.timeout,
             "redeemed": h.redeemed,
         })
     } else {
-        json!({"error": "not_found"})
+        foundation_serialization::json!({"error": "not_found"})
     }
 }
 
@@ -38,11 +37,11 @@ pub fn refund(id: u64, now: u64) -> foundation_serialization::json::Value {
             {
                 crate::telemetry::HTLC_REFUNDED_TOTAL.inc();
             }
-            json!({"status": "refunded"})
+            foundation_serialization::json!({"status": "refunded"})
         } else {
-            json!({"error": "not_refundable"})
+            foundation_serialization::json!({"error": "not_refundable"})
         }
     } else {
-        json!({"error": "not_found"})
+        foundation_serialization::json!({"error": "not_found"})
     }
 }

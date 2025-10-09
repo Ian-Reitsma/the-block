@@ -37,7 +37,7 @@ BLAKE3("did-anchor:" || address || hash(document) || nonce_le)
 
 The registry stores the document and hash keyed by address and rejects any
 update whose nonce is not greater than the previous value. Each successful
-anchor increments the `did_anchor_total` Prometheus counter.
+anchor increments the `did_anchor_total` runtime telemetry counter.
 
 The JSON-RPC layer enforces the same monotonic requirement *per address* before
 requests reach the registry. Nonces are scoped by the submitting address, so a

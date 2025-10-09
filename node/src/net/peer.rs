@@ -12,7 +12,10 @@ use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
 use concurrency::{Lazy, MutexExt};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::{
+    json::{self, Value},
+    Error as SerializationError,
+};
 use hex;
 use indexmap::IndexMap;
 use rand::{rngs::StdRng, seq::SliceRandom};
@@ -40,6 +43,10 @@ use sys::tempfile::{self, Builder as TempBuilder, NamedTempFile};
 use tar::Builder;
 
 fn sys_to_io_error(err: sys::error::SysError) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Other, err)
+}
+
+fn json_to_io_error(err: SerializationError) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, err)
 }
 
@@ -1301,12 +1308,12 @@ pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
                 .append(true)
                 .open(&path)
                 .unwrap();
-            let entry = json!({
+            let entry = foundation_serialization::json!({
                 "old": hex::encode(old),
                 "new": hex::encode(new),
                 "ts": now_secs(),
             });
-            let _ = writeln!(file, "{}", entry.to_string());
+            let _ = writeln!(file, "{}", json::to_string_value(&entry));
         }
         let revoke = now_secs() + KEY_GRACE_SECS;
         ROTATED_KEYS.guard().insert(*old, (new, revoke));
@@ -1387,7 +1394,7 @@ pub fn export_peer_stats(pk: &[u8; 32], name: &str) -> std::io::Result<bool> {
         };
         let metrics =
             metrics.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "peer"))?;
-        let json = json::to_vec(&metrics)?;
+        let json = json::to_vec(&metrics).map_err(json_to_io_error)?;
         let tmp_dir = tempfile::tempdir_in(&dir).map_err(sys_to_io_error)?;
         let mut tmp = NamedTempFile::new_in(tmp_dir.path()).map_err(sys_to_io_error)?;
         tmp.as_file().lock_exclusive().map_err(sys_to_io_error)?;
@@ -1522,7 +1529,7 @@ pub fn export_all_peer_stats(
                         }
                     }
                     let id = overlay_peer_label(pk);
-                    let data = json::to_vec(&m)?;
+                    let data = json::to_vec(&m).map_err(json_to_io_error)?;
                     total_bytes += data.len() as u64;
                     if total_bytes > quota {
                         return Err(std::io::Error::new(
@@ -1601,7 +1608,7 @@ pub fn export_all_peer_stats(
                     }
                 }
                 let id = overlay_peer_label(pk);
-                let data = json::to_vec(&m)?;
+                let data = json::to_vec(&m).map_err(json_to_io_error)?;
                 total_bytes += data.len() as u64;
                 if total_bytes > quota {
                     return Err(std::io::Error::new(
@@ -2221,7 +2228,7 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
         }
         let event = RotationEvent {
             peer_id: overlay_peer_label(old),
-            metrics: json!({ "key_rotation": hex::encode(new) }),
+            metrics: foundation_serialization::json!({ "key_rotation": hex::encode(new) }),
         };
         let fut_client = client.clone();
         client.spawn(async move {

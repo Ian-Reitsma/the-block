@@ -1,9 +1,10 @@
-use async_trait::async_trait;
 #[cfg(any(feature = "inhouse", all(feature = "quinn", not(feature = "s2n-quic"))))]
 use crypto_suite::hashing::blake3;
 use diagnostics::{anyhow, Result as DiagResult};
+use std::future::Future;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -68,21 +69,25 @@ pub struct ProviderMetadata {
 }
 
 /// Generic QUIC listener interface implemented by backends.
-#[async_trait]
 pub trait QuicListener {
     type Endpoint;
     type Error;
 
-    async fn listen(&self, addr: SocketAddr) -> Result<Self::Endpoint, Self::Error>;
+    fn listen<'a>(
+        &'a self,
+        addr: SocketAddr,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Endpoint, Self::Error>> + Send + 'a>>;
 }
 
 /// Generic QUIC connector interface implemented by backends.
-#[async_trait]
 pub trait QuicConnector {
     type Connection;
     type Error;
 
-    async fn connect(&self, addr: SocketAddr) -> Result<Self::Connection, Self::Error>;
+    fn connect<'a>(
+        &'a self,
+        addr: SocketAddr,
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Connection, Self::Error>> + Send + 'a>>;
 }
 
 /// Certificate store operations required by the node when managing TLS material.

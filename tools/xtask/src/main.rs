@@ -5,7 +5,6 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
-use foundation_serialization::json;
 use git2::{DiffFormat, Repository};
 use std::io::{self, Write};
 use std::process::Command as StdCommand;

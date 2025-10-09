@@ -2,6 +2,7 @@
 
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::{hex, json};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -104,7 +105,7 @@ pub(crate) fn telemetry_counter(name: &'static str, help: &'static str) -> Count
     counter(name, help)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayerProof {
     pub relayer: String,
     pub commitment: [u8; 32],
@@ -127,7 +128,7 @@ impl RelayerProof {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayerBundle {
     pub proofs: Vec<RelayerProof>,
 }

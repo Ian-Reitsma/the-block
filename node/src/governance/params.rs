@@ -1,10 +1,10 @@
 use super::ParamKey;
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
-use bincode;
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::info;
-use foundation_serialization::json;
+use foundation_math::linalg::{Matrix, Vector};
+use foundation_serialization::{binary, json};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     validate_runtime_backend_policy, validate_storage_engine_policy,
@@ -830,7 +830,7 @@ impl EncryptedUtilization {
         for (b, k) in buf.iter_mut().zip(key.iter().cycle()) {
             *b ^= k;
         }
-        bincode::deserialize(&buf).unwrap_or_default()
+        binary::decode(&buf).unwrap_or_default()
     }
 }
 
@@ -993,8 +993,8 @@ pub fn retune_multipliers(
 
     use crate::governance::kalman::KalmanLqg;
     let mut kf = KalmanLqg {
-        x: nalgebra::DVector::from_row_slice(&state.x),
-        p: nalgebra::DMatrix::from_row_slice(8, 8, &state.p),
+        x: Vector::<8>::from_array(state.x),
+        p: Matrix::<8, 8>::from_row_major(&state.p),
     };
     if !burst {
         kf.step(

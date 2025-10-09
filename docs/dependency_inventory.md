@@ -2,8 +2,8 @@
 
 | Tier | Crate | Version | Origin | License | Depth |
 | --- | --- | --- | --- | --- | --- |
-> **2025-10-08 review**: Governance, ledger, metrics-aggregator, and overlay persistence now round-trip through the first-party `foundation_serialization` facade (JSON, binary, base58). Remaining direct `serde_json`/`bincode` usage is limited to tooling crates tracked in `docs/pivot_dependency_strategy.md`.
-> **2025-10-08 delta**: Removed the third-party base58 crate from the workspace after migrating overlay peer storage to `foundation_serialization::base58`; transitive `base64` entries remain until upstream crates accept the in-house encoder.
+> **2025-10-12 review**: Governance, ledger, metrics-aggregator, overlay persistence, and the runtime telemetry stack now round-trip through first-party crates (`foundation_serialization`, `foundation_math`, `runtime::telemetry`). Remaining direct `serde_json`/`bincode` usage is limited to tooling crates tracked in `docs/pivot_dependency_strategy.md`.
+> **2025-10-12 delta**: Removed the Prometheus exporter from the workspace in favour of `runtime::telemetry` snapshots rendered through the foundation dashboard generator; transitive `base64` entries remain until upstream crates accept the in-house encoder.
 | strategic | `rustls` | 0.23.32 | crates.io | Apache-2.0 OR ISC OR MIT | 2 |
 | replaceable | `bincode` | 1.3.3 | crates.io | MIT | 1 |
 | replaceable | `serde` | 1.0.228 | crates.io | MIT OR Apache-2.0 | 1 |
@@ -315,7 +315,6 @@
 | unclassified | `probe` | 0.1.0 | workspace | — | 0 |
 | unclassified | `proc-macro2` | 1.0.101 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `procfs` | 0.15.1 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `prometheus` | 0.13.4 | crates.io | Apache-2.0 | 1 |
 | unclassified | `protobuf` | 2.28.0 | crates.io | MIT | 2 |
 | unclassified | `psm` | 0.1.27 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `python_bridge` | 0.1.0 | workspace | — | 0 |

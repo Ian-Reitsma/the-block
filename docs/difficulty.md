@@ -42,7 +42,7 @@ resulting difficulty hint for the latest blocks.
 
 ### Telemetry
 
-Prometheus counters `difficulty_window_short`, `difficulty_window_med`, and
+Runtime telemetry counters `difficulty_window_short`, `difficulty_window_med`, and
 `difficulty_window_long` expose the raw EMA windows for dashboards.
 
 ### Tests

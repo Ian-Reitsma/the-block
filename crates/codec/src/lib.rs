@@ -1,6 +1,7 @@
 use core::fmt;
 
 use bincode::Options;
+use foundation_serialization::{json, Error as SerializationError};
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "telemetry")]
 use std::sync::OnceLock;
@@ -84,12 +85,12 @@ pub enum Error {
         /// Direction of the codec operation.
         direction: Direction,
     },
-    /// A serde_json codec failure.
+    /// A JSON codec failure using the first-party facade.
     #[error("{direction} using JSON codec failed: {source}")]
     Json {
-        /// Underlying JSON error.
+        /// Underlying JSON error reported by the serialization facade.
         #[source]
-        source: serde_json::Error,
+        source: SerializationError,
         /// Direction of the codec operation.
         direction: Direction,
     },
@@ -132,7 +133,7 @@ impl Error {
         }
     }
 
-    fn from_json(source: serde_json::Error, direction: Direction) -> Self {
+    fn from_json(source: SerializationError, direction: Direction) -> Self {
         Error::Json { source, direction }
     }
 
@@ -194,7 +195,7 @@ impl BincodeProfile {
 /// Canonical JSON configuration identifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JsonProfile {
-    /// Default serde_json serializer.
+    /// Default JSON serializer from the first-party facade.
     Canonical,
 }
 
@@ -273,7 +274,7 @@ impl Codec {
                 .serialize(value)
                 .map_err(|err| Error::from_bincode(err, profile, Direction::Serialize)),
             Codec::Json(JsonProfile::Canonical) => {
-                serde_json::to_vec(value).map_err(|err| Error::from_json(err, Direction::Serialize))
+                json::to_vec(value).map_err(|err| Error::from_json(err, Direction::Serialize))
             }
             Codec::Cbor(CborProfile::Canonical) => {
                 serde_cbor::to_vec(value).map_err(|err| Error::from_cbor(err, Direction::Serialize))
@@ -287,8 +288,9 @@ impl Codec {
                 .config()
                 .deserialize(bytes)
                 .map_err(|err| Error::from_bincode(err, profile, Direction::Deserialize)),
-            Codec::Json(JsonProfile::Canonical) => serde_json::from_slice(bytes)
-                .map_err(|err| Error::from_json(err, Direction::Deserialize)),
+            Codec::Json(JsonProfile::Canonical) => {
+                json::from_slice(bytes).map_err(|err| Error::from_json(err, Direction::Deserialize))
+            }
             Codec::Cbor(CborProfile::Canonical) => serde_cbor::from_slice(bytes)
                 .map_err(|err| Error::from_cbor(err, Direction::Deserialize)),
         }
@@ -354,8 +356,8 @@ pub fn serialize_to_string<T: Serialize>(codec: Codec, value: &T) -> Result<Stri
 
 /// Serialize `value` to a prettified JSON string using the canonical settings.
 pub fn serialize_json_pretty<T: Serialize>(value: &T) -> Result<String> {
-    let result = serde_json::to_string_pretty(value)
-        .map_err(|err| Error::from_json(err, Direction::Serialize));
+    let result =
+        json::to_string_pretty(value).map_err(|err| Error::from_json(err, Direction::Serialize));
     observe_result(
         result.as_ref().ok().map(|s| s.as_bytes().len()),
         Codec::Json(JsonProfile::Canonical),

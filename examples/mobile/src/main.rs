@@ -6,13 +6,14 @@ use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletSigner};
+use foundation_serialization::json;
 
 fn main() {
     // simulate syncing headers from a file on disk
     let mut file = File::open("../light_headers.json").expect("header file");
     let mut data = Vec::new();
     file.read_to_end(&mut data).unwrap();
-    let headers: Vec<Header> = serde_json::from_slice(&data).unwrap();
+    let headers: Vec<Header> = json::from_slice(&data).unwrap();
     let mut iter = headers.into_iter();
     let genesis = iter.next().unwrap();
     let mut client = LightClient::new(genesis.clone());
@@ -122,7 +123,7 @@ fn notify_tx(id: &str) {
     let client = BlockingClient::default();
     let _ = client
         .request(Method::Post, "http://localhost:8080/push")
-        .and_then(|builder| builder.json(&serde_json::json!({"tx": id})))
+        .and_then(|builder| builder.json(&foundation_serialization::json!({ "tx": id })))
         .and_then(|builder| builder.send());
     println!("push notification: tx {id}");
 }

@@ -177,7 +177,7 @@ mutual-TLS rotations directly from telemetry.
 
 ## Telemetry
 
-The handshake module exports the following Prometheus metrics:
+The handshake module exports the following runtime telemetry metrics:
 
 - `p2p_handshake_reject_total{reason}` – count of rejected handshakes grouped by
   `bad_network`, `old_proto`, or `missing_features`.

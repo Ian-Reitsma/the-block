@@ -13,54 +13,38 @@ const DEFAULT_MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 #[cfg(feature = "telemetry")]
 mod telemetry {
-    use once_cell::sync::Lazy;
-    use prometheus::{IntCounter, Opts, Registry};
+    use foundation_lazy::sync::Lazy;
+    use runtime::telemetry::{IntCounter, Registry};
 
     pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
-    pub static LIGHT_STATE_SNAPSHOT_COMPRESSED_BYTES: Lazy<IntCounter> = Lazy::new(|| {
-        let counter = IntCounter::with_opts(
-            Opts::new(
-                "light_state_snapshot_compressed_bytes",
-                "Total compressed bytes processed for light-client snapshots",
-            )
-            .namespace("the_block"),
-        )
-        .expect("compressed snapshot counter");
+    fn register_counter(name: &str, help: &str) -> IntCounter {
+        let counter = IntCounter::new(name, help).expect("create light-client counter");
         REGISTRY
             .register(Box::new(counter.clone()))
-            .expect("register compressed snapshot counter");
+            .expect("register light-client counter");
         counter
+    }
+
+    pub static LIGHT_STATE_SNAPSHOT_COMPRESSED_BYTES: Lazy<IntCounter> = Lazy::new(|| {
+        register_counter(
+            "the_block_light_state_snapshot_compressed_bytes",
+            "Total compressed bytes processed for light-client snapshots",
+        )
     });
 
     pub static LIGHT_STATE_SNAPSHOT_DECOMPRESSED_BYTES: Lazy<IntCounter> = Lazy::new(|| {
-        let counter = IntCounter::with_opts(
-            Opts::new(
-                "light_state_snapshot_decompressed_bytes",
-                "Total decompressed bytes applied from light-client snapshots",
-            )
-            .namespace("the_block"),
+        register_counter(
+            "the_block_light_state_snapshot_decompressed_bytes",
+            "Total decompressed bytes applied from light-client snapshots",
         )
-        .expect("decompressed snapshot counter");
-        REGISTRY
-            .register(Box::new(counter.clone()))
-            .expect("register decompressed snapshot counter");
-        counter
     });
 
     pub static LIGHT_STATE_SNAPSHOT_DECOMPRESS_ERRORS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
-        let counter = IntCounter::with_opts(
-            Opts::new(
-                "light_state_snapshot_decompress_errors_total",
-                "Total lz77-rle decompression failures for light-client snapshots",
-            )
-            .namespace("the_block"),
+        register_counter(
+            "the_block_light_state_snapshot_decompress_errors_total",
+            "Total lz77-rle decompression failures for light-client snapshots",
         )
-        .expect("snapshot decompression counter");
-        REGISTRY
-            .register(Box::new(counter.clone()))
-            .expect("register snapshot decompression counter");
-        counter
     });
 }
 

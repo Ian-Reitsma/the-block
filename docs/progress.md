@@ -234,12 +234,12 @@ with hysteresis `ΔN ≈ √N*` to blunt flash joins. Full derivations live in [
 ## 10. Monitoring, Debugging & Profiling — 95.8 %
 
 **Evidence**
-  - Prometheus exporter with extensive counters (`node/src/telemetry.rs`).
+  - Runtime telemetry exporter with extensive counters (`node/src/telemetry.rs`).
   - Service badge tracker exports uptime metrics and RPC status (`node/src/service_badge.rs`, `node/tests/service_badge.rs`). See `docs/service_badge.md`.
   - Monitoring stack via `make monitor` and docs in `docs/monitoring/README.md`.
     - Cluster metrics aggregation with disk-backed retention (`metrics-aggregator` crate).
     - Aggregator ingestion now depends solely on the in-house `httpd` server; runtime-backed archive streaming is pending. Outbound correlations continue to share the node’s HTTP client (`metrics-aggregator/src/lib.rs`).
-    - Metrics-to-logs correlation links Prometheus anomalies to targeted log dumps and exposes `log_correlation_fail_total` for missed lookups (`metrics-aggregator/src/lib.rs`, `node/src/rpc/logs.rs`, `cli/src/logs.rs`).
+    - Metrics-to-logs correlation links runtime telemetry anomalies to targeted log dumps and exposes `log_correlation_fail_total` for missed lookups (`metrics-aggregator/src/lib.rs`, `node/src/rpc/logs.rs`, `cli/src/logs.rs`).
     - VM trace counters and partition dashboards (`node/src/telemetry.rs`, `monitoring/templates/partition.json`).
     - Settlement audit CI job (`.github/workflows/ci.yml`).
     - Fee-floor policy changes and wallet overrides surface via `fee_floor_window_changed_total`, `fee_floor_warning_total`, and `fee_floor_override_total`, while DID anchors increment `did_anchor_total` for explorer dashboards (`node/src/telemetry.rs`, `monitoring/metrics.json`, `docs/mempool_qos.md`, `docs/identity.md`).

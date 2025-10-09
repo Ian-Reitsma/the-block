@@ -1,3 +1,5 @@
+use foundation_rpc::{Request as RpcEnvelopeRequest, Response as RpcEnvelopeResponse};
+use foundation_serialization::json;
 use httpd::{ClientError as HttpClientError, ClientResponse, HttpClient, Method};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -121,6 +123,8 @@ impl RpcClient {
 pub enum RpcClientError {
     Transport(HttpClientError),
     InjectedFault,
+    Decode(foundation_serialization::Error),
+    Rpc(foundation_rpc::RpcError),
 }
 
 impl fmt::Display for RpcClientError {
@@ -128,6 +132,10 @@ impl fmt::Display for RpcClientError {
         match self {
             RpcClientError::Transport(err) => write!(f, "transport error: {err}"),
             RpcClientError::InjectedFault => f.write_str("fault injection triggered"),
+            RpcClientError::Decode(err) => write!(f, "decode error: {err}"),
+            RpcClientError::Rpc(err) => {
+                write!(f, "rpc error {}: {}", err.code, err.message())
+            }
         }
     }
 }
@@ -137,6 +145,8 @@ impl std::error::Error for RpcClientError {
         match self {
             RpcClientError::Transport(err) => Some(err),
             RpcClientError::InjectedFault => None,
+            RpcClientError::Decode(err) => Some(err),
+            RpcClientError::Rpc(err) => Some(err),
         }
     }
 }
@@ -161,33 +171,21 @@ pub struct InflationParams {
 
 impl RpcClient {
     pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
-        #[derive(Serialize)]
-        struct Payload<'a> {
-            jsonrpc: &'static str,
-            id: u32,
-            method: &'static str,
-            params: foundation_serialization::json::Value,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            auth: Option<&'a str>,
-        }
-        #[derive(Deserialize)]
-        struct Envelope<T> {
-            result: T,
-        }
-
         let params = foundation_serialization::json!({ "lane": lane.as_str() });
-        let payload = Payload {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "mempool.stats",
-            params,
-            auth: None,
-        };
-        let res = self
-            .call(url, &payload)?
-            .json::<Envelope<MempoolStats>>()
+        let mut request = RpcEnvelopeRequest::new("mempool.stats", params);
+        request.id = Some(json::Value::from(1));
+
+        let response = self
+            .call(url, &request)?
+            .json::<RpcEnvelopeResponse>()
             .map_err(RpcClientError::from)?;
-        Ok(res.result)
+
+        match response {
+            RpcEnvelopeResponse::Result { result, .. } => {
+                json::from_value(result).map_err(RpcClientError::Decode)
+            }
+            RpcEnvelopeResponse::Error { error, .. } => Err(RpcClientError::Rpc(error)),
+        }
     }
 
     pub fn record_wallet_qos_event(
@@ -303,7 +301,13 @@ impl RpcClient {
             .call(url, &payload)?
             .json::<Envelope>()
             .map_err(RpcClientError::from)?;
-        Ok(res.result["stake"].as_u64().unwrap_or(0))
+        let stake = res
+            .result
+            .as_object()
+            .and_then(|map| map.get("stake"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        Ok(stake)
     }
 }
 
@@ -385,7 +389,6 @@ impl From<RpcClientError> for WalletQosError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use foundation_serialization::json::json;
 
     struct EnvGuard {
         key: &'static str,
@@ -665,7 +668,7 @@ mod tests {
             max_retries: 0,
             fault_rate: 1.0,
         };
-        let payload = json!({ "jsonrpc": "2.0", "method": "noop" });
+        let payload = foundation_serialization::json!({ "jsonrpc": "2.0", "method": "noop" });
         let err = client
             .call("http://127.0.0.1:0", &payload)
             .expect_err("fault injection should abort the request");

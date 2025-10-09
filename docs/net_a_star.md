@@ -54,7 +54,7 @@ When telemetry is enabled the router exposes:
 - `route_fail_total` – number of searches that failed to produce a path within
   the hop limit.
 
-Metrics appear on the Prometheus exporter and can be scraped via
+Metrics appear on the runtime telemetry exporter and can be scraped via
 `curl localhost:9100/metrics | rg '^asn_latency_ms'`.
 
 ## Debugging

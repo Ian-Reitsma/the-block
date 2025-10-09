@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use foundation_serialization::json::json;
 use the_block::rpc::pos;
 use wallet::Wallet;
 
@@ -12,7 +11,7 @@ fn bond_and_unbond_via_rpc() {
     let sig = w.sign_stake(role, amount, false).unwrap();
     let pk_hex = w.public_key_hex();
     let sig_hex = hex::encode(sig.to_bytes());
-    let params = json!({
+    let params = foundation_serialization::json!({
         "id": pk_hex.clone(),
         "role": role,
         "amount": amount,
@@ -24,7 +23,7 @@ fn bond_and_unbond_via_rpc() {
     assert_eq!(res["stake"].as_u64().unwrap(), amount);
     let sig_u = w.sign_stake(role, amount, true).unwrap();
     let sig_u_hex = hex::encode(sig_u.to_bytes());
-    let params_u = json!({
+    let params_u = foundation_serialization::json!({
         "id": pk_hex.clone(),
         "role": role,
         "amount": amount,
@@ -35,7 +34,7 @@ fn bond_and_unbond_via_rpc() {
     let res_u = pos::unbond(&params_u).expect("unbond");
     assert_eq!(res_u["stake"].as_u64().unwrap(), 0);
 
-    let params_role = json!({"id": pk_hex, "role": role});
+    let params_role = foundation_serialization::json!({"id": pk_hex, "role": role});
     let res_role = pos::role(&params_role).expect("role");
     assert_eq!(res_role["stake"].as_u64().unwrap(), 0);
 }

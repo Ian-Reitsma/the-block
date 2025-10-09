@@ -2,7 +2,7 @@
 #![allow(clippy::expect_used)]
 
 use diagnostics::{self, Level as LogLevel, LogRecord, LogSink, TbError};
-use foundation_serialization::json::{self, json, Map as JsonMap};
+use foundation_serialization::json::{self, Map as JsonMap};
 use runtime::sync::CancellationToken;
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -150,12 +150,27 @@ impl CliLogSink {
 
     fn write_json(&self, record: &LogRecord, stderr: &mut io::Stderr) {
         let mut obj = JsonMap::new();
-        obj.insert("level".into(), json!(record.level.as_str()));
-        obj.insert("target".into(), json!(record.target.as_ref()));
-        obj.insert("module".into(), json!(record.module_path.as_ref()));
-        obj.insert("file".into(), json!(record.file.as_ref()));
-        obj.insert("line".into(), json!(record.line));
-        obj.insert("message".into(), json!(record.message.as_ref()));
+        obj.insert(
+            "level".into(),
+            foundation_serialization::json!(record.level.as_str()),
+        );
+        obj.insert(
+            "target".into(),
+            foundation_serialization::json!(record.target.as_ref()),
+        );
+        obj.insert(
+            "module".into(),
+            foundation_serialization::json!(record.module_path.as_ref()),
+        );
+        obj.insert(
+            "file".into(),
+            foundation_serialization::json!(record.file.as_ref()),
+        );
+        obj.insert("line".into(), foundation_serialization::json!(record.line));
+        obj.insert(
+            "message".into(),
+            foundation_serialization::json!(record.message.as_ref()),
+        );
         if !record.fields.is_empty() {
             let mut fields = JsonMap::new();
             for (idx, field) in record.fields.iter().enumerate() {
@@ -164,9 +179,9 @@ impl CliLogSink {
                 } else {
                     field.key.to_string()
                 };
-                fields.insert(key, json!(field.value));
+                fields.insert(key, foundation_serialization::json!(field.value));
             }
-            obj.insert("fields".into(), json!(fields));
+            obj.insert("fields".into(), foundation_serialization::json!(fields));
         }
         match json::to_string(&obj) {
             Ok(rendered) => {
@@ -246,17 +261,23 @@ impl TraceWriter {
             .unwrap_or_default()
             .as_micros();
         let mut args = JsonMap::new();
-        args.insert("message".into(), json!(record.message.as_ref()));
-        args.insert("level".into(), json!(record.level.as_str()));
+        args.insert(
+            "message".into(),
+            foundation_serialization::json!(record.message.as_ref()),
+        );
+        args.insert(
+            "level".into(),
+            foundation_serialization::json!(record.level.as_str()),
+        );
         for (idx, field) in record.fields.iter().enumerate() {
             let key = if field.key.is_empty() {
                 format!("field_{idx}")
             } else {
                 field.key.to_string()
             };
-            args.insert(key, json!(field.value));
+            args.insert(key, foundation_serialization::json!(field.value));
         }
-        let event = json!({
+        let event = foundation_serialization::json!({
             "name": record.target.as_ref(),
             "cat": record.module_path.as_ref(),
             "ph": "i",

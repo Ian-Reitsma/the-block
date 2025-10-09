@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use once_cell::sync::Lazy;
+use foundation_lazy::sync::Lazy;
+use foundation_serialization::json;
 use runtime::sync::CancellationToken;
 use serde::Serialize;
 use tempfile;
@@ -397,7 +398,7 @@ fn execute_scenario(
         None
     };
 
-    let json = serde_json::to_vec_pretty(metrics)?;
+    let json = json::to_vec_pretty(metrics).map_err(|err| anyhow!(err.to_string()))?;
     fs::write(&metrics_path, json)?;
     let mut summary = File::create(&summary_path)?;
     write_summary(&mut summary, metrics)?;

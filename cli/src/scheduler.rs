@@ -5,7 +5,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::json;
 
 pub enum SchedulerCmd {
     /// Show scheduler queue depths and weights
@@ -63,7 +62,7 @@ pub fn handle(cmd: SchedulerCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "scheduler.stats",
-                params: json!({}),
+                params: foundation_serialization::json!({}),
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &payload) {

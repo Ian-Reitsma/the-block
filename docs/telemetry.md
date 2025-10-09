@@ -144,15 +144,11 @@ cluster-wide gauges when compiled with `--features telemetry`:
 
 Nodes publish these wrapper samples via the telemetry summary stream. The aggregator exposes them through the `/wrappers` endpoint, returning the latest metrics per node. The CLI mirrors this with `contract-cli system dependencies --aggregator http://<host>:9000`, producing a sorted, human-readable report operators can paste into incident timelines.
 
-Prometheus query examples:
-
-```promql
-# Cancellation rate by reason
-sum(rate(scheduler_cancel_total[5m])) by (reason)
-
-# Active peers across the cluster
-sum(cluster_peer_active_total)
-```
+Operators can calculate derived values directly from the `/metrics` payload
+using the first-party helpers under `monitoring/tools/` or ad-hoc scripts. For
+example, summing `scheduler_cancel_total{reason}` across nodes reproduces the
+cluster cancellation rate, and `cluster_peer_active_total` exposes the number of
+currently active peers.
 
 Nodes queue metrics locally if the aggregator is unreachable, so collector
 outages do not block operation.

@@ -6,7 +6,7 @@ Nodes periodically emit a full snapshot followed by incremental diffs. CI uses
 `scripts/snapshot_ci.sh` to verify that the latest snapshot plus diffs reconstruct
 the live state.
 
-Snapshot operations export the following Prometheus metrics:
+Snapshot operations export the following runtime telemetry metrics:
 
 - `snapshot_duration_seconds` (histogram) – time spent creating or applying a snapshot.
 - `snapshot_fail_total` (counter) – failures during snapshot operations.

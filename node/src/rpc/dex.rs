@@ -3,7 +3,6 @@
 use crate::dex::{check_liquidity_rules, storage::EscrowState, DexStore, TrustLedger};
 use concurrency::Lazy;
 use dex::escrow::PaymentProof;
-use foundation_serialization::json::json;
 use std::sync::Mutex;
 
 pub static STORE: Lazy<Mutex<DexStore>> = Lazy::new(|| Mutex::new(DexStore::open("dex_db")));
@@ -16,19 +15,19 @@ pub fn escrow_status(id: u64) -> foundation_serialization::json::Value {
         let mut proofs = Vec::new();
         for (idx, amount) in entry.payments.iter().enumerate() {
             if let Some(p) = state.escrow.proof(id, idx) {
-                proofs.push(json!({"amount": amount, "proof": p}));
+                proofs.push(foundation_serialization::json!({"amount": amount, "proof": p}));
             }
         }
-        json!({
-            "from": entry.from,
-            "to": entry.to,
+        foundation_serialization::json!({
+            "from": &entry.from,
+            "to": &entry.to,
             "total": entry.total,
             "released": entry.released,
             "outstanding": entry.total - entry.released,
             "proofs": proofs
         })
     } else {
-        json!({"error": "not_found"})
+        foundation_serialization::json!({"error": "not_found"})
     }
 }
 
@@ -65,7 +64,7 @@ pub fn escrow_release(
         .status(id)
         .map(|e| e.payments.len().saturating_sub(1))
         .unwrap_or(0);
-    Ok(json!({"proof": proof.clone(), "root": root, "idx": idx}))
+    Ok(foundation_serialization::json!({"proof": proof.clone(), "root": root, "idx": idx}))
 }
 
 pub fn escrow_proof(id: u64, idx: usize) -> Option<PaymentProof> {
