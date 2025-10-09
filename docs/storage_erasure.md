@@ -197,7 +197,7 @@ fingerprint, chunk index, status (`success`, `failure`, `skipped`, or `fatal`),
 bytes written, and any error cause. Logs rotate daily and the directory retains
 the 14 most recent files.
 
-Repair attempts and failures feed Prometheus metrics that power dashboards:
+Repair attempts and failures feed runtime telemetry metrics that power dashboards:
 
 - `storage_repair_attempts_total{status="success|failure|skipped|fatal"}`
   increments for every attempt outcome.

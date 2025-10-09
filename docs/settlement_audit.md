@@ -55,7 +55,7 @@ curl -s localhost:26658/settlement.audit | jq
 
 CI still runs `cargo test -p the_block --test settlement_audit --release` to replay recent checkpoints and fail if explorer indexes diverge from ledger anchors.
 
-Set `TB_SETTLE_AUDIT_INTERVAL_MS` to instruct the node to audit pending epochs periodically. Reports land in `state/receipts/audit_latest.json`, and the Prometheus counter `settle_audit_mismatch_total` increments whenever an invalid entry surfaces.
+Set `TB_SETTLE_AUDIT_INTERVAL_MS` to instruct the node to audit pending epochs periodically. Reports land in `state/receipts/audit_latest.json`, and the runtime telemetry counter `settle_audit_mismatch_total` increments whenever an invalid entry surfaces.
 
 The `tools/indexer` utility can ingest checkpointed receipts into a SQLite database:
 

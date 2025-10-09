@@ -44,7 +44,7 @@ and emits maintenance state via telemetry and RPC. CLI operators can inspect pro
 interface exposes the same data and controls via `storage_provider_profiles` and
 `storage_provider_set_maintenance`.
 
-These counters are emitted directly from the RPC helpers in `node/src/rpc/storage.rs` whenever uploads or challenges complete, and they are only available when the `telemetry` feature flag is enabled. Operators relying on contract or challenge telemetry should ensure telemetry is compiled in and that Prometheus scrapes the node endpoint.
+These counters are emitted directly from the RPC helpers in `node/src/rpc/storage.rs` whenever uploads or challenges complete, and they are only available when the `telemetry` feature flag is enabled. Operators relying on contract or challenge telemetry should ensure telemetry is compiled in and that the runtime exporter is scraped by the aggregator.
 
 ## Coding abstraction and configuration
 

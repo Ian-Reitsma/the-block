@@ -12,7 +12,7 @@ fn init() {
 }
 
 #[test]
-fn metrics_http_exporter_serves_prometheus_text() {
+fn metrics_http_exporter_serves_foundation_text() {
     init();
     telemetry::MEMPOOL_SIZE
         .with_label_values(&["consumer"])
@@ -27,7 +27,7 @@ fn metrics_http_exporter_serves_prometheus_text() {
         .unwrap();
     let mut buf = String::new();
     stream.read_to_string(&mut buf).unwrap();
-    assert!(buf.contains("Content-Type: text/plain"));
+    assert!(buf.contains("Content-Type: text/plain; charset=utf-8"));
     assert!(buf.contains("mempool_size"));
     assert!(buf.contains("42"));
     assert!(buf.contains("tx_submitted_total 1"));

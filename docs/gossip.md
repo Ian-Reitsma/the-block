@@ -76,7 +76,7 @@ counts.
 ## Rate-Limit Telemetry
 
 Each peer records request counts, bytes sent, and drop reasons. The following
-Prometheus counters expose these metrics:
+Runtime telemetry counters expose these metrics:
 
 | Metric | Labels | Description |
 |--------|--------|-------------|
@@ -110,7 +110,7 @@ the current score via `net.peer_stats` or:
 net stats reputation <peer_id>
 ```
 
-The score is exported as `peer_reputation_score{peer_id}` in Prometheus.
+The score is exported as `peer_reputation_score{peer_id}` via the runtime exporter.
 
 Metrics for an individual peer can be queried over RPC using `net.peer_stats`
 or via the `net stats <peer_id>` CLI, returning recent request counts, bytes

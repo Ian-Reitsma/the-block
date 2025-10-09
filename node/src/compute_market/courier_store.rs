@@ -1,5 +1,6 @@
 use crate::compute_market::receipt::Receipt;
 use crate::transaction::FeeLane;
+use foundation_serialization::binary;
 use sled::Tree;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -20,7 +21,7 @@ impl ReceiptStore {
         for entry in tree.iter() {
             match entry {
                 Ok((key, v)) => {
-                    if let Ok(r) = bincode::deserialize::<Receipt>(&v) {
+                    if let Ok(r) = binary::decode::<Receipt>(&v) {
                         seen.insert(r.idempotency_key);
                     } else {
                         #[cfg(feature = "telemetry")]
@@ -48,7 +49,7 @@ impl ReceiptStore {
     /// Attempt to insert the receipt; returns `true` if newly stored.
     pub fn try_insert(&self, r: &Receipt) -> Result<bool, sled::Error> {
         let key = r.idempotency_key;
-        let bytes = bincode::serialize(r).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
+        let bytes = binary::encode(r).unwrap_or_else(|e| panic!("serialize receipt: {e}"));
         let res = self
             .tree
             .compare_and_swap(key, None as Option<Vec<u8>>, Some(bytes))?;
@@ -72,7 +73,7 @@ impl ReceiptStore {
         for entry in self.tree.iter() {
             match entry {
                 Ok((_key, bytes)) => {
-                    if let Ok(receipt) = bincode::deserialize::<Receipt>(&bytes) {
+                    if let Ok(receipt) = binary::decode::<Receipt>(&bytes) {
                         if receipt.lane == lane {
                             receipts.push(receipt);
                         }

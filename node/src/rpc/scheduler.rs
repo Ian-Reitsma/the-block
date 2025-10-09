@@ -1,4 +1,4 @@
-use foundation_serialization::json::{json, Map, Value};
+use foundation_serialization::json::{Map, Value};
 
 use crate::scheduler::{self, ServiceClass};
 
@@ -9,7 +9,7 @@ pub fn stats() -> Value {
         let depth = stats.queue_depths.get(class).copied().unwrap_or(0);
         queues.insert(class.as_str().to_string(), Value::from(depth as u64));
     }
-    json!({
+    foundation_serialization::json!({
         "reentrant_enabled": stats.reentrant_enabled,
         "weights": stats.weights.as_map(),
         "queues": queues,

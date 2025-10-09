@@ -1,9 +1,9 @@
 #![allow(unsafe_code)]
 
-use async_trait::async_trait;
 use jni::objects::{GlobalRef, JObject, JValue};
 use jni::JavaVM;
 use ndk_context::android_context;
+use std::pin::Pin;
 use tracing::debug;
 
 use super::{DeviceStatus, DeviceStatusProbe, ProbeError};
@@ -44,13 +44,16 @@ impl AndroidProbe {
     }
 }
 
-#[async_trait]
 impl DeviceStatusProbe for AndroidProbe {
-    async fn poll_status(&self) -> Result<DeviceStatus, ProbeError> {
-        self.with_env(|env, context| unsafe {
-            let context_class = env
-                .find_class("android/content/Context")
-                .map_err(|err| ProbeError::backend(format!("context class: {err}")))?;
+    fn poll_status(
+        &self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<DeviceStatus, ProbeError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            self.with_env(|env, context| unsafe {
+                let context_class = env
+                    .find_class("android/content/Context")
+                    .map_err(|err| ProbeError::backend(format!("context class: {err}")))?;
 
             let connectivity_service = env
                 .get_static_field(
@@ -303,6 +306,7 @@ impl DeviceStatusProbe for AndroidProbe {
                 is_charging: charging,
                 battery_level: level,
             })
+        })
         })
     }
 }

@@ -11,7 +11,7 @@ for m in [m for m in schema["metrics"] if not m.get("deprecated")]:
         "title": m["name"],
         "targets": [{"expr": m["name"]}],
         "options": {"legend": {"showLegend": False}},
-        "datasource": {"type": "prometheus", "uid": "prom"},
+        "datasource": {"type": "foundation-telemetry", "uid": "foundation"},
     }
     name = m["name"]
     if name.startswith("dex_"):

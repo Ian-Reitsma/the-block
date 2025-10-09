@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
-use foundation_serialization::json::json;
 use tempfile::tempdir;
 use the_block::gateway::dns::{gateway_policy, publish_record};
 
@@ -8,24 +7,26 @@ use the_block::gateway::dns::{gateway_policy, publish_record};
 fn reads_increment_without_charging() {
     let dir = tempdir().unwrap();
     std::env::set_var("TB_DNS_DB_PATH", dir.path().join("dns").to_str().unwrap());
-    let txt = json!({"gw_policy":{}}).to_string();
+    let txt = foundation_serialization::json::to_string_value(
+        &foundation_serialization::json!({"gw_policy": {}}),
+    );
     let sk = SigningKey::from_bytes(&[1u8; 32]);
     let pk = sk.verifying_key();
     let mut msg = Vec::new();
     msg.extend(b"test.block");
     msg.extend(txt.as_bytes());
     let sig = sk.sign(&msg);
-    let params = json!({
+    let params = foundation_serialization::json!({
         "domain":"test.block",
         "txt":txt,
         "pubkey":hex::encode(pk.to_bytes()),
         "sig":hex::encode(sig.to_bytes()),
     });
     let _ = publish_record(&params);
-    let r1 = gateway_policy(&json!({"domain":"test.block"}));
+    let r1 = gateway_policy(&foundation_serialization::json!({"domain":"test.block"}));
     assert_eq!(r1["reads_total"].as_u64().unwrap(), 1);
     assert!(r1.get("remaining_budget_μc").is_none());
-    let r2 = gateway_policy(&json!({"domain":"test.block"}));
+    let r2 = gateway_policy(&foundation_serialization::json!({"domain":"test.block"}));
     assert_eq!(r2["reads_total"].as_u64().unwrap(), 2);
     assert!(r2["last_access_ts"].as_u64().unwrap() >= r1["last_access_ts"].as_u64().unwrap());
 }

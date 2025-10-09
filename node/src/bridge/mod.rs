@@ -560,12 +560,9 @@ impl Bridge {
         let state = db
             .get(STATE_KEY)
             .and_then(|bytes| {
-                if let Ok(value) = json::value_from_slice(&bytes) {
-                    if let Ok(decoded) = state_codec::decode(&value) {
-                        return Some(decoded);
-                    }
-                }
-                bincode::deserialize(&bytes).ok()
+                json::value_from_slice(&bytes)
+                    .ok()
+                    .and_then(|value| state_codec::decode(&value).ok())
             })
             .unwrap_or_default();
         Self { db, state }

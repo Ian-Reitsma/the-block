@@ -9,7 +9,7 @@
 - New `crates/codec` crate standardises JSON/CBOR/bincode profiles, exposes serde bridging macros, rehosts the canonical bincode config as named profiles (`transaction`, `gossip`, `snapshot`), and instruments serialization failures and payload sizing for telemetry dashboards. CLI, explorer, gossip relay persistence, storage manifests, and PyO3 bindings all call through the wrapper.
 - `crates/crypto_suite` now owns signature, hashing, key-derivation, and Groth16 helpers. It implements a first-party Ed25519 backend behind project-specific key types, re-exports through the `crypto` crate, includes regression tests for transaction signing/verification and remote signer flows, and ships benchmarking harnesses plus feature gates for optional algorithms.
 - Grafana dashboards (`monitoring/grafana/*.json`) and schema docs (`monitoring/metrics.json`, `monitoring/README.md`) were regenerated to plot wrapper health, dependency drift gauges, codec/crypto failure rates, and dependency policy violations.
-- Dependency registry tooling emits a Prometheus `dependency_policy_violation` gauge, and `contract-cli system dependencies` prints wrapper snapshots for operators. Documentation updates landed in `docs/telemetry.md`, `docs/serialization.md`, `docs/pivot_dependency_strategy.md`, and `docs/monitoring.md` to describe interpretation and rollout guidance.
+- Dependency registry tooling emits a runtime telemetry `dependency_policy_violation` gauge, and `contract-cli system dependencies` prints wrapper snapshots for operators. Documentation updates landed in `docs/telemetry.md`, `docs/serialization.md`, `docs/pivot_dependency_strategy.md`, and `docs/monitoring.md` to describe interpretation and rollout guidance.
 
 ### Changed
 - Updated `docs/progress.md`, `docs/roadmap.md`, and root readiness figures to reflect governance-managed dependency backends, release provenance hashing, and wrapper telemetry (mainnet readiness 99.2/100, vision completion 93.4/100) with refreshed pillar percentages.
@@ -136,7 +136,7 @@
 - Feat: expose mempool limits (`max_mempool_size`, `min_fee_per_byte`,
   `tx_ttl`, `max_pending_per_account`) via `TB_*` env vars and sweep expired
   entries on startup.
-- Feat: add Prometheus metrics for TTL drops (`ttl_drop_total`) and
+- Feat: add runtime metrics for TTL drops (`ttl_drop_total`) and
   lock poisoning (`lock_poison_total`).
 - Feat: orphan sweeps rebuild heap when `orphan_counter > mempool_size / 2` and
   reset the counter; panic-inject test covers global mempool mutex.
@@ -159,7 +159,7 @@
 - Feat: batched startup mempool rebuild reports `startup_ttl_drop_total`
   (expired mempool entries dropped during startup) and
   benchmark `startup_rebuild` compares throughput.
-- Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for Prometheus scrapes.
+- Feat: minimal `serve_metrics` HTTP exporter returns `gather_metrics()` output for telemetry scrapes.
 - Feat: optional purge loop `maybe_spawn_purge_loop` reads
   `TB_PURGE_LOOP_SECS` / `--mempool-purge-interval` and calls
   `purge_expired` on a fixed interval, advancing `ttl_drop_total` and
@@ -167,7 +167,7 @@
 - Feat: added `node` binary with clap-based CLI and JSON-RPC endpoints for
   balances, transaction submission, mining control, and metrics; flags
   `--mempool-purge-interval` and `--metrics-addr` configure purge loop and
-  Prometheus exporter.
+  telemetry exporter.
 - Test: `tests/node_rpc.rs` smoke-tests JSON-RPC metrics, balance queries, and
   mining control.
 - Test: env-driven purge loop inserts a TTL-expired transaction and an orphan

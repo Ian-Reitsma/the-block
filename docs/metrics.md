@@ -1,10 +1,11 @@
-# Telemetry and Prometheus Metrics
-> **Review (2025-09-25):** Synced Telemetry and Prometheus Metrics guidance with the dependency-sovereignty pivot and confirmed readiness + token hygiene.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+# Telemetry Metrics
+> **Review (2025-12-14):** Synced telemetry guidance with the first-party monitoring rollout and confirmed readiness + token hygiene.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
 The node exposes internal counters via a minimal HTTP exporter when compiled
 with the `telemetry` feature. Start a node with the `--metrics-addr` flag and
-visit the `/metrics` endpoint to scrape metrics in the Prometheus text format.
+visit the `/metrics` endpoint to retrieve the first-party text snapshot served by
+`runtime::telemetry`.
 
 ```bash
 $ cargo run --bin node --features telemetry -- run --metrics-addr 127.0.0.1:9100

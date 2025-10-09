@@ -3,7 +3,6 @@ use crypto_suite::encryption::symmetric::{decrypt_aes256_cbc, encrypt_aes256_cbc
 use crypto_suite::encryption::x25519::{PublicKey as X25519Public, SecretKey as X25519Secret};
 use crypto_suite::mac::hmac_sha256;
 use crypto_suite::signatures::ed25519::{Signature as Ed25519Signature, SigningKey, VerifyingKey};
-use foundation_serialization::json;
 use foundation_serialization::json::{self as json_module, Value};
 use httpd::{
     Method, Response, Router, ServerConfig, ServerTlsConfig, StatusCode, WebSocketResponse, serve,
@@ -540,7 +539,8 @@ fn request_builder_customizes_requests() {
             assert!(!req.keep_alive());
             assert_eq!(req.remote_addr(), remote);
             assert_eq!(req.body_bytes(), b"payload");
-            Ok(Response::new(StatusCode::ACCEPTED).json(&json!({"ok": true}))?)
+            Ok(Response::new(StatusCode::ACCEPTED)
+                .json(&foundation_serialization::json!({"ok": true}))?)
         });
         let request = router
             .request_builder()
@@ -559,18 +559,18 @@ fn request_builder_customizes_requests() {
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         assert_eq!(response.header("content-type"), Some("application/json"));
         let body: Value = json_module::from_slice(response.body()).expect("json body");
-        assert_eq!(body, json!({"ok": true}));
+        assert_eq!(body, foundation_serialization::json!({"ok": true}));
     });
 }
 
 #[test]
 fn response_json_sets_header_and_body() {
     let response = Response::new(StatusCode::OK)
-        .json(&json!({"value": 42}))
+        .json(&foundation_serialization::json!({"value": 42}))
         .expect("json response");
     assert_eq!(response.header("content-type"), Some("application/json"));
     let body: Value = json_module::from_slice(response.body()).expect("json body");
-    assert_eq!(body, json!({"value": 42}));
+    assert_eq!(body, foundation_serialization::json!({"value": 42}));
 }
 
 #[test]

@@ -6,8 +6,8 @@ use crate::params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
 use crate::treasury::{mark_cancelled, mark_executed, TreasuryDisbursement};
+use foundation_lazy::sync::Lazy;
 use foundation_serialization::{binary, json};
-use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
 use std::collections::HashMap;

@@ -182,7 +182,7 @@ lane is stuck behind missing providers or policy misconfiguration.
 
 ### Telemetry & Observability
 
-Prometheus metrics now include:
+Runtime telemetry metrics now include:
 
 - `matches_total{dry_run="false",lane="consumer"}` – successful matches per lane
   split by dry-run state.
@@ -238,7 +238,7 @@ can align dashboards with manual interventions.
 Workloads are expressed in **compute units** representing GPU-seconds scaled by
 device throughput. The reference implementation estimates units as one per MiB
 of workload input. Providers post offers with a `units` capacity and
-`price_per_unit`, and receipts include the units consumed. Prometheus gauges
+`price_per_unit`, and receipts include the units consumed. Telemetry gauges
 `industrial_units_total` and `industrial_price_per_unit` track aggregate demand
 and the latest quoted price. Hardware can be calibrated via
 `compute_market::workload::calibrate_gpu`, which maps a GPU's GFLOPS rating to
@@ -349,7 +349,7 @@ The scheduler ingests offers, applies reputation multipliers to derive effective
 prices, and selects the lowest-cost provider that satisfies the job's capability
 requirements.
 
-Prometheus counters `scheduler_match_total{result}` and
+Runtime counters `scheduler_match_total{result}` and
 `reputation_adjust_total{result}` expose scheduler outcomes and reputation
 adjustments. The gauge `scheduler_effective_price{provider}` records the latest
 effective price by provider. Unmatched accelerator requests increment
@@ -547,7 +547,7 @@ Receipts are persisted in `sled` until acknowledged and rewards are paid
 when forwarding succeeds. Each receipt carries a unique ID and an
 `acknowledged` flag set only after successful forwarding. The `compute courier
 flush` command retries failed sends with exponential backoff and records
-`courier_flush_attempt_total` and `courier_flush_failure_total` Prometheus
+`courier_flush_attempt_total` and `courier_flush_failure_total` runtime
 counters for observability. Flushing streams entries directly from the
 underlying database iterator, so memory usage remains constant even with large
 receipt queues.
@@ -697,7 +697,7 @@ the comfort threshold governable.
 
 Admission decisions are logged with job identifiers, requested shards, and current mode to aid post-mortems.
 
-Providers that miss declared job deadlines have their bonds slashed via `penalize_sla`, incrementing `industrial_rejected_total{reason="SLA"}` for dashboard alerts. Operators should set Prometheus rules to page when this counter rises. The scheduler tracks each job's expected versus actual runtime and records overruns in the `compute_job_timeout_total` counter. Jobs resubmitted after a timeout bump `job_resubmitted_total`, aiding SLA enforcement audits.
+Providers that miss declared job deadlines have their bonds slashed via `penalize_sla`, incrementing `industrial_rejected_total{reason="SLA"}` for dashboard alerts. Operators should set foundation dashboard alerts when this counter rises. The scheduler tracks each job's expected versus actual runtime and records overruns in the `compute_job_timeout_total` counter. Jobs resubmitted after a timeout bump `job_resubmitted_total`, aiding SLA enforcement audits.
 
 Providers advertise hardware capabilities—including supported frameworks like CUDA or OpenCL—through offer capabilities. Clients can query a provider's registered hardware via the `compute.provider_hardware` RPC:
 

@@ -1,19 +1,10 @@
-global:
-  scrape_interval: 15s
-
-rule_files:
-  - alert.rules.yml
-
-scrape_configs:
-  - job_name: 'the_block'
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['host.docker.internal:9898']
-  - job_name: 'swarm'
-    static_configs:
-      - targets:
-          - 'localhost:9021'
-          - 'localhost:9022'
-          - 'localhost:9023'
-          - 'localhost:9024'
-          - 'localhost:9025'
+# Foundation telemetry sources configuration used by the first-party dashboard helpers.
+# The native monitoring script reads the TELEMETRY_ENDPOINT environment variable,
+# but this file provides canonical defaults for operators and docker-compose.
+refresh_interval: 5
+sources:
+  - name: primary
+    endpoint: http://localhost:9898/metrics
+  - name: swarm
+    endpoint: http://localhost:9021/metrics
+    notes: "example swarm instance"

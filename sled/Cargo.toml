@@ -11,7 +11,7 @@ legacy-format = ["dep:sled-legacy"]
 storage_engine = { path = "../crates/storage_engine" }
 thiserror = "1"
 tempfile = "3"
-once_cell = "1"
+foundation_lazy = { path = "../crates/foundation_lazy" }
 hex = "0.4"
 
 [dependencies.sled-legacy]

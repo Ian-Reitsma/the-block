@@ -1,8 +1,13 @@
 # Monitoring
-> **Review (2025-09-29):** Reaffirmed runtime HTTP client coverage, noted the aggregator/gateway server migration outstanding, and reconfirmed readiness + token hygiene.
+> **Review (2025-12-14):** Reaffirmed runtime HTTP client coverage, noted the aggregator/gateway server migration outstanding, and reconfirmed readiness + token hygiene.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-29).
 
-The default dashboard bundles Prometheus and Grafana to visualize subsystem metrics.
+The default monitoring stack now ships entirely with first-party components. A
+lightweight dashboard generator polls the node’s telemetry exporter and renders
+HTML summaries grouped by subsystem. Operators no longer need Prometheus or
+Grafana; the tooling relies exclusively on `runtime::telemetry` snapshots and
+the shared `monitoring/metrics.json` catalogue.
+
 Operational alert handling and correlation procedures live in the
 [`Telemetry Operations Runbook`](telemetry_ops.md).
 
@@ -30,25 +35,26 @@ scripts/monitor_native.sh
 same script. When Docker isn't installed or the daemon is stopped, these
 commands automatically fall back to the native binaries.
 
-The native script verifies SHA256 checksums for the downloaded Prometheus and
-Grafana archives before extracting them. Add `DETACH=1` to run it without
-blocking the calling shell.
+The native script streams the node’s `/metrics` endpoint, regenerates
+`monitoring/output/index.html` every few seconds, and serves it on
+<http://127.0.0.1:8088>. Set `TELEMETRY_ENDPOINT` to track a remote node or
+adjust `REFRESH_INTERVAL`/`FOUNDATION_DASHBOARD_PORT` to suit local
+requirements. `monitoring/prometheus.yml` now documents canonical telemetry
+targets for clusters and the Docker compose recipe consumes it as a bind mount.
 
-Prometheus scrapes the node at `host.docker.internal:9898` while Grafana serves a preloaded dashboard on <http://localhost:3000>.
-
-Panels include per-lane mempool size, banned peers, gossip duplicate counts,
-`read_denied_total{reason}` counters, subsidy gauges (`subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`, `rent_escrow_locked_ct_total`),
+The rendered dashboard mirrors the previous Grafana panels: per-lane mempool
+size, banned peers, gossip duplicate counts, subsidy gauges
+(`subsidy_bytes_total{type}`, `subsidy_cpu_ms_total`, `rent_escrow_locked_ct_total`),
 per-peer request/drop panels from `peer_request_total`/`peer_drop_total{reason}`,
 scheduler match histograms (`scheduler_match_total{result}`,
-`scheduler_provider_reputation`) and average log size derived from the
-`log_size_bytes` histogram. Fee-floor charts combine `fee_floor_current` with
+`scheduler_provider_reputation`) and log size statistics derived from the
+`log_size_bytes` histogram. Fee-floor cards combine `fee_floor_current` with
 `fee_floor_warning_total{lane}`/`fee_floor_override_total{lane}` so operators can
-trace wallet guidance, and DID anchor panels plot `did_anchor_total` alongside
+trace wallet guidance, and DID anchor sections plot `did_anchor_total` alongside
 recent `/dids` history for cross-navigation. Additional gauges expose
 `subsidy_auto_reduced_total` and `kill_switch_trigger_total` so operators can
-correlate reward shifts with governance interventions. After running a monitor
-command, open Grafana and import `monitoring/grafana/dashboard.json` to explore
-the live panels.
+correlate reward shifts with governance interventions. The HTML refreshes every
+five seconds by default and never leaves first-party code.
 
 Remote signer integrations emit `remote_signer_request_total`,
 `remote_signer_success_total`, and `remote_signer_error_total{reason}` under the
@@ -129,7 +135,7 @@ when ingestion/export counters stop increasing.
 
 ### Metrics-to-logs correlation
 
-The aggregator ingests Prometheus labels that include `correlation_id` and caches the most recent values per metric. When a counter such as `quic_handshake_fail_total{peer="…"}` spikes, the service issues a REST query against the node's `/logs/search` endpoint, saves the matching payload under `$TB_LOG_DUMP_DIR`, and increments `log_correlation_fail_total` when no records are found. These outbound fetches now run through the shared `httpd::HttpClient`, giving the service the same timeout and backoff behaviour as the node’s JSON-RPC client without pulling in `reqwest`. Operators can retrieve cached mappings via `GET /correlations/<metric>` or the CLI:
+The aggregator ingests runtime telemetry labels that include `correlation_id` and caches the most recent values per metric. When a counter such as `quic_handshake_fail_total{peer="…"}` spikes, the service issues a REST query against the node's `/logs/search` endpoint, saves the matching payload under `$TB_LOG_DUMP_DIR`, and increments `log_correlation_fail_total` when no records are found. These outbound fetches now run through the shared `httpd::HttpClient`, giving the service the same timeout and backoff behaviour as the node’s JSON-RPC client without pulling in `reqwest`. Operators can retrieve cached mappings via `GET /correlations/<metric>` or the CLI:
 
 ```bash
 contract logs correlate-metric --metric quic_handshake_fail_total \
@@ -138,7 +144,7 @@ contract logs correlate-metric --metric quic_handshake_fail_total \
 
 The log indexer records ingest offsets in the first-party log store, batches inserts with lightweight JSON payloads, supports encryption key rotation with passphrase prompts, and exposes both REST (`/logs/search`) and WebSocket (`/logs/tail`) streaming APIs for dashboards. `scripts/log_indexer_load.sh` stress-tests one million log lines, while integration tests under `node/tests/log_api.rs` validate the filters end-to-end. Legacy SQLite databases are migrated automatically when the indexer is built with `--features sqlite-migration`; once imported, the default build path keeps the dependency surface purely first-party. Set the `passphrase` option when invoking `index` (either through the CLI or RPC) to encrypt message bodies at rest; supply the same passphrase via the query string when using `/logs/search` or `/logs/tail` to decrypt results on the fly.
 
-When the node runs without the `telemetry` feature the `tracing` crate is not linked, so subsystems that normally emit structured spans fall back to plain stderr diagnostics. RPC log streaming, mempool admission, and QUIC handshake validation all degrade gracefully: warnings appear in the system journal, counters remain untouched, and the RPC surface continues to return JSON errors. Enable `--features telemetry` whenever Prometheus metrics and structured spans are required.
+When the node runs without the `telemetry` feature the `tracing` crate is not linked, so subsystems that normally emit structured spans fall back to plain stderr diagnostics. RPC log streaming, mempool admission, and QUIC handshake validation all degrade gracefully: warnings appear in the system journal, counters remain untouched, and the RPC surface continues to return JSON errors. Enable `--features telemetry` whenever runtime metrics and structured spans are required.
 
 The CLI, aggregator, and wallet stacks now share the new `httpd::uri` helpers for URL parsing and query encoding. Until the full HTTP router lands these helpers intentionally reject unsupported schemes and surface `UriError::InvalidAuthority` rather than guessing behaviour, so operators may see 501 responses when integrations send exotic URLs. The stub keeps the dependency graph first-party while we flesh out end-to-end parsers.
 
@@ -253,8 +259,8 @@ for auditors reconstructing economic conditions around an event.
 
 `monitoring/docker-compose.yml` provisions both services. Configuration files
 live under `monitoring/prometheus.yml` and `monitoring/grafana/dashboard.json`.
-The native script downloads Prometheus and Grafana into `monitoring/bin/` and
-launches them with these same configs.
+The native script now uses the foundation dashboard generator directly rather
+than downloading Prometheus and Grafana bundles.
 
 ## Validation
 
@@ -277,13 +283,14 @@ fail on unsupported panel types.
 `make -C monitoring lint` regenerates `metrics.json` and `grafana/dashboard.json`
 from metric definitions in `node/src/telemetry.rs` via the scripts in
 `monitoring/tools`. Removed metrics are kept in the schema with `"deprecated": true`
-and omitted from the dashboard. Each Prometheus counter or gauge becomes a
-Grafana timeseries panel. The auto-generated dashboard provides a starting point
-for operators to further customize panels.
+and omitted from the dashboard. Each runtime telemetry counter or gauge becomes
+an HTML panel in the generated dashboard (Grafana templates remain for legacy
+deployments). The auto-generated dashboard provides a starting point for
+operators to further customize panels.
 
 ## Synthetic chain health checks
 
-`scripts/synthetic.sh` runs a mine → gossip → tip cycle using the `probe` CLI and emits Prometheus metrics:
+`scripts/synthetic.sh` runs a mine → gossip → tip cycle using the `probe` CLI and emits runtime telemetry metrics:
 
 - `synthetic_convergence_seconds` – wall-clock time from mining start until tip is observed.
 - `synthetic_success_total` – number of successful end-to-end runs.
@@ -312,7 +319,7 @@ JSON payloads `{event, proposal_id}`.
 
 ## Alerting
 
-Prometheus rules under `monitoring/alert.rules.yml` watch for:
+Legacy Prometheus rules under `monitoring/alert.rules.yml` watch for:
 
 - Convergence lag (p95 over 30s for 10m, pages).
 - Consumer fee p90 exceeding `ConsumerFeeComfortP90Microunits` (warns).
@@ -321,12 +328,12 @@ Prometheus rules under `monitoring/alert.rules.yml` watch for:
 - Subsidy counter spikes via `subsidy_bytes_total`/`subsidy_cpu_ms_total` (warns).
 - Sudden `rent_escrow_locked_ct_total` growth (warns).
 
-`scripts/telemetry_sweep.sh` runs the synthetic check, queries Prometheus for headline numbers, and writes a timestamped `status/index.html` colored green/orange/red.
+`scripts/telemetry_sweep.sh` runs the synthetic check, queries the runtime exporter for headline numbers, and writes a timestamped `status/index.html` colored green/orange/red.
 
 ### RPC aids
 
 Some subsidy figures are not metrics but can be sampled over JSON-RPC.
 Operators typically add a cron job that logs the output of `inflation.params`
 and `stake.role` for their bond address. Persisting these snapshots alongside
-Prometheus data provides a full accounting trail when reconciling payouts or
+Telemetry data provides a full accounting trail when reconciling payouts or
 investigating anomalous subsidy shifts.

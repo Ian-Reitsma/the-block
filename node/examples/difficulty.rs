@@ -11,7 +11,7 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "http://127.0.0.1:3030".to_string());
     let client = RpcClient::from_env();
-    let payload = json!({
+    let payload = foundation_serialization::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "consensus.difficulty",

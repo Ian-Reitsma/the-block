@@ -28,7 +28,7 @@ Datadirs remain backward compatible; take a backup of `~/.block/datadir` before 
 After restart, verify that governance parameters reflect the CT-only subsidy model by running `blockctl rpc inflation.params` to print `beta`, `gamma`, `kappa`, `lambda`, and `rent_rate_ct_per_byte`, then query stake balances with `blockctl rpc stake.role <provider>` to confirm that subsidy counters and role bonds carried over correctly.
 
 For additional assurance, query `subsidy_bytes_total{type}` and `rent_escrow_locked_ct_total`
-from the Prometheus endpoint and compare them against pre-upgrade snapshots. Any
+from the runtime telemetry snapshot and compare them against pre-upgrade baselines. Any
 unexpected jumps suggest lingering legacy-ledger files or misapplied configs.
 
 ## Migrating from subsidy-ledger devnets

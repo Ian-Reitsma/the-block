@@ -24,9 +24,9 @@ rebate accounting durable across restarts and chain reorgs.
 * **Explorer surfaces** – The explorer API publishes
   `/light_client/top_relayers` and `/light_client/rebate_history` routes to drive
   dashboards showing the most active relayers and the latest payouts.
-* **Telemetry** – Prometheus counters `PROOF_REBATES_PENDING_TOTAL` and
-  `PROOF_REBATES_CLAIMED_TOTAL` expose outstanding balances and realised payouts;
-  dashboards should alert on unexpected growth or drops in these gauges.
+* **Telemetry** – Runtime telemetry counters `proof_rebates_pending_total` and
+  `proof_rebates_claimed_total` expose outstanding balances and realised payouts;
+  the foundation dashboard generator surfaces alerts when these gauges drift.
 
 ## Claim Cadence
 
@@ -74,9 +74,9 @@ The rebate rate is governed alongside other economic parameters:
 
 ## Operational Checklist
 
-1. **Instrument dashboards** – Pull `/light_client/top_relayers` and
-   `/light_client/rebate_history` into Grafana (or similar) to visualise volume
-   per relayer and recent payouts.
+1. **Instrument dashboards** – Feed `/light_client/top_relayers` and
+   `/light_client/rebate_history` into the foundation dashboard generator (or
+   your preferred first-party panels) to visualise relayer volume and payouts.
 2. **Automate audits** – Schedule a job that walks `light_client.rebate_history`
    daily, exporting receipts to cold storage. Use the returned `next` cursor to
    resume incremental scans.

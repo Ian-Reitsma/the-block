@@ -8,7 +8,7 @@ use crate::telemetry::{
     GOV_VOTES_TOTAL, PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
 };
 use concurrency::Lazy;
-use foundation_serialization::json;
+use foundation_serialization::{binary, json};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
@@ -94,11 +94,11 @@ static GOV_DB_REGISTRY: Lazy<Mutex<HashMap<PathBuf, Weak<sled::Db>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 fn ser<T: Serialize>(value: &T) -> sled::Result<Vec<u8>> {
-    bincode::serialize(value).map_err(|e| sled::Error::Unsupported(format!("ser: {e}").into()))
+    binary::encode(value).map_err(|e| sled::Error::Unsupported(format!("ser: {e}").into()))
 }
 
 fn de<T: DeserializeOwned>(bytes: &[u8]) -> sled::Result<T> {
-    bincode::deserialize(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
+    binary::decode(bytes).map_err(|e| sled::Error::Unsupported(format!("de: {e}").into()))
 }
 
 fn decode_install_times(bytes: &[u8]) -> sled::Result<Vec<u64>> {

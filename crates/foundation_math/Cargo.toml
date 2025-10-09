@@ -1,0 +1,11 @@
+[package]
+name = "foundation_math"
+version = "0.1.0"
+edition = "2021"
+description = "First-party math primitives for The Block"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[dev-dependencies]
+approx = "0.5"

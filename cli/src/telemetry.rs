@@ -5,7 +5,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::json;
 
 pub enum TelemetryCmd {
     /// Dump current telemetry allocation in bytes
@@ -136,7 +135,7 @@ pub fn handle(cmd: TelemetryCmd) {
                 return;
             }
             let client = RpcClient::from_env();
-            let payload = json!({
+            let payload = foundation_serialization::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "telemetry.configure",

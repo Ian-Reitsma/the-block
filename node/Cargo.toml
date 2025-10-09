@@ -33,10 +33,10 @@ privacy = { path = "../privacy", optional = true }
 cli_core = { path = "../crates/cli_core" }
 serde_bytes = "0.11"
 foundation_serialization = { path = "../crates/foundation_serialization" }
+foundation_rpc = { path = "../crates/foundation_rpc" }
 icu_normalizer = "2"
 static_assertions = "1"
 tar = "0.4"
-jsonrpc-core = "18"
 flate2 = "1"
 indexmap = "2"
 colored = "2"
@@ -50,9 +50,7 @@ state = { path = "../state" }
 xorfilter-rs = "0.5"
 # fountain coding for repair overlay (via coding crate)
 # linear-algebra routines for governor
-nalgebra = { version = "0.32", features = ["std"] }
-# statistical functions for risk tuning
-statrs = "0.16"
+foundation_math = { path = "../crates/foundation_math" }
 # spectral transforms for burst veto
 rustdct = "0.7"
 # minimal HTTP parsing

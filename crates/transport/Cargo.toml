@@ -36,14 +36,13 @@ quinn = [
 quic = ["quinn", "s2n-quic"]
 
 [dependencies]
-async-trait = "0.1"
 diagnostics = { path = "../diagnostics" }
 base64_fp = { path = "../base64_fp", optional = true }
 dashmap = { version = "5", optional = true }
 sys = { path = "../sys", optional = true }
 crypto_suite = { path = "../crypto_suite", optional = true }
 hex = { version = "0.4", optional = true }
-once_cell = "1"
+foundation_lazy = { path = "../foundation_lazy" }
 rand = { path = "../rand", optional = true }
 rcgen = { version = "0.12", optional = true }
 runtime = { path = "../runtime", default-features = false, features = ["inhouse-backend"], optional = true }

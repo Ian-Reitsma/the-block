@@ -7,7 +7,7 @@ use crypto_suite::signatures::ed25519::{
 };
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::warn;
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::json::Value;
 use hex;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -111,7 +111,7 @@ pub fn publish_record(params: &Value) -> Result<Value, DnsError> {
     );
     db.insert(&format!("dns_last/{}", domain), 0u64.to_le_bytes().to_vec());
     mobile_cache::purge_policy(domain);
-    Ok(json!({"status":"ok"}))
+    Ok(foundation_serialization::json!({"status":"ok"}))
 }
 
 pub fn verify_txt(domain: &str, node_id: &str) -> bool {
@@ -178,7 +178,7 @@ pub fn gateway_policy(params: &Value) -> Value {
                     .as_secs();
                 db.insert(&last_key, ts.to_le_bytes().to_vec());
                 let _ = read_receipt::append(domain, "gateway", txt.len() as u64, false, true);
-                let response = json!({
+                let response = foundation_serialization::json!({
                     "record": txt,
                     "reads_total": reads,
                     "last_access_ts": ts,
@@ -191,7 +191,7 @@ pub fn gateway_policy(params: &Value) -> Value {
     if let Some(cached) = mobile_cache::cached_policy(domain) {
         return cached;
     }
-    let miss = json!({
+    let miss = foundation_serialization::json!({
         "record": null,
         "reads_total": 0,
         "last_access_ts": 0,
@@ -204,7 +204,7 @@ pub fn reads_since(params: &Value) -> Value {
     let domain = params.get("domain").and_then(|v| v.as_str()).unwrap_or("");
     let epoch = params.get("epoch").and_then(|v| v.as_u64()).unwrap_or(0);
     let (total, last) = read_receipt::reads_since(epoch, domain);
-    json!({"reads_total": total, "last_access_ts": last})
+    foundation_serialization::json!({"reads_total": total, "last_access_ts": last})
 }
 
 pub fn dns_lookup(params: &Value) -> Value {
@@ -221,5 +221,5 @@ pub fn dns_lookup(params: &Value) -> Value {
         .as_ref()
         .map(|_| verify_txt(domain, &pk))
         .unwrap_or(false);
-    json!({"record": txt, "verified": verified})
+    foundation_serialization::json!({"record": txt, "verified": verified})
 }

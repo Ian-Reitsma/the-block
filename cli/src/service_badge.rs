@@ -5,7 +5,6 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::json;
 
 pub enum ServiceBadgeCmd {
     /// Verify a badge token via RPC
@@ -107,7 +106,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "service_badge_verify",
-                params: json!({"badge": badge}),
+                params: foundation_serialization::json!({"badge": badge}),
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &payload) {
@@ -131,7 +130,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "service_badge_issue",
-                params: json!({}),
+                params: foundation_serialization::json!({}),
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &payload) {
@@ -155,7 +154,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "service_badge_revoke",
-                params: json!({}),
+                params: foundation_serialization::json!({}),
                 auth: None,
             };
             if let Ok(resp) = client.call(&url, &payload) {

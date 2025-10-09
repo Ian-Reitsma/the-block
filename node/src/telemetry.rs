@@ -4874,20 +4874,14 @@ fn gather() -> String {
         LOG_DROP_TOTAL.with_label_values(&["consensus"]),
     );
 
-    let mut buffer = Vec::new();
-    let encoder = TextEncoder::new();
-    let metrics = REGISTRY.gather();
-    encoder
-        .encode(&metrics, &mut buffer)
-        .unwrap_or_else(|e| panic!("encode: {e}"));
-    String::from_utf8(buffer).unwrap_or_default()
+    REGISTRY.render()
 }
 
 pub fn gather_metrics() -> PyResult<String> {
     Ok(gather())
 }
 
-/// Start a minimal HTTP server that exposes Prometheus metrics.
+/// Start a minimal HTTP server that exposes the in-house telemetry snapshot.
 ///
 /// The server runs on a background thread and responds to any incoming
 /// connection with the current metrics in text format. The bound socket
@@ -4945,8 +4939,10 @@ pub fn serve_metrics_with_shutdown(addr: &str) -> PyResult<(String, MetricsServe
                     let _ = stream.read(&mut _req);
                     let body = gather_metrics().unwrap_or_else(|e| e.message().to_string());
                     let response = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{}",
-                        body.len(), body
+                        "HTTP/1.1 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
+                        runtime::telemetry::TEXT_MIME,
+                        body.len(),
+                        body
                     );
                     let _ = stream.write_all(response.as_bytes());
                 }

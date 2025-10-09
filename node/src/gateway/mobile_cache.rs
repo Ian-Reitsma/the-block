@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use coding::{ChaCha20Poly1305Encryptor, Encryptor, CHACHA20_POLY1305_NONCE_LEN};
 use concurrency::{mutex, Lazy, MutexGuard, MutexT};
+use foundation_serialization::json::Value;
 use foundation_serialization::{binary, json, Deserialize, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -856,11 +857,11 @@ pub fn purge_policy(domain: &str) {
 
 pub fn status_snapshot() -> Value {
     match lock_cache() {
-        Some(cache) => json!({
+        Some(cache) => foundation_serialization::json!({
             "status": "ok",
             "cache": cache.status(),
         }),
-        None => json!({
+        None => foundation_serialization::json!({
             "status": "error",
             "error": "lock",
         }),
@@ -870,15 +871,15 @@ pub fn status_snapshot() -> Value {
 pub fn flush_cache() -> Value {
     match lock_cache() {
         Some(mut cache) => match cache.flush() {
-            Ok(()) => json!({
+            Ok(()) => foundation_serialization::json!({
                 "status": "ok",
             }),
-            Err(err) => json!({
+            Err(err) => foundation_serialization::json!({
                 "status": "error",
                 "error": err.to_string(),
             }),
         },
-        None => json!({
+        None => foundation_serialization::json!({
             "status": "error",
             "error": "lock",
         }),

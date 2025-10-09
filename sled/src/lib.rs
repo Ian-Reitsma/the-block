@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use once_cell::sync::OnceCell;
+use foundation_lazy::sync::OnceCell;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

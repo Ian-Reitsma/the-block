@@ -1,10 +1,11 @@
 use crypto_suite::hashing::blake3;
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use storage_engine::{KeyValue, StorageError, StorageResult};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountLedger {
     pub balances: HashMap<String, u64>,
 }
@@ -49,19 +50,19 @@ impl AccountLedger {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OutPoint {
     pub txid: [u8; 32],
     pub index: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Utxo {
     pub value: u64,
     pub owner: String,
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct UtxoLedger {
     pub utxos: HashMap<OutPoint, Utxo>,
 }

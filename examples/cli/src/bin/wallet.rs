@@ -5,6 +5,7 @@ use cli_core::{
     parse::{Matches, ParseError, Parser},
 };
 use httpd::{BlockingClient, Method};
+use foundation_serialization::json;
 use wallet::{Wallet, WalletSigner};
 
 #[derive(Copy, Clone)]
@@ -84,7 +85,7 @@ fn handle_stake_role(matches: &Matches) -> Result<(), String> {
         .map_err(|err| err.to_string())?;
     let sig_hex = hex::encode(sig.to_bytes());
     let pk_hex = wallet.public_key_hex();
-    let body = serde_json::json!({
+    let body = foundation_serialization::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
@@ -103,7 +104,7 @@ fn handle_stake_role(matches: &Matches) -> Result<(), String> {
         .and_then(|builder| builder.json(&body))
         .and_then(|builder| builder.send())
     {
-        Ok(resp) => match resp.json::<serde_json::Value>() {
+        Ok(resp) => match resp.json::<json::Value>() {
             Ok(v) => println!("{}", v["result"].to_string()),
             Err(e) => return Err(format!("parse error: {e}")),
         },
@@ -121,7 +122,7 @@ fn handle_escrow_balance(matches: &Matches) -> Result<(), String> {
         .get_string("url")
         .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
 
-    let payload = serde_json::json!({
+    let payload = foundation_serialization::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "rent.escrow.balance",
@@ -133,7 +134,7 @@ fn handle_escrow_balance(matches: &Matches) -> Result<(), String> {
         .and_then(|builder| builder.json(&payload))
         .and_then(|builder| builder.send())
     {
-        Ok(resp) => match resp.json::<serde_json::Value>() {
+        Ok(resp) => match resp.json::<json::Value>() {
             Ok(v) => println!("{}", v["result"].as_u64().unwrap_or(0)),
             Err(e) => return Err(format!("parse error: {e}")),
         },

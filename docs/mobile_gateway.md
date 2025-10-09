@@ -33,7 +33,7 @@ time so status calls can expose the oldest age, helping operators spot stuck sub
 ## Telemetry
 
 Telemetry instruments cache hits/misses, eviction totals, rejected insertions, entry/queue gauges, and sweep cadence. The
-following Prometheus metrics are exported when the telemetry feature is enabled:
+following runtime telemetry metrics are exported when the telemetry feature is enabled:
 
 ```
 mobile_cache_hit_total

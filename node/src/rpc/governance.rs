@@ -2,7 +2,7 @@ use super::RpcError;
 use crate::governance::{
     GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
-use foundation_serialization::{binary, json::json};
+use foundation_serialization::binary;
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
@@ -40,10 +40,7 @@ pub fn submit_proposal(
     current_epoch: u64,
     vote_deadline: u64,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    let key = parse_key(key).ok_or(RpcError {
-        code: -32060,
-        message: "bad key",
-    })?;
+    let key = parse_key(key).ok_or_else(|| RpcError::new(-32060, "bad key"))?;
     let p = Proposal {
         id: 0,
         key,
@@ -57,11 +54,10 @@ pub fn submit_proposal(
         status: ProposalStatus::Open,
         deps,
     };
-    let id = store.submit(p).map_err(|_| RpcError {
-        code: -32061,
-        message: "submit failed",
-    })?;
-    Ok(json!({"id": id}))
+    let id = store
+        .submit(p)
+        .map_err(|_| RpcError::new(-32061, "submit failed"))?;
+    Ok(foundation_serialization::json!({"id": id}))
 }
 
 pub fn vote_proposal(
@@ -80,32 +76,18 @@ pub fn vote_proposal(
     let tree = store.proposals();
     if let Some(raw) = tree
         .get(binary::encode(&proposal_id).unwrap())
-        .map_err(|_| RpcError {
-            code: -32068,
-            message: "storage",
-        })?
+        .map_err(|_| RpcError::new(-32068, "storage"))?
     {
-        let prop: Proposal = binary::decode(&raw).map_err(|_| RpcError {
-            code: -32069,
-            message: "decode",
-        })?;
+        let prop: Proposal = binary::decode(&raw).map_err(|_| RpcError::new(-32069, "decode"))?;
         for dep in &prop.deps {
             if let Some(dr) = tree
                 .get(binary::encode(dep).unwrap())
-                .map_err(|_| RpcError {
-                    code: -32068,
-                    message: "storage",
-                })?
+                .map_err(|_| RpcError::new(-32068, "storage"))?
             {
-                let dp: Proposal = binary::decode(&dr).map_err(|_| RpcError {
-                    code: -32069,
-                    message: "decode",
-                })?;
+                let dp: Proposal =
+                    binary::decode(&dr).map_err(|_| RpcError::new(-32069, "decode"))?;
                 if dp.status != ProposalStatus::Activated {
-                    return Err(RpcError {
-                        code: -32070,
-                        message: "dependency not active",
-                    });
+                    return Err(RpcError::new(-32070, "dependency not active"));
                 }
             }
         }
@@ -119,11 +101,8 @@ pub fn vote_proposal(
     };
     store
         .vote(proposal_id, v, current_epoch)
-        .map_err(|_| RpcError {
-            code: -32062,
-            message: "vote failed",
-        })?;
-    Ok(json!({"ok":true}))
+        .map_err(|_| RpcError::new(-32062, "vote failed"))?;
+    Ok(foundation_serialization::json!({"ok":true}))
 }
 
 // Backwards-compatible wrappers
@@ -164,29 +143,18 @@ pub fn gov_list(store: &GovStore) -> Result<foundation_serialization::json::Valu
     let mut arr = vec![];
     for item in store.proposals().iter() {
         // need access; make proposals() pub
-        let (_, raw) = item.map_err(|_| RpcError {
-            code: -32063,
-            message: "iter",
-        })?;
-        let p: Proposal = binary::decode(&raw).map_err(|_| RpcError {
-            code: -32065,
-            message: "decode",
-        })?;
+        let (_, raw) = item.map_err(|_| RpcError::new(-32063, "iter"))?;
+        let p: Proposal = binary::decode(&raw).map_err(|_| RpcError::new(-32065, "decode"))?;
         arr.push(p);
     }
-    Ok(
-        foundation_serialization::json::to_value(arr).map_err(|_| RpcError {
-            code: -32066,
-            message: "json",
-        })?,
-    )
+    Ok(foundation_serialization::json::to_value(arr).map_err(|_| RpcError::new(-32066, "json"))?)
 }
 
 pub fn gov_params(
     params: &Params,
     epoch: u64,
 ) -> Result<foundation_serialization::json::Value, RpcError> {
-    Ok(json!({
+    Ok(foundation_serialization::json!({
         "epoch": epoch,
         "snapshot_interval_secs": params.snapshot_interval_secs,
         "consumer_fee_comfort_p90_microunits": params.consumer_fee_comfort_p90_microunits,
@@ -214,10 +182,7 @@ pub fn release_signers(
     let signers = crate::provenance::release_signer_hexes();
     let threshold = store
         .approved_release_hashes()
-        .map_err(|_| RpcError {
-            code: -32080,
-            message: "release read failed",
-        })?
+        .map_err(|_| RpcError::new(-32080, "release read failed"))?
         .into_iter()
         .max_by_key(|r| r.activated_epoch)
         .map(|r| r.signature_threshold)
@@ -228,14 +193,14 @@ pub fn release_signers(
                 signers.len() as u32
             }
         });
-    Ok(json!({
+    Ok(foundation_serialization::json!({
         "signers": signers,
         "threshold": threshold,
     }))
 }
 
 pub fn inflation_params(params: &Params) -> foundation_serialization::json::Value {
-    json!({
+    foundation_serialization::json!({
         "beta_storage_sub_ct": params.beta_storage_sub_ct,
         "gamma_read_sub_ct": params.gamma_read_sub_ct,
         "kappa_cpu_sub_ct": params.kappa_cpu_sub_ct,
@@ -252,11 +217,8 @@ pub fn gov_rollback_last(
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     store
         .rollback_last(current_epoch, rt, params)
-        .map_err(|_| RpcError {
-            code: -32064,
-            message: "rollback failed",
-        })?;
-    Ok(json!({"ok":true}))
+        .map_err(|_| RpcError::new(-32064, "rollback failed"))?;
+    Ok(foundation_serialization::json!({"ok":true}))
 }
 
 pub fn gov_rollback(
@@ -268,9 +230,6 @@ pub fn gov_rollback(
 ) -> Result<foundation_serialization::json::Value, RpcError> {
     store
         .rollback_proposal(proposal_id, current_epoch, rt, params)
-        .map_err(|_| RpcError {
-            code: -32067,
-            message: "rollback failed",
-        })?;
-    Ok(json!({"ok":true}))
+        .map_err(|_| RpcError::new(-32067, "rollback failed"))?;
+    Ok(foundation_serialization::json!({"ok":true}))
 }

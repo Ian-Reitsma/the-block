@@ -13,6 +13,7 @@ camino = "1.1"
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
+runtime = { path = "../../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 
 [dev-dependencies]
 tempfile = "3"

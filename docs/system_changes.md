@@ -17,7 +17,7 @@ This living document chronicles every deliberate shift in The‑Block's protocol
 - Extended `node/src/telemetry.rs` with per-wrapper gauges (`runtime_backend_info`, `transport_provider_connect_total{provider}`, `overlay_backend_active`, `storage_engine_backend_info`, `coding_backend_info`, `codec_serialize_fail_total{profile}`, `crypto_suite_signature_fail_total{backend}`) plus size/failure histograms where applicable.
 - Added wrapper snapshots to `metrics-aggregator`, exposing a REST `/wrappers` endpoint, schema docs in `monitoring/metrics.json`, and Grafana dashboards that chart backend selections, failure rates, and policy violation gauges across operator/dev/telemetry views.
 - Landed a `contract-cli system dependencies` subcommand that queries the aggregator and formats wrapper status (provider name, version, commit hash, policy tier) for on-call debugging and change management.
-- Wired the dependency registry tooling to emit a Prometheus `dependency_policy_violation` gauge, enabling alerts when policy drift appears.
+- Wired the dependency registry tooling to emit a runtime telemetry `dependency_policy_violation` gauge, enabling alerts when policy drift appears.
 
 ### Operator & Governance Impact
 
@@ -189,7 +189,7 @@ Subsequent economic shifts—such as changing the rent refund ratio, altering su
 
 ### Operational Impact
 
-- **Operators** should monitor the new RPCs and Prometheus counters to ensure balances drift as expected, anchors land on schedule, and SLA burns are visible. Automate backups of `compute_settlement.db` alongside other state directories.
+- **Operators** should monitor the new RPCs and runtime telemetry counters to ensure balances drift as expected, anchors land on schedule, and SLA burns are visible. Automate backups of `compute_settlement.db` alongside other state directories.
 - **Explorers and auditors** can subscribe to the audit feed, correlate sequence numbers with Merkle roots, and flag any divergence between local mirrors and the node-provided anchors.
 - **Governance and finance** teams gain deterministic evidence of CT burns, refunds, and payouts, unblocking treasury reconciliation and upcoming SLA enforcement proposals.
 

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use foundation_serialization::json;
 use hex;
 use httpd::{
     HttpError, Method, Response, Router, ServerConfig, ServerTlsConfig, StatusCode,
@@ -174,7 +175,7 @@ fn build_websocket_router(state: SignerState) -> Router<SignerState> {
                 while let Some(message) = stream.recv().await.map_err(HttpError::from)? {
                     match message {
                         Message::Text(body) => {
-                            let payload: SignRequest = serde_json::from_str(&body)
+                            let payload: SignRequest = json::from_str(&body)
                                 .map_err(|err| HttpError::Handler(err.to_string()))?;
                             let response = success_response(&state, payload)?;
                             let text = String::from_utf8(response.body().to_vec())

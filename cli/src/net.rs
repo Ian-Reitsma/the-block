@@ -8,7 +8,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::json::{self, Value};
 use hex;
 use serde::{Deserialize, Serialize};
 use the_block::net::{PeerCertHistoryEntry, QuicStatsEntry};
@@ -501,7 +501,7 @@ pub fn handle(cmd: NetCmd) {
                     jsonrpc: "2.0",
                     id: 1,
                     method: "net.reputation_show",
-                    params: json!({"peer": peer}),
+                    params: foundation_serialization::json!({"peer": peer}),
                     auth: None,
                 };
                 if let Ok(resp) = client.call(&url, &payload) {
@@ -527,7 +527,7 @@ pub fn handle(cmd: NetCmd) {
                     jsonrpc: "2.0",
                     id: 1,
                     method: "net.dns_verify",
-                    params: json!({"domain": domain}),
+                    params: foundation_serialization::json!({"domain": domain}),
                     auth: None,
                 };
                 if let Ok(resp) = client.call(&url, &payload) {
@@ -559,7 +559,7 @@ pub fn handle(cmd: NetCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "net.key_rotate",
-                params: json!({
+                params: foundation_serialization::json!({
                     "peer_id": peer_id,
                     "new_key": new_key,
                     "signature": hex::encode(sig.to_bytes()),
@@ -703,7 +703,7 @@ pub fn handle(cmd: NetCmd) {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "net.gossip_status",
-                params: json!({}),
+                params: foundation_serialization::json!({}),
             };
             if let Ok(resp) = client.call(&url, &payload) {
                 if let Ok(text) = resp.text() {
@@ -818,7 +818,7 @@ pub fn handle(cmd: NetCmd) {
                     jsonrpc: "2.0",
                     id: 1,
                     method: "peer.rebate_claim",
-                    params: json!({"peer": peer, "threshold": threshold, "epoch": epoch, "reward": reward}),
+                    params: foundation_serialization::json!({"peer": peer, "threshold": threshold, "epoch": epoch, "reward": reward}),
                     auth: None,
                 };
                 if let Ok(resp) = client.call(&url, &payload) {

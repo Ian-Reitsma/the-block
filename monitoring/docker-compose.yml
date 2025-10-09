@@ -1,15 +1,20 @@
 version: '3'
 services:
-  prometheus:
-    image: prom/prometheus
+  foundation-dashboard:
+    image: python:3.11-slim
+    working_dir: /workspace
+    environment:
+      TELEMETRY_ENDPOINT: ${TELEMETRY_ENDPOINT:-http://host.docker.internal:9898/metrics}
+      REFRESH_INTERVAL: ${REFRESH_INTERVAL:-5}
+      FOUNDATION_DASHBOARD_PORT: "8088"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ..:/workspace:ro
+    command: >-
+      bash -c "mkdir -p monitoring/output &&
+               while true; do
+                 python monitoring/tools/render_foundation_dashboard.py \"${TELEMETRY_ENDPOINT}\" || true;
+                 sleep ${REFRESH_INTERVAL};
+               done &
+               python -m http.server ${FOUNDATION_DASHBOARD_PORT} --bind 0.0.0.0 --directory monitoring/output"
     ports:
-      - "9090:9090"
-  grafana:
-    image: grafana/grafana
-    volumes:
-      - ./grafana:/var/lib/grafana
-      - ./grafana/dashboard.json:/etc/grafana/provisioning/dashboards/dashboard.json
-    ports:
-      - "3000:3000"
+      - "8088:8088"

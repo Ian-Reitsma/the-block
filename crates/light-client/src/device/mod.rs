@@ -1,10 +1,10 @@
-use std::fmt;
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
-
-use async_trait::async_trait;
 use foundation_serialization::{Deserialize, Serialize};
 use runtime::sync::Mutex;
+use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 use tracing::{debug, warn};
 
 #[cfg(feature = "telemetry")]
@@ -164,9 +164,10 @@ impl fmt::Display for ProbeError {
 
 impl std::error::Error for ProbeError {}
 
-#[async_trait]
 pub trait DeviceStatusProbe: Send + Sync {
-    async fn poll_status(&self) -> Result<DeviceStatus, ProbeError>;
+    fn poll_status(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<DeviceStatus, ProbeError>> + Send + '_>>;
 }
 
 pub trait IntoDynProbe {

@@ -3,7 +3,6 @@ mod store {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use foundation_serialization::json::json;
     use httpd::{form_urlencoded, StatusCode};
     use runtime::ws::{Message as WsMessage, ServerStream};
     use serde::Serialize;
@@ -128,21 +127,30 @@ mod store {
         match err {
             SearchError::MissingDatabase => (
                 StatusCode::NOT_FOUND,
-                json!({"error": "log database unavailable"}).to_string(),
+                foundation_serialization::json::to_string_value(
+                    &foundation_serialization::json!({"error": "log database unavailable"}),
+                ),
             ),
-            SearchError::InvalidQuery(msg) => {
-                (StatusCode::BAD_REQUEST, json!({"error": msg}).to_string())
-            }
+            SearchError::InvalidQuery(msg) => (
+                StatusCode::BAD_REQUEST,
+                foundation_serialization::json::to_string_value(
+                    &foundation_serialization::json!({"error": msg}),
+                ),
+            ),
             SearchError::QueryFailed(err) => {
                 log_query_failure(&err);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({"error": "log query failed"}).to_string(),
+                    foundation_serialization::json::to_string_value(
+                        &foundation_serialization::json!({"error": "log query failed"}),
+                    ),
                 )
             }
             SearchError::EncodeFailed(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                json!({"error": format!("serialization failed: {err}")}).to_string(),
+                foundation_serialization::json::to_string_value(&foundation_serialization::json!({
+                    "error": format!("serialization failed: {err}"),
+                })),
             ),
         }
     }
@@ -178,7 +186,12 @@ mod store {
                     let (status, body) = map_search_error(SearchError::QueryFailed(err));
                     if ws
                         .send(WsMessage::Text(
-                            json!({"status": status.as_u16(), "body": body}).to_string(),
+                            foundation_serialization::json::to_string_value(
+                                &foundation_serialization::json!({
+                                    "status": status.as_u16(),
+                                    "body": body,
+                                }),
+                            ),
                         ))
                         .await
                         .is_err()
@@ -196,7 +209,12 @@ mod store {
             let (status, body) = map_search_error(SearchError::MissingDatabase);
             let _ = stream
                 .send(WsMessage::Text(
-                    json!({"status": status.as_u16(), "body": body}).to_string(),
+                    foundation_serialization::json::to_string_value(
+                        &foundation_serialization::json!({
+                            "status": status.as_u16(),
+                            "body": body,
+                        }),
+                    ),
                 ))
                 .await;
             return;
@@ -208,7 +226,12 @@ mod store {
                 let (status, body) = map_search_error(err);
                 let _ = stream
                     .send(WsMessage::Text(
-                        json!({"status": status.as_u16(), "body": body}).to_string(),
+                        foundation_serialization::json::to_string_value(
+                            &foundation_serialization::json!({
+                                "status": status.as_u16(),
+                                "body": body,
+                            }),
+                        ),
                     ))
                     .await;
             }

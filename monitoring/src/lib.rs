@@ -162,8 +162,8 @@ fn generate(metrics: &[Metric], overrides: Option<Value>) -> Result<Value, Dashb
         panel.insert("options".into(), Value::Object(options));
 
         let mut datasource = Map::new();
-        datasource.insert("type".into(), Value::from("prometheus"));
-        datasource.insert("uid".into(), Value::from("prom"));
+        datasource.insert("type".into(), Value::from("foundation-telemetry"));
+        datasource.insert("uid".into(), Value::from("foundation"));
         panel.insert("datasource".into(), Value::Object(datasource));
 
         let panel_value = Value::Object(panel);

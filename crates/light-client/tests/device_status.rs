@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use light_client::{
     sync_background_with_probe, DeviceFallback, DeviceStatus, DeviceStatusProbe,
     DeviceStatusWatcher, GatingReason, Header, LightClient, LightClientConfig, ProbeError,
@@ -10,7 +10,9 @@ use light_client::{
 };
 
 #[cfg(feature = "telemetry")]
-use light_client::LIGHT_CLIENT_DEVICE_STATUS;
+use light_client::{DEVICE_TELEMETRY_REGISTRY, LIGHT_CLIENT_DEVICE_STATUS};
+#[cfg(feature = "telemetry")]
+use runtime::telemetry::{Collector, MetricSampleValue};
 
 fn make_header(prev: &Header, height: u64) -> Header {
     let mut h = Header {
@@ -52,15 +54,19 @@ impl MockProbe {
     }
 }
 
-#[async_trait]
 impl DeviceStatusProbe for MockProbe {
-    async fn poll_status(&self) -> Result<DeviceStatus, ProbeError> {
-        let mut guard = self.responses.lock().unwrap();
-        guard.pop_front().unwrap_or_else(|| {
-            Ok(DeviceStatus {
-                on_wifi: true,
-                is_charging: true,
-                battery_level: 1.0,
+    fn poll_status(
+        &self,
+    ) -> Pin<Box<dyn std::future::Future<Output = Result<DeviceStatus, ProbeError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let mut guard = self.responses.lock().unwrap();
+            guard.pop_front().unwrap_or_else(|| {
+                Ok(DeviceStatus {
+                    on_wifi: true,
+                    is_charging: true,
+                    battery_level: 1.0,
+                })
             })
         })
     }
@@ -260,10 +266,38 @@ fn telemetry_records_device_status() {
         assert_eq!(client.tip_height(), 1);
         #[cfg(feature = "telemetry")]
         {
-            let metrics = LIGHT_CLIENT_DEVICE_STATUS.collect();
-            assert_eq!(metrics.len(), 1);
-            let sample = &metrics[0];
-            assert_eq!(sample.get_label("freshness"), Some("fresh"));
+            let family = LIGHT_CLIENT_DEVICE_STATUS.collect();
+            assert_eq!(family.name, "the_block_light_client_device_status");
+            assert!(family.samples.iter().any(|sample| sample
+                .labels
+                .iter()
+                .any(|(key, value)| key == "freshness" && value == "fresh")));
+
+            let wifi_sample = family
+                .samples
+                .iter()
+                .find(|sample| {
+                    sample
+                        .labels
+                        .iter()
+                        .any(|(key, value)| key == "field" && value == "wifi")
+                })
+                .expect("wifi field recorded");
+            let freshness = wifi_sample
+                .labels
+                .iter()
+                .find(|(key, _)| key == "freshness")
+                .map(|(_, value)| value.as_str());
+            assert_eq!(freshness, Some("fresh"));
+            match &wifi_sample.value {
+                MetricSampleValue::Gauge(value) => assert!((value - 1.0).abs() < f64::EPSILON),
+                other => panic!("unexpected metric sample type: {:?}", other),
+            }
+
+            let snapshot = DEVICE_TELEMETRY_REGISTRY.snapshot();
+            assert!(snapshot
+                .iter()
+                .any(|family| family.name == "the_block_light_client_device_status"));
         }
     });
 }

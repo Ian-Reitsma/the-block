@@ -186,8 +186,8 @@
 <!-- n276 -->
 <g id="node20" class="node">
 <title>n276</title>
-<ellipse fill="none" stroke="black" cx="361.74" cy="-90" rx="66.09" ry="18"/>
-<text text-anchor="middle" x="361.74" y="-86.3" font-family="Times,serif" font-size="14.00">prometheus</text>
+<ellipse fill="none" stroke="black" cx="361.74" cy="-90" rx="94.5" ry="18"/>
+<text text-anchor="middle" x="361.74" y="-86.3" font-family="Times,serif" font-size="14.00">runtime::telemetry</text>
 </g>
 <!-- n275&#45;&gt;n276 -->
 <g id="edge31" class="edge">

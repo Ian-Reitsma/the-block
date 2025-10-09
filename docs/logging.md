@@ -61,7 +61,7 @@ $ contract logs search --db log_store_dir --peer peer-42 --since 1700000000 --un
 ```
 
 The metrics aggregator ingests the same `correlation_id` labels from
-Prometheus payloads and caches the most recent correlations per metric.
+runtime telemetry payloads and caches the most recent correlations per metric.
 Each ingestion updates the `log_correlation_index_total` counter and,
 when lookups fail to find matching rows, the
 `log_correlation_fail_total` counter increments for alerting. The

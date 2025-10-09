@@ -1,8 +1,8 @@
-use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::{did_view, DidDocumentView, Explorer, MetricPoint};
+use foundation_serialization::json;
 use hex;
-use rand::{rngs::StdRng, Rng, SeedableRng};
-use serde_json::json;
+use rand::{rngs::StdRng, Rng};
 use std::convert::TryInto;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -90,12 +90,12 @@ fn main() {
         let account = &mut accounts[idx];
         account.nonce += 1;
         let nonce = account.nonce;
-        let document = json!({
+        let document_value = foundation_serialization::json!({
             "id": format!("did:tb:{}", account.address),
             "sequence": nonce,
             "updated": base_ts + step as i64,
-        })
-        .to_string();
+        });
+        let document = json::to_string_value(&document_value);
 
         let tx = build_anchor(account, document, nonce);
         match registry.anchor(&tx, Some(&gov)) {

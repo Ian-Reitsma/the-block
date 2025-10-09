@@ -6,6 +6,7 @@ use cli_core::{
 };
 use httpd::{BlockingClient, Method};
 use serde::Deserialize;
+use foundation_serialization::json;
 
 #[derive(Deserialize, Debug)]
 struct Summary {
@@ -42,15 +43,15 @@ fn main() {
         .get_string("rpc")
         .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
 
-    let body = serde_json::json!({"method":"settlement.audit"});
-    let res: serde_json::Value = BlockingClient::default()
+    let body = foundation_serialization::json!({"method":"settlement.audit"});
+    let res: json::Value = BlockingClient::default()
         .request(Method::Post, &rpc)
         .and_then(|builder| builder.json(&body))
         .and_then(|builder| builder.send())
         .expect("rpc")
         .json()
         .expect("json");
-    let list: Vec<Summary> = serde_json::from_value(res["result"].clone()).unwrap_or_default();
+    let list: Vec<Summary> = json::from_value(res["result"].clone()).unwrap_or_default();
     for s in list {
         println!("epoch {} receipts {} invalid {}", s.epoch, s.receipts, s.invalid);
     }

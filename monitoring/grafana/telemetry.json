@@ -7,8 +7,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 2,
       "options": {
@@ -26,8 +26,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 3,
       "options": {
@@ -45,8 +45,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 4,
       "options": {
@@ -64,8 +64,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 5,
       "options": {
@@ -83,8 +83,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 6,
       "options": {
@@ -107,8 +107,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 8,
       "options": {
@@ -126,8 +126,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 9,
       "options": {
@@ -145,8 +145,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 10,
       "options": {
@@ -164,8 +164,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 11,
       "options": {
@@ -183,8 +183,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 12,
       "options": {
@@ -202,8 +202,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 13,
       "options": {
@@ -221,8 +221,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 14,
       "options": {
@@ -240,8 +240,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 15,
       "options": {
@@ -259,8 +259,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 16,
       "options": {
@@ -278,8 +278,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 17,
       "options": {
@@ -297,8 +297,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 18,
       "options": {
@@ -316,8 +316,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 19,
       "options": {
@@ -335,8 +335,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 20,
       "options": {
@@ -359,8 +359,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 22,
       "options": {
@@ -378,8 +378,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 23,
       "options": {
@@ -397,8 +397,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 24,
       "options": {
@@ -416,8 +416,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 25,
       "options": {
@@ -440,8 +440,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 27,
       "options": {
@@ -459,8 +459,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 28,
       "options": {
@@ -478,8 +478,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 29,
       "options": {
@@ -497,8 +497,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 30,
       "options": {
@@ -516,8 +516,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 31,
       "options": {
@@ -535,8 +535,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 32,
       "options": {
@@ -554,8 +554,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 33,
       "options": {
@@ -573,8 +573,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 34,
       "options": {
@@ -592,8 +592,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 35,
       "options": {
@@ -611,8 +611,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 36,
       "options": {
@@ -630,8 +630,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 37,
       "options": {
@@ -649,8 +649,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 38,
       "options": {
@@ -668,8 +668,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 39,
       "options": {
@@ -687,8 +687,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 40,
       "options": {
@@ -706,8 +706,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 41,
       "options": {
@@ -725,8 +725,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 42,
       "options": {
@@ -744,8 +744,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 43,
       "options": {
@@ -763,8 +763,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 44,
       "options": {
@@ -782,8 +782,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 45,
       "options": {
@@ -801,8 +801,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 46,
       "options": {
@@ -820,8 +820,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 47,
       "options": {
@@ -839,8 +839,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 48,
       "options": {
@@ -858,8 +858,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 49,
       "options": {
@@ -877,8 +877,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 50,
       "options": {
@@ -896,8 +896,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 51,
       "options": {
@@ -915,8 +915,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 52,
       "options": {
@@ -934,8 +934,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 53,
       "options": {
@@ -953,8 +953,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 54,
       "options": {
@@ -972,8 +972,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 55,
       "options": {
@@ -991,8 +991,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 56,
       "options": {
@@ -1010,8 +1010,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 57,
       "options": {
@@ -1029,8 +1029,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 58,
       "options": {
@@ -1048,8 +1048,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 59,
       "options": {
@@ -1067,8 +1067,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 60,
       "options": {
@@ -1086,8 +1086,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 61,
       "options": {
@@ -1105,8 +1105,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 62,
       "options": {
@@ -1124,8 +1124,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 63,
       "options": {
@@ -1143,8 +1143,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 64,
       "options": {
@@ -1162,8 +1162,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 65,
       "options": {
@@ -1181,8 +1181,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 66,
       "options": {
@@ -1200,8 +1200,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 67,
       "options": {
@@ -1219,8 +1219,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 68,
       "options": {
@@ -1238,8 +1238,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 69,
       "options": {
@@ -1257,8 +1257,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 70,
       "options": {
@@ -1276,8 +1276,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 71,
       "options": {
@@ -1295,8 +1295,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 72,
       "options": {
@@ -1314,8 +1314,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 73,
       "options": {
@@ -1333,8 +1333,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 74,
       "options": {
@@ -1352,8 +1352,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 75,
       "options": {
@@ -1371,8 +1371,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 76,
       "options": {
@@ -1390,8 +1390,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 77,
       "options": {
@@ -1409,8 +1409,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 78,
       "options": {
@@ -1428,8 +1428,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 79,
       "options": {
@@ -1447,8 +1447,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 80,
       "options": {
@@ -1466,8 +1466,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 81,
       "options": {
@@ -1485,8 +1485,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 82,
       "options": {
@@ -1504,8 +1504,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 83,
       "options": {
@@ -1523,8 +1523,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 84,
       "options": {
@@ -1542,8 +1542,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 85,
       "options": {
@@ -1561,8 +1561,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 86,
       "options": {
@@ -1580,8 +1580,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 87,
       "options": {
@@ -1599,8 +1599,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 88,
       "options": {
@@ -1618,8 +1618,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 89,
       "options": {
@@ -1637,8 +1637,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 90,
       "options": {
@@ -1656,8 +1656,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 91,
       "options": {
@@ -1675,8 +1675,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 92,
       "options": {
@@ -1694,8 +1694,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 93,
       "options": {
@@ -1713,8 +1713,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 94,
       "options": {
@@ -1732,8 +1732,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 95,
       "options": {
@@ -1751,8 +1751,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 96,
       "options": {
@@ -1770,8 +1770,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 97,
       "options": {
@@ -1789,8 +1789,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 98,
       "options": {
@@ -1808,8 +1808,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 99,
       "options": {
@@ -1827,8 +1827,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 100,
       "options": {
@@ -1846,8 +1846,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 101,
       "options": {
@@ -1865,8 +1865,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 102,
       "options": {
@@ -1884,8 +1884,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 103,
       "options": {
@@ -1903,8 +1903,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 104,
       "options": {
@@ -1922,8 +1922,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 105,
       "options": {
@@ -1941,8 +1941,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 106,
       "options": {
@@ -1960,8 +1960,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 107,
       "options": {
@@ -1979,8 +1979,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 108,
       "options": {
@@ -1998,8 +1998,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 109,
       "options": {
@@ -2017,8 +2017,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 110,
       "options": {
@@ -2036,8 +2036,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 111,
       "options": {
@@ -2055,8 +2055,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 112,
       "options": {
@@ -2074,8 +2074,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 113,
       "options": {
@@ -2093,8 +2093,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 114,
       "options": {
@@ -2112,8 +2112,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 115,
       "options": {
@@ -2131,8 +2131,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 116,
       "options": {
@@ -2150,8 +2150,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 117,
       "options": {
@@ -2169,8 +2169,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 118,
       "options": {
@@ -2188,8 +2188,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 119,
       "options": {
@@ -2207,8 +2207,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 120,
       "options": {
@@ -2226,8 +2226,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 121,
       "options": {
@@ -2245,8 +2245,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 122,
       "options": {
@@ -2264,8 +2264,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 123,
       "options": {
@@ -2283,8 +2283,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 124,
       "options": {
@@ -2302,8 +2302,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 125,
       "options": {
@@ -2321,8 +2321,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 126,
       "options": {
@@ -2340,8 +2340,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 127,
       "options": {
@@ -2359,8 +2359,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 128,
       "options": {
@@ -2378,8 +2378,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 129,
       "options": {
@@ -2397,8 +2397,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 130,
       "options": {
@@ -2416,8 +2416,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 131,
       "options": {
@@ -2435,8 +2435,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 132,
       "options": {
@@ -2454,8 +2454,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 133,
       "options": {
@@ -2473,8 +2473,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 134,
       "options": {
@@ -2492,8 +2492,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 135,
       "options": {
@@ -2511,8 +2511,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 136,
       "options": {
@@ -2530,8 +2530,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 137,
       "options": {
@@ -2549,8 +2549,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 138,
       "options": {
@@ -2568,8 +2568,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 139,
       "options": {
@@ -2587,8 +2587,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 140,
       "options": {
@@ -2606,8 +2606,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 141,
       "options": {
@@ -2625,8 +2625,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 142,
       "options": {
@@ -2644,8 +2644,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 143,
       "options": {
@@ -2663,8 +2663,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 144,
       "options": {
@@ -2682,8 +2682,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 145,
       "options": {
@@ -2701,8 +2701,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 146,
       "options": {
@@ -2720,8 +2720,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 147,
       "options": {
@@ -2739,8 +2739,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 148,
       "options": {
@@ -2758,8 +2758,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 149,
       "options": {
@@ -2777,8 +2777,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 150,
       "options": {
@@ -2796,8 +2796,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 151,
       "options": {
@@ -2815,8 +2815,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 152,
       "options": {
@@ -2834,8 +2834,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 153,
       "options": {
@@ -2853,8 +2853,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 154,
       "options": {
@@ -2872,8 +2872,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 155,
       "options": {
@@ -2891,8 +2891,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 156,
       "options": {
@@ -2910,8 +2910,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 157,
       "options": {
@@ -2929,8 +2929,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 158,
       "options": {
@@ -2948,8 +2948,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 159,
       "options": {
@@ -2967,8 +2967,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 160,
       "options": {
@@ -2986,8 +2986,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 161,
       "options": {
@@ -3005,8 +3005,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 162,
       "options": {
@@ -3024,8 +3024,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 163,
       "options": {
@@ -3043,8 +3043,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 164,
       "options": {
@@ -3062,8 +3062,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 165,
       "options": {
@@ -3081,8 +3081,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 166,
       "options": {
@@ -3100,8 +3100,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 167,
       "options": {
@@ -3119,8 +3119,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 168,
       "options": {
@@ -3138,8 +3138,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 169,
       "options": {
@@ -3157,8 +3157,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 170,
       "options": {
@@ -3176,8 +3176,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 171,
       "options": {
@@ -3195,8 +3195,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 172,
       "options": {
@@ -3214,8 +3214,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 173,
       "options": {
@@ -3233,8 +3233,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 174,
       "options": {
@@ -3252,8 +3252,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 175,
       "options": {
@@ -3271,8 +3271,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 176,
       "options": {
@@ -3290,8 +3290,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 177,
       "options": {
@@ -3309,8 +3309,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 178,
       "options": {
@@ -3328,8 +3328,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 179,
       "options": {
@@ -3347,8 +3347,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 180,
       "options": {
@@ -3366,8 +3366,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 181,
       "options": {
@@ -3385,8 +3385,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 182,
       "options": {
@@ -3404,8 +3404,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 183,
       "options": {
@@ -3423,8 +3423,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 184,
       "options": {
@@ -3442,8 +3442,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 185,
       "options": {
@@ -3461,8 +3461,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 186,
       "options": {
@@ -3480,8 +3480,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 187,
       "options": {
@@ -3499,8 +3499,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 188,
       "options": {
@@ -3518,8 +3518,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 189,
       "options": {
@@ -3537,8 +3537,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 190,
       "options": {
@@ -3556,8 +3556,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 191,
       "options": {
@@ -3575,8 +3575,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 192,
       "options": {
@@ -3594,8 +3594,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 193,
       "options": {
@@ -3613,8 +3613,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 194,
       "options": {
@@ -3632,8 +3632,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 195,
       "options": {
@@ -3651,8 +3651,8 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prom"
+        "type": "foundation-telemetry",
+        "uid": "foundation"
       },
       "id": 196,
       "options": {

@@ -4,7 +4,6 @@ use cli_core::{
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
-use foundation_serialization::json;
 #[cfg(feature = "hid")]
 use hidapi::HidApi;
 use qrcode::{render::unicode, QrCode};

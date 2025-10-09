@@ -19,4 +19,4 @@ its supply.
 ## Metrics
 
 The node exposes `tokens_created_total` and `token_bridge_volume_total`
-Prometheus counters to monitor token issuance and bridge activity.
+runtime telemetry counters to monitor token issuance and bridge activity.

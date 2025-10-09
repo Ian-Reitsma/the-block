@@ -264,7 +264,12 @@ fn find_command<'a>(root: &'a CliCommand, path: &[&str]) -> Option<&'a CliComman
 fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, ProbeError> {
     let client = BlockingClient::default();
     let start = Instant::now();
-    let req = serde_json::json!({"jsonrpc":"2.0","id":0,"method":"metrics","params":{}});
+    let req = foundation_serialization::json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "metrics",
+        "params": {}
+    });
     client
         .request(Method::Post, url)
         .and_then(|builder| builder.timeout(timeout).json(&req))
@@ -278,7 +283,12 @@ fn ping_rpc(url: &str, timeout: Duration, expect_ms: u64) -> Result<Duration, Pr
 }
 
 fn fetch_height(url: &str, client: &BlockingClient, timeout: Duration) -> Result<u64, ProbeError> {
-    let req = serde_json::json!({"jsonrpc":"2.0","id":0,"method":"metrics","params":{}});
+    let req = foundation_serialization::json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "metrics",
+        "params": {}
+    });
     let text = client
         .request(Method::Post, url)
         .and_then(|builder| builder.timeout(timeout).json(&req))
@@ -305,7 +315,12 @@ fn mine_one(
 ) -> Result<Duration, ProbeError> {
     let client = BlockingClient::default();
     let start_height = fetch_height(url, &client, timeout)?;
-    let req = serde_json::json!({"jsonrpc":"2.0","id":0,"method":"start_mining","params":{"miner":miner}});
+    let req = foundation_serialization::json!({
+        "jsonrpc": "2.0",
+        "id": 0,
+        "method": "start_mining",
+        "params": {"miner": miner}
+    });
     client
         .request(Method::Post, url)
         .and_then(|builder| builder.timeout(timeout).json(&req))
@@ -319,9 +334,14 @@ fn mine_one(
             let _ = client
                 .request(Method::Post, url)
                 .and_then(|builder| {
-                    builder.timeout(timeout).json(&serde_json::json!({
-                        "jsonrpc":"2.0","id":1,"method":"stop_mining","params":{}
-                    }))
+                    builder
+                        .timeout(timeout)
+                        .json(&foundation_serialization::json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "stop_mining",
+                            "params": {}
+                        }))
                 })
                 .and_then(|builder| builder.send());
             return Ok(start.elapsed());
@@ -330,9 +350,14 @@ fn mine_one(
             let _ = client
                 .request(Method::Post, url)
                 .and_then(|builder| {
-                    builder.timeout(timeout).json(&serde_json::json!({
-                        "jsonrpc":"2.0","id":1,"method":"stop_mining","params":{}
-                    }))
+                    builder
+                        .timeout(timeout)
+                        .json(&foundation_serialization::json!({
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "stop_mining",
+                            "params": {}
+                        }))
                 })
                 .and_then(|builder| builder.send());
             return Err(ProbeError::Timeout);

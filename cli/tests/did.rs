@@ -8,7 +8,6 @@ use contract_cli::light_client::{
 use contract_cli::rpc::RpcClient;
 use contract_cli::tx::{generate_keypair, TxDidAnchor};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
-use foundation_serialization::json::json;
 use hex;
 use support::json_rpc::JsonRpcMock;
 
@@ -24,7 +23,7 @@ fn signature_from_vec(sig: &[u8]) -> Signature {
 
 #[test]
 fn build_anchor_transaction_generates_signatures() {
-    let document = json!({
+    let document = foundation_serialization::json!({
         "id": "did:tb:test",
         "service": [{"id": "#resolver", "type": "Resolver", "serviceEndpoint": "https://example.com"}]
     });
@@ -67,7 +66,7 @@ fn build_anchor_transaction_generates_signatures() {
 
 #[test]
 fn build_anchor_transaction_rejects_large_documents() {
-    let oversized = json!({ "blob": "a".repeat(65_537) });
+    let oversized = foundation_serialization::json!({ "blob": "a".repeat(65_537) });
     let (owner_secret, _) = generate_keypair();
     let material = AnchorKeyMaterial {
         address: None,
@@ -82,7 +81,7 @@ fn build_anchor_transaction_rejects_large_documents() {
 
 fn anchor_responses(tx: &TxDidAnchor, updated_at: u64) -> String {
     let doc_hash = hex::encode(tx.document_hash());
-    json!({
+    foundation_serialization::json!({
         "jsonrpc": "2.0",
         "result": {
             "address": tx.address,
@@ -100,7 +99,7 @@ fn anchor_responses(tx: &TxDidAnchor, updated_at: u64) -> String {
 
 #[test]
 fn anchor_submission_and_resolve_flow() {
-    let document = json!({
+    let document = foundation_serialization::json!({
         "id": "did:tb:flow",
         "controller": ["did:tb:owner"],
         "service": [{"id": "#agent", "type": "AgentService", "serviceEndpoint": "https://agent"}]
@@ -116,13 +115,13 @@ fn anchor_submission_and_resolve_flow() {
     let tx = build_anchor_transaction(&document, &material).expect("build anchor");
     let responses = vec![
         anchor_responses(&tx, 123),
-        json!({
+        foundation_serialization::json!({
             "jsonrpc": "2.0",
             "result": {"height": 42, "hash": "beef", "difficulty": 1},
             "id": 1
         })
         .to_string(),
-        json!({
+        foundation_serialization::json!({
             "jsonrpc": "2.0",
             "result": {
                 "address": tx.address,

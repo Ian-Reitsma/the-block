@@ -8,3 +8,4 @@ foundation_serialization = { path = "../crates/foundation_serialization" }
 cli_core = { path = "../crates/cli_core" }
 crypto_suite = { path = "../crates/crypto_suite" }
 storage_engine = { path = "../crates/storage_engine" }
+serde = { version = "1", features = ["derive"], default-features = false }

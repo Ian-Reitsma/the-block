@@ -7,7 +7,6 @@ use cli_core::{
     parse::Matches,
     ConfigReader,
 };
-use foundation_serialization::json::json;
 use std::{path::PathBuf, process};
 
 pub enum ConfigCmd {
@@ -100,7 +99,7 @@ pub fn reload(url: String) {
         jsonrpc: "2.0",
         id: 1,
         method: "config.reload",
-        params: json!({}),
+        params: foundation_serialization::json!({}),
         auth: None,
     };
     if let Ok(resp) = client.call(&url, &payload) {

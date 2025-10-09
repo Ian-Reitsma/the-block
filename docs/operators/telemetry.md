@@ -16,19 +16,17 @@ Headline panels show:
 - **Storage provider RTT/loss** – track `storage_provider_rtt_ms` and `storage_provider_loss_rate`.
 - **Read denials & issuance** – watch `read_denied_total{reason}` and `subsidy_bytes_total{type="read"}`; rent escrow via `rent_escrow_locked_ct_total`, `rent_escrow_refunded_ct_total`, and `rent_escrow_burned_ct_total`. Sudden `subsidy_auto_reduced_total` or `kill_switch_trigger_total` increments indicate global inflation dampening events and should be cross-referenced with `governance/history`.
 
-Each panel exposes drill-down links to the underlying Prometheus query. For
-example, clicking the read-denial panel reveals a per-reason breakdown so
-operators can differentiate between rate-limit drops and missing `ReadAck`
-signatures. Set alert thresholds at roughly 2× the 30‑day moving average to
-catch regressions without paging on normal bursts.
+Each panel exposes drill-down links to the underlying metric definition in
+`monitoring/metrics.json`. The generated dashboard surfaces the current value and
+the raw metric name so operators can pivot into the CLI or automation. Set alert
+thresholds at roughly 2× the 30‑day moving average to catch regressions without
+paging on normal bursts.
 
-To scrape metrics remotely with Prometheus:
-```yaml
-scrape_configs:
-  - job_name: node
-    static_configs:
-      - targets: ['node-host:9898']
-```
+To poll metrics remotely, point the dashboard helpers or a custom script at the
+node’s `/metrics` exporter (for example `http://node-host:9898/metrics`). The
+`TELEMETRY_ENDPOINT` environment variable controls the target for both the
+Docker compose recipe and `scripts/monitor_native.sh`.
+
 Use `scripts/telemetry_sweep.sh` to generate a static `status/index.html` snapshot.
 
 The sweep script captures subsidy multipliers (`beta`, `gamma`, `kappa`,

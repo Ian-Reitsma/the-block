@@ -55,7 +55,7 @@ when diagnostics disagree with the configured backend:
    backend label, tracked peer count, and the persisted database path (if
    applicable). When the CLI reports `stub` or an unexpected path, restart the
    node after updating configuration.
-2. Confirm Prometheus gauges `overlay_backend_active{backend}`,
+2. Confirm runtime telemetry gauges `overlay_backend_active{backend}`,
    `overlay_peer_total{backend}`, and `overlay_peer_persisted_total{backend}` are
    reporting values for the intended backend:
    ```bash
@@ -210,14 +210,14 @@ directories are created automatically if missing. See
 ## Rate-Limit Metric Retention
 
 Per-peer telemetry retains up to `max_peer_metrics` entries in memory. The
-default cap (1024) prevents unbounded label cardinality in Prometheus. When the
+default cap (1024) prevents unbounded label cardinality in the telemetry snapshot. When the
 cap is exceeded, the least recently updated peer is evicted and its counters are
 removed from the exporter. An informational `evict_peer_metrics` log is emitted
 whenever eviction occurs. Each entry tracks requests, bytes, and drops and
 consumes only a few dozen bytes, but operators should size the cap according to
 expected peer churn and available memory.
 
-Set `peer_metrics_export = false` to suppress per-peer Prometheus labels and
+Set `peer_metrics_export = false` to suppress per-peer telemetry labels and
 `track_peer_drop_reasons = false` to aggregate all drops under `other` if label
 cardinality is a concern.
 
@@ -270,7 +270,7 @@ each page; press <kbd>Enter</kbd> to advance. See
 
 Invoking `net.peer_stats_reset` or the `net stats reset` CLI subcommand clears
 all counters for the specified peer. This operation removes the peer's metrics
-from the Prometheus exporter and permanently discards historical data. Each
+from the telemetry exporter and permanently discards historical data. Each
 successful reset increments `peer_stats_reset_total{peer_id}` which can be
 scraped from the metrics endpoint:
 
@@ -388,7 +388,7 @@ short, an `AsnLatencyCache` records measured latency floors between ASN pairs
 and the heuristic biases routes toward peers with low latency and high uptime.
 Operators can adjust `TB_ASTAR_MAX_HOPS` and `TB_ASTAR_CACHE_TTL_MS` to balance
 accuracy against CPU overhead. Metrics such as `asn_latency_ms` and
-`route_fail_total` surface on the Prometheus exporter for monitoring.
+`route_fail_total` surface on the telemetry exporter for monitoring.
 
 ## Gossip Relay Deduplication and Fanout
 

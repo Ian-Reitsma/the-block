@@ -17,7 +17,12 @@ use ::storage::{contract::StorageContract, offer::StorageOffer};
 use base64_fp::decode_standard;
 use concurrency::Lazy;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use foundation_serialization::{binary, Deserialize, Serialize};
+use foundation_rpc::{
+    Params as RpcParams, Request as RpcRequest, Response as RpcResponse, RpcError,
+};
+use foundation_serialization::binary;
+#[cfg(feature = "telemetry")]
+use foundation_serialization::Deserialize;
 use hex;
 use httpd::{
     form_urlencoded, serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
@@ -106,15 +111,8 @@ impl RpcState {
             Ok(_) => None,
             Err(code) => {
                 telemetry_rpc_error(code);
-                let err = RpcError {
-                    code: code.rpc_code(),
-                    message: code.message(),
-                };
-                let resp = RpcResponse::Error {
-                    jsonrpc: "2.0",
-                    error: err,
-                    id: None,
-                };
+                let err = rpc_error(code.rpc_code(), code.message());
+                let resp = RpcResponse::error(err, None);
                 let response = Response::new(StatusCode::TOO_MANY_REQUESTS)
                     .json(&resp)
                     .unwrap_or_else(|_| {
@@ -299,56 +297,9 @@ const BADGE_METHODS: &[&str] = &[
 
 const DEBUG_METHODS: &[&str] = &["set_difficulty", "start_mining", "stop_mining"];
 
-#[derive(Deserialize)]
-struct RpcRequest {
-    #[serde(default)]
-    _jsonrpc: Option<String>,
-    method: String,
-    #[serde(default)]
-    params: foundation_serialization::json::Value,
-    #[serde(default)]
-    id: Option<foundation_serialization::json::Value>,
-    #[serde(default)]
-    badge: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum RpcResponse {
-    Result {
-        jsonrpc: &'static str,
-        result: foundation_serialization::json::Value,
-        id: Option<foundation_serialization::json::Value>,
-    },
-    Error {
-        jsonrpc: &'static str,
-        error: RpcError,
-        id: Option<foundation_serialization::json::Value>,
-    },
-}
-
-#[derive(Serialize, Debug)]
-pub struct RpcError {
-    code: i32,
-    message: &'static str,
-}
-
-impl RpcError {
-    pub fn code(&self) -> i32 {
-        self.code
-    }
-
-    pub fn message(&self) -> &'static str {
-        self.message
-    }
-}
-
 fn parse_overlay_peer_param(id: &str) -> Result<[u8; 32], RpcError> {
     if id.is_empty() {
-        return Err(RpcError {
-            code: -32602,
-            message: "invalid params",
-        });
+        return Err(rpc_error(-32602, "invalid params"));
     }
     if let Ok(peer) = net::overlay_peer_from_base58(id) {
         let mut out = [0u8; 32];
@@ -362,10 +313,7 @@ fn parse_overlay_peer_param(id: &str) -> Result<[u8; 32], RpcError> {
             return Ok(out);
         }
     }
-    Err(RpcError {
-        code: -32602,
-        message: "invalid params",
-    })
+    Err(rpc_error(-32602, "invalid params"))
 }
 
 fn io_err_msg(e: &std::io::Error) -> &'static str {
@@ -396,19 +344,13 @@ impl SnapshotError {
 
 impl From<SnapshotError> for RpcError {
     fn from(e: SnapshotError) -> Self {
-        Self {
-            code: e.code(),
-            message: e.message(),
-        }
+        rpc_error(e.code(), e.message())
     }
 }
 
 impl From<crate::compute_market::MarketError> for RpcError {
     fn from(e: crate::compute_market::MarketError) -> Self {
-        Self {
-            code: e.code(),
-            message: e.message(),
-        }
+        rpc_error(e.code(), e.message())
     }
 }
 
@@ -425,28 +367,25 @@ fn telemetry_rpc_error(code: RpcClientErrorCode) {
     let _ = code;
 }
 
+fn rpc_error(code: i32, message: &'static str) -> RpcError {
+    RpcError::new(code, message)
+}
+
 fn check_nonce(
     scope: impl Into<String>,
-    params: &foundation_serialization::json::Value,
+    params: &RpcParams,
     nonces: &Arc<Mutex<HashSet<(String, u64)>>>,
 ) -> Result<(), RpcError> {
     let nonce = params
         .get("nonce")
         .and_then(|v| v.as_u64())
-        .ok_or(RpcError {
-            code: -32602,
-            message: "missing nonce",
-        })?;
+        .ok_or_else(|| rpc_error(-32602, "missing nonce"))?;
     let key = scope.into();
-    let mut guard = nonces.lock().map_err(|_| RpcError {
-        code: -32603,
-        message: "internal error",
-    })?;
+    let mut guard = nonces
+        .lock()
+        .map_err(|_| rpc_error(-32603, "internal error"))?;
     if !guard.insert((key, nonce)) {
-        return Err(RpcError {
-            code: -32000,
-            message: "replayed nonce",
-        });
+        return Err(rpc_error(-32000, "replayed nonce"));
     }
     Ok(())
 }
@@ -487,19 +426,13 @@ fn execute_rpc(
 
     let response = if DEBUG_METHODS.contains(&method_str) {
         if !runtime_cfg.enable_debug || !authorized {
-            Err(RpcError {
-                code: -32601,
-                message: "method not found",
-            })
+            Err(rpc_error(-32601, "method not found"))
         } else {
             dispatch_result()
         }
     } else if ADMIN_METHODS.contains(&method_str) {
         if !authorized {
-            Err(RpcError {
-                code: -32601,
-                message: "method not found",
-            })
+            Err(rpc_error(-32601, "method not found"))
         } else {
             dispatch_result()
         }
@@ -516,10 +449,7 @@ fn execute_rpc(
         ) {
             let local = peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
             if !local {
-                Err(RpcError {
-                    code: -32601,
-                    message: "method not found",
-                })
+                Err(rpc_error(-32601, "method not found"))
             } else {
                 if method_str == "net.peer_stats_export" {
                     #[cfg(feature = "telemetry")]
@@ -555,23 +485,12 @@ fn execute_rpc(
             dispatch_result()
         }
     } else {
-        Err(RpcError {
-            code: -32601,
-            message: "method not found",
-        })
+        Err(rpc_error(-32601, "method not found"))
     };
 
     match response {
-        Ok(value) => RpcResponse::Result {
-            jsonrpc: "2.0",
-            result: value,
-            id,
-        },
-        Err(error) => RpcResponse::Error {
-            jsonrpc: "2.0",
-            error,
-            id,
-        },
+        Ok(value) => RpcResponse::success(value, id),
+        Err(error) => RpcResponse::error(error, id),
     }
 }
 
@@ -622,22 +541,15 @@ async fn handle_rpc_post(request: Request<RpcState>) -> Result<Response, HttpErr
     let auth = request.header("authorization");
     let peer_ip = Some(remote.ip());
     let origin = request.header("origin");
-    let rpc_request =
-        match foundation_serialization::json::from_slice::<RpcRequest>(request.body_bytes()) {
-            Ok(req) => req,
-            Err(_) => {
-                let response = RpcResponse::Error {
-                    jsonrpc: "2.0",
-                    error: RpcError {
-                        code: -32700,
-                        message: "parse error",
-                    },
-                    id: None,
-                };
-                let response = Response::new(StatusCode::OK).json(&response)?;
-                return Ok(state.apply_cors(response, origin));
-            }
-        };
+    let runtime_cfg = state.runtime();
+    let rpc_request = match RpcRequest::from_http_state(&request, runtime_cfg.max_body_bytes) {
+        Ok(req) => req,
+        Err(err) => {
+            let response = RpcResponse::error(err.into_rpc_error(), None);
+            let response = Response::new(StatusCode::OK).json(&response)?;
+            return Ok(state.apply_cors(response, origin));
+        }
+    };
     let rpc_response = execute_rpc(&state, rpc_request, auth, peer_ip);
     let response = Response::new(StatusCode::OK).json(&rpc_response)?;
     Ok(state.apply_cors(response, origin))
@@ -772,12 +684,11 @@ async fn handle_badge_status(request: Request<RpcState>) -> Result<Response, Htt
         chain.check_badges();
         chain.badge_status()
     };
-    let body = foundation_serialization::json!({
+    let body = foundation_serialization::json::to_string_value(&foundation_serialization::json!({
         "active": active,
         "last_mint": last_mint,
         "last_burn": last_burn,
-    })
-    .to_string();
+    }));
     let response = Response::new(StatusCode::OK)
         .with_header("content-type", "application/json")
         .with_body(body.into_bytes());
@@ -819,15 +730,9 @@ fn dispatch(
             .get("badge")
             .and_then(|v| v.as_str())
             .or(req.badge.as_deref())
-            .ok_or(RpcError {
-                code: -32602,
-                message: "badge required",
-            })?;
+            .ok_or(rpc_error(-32602, "badge required"))?;
         if !crate::service_badge::verify(badge) {
-            return Err(RpcError {
-                code: -32602,
-                message: "invalid badge",
-            });
+            return Err(rpc_error(-32602, "invalid badge"));
         }
     }
 
@@ -942,41 +847,26 @@ fn dispatch(
             let header = req
                 .params
                 .get("header")
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })
+                .ok_or(rpc_error(-32602, "invalid params"))
                 .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
+                    foundation_serialization::json::from_value(v.clone())
+                        .map_err(|_| rpc_error(-32602, "invalid params"))
                 })?;
             let proof = req
                 .params
                 .get("proof")
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })
+                .ok_or(rpc_error(-32602, "invalid params"))
                 .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
+                    foundation_serialization::json::from_value(v.clone())
+                        .map_err(|_| rpc_error(-32602, "invalid params"))
                 })?;
             let proofs = req
                 .params
                 .get("relayer_proofs")
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })
+                .ok_or(rpc_error(-32602, "invalid params"))
                 .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
+                    foundation_serialization::json::from_value(v.clone())
+                        .map_err(|_| rpc_error(-32602, "invalid params"))
                 })?;
             bridge::verify_deposit(asset, relayer, user, amount, header, proof, proofs)?
         }
@@ -1004,15 +894,10 @@ fn dispatch(
             let proofs = req
                 .params
                 .get("relayer_proofs")
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })
+                .ok_or(rpc_error(-32602, "invalid params"))
                 .and_then(|v| {
-                    foundation_serialization::json::from_value(v.clone()).map_err(|_| RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
+                    foundation_serialization::json::from_value(v.clone())
+                        .map_err(|_| rpc_error(-32602, "invalid params"))
                 })?;
             bridge::request_withdrawal(asset, relayer, user, amount, proofs)?
         }
@@ -1060,10 +945,7 @@ fn dispatch(
                 .params
                 .get("asset")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })?;
+                .ok_or(rpc_error(-32602, "invalid params"))?;
             bridge::relayer_quorum(asset)?
         }
         "bridge.deposit_history" => {
@@ -1071,10 +953,7 @@ fn dispatch(
                 .params
                 .get("asset")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })?;
+                .ok_or(rpc_error(-32602, "invalid params"))?;
             let cursor = req.params.get("cursor").and_then(|v| v.as_u64());
             let limit = req
                 .params
@@ -1092,29 +971,16 @@ fn dispatch(
                 .unwrap_or("");
             let bytes = match hex::decode(hex) {
                 Ok(b) => b,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
+                Err(_) => return Err(rpc_error(-32602, "invalid params")),
             };
             let receipt: AssistReceipt = match binary::decode(&bytes) {
                 Ok(r) => r,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
+                Err(_) => return Err(rpc_error(-32602, "invalid params")),
             };
             if !receipt.verify()
                 || !validate_proximity(receipt.device, receipt.rssi, receipt.rtt_ms)
             {
-                return Err(RpcError {
-                    code: -32002,
-                    message: "invalid receipt",
-                });
+                return Err(rpc_error(-32002, "invalid receipt"));
             }
             let hash = receipt.hash();
             let key = format!("localnet_receipts/{}", hash);
@@ -1126,18 +992,13 @@ fn dispatch(
                 foundation_serialization::json!({"status":"ok"})
             }
         }
-        "dns.publish_record" => match gateway::dns::publish_record(&req.params) {
+        "dns.publish_record" => match gateway::dns::publish_record(req.params.as_value()) {
             Ok(v) => v,
-            Err(e) => {
-                return Err(RpcError {
-                    code: e.code(),
-                    message: e.message(),
-                })
-            }
+            Err(e) => return Err(rpc_error(e.code(), e.message())),
         },
-        "gateway.policy" => gateway::dns::gateway_policy(&req.params),
-        "gateway.reads_since" => gateway::dns::reads_since(&req.params),
-        "gateway.dns_lookup" => gateway::dns::dns_lookup(&req.params),
+        "gateway.policy" => gateway::dns::gateway_policy(req.params.as_value()),
+        "gateway.reads_since" => gateway::dns::reads_since(req.params.as_value()),
+        "gateway.dns_lookup" => gateway::dns::dns_lookup(req.params.as_value()),
         "gateway.mobile_cache_status" => gateway::mobile_cache::status_snapshot(),
         "gateway.mobile_cache_flush" => gateway::mobile_cache::flush_cache(),
         #[cfg(feature = "telemetry")]
@@ -1148,7 +1009,7 @@ fn dispatch(
                 compaction_secs: Option<u64>,
             }
             let cfg: TelemetryConfigure = foundation_serialization::json::from_value(
-                req.params.clone(),
+                req.params.clone().into(),
             )
             .unwrap_or(TelemetryConfigure {
                 sample_rate: None,
@@ -1168,15 +1029,12 @@ fn dispatch(
         }
         #[cfg(not(feature = "telemetry"))]
         "telemetry.configure" => {
-            return Err(RpcError {
-                code: -32603,
-                message: "telemetry disabled",
-            });
+            return Err(rpc_error(-32603, "telemetry disabled"));
         }
         #[cfg(feature = "telemetry")]
         "analytics" => {
             let q: analytics::AnalyticsQuery = foundation_serialization::json::from_value(
-                req.params.clone(),
+                req.params.clone().into(),
             )
             .unwrap_or(analytics::AnalyticsQuery {
                 domain: String::new(),
@@ -1265,10 +1123,7 @@ fn dispatch(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let pk = parse_overlay_peer_param(id)?;
-            let m = net::peer_stats(&pk).ok_or(RpcError {
-                code: -32602,
-                message: "unknown peer",
-            })?;
+            let m = net::peer_stats(&pk).ok_or(rpc_error(-32602, "unknown peer"))?;
             foundation_serialization::json!({
                 "requests": m.requests,
                 "bytes_sent": m.bytes_sent,
@@ -1303,10 +1158,7 @@ fn dispatch(
             if net::reset_peer_metrics(&pk) {
                 foundation_serialization::json!({"status": "ok"})
             } else {
-                return Err(RpcError {
-                    code: -32602,
-                    message: "unknown peer",
-                });
+                return Err(rpc_error(-32602, "unknown peer"));
             }
         }
         "net.peer_stats_export" => {
@@ -1328,10 +1180,7 @@ fn dispatch(
                         foundation_serialization::json!({"status": "ok", "overwritten": over})
                     }
                     Err(e) => {
-                        return Err(RpcError {
-                            code: -32602,
-                            message: io_err_msg(&e),
-                        });
+                        return Err(rpc_error(-32602, io_err_msg(&e)));
                     }
                 }
             } else {
@@ -1346,10 +1195,7 @@ fn dispatch(
                         foundation_serialization::json!({"status": "ok", "overwritten": over})
                     }
                     Err(e) => {
-                        return Err(RpcError {
-                            code: -32602,
-                            message: io_err_msg(&e),
-                        });
+                        return Err(rpc_error(-32602, io_err_msg(&e)));
                     }
                 }
             }
@@ -1363,10 +1209,7 @@ fn dispatch(
         "net.peer_stats_persist" => match net::persist_peer_metrics() {
             Ok(()) => foundation_serialization::json!({"status": "ok"}),
             Err(_) => {
-                return Err(RpcError {
-                    code: -32603,
-                    message: "persist failed",
-                });
+                return Err(rpc_error(-32603, "persist failed"));
             }
         },
         "net.peer_throttle" => {
@@ -1385,10 +1228,7 @@ fn dispatch(
                 if net::clear_throttle(&pk) {
                     foundation_serialization::json!({"status": "ok"})
                 } else {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "unknown peer",
-                    });
+                    return Err(rpc_error(-32602, "unknown peer"));
                 }
             } else {
                 net::throttle_peer(&pk, "manual");
@@ -1405,10 +1245,7 @@ fn dispatch(
             if net::clear_throttle(&pk) {
                 foundation_serialization::json!({"status": "ok"})
             } else {
-                return Err(RpcError {
-                    code: -32602,
-                    message: "unknown peer",
-                });
+                return Err(rpc_error(-32602, "unknown peer"));
             }
         }
         "net.reputation_sync" => {
@@ -1434,19 +1271,13 @@ fn dispatch(
                         diagnostics::tracing::error!(error = %err, "quic_cert_rotation_failed");
                         #[cfg(not(feature = "telemetry"))]
                         let _ = err;
-                        return Err(RpcError {
-                            code: -32603,
-                            message: "rotation failed",
-                        });
+                        return Err(rpc_error(-32603, "rotation failed"));
                     }
                 }
             }
             #[cfg(not(feature = "quic"))]
             {
-                return Err(RpcError {
-                    code: -32601,
-                    message: "quic feature not enabled",
-                });
+                return Err(rpc_error(-32601, "quic feature not enabled"));
             }
         }
         "net.key_rotate" => {
@@ -1454,64 +1285,40 @@ fn dispatch(
                 .params
                 .get("peer_id")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })?;
+                .ok_or(rpc_error(-32602, "invalid params"))?;
             let new_key = req
                 .params
                 .get("new_key")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })?;
+                .ok_or(rpc_error(-32602, "invalid params"))?;
             let sig_hex = req
                 .params
                 .get("signature")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })?;
-            let old_bytes = hex::decode(id).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
-            let new_bytes = hex::decode(new_key).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
-            let sig_bytes = hex::decode(sig_hex).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
-            let old_pk: [u8; 32] = old_bytes.try_into().map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
-            let new_pk: [u8; 32] = new_bytes.try_into().map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
-            let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
+                .ok_or(rpc_error(-32602, "invalid params"))?;
+            let old_bytes = hex::decode(id).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let new_bytes =
+                hex::decode(new_key).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let sig_bytes =
+                hex::decode(sig_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let old_pk: [u8; 32] = old_bytes
+                .try_into()
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let new_pk: [u8; 32] = new_bytes
+                .try_into()
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
+            let sig_arr: [u8; 64] = sig_bytes
+                .try_into()
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
             let sig = Signature::from_bytes(&sig_arr);
-            let vk = VerifyingKey::from_bytes(&old_pk).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
+            let vk = VerifyingKey::from_bytes(&old_pk)
+                .map_err(|_| rpc_error(-32602, "invalid params"))?;
             if vk.verify(&new_pk, &sig).is_err() {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
                     .with_label_values(&["bad_sig"])
                     .inc();
-                return Err(RpcError {
-                    code: -32602,
-                    message: "bad signature",
-                });
+                return Err(rpc_error(-32602, "bad signature"));
             }
             if net::rotate_peer_key(&old_pk, new_pk) {
                 #[cfg(feature = "telemetry")]
@@ -1524,10 +1331,7 @@ fn dispatch(
                 crate::telemetry::PEER_KEY_ROTATE_TOTAL
                     .with_label_values(&["missing"])
                     .inc();
-                return Err(RpcError {
-                    code: -32602,
-                    message: "unknown peer",
-                });
+                return Err(rpc_error(-32602, "unknown peer"));
             }
         }
         "net.handshake_failures" => {
@@ -1541,10 +1345,7 @@ fn dispatch(
                 diagnostics::tracing::warn!(target: "rpc", error = %e, "failed to serialize quic stats");
                 #[cfg(not(feature = "telemetry"))]
                 let _ = e;
-                return Err(RpcError {
-                    code: -32603,
-                    message: "serialization error",
-                });
+                return Err(rpc_error(-32603, "serialization error"));
             }
         },
         "net.quic_certs" => {
@@ -1555,10 +1356,7 @@ fn dispatch(
                     diagnostics::tracing::warn!(target: "rpc", error = %e, "failed to serialize quic cert history");
                     #[cfg(not(feature = "telemetry"))]
                     let _ = e;
-                    return Err(RpcError {
-                        code: -32603,
-                        message: "serialization error",
-                    });
+                    return Err(rpc_error(-32603, "serialization error"));
                 }
             }
         }
@@ -1582,12 +1380,8 @@ fn dispatch(
                 .get("epoch")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(
-                |_| RpcError {
-                    code: -32602,
-                    message: "bad peer",
-                },
-            )?;
+            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default())
+                .map_err(|_| rpc_error(-32602, "bad peer"))?;
             let eligible = net::uptime::eligible(&pk, threshold, epoch);
             foundation_serialization::json!({"eligible": eligible})
         }
@@ -1612,12 +1406,8 @@ fn dispatch(
                 .get("reward")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0);
-            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default()).map_err(
-                |_| RpcError {
-                    code: -32602,
-                    message: "bad peer",
-                },
-            )?;
+            let pk = net::uptime::peer_from_bytes(&hex::decode(peer).unwrap_or_default())
+                .map_err(|_| rpc_error(-32602, "bad peer"))?;
             let voucher = net::uptime::claim(pk, threshold, epoch, reward).unwrap_or(0);
             foundation_serialization::json!({"voucher": voucher})
         }
@@ -1625,10 +1415,7 @@ fn dispatch(
             if crate::config::reload() {
                 foundation_serialization::json!({"status": "ok"})
             } else {
-                return Err(RpcError {
-                    code: -32603,
-                    message: "reload failed",
-                });
+                return Err(rpc_error(-32603, "reload failed"));
             }
         }
         "kyc.verify" => {
@@ -1641,10 +1428,7 @@ fn dispatch(
                 Ok(true) => foundation_serialization::json!({"status": "verified"}),
                 Ok(false) => foundation_serialization::json!({"status": "denied"}),
                 Err(_) => {
-                    return Err(RpcError {
-                        code: -32080,
-                        message: "kyc failure",
-                    });
+                    return Err(rpc_error(-32080, "kyc failure"));
                 }
             }
         }
@@ -1661,42 +1445,55 @@ fn dispatch(
             })
         }
         "pow.submit" => {
-            let header_obj = req.params.get("header").ok_or(RpcError {
-                code: -32602,
-                message: "missing header",
-            })?;
+            let header_value = req
+                .params
+                .get("header")
+                .ok_or(rpc_error(-32602, "missing header"))?;
+            let header_obj = header_value
+                .as_object()
+                .ok_or(rpc_error(-32602, "header must be an object"))?;
             let parse32 =
                 |v: &foundation_serialization::json::Value| -> Result<[u8; 32], RpcError> {
-                    let s = v.as_str().ok_or(RpcError {
-                        code: -32602,
-                        message: "bad hex",
-                    })?;
-                    let bytes = hex::decode(s).map_err(|_| RpcError {
-                        code: -32602,
-                        message: "bad hex",
-                    })?;
-                    let arr: [u8; 32] = bytes.try_into().map_err(|_| RpcError {
-                        code: -32602,
-                        message: "bad hex",
-                    })?;
+                    let s = v.as_str().ok_or(rpc_error(-32602, "bad hex"))?;
+                    let bytes = hex::decode(s).map_err(|_| rpc_error(-32602, "bad hex"))?;
+                    let arr: [u8; 32] =
+                        bytes.try_into().map_err(|_| rpc_error(-32602, "bad hex"))?;
                     Ok(arr)
                 };
-            let prev_hash = parse32(&header_obj["prev_hash"])?;
-            let merkle_root = parse32(&header_obj["merkle_root"])?;
-            let checkpoint_hash = parse32(&header_obj["checkpoint_hash"])?;
-            let nonce = header_obj["nonce"].as_u64().ok_or(RpcError {
-                code: -32602,
-                message: "bad nonce",
-            })?;
-            let difficulty = header_obj["difficulty"].as_u64().ok_or(RpcError {
-                code: -32602,
-                message: "bad difficulty",
-            })?;
-            let timestamp = header_obj["timestamp_millis"].as_u64().ok_or(RpcError {
-                code: -32602,
-                message: "bad timestamp_millis",
-            })?;
-            let retune_hint = header_obj["retune_hint"].as_i64().unwrap_or(0) as i8;
+            let prev_hash = parse32(
+                header_obj
+                    .get("prev_hash")
+                    .ok_or(rpc_error(-32602, "missing prev_hash"))?,
+            )?;
+            let merkle_root = parse32(
+                header_obj
+                    .get("merkle_root")
+                    .ok_or(rpc_error(-32602, "missing merkle_root"))?,
+            )?;
+            let checkpoint_hash = parse32(
+                header_obj
+                    .get("checkpoint_hash")
+                    .ok_or(rpc_error(-32602, "missing checkpoint_hash"))?,
+            )?;
+            let nonce = header_obj
+                .get("nonce")
+                .ok_or(rpc_error(-32602, "missing nonce"))?
+                .as_u64()
+                .ok_or(rpc_error(-32602, "bad nonce"))?;
+            let difficulty = header_obj
+                .get("difficulty")
+                .ok_or(rpc_error(-32602, "missing difficulty"))?
+                .as_u64()
+                .ok_or(rpc_error(-32602, "bad difficulty"))?;
+            let timestamp = header_obj
+                .get("timestamp_millis")
+                .ok_or(rpc_error(-32602, "missing timestamp_millis"))?
+                .as_u64()
+                .ok_or(rpc_error(-32602, "bad timestamp_millis"))?;
+            let retune_hint = header_obj
+                .get("retune_hint")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i8;
             let hdr = BlockHeader {
                 prev_hash,
                 merkle_root,
@@ -1704,7 +1501,10 @@ fn dispatch(
                 nonce,
                 difficulty,
                 retune_hint,
-                base_fee: header_obj["base_fee"].as_u64().unwrap_or(1),
+                base_fee: header_obj
+                    .get("base_fee")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1),
                 timestamp_millis: timestamp,
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),
@@ -1717,17 +1517,14 @@ fn dispatch(
             if val <= u64::MAX / difficulty.max(1) {
                 foundation_serialization::json!({"status":"accepted"})
             } else {
-                return Err(RpcError {
-                    code: -32082,
-                    message: "invalid pow",
-                });
+                return Err(rpc_error(-32082, "invalid pow"));
             }
         }
         "consensus.difficulty" => consensus::difficulty(&bc),
-        "consensus.pos.register" => pos::register(&req.params)?,
-        "consensus.pos.bond" => pos::bond(&req.params)?,
-        "consensus.pos.unbond" => pos::unbond(&req.params)?,
-        "consensus.pos.slash" => pos::slash(&req.params)?,
+        "consensus.pos.register" => pos::register(req.params.as_value())?,
+        "consensus.pos.bond" => pos::bond(req.params.as_value())?,
+        "consensus.pos.unbond" => pos::unbond(req.params.as_value())?,
+        "consensus.pos.slash" => pos::slash(req.params.as_value())?,
         "light.latest_header" => {
             let guard = bc.lock().unwrap();
             foundation_serialization::json::to_value(light::latest_header(&guard)).unwrap()
@@ -1763,10 +1560,7 @@ fn dispatch(
                     );
                     #[cfg(not(feature = "telemetry"))]
                     let _ = e;
-                    return Err(RpcError {
-                        code: -32603,
-                        message: "serialization error".into(),
-                    });
+                    return Err(rpc_error(-32603, "serialization error".into()));
                 }
             }
         }
@@ -1775,10 +1569,7 @@ fn dispatch(
                 match hex::decode(hex) {
                     Ok(bytes) => Some(bytes),
                     Err(_) => {
-                        return Err(RpcError {
-                            code: -32602,
-                            message: "invalid relayer id".into(),
-                        });
+                        return Err(rpc_error(-32602, "invalid relayer id".into()));
                     }
                 }
             } else {
@@ -1806,10 +1597,7 @@ fn dispatch(
                     );
                     #[cfg(not(feature = "telemetry"))]
                     let _ = e;
-                    return Err(RpcError {
-                        code: -32603,
-                        message: "serialization error".into(),
-                    });
+                    return Err(rpc_error(-32603, "serialization error".into()));
                 }
             }
         }
@@ -1912,7 +1700,7 @@ fn dispatch(
                 .unwrap_or("");
             net::dns_verify(domain)
         }
-        "stake.role" => pos::role(&req.params)?,
+        "stake.role" => pos::role(req.params.as_value())?,
         "config.reload" => {
             let ok = crate::config::reload();
             foundation_serialization::json!({"reloaded": ok})
@@ -1920,7 +1708,7 @@ fn dispatch(
         "register_handle" => {
             check_nonce(req.method.as_str(), &req.params, &nonces)?;
             match handles.lock() {
-                Ok(mut reg) => match identity::register_handle(&req.params, &mut reg) {
+                Ok(mut reg) => match identity::register_handle(req.params.as_value(), &mut reg) {
                     Ok(v) => v,
                     Err(e) => foundation_serialization::json!({"error": e.code()}),
                 },
@@ -1936,19 +1724,21 @@ fn dispatch(
                 .unwrap_or_else(|| req.method.clone());
             check_nonce(scope, &req.params, &nonces)?;
             match dids.lock() {
-                Ok(mut reg) => match identity::anchor_did(&req.params, &mut reg, &GOV_STORE) {
-                    Ok(v) => v,
-                    Err(e) => foundation_serialization::json!({"error": e.code()}),
-                },
+                Ok(mut reg) => {
+                    match identity::anchor_did(req.params.as_value(), &mut reg, &GOV_STORE) {
+                        Ok(v) => v,
+                        Err(e) => foundation_serialization::json!({"error": e.code()}),
+                    }
+                }
                 Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
             }
         }
         "resolve_handle" => match handles.lock() {
-            Ok(reg) => identity::resolve_handle(&req.params, &reg),
+            Ok(reg) => identity::resolve_handle(req.params.as_value(), &reg),
             Err(_) => foundation_serialization::json!({"address": null}),
         },
         "identity.resolve" => match dids.lock() {
-            Ok(reg) => identity::resolve_did(&req.params, &reg),
+            Ok(reg) => identity::resolve_did(req.params.as_value(), &reg),
             Err(_) => foundation_serialization::json!({
                 "address": foundation_serialization::json::Value::Null,
                 "document": foundation_serialization::json::Value::Null,
@@ -1958,7 +1748,7 @@ fn dispatch(
             }),
         },
         "whoami" => match handles.lock() {
-            Ok(reg) => identity::whoami(&req.params, &reg),
+            Ok(reg) => identity::whoami(req.params.as_value(), &reg),
             Err(_) => foundation_serialization::json!({"address": null, "handle": null}),
         },
         "record_le_request" => {
@@ -2140,12 +1930,7 @@ fn dispatch(
                         Err(_) => foundation_serialization::json!({"error": "lock poisoned"}),
                     }
                 }
-                None => {
-                    return Err(RpcError {
-                        code: -32602,
-                        message: "invalid params",
-                    })
-                }
+                None => return Err(rpc_error(-32602, "invalid params")),
             }
         }
         "set_snapshot_interval" => {
@@ -2153,10 +1938,7 @@ fn dispatch(
                 .params
                 .get("interval")
                 .and_then(|v| v.as_u64())
-                .ok_or(RpcError {
-                    code: -32602,
-                    message: "invalid params",
-                })?;
+                .ok_or(rpc_error(-32602, "invalid params"))?;
             if interval < 10 {
                 return Err(SnapshotError::IntervalTooSmall.into());
             }
@@ -2165,10 +1947,7 @@ fn dispatch(
                 guard.config.snapshot_interval = interval;
                 guard.save_config();
             } else {
-                return Err(RpcError {
-                    code: -32603,
-                    message: "lock poisoned",
-                });
+                return Err(rpc_error(-32603, "lock poisoned"));
             }
             #[cfg(feature = "telemetry")]
             {
@@ -2218,10 +1997,7 @@ fn dispatch(
                 .params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32072,
-                    message: "missing path",
-                })?;
+                .ok_or(rpc_error(-32072, "missing path"))?;
             jurisdiction::set(&bc, path)?
         }
         "jurisdiction.policy_diff" => {
@@ -2229,10 +2005,7 @@ fn dispatch(
                 .params
                 .get("path")
                 .and_then(|v| v.as_str())
-                .ok_or(RpcError {
-                    code: -32072,
-                    message: "missing path",
-                })?;
+                .ok_or(rpc_error(-32072, "missing path"))?;
             jurisdiction::policy_diff(&bc, path)?
         }
         "metrics" => {
@@ -2302,12 +2075,7 @@ fn dispatch(
                 .unwrap_or(0);
             match dex::escrow_release(id, amt) {
                 Ok(v) => v,
-                Err(_) => {
-                    return Err(RpcError {
-                        code: -32002,
-                        message: "release failed",
-                    })
-                }
+                Err(_) => return Err(rpc_error(-32002, "release failed")),
             }
         }
         "dex_escrow_proof" => {
@@ -2318,15 +2086,10 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
             if let Some(proof) = dex::escrow_proof(id, idx) {
-                foundation_serialization::json::to_value(proof).map_err(|_| RpcError {
-                    code: -32603,
-                    message: "internal error",
-                })?
+                foundation_serialization::json::to_value(proof)
+                    .map_err(|_| rpc_error(-32603, "internal error"))?
             } else {
-                return Err(RpcError {
-                    code: -32003,
-                    message: "not found",
-                });
+                return Err(rpc_error(-32003, "not found"));
             }
         }
         "htlc_status" => {
@@ -2598,10 +2361,7 @@ fn dispatch(
                 .get("code")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let code = hex::decode(code_hex).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
+            let code = hex::decode(code_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
             let gas = vm::estimate_gas(code);
             foundation_serialization::json!({"gas_used": gas})
         }
@@ -2611,10 +2371,7 @@ fn dispatch(
                 .get("code")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let code = hex::decode(code_hex).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
+            let code = hex::decode(code_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
             let trace = vm::exec_trace(code);
             foundation_serialization::json!({"trace": trace})
         }
@@ -2630,19 +2387,11 @@ fn dispatch(
                 .get("data")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let bytes = hex::decode(data_hex).map_err(|_| RpcError {
-                code: -32602,
-                message: "invalid params",
-            })?;
+            let bytes = hex::decode(data_hex).map_err(|_| rpc_error(-32602, "invalid params"))?;
             vm::storage_write(id, bytes);
             foundation_serialization::json!({"status": "ok"})
         }
-        _ => {
-            return Err(RpcError {
-                code: -32601,
-                message: "method not found",
-            })
-        }
+        _ => return Err(rpc_error(-32601, "method not found")),
     })
 }
 

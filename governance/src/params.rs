@@ -1,4 +1,5 @@
 use super::ParamKey;
+use foundation_math::linalg::{Matrix, Vector};
 use foundation_serialization::{binary, json};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -1115,8 +1116,8 @@ pub fn retune_multipliers(
 
     use crate::kalman::KalmanLqg;
     let mut kf = KalmanLqg {
-        x: nalgebra::DVector::from_row_slice(&state.x),
-        p: nalgebra::DMatrix::from_row_slice(8, 8, &state.p),
+        x: Vector::<8>::from_array(state.x),
+        p: Matrix::<8, 8>::from_row_major(&state.p),
     };
     if !burst {
         kf.step(

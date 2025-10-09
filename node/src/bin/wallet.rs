@@ -2,7 +2,7 @@
 
 use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::json::{self, Value};
 use hex::{decode, encode};
 use httpd::{BlockingClient, Method};
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
@@ -527,7 +527,7 @@ fn main() {
                 signers_payload = approvals
                     .iter()
                     .map(|(pk, sig)| {
-                        json!({
+                        foundation_serialization::json!({
                             "pk": encode(pk.to_bytes()),
                             "sig": encode(sig.to_bytes()),
                         })
@@ -545,14 +545,14 @@ fn main() {
                     .sign_stake(&role_str, amount, withdraw)
                     .expect("sign");
                 id = wallet.public_key_hex();
-                signers_payload = vec![json!({
+                signers_payload = vec![foundation_serialization::json!({
                     "pk": id.clone(),
                     "sig": encode(sig.to_bytes()),
                 })];
                 threshold_value = 1;
             }
             let sig_hex = encode(sig.to_bytes());
-            let body = json!({
+            let body = foundation_serialization::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": if withdraw { "consensus.pos.unbond" } else { "consensus.pos.bond" },
@@ -579,7 +579,7 @@ fn main() {
             }
         }
         Commands::EscrowBalance { account, url } => {
-            let payload = json!({
+            let payload = foundation_serialization::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "rent.escrow.balance",
@@ -599,7 +599,7 @@ fn main() {
             }
         }
         Commands::EscrowRelease { id, amount, url } => {
-            let payload = json!({
+            let payload = foundation_serialization::json!({
                 "jsonrpc": "2.0",
                 "id": 1,
                 "method": "dex.escrow_release",

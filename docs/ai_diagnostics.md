@@ -8,5 +8,5 @@ tweaks. Training happens off-line using datasets exported via the node
 telemetry module, respecting privacy policies.
 
 Operators can submit anomaly labels back to the network which are aggregated
-via Prometheus counters. Governance may toggle the diagnostics feature via
+via runtime telemetry counters. Governance may toggle the diagnostics feature via
 `ai_diagnostics_enabled` parameter.

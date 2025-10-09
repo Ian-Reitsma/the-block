@@ -162,7 +162,7 @@ fn is_receipt_file(ext: Option<&str>) -> bool {
 }
 
 fn next_sequence(dir: &Path) -> IoResult<u64> {
-    let mut max_id = None;
+    let mut max_id: Option<u64> = None;
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();

@@ -922,7 +922,9 @@ async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
 }
 
 async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
-    Ok(http_metrics::prometheus(aggregator_metrics().registry()))
+    Ok(http_metrics::telemetry_snapshot(
+        aggregator_metrics().registry(),
+    ))
 }
 
 pub fn router(state: AppState) -> Router<AppState> {

@@ -49,10 +49,7 @@ pub fn set(
                 "jurisdiction": pack.region,
             }))
         }
-        Err(_) => Err(RpcError {
-            code: -32070,
-            message: "load failed",
-        }),
+        Err(_) => Err(RpcError::new(-32070, "load failed")),
     }
 }
 
@@ -74,17 +71,15 @@ pub fn policy_diff(
             })
             .resolve()
     };
-    let load_error = || RpcError {
-        code: -32070,
-        message: "load failed",
-    };
+    let load_error = || RpcError::new(-32070, "load failed");
     let new_pack = if std::path::Path::new(path).exists() {
         jurisdiction::PolicyPack::load(path).map_err(|_| load_error())
     } else {
         jurisdiction::PolicyPack::template(path).ok_or_else(load_error)
     }?
     .resolve();
-    Ok(jurisdiction::PolicyPack::diff(&current, &new_pack))
+    let diff = jurisdiction::PolicyPack::diff(&current, &new_pack);
+    Ok(foundation_serialization::json::from_any(diff))
 }
 
 #[cfg(test)]

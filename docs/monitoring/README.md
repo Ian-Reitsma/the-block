@@ -4,7 +4,7 @@
 
 This directory contains subsystem-specific Grafana dashboards that complement
 the primary telemetry bundle under `monitoring/grafana/`. Each JSON file is
-ready to import once the Prometheus stack is running.
+ready to import once the foundation telemetry stack is running.
 
 - `compute_market_dashboard.json` visualises backlog factors, fee-floor
   enforcement, courier retry behaviour, and the SLA violation counters alongside
@@ -25,5 +25,5 @@ the metrics aggregator.
 
 Import any of these dashboards after running `make monitor` (or the native
 equivalent) and ensure nodes start with `--metrics-addr` and
-`--features telemetry`. Dashboards assume Prometheus on `localhost:9090`; edit the
+`--features telemetry`. Dashboards assume the runtime exporter on `localhost:9090`; edit the
 embedded `datasource` block if your deployment differs.

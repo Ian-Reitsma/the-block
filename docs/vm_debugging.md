@@ -27,4 +27,4 @@ GET /vm/trace?code=<hex>
 
 Each message contains the program counter, opcode, stack, and storage snapshot.
 
-A Prometheus counter `vm_trace_total` tracks usage of this endpoint.
+A runtime telemetry counter `vm_trace_total` tracks usage of this endpoint.

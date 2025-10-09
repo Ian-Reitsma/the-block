@@ -1,6 +1,6 @@
 use colored::*;
 use crypto_suite::signatures::Signer;
-use foundation_serialization::json::{self, json, Value};
+use foundation_serialization::json::{self, Value};
 use hex;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
 use regex::Regex;
@@ -997,7 +997,7 @@ fn main() {
                         let mut off = offset;
                         let mut rows = Vec::new();
                         loop {
-                            let req = json!({
+                            let req = foundation_serialization::json!({
                                 "method": "net.peer_stats_all",
                                 "params": {"offset": off, "limit": limit},
                             });
@@ -1020,7 +1020,7 @@ fn main() {
                                 let m = &entry["metrics"];
                                 let until = m["throttled_until"].as_u64().unwrap_or(0);
                                 if until > now {
-                                    rows.push(json!({
+                                    rows.push(foundation_serialization::json!({
                                         "peer": entry["peer_id"].as_str().unwrap_or(""),
                                         "reason": m["throttle_reason"].as_str().unwrap_or(""),
                                         "until": until,
@@ -1056,7 +1056,7 @@ fn main() {
                         let mut active = 0u64;
                         let mut rows = Vec::new();
                         loop {
-                            let req = json!({
+                            let req = foundation_serialization::json!({
                                 "method": "net.peer_stats_all",
                                 "params": {"offset": off, "limit": limit},
                             });
@@ -1109,7 +1109,7 @@ fn main() {
                                 total_req += reqs;
                                 total_bytes += bytes;
                                 total_drop += drops_total;
-                                rows.push(json!({
+                                rows.push(foundation_serialization::json!({
                                     "peer": id,
                                     "requests": reqs,
                                     "bytes_sent": bytes,
@@ -1145,7 +1145,7 @@ fn main() {
                         }
                         match format {
                             OutputFormat::Json => {
-                                let out = json!({
+                                let out = foundation_serialization::json!({
                                     "peers": if summary { Value::Array(vec![]) } else { Value::Array(rows.clone()) },
                                     "summary": {
                                         "total_peers": rows.len(),
@@ -1209,7 +1209,7 @@ fn main() {
                             }
                         }
                     } else if let Some(id) = peer_id {
-                        let req = json!({
+                        let req = foundation_serialization::json!({
                             "method": "net.peer_stats",
                             "params": {"peer_id": id},
                         });
@@ -1301,7 +1301,7 @@ fn main() {
                 }
             }
             StatsCmd::Reset { peer_id, rpc } => {
-                let req = json!({
+                let req = foundation_serialization::json!({
                     "method": "net.peer_stats_reset",
                     "params": {"peer_id": peer_id},
                 });
@@ -1317,7 +1317,7 @@ fn main() {
                 }
             }
             StatsCmd::Reputation { peer_id, rpc } => {
-                let req = json!({
+                let req = foundation_serialization::json!({
                     "method": "net.peer_stats",
                     "params": {"peer_id": peer_id},
                 });
@@ -1376,8 +1376,8 @@ fn main() {
                 } else if peer_id.is_none() {
                     eprintln!("{}", gettext("peer_id required unless --all is specified"));
                 } else {
-                    let params = json!({"peer_id": peer_id.unwrap(), "path": path});
-                    let req = json!({
+                    let params = foundation_serialization::json!({"peer_id": peer_id.unwrap(), "path": path});
+                    let req = foundation_serialization::json!({
                         "method": "net.peer_stats_export",
                         "params": params,
                     });
@@ -1400,7 +1400,7 @@ fn main() {
                 }
             }
             StatsCmd::Persist { rpc } => {
-                let req = json!({ "method": "net.peer_stats_persist" });
+                let req = foundation_serialization::json!({ "method": "net.peer_stats_persist" });
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if val["result"]["status"].as_str() == Some("ok") {
@@ -1417,7 +1417,7 @@ fn main() {
                 clear,
                 rpc,
             } => {
-                let req = json!({
+                let req = foundation_serialization::json!({
                     "method": "net.peer_throttle",
                     "params": { "peer_id": peer_id, "clear": clear },
                 });
@@ -1437,7 +1437,7 @@ fn main() {
                 }
             }
             StatsCmd::Failures { peer_id, rpc } => {
-                let req = json!({
+                let req = foundation_serialization::json!({
                     "method": "net.peer_stats",
                     "params": {"peer_id": peer_id},
                 });
@@ -1484,7 +1484,7 @@ fn main() {
         },
         Command::Backpressure { action } => match action {
             BackpressureCmd::Clear { peer_id, rpc } => {
-                let req = json!({
+                let req = foundation_serialization::json!({
                     "method": "net.backpressure_clear",
                     "params": {"peer_id": peer_id},
                 });
@@ -1502,7 +1502,8 @@ fn main() {
         },
         Command::Compute { action } => match action {
             ComputeCmd::Stats { rpc, effective } => {
-                let req = json!({ "method": "compute_market.scheduler_stats" });
+                let req =
+                    foundation_serialization::json!({ "method": "compute_market.scheduler_stats" });
                 match post_json(&rpc, req) {
                     Ok(val) => {
                         if effective {
@@ -1521,7 +1522,7 @@ fn main() {
         },
         Command::Reputation { action } => match action {
             ReputationCmd::Sync { rpc } => {
-                let req = json!({ "method": "net.reputation_sync" });
+                let req = foundation_serialization::json!({ "method": "net.reputation_sync" });
                 match post_json(&rpc, req) {
                     Ok(_) => println!("sync triggered"),
                     Err(e) => eprintln!("{e}"),
@@ -1530,7 +1531,7 @@ fn main() {
         },
         Command::Config { action } => match action {
             ConfigCmd::Reload { rpc } => {
-                let req = json!({ "method": "net.config_reload" });
+                let req = foundation_serialization::json!({ "method": "net.config_reload" });
                 match post_json(&rpc, req) {
                     Ok(_) => println!("reload triggered"),
                     Err(e) => eprintln!("{e}"),
@@ -1546,7 +1547,7 @@ fn main() {
                 if let Ok(bytes) = hex::decode(&new_key) {
                     let sk = load_net_key();
                     let sig = sk.sign(&bytes);
-                    let req = json!({
+                    let req = foundation_serialization::json!({
                         "method": "net.key_rotate",
                         "params": {
                             "peer_id": peer_id,
@@ -1564,7 +1565,7 @@ fn main() {
             }
         },
         Command::DnsLookup { domain, rpc } => {
-            let body = json!({
+            let body = foundation_serialization::json!({
                 "method": "gateway.dns_lookup",
                 "params": {"domain": domain},
             });

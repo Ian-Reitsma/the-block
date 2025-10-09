@@ -1,7 +1,8 @@
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Header from an external chain.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Header {
     pub chain_id: String,
     pub height: u64,
@@ -10,7 +11,7 @@ pub struct Header {
 }
 
 /// Merkle proof referencing a deposit leaf.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Proof {
     pub leaf: [u8; 32],
     pub path: Vec<[u8; 32]>,

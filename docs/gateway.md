@@ -62,8 +62,8 @@ Security considerations are catalogued under
 
 - Finalized read batches mint `READ_SUB_CT` via the block coinbase. The
   formula `γ × bytes` is governed by `inflation.params`.
-- Prometheus counter `subsidy_bytes_total{type="read"}` increments with every
-  anchored batch so operators can reconcile payouts.
+- Runtime telemetry counter `subsidy_bytes_total{type="read"}` increments with
+  every anchored batch so operators can reconcile payouts.
 
 ## 4. Abuse Prevention Summary
 

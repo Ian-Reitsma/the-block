@@ -68,7 +68,7 @@ Auditors reconstruct traffic with the following steps:
 - `gateway.reads_since(epoch)` – returns per‑domain totals derived from
   finalized batches.
 - `analytics` – aggregates read counts and bytes for dashboards.
-- Prometheus counters `subsidy_bytes_total{type="read"}` and
+- Runtime telemetry counters `subsidy_bytes_total{type="read"}` and
   `read_denied_total{reason}` reflect subsidy issuance and rate‑limit drops.
 
 ## 5. Failure handling

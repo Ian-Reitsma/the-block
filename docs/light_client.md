@@ -45,7 +45,7 @@ desktop fallback that always defers to the configured `DeviceFallback`. Probes
 are polled asynchronously and cached for `stale_after`; if the backend fails,
 the last known status (or the fallback policy) is used while emitting a
 `tracing` warning. Every probe result is reported to the
-`light_client_device_status` Prometheus gauge (full metric
+`light_client_device_status` runtime telemetry gauge (full metric
 `the_block_light_client_device_status{field="wifi|charging|battery",freshness="fresh|cached|fallback"}`) when the
 `telemetry` feature is enabled. `DeviceStatusWatcher` records both the
 monotonic timestamp and wall-clock instant for each poll so cached reads expose

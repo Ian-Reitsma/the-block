@@ -5,7 +5,7 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use crypto_suite::transactions::{
     canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
 };
-use once_cell::sync::Lazy;
+use foundation_lazy::sync::Lazy;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};

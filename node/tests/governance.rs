@@ -1,5 +1,4 @@
 #![cfg(feature = "integration-tests")]
-use foundation_serialization::json::json;
 use governance_spec::{
     encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,
 };
@@ -140,16 +139,28 @@ fn gov_params_includes_dependency_policy() {
 
     let response = the_block::rpc::governance::gov_params(&params, 42).unwrap();
 
-    assert_eq!(response["runtime_backend_mask"], json!(runtime_mask));
+    assert_eq!(
+        response["runtime_backend_mask"],
+        foundation_serialization::json!(runtime_mask)
+    );
     assert_eq!(
         response["runtime_backend_policy"],
-        json!(["inhouse", "stub"])
+        foundation_serialization::json!(["inhouse", "stub"])
     );
-    assert_eq!(response["transport_provider_mask"], json!(transport_mask));
-    assert_eq!(response["transport_provider_policy"], json!(["quinn"]));
-    assert_eq!(response["storage_engine_mask"], json!(storage_mask));
+    assert_eq!(
+        response["transport_provider_mask"],
+        foundation_serialization::json!(transport_mask)
+    );
+    assert_eq!(
+        response["transport_provider_policy"],
+        foundation_serialization::json!(["quinn"])
+    );
+    assert_eq!(
+        response["storage_engine_mask"],
+        foundation_serialization::json!(storage_mask)
+    );
     assert_eq!(
         response["storage_engine_policy"],
-        json!(["rocksdb-compat", "inhouse"])
+        foundation_serialization::json!(["rocksdb-compat", "inhouse"])
     );
 }

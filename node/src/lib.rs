@@ -36,7 +36,7 @@ mod py;
 
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry-json")]
-use foundation_serialization::json::{self, json, Map as JsonMap, Value as JsonValue};
+use foundation_serialization::json::{self, Map as JsonMap, Value as JsonValue};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -312,17 +312,23 @@ fn log_event(
         return;
     }
     let mut obj = JsonMap::new();
-    obj.insert("subsystem".into(), json!(subsystem));
-    obj.insert("op".into(), json!(op));
-    obj.insert("sender".into(), json!(scrub(sender)));
-    obj.insert("nonce".into(), json!(nonce));
-    obj.insert("reason".into(), json!(reason));
-    obj.insert("code".into(), json!(code));
+    obj.insert(
+        "subsystem".into(),
+        foundation_serialization::json!(subsystem),
+    );
+    obj.insert("op".into(), foundation_serialization::json!(op));
+    obj.insert(
+        "sender".into(),
+        foundation_serialization::json!(scrub(sender)),
+    );
+    obj.insert("nonce".into(), foundation_serialization::json!(nonce));
+    obj.insert("reason".into(), foundation_serialization::json!(reason));
+    obj.insert("code".into(), foundation_serialization::json!(code));
     if let Some(v) = fpb {
-        obj.insert("fpb".into(), json!(v));
+        obj.insert("fpb".into(), foundation_serialization::json!(v));
     }
     if let Some(c) = cid {
-        obj.insert("cid".into(), json!(c));
+        obj.insert("cid".into(), foundation_serialization::json!(c));
     }
     let msg = JsonValue::Object(obj).to_string();
     telemetry::observe_log_size(msg.len());
