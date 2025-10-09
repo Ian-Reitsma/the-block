@@ -1,6 +1,7 @@
 use core::fmt;
 use std::collections::BTreeMap;
 use std::io;
+use std::ops::{Index, IndexMut};
 
 use serde::de::value::StringDeserializer;
 use serde::de::{self, DeserializeOwned, DeserializeSeed, EnumAccess, VariantAccess, Visitor};
@@ -272,6 +273,8 @@ pub enum Value {
     Object(Map),
 }
 
+static NULL: Value = Value::Null;
+
 impl Default for Value {
     fn default() -> Self {
         Value::Null
@@ -370,7 +373,7 @@ impl Value {
         }
     }
 
-    pub fn as_array(&self) -> Option<&[Value]> {
+    pub fn as_array(&self) -> Option<&Vec<Value>> {
         if let Value::Array(values) = self {
             Some(values)
         } else {
@@ -539,6 +542,68 @@ impl Value {
                 out.push_str(&"  ".repeat(depth));
                 out.push('}');
             }
+        }
+    }
+}
+
+impl Index<&str> for Value {
+    type Output = Value;
+
+    fn index(&self, index: &str) -> &Self::Output {
+        match self {
+            Value::Object(map) => map.get(index).unwrap_or(&NULL),
+            _ => &NULL,
+        }
+    }
+}
+
+impl IndexMut<&str> for Value {
+    fn index_mut(&mut self, index: &str) -> &mut Self::Output {
+        if !matches!(self, Value::Object(_)) {
+            *self = Value::Object(Map::new());
+        }
+
+        if let Value::Object(map) = self {
+            map.entry(index.to_owned()).or_insert(Value::Null)
+        } else {
+            unreachable!("value was converted to an object");
+        }
+    }
+}
+
+impl Index<usize> for Value {
+    type Output = Value;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match self {
+            Value::Array(values) => values.get(index).unwrap_or(&NULL),
+            _ => &NULL,
+        }
+    }
+}
+
+impl IndexMut<usize> for Value {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        if !matches!(self, Value::Array(_)) {
+            *self = Value::Array(Vec::new());
+        }
+
+        if let Value::Array(values) = self {
+            if index >= values.len() {
+                values.resize(index + 1, Value::Null);
+            }
+            &mut values[index]
+        } else {
+            unreachable!("value was converted to an array");
+        }
+    }
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match crate::json_impl::to_string(self) {
+            Ok(rendered) => f.write_str(&rendered),
+            Err(_) => Err(fmt::Error),
         }
     }
 }
@@ -1906,7 +1971,7 @@ fn decode_surrogate_pair(high: u16, low: u16) -> Option<char> {
 mod tests {
     use super::*;
 
-    use serde::{Deserialize, Serialize};
+    use crate::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
     struct Sample {
@@ -1929,7 +1994,7 @@ mod tests {
 
     #[test]
     fn json_macro_objects() {
-        let value = foundation_serialization::json!({
+        let value = crate::json!({
             "id": 1,
             "name": "test",
             "flags": [true, false, null],

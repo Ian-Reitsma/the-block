@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "telemetry")]
-use serde::Serialize;
+use foundation_serialization::Serialize;
 
 #[cfg(feature = "telemetry")]
 #[derive(Clone, Debug, Serialize)]

@@ -68,7 +68,7 @@ pub fn domain_tag_for(chain_id: u32) -> DomainTag {
 /// Canonical bincode configuration shared across transaction serialization helpers.
 #[must_use]
 pub fn canonical_bincode_config() -> BincodeConfig {
-    profiles::transaction_config()
+    profiles::transaction::config()
 }
 
 /// Serialize a payload using the canonical transaction bincode settings.
@@ -86,7 +86,7 @@ pub fn try_canonical_payload_bytes<T>(payload: &T) -> Result<Vec<u8>, codec::Err
 where
     T: serde::Serialize,
 {
-    codec::serialize(profiles::transaction(), payload)
+    codec::serialize(profiles::transaction::codec(), payload)
 }
 
 /// Helper that attaches the configured domain tag to a message payload.

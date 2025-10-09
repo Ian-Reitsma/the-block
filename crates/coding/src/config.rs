@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use foundation_serialization::toml;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 use crate::compression::{compressor_for, default_compressor};
 use crate::encrypt::encryptor_for;
@@ -101,17 +101,17 @@ impl Default for ChunkConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct Config {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub encryption: EncryptionConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub erasure: ErasureConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fountain: FountainConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub compression: CompressionConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chunks: ChunkConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub rollout: RolloutConfig,
 }
 
@@ -208,13 +208,13 @@ fn default_chunk_ladder() -> Vec<usize> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RolloutConfig {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub allow_fallback_coder: bool,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub allow_fallback_compressor: bool,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub require_emergency_switch: bool,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub emergency_switch_env: Option<String>,
 }
 

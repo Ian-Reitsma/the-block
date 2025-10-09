@@ -1,7 +1,5 @@
 use runtime::ws::{Message as WsMessage, ServerStream};
 
-#[cfg(feature = "telemetry")]
-use crate::telemetry;
 use crate::vm::{vm_debug_enabled, Debugger};
 
 /// Stream VM execution trace over an upgraded WebSocket connection.

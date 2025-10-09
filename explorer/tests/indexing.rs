@@ -1,10 +1,10 @@
 use explorer::Explorer;
-use sys::temp;
+use sys::tempfile;
 use the_block::compute_market::receipt::Receipt;
 
 #[test]
 fn ingest_and_query() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let receipts = dir.path().join("pending");
     std::fs::create_dir_all(&receipts).unwrap();
     let r = Receipt::new(

@@ -76,5 +76,5 @@ pub fn domain_tag() -> &'static [u8] {
 
 /// Canonical bincode configuration shared across the codebase.
 pub fn bincode_config() -> BincodeConfig {
-    profiles::transaction_config()
+    profiles::transaction::config()
 }

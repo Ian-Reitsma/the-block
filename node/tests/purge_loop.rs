@@ -120,18 +120,18 @@ fn counters_saturate_at_u64_max() {
     telemetry::TTL_DROP_TOTAL.reset();
     telemetry::TTL_DROP_TOTAL.inc_by(u64::MAX - 1);
     bc.purge_expired();
-    assert_eq!(u64::MAX, telemetry::TTL_DROP_TOTAL.get());
+    assert_eq!(u64::MAX, telemetry::TTL_DROP_TOTAL.value());
 
     telemetry::ORPHAN_SWEEP_TOTAL.reset();
     telemetry::ORPHAN_SWEEP_TOTAL.inc_by(u64::MAX - 1);
     submit_orphan_tx(&mut bc);
     bc.purge_expired();
-    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.value());
 
     // attempt another sweep
     submit_orphan_tx(&mut bc);
     bc.purge_expired();
-    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.value());
 
     telemetry::TTL_DROP_TOTAL.reset();
     telemetry::ORPHAN_SWEEP_TOTAL.reset();
@@ -168,8 +168,8 @@ fn counters_saturate_concurrently() {
     for h in handles {
         h.join().unwrap();
     }
-    assert_eq!(u64::MAX, telemetry::TTL_DROP_TOTAL.get());
-    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    assert_eq!(u64::MAX, telemetry::TTL_DROP_TOTAL.value());
+    assert_eq!(u64::MAX, telemetry::ORPHAN_SWEEP_TOTAL.value());
     telemetry::TTL_DROP_TOTAL.reset();
     telemetry::ORPHAN_SWEEP_TOTAL.reset();
 }

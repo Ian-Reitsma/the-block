@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 pub mod handshake;
 pub use handshake::*;

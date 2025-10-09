@@ -5,8 +5,6 @@ use light_client::{account_state_value, AccountChunk, StateChunk};
 use runtime::ws::{Message as WsMessage, ServerStream};
 use state::MerkleTrie;
 
-#[cfg(feature = "telemetry")]
-use crate::telemetry;
 use crate::Blockchain;
 
 /// Stream state diffs to the client over an upgraded WebSocket connection.

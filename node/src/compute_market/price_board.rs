@@ -1,6 +1,6 @@
 use crate::transaction::FeeLane;
 use concurrency::{Lazy, OnceCell};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt;
 use std::io;
@@ -32,12 +32,14 @@ const VERSION: u16 = 3;
 
 /// Sliding window of recent prices with quantile bands per lane.
 #[derive(Serialize, Deserialize, Clone, Copy)]
+#[serde(crate = "foundation_serialization::serde")]
 struct PriceEntry {
     price: u64,
     weighted: u64,
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PriceBoard {
     pub window: usize,
     consumer: VecDeque<PriceEntry>,

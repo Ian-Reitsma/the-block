@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// StorageOffer advertises available storage capacity
 /// along with pricing and retention policy.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct StorageOffer {
     /// Unique identifier of the provider
     pub provider_id: String,

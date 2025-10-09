@@ -8,3 +8,5 @@
 pub mod distribution;
 /// Fixed-size linear algebra primitives.
 pub mod linalg;
+/// Spectral transforms and related helpers.
+pub mod transform;

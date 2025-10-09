@@ -2,7 +2,7 @@
 use crate::telemetry;
 use crate::transaction::FeeLane;
 use concurrency::{mutex, MutexExt, MutexT};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use settlement::{SlaOutcome, SlaResolutionKind};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{
@@ -65,6 +65,7 @@ pub const MIN_BOND: u64 = 1;
 
 /// A stake-backed offer for compute capacity.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Offer {
     pub job_id: String,
     pub provider: String,
@@ -78,10 +79,10 @@ pub struct Offer {
     /// amount to industrial tokens, `100` routes it all to consumer tokens.
     pub fee_pct_ct: u8,
     /// Hardware capability advertised by the provider.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub capability: scheduler::Capability,
     /// Initial reputation score for the provider.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub reputation: i64,
     /// Reputation-based price multiplier.
     #[serde(default = "default_multiplier")]
@@ -119,11 +120,15 @@ fn default_multiplier() -> f64 {
 
 /// Receipt for a workload slice including an optional SNARK proof.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ExecutionReceipt {
     pub reference: [u8; 32],
     pub output: [u8; 32],
     pub payout: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "foundation_serialization::defaults::default",
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
     pub proof: Option<Vec<u8>>,
 }
 
@@ -238,6 +243,7 @@ impl WorkloadRunner {
 
 /// A job submitted by a consumer with per-slice reference hashes.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Job {
     pub job_id: String,
     pub buyer: String,
@@ -247,17 +253,18 @@ pub struct Job {
     pub consumer_bond: u64,
     pub workloads: Vec<Workload>,
     /// Required hardware capability for the job.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub capability: scheduler::Capability,
     /// Unix timestamp by which the provider must deliver.
     pub deadline: u64,
     /// Priority for scheduling.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub priority: scheduler::Priority,
 }
 
 /// Internal state for a matched job.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 struct JobState {
     job: Job,
     provider: String,

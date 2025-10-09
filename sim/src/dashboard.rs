@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::Serialize;
+use foundation_serialization::Serialize;
 
 /// Snapshot of simulation state exported for dashboards.
 #[derive(Debug, Clone, Serialize)]

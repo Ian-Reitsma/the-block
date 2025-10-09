@@ -37,9 +37,9 @@ mod py;
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry-json")]
 use foundation_serialization::json::{self, Map as JsonMap, Value as JsonValue};
+use foundation_serialization::{Deserialize, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -440,17 +440,17 @@ pub struct TokenBalance {
 pub struct Account {
     pub address: String,
     pub balance: TokenBalance,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub pending_consumer: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub pending_industrial: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub pending_nonce: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub pending_nonces: HashSet<u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub sessions: Vec<accounts::SessionPolicy>,
 }
 
@@ -553,77 +553,80 @@ impl<'a> ReservationGuard<'a> {
 pub struct Block {
     pub index: u64,
     pub previous_hash: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// UNIX timestamp in milliseconds when the block was mined
     pub timestamp_millis: u64,
     pub transactions: Vec<SignedTransaction>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub difficulty: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Miner-provided hint about recent hash-rate trend
     pub retune_hint: i8,
     pub nonce: u64,
     pub hash: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Canonical consumer reward recorded in the header. Must match tx[0].
     pub coinbase_consumer: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Canonical industrial reward recorded in the header. Must match tx[0].
     pub coinbase_industrial: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// CT subsidy minted for storage operations in this block
     pub storage_sub_ct: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// CT subsidy minted for read delivery in this block
     pub read_sub_ct: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// CT subsidy minted for compute in this block
     pub compute_sub_ct: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// CT rebates paid to proof relayers in this block
     pub proof_rebate_ct: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// IT subsidy minted for storage operations in this block
     pub storage_sub_it: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// IT subsidy minted for read delivery in this block
     pub read_sub_it: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// IT subsidy minted for compute in this block
     pub compute_sub_it: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Merkle root of all `ReadAck`s batched for this block
     pub read_root: [u8; 32],
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// blake3(total_fee_ct || total_fee_it) in hex
     pub fee_checksum: String,
-    #[serde(default, alias = "snapshot_root")]
+    #[serde(
+        default = "foundation_serialization::defaults::default",
+        alias = "snapshot_root"
+    )]
     /// Merkle root of account state
     pub state_root: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Base fee in effect for this block.
     pub base_fee: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// L2 blob commitment roots anchored in this block
     pub l2_roots: Vec<[u8; 32]>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Corresponding total byte sizes per root
     pub l2_sizes: Vec<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Commitment to VDF preimage for randomness fuse
     pub vdf_commit: [u8; 32],
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// VDF output revealed for commitment two blocks prior
     pub vdf_output: [u8; 32],
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Pietrzak proof bytes for the VDF evaluation
     pub vdf_proof: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Optional Dilithium public key for the miner.
     pub dilithium_pubkey: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Optional Dilithium signature over the header hash.
     pub dilithium_sig: Vec<u8>,
 }
@@ -785,41 +788,41 @@ pub struct Blockchain {
 
 #[derive(Serialize, Deserialize)]
 pub struct ChainDisk {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub schema_version: usize,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chain: Vec<Block>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub accounts: HashMap<String, Account>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub emission_consumer: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub emission_industrial: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub emission_consumer_year_ago: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub inflation_epoch_marker: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub block_reward_consumer: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub block_reward_industrial: TokenAmount,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub block_height: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub mempool: Vec<MempoolEntryDisk>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub base_fee: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub params: Params,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub epoch_storage_bytes: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub epoch_read_bytes: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub epoch_cpu_ms: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub epoch_bytes_out: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub recent_timestamps: Vec<u64>,
 }
 
@@ -829,7 +832,7 @@ pub struct MempoolEntryDisk {
     pub nonce: u64,
     pub tx: SignedTransaction,
     pub timestamp_millis: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub timestamp_ticks: u64,
 }
 
@@ -1197,7 +1200,20 @@ impl Blockchain {
             );
             #[cfg(all(feature = "telemetry", not(feature = "telemetry-json")))]
             if telemetry::should_log("service") {
-                let span = diagnostics::tracing::info_span!("badge", from = before, to = after);
+                let span = diagnostics::tracing::Span::new(
+                    std::borrow::Cow::Borrowed("badge"),
+                    diagnostics::tracing::Level::INFO,
+                    vec![
+                        diagnostics::FieldValue {
+                            key: std::borrow::Cow::Borrowed("from"),
+                            value: format!("{}", before),
+                        },
+                        diagnostics::FieldValue {
+                            key: std::borrow::Cow::Borrowed("to"),
+                            value: format!("{}", after),
+                        },
+                    ],
+                );
                 let _e = span.enter();
                 info!("badge {}", if after { "minted" } else { "revoked" });
             }
@@ -3161,7 +3177,7 @@ impl Blockchain {
             let fpb = value.fee_per_byte();
             if now.saturating_sub(value.timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
-                if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
+                if telemetry::TTL_DROP_TOTAL.value() < u64::MAX {
                     telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
                 }
                 expired.push((sender, nonce, fpb));
@@ -3175,7 +3191,7 @@ impl Blockchain {
             let fpb = value.fee_per_byte();
             if now.saturating_sub(value.timestamp_millis) > ttl_ms {
                 #[cfg(feature = "telemetry")]
-                if telemetry::TTL_DROP_TOTAL.get() < u64::MAX {
+                if telemetry::TTL_DROP_TOTAL.value() < u64::MAX {
                     telemetry::sampled_inc(&telemetry::TTL_DROP_TOTAL);
                 }
                 expired.push((sender, nonce, fpb));
@@ -3208,7 +3224,7 @@ impl Blockchain {
         let orphans = orphaned.len();
         if size > 0 && orphans * 2 > size {
             #[cfg(feature = "telemetry")]
-            if telemetry::ORPHAN_SWEEP_TOTAL.get() < u64::MAX {
+            if telemetry::ORPHAN_SWEEP_TOTAL.value() < u64::MAX {
                 telemetry::ORPHAN_SWEEP_TOTAL.inc();
             }
             for (sender, nonce, fpb) in orphaned {
@@ -4543,12 +4559,12 @@ pub fn spawn_purge_loop_thread(
                 #[cfg(feature = "telemetry")]
                 {
                     let (ttl_before, orphan_before) = (
-                        telemetry::TTL_DROP_TOTAL.get(),
-                        telemetry::ORPHAN_SWEEP_TOTAL.get(),
+                        telemetry::TTL_DROP_TOTAL.value(),
+                        telemetry::ORPHAN_SWEEP_TOTAL.value(),
                     );
                     let _ = guard.purge_expired();
-                    let ttl_after = telemetry::TTL_DROP_TOTAL.get();
-                    let orphan_after = telemetry::ORPHAN_SWEEP_TOTAL.get();
+                    let ttl_after = telemetry::TTL_DROP_TOTAL.value();
+                    let orphan_after = telemetry::ORPHAN_SWEEP_TOTAL.value();
                     let ttl_delta = ttl_after.saturating_sub(ttl_before);
                     let orphan_delta = orphan_after.saturating_sub(orphan_before);
                     #[cfg(not(feature = "telemetry-json"))]

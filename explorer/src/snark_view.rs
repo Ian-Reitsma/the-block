@@ -2,7 +2,7 @@
 
 use crate::Explorer;
 use anyhow::Result;
-use serde::Serialize;
+use foundation_serialization::Serialize;
 
 #[derive(Serialize)]
 pub struct SnarkProofRecord {

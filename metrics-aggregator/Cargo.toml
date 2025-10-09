@@ -10,6 +10,7 @@ diagnostics = { path = "../crates/diagnostics" }
 httpd = { path = "../crates/httpd" }
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../crates/foundation_serialization" }
+foundation_telemetry = { path = "../crates/foundation_telemetry" }
 runtime = { path = "../crates/runtime", default-features = false, features = ["inhouse-backend"] }
 crypto_suite = { path = "../crates/crypto_suite" }
 storage_engine = { path = "../crates/storage_engine" }

@@ -11,6 +11,8 @@ use hex;
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
 #[cfg(feature = "telemetry")]
+use httpd::{BlockingClient, Method};
+#[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
     self, Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
@@ -24,11 +26,12 @@ use std::sync::{Mutex, Once};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use sys::process;
-#[cfg(feature = "telemetry")]
-use ureq;
 
 #[cfg(feature = "telemetry")]
-use serde::Serialize;
+use foundation_serialization::Serialize;
+
+#[cfg(feature = "telemetry")]
+static GOV_WEBHOOK_CLIENT: Lazy<BlockingClient> = Lazy::new(BlockingClient::default);
 
 pub mod summary;
 
@@ -63,7 +66,7 @@ const KNOWN_STORAGE_ENGINES: [&str; 4] = ["memory", "inhouse", "rocksdb", "rocks
 const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
     ("bincode", &["transaction", "gossip", "storage_manifest"]),
     ("json", &["none"]),
-    ("cbor", &["none"]),
+    ("binary", &["none"]),
 ];
 #[cfg(all(feature = "quic", feature = "s2n-quic"))]
 const COMPILED_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
@@ -228,8 +231,9 @@ impl ReadStats {
     }
 
     pub fn snapshot(&self, domain: &str) -> (u64, u64) {
+        let key = domain.to_owned();
         self.inner
-            .get(domain)
+            .get(&key)
             .map(|s| {
                 (
                     s.reads.load(Ordering::Relaxed),
@@ -296,7 +300,7 @@ fn should_sample() -> bool {
     if rate >= 1_000_000 {
         return true;
     }
-    rand::thread_rng().gen_range(0..1_000_000) < rate
+    rand::thread_rng().gen_range(0..1_000_000u64) < rate
 }
 
 #[cfg(feature = "telemetry")]
@@ -362,9 +366,16 @@ fn set_coding_metric(component: &str, algorithm: &str, mode: &str, value: i64) {
 #[cfg(feature = "telemetry")]
 fn codec_labels(codec: Codec) -> (&'static str, &'static str) {
     match codec {
-        Codec::Bincode(profile) => ("bincode", profile.as_str()),
+        Codec::Bincode(profile) => (
+            "bincode",
+            match profile {
+                codec::BincodeProfile::Transaction => "transaction",
+                codec::BincodeProfile::Gossip => "gossip",
+                codec::BincodeProfile::StorageManifest => "storage_manifest",
+            },
+        ),
         Codec::Json(_) => ("json", CODEC_NONE_PROFILE),
-        Codec::Cbor(_) => ("cbor", CODEC_NONE_PROFILE),
+        Codec::Binary(_) => ("binary", CODEC_NONE_PROFILE),
     }
 }
 
@@ -425,12 +436,12 @@ pub fn init_wrapper_metrics() {}
 pub fn record_runtime_backend(active: &str) {
     let compiled = crate::runtime::compiled_backends();
     for backend in KNOWN_RUNTIME_BACKENDS {
-        let compiled_flag = if compiled.iter().any(|&b| b == *backend) {
+        let compiled_flag = if compiled.iter().any(|&b| b == backend) {
             "true"
         } else {
             "false"
         };
-        let value = if *backend == active { 1 } else { 0 };
+        let value = if backend == active { 1 } else { 0 };
         RUNTIME_BACKEND_INFO
             .with_label_values(&[backend, compiled_flag])
             .set(value);
@@ -478,12 +489,12 @@ pub fn record_dependency_policy(_kind: &str, _allowed: &[String]) {}
 pub fn record_transport_backend(active: &str) {
     let compiled = compiled_transport_providers();
     for provider in KNOWN_TRANSPORT_PROVIDERS {
-        let compiled_flag = if compiled.iter().any(|&p| p == *provider) {
+        let compiled_flag = if compiled.iter().any(|&p| p == provider) {
             "true"
         } else {
             "false"
         };
-        let value = if *provider == active { 1 } else { 0 };
+        let value = if provider == active { 1 } else { 0 };
         TRANSPORT_PROVIDER_INFO
             .with_label_values(&[provider, compiled_flag])
             .set(value);
@@ -625,7 +636,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
 
     let compiled_runtime = crate::runtime::compiled_backends();
     for backend in KNOWN_RUNTIME_BACKENDS {
-        let compiled_flag = if compiled_runtime.iter().any(|&b| b == *backend) {
+        let compiled_flag = if compiled_runtime.iter().any(|&b| b == backend) {
             "true"
         } else {
             "false"
@@ -636,7 +647,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
             push_metric(
                 &mut metrics,
                 "runtime_backend_info",
-                &[("backend", *backend), ("compiled", compiled_flag)],
+                &[("backend", backend), ("compiled", compiled_flag)],
                 gauge.get() as f64,
             );
         }
@@ -644,7 +655,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
 
     let compiled_transport = compiled_transport_providers();
     for provider in KNOWN_TRANSPORT_PROVIDERS {
-        let compiled_flag = if compiled_transport.iter().any(|&p| p == *provider) {
+        let compiled_flag = if compiled_transport.iter().any(|&p| p == provider) {
             "true"
         } else {
             "false"
@@ -655,7 +666,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
             push_metric(
                 &mut metrics,
                 "transport_provider_info",
-                &[("provider", *provider), ("compiled", compiled_flag)],
+                &[("provider", provider), ("compiled", compiled_flag)],
                 gauge.get() as f64,
             );
         }
@@ -665,7 +676,7 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
             push_metric(
                 &mut metrics,
                 "transport_provider_connect_total",
-                &[("provider", *provider)],
+                &[("provider", provider)],
                 counter.get() as f64,
             );
         }
@@ -969,12 +980,16 @@ pub fn log_context() -> diagnostics::tracing::Span {
     use rand::RngCore;
     let mut buf = [0u8; 8];
     rand::thread_rng().fill_bytes(&mut buf);
-    diagnostics::tracing::info_span!("trace", trace_id = %hex::encode(buf))
+    crate::logging::info_span_with_field("trace", "trace_id", hex::encode(buf))
 }
 
 #[cfg(not(feature = "telemetry"))]
 pub fn log_context() -> diagnostics::tracing::Span {
-    diagnostics::tracing::info_span!("trace")
+    diagnostics::tracing::Span::new(
+        std::borrow::Cow::Borrowed("trace"),
+        diagnostics::tracing::Level::INFO,
+        Vec::new(),
+    )
 }
 
 pub static HAAR_ETA_MILLI: Lazy<IntGauge> = Lazy::new(|| {
@@ -1746,8 +1761,7 @@ pub static PRICE_WEIGHT_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 pub static PARALLEL_EXECUTE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    let buckets = telemetry::exponential_buckets(0.001, 2.0, 12)
-        .unwrap_or_else(|e| panic!("parallel execute buckets: {e}"));
+    let buckets = telemetry::exponential_buckets(0.001, 2.0, 12);
     let opts = HistogramOpts::new(
         "parallel_execute_seconds",
         "Elapsed wall-clock time for ParallelExecutor batches",
@@ -2413,8 +2427,7 @@ pub static STORAGE_COMPRESSION_RATIO: Lazy<HistogramVec> = Lazy::new(|| {
 });
 
 pub static STORAGE_PUT_OBJECT_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
-    let buckets = telemetry::exponential_buckets(0.005, 1.8, 12)
-        .unwrap_or_else(|e| panic!("storage put object buckets: {e}"));
+    let buckets = telemetry::exponential_buckets(0.005, 1.8, 12);
     let opts = HistogramOpts::new(
         "storage_put_object_seconds",
         "End-to-end latency for StoragePipeline::put_object",
@@ -3344,8 +3357,14 @@ pub static GOV_DEPENDENCY_POLICY_ALLOWED: Lazy<GaugeVec> = Lazy::new(|| {
 /// Send governance events to an external webhook if `GOV_WEBHOOK_URL` is set.
 pub fn governance_webhook(event: &str, proposal_id: u64) {
     if let Ok(url) = std::env::var("GOV_WEBHOOK_URL") {
-        let _ =
-            ureq::post(&url).send_json(ureq::json!({"event": event, "proposal_id": proposal_id}));
+        let payload = foundation_serialization::json!({
+            "event": event,
+            "proposal_id": proposal_id,
+        });
+        let _ = GOV_WEBHOOK_CLIENT
+            .request(Method::Post, &url)
+            .and_then(|req| req.json(&payload))
+            .and_then(|req| req.send());
     }
 }
 
@@ -4729,10 +4748,7 @@ pub static LOG_CORRELATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 
 pub static LOG_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("log_size_bytes", "Size of serialized log events in bytes")
-        .buckets(
-            telemetry::exponential_buckets(64.0, 2.0, 8)
-                .unwrap_or_else(|e| panic!("histogram buckets: {e}")),
-        );
+        .buckets(telemetry::exponential_buckets(64.0, 2.0, 8));
     let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));
     REGISTRY
         .register(Box::new(h.clone()))

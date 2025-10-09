@@ -1,10 +1,10 @@
 use codec::{self, profiles};
 use explorer::Explorer;
-use sys::temp;
+use sys::tempfile;
 
 #[test]
 fn load_trace() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     struct DirGuard(std::path::PathBuf);
     impl Drop for DirGuard {
         fn drop(&mut self) {
@@ -17,7 +17,7 @@ fn load_trace() {
     std::fs::create_dir_all("trace").unwrap();
     std::fs::write(
         "trace/tx1.json",
-        codec::serialize(profiles::json(), &vec!["Push", "Halt"]).unwrap(),
+        codec::serialize(profiles::json::codec(), &vec!["Push", "Halt"]).unwrap(),
     )
     .unwrap();
     let db = dir.path().join("explorer.db");

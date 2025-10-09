@@ -84,8 +84,8 @@ fn anchor_responses(tx: &TxDidAnchor, updated_at: u64) -> String {
     foundation_serialization::json!({
         "jsonrpc": "2.0",
         "result": {
-            "address": tx.address,
-            "document": tx.document,
+            "address": tx.address.clone(),
+            "document": tx.document.clone(),
             "hash": doc_hash,
             "nonce": tx.nonce,
             "updated_at": updated_at,
@@ -124,8 +124,8 @@ fn anchor_submission_and_resolve_flow() {
         foundation_serialization::json!({
             "jsonrpc": "2.0",
             "result": {
-                "address": tx.address,
-                "document": tx.document,
+                "address": tx.address.clone(),
+                "document": tx.document.clone(),
                 "hash": hex::encode(tx.document_hash()),
                 "nonce": tx.nonce,
                 "updated_at": 123,

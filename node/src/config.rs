@@ -5,12 +5,12 @@ use concurrency::Lazy;
 use diagnostics::anyhow::{anyhow, Result};
 use diagnostics::TbError;
 use foundation_serialization::toml;
+use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     DEFAULT_RUNTIME_BACKEND_POLICY, DEFAULT_STORAGE_ENGINE_POLICY,
     DEFAULT_TRANSPORT_PROVIDER_POLICY,
 };
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -31,9 +31,9 @@ pub struct NodeConfig {
     pub price_board_path: String,
     pub price_board_window: usize,
     pub price_board_save_interval: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub rpc: RpcConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub compute_market: ComputeMarketConfig,
     pub telemetry_summary_interval: u64,
     #[serde(default = "default_max_peer_metrics")]
@@ -46,7 +46,7 @@ pub struct NodeConfig {
     pub peer_metrics_db: String,
     #[serde(default = "default_peer_metrics_retention")]
     pub peer_metrics_retention: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub peer_metrics_compress: bool,
     #[serde(default = "default_peer_metrics_sample_rate")]
     pub peer_metrics_sample_rate: u32,
@@ -54,13 +54,13 @@ pub struct NodeConfig {
     pub metrics_export_dir: String,
     #[serde(default = "default_peer_metrics_export_quota_bytes")]
     pub peer_metrics_export_quota_bytes: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub overlay: OverlayConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub storage: EngineConfig,
     #[serde(default = "default_false")]
     pub storage_legacy_mode: bool,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub metrics_aggregator: Option<AggregatorConfig>,
     #[serde(default = "default_true")]
     pub track_peer_drop_reasons: bool,
@@ -86,13 +86,13 @@ pub struct NodeConfig {
     pub gateway_dns_disable_verify: bool,
     #[serde(default = "default_gateway_blocklist")]
     pub gateway_blocklist: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub lighthouse: LighthouseConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic: Option<QuicConfig>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub telemetry: TelemetryConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub jurisdiction: Option<String>,
     #[serde(default = "default_proof_rebate_rate")]
     pub proof_rebate_rate: u64,
@@ -176,7 +176,7 @@ impl Default for OverlayBackend {
 pub struct OverlayConfig {
     #[serde(default = "default_overlay_db_path")]
     pub peer_db_path: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub backend: OverlayBackend,
 }
 
@@ -193,7 +193,7 @@ impl Default for OverlayConfig {
 pub struct AggregatorConfig {
     pub url: String,
     pub auth_token: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub srv_record: Option<String>,
     #[serde(default = "default_retention_secs")]
     pub retention_secs: u64,
@@ -567,7 +567,7 @@ pub struct RpcConfig {
     pub request_timeout_ms: u64,
     pub enable_debug: bool,
     pub admin_token_file: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub relay_only: bool,
 }
 
@@ -578,7 +578,7 @@ pub struct QuicConfig {
     pub key_path: String,
     #[serde(default = "default_cert_ttl_days")]
     pub cert_ttl_days: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub transport: QuicTransportConfig,
 }
 
@@ -588,19 +588,19 @@ fn default_cert_ttl_days() -> u64 {
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct QuicTransportConfig {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub provider: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub certificate_cache: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub retry_attempts: Option<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub retry_backoff_ms: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub handshake_timeout_ms: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub rotation_history: Option<usize>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub rotation_max_age_secs: Option<u64>,
 }
 

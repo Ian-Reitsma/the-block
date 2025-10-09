@@ -4,7 +4,7 @@ use super::order_book::{Order, OrderBook};
 use crate::simple_db::{names, SimpleDb};
 use dex::amm::Pool;
 use dex::escrow::{Escrow, EscrowId, PaymentProof};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

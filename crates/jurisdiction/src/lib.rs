@@ -3,6 +3,7 @@ use base64_fp::encode_standard;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::{json, Deserialize, Serialize};
+use httpd::{BlockingClient, ClientError as HttpClientError, Method};
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
 use std::path::Path;
@@ -14,7 +15,7 @@ pub struct PolicyPack {
     pub consent_required: bool,
     pub features: Vec<String>,
     /// Optional parent region to inherit defaults from (e.g. country -> state -> municipality).
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub parent: Option<String>,
 }
 
@@ -48,14 +49,32 @@ impl SignedPack {
 static CACHE: Lazy<std::sync::Mutex<HashMap<String, PolicyPack>>> =
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
+static HTTP_CLIENT: Lazy<BlockingClient> = Lazy::new(BlockingClient::default);
+
+fn map_http_error(err: HttpClientError) -> io::Error {
+    if err.is_timeout() {
+        io::Error::new(ErrorKind::TimedOut, err.to_string())
+    } else {
+        io::Error::new(ErrorKind::Other, err.to_string())
+    }
+}
+
 /// Fetch a signed policy pack from a URL and cache it.
 pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack> {
-    let resp = ureq::get(url)
-        .call()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-    let body = resp
-        .into_string()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    let response = HTTP_CLIENT
+        .request(Method::Get, url)
+        .map_err(map_http_error)?
+        .send()
+        .map_err(map_http_error)?;
+    if !response.status().is_success() {
+        return Err(io::Error::new(
+            ErrorKind::Other,
+            format!("http status {}", response.status().as_u16()),
+        ));
+    }
+    let body = response
+        .text()
+        .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
     let signed: SignedPack = json::from_str(&body)
         .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
     if !signed.verify(pk) {

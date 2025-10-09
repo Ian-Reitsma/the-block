@@ -11,6 +11,5 @@ telemetry = ["dep:metrics"]
 bincode = "1.3"
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../foundation_serialization" }
-serde_cbor = "0.11"
 thiserror = "1"
 metrics = { version = "0.21", optional = true }

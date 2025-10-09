@@ -1,12 +1,11 @@
-use std::collections::BTreeMap;
-
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::{Deserialize, Serialize};
 use httpd::{BlockingClient, Method};
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub enum SystemCmd {
@@ -61,7 +60,7 @@ struct WrapperMetric {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct WrapperSummary {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     metrics: Vec<WrapperMetric>,
 }
 

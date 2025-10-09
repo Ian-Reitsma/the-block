@@ -1,6 +1,6 @@
 use crypto_suite::hashing::blake3;
 use foundation_serialization::json;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,7 +16,7 @@ pub struct LeRequest {
     pub agency: String,
     pub case_hash: String,
     pub jurisdiction: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub language: String,
 }
 
@@ -26,7 +26,7 @@ pub struct LeAction {
     pub agency: String,
     pub action_hash: String,
     pub jurisdiction: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub language: String,
 }
 
@@ -37,7 +37,7 @@ pub struct EvidenceRecord {
     pub case_hash: String,
     pub evidence_hash: String,
     pub jurisdiction: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub language: String,
 }
 

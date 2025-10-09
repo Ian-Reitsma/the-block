@@ -66,7 +66,7 @@ fn env_driven_purge_loop_drops_entries() {
         maybe_spawn_purge_loop(Arc::clone(&bc), shutdown.as_arc()).expect("invalid interval");
     thread::sleep(Duration::from_millis(50));
     #[cfg(feature = "telemetry")]
-    let before = telemetry::TTL_DROP_TOTAL.get();
+    let before = telemetry::TTL_DROP_TOTAL.value();
     shutdown.trigger();
     handle.join().unwrap();
     thread::sleep(Duration::from_millis(50));
@@ -75,8 +75,8 @@ fn env_driven_purge_loop_drops_entries() {
     assert!(guard.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
-        assert_eq!(before, telemetry::TTL_DROP_TOTAL.get());
+        assert_eq!(1, telemetry::TTL_DROP_TOTAL.value());
+        assert_eq!(before, telemetry::TTL_DROP_TOTAL.value());
         telemetry::TTL_DROP_TOTAL.reset();
     }
 }

@@ -19,23 +19,14 @@ pub fn extract_wasm_metadata(bytes: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    const PUSH_I64: u8 = 0x01;
+    const RETURN: u8 = 0x10;
+
     fn sample_module() -> Vec<u8> {
         let mut buf = Vec::new();
         buf.extend_from_slice(&wasm::MAGIC);
         buf.push(wasm::VERSION_V1);
-        buf.extend_from_slice(&[
-            wasm::opcodes::PUSH_I64,
-            1,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            wasm::opcodes::RETURN,
-            1,
-        ]);
+        buf.extend_from_slice(&[PUSH_I64, 1, 0, 0, 0, 0, 0, 0, 0, RETURN, 1]);
         buf
     }
 

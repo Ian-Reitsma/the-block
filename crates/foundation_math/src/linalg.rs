@@ -328,7 +328,7 @@ mod tests {
         let mut m = Matrix::<3, 3>::identity();
         m[(0, 1)] = 2.0;
         m[(1, 2)] = -1.0;
-        m[(2, 0)] = 0.5;
+        m[(2, 0)] = -0.5;
         let inv = m.try_inverse().unwrap();
         let prod = m.mul_matrix(&inv);
         for r in 0..3 {

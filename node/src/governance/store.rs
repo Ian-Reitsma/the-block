@@ -8,11 +8,11 @@ use crate::telemetry::{
     GOV_VOTES_TOTAL, PARAM_CHANGE_ACTIVE, PARAM_CHANGE_PENDING,
 };
 use concurrency::Lazy;
-use foundation_serialization::{binary, json};
+use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::{binary, json, Deserialize, Serialize};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sled::Config;
 use std::collections::HashMap;
 use std::env;
@@ -27,6 +27,7 @@ const PARAM_HISTORY_LIMIT: usize = 512;
 const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct LastActivation {
     pub proposal_id: u64,
     pub key: ParamKey,
@@ -36,25 +37,28 @@ pub struct LastActivation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct ParamChangeRecord {
     key: ParamKey,
     proposal_id: u64,
     epoch: u64,
     old_value: i64,
     new_value: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     fee_floor: Option<FeeFloorPolicySnapshot>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     dependency_policy: Option<DependencyPolicySnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct FeeFloorPolicySnapshot {
     window: i64,
     percentile: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct FeeFloorPolicyRecord {
     epoch: u64,
     proposal_id: u64,
@@ -63,12 +67,14 @@ struct FeeFloorPolicyRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct DependencyPolicySnapshot {
     kind: String,
     allowed: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DependencyPolicyRecord {
     pub epoch: u64,
     pub proposal_id: u64,
@@ -77,6 +83,7 @@ pub struct DependencyPolicyRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DidRevocationRecord {
     pub address: String,
     pub reason: String,

@@ -105,7 +105,7 @@ def boom(bc):
     thread::sleep(Duration::from_millis(1100));
 
     #[cfg(feature = "telemetry")]
-    assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
+    assert_eq!(1, telemetry::TTL_DROP_TOTAL.value());
 
     Python::with_gil(|py| {
         let bc_ref = bc_py.borrow(py);

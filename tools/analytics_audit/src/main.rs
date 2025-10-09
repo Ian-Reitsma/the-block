@@ -1,6 +1,10 @@
 use crypto_suite::hashing::blake3::Hasher;
-use serde::Deserialize;
-use std::{env, fs::File, io::BufReader};
+use foundation_serialization::{binary, Deserialize};
+use std::{
+    env,
+    fs::File,
+    io::{BufReader, Read},
+};
 
 #[derive(Deserialize)]
 struct ReadAck {
@@ -49,10 +53,12 @@ fn merkle_root(mut leaves: Vec<[u8; 32]>) -> [u8; 32] {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = env::args()
         .nth(1)
-        .expect("usage: analytics_audit <cbor-file>");
+        .expect("usage: analytics_audit <binary-file>");
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let acks: Vec<ReadAck> = serde_cbor::from_reader(reader)?;
+    let mut reader = BufReader::new(file);
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer)?;
+    let acks: Vec<ReadAck> = binary::decode(&buffer)?;
     let leaves: Vec<[u8; 32]> = acks.iter().map(hash_ack).collect();
     let root = merkle_root(leaves);
     let total: u64 = acks.iter().map(|a| a.bytes).sum();

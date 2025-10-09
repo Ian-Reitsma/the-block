@@ -1,0 +1,10 @@
+[package]
+name = "foundation_telemetry"
+version = "0.1.0"
+edition = "2021"
+description = "Shared telemetry schema definitions and validators"
+authors = ["The Block Dev Team"]
+license = "MIT"
+
+[dependencies]
+foundation_serialization = { path = "../foundation_serialization" }

@@ -101,7 +101,7 @@ fn ttl_expiry_purges_and_counts() {
     assert_eq!(1, dropped);
     assert!(bc.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
-    assert_eq!(1, telemetry::TTL_DROP_TOTAL.get());
+    assert_eq!(1, telemetry::TTL_DROP_TOTAL.value());
 }
 
 #[testkit::tb_serial]
@@ -132,7 +132,7 @@ fn orphan_sweep_removes_missing_sender() {
     let _ = bc.purge_expired();
     assert!(bc.mempool_consumer.is_empty());
     #[cfg(feature = "telemetry")]
-    assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.value());
 }
 
 #[testkit::tb_serial]
@@ -180,7 +180,7 @@ fn heap_orphan_stress_triggers_rebuild_and_orders() {
     assert_eq!(bc.mempool_consumer.len(), 3);
     assert_eq!(bc.orphan_count(), 0);
     #[cfg(feature = "telemetry")]
-    assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
+    assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.value());
     let ttl = bc.tx_ttl;
     let mut entries: Vec<_> = bc
         .mempool_consumer

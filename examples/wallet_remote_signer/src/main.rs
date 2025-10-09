@@ -1,6 +1,6 @@
 use httpd::{HttpError, Method, Response, Router, ServerConfig, StatusCode};
 use runtime::net::TcpListener;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::sync::Arc;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletSigner};
 use ledger::crypto::remote_tag;

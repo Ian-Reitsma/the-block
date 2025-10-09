@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
 use foundation_serialization::json;
+use foundation_serialization::Serialize;
 use rand::{rngs::StdRng, Rng};
-use serde::Serialize;
 
 pub mod bridging;
 pub mod dashboard;

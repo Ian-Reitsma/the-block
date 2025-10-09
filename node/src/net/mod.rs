@@ -38,6 +38,7 @@ use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
 use foundation_serialization::json::{self, Value};
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use ledger::address::ShardId;
 #[cfg(feature = "telemetry")]
@@ -46,7 +47,6 @@ use p2p_overlay::{
     InhouseOverlay, InhousePeerId, OverlayResult, OverlayService, PeerEndpoint, StubOverlay,
 };
 use rand::{OsRng, Rng, RngCore};
-use serde::{Deserialize, Serialize};
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 use std::fs;
 use std::io::{Read, Write};
@@ -194,7 +194,7 @@ pub struct OverlayStatus {
     pub backend: String,
     pub active_peers: usize,
     pub persisted_peers: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub database_path: Option<String>,
 }
 
@@ -525,7 +525,7 @@ type ProviderCertStores = HashMap<String, PeerCertStore>;
 #[derive(Clone, Serialize, Deserialize)]
 struct CertDiskRecord {
     fingerprint: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     cert: Option<String>,
     updated_at: u64,
 }
@@ -533,23 +533,23 @@ struct CertDiskRecord {
 #[derive(Clone, Serialize, Deserialize)]
 struct PeerCertDiskEntry {
     peer: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     providers: Vec<ProviderDiskRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     current: Option<CertDiskRecord>,
     history: Vec<CertDiskRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     rotations: Option<u64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 struct ProviderDiskRecord {
     provider: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     current: Option<CertDiskRecord>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     history: Vec<CertDiskRecord>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     rotations: Option<u64>,
 }
 
@@ -609,13 +609,13 @@ pub fn register_shard_peer(shard: ShardId, peer: OverlayPeerId) {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct QuicStatsEntry {
     pub peer_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub address: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub latency_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub fingerprint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub provider: Option<String>,
     pub retransmits: u64,
     pub endpoint_reuse: u64,

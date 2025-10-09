@@ -1,5 +1,5 @@
+use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Aggregated checkpoint summarising shard tips and rewards.

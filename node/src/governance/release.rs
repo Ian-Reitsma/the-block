@@ -1,8 +1,9 @@
 use super::{Address, GovStore, ProposalStatus, VoteChoice, QUORUM};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Provenance attestation over a release artifact.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ReleaseAttestation {
     /// Hex-encoded Ed25519 verifying key that produced the signature.
     pub signer: String,
@@ -12,6 +13,7 @@ pub struct ReleaseAttestation {
 
 /// Governance proposal representing a release hash endorsement.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ReleaseVote {
     pub id: u64,
     /// Hex-encoded BLAKE3 hash of the release artifact.
@@ -87,6 +89,7 @@ impl ReleaseVote {
 
 /// Ballot cast for a release proposal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ReleaseBallot {
     pub proposal_id: u64,
     pub voter: Address,
@@ -109,6 +112,7 @@ impl ReleaseBallot {
 
 /// Record describing an activated release hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ApprovedRelease {
     pub build_hash: String,
     pub activated_epoch: u64,

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Constant-product automated market maker pool for CT/IT pairs.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]

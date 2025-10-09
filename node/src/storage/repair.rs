@@ -6,13 +6,10 @@ use crate::storage::settings;
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
-use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json;
-use rayon::prelude::*;
-use rayon::ThreadPool;
-use rayon::ThreadPoolBuilder;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
@@ -26,14 +23,6 @@ const MAX_LOG_FILES: usize = 14;
 const FAILURE_PREFIX: &str = "repair/failures/";
 const FAILURE_BACKOFF_BASE_SECS: u64 = 30;
 const FAILURE_BACKOFF_CAP_SECS: u64 = 60 * 60;
-
-static REPAIR_POOL: Lazy<ThreadPool> = Lazy::new(|| {
-    ThreadPoolBuilder::new()
-        .num_threads(MAX_CONCURRENT_REPAIRS)
-        .thread_name(|idx| format!("repair-worker-{idx}"))
-        .build()
-        .expect("repair pool")
-});
 
 pub fn spawn(path: String, period: Duration) {
     let _ = thread::Builder::new()
@@ -137,6 +126,7 @@ pub struct RepairFailure {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum RepairLogStatus {
     Success,
     Failure,
@@ -157,6 +147,7 @@ impl fmt::Display for RepairLogStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct RepairLogEntry {
     pub timestamp: i64,
     pub manifest: String,
@@ -560,7 +551,7 @@ pub fn run_once(
             let computed: Vec<RepairOutcome> = if jobs.is_empty() {
                 Vec::new()
             } else {
-                REPAIR_POOL.install(|| jobs.into_par_iter().map(process_job).collect())
+                run_scheduled_jobs(jobs)
             };
 
             outcomes.extend(computed);
@@ -583,6 +574,42 @@ struct ScheduledJob {
     missing_slots: Vec<usize>,
     failure_key: String,
     erasure: ErasureParams,
+}
+
+fn run_scheduled_jobs(jobs: Vec<ScheduledJob>) -> Vec<RepairOutcome> {
+    use std::sync::{Arc, Mutex};
+
+    let queue = Arc::new(Mutex::new(VecDeque::from(jobs)));
+    let workers = MAX_CONCURRENT_REPAIRS.min(queue.lock().unwrap().len());
+    if workers == 0 {
+        return Vec::new();
+    }
+
+    let mut outcomes = Vec::new();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            let queue = Arc::clone(&queue);
+            handles.push(scope.spawn(move || {
+                let mut local = Vec::new();
+                loop {
+                    let job = {
+                        let mut guard = queue.lock().expect("repair queue lock");
+                        guard.pop_front()
+                    };
+                    match job {
+                        Some(job) => local.push(process_job(job)),
+                        None => break,
+                    }
+                }
+                local
+            }));
+        }
+        for handle in handles {
+            outcomes.extend(handle.join().expect("repair worker panicked"));
+        }
+    });
+    outcomes
 }
 
 fn process_job(job: ScheduledJob) -> RepairOutcome {
@@ -914,32 +941,39 @@ use runtime::sync::mpsc::UnboundedSender;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(test)]
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 #[cfg(test)]
-static ITERATION_HOOK: Lazy<Mutex<Option<UnboundedSender<()>>>> = Lazy::new(|| Mutex::new(None));
+fn iteration_hook() -> &'static Mutex<Option<UnboundedSender<()>>> {
+    static ITERATION_HOOK: OnceLock<Mutex<Option<UnboundedSender<()>>>> = OnceLock::new();
+    ITERATION_HOOK.get_or_init(|| Mutex::new(None))
+}
+
 #[cfg(test)]
-static STOP_FLAG: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+fn stop_flag() -> &'static AtomicBool {
+    static STOP_FLAG: OnceLock<AtomicBool> = OnceLock::new();
+    STOP_FLAG.get_or_init(|| AtomicBool::new(false))
+}
 
 #[cfg(test)]
 pub(crate) fn install_iteration_hook(sender: UnboundedSender<()>) {
-    *ITERATION_HOOK.lock().unwrap() = Some(sender);
+    *iteration_hook().lock().unwrap() = Some(sender);
 }
 
 #[cfg(test)]
 pub(crate) fn clear_iteration_hook() {
-    ITERATION_HOOK.lock().unwrap().take();
-    STOP_FLAG.store(false, Ordering::SeqCst);
+    iteration_hook().lock().unwrap().take();
+    stop_flag().store(false, Ordering::SeqCst);
 }
 
 #[cfg(test)]
 pub(crate) fn request_stop() {
-    STOP_FLAG.store(true, Ordering::SeqCst);
+    stop_flag().store(true, Ordering::SeqCst);
 }
 
 #[cfg(test)]
 fn notify_iteration() {
-    if let Some(tx) = ITERATION_HOOK.lock().unwrap().as_ref() {
+    if let Some(tx) = iteration_hook().lock().unwrap().as_ref() {
         let _ = tx.send(());
     }
 }
@@ -949,7 +983,7 @@ fn notify_iteration() {}
 
 #[cfg(test)]
 fn should_stop() -> bool {
-    STOP_FLAG.load(Ordering::SeqCst)
+    stop_flag().load(Ordering::SeqCst)
 }
 
 #[cfg(not(test))]

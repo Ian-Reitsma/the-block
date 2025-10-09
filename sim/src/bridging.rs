@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Models cross-chain bridging flows.
 #[derive(Debug, Clone, Serialize, Deserialize)]

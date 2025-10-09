@@ -1,7 +1,6 @@
 use super::ParamKey;
 use foundation_math::linalg::{Matrix, Vector};
-use foundation_serialization::{binary, json};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{binary, json, Deserialize, Serialize};
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
@@ -240,6 +239,7 @@ const DEFAULT_TIMELOCK_EPOCHS: u64 = 2;
 const KILL_SWITCH_TIMELOCK_EPOCHS: u64 = 10800; // ≈12h at 4s epochs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Params {
     pub snapshot_interval_secs: i64,
     pub consumer_fee_comfort_p90_microunits: i64,
@@ -935,6 +935,7 @@ pub fn registry() -> &'static [ParamSpec] {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Utilization {
     pub bytes_stored: f64,
     pub bytes_read: f64,
@@ -944,6 +945,7 @@ pub struct Utilization {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct EncryptedUtilization(pub Vec<u8>);
 
 #[allow(dead_code)]
@@ -967,11 +969,13 @@ pub fn retune_multipliers(
     rng_seed: Option<u64>,
 ) -> [i64; 4] {
     #[derive(Serialize, Deserialize)]
+    #[serde(crate = "foundation_serialization::serde")]
     struct KalmanState {
         x: [f64; 8],
         p: Vec<f64>,
     }
     #[derive(Serialize, Deserialize, Default)]
+    #[serde(crate = "foundation_serialization::serde")]
     struct UtilHistory {
         bytes_stored: Vec<f64>,
         bytes_read: Vec<f64>,

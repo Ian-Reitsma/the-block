@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn now_ts() -> u64 {
@@ -9,6 +9,7 @@ fn now_ts() -> u64 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum DisbursementStatus {
     Scheduled,
     Executed { tx_hash: String, executed_at: u64 },
@@ -16,6 +17,7 @@ pub enum DisbursementStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryDisbursement {
     pub id: u64,
     pub destination: String,

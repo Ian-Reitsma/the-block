@@ -1,7 +1,7 @@
 use httpd::{BlockingClient, HttpError, Method, Response, Router, ServerConfig, StatusCode};
 use light_client::{sync_background, upload_compressed_logs, Header, LightClient, SyncOptions};
 use runtime::net::TcpListener;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::Read;
 use std::sync::Arc;

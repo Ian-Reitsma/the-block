@@ -3,9 +3,10 @@ use crate::simple_db::{names, SimpleDb};
 use crate::telemetry::{
     RENT_ESCROW_BURNED_CT_TOTAL, RENT_ESCROW_LOCKED_CT_TOTAL, RENT_ESCROW_REFUNDED_CT_TOTAL,
 };
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct Escrow {
     depositor: String,
     amount: u64,

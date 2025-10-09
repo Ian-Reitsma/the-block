@@ -14,11 +14,10 @@ path = "src/bin/bootstrap_dependency_policy.rs"
 [dependencies]
 foundation_math = { path = "../crates/foundation_math" }
 rand = { path = "../crates/rand" }
-rustdct = "0.7"
-serde = { version = "1", features = ["derive"] }
 sled = { path = "../sled" }
 foundation_lazy = { path = "../crates/foundation_lazy" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3"

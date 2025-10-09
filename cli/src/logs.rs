@@ -350,10 +350,10 @@ mod sqlite {
         CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
     };
     use crypto_suite::hashing::blake3::derive_key;
+    use foundation_serialization::Deserialize;
     use httpd::{BlockingClient, Method};
     use rpassword::prompt_password;
     use rusqlite::{params, params_from_iter, Connection, Row};
-    use serde::Deserialize;
     use std::env;
 
     #[derive(Debug, Deserialize)]

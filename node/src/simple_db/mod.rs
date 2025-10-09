@@ -9,8 +9,8 @@ use std::sync::{Once, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use concurrency::Lazy;
+use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
-use serde::{Deserialize, Serialize};
 #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
 use storage_engine::rocksdb_engine::RocksDbEngine;
 use storage_engine::{
@@ -100,7 +100,7 @@ fn default_engine_kind() -> EngineKind {
 pub struct EngineConfig {
     #[serde(default = "default_engine_kind")]
     pub default_engine: EngineKind,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub overrides: HashMap<String, EngineKind>,
 }
 

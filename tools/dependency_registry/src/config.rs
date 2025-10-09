@@ -2,17 +2,17 @@ use std::{collections::HashMap, fs, path::Path};
 
 use diagnostics::anyhow::Context;
 use foundation_serialization::toml;
-use serde::Deserialize;
+use foundation_serialization::Deserialize;
 
 use crate::model::RiskTier;
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct PolicyConfig {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub tiers: TierConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub licenses: LicenseConfig,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub settings: SettingsConfig,
 }
 
@@ -89,11 +89,11 @@ impl SettingsConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct TierConfig {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub strategic: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub replaceable: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub forbidden: Vec<String>,
 }
 
@@ -107,7 +107,7 @@ impl TierConfig {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct LicenseConfig {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub forbidden: Vec<String>,
 }
 

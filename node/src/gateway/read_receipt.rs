@@ -9,7 +9,7 @@ use crate::exec;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::SUBSIDY_BYTES_TOTAL;
 use crypto_suite::hashing::blake3;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 use foundation_serialization::binary;
 

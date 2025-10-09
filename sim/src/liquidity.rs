@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Tracks token liquidity available for simulations.
 #[derive(Debug, Clone, Serialize, Deserialize)]

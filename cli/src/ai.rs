@@ -5,7 +5,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use serde::Deserialize;
+use foundation_serialization::Deserialize;
 
 /// Minimal snapshot of metrics for diagnostics.
 #[derive(Clone, Deserialize, Default)]

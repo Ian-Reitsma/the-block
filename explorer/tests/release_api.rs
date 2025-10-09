@@ -1,8 +1,8 @@
-use crypto_suite::signatures::{ed25519::SigningKey, Signer};
+use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::release_view::{paginated_release_history, ReleaseHistoryFilter};
 use hex;
 use rand::rngs::OsRng;
-use sys::temp;
+use sys::tempfile;
 use the_block::governance::{
     self, controller, GovStore, ProposalStatus, ReleaseAttestation, ReleaseVote, VoteChoice,
 };
@@ -10,7 +10,7 @@ use the_block::provenance;
 
 #[test]
 fn release_api_paginates_and_filters() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let store = GovStore::open(dir.path());
 
     let mut rng = OsRng::default();

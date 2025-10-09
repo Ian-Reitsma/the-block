@@ -238,7 +238,7 @@ impl GatingReason {
 pub struct SyncOutcome {
     pub appended: usize,
     pub status: DeviceStatusSnapshot,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub gating: Option<GatingReason>,
 }
 
@@ -308,7 +308,7 @@ where
 pub struct AnnotatedLogBundle {
     pub compression: &'static str,
     pub payload: Vec<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub device_status: Option<DeviceStatusEnvelope>,
 }
 

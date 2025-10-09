@@ -1,10 +1,11 @@
 use foundation_serialization::json;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Basic proposal shared by both houses.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Proposal {
     pub id: u64,
     pub start: u64,
