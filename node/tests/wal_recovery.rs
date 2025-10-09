@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 
 use crypto_suite::hashing::blake3::Hasher;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use the_block::SimpleDb;

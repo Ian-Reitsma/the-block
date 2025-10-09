@@ -3,9 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crypto_suite::hashing::blake3::hash;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use ledger::address;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     governance::GovStore,
@@ -47,7 +47,7 @@ pub struct DidRecord {
     pub nonce: u64,
     pub updated_at: u64,
     pub public_key: Vec<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub remote_attestation: Option<DidAttestationRecord>,
 }
 

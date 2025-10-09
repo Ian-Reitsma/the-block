@@ -1,10 +1,11 @@
 use crate::transaction::FeeLane;
 use crypto_suite::hashing::blake3::Hasher;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Receipt emitted by the dry-run matcher.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Receipt {
     pub version: u16,
     pub job_id: String,

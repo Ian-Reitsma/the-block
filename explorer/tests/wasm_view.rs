@@ -1,29 +1,17 @@
 use explorer::Explorer;
-use sys::temp;
+use sys::tempfile;
 
 fn sample_module() -> Vec<u8> {
     let mut buf = Vec::new();
     buf.extend_from_slice(&the_block::vm::wasm::MAGIC);
     buf.push(the_block::vm::wasm::VERSION_V1);
-    buf.extend_from_slice(&[
-        the_block::vm::wasm::opcodes::PUSH_I64,
-        9,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        the_block::vm::wasm::opcodes::RETURN,
-        1,
-    ]);
+    buf.extend_from_slice(&[0x01, 9, 0, 0, 0, 0, 0, 0, 0, 0x10, 1]);
     buf
 }
 
 #[test]
 fn disassembles_wasm() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("ex.db");
     let ex = Explorer::open(&db).unwrap();
     let wasm = sample_module();

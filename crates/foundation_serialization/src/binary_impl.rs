@@ -1,6 +1,7 @@
 use core::fmt;
 use std::string::FromUtf8Error;
 
+use crate::Serialize;
 use serde::de::value::StringDeserializer;
 use serde::de::{
     self, DeserializeOwned, DeserializeSeed, EnumAccess, IntoDeserializer, MapAccess, SeqAccess,
@@ -10,7 +11,6 @@ use serde::ser::{
     self, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant,
 };
-use serde::Serialize;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -1185,7 +1185,7 @@ impl<'de, 'a> VariantAccess<'de> for VariantDeserializer<'a, 'de> {
 mod tests {
     use super::*;
 
-    use serde::{Deserialize, Serialize};
+    use crate::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
     struct Example {

@@ -60,7 +60,7 @@ pub struct ReceiptEntry {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ReceiptPage {
     pub receipts: Vec<ReceiptEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub next: Option<u64>,
 }
 

@@ -32,18 +32,18 @@ const OFFSET_PREFIX: &str = "offset:";
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct LogEntry {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub id: Option<u64>,
     pub timestamp: u64,
     pub level: String,
     pub message: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub correlation_id: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub peer: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub tx: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub block: Option<u64>,
 }
 

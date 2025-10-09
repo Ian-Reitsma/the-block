@@ -1,8 +1,8 @@
 use std::{cmp::Ordering, fmt};
 
 use chrono::{DateTime, Utc};
+use foundation_serialization::{Deserialize, Serialize};
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct CrateRef {

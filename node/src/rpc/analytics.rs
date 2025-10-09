@@ -1,6 +1,6 @@
 #![cfg(feature = "telemetry")]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct AnalyticsQuery {

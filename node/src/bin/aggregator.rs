@@ -1,4 +1,4 @@
-use std::{error::Error, process};
+use std::{error::Error, io, process};
 
 use cli_core::{
     arg::{ArgSpec, OptionSpec},
@@ -6,6 +6,7 @@ use cli_core::{
     parse::Matches,
 };
 use foundation_serialization::json::{self, Value};
+use foundation_telemetry::TelemetrySummary;
 use httpd::{BlockingClient, Method};
 use std::collections::VecDeque;
 
@@ -69,6 +70,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 eprintln!("telemetry request failed: {}", resp.status().as_u16());
             }
             let body = resp.text()?;
+            let payload = json::value_from_str(&body)?;
+            if let Err(err) = validate_telemetry_payload(&payload) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("telemetry payload failed schema validation: {err}"),
+                )
+                .into());
+            }
             println!("{}", body);
         }
     }
@@ -137,4 +146,64 @@ fn build_cli(matches: Matches) -> Result<Cli, String> {
     };
 
     Ok(Cli { db, cmd })
+}
+
+fn validate_telemetry_payload(payload: &Value) -> Result<(), String> {
+    let map = payload
+        .as_object()
+        .ok_or_else(|| "telemetry payload must be a JSON object".to_string())?;
+    let mut errors = Vec::new();
+    for (node, summary_value) in map {
+        if let Err(err) = TelemetrySummary::validate_value(summary_value) {
+            errors.push(format!("{node}: {} ({})", err.message(), err.path()));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_payload_accepts_well_formed_summary() {
+        let value = json::value_from_str(
+            r#"{
+                "node-a": {
+                    "node_id": "node-a",
+                    "seq": 1,
+                    "timestamp": 1700000000,
+                    "sample_rate_ppm": 500000,
+                    "compaction_secs": 30,
+                    "memory": {
+                        "mempool": {"latest": 1, "p50": 1, "p90": 1, "p99": 1}
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+        assert!(validate_telemetry_payload(&value).is_ok());
+    }
+
+    #[test]
+    fn validate_payload_reports_schema_errors() {
+        let value = json::value_from_str(
+            r#"{
+                "node-a": {
+                    "node_id": "node-a",
+                    "seq": 1,
+                    "timestamp": 1700000000,
+                    "sample_rate_ppm": 500000,
+                    "compaction_secs": 30
+                }
+            }"#,
+        )
+        .unwrap();
+        let err = validate_telemetry_payload(&value).expect_err("schema drift should be reported");
+        assert!(err.contains("/memory"));
+    }
 }

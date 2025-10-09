@@ -1,5 +1,5 @@
 use foundation_serialization::json;
-use serde::Serialize;
+use foundation_serialization::Serialize;
 use std::io::Write;
 use std::time::Duration;
 

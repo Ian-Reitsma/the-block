@@ -11,6 +11,7 @@ telemetry = []
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 crypto_suite = { path = "../crates/crypto_suite" }
+foundation_serialization = { path = "../crates/foundation_serialization" }
 
 [dev-dependencies]
 tempfile = "3"

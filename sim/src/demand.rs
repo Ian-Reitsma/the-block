@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Models demand growth for consumer and industrial usage.
 #[derive(Debug, Clone, Serialize, Deserialize)]

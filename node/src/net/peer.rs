@@ -16,12 +16,12 @@ use foundation_serialization::{
     json::{self, Value},
     Error as SerializationError,
 };
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use indexmap::IndexMap;
 use rand::{rngs::StdRng, seq::SliceRandom};
 use runtime::net::lookup_srv;
 use runtime::sync::broadcast;
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryInto;
 use std::fs;
@@ -713,10 +713,10 @@ pub struct PeerIdentity {
     /// Active public key used for message signatures.
     pub public_key: [u8; 32],
     /// Previously active key kept during rotation grace period.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub old_key: Option<[u8; 32]>,
     /// Rotation timestamp for audit and expiry.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub rotated_at: Option<u64>,
 }
 
@@ -759,33 +759,33 @@ fn instant_now() -> Instant {
 pub struct PeerMetrics {
     pub requests: u64,
     pub bytes_sent: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub sends: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub drops: HashMap<DropReason, u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub handshake_fail: HashMap<HandshakeError, u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub handshake_success: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub last_handshake_ms: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub tls_errors: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub reputation: PeerReputation,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub last_updated: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub req_avg: f64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub byte_avg: f64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub throttled_until: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub throttle_reason: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub backoff_level: u32,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub sec_start: u64,
     #[serde(skip)]
     pub sec_requests: u64,
@@ -910,7 +910,7 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
                 if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
                     let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
                     if sample <= 1 || sends % sample == 0 {
-                        let id = overlay_peer_label(pk);
+                        let id = overlay_peer_label(&pk);
                         crate::telemetry::PEER_BYTES_SENT_TOTAL
                             .with_label_values(&[id.as_str()])
                             .inc_by(bytes as u64 * sample as u64);
@@ -946,7 +946,7 @@ pub(crate) fn record_send(addr: SocketAddr, bytes: usize) {
                 if EXPORT_PEER_METRICS.load(Ordering::Relaxed) {
                     let sample = PEER_METRICS_SAMPLE_RATE.load(Ordering::Relaxed);
                     if sample <= 1 || sends % sample == 0 {
-                        let id = overlay_peer_label(pk);
+                        let id = overlay_peer_label(&pk);
                         crate::telemetry::PEER_BYTES_SENT_TOTAL
                             .with_label_values(&[id.as_str()])
                             .inc_by(bytes as u64 * sample as u64);
@@ -1771,7 +1771,7 @@ struct QuicEndpoint {
 mod tests {
     use super::*;
     use httpd::{Method, Response, Router, ServerConfig, StatusCode};
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use sys::tempfile::tempdir;
 

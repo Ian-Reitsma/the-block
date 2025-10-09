@@ -1,8 +1,8 @@
 use foundation_rpc::{Request as RpcEnvelopeRequest, Response as RpcEnvelopeResponse};
 use foundation_serialization::json;
+use foundation_serialization::{Deserialize, Serialize};
 use httpd::{ClientError as HttpClientError, ClientResponse, HttpClient, Method};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -326,17 +326,17 @@ struct RpcEnvelope<T> {
 
 #[derive(Debug, Deserialize)]
 pub struct MempoolStats {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub size: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub age_p50: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub age_p95: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_p50: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_p90: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_floor: u64,
 }
 

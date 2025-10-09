@@ -265,8 +265,13 @@ curl -H 'Authorization: Bearer <token>' -d '{"jsonrpc":"2.0","id":1,"method":"te
 
 Mempool, storage, and compute subsystems each feed per-component memory histograms. The aggregator
 accepts summaries at `/telemetry` and serves the latest window at `/telemetry/<node>` for dashboards.
-The lightweight HTML dashboard in `dashboard/index.html` links to these endpoints, and the
-`aggregator telemetry` CLI helper prints the JSON payload for ad hoc inspection.
+Payloads are now checked against the shared `foundation_telemetry` schema before ingestion; invalid
+documents are rejected with a `400` response and increment
+`aggregator_telemetry_schema_error_total`. Successful submissions bump
+`aggregator_telemetry_ingest_total`, giving operators concrete alert hooks for schema drift or
+misconfigured exporters. The lightweight HTML dashboard in `dashboard/index.html` links to these
+endpoints, and the `aggregator telemetry` CLI helper now validates the response against the same
+schema, surfacing a structured error when drift is detected instead of printing stale JSON.
 
 `telemetry.sample_rate` in `config/default.toml` (1.0 disables
 sampling). Sampled counters scale their increments to preserve expected

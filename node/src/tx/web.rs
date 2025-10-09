@@ -1,5 +1,5 @@
 use crate::transaction::FeeLane;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Manifest transaction mapping a domain to blob identifiers.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]

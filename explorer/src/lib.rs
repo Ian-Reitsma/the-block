@@ -718,9 +718,9 @@ pub struct DidDocumentView {
     pub nonce: u64,
     pub updated_at: u64,
     pub public_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub remote_signer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub remote_signature: Option<String>,
 }
 
@@ -750,7 +750,7 @@ pub struct DidRecordRow {
     pub address: String,
     pub hash: String,
     pub anchored_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub wallet_url: Option<String>,
 }
 
@@ -1715,11 +1715,11 @@ impl Explorer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sys::temp;
+    use sys::tempfile;
 
     #[test]
     fn index_and_query() {
-        let dir = temp::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let receipts = dir.path().join("receipts");
         std::fs::create_dir_all(&receipts).unwrap();
         let r = Receipt::new(

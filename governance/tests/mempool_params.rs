@@ -1,14 +1,15 @@
 use std::fs;
 use std::time::Duration;
 
+use foundation_serialization::{json, Deserialize};
 use governance::{
     controller, registry, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime,
     RuntimeAdapter, Vote, VoteChoice,
 };
-use serde::Deserialize;
 use tempfile::tempdir;
 
 #[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 #[allow(dead_code)]
 struct FeeFloorEvent {
     epoch: u64,

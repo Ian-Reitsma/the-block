@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
 pub use coding::CHACHA20_POLY1305_NONCE_LEN;
@@ -8,31 +8,35 @@ pub const ENCRYPTED_CHUNK_OVERHEAD: usize =
     coding::CHACHA20_POLY1305_NONCE_LEN + coding::CHACHA20_POLY1305_TAG_LEN;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum Redundancy {
     None,
     ReedSolomon { data: u8, parity: u8 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderChunkEntry {
     pub provider: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chunk_indices: Vec<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chunk_lens: Vec<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub encryption_key: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ChunkRef {
     pub id: [u8; 32],
     pub nodes: Vec<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub provider_chunks: Vec<ProviderChunkEntry>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ObjectManifest {
     pub version: u16,
     pub total_len: u64,
@@ -41,21 +45,21 @@ pub struct ObjectManifest {
     pub redundancy: Redundancy,
     pub content_key_enc: Vec<u8>,
     pub blake3: [u8; 32],
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chunk_lens: Vec<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chunk_compressed_lens: Vec<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub chunk_cipher_lens: Vec<u32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub compression_alg: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub compression_level: Option<i32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub encryption_alg: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub erasure_alg: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub provider_chunks: Vec<ProviderChunkEntry>,
 }
 
@@ -110,6 +114,7 @@ impl ObjectManifest {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct StoreReceipt {
     pub manifest_hash: [u8; 32],
     pub chunk_count: u32,

@@ -1,5 +1,5 @@
 use concurrency::{Lazy, MutexExt};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

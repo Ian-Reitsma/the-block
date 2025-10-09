@@ -1,7 +1,7 @@
 use explorer::{router, Explorer, ExplorerHttpState};
 use httpd::StatusCode;
 use std::sync::Arc;
-use sys::temp;
+use sys::tempfile;
 use the_block::{
     transaction::{FeeLane, RawTxPayload, SignedTransaction},
     Block, TokenAmount,
@@ -10,7 +10,7 @@ use the_block::{
 #[test]
 fn block_lookup_via_router() {
     runtime::block_on(async {
-        let dir = temp::tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("explorer.db");
         let explorer = Arc::new(Explorer::open(&db).unwrap());
 

@@ -2,6 +2,24 @@
 > **Review (2025-10-08):** Logged the migration to the `foundation_serialization` facade across governance, ledger, and the metrics aggregator plus new JSON `Value` helpers.
 > Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
 
+## 2025-10-15 — HTTP Client In-Housing
+
+- Replaced the last `ureq` call sites with the first-party HTTP client: governance
+  webhooks now post through `httpd::BlockingClient`, jurisdiction policy fetches
+  reuse the same helper, and lightweight probes issue raw TCP requests to avoid
+  third-party HTTP stacks altogether.
+- Updated the dependency audit and registry inventory to reflect the removal of
+  `ureq`, continuing the push toward `FIRST_PARTY_ONLY=1` compliance.
+
+## 2025-10-12 — Binary Codec Consolidation
+
+- Retired the external `serde_cbor` dependency by routing the codec crate’s
+  binary profile and analytics tooling through the first-party
+  `foundation_serialization::binary` helpers.
+- Updated codec profile telemetry and the dependency audit to reflect the new
+  binary label, keeping node metrics and simulator harnesses aligned with the
+  first-party encoders.
+
 ## 2025-10-08 — Foundation Serialization Rollout
 
 - Extended the first-party JSON `Value` and `Number` helpers (`as_i64`, `as_u64`, `as_f64`) so callers can traverse payloads without manual pattern matching.

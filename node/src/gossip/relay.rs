@@ -9,12 +9,12 @@ use crate::simple_db::{names, SimpleDb};
 use codec::profiles;
 use concurrency::{MutexExt, MutexGuard};
 use crypto_suite::hashing::blake3::hash;
+use foundation_serialization::Serialize;
 use hex;
 use ledger::address::ShardId;
 use lru::LruCache;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use serde::Serialize;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -99,9 +99,10 @@ impl ShardStore {
             if let Some(suffix) = key.strip_prefix("shard:") {
                 if let Ok(shard) = suffix.parse::<ShardId>() {
                     if let Some(bytes) = db.get(&key) {
-                        if let Ok(mut peers) =
-                            codec::deserialize::<Vec<OverlayPeerId>>(profiles::gossip(), &bytes)
-                        {
+                        if let Ok(mut peers) = codec::deserialize::<Vec<OverlayPeerId>>(
+                            profiles::gossip::codec(),
+                            &bytes,
+                        ) {
                             peers.sort_by(|a, b| a.to_bytes().cmp(&b.to_bytes()));
                             peers.dedup();
                             out.insert(shard, peers);
@@ -124,7 +125,7 @@ impl ShardStore {
         entry.dedup();
         let snapshot = entry.clone();
         drop(cache);
-        if let Ok(bytes) = codec::serialize(profiles::gossip(), &snapshot) {
+        if let Ok(bytes) = codec::serialize(profiles::gossip::codec(), &snapshot) {
             let key = format!("shard:{shard}");
             let mut db = self.db();
             let _ = db.insert(&key, bytes);
@@ -162,15 +163,15 @@ pub struct FanoutStatus {
     pub min: usize,
     pub base: usize,
     pub max: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub last: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub candidates: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub avg_score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub millis_since_update: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub selected_peers: Option<Vec<String>>,
 }
 
@@ -183,7 +184,7 @@ pub struct ShardAffinity {
 #[derive(Clone, Serialize)]
 pub struct PartitionStatus {
     pub active: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub marker: Option<u64>,
     pub isolated_peers: Vec<String>,
 }
@@ -244,7 +245,7 @@ impl Relay {
     }
 
     fn hash_msg(msg: &Message) -> [u8; 32] {
-        hash(&codec::serialize(profiles::gossip(), msg).unwrap_or_default()).into()
+        hash(&codec::serialize(profiles::gossip::codec(), msg).unwrap_or_default()).into()
     }
 
     pub fn should_process_at(&self, msg: &Message, now: Instant) -> bool {
@@ -460,7 +461,7 @@ impl Relay {
 
     /// Broadcast a message to a random subset of peers using default sender.
     pub fn broadcast(&self, msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {
-        let serialized = codec::serialize(profiles::gossip(), msg).unwrap_or_default();
+        let serialized = codec::serialize(profiles::gossip::codec(), msg).unwrap_or_default();
         let large = serialized.len() > 1024;
         self.broadcast_with(msg, peers, |(addr, transport, cert), m| {
             if large {

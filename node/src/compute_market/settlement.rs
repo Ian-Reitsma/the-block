@@ -17,8 +17,9 @@ use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 #[cfg(feature = "telemetry")]
 use diagnostics::tracing::error;
 use foundation_serialization::binary;
+use foundation_serialization::de::DeserializeOwned;
+use foundation_serialization::{Deserialize, Serialize};
 use ledger::utxo_account::AccountLedger;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 const AUDIT_CAP: usize = 256;
 const ROOT_HISTORY: usize = 32;
@@ -33,6 +34,7 @@ const KEY_NEXT_SEQ: &str = "next_seq";
 const KEY_SLA_QUEUE: &str = "sla_queue";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum SettleMode {
     DryRun,
     Armed { activate_at: u64 },
@@ -40,6 +42,7 @@ pub enum SettleMode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 struct Metadata {
     armed_requested_height: Option<u64>,
     armed_delay: Option<u64>,
@@ -49,6 +52,7 @@ struct Metadata {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct AuditRecord {
     pub sequence: u64,
     pub timestamp: u64,
@@ -58,11 +62,12 @@ pub struct AuditRecord {
     pub delta_it: i64,
     pub balance_ct: u64,
     pub balance_it: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub anchor: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct BalanceSnapshot {
     pub provider: String,
     pub ct: u64,
@@ -70,6 +75,7 @@ pub struct BalanceSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SlaRecord {
     pub job_id: String,
     pub provider: String,
@@ -81,6 +87,7 @@ pub struct SlaRecord {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum SlaResolutionKind {
     Completed,
     Cancelled { reason: String },
@@ -88,6 +95,7 @@ pub enum SlaResolutionKind {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SlaResolution {
     pub job_id: String,
     pub provider: String,
@@ -107,6 +115,7 @@ pub enum SlaOutcome<'a> {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SettlementEngineInfo {
     pub engine: String,
     pub legacy_mode: bool,
@@ -265,9 +274,9 @@ impl SettlementState {
     fn refresh_sla_metrics(&self) {
         #[cfg(feature = "telemetry")]
         {
-            crate::telemetry::COMPUTE_SLA_PENDING_TOTAL.set(self.sla.len() as i64);
+            COMPUTE_SLA_PENDING_TOTAL.set(self.sla.len() as i64);
             let next = self.next_deadline().unwrap_or(0);
-            crate::telemetry::COMPUTE_SLA_NEXT_DEADLINE_TS.set(next as i64);
+            COMPUTE_SLA_NEXT_DEADLINE_TS.set(next as i64);
         }
     }
 
@@ -317,10 +326,7 @@ impl SettlementState {
                     reason: reason.to_string(),
                 }
             }
-            SlaOutcome::Violated {
-                reason,
-                automated: _,
-            } => {
+            SlaOutcome::Violated { reason, automated } => {
                 let memo = format!("sla_violation_{reason}");
                 match self.ct.debit(&record.provider, record.provider_bond) {
                     Ok(_) => {
@@ -338,7 +344,7 @@ impl SettlementState {
                                 .with_label_values(&[record.provider.as_str()])
                                 .inc();
                             if automated {
-                                crate::telemetry::COMPUTE_SLA_AUTOMATED_SLASH_TOTAL.inc();
+                                COMPUTE_SLA_AUTOMATED_SLASH_TOTAL.inc();
                             }
                         }
                     }

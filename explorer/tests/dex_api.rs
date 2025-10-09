@@ -1,5 +1,5 @@
 use explorer::Explorer;
-use sys::temp;
+use sys::tempfile;
 use the_block::{
     compute_market::Job,
     dex::order_book::{Order, OrderBook, Side},
@@ -7,7 +7,7 @@ use the_block::{
 
 #[test]
 fn index_and_query_order_book_and_jobs() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("explorer.db");
     let ex = Explorer::open(&db).unwrap();
 

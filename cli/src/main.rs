@@ -56,6 +56,7 @@ mod tx;
 mod version;
 #[cfg(feature = "quantum")]
 mod wallet;
+mod wasm;
 
 use crate::wasm::extract_wasm_metadata;
 use ai::handle as handle_ai;

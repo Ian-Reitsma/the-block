@@ -1,5 +1,5 @@
 use crypto_suite::signatures::ed25519::Signature;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// A minimal partially signed block transaction container used for
 /// air-gapped signing workflows. The payload is an opaque blob (typically a

@@ -8,9 +8,9 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json::Value;
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
-use serde::{Deserialize, Serialize};
 use the_block::net::{PeerCertHistoryEntry, QuicStatsEntry};
 
 #[derive(Deserialize)]
@@ -23,7 +23,7 @@ struct OverlayStatusView {
     backend: String,
     active_peers: usize,
     persisted_peers: usize,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     database_path: Option<String>,
 }
 
@@ -494,7 +494,9 @@ pub fn handle(cmd: NetCmd) {
                     id: u32,
                     method: &'static str,
                     params: foundation_serialization::json::Value,
-                    #[serde(skip_serializing_if = "Option::is_none")]
+                    #[serde(
+                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+                    )]
                     auth: Option<&'a str>,
                 }
                 let payload = Payload {
@@ -520,7 +522,9 @@ pub fn handle(cmd: NetCmd) {
                     id: u32,
                     method: &'static str,
                     params: foundation_serialization::json::Value,
-                    #[serde(skip_serializing_if = "Option::is_none")]
+                    #[serde(
+                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+                    )]
                     auth: Option<&'a str>,
                 }
                 let payload = Payload {
@@ -552,7 +556,7 @@ pub fn handle(cmd: NetCmd) {
                 id: u32,
                 method: &'static str,
                 params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "Option::is_none")]
+                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
                 auth: Option<&'a str>,
             }
             let payload = Payload {
@@ -581,7 +585,9 @@ pub fn handle(cmd: NetCmd) {
                     id: u32,
                     method: &'static str,
                     params: foundation_serialization::json::Value,
-                    #[serde(skip_serializing_if = "Option::is_none")]
+                    #[serde(
+                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+                    )]
                     auth: Option<&'a str>,
                 }
                 let payload = Payload {
@@ -605,7 +611,9 @@ pub fn handle(cmd: NetCmd) {
                     id: u32,
                     method: &'static str,
                     params: foundation_serialization::json::Value,
-                    #[serde(skip_serializing_if = "Option::is_none")]
+                    #[serde(
+                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+                    )]
                     auth: Option<&'a str>,
                 }
                 #[derive(Deserialize)]
@@ -639,7 +647,9 @@ pub fn handle(cmd: NetCmd) {
                     id: u32,
                     method: &'static str,
                     params: foundation_serialization::json::Value,
-                    #[serde(skip_serializing_if = "Option::is_none")]
+                    #[serde(
+                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+                    )]
                     auth: Option<&'a str>,
                 }
                 let payload = Payload {
@@ -664,7 +674,7 @@ pub fn handle(cmd: NetCmd) {
                 id: u32,
                 method: &'static str,
                 params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "Option::is_none")]
+                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
                 auth: Option<&'a str>,
             }
             #[derive(Deserialize)]
@@ -780,7 +790,7 @@ pub fn handle(cmd: NetCmd) {
                 id: u32,
                 method: &'static str,
                 params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "Option::is_none")]
+                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
                 auth: Option<&'a str>,
             }
             let payload = Payload {
@@ -811,7 +821,9 @@ pub fn handle(cmd: NetCmd) {
                     id: u32,
                     method: &'static str,
                     params: foundation_serialization::json::Value,
-                    #[serde(skip_serializing_if = "Option::is_none")]
+                    #[serde(
+                        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+                    )]
                     auth: Option<&'a str>,
                 }
                 let payload = Payload {

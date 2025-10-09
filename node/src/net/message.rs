@@ -1,8 +1,8 @@
 use crate::net::peer::ReputationUpdate;
 use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
 use crypto_suite::signatures::ed25519::SigningKey;
+use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
 /// Signed network message wrapper.
@@ -15,10 +15,10 @@ pub struct Message {
     /// Inner message payload.
     pub body: Payload,
     /// Optional partition marker propagated in gossip headers.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub partition: Option<u64>,
     /// Optional certificate fingerprint for QUIC trust validation.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub cert_fingerprint: Option<Vec<u8>>,
 }
 

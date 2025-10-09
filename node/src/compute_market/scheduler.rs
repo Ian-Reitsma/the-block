@@ -1,6 +1,6 @@
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use foundation_serialization::json::{self, Value};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
@@ -17,27 +17,29 @@ use crate::telemetry;
 
 /// Hardware capability descriptor for a provider or workload.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Capability {
     /// Number of CPU cores available.
     pub cpu_cores: u8,
     /// Optional GPU model identifier.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub gpu: Option<String>,
     /// GPU memory in megabytes.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub gpu_memory_mb: u32,
     /// Optional specialised accelerator type.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub accelerator: Option<Accelerator>,
     /// Accelerator memory in megabytes.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub accelerator_memory_mb: u32,
     /// Supported compute frameworks (e.g., CUDA, OpenCL).
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub frameworks: Vec<String>,
 }
 
 #[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SchedulerStats {
     pub success: u64,
     pub capability_mismatch: u64,
@@ -54,6 +56,7 @@ pub struct SchedulerStats {
 }
 
 #[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PendingJob {
     pub job_id: String,
     pub priority: Priority,
@@ -843,10 +846,11 @@ fn scheduler() -> MutexGuard<'static, SchedulerState> {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(crate = "foundation_serialization::serde")]
 struct ReputationEntry {
     score: i64,
     last_update: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     epoch: u64,
 }
 

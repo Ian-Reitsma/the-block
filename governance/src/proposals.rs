@@ -1,10 +1,11 @@
 use crate::ParamKey;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use super::Address;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum ProposalStatus {
     Open,
     Passed,
@@ -14,6 +15,7 @@ pub enum ProposalStatus {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum VoteChoice {
     Yes,
     No,
@@ -21,6 +23,7 @@ pub enum VoteChoice {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Proposal {
     pub id: u64,
     pub key: ParamKey,
@@ -37,6 +40,7 @@ pub struct Proposal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Vote {
     pub proposal_id: u64,
     pub voter: Address,

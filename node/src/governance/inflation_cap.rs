@@ -4,10 +4,11 @@ use crypto_suite::hashing::blake3::Hasher;
 #[cfg(test)]
 use crypto_suite::zk::groth16::Groth16Bn256;
 use crypto_suite::zk::groth16::PreparedVerifyingKey;
+use foundation_serialization::Serialize;
 use inflation::proof::{verify as verify_proof, InflationProof};
-use serde::Serialize;
 
 #[derive(Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct WeekTuple {
     pub week: u64,
     pub s_start: u64,

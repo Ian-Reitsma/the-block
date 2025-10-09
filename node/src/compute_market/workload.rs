@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Normalised compute unit (e.g., GPU-seconds scaled by FLOPS).
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ComputeUnits(pub u64);
 
 /// Estimate compute units from raw workload bytes. Currently 1 unit per MiB.

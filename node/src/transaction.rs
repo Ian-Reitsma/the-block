@@ -14,10 +14,10 @@ use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use crypto_suite::transactions::{
     canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
 };
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use ledger::address::{self, ShardId};
 use lru::LruCache;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
@@ -46,10 +46,16 @@ impl Default for TxVersion {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct TxSignature {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default = "foundation_serialization::defaults::default",
+        skip_serializing_if = "foundation_serialization::skip::is_empty"
+    )]
     pub ed25519: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default = "foundation_serialization::defaults::default",
+        skip_serializing_if = "foundation_serialization::skip::is_empty"
+    )]
     pub dilithium: Vec<u8>,
 }
 impl Default for TxSignature {
@@ -77,10 +83,10 @@ static TX_SIGNER: Lazy<TransactionSigner> =
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct TxDidAnchorAttestation {
     /// Hex-encoded verifying key for the remote signer.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signer: String,
     /// Hex-encoded signature over the attestation message.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signature: String,
 }
 
@@ -88,22 +94,22 @@ pub struct TxDidAnchorAttestation {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct TxDidAnchor {
     /// Account address owning the DID document.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub address: String,
     /// Public key authorizing the update.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub public_key: Vec<u8>,
     /// Canonical DID document body.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub document: String,
     /// Monotonic nonce protecting against replay.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
     /// Ed25519 signature from the owner over the anchor digest.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signature: Vec<u8>,
     /// Optional remote attestation signed by a provenance-configured key.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub remote_attestation: Option<TxDidAnchorAttestation>,
 }
 
@@ -258,26 +264,26 @@ pub struct SignedTransaction {
     pub payload: RawTxPayload,
     pub public_key: Vec<u8>,
     #[cfg(feature = "quantum")]
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub dilithium_public_key: Vec<u8>,
     pub signature: TxSignature,
     /// Priority fee paid to the miner above the base fee.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub tip: u64,
     /// Optional set of signer public keys for multisig.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signer_pubkeys: Vec<Vec<u8>>,
     /// Aggregated signatures concatenated in order.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub aggregate_signature: Vec<u8>,
     /// Required number of signatures.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub threshold: u8,
     /// Fee lane classification for admission and scheduling.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub lane: FeeLane,
     /// Signature mode for the transaction.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub version: TxVersion,
 }
 impl Default for SignedTransaction {
@@ -475,7 +481,7 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
 /// Verifies a signed transaction. Returns `true` if the signature and encoding are valid.
 pub fn verify_signed_tx(tx: &SignedTransaction) -> bool {
     let key = {
-        let bytes = codec::serialize(profiles::transaction(), tx).unwrap_or_default();
+        let bytes = codec::serialize(profiles::transaction::codec(), tx).unwrap_or_default();
         let mut h = Hasher::new();
         h.update(&bytes);
         h.finalize().into()
@@ -647,7 +653,7 @@ pub fn canonical_payload_py(payload: RawTxPayload) -> Vec<u8> {
 /// Raises:
 ///     ValueError: If ``bytes`` cannot be deserialized.
 pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
-    codec::deserialize(profiles::transaction(), &bytes)
+    codec::deserialize(profiles::transaction::codec(), &bytes)
         .map_err(|e| py_value_err(format!("decode: {e}")))
 }
 

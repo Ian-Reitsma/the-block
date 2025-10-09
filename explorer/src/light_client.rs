@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use serde::Serialize;
+use foundation_serialization::Serialize;
 use std::path::Path;
 use the_block::light_client::proof_tracker::{ProofTracker, ReceiptPage};
 
@@ -9,7 +9,7 @@ pub struct RelayerLeaderboardEntry {
     pub pending: u64,
     pub total_proofs: u64,
     pub total_claimed: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub last_claim_height: Option<u64>,
 }
 
@@ -29,7 +29,7 @@ pub struct RebateReceiptRow {
 #[derive(Debug, Clone, Serialize)]
 pub struct RebateHistoryPage {
     pub receipts: Vec<RebateReceiptRow>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub next: Option<u64>,
 }
 
@@ -101,11 +101,11 @@ pub fn recent_rebate_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sys::temp;
+    use sys::tempfile;
 
     #[test]
     fn leaderboard_and_history_from_tracker() {
-        let dir = temp::tempdir().expect("tempdir");
+        let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("rebates");
         {
             let mut tracker = ProofTracker::open(&path);

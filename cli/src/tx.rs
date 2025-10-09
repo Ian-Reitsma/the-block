@@ -6,9 +6,9 @@ use crypto_suite::transactions::{
     canonical_payload_bytes as suite_canonical_payload_bytes, TransactionSigner,
 };
 use foundation_lazy::sync::Lazy;
+use foundation_serialization::{Deserialize, Serialize};
 use rand::rngs::OsRng;
 use rand::RngCore;
-use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
 use std::fmt;
 
@@ -29,9 +29,15 @@ pub enum TxVersion {
 /// Signature bundle for transactions.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct TxSignature {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default = "foundation_serialization::defaults::default",
+        skip_serializing_if = "foundation_serialization::skip::is_empty"
+    )]
     pub ed25519: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        default = "foundation_serialization::defaults::default",
+        skip_serializing_if = "foundation_serialization::skip::is_empty"
+    )]
     pub dilithium: Vec<u8>,
 }
 
@@ -64,21 +70,21 @@ impl fmt::Display for FeeLane {
 /// Unsigned transaction payload in canonical form.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct RawTxPayload {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub from_: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub to: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub amount_consumer: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub amount_industrial: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub pct_ct: u8,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub memo: Vec<u8>,
 }
 
@@ -87,20 +93,20 @@ pub struct RawTxPayload {
 pub struct SignedTransaction {
     pub payload: RawTxPayload,
     pub public_key: Vec<u8>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub dilithium_public_key: Vec<u8>,
     pub signature: TxSignature,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub tip: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signer_pubkeys: Vec<Vec<u8>>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub aggregate_signature: Vec<u8>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub threshold: u8,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub lane: FeeLane,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub version: TxVersion,
 }
 
@@ -124,26 +130,26 @@ impl Default for SignedTransaction {
 /// Remote attestation accompanying a DID anchor transaction.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct TxDidAnchorAttestation {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signer: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signature: String,
 }
 
 /// Transaction anchoring a DID document on-chain.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
 pub struct TxDidAnchor {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub address: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub public_key: Vec<u8>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub document: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub signature: Vec<u8>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub remote_attestation: Option<TxDidAnchorAttestation>,
 }
 

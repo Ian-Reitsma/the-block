@@ -259,6 +259,18 @@ impl Span {
         SpanGuard
     }
 
+    pub fn entered(&self) -> SpanGuard {
+        self.enter()
+    }
+
+    pub fn in_scope<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _guard = self.enter();
+        f()
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -439,13 +451,22 @@ macro_rules! __diagnostics_span_parse {
         $builder.add_field(stringify!($key), format!("{}", &$value));
         $crate::__diagnostics_span_parse!($builder, $($rest)*);
     }};
+    ($builder:ident, $key:ident = %$value:expr $(,)?) => {{
+        $builder.add_field(stringify!($key), format!("{}", &$value));
+    }};
     ($builder:ident, $key:ident = ?$value:expr, $($rest:tt)*) => {{
         $builder.add_field(stringify!($key), format!("{:?}", &$value));
         $crate::__diagnostics_span_parse!($builder, $($rest)*);
     }};
+    ($builder:ident, $key:ident = ?$value:expr $(,)?) => {{
+        $builder.add_field(stringify!($key), format!("{:?}", &$value));
+    }};
     ($builder:ident, $key:ident = $value:expr, $($rest:tt)*) => {{
         $builder.add_field(stringify!($key), format!("{}", &$value));
         $crate::__diagnostics_span_parse!($builder, $($rest)*);
+    }};
+    ($builder:ident, $key:ident = $value:expr $(,)?) => {{
+        $builder.add_field(stringify!($key), format!("{}", &$value));
     }};
     ($builder:ident, %$value:expr, $($rest:tt)*) => {{
         $builder.add_field("value", format!("{}", &$value));

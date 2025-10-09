@@ -1,7 +1,7 @@
 use core::fmt;
 
 use bincode::Options;
-use foundation_serialization::{json, Error as SerializationError};
+use foundation_serialization::{binary, json, Error as SerializationError};
 use serde::{de::DeserializeOwned, Serialize};
 #[cfg(feature = "telemetry")]
 use std::sync::OnceLock;
@@ -14,8 +14,6 @@ use metrics::{histogram, increment_counter};
 pub mod inhouse;
 pub mod macros;
 pub mod profiles;
-
-pub use profiles::{cbor, gossip, json, storage_manifest, transaction};
 
 /// Semantic version of the codec crate exposed for telemetry labeling.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -94,12 +92,12 @@ pub enum Error {
         /// Direction of the codec operation.
         direction: Direction,
     },
-    /// A serde_cbor codec failure.
-    #[error("{direction} using CBOR codec failed: {source}")]
-    Cbor {
-        /// Underlying CBOR error.
+    /// A binary codec failure using the first-party facade.
+    #[error("{direction} using binary codec failed: {source}")]
+    Binary {
+        /// Underlying error reported by the serialization facade.
         #[source]
-        source: serde_cbor::Error,
+        source: SerializationError,
         /// Direction of the codec operation.
         direction: Direction,
     },
@@ -137,8 +135,8 @@ impl Error {
         Error::Json { source, direction }
     }
 
-    fn from_cbor(source: serde_cbor::Error, direction: Direction) -> Self {
-        Error::Cbor { source, direction }
+    fn from_binary(source: SerializationError, direction: Direction) -> Self {
+        Error::Binary { source, direction }
     }
 
     fn from_utf8(source: FromUtf8Error, codec: &'static str, direction: Direction) -> Self {
@@ -161,8 +159,8 @@ pub enum Codec {
     Bincode(BincodeProfile),
     /// JSON serialization using the canonical settings.
     Json(JsonProfile),
-    /// CBOR serialization using the canonical settings.
-    Cbor(CborProfile),
+    /// Binary serialization using the canonical settings.
+    Binary(BinaryProfile),
 }
 
 /// Bincode profiles made available to the workspace.
@@ -207,17 +205,17 @@ impl fmt::Display for JsonProfile {
     }
 }
 
-/// Canonical CBOR configuration identifiers.
+/// Canonical binary configuration identifiers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CborProfile {
-    /// Default serde_cbor serializer.
+pub enum BinaryProfile {
+    /// Default first-party binary serializer.
     Canonical,
 }
 
-impl fmt::Display for CborProfile {
+impl fmt::Display for BinaryProfile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CborProfile::Canonical => write!(f, "canonical"),
+            BinaryProfile::Canonical => write!(f, "canonical"),
         }
     }
 }
@@ -255,7 +253,7 @@ impl Codec {
         match self {
             Codec::Bincode(_) => "bincode",
             Codec::Json(_) => "json",
-            Codec::Cbor(_) => "cbor",
+            Codec::Binary(_) => "binary",
         }
     }
 
@@ -276,8 +274,8 @@ impl Codec {
             Codec::Json(JsonProfile::Canonical) => {
                 json::to_vec(value).map_err(|err| Error::from_json(err, Direction::Serialize))
             }
-            Codec::Cbor(CborProfile::Canonical) => {
-                serde_cbor::to_vec(value).map_err(|err| Error::from_cbor(err, Direction::Serialize))
+            Codec::Binary(BinaryProfile::Canonical) => {
+                binary::encode(value).map_err(|err| Error::from_binary(err, Direction::Serialize))
             }
         }
     }
@@ -291,8 +289,9 @@ impl Codec {
             Codec::Json(JsonProfile::Canonical) => {
                 json::from_slice(bytes).map_err(|err| Error::from_json(err, Direction::Deserialize))
             }
-            Codec::Cbor(CborProfile::Canonical) => serde_cbor::from_slice(bytes)
-                .map_err(|err| Error::from_cbor(err, Direction::Deserialize)),
+            Codec::Binary(BinaryProfile::Canonical) => {
+                binary::decode(bytes).map_err(|err| Error::from_binary(err, Direction::Deserialize))
+            }
         }
     }
 }
@@ -347,7 +346,7 @@ pub fn serialize_to_string<T: Serialize>(codec: Codec, value: &T) -> Result<Stri
                 }
             })
         }
-        Codec::Bincode(_) | Codec::Cbor(_) => Err(Error::unsupported_text(
+        Codec::Bincode(_) | Codec::Binary(_) => Err(Error::unsupported_text(
             codec.codec_label(),
             Direction::Serialize,
         )),
@@ -447,7 +446,7 @@ where
 mod tests {
     use super::*;
     use bincode::Options;
-    use serde::{Deserialize, Serialize};
+    use foundation_serialization::{Deserialize, Serialize};
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
     struct Sample {
@@ -458,7 +457,7 @@ mod tests {
     fn bincode_roundtrip_uses_named_profile() {
         let sample = Sample { value: 42 };
         let bytes = serialize(Codec::Bincode(BincodeProfile::Transaction), &sample).unwrap();
-        let via_config = profiles::transaction_config()
+        let via_config = profiles::transaction::config()
             .serialize(&sample)
             .expect("transaction profile");
         assert_eq!(bytes, via_config);
@@ -476,10 +475,10 @@ mod tests {
     }
 
     #[test]
-    fn cbor_roundtrip() {
+    fn binary_roundtrip() {
         let sample = Sample { value: 9 };
-        let bytes = serialize(Codec::Cbor(CborProfile::Canonical), &sample).unwrap();
-        let decoded: Sample = deserialize(Codec::Cbor(CborProfile::Canonical), &bytes).unwrap();
+        let bytes = serialize(Codec::Binary(BinaryProfile::Canonical), &sample).unwrap();
+        let decoded: Sample = deserialize(Codec::Binary(BinaryProfile::Canonical), &bytes).unwrap();
         assert_eq!(decoded, sample);
     }
 
@@ -508,9 +507,10 @@ mod tests {
             deserialize::<Sample>(Codec::Json(JsonProfile::Canonical), b"not json").unwrap_err();
         assert!(matches!(json_err, Error::Json { .. }));
 
-        let cbor_err =
-            deserialize::<Sample>(Codec::Cbor(CborProfile::Canonical), b"not cbor").unwrap_err();
-        assert!(matches!(cbor_err, Error::Cbor { .. }));
+        let binary_err =
+            deserialize::<Sample>(Codec::Binary(BinaryProfile::Canonical), b"not binary")
+                .unwrap_err();
+        assert!(matches!(binary_err, Error::Binary { .. }));
     }
 
     #[test]
@@ -518,6 +518,10 @@ mod tests {
         let sample = Sample { value: 21 };
         let err =
             serialize_to_string(Codec::Bincode(BincodeProfile::Transaction), &sample).unwrap_err();
+        assert!(matches!(err, Error::UnsupportedTextCodec { .. }));
+
+        let err =
+            serialize_to_string(Codec::Binary(BinaryProfile::Canonical), &sample).unwrap_err();
         assert!(matches!(err, Error::UnsupportedTextCodec { .. }));
     }
 }

@@ -1,5 +1,5 @@
+use foundation_serialization::Serialize;
 use hex;
-use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct CertRecord {

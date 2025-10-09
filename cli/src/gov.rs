@@ -7,7 +7,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
-use foundation_serialization::{binary, json};
+use foundation_serialization::binary;
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry, GovStore, ParamKey, Proposal, ProposalStatus,

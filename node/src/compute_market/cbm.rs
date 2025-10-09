@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Redeemable compute-backed token.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ComputeToken {
     /// Number of compute units this token represents.
     pub units: u64,
@@ -26,6 +27,7 @@ impl ComputeToken {
 
 /// Linear redeem curve priced off the current marketplace median.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct RedeemCurve {
     /// Base price per compute unit.
     pub base: u64,
@@ -43,6 +45,7 @@ impl RedeemCurve {
 
 /// Fee-funded backstop that guarantees redemption up to `reserve` units.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Backstop {
     pub reserve: u64,
 }

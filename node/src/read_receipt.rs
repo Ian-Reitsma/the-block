@@ -1,6 +1,6 @@
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use serde_bytes;
 
 /// Client-signed acknowledgement that a path was read from a manifest.

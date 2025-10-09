@@ -80,6 +80,7 @@ fn require_object<'a>(value: &'a Value, field: &'static str) -> Result<&'a Map, 
 fn require_array<'a>(value: &'a Value, field: &'static str) -> Result<&'a [Value], Error> {
     value
         .as_array()
+        .map(|values| values.as_slice())
         .ok_or_else(|| Error::invalid_type(field, "an array"))
 }
 

@@ -1,5 +1,5 @@
 use super::{runtime::Vm, state::ContractId};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Transactions targeting the contract VM.
 #[derive(Clone, Serialize, Deserialize)]

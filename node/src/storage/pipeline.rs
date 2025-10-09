@@ -17,8 +17,8 @@ use crate::transaction::BlobTx;
 use codec::profiles;
 use coding::{Compressor, EncryptError, Encryptor};
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::{Deserialize, Serialize};
 use rand::{rngs::OsRng, RngCore};
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -44,15 +44,16 @@ const RTT_LO_MS: f64 = 80.0;
 const QUOTA_BYTES_PER_CREDIT: u64 = 1024 * 1024; // 1 credit == 1 MiB logical quota
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ManifestSummary {
     pub manifest: String,
     pub total_len: u64,
     pub chunk_count: u32,
     pub erasure: String,
     pub compression: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub encryption: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub compression_level: Option<i32>,
     pub erasure_fallback: bool,
     pub compression_fallback: bool,
@@ -203,6 +204,7 @@ pub trait Provider: Send + Sync {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderProfile {
     pub bw_ewma: f64,
     pub rtt_ewma: f64,
@@ -210,23 +212,24 @@ pub struct ProviderProfile {
     pub preferred_chunk: u32,
     pub stable_chunks: u32,
     pub updated_at: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub success_rate_ewma: f64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub recent_failures: u32,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub total_chunks: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub total_failures: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub last_upload_bytes: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub last_upload_secs: f64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub maintenance: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderProfileSnapshot {
     pub provider: String,
     pub profile: ProviderProfile,
@@ -234,6 +237,7 @@ pub struct ProviderProfileSnapshot {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct PipelineEngineSummary {
     pub pipeline: String,
     pub rent_escrow: String,
@@ -877,13 +881,13 @@ impl StoragePipeline {
             provider_chunks: provider_chunk_index.values().cloned().collect(),
         };
         let mut h = Hasher::new();
-        let manifest_bytes_temp =
-            codec::serialize(profiles::storage_manifest(), &manifest).map_err(|e| e.to_string())?;
+        let manifest_bytes_temp = codec::serialize(profiles::storage_manifest::codec(), &manifest)
+            .map_err(|e| e.to_string())?;
         h.update(&manifest_bytes_temp);
         let man_hash = *h.finalize().as_bytes();
         manifest.blake3 = man_hash;
-        let manifest_bytes =
-            codec::serialize(profiles::storage_manifest(), &manifest).map_err(|e| e.to_string())?;
+        let manifest_bytes = codec::serialize(profiles::storage_manifest::codec(), &manifest)
+            .map_err(|e| e.to_string())?;
         self.db
             .try_insert(
                 &format!("manifest/{}", hex::encode(man_hash)),
@@ -901,8 +905,8 @@ impl StoragePipeline {
             },
             lane: lane.to_string(),
         };
-        let rec_bytes =
-            codec::serialize(profiles::storage_manifest(), &receipt).map_err(|e| e.to_string())?;
+        let rec_bytes = codec::serialize(profiles::storage_manifest::codec(), &receipt)
+            .map_err(|e| e.to_string())?;
         self.db
             .try_insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes)
             .map_err(|e| e.to_string())?;
@@ -950,7 +954,7 @@ impl StoragePipeline {
         let key = format!("manifest/{}", hex::encode(manifest_hash));
         let manifest_bytes = self.db.get(&key).ok_or("missing manifest")?;
         let manifest: ObjectManifest =
-            codec::deserialize(profiles::storage_manifest(), &manifest_bytes)
+            codec::deserialize(profiles::storage_manifest::codec(), &manifest_bytes)
                 .map_err(|e| e.to_string())?;
         let encryptor = manifest_encryptor(&manifest)?;
         let compressor = manifest_compressor(&manifest)?;
@@ -1029,7 +1033,7 @@ impl StoragePipeline {
                 continue;
             };
             let Ok(manifest) =
-                codec::deserialize::<ObjectManifest>(profiles::storage_manifest(), &bytes)
+                codec::deserialize::<ObjectManifest>(profiles::storage_manifest::codec(), &bytes)
             else {
                 continue;
             };
@@ -1180,7 +1184,7 @@ mod tests {
             let db = pipeline.db();
             db.get(&key).expect("manifest present")
         };
-        codec::deserialize(profiles::storage_manifest(), &bytes).expect("manifest decode")
+        codec::deserialize(profiles::storage_manifest::codec(), &bytes).expect("manifest decode")
     }
 
     fn sample_blob(len: usize) -> Vec<u8> {

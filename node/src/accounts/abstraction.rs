@@ -1,5 +1,5 @@
 use crate::{SignedTransaction, TxAdmissionError};
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Trait for pluggable account validation logic.
@@ -16,7 +16,7 @@ pub struct SessionPolicy {
     /// Expiration time (UNIX secs).
     pub expires_at: u64,
     /// Highest nonce observed for this session.
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
 }
 

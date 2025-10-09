@@ -214,13 +214,13 @@ fn startup_ttl_purge_increments_metrics() {
         bc.path.clear();
     }
     #[cfg(feature = "telemetry")]
-    let start_ttl = telemetry::STARTUP_TTL_DROP_TOTAL.get();
+    let start_ttl = telemetry::STARTUP_TTL_DROP_TOTAL.value();
     let bc2 = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(0, bc2.mempool_consumer.len());
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(1, telemetry::TTL_DROP_TOTAL.get() - start_ttl);
-        assert_eq!(start_ttl + 1, telemetry::STARTUP_TTL_DROP_TOTAL.get());
+        assert_eq!(1, telemetry::TTL_DROP_TOTAL.value() - start_ttl);
+        assert_eq!(start_ttl + 1, telemetry::STARTUP_TTL_DROP_TOTAL.value());
         assert_eq!(
             0,
             telemetry::MEMPOOL_SIZE
@@ -309,8 +309,8 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
         // subsidy payouts. They count toward orphan sweeps, not TTL expiry,
         // preserving the civic-grade accounting model that underpins
         // service-based governance.
-        assert_eq!(0, telemetry::STARTUP_TTL_DROP_TOTAL.get());
-        assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.get());
+        assert_eq!(0, telemetry::STARTUP_TTL_DROP_TOTAL.value());
+        assert_eq!(1, telemetry::ORPHAN_SWEEP_TOTAL.value());
     }
 }
 

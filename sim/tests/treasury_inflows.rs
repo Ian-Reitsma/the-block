@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use foundation_serialization::Deserialize;
 #[derive(Default)]
 struct TreasuryState {
     balance_ct: u64,

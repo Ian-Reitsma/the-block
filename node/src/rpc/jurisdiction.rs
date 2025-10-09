@@ -92,7 +92,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let err = policy_diff(&bc, "definitely-missing-template").unwrap_err();
-        assert_eq!(err.code(), -32070);
+        assert_eq!(err.code, -32070);
         assert_eq!(err.message(), "load failed");
     }
 }

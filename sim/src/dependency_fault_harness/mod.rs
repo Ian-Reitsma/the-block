@@ -12,8 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
+use foundation_serialization::Serialize;
 use runtime::sync::CancellationToken;
-use serde::Serialize;
 use tempfile;
 
 use codec::{self, Codec as CodecProfile};
@@ -83,7 +83,7 @@ pub enum CryptoBackendChoice {
 pub enum CodecBackendChoice {
     Bincode,
     Json,
-    Cbor,
+    Binary,
 }
 
 /// Targets that faults can be injected against.
@@ -770,7 +770,7 @@ fn run_codec_probe(
             CodecProfile::Bincode(codec::profiles::transaction::profile())
         }
         CodecBackendChoice::Json => CodecProfile::Json(codec::profiles::json::profile()),
-        CodecBackendChoice::Cbor => CodecProfile::Cbor(codec::profiles::cbor::profile()),
+        CodecBackendChoice::Binary => CodecProfile::Binary(codec::profiles::binary::profile()),
     };
     let fault = injector.get(FaultTarget::Codec);
     if fault == Some(FaultKind::Panic) {
@@ -813,7 +813,7 @@ fn serialize_with_profile<T: Serialize>(
     match profile {
         CodecProfile::Bincode(profile) => profile.serialize(value),
         CodecProfile::Json(profile) => profile.serialize(value),
-        CodecProfile::Cbor(profile) => profile.serialize(value),
+        CodecProfile::Binary(profile) => profile.serialize(value),
     }
 }
 
@@ -1414,14 +1414,14 @@ impl CryptoBackendChoice {
 
 impl CodecBackendChoice {
     pub const fn variants() -> &'static [&'static str] {
-        &["bincode", "json", "cbor"]
+        &["bincode", "json", "binary"]
     }
 
     fn as_str(&self) -> &'static str {
         match self {
             CodecBackendChoice::Bincode => "bincode",
             CodecBackendChoice::Json => "json",
-            CodecBackendChoice::Cbor => "cbor",
+            CodecBackendChoice::Binary => "binary",
         }
     }
 }
@@ -1506,7 +1506,7 @@ impl std::str::FromStr for CodecBackendChoice {
         match value.to_ascii_lowercase().as_str() {
             "bincode" => Ok(Self::Bincode),
             "json" => Ok(Self::Json),
-            "cbor" => Ok(Self::Cbor),
+            "binary" => Ok(Self::Binary),
             other => Err(other.to_string()),
         }
     }

@@ -5,6 +5,7 @@ use crate::Blockchain;
 use diagnostics::tracing::info;
 use foundation_math::linalg::{Matrix, Vector};
 use foundation_serialization::{binary, json};
+use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     validate_runtime_backend_policy, validate_storage_engine_policy,
@@ -12,7 +13,6 @@ use governance_spec::{
     DEFAULT_STORAGE_ENGINE_POLICY, DEFAULT_TRANSPORT_PROVIDER_POLICY, RUNTIME_BACKEND_OPTIONS,
     STORAGE_ENGINE_OPTIONS, TRANSPORT_PROVIDER_OPTIONS,
 };
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
@@ -123,6 +123,7 @@ const DEFAULT_TIMELOCK_EPOCHS: u64 = 2;
 const KILL_SWITCH_TIMELOCK_EPOCHS: u64 = 10800; // ≈12h at 4s epochs
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct Params {
     pub snapshot_interval_secs: i64,
     pub consumer_fee_comfort_p90_microunits: i64,

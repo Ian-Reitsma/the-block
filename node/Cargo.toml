@@ -34,6 +34,7 @@ cli_core = { path = "../crates/cli_core" }
 serde_bytes = "0.11"
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_rpc = { path = "../crates/foundation_rpc" }
+foundation_telemetry = { path = "../crates/foundation_telemetry" }
 icu_normalizer = "2"
 static_assertions = "1"
 tar = "0.4"
@@ -51,8 +52,6 @@ xorfilter-rs = "0.5"
 # fountain coding for repair overlay (via coding crate)
 # linear-algebra routines for governor
 foundation_math = { path = "../crates/foundation_math" }
-# spectral transforms for burst veto
-rustdct = "0.7"
 # minimal HTTP parsing
 httparse = "1"
 # account ledger for CT burns
@@ -71,10 +70,6 @@ coding = { path = "../crates/coding" }
 # governance parameter helpers
 governance-spec = { path = "../governance", package = "governance" }
 # jittered RPC client
-# parallel execution runtime
-rayon = "1"
-# webhook alerts
-ureq = { version = "2", features = ["json"], optional = true }
 pprof = { version = "0.13", features = ["flamegraph"] }
 bytes = "1"
 lru = "0.11"
@@ -94,7 +89,7 @@ integration-tests = []
 quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 
 fuzzy = []
-telemetry = ["ureq", "bridges/telemetry"]
+telemetry = ["bridges/telemetry", "codec/telemetry", "crypto_suite/telemetry"]
 telemetry-json = ["telemetry"]
 test-telemetry = ["telemetry"]
 telemetry-verbose = ["telemetry"]

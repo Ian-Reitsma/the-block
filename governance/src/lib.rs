@@ -40,9 +40,10 @@ pub type Address = String;
 #[doc = concat!("```rust\n", include_str!("../examples/usage.rs"), "\n```")]
 mod governance_example {}
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum ParamKey {
     SnapshotIntervalSecs,
     ConsumerFeeComfortP90Microunits,

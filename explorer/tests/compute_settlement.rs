@@ -1,9 +1,9 @@
 use explorer::{compute_view, Explorer, ProviderSettlementRecord};
-use sys::temp;
+use sys::tempfile;
 
 #[test]
 fn provider_balances_round_trip() {
-    let dir = temp::tempdir().expect("tempdir");
+    let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("explorer.db");
     let explorer = Explorer::open(&db_path).expect("open explorer");
     let records = vec![ProviderSettlementRecord {

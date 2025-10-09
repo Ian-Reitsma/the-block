@@ -1,6 +1,6 @@
 #![deny(warnings)]
 
-use crate::codec_helpers::json_to_string_pretty;
+use crate::codec_helpers::{json_to_string, json_to_string_pretty};
 use crate::parse_utils::{parse_required, parse_u64_required, require_string, take_string};
 use crate::rpc::{RpcClient, WalletQosError, WalletQosEvent};
 use crate::tx::{generate_keypair, sign_tx, FeeLane, RawTxPayload};
@@ -274,7 +274,7 @@ pub struct BuildTxReport {
     pub fee_floor: u64,
     pub lane: String,
     pub warnings: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub payload: Option<RawTxPayload>,
     pub auto_bumped: bool,
     pub forced: bool,
@@ -368,7 +368,11 @@ pub fn handle(cmd: WalletCmd) {
                             "status": "error",
                             "message": err.to_string(),
                         });
-                        println!("{}", payload);
+                        match json_to_string_pretty(&payload).or_else(|_| json_to_string(&payload))
+                        {
+                            Ok(text) => println!("{}", text),
+                            Err(err) => eprintln!("failed to encode json payload: {err}"),
+                        }
                     } else {
                         eprintln!("{}", err);
                     }
@@ -451,7 +455,11 @@ pub fn handle(cmd: WalletCmd) {
                             "status": "error",
                             "message": err.to_string(),
                         });
-                        println!("{}", payload);
+                        match json_to_string_pretty(&payload).or_else(|_| json_to_string(&payload))
+                        {
+                            Ok(text) => println!("{}", text),
+                            Err(err) => eprintln!("failed to encode json payload: {err}"),
+                        }
                     } else {
                         eprintln!("wallet send failed: {err}");
                     }

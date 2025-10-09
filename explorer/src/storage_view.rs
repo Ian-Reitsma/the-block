@@ -1,4 +1,4 @@
-use serde::Serialize;
+use foundation_serialization::Serialize;
 use storage::StorageContract;
 use the_block::storage::pipeline::ManifestSummary;
 
@@ -37,9 +37,9 @@ pub struct ManifestAlgorithmView {
     pub chunk_count: u32,
     pub erasure: String,
     pub compression: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub encryption: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub compression_level: Option<i32>,
     pub erasure_fallback: bool,
     pub compression_fallback: bool,

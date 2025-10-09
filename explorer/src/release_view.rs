@@ -1,5 +1,5 @@
 use anyhow::Result;
-use serde::Serialize;
+use foundation_serialization::Serialize;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

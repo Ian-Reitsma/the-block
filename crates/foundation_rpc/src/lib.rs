@@ -8,8 +8,8 @@
 //! utilities for bridging to the in-house `httpd` layer.
 
 use foundation_serialization::json::{self, Map, Value};
+use foundation_serialization::{Deserialize, Serialize};
 use httpd::{HttpError, Request as HttpRequest, Response as HttpResponse, StatusCode};
-use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use thiserror::Error;
 
@@ -106,11 +106,11 @@ pub struct Request {
     #[serde(rename = "jsonrpc", default)]
     pub version: Option<String>,
     pub method: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub params: Params,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub id: Option<Value>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub badge: Option<String>,
 }
 
@@ -160,14 +160,14 @@ pub enum Response {
         #[serde(rename = "jsonrpc")]
         version: String,
         result: Value,
-        #[serde(default)]
+        #[serde(default = "foundation_serialization::defaults::default")]
         id: Option<Value>,
     },
     Error {
         #[serde(rename = "jsonrpc")]
         version: String,
         error: RpcError,
-        #[serde(default)]
+        #[serde(default = "foundation_serialization::defaults::default")]
         id: Option<Value>,
     },
 }

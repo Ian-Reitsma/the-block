@@ -3,9 +3,9 @@ mod store {
     use std::path::PathBuf;
     use std::time::Duration;
 
+    use foundation_serialization::Serialize;
     use httpd::{form_urlencoded, StatusCode};
     use runtime::ws::{Message as WsMessage, ServerStream};
-    use serde::Serialize;
 
     use crate::log_indexer::{search_logs, LogEntry, LogFilter, LogIndexerError};
 

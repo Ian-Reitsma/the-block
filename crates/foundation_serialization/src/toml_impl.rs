@@ -1,7 +1,7 @@
 use std::fmt;
 
+use crate::Serialize;
 use serde::de::DeserializeOwned;
-use serde::ser::Serialize;
 
 use crate::json_impl::{self, Map as JsonMap, Number as JsonNumber, Value as JsonValue};
 
@@ -881,7 +881,7 @@ mod tests {
         port: u16,
         name: String,
         values: Vec<u32>,
-        #[serde(default)]
+        #[serde(default = "crate::defaults::default")]
         nested: Option<Nested>,
     }
 

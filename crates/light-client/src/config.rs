@@ -9,13 +9,13 @@ use crate::device::DeviceFallback;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct LightClientConfig {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub ignore_charging_requirement: bool,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub wifi_only_override: Option<bool>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub min_battery_override: Option<f32>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fallback_override: Option<DeviceFallback>,
     #[serde(default = "default_max_snapshot_bytes")]
     pub max_snapshot_bytes: u64,

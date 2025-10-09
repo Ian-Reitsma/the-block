@@ -1,5 +1,5 @@
 use explorer::Explorer;
-use sys::temp;
+use sys::tempfile;
 use the_block::{
     transaction::{FeeLane, RawTxPayload, SignedTransaction},
     Block, TokenAmount,
@@ -7,7 +7,7 @@ use the_block::{
 
 #[test]
 fn index_block_and_search() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let db = dir.path().join("explorer.db");
     let ex = Explorer::open(&db).unwrap();
 

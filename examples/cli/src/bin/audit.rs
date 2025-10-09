@@ -5,7 +5,7 @@ use cli_core::{
     parse::{ParseError, Parser},
 };
 use httpd::{BlockingClient, Method};
-use serde::Deserialize;
+use foundation_serialization::Deserialize;
 use foundation_serialization::json;
 
 #[derive(Deserialize, Debug)]

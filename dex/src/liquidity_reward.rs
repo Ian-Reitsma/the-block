@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Simple epoch-based liquidity mining reward distributor.

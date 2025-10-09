@@ -19,24 +19,48 @@ pub fn corr_id_random() -> String {
     hex::encode(bytes)
 }
 
+pub(crate) fn info_span_with_field(
+    name: &'static str,
+    key: &'static str,
+    value: String,
+) -> diagnostics::tracing::Span {
+    diagnostics::tracing::Span::new(
+        std::borrow::Cow::Borrowed(name),
+        diagnostics::tracing::Level::INFO,
+        vec![diagnostics::FieldValue {
+            key: std::borrow::Cow::Borrowed(key),
+            value,
+        }],
+    )
+}
+
 #[macro_export]
 macro_rules! log_context {
     (block = $height:expr) => {
-        diagnostics::tracing::info_span!("block", correlation_id = %$crate::logging::corr_id_height($height))
+        $crate::logging::info_span_with_field(
+            "block",
+            "correlation_id",
+            $crate::logging::corr_id_height($height),
+        )
     };
     (tx = $hash:expr) => {
-        diagnostics::tracing::info_span!("tx", correlation_id = %$crate::logging::corr_id_hash(&$hash))
+        $crate::logging::info_span_with_field(
+            "tx",
+            "correlation_id",
+            $crate::logging::corr_id_hash(&$hash),
+        )
     };
     (request) => {
-        diagnostics::tracing::info_span!(
+        $crate::logging::info_span_with_field(
             "request",
-            correlation_id = %$crate::logging::corr_id_random()
+            "correlation_id",
+            $crate::logging::corr_id_random(),
         )
     };
     (request = $id:expr) => {
-        diagnostics::tracing::info_span!("request", correlation_id = %$id)
+        $crate::logging::info_span_with_field("request", "correlation_id", format!("{}", &$id))
     };
     (provider = $id:expr) => {
-        diagnostics::tracing::info_span!("provider", id = %$id)
+        $crate::logging::info_span_with_field("provider", "id", format!("{}", &$id))
     };
 }

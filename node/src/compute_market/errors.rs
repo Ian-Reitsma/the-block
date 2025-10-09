@@ -1,7 +1,8 @@
-use serde::Serialize;
+use foundation_serialization::Serialize;
 use std::fmt;
 
 #[derive(Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub enum MarketError {
     NoPriceData,
     InvalidWorkload,

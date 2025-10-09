@@ -1,5 +1,5 @@
 use crate::Blockchain;
-use serde::Serialize;
+use foundation_serialization::Serialize;
 
 #[derive(Serialize, Clone)]
 pub struct HeaderSummary {
@@ -14,7 +14,7 @@ pub struct RebateRelayer {
     pub pending: u64,
     pub total_proofs: u64,
     pub total_claimed: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub last_claim_height: Option<u64>,
 }
 
@@ -40,7 +40,7 @@ pub struct RebateReceiptEntry {
 #[derive(Serialize, Clone)]
 pub struct RebateReceiptPage {
     pub receipts: Vec<RebateReceiptEntry>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub next: Option<u64>,
 }
 

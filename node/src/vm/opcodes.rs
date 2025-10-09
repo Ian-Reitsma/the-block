@@ -1,4 +1,4 @@
-use serde::Serialize;
+use foundation_serialization::Serialize;
 
 /// Core VM opcodes.
 #[derive(Clone, Copy, Serialize, Debug, PartialEq, Eq)]

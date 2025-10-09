@@ -10,7 +10,7 @@ log = "0.4"
 base64_fp = { path = "../base64_fp" }
 crypto_suite = { path = "../crypto_suite" }
 foundation_lazy = { path = "../foundation_lazy" }
-ureq = "2"
+httpd = { path = "../httpd" }
 
 # optional post-quantum encryption
 pqcrypto-kyber = { version = "0.8", optional = true }

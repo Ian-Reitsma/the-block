@@ -16,10 +16,10 @@ use cli_core::{
     parse::Matches,
 };
 use crypto_suite::signatures::ed25519::SigningKey;
-use foundation_serialization::json::{self, Value};
+use foundation_serialization::json::Value;
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use light_client::{self, SyncOptions};
-use serde::{Deserialize, Serialize};
 
 const MAX_DID_DOC_BYTES: usize = 64 * 1024;
 
@@ -427,7 +427,7 @@ pub struct AnchorRecord {
     pub nonce: u64,
     pub updated_at: u64,
     pub public_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub remote_attestation: Option<AnchorRemoteAttestation>,
 }
 
@@ -435,17 +435,17 @@ pub struct AnchorRecord {
 #[serde(rename_all = "snake_case")]
 pub struct ResolvedDid {
     pub address: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub document: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub hash: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub nonce: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub updated_at: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub public_key: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub remote_attestation: Option<AnchorRemoteAttestation>,
 }
 
@@ -457,7 +457,7 @@ struct AnchorRecordWire {
     nonce: u64,
     updated_at: u64,
     public_key: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     remote_attestation: Option<AnchorRemoteAttestation>,
 }
 
@@ -480,17 +480,17 @@ impl AnchorRecordWire {
 #[derive(Debug, Clone, Deserialize)]
 struct ResolvedDidWire {
     address: String,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     document: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     hash: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     nonce: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     updated_at: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     public_key: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     remote_attestation: Option<AnchorRemoteAttestation>,
 }
 
@@ -515,9 +515,9 @@ impl ResolvedDidWire {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RpcEnvelope<T> {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     result: Option<T>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     error: Option<RpcErrorBody>,
 }
 
@@ -530,7 +530,7 @@ struct RpcErrorBody {
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RebateHistoryResult {
     receipts: Vec<RebateHistoryReceipt>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     next: Option<u64>,
 }
 
@@ -538,7 +538,7 @@ struct RebateHistoryResult {
 struct RebateHistoryReceipt {
     height: u64,
     amount: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     relayers: Vec<RebateHistoryRelayer>,
 }
 
@@ -561,7 +561,7 @@ struct Payload<'a> {
     id: u32,
     method: &'static str,
     params: Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     auth: Option<&'a str>,
 }
 
@@ -824,7 +824,9 @@ fn run_resolve_command(args: DidResolveArgs) -> Result<()> {
         Some(doc) => {
             println!(
                 "Document:\n{}",
-                json_to_string_pretty(doc).unwrap_or_else(|_| doc.to_string())
+                json_to_string_pretty(doc)
+                    .or_else(|_| json_to_string(doc))
+                    .unwrap_or_else(|_| format!("{doc:?}"))
             );
         }
         None => println!("Document: <none>"),
@@ -893,7 +895,7 @@ fn load_remote_signer(path: &Path) -> Result<(Vec<u8>, Option<String>)> {
         #[derive(Deserialize)]
         struct RemoteSignerFile {
             secret: String,
-            #[serde(default)]
+            #[serde(default = "foundation_serialization::defaults::default")]
             signer: Option<String>,
         }
         let parsed: RemoteSignerFile =

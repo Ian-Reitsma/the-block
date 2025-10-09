@@ -209,6 +209,7 @@ mod state_codec {
         CodecError::InvalidType { field, expected }
     }
 
+    #[allow(dead_code)]
     fn invalid_value(field: &'static str, reason: impl Into<String>) -> CodecError {
         CodecError::InvalidValue {
             field,
@@ -229,6 +230,7 @@ mod state_codec {
     fn require_array<'a>(value: &'a Value, field: &'static str) -> Result<&'a [Value], CodecError> {
         value
             .as_array()
+            .map(|values| values.as_slice())
             .ok_or_else(|| invalid_type(field, "an array"))
     }
 
@@ -244,6 +246,7 @@ mod state_codec {
             .ok_or_else(|| invalid_type(field, "an integer"))
     }
 
+    #[allow(dead_code)]
     fn require_bool(value: &Value, field: &'static str) -> Result<bool, CodecError> {
         match value {
             Value::Bool(flag) => Ok(*flag),

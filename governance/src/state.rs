@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Treasury account that accumulates a percentage of block subsidies.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryState {
     /// Total CT collected in the treasury.
     pub balance_ct: u64,

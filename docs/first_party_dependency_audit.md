@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-09 15:20:00Z_
+_Last updated: 2025-10-10 11:20:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -19,31 +19,31 @@ explicit.
 | Module | File | Line(s) | Third-party usage | Notes |
 | --- | --- | --- | --- | --- |
 | gateway | `node/src/gateway/read_receipt.rs` | 12 | `serde::{Deserialize, Serialize}` derive | Receipt envelopes and gateway attestations remain on serde derives; no facade wrapper yet. |
-| compute_market | `node/src/compute_market/mod.rs` | 5, 57, 81-87, 126, 250, 255 | `serde::{Deserialize, Serialize}` derive + field attributes | Lane policy/state structs use serde rename/default attributes. |
-| compute_market | `node/src/compute_market/cbm.rs` | 1 | serde derive | CBM configuration round-trips via serde. |
-| compute_market | `node/src/compute_market/courier.rs` | 6 | serde derive | Courier payloads retain serde derives, but persistence now calls `foundation_serialization::binary::{encode, decode}` instead of `bincode`. |
-| compute_market | `node/src/compute_market/courier_store.rs` | 1 | serde derive | Receipt store now persists via `foundation_serialization::binary::{encode, decode}` for sled values; serde derives remain on `Receipt`. |
-| compute_market | `node/src/compute_market/errors.rs` | 1 | `serde::Serialize` | Error surfaces expose serde serialization for RPC. |
-| compute_market | `node/src/compute_market/price_board.rs` | 3 | serde derive | Price board structs still derive serde, yet snapshot persistence now reuses the in-house binary codec (`foundation_serialization::binary`). |
-| compute_market | `node/src/compute_market/receipt.rs` | 3 | serde derive | Receipt encoding still serde-based; includes optional field handling. |
-| compute_market | `node/src/compute_market/scheduler.rs` | 3, 24-36, 849 | serde derive + defaults | Scheduler policy config uses serde default helpers. |
-| compute_market | `node/src/compute_market/settlement.rs` | 22, 62 | serde derive (with `serde::de::DeserializeOwned`) | Settlement pipeline now routes SimpleDb blobs through `foundation_serialization::binary`; serde derives remain for struct definitions. |
-| compute_market | `node/src/compute_market/workload.rs` | 1 | serde derive | Workload manifests serialized/deserialized via serde. |
-| storage | `node/src/storage/fs.rs` | 6 | serde derive | Filesystem manifest uses serde. |
-| storage | `node/src/storage/pipeline.rs` | 21, 53, 213-225 | serde derive + skip/defaults | Storage pipeline manifests rely on serde attribute logic. |
-| storage | `node/src/storage/repair.rs` | 15, 139 | serde derive + rename_all | Repair queue tasks use serde rename for enums. |
-| storage | `node/src/storage/types.rs` | 1, 19-58 | serde derive + defaults | Storage policy/state structures remain serde-backed. |
-| governance | `node/src/governance/mod.rs` | 35 | serde derive | Module-level envelope still on serde derives. |
-| governance | `node/src/governance/bicameral.rs` | 2 | serde derive | Bicameral state persists via serde. |
-| governance | `node/src/governance/inflation_cap.rs` | 8 | `serde::Serialize` | Inflation cap reports export using serde. |
-| governance | `node/src/governance/params.rs` | 15, 138, 163-167, 996-997 | serde derive + defaults | `EncryptedUtilization::decrypt` now decodes with `foundation_serialization::binary`; remaining structs still derive via serde. |
-| governance | `node/src/governance/proposals.rs` | 2 | serde derive | Proposal DAG nodes rely on serde. |
-| governance | `node/src/governance/release.rs` | 2 | serde derive | Release policy still serialized through serde. |
-| governance | `node/src/governance/state.rs` | 1 | serde derive | Global governance state depends on serde. |
-| governance | `node/src/governance/store.rs` | 15, 45, 47 | serde derive + skip_serializing_if | Persistence now routes through `foundation_serialization::binary::{encode, decode}` instead of `bincode`. |
-| governance | `node/src/governance/token.rs` | 2 | serde derive | Token accounting uses serde. |
+| compute_market | `node/src/compute_market/mod.rs` | 5, 57, 81-87, 126, 250, 255 | `foundation_serialization::{Deserialize, Serialize}` derive + facade defaults | Lane policy/state structs now pull defaults/skip handlers from `foundation_serialization::{defaults, skip}`. |
+| compute_market | `node/src/compute_market/cbm.rs` | 1 | facade derive | CBM configuration round-trips via the facade re-export. |
+| compute_market | `node/src/compute_market/courier.rs` | 6 | facade derive | Courier payloads retain facade derives; persistence already uses `foundation_serialization::binary::{encode, decode}`. |
+| compute_market | `node/src/compute_market/courier_store.rs` | 1 | facade derive | Receipt store persists via `foundation_serialization::binary::{encode, decode}` for sled values. |
+| compute_market | `node/src/compute_market/errors.rs` | 1 | `foundation_serialization::Serialize` | Error surfaces expose facade serialization for RPC. |
+| compute_market | `node/src/compute_market/price_board.rs` | 3 | facade derive | Price board structs derive through the facade and snapshot via `foundation_serialization::binary`. |
+| compute_market | `node/src/compute_market/receipt.rs` | 3 | facade derive + optional defaults | Receipt encoding now references `foundation_serialization::defaults::default` and `foundation_serialization::skip::option_is_none`. |
+| compute_market | `node/src/compute_market/scheduler.rs` | 3, 24-36, 849 | facade derive + defaults | Scheduler capability/reputation state uses facade helpers for defaults. |
+| compute_market | `node/src/compute_market/settlement.rs` | 22, 62 | facade derive (`foundation_serialization::de::DeserializeOwned`) | Settlement pipeline routes SimpleDb blobs through the facade; optional fields use the facade skip helpers. |
+| compute_market | `node/src/compute_market/workload.rs` | 1 | facade derive | Workload manifests serialize via the facade exports. |
+| storage | `node/src/storage/fs.rs` | 6 | facade derive | Filesystem escrow entries serialize through the facade. |
+| storage | `node/src/storage/pipeline.rs` | 21, 53, 213-225 | facade derive + skip/defaults | Storage pipeline manifests use `foundation_serialization::{defaults, skip}` for optionals and collections. |
+| storage | `node/src/storage/repair.rs` | 15, 139 | facade derive + rename_all | Repair queue tasks use facade derives with `rename_all`. |
+| storage | `node/src/storage/types.rs` | 1, 19-58 | facade derive + defaults | Storage policy/state structures now reference facade defaults. |
+| governance | `node/src/governance/mod.rs` | 35 | facade derive | Module-level envelope derives via the facade. |
+| governance | `node/src/governance/bicameral.rs` | 2 | facade derive | Bicameral state persists via facade derives. |
+| governance | `node/src/governance/inflation_cap.rs` | 8 | `foundation_serialization::Serialize` | Inflation cap reports export using the facade serializer. |
+| governance | `node/src/governance/params.rs` | 15, 138, 163-167, 996-997 | facade derive + defaults | `EncryptedUtilization::decrypt` decodes with the facade; structs use facade default helpers. |
+| governance | `node/src/governance/proposals.rs` | 2 | facade derive | Proposal DAG nodes rely on the facade re-export. |
+| governance | `node/src/governance/release.rs` | 2 | facade derive | Release policy serializes via the facade helpers. |
+| governance | `node/src/governance/state.rs` | 1 | facade derive | Global governance state uses the facade. |
+| governance | `node/src/governance/store.rs` | 15, 45, 47 | facade derive + skip helpers | Persistence routes through `foundation_serialization::binary::{encode, decode}` with facade skip predicates. |
+| governance | `node/src/governance/token.rs` | 2 | facade derive | Token accounting uses facade derives. |
 | governance | `node/src/governance/kalman.rs` | 1 | serde derive (first-party math) | Kalman filter now uses `foundation_math` vectors/matrices and `ChiSquared`; serde derives limited to struct definitions. |
-| governance | `node/src/governance/variance.rs` | (see §2) | — | (See math section for rustdct usage.) |
+| governance | `node/src/governance/variance.rs` | (see §2) | — | Burst veto DCT now routes through `foundation_math::transform::dct2_inplace`. |
 | governance | `node/src/governance` (misc) | — | `serde_json` — none observed | Runtime crate already routes JSON through facade; governance code has no direct serde_json usage. |
 | rpc | `node/src/rpc/mod.rs` | 21-32, 364-620 | **Migrated to `foundation_rpc` request/response envelope** | Runtime handlers now parse via the first-party `foundation_rpc` crate; remaining serde derives only cover auxiliary payload structs. |
 | rpc | `node/src/rpc/client.rs` | 1-340 | serde derive + skip/default bounds | Client helpers now emit/parse `foundation_rpc::{Request, Response}` envelopes but still deserialize typed payloads through serde. |
@@ -76,8 +76,13 @@ third-party codecs:
 ### Tooling & Support Crate Migrations (2025-10-09)
 
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
-  `foundation_serialization::json`, allowing the `ureq` JSON feature and
-  `serde_json` dependency to be removed.
+  `foundation_serialization::json` and the in-house HTTP client, eliminating the
+  `ureq` dependency entirely.
+- ✅ Governance webhook notifications dispatch through `httpd::BlockingClient`
+  so telemetry alerts ride first-party HTTP primitives instead of `ureq`.
+- ✅ Lightweight probes (`tools/probe.rs`, `tools/partition_probe.rs`) fetch
+  metrics over raw `TcpStream` requests, dropping their previous reliance on the
+  `ureq` crate.
 - ✅ `crates/probe` emits RPC payloads through the in-house `json!` macro, and
   `crates/wallet` (including the remote signer tests) round-trips signer
   messages with the same facade.
@@ -87,8 +92,9 @@ third-party codecs:
 - ✅ `examples/mobile`, `examples/cli`, and the wallet remote signer demo all
   consume the shared JSON helpers so downstream automation builds no longer
   pull in `serde_json`.
-- ✅ `crates/codec` now wraps the facade’s JSON implementation, exposing the
-  same API surface without depending on third-party encoders.
+- ✅ `crates/codec` now wraps the facade’s JSON implementation and ships a
+  first-party binary profile, removing the lingering `serde_cbor` dependency
+  from production crates.
 - ✅ `crates/light-client` device telemetry and state snapshot metrics now feed
   the in-house `runtime::telemetry` registry, removing the optional
   `prometheus` dependency and updating regression tests to assert against the
@@ -96,7 +102,16 @@ third-party codecs:
 - ✅ Monitoring scripts, docker-compose assets, and the metrics aggregator all
   emit dashboards via `monitoring/tools/render_foundation_dashboard.py` and
   `httpd::metrics::telemetry_snapshot`, removing Prometheus from the
-  observability toolchain.
+  observability toolchain. Wrapper summaries inside the aggregator now rely on
+  `foundation_serialization::defaults::default` so telemetry exports stay on
+  first-party helpers.
+- ✅ `tools/analytics_audit` decodes read acknowledgement batches with the
+  facade’s binary helpers, ensuring telemetry audits stay on first-party
+  codecs while retaining the Merkle validation workflow.
+- ✅ CLI binaries, explorer tooling, log indexer utilities, and runtime RPC
+  clients now source `#[serde(default)]`/`skip_serializing_if` behaviour from
+  `foundation_serialization::{defaults, skip}`. This keeps workspace derives on
+  the facade without referencing standard-library helpers directly.
 
 Remaining tasks before we can flip `FIRST_PARTY_ONLY=1` include replacing the
 residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`), finishing
@@ -111,8 +126,8 @@ quantiles without local patches.
 | `nalgebra` | Dense linear algebra for Kalman filter state (`DVector`, `DMatrix`) | — | **Removed.** Replaced by `crates/foundation_math::linalg` fixed-size matrices/vectors powering both node and governance Kalman filters. |
 | `statrs` | Statistical distributions (Chi-squared CDF) for Kalman confidence bounds | — | **Removed.** Replaced by `crates/foundation_math::distribution::ChiSquared` inverse CDF implementation. |
 | `foundation_math` | First-party linear algebra & distributions | `node/src/governance/kalman.rs`; `node/src/governance/params.rs`; `governance/src/{kalman,params}.rs` | Provides fixed-size matrices/vectors plus chi-squared quantiles used by Kalman retuning; extend with DCT/backoff primitives next. |
-| `rustdct` | Fast cosine transform planner for variance smoothing | `node/src/governance/variance.rs`; `governance/src/variance.rs` | Provides type-2 DCT via planner; evaluate migrating to in-house FFT/DCT in `crates/coding` or bespoke implementation. |
-| `rayon` | Parallel iterators and thread pool | `node/src/parallel.rs`; `node/src/storage/repair.rs` (thread pool + parallel iterators) | Node runtime still depends on rayon for CPU-bound pipelines; requires replacement with internal thread-pool implementation. |
+| `rustdct` | Fast cosine transform planner for variance smoothing | — | **Removed.** Replaced by `foundation_math::transform::dct2_inplace`, wiring node and governance burst veto logic to first-party code. |
+| `rayon` | Parallel iterators and thread pool | — | **Removed.** Conflict-aware task scheduling and storage repair batches now execute on scoped std threads, eliminating the external pool. |
 | `bytes` | — | _No active call sites in node/runtime crates_ | `bytes` crate no longer imported in production modules; manifests may still include it indirectly (verify before removal). |
 
 ### Supporting Crates Mirroring Runtime Usage
@@ -126,11 +141,11 @@ quantiles without local patches.
 
 ## 3. Next Steps Toward Full Migration
 
-1. **Extend `foundation_serialization`:** add JSON/binary adapters that emulate
-   the serde defaults currently relied upon (e.g., default/skip semantics for
-   optionals). Introduce helper derive macros or manual `impl Serialize`/`impl
-   Deserialize` via the facade to unblock compute-market/storage/governance
-   structs.
+1. **Finalize facade ergonomics:** now that defaults/skip helpers are wired
+   across runtime/tooling crates, capture any bespoke predicates (e.g., non-zero
+   numeric guards) inside `foundation_serialization` so downstream code stops
+   shadowing std helpers entirely. Promote derive macros once coverage is
+   exhaustive.
 2. **Refactor Call Sites:** replace direct serde derives with the new helpers,
    ensuring deterministic round-trips. Update persistence layers and RPC
    handlers to consume the facade APIs instead of `serde_json` or `bincode`.

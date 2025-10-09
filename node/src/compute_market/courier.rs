@@ -2,15 +2,16 @@ use super::scheduler::{self, Capability};
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::binary;
+use foundation_serialization::{Deserialize, Serialize};
 use rand::RngCore;
 use runtime::{block_on, sleep};
-use serde::{Deserialize, Serialize};
 use sled::Tree;
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Receipt stored for carry-to-earn courier mode.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct CourierReceipt {
     pub id: u64,
     pub bundle_hash: String,

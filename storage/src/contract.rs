@@ -1,9 +1,10 @@
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// StorageContract tracks file shards stored with a provider
 /// along with payment schedule and erasure coding metadata.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct StorageContract {
     /// Identifier of the stored object
     pub object_id: String,

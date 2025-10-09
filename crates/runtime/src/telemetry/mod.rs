@@ -380,6 +380,49 @@ impl Collector for Counter {
 pub type IntCounter = Counter;
 
 #[derive(Clone)]
+pub struct IntCounterHandle(Result<IntCounter>);
+
+impl IntCounterHandle {
+    fn new(inner: Result<IntCounter>) -> Self {
+        Self(inner)
+    }
+
+    fn inner(&self) -> Option<&IntCounter> {
+        self.0.as_ref().ok()
+    }
+
+    pub fn into_result(self) -> Result<IntCounter> {
+        self.0
+    }
+
+    pub fn inc(&self) {
+        if let Some(counter) = self.inner() {
+            counter.inc();
+        }
+    }
+
+    pub fn inc_by(&self, value: u64) {
+        if let Some(counter) = self.inner() {
+            counter.inc_by(value);
+        }
+    }
+
+    pub fn reset(&self) {
+        if let Some(counter) = self.inner() {
+            counter.reset();
+        }
+    }
+
+    pub fn value(&self) -> u64 {
+        self.inner().map(|c| c.value()).unwrap_or(0)
+    }
+
+    pub fn get(&self) -> u64 {
+        self.value()
+    }
+}
+
+#[derive(Clone)]
 pub struct CounterVec {
     inner: Arc<CounterVecInner>,
 }
@@ -406,7 +449,11 @@ impl CounterVec {
         })
     }
 
-    pub fn with_label_values(&self, values: &[&str]) -> Result<IntCounter> {
+    pub fn with_label_values(&self, values: &[&str]) -> IntCounterHandle {
+        IntCounterHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn try_with_label_values(&self, values: &[&str]) -> Result<IntCounter> {
         if values.len() != self.inner.label_names.len() {
             return Err(MetricError::InconsistentCardinality {
                 expected: self.inner.label_names.len(),
@@ -437,6 +484,14 @@ impl CounterVec {
         };
         self.inner.values.insert(key, counter.inner.clone());
         Ok(counter)
+    }
+
+    pub fn remove_label_values(&self, values: &[&str]) -> bool {
+        if values.len() != self.inner.label_names.len() {
+            return false;
+        }
+        let key = LabelKey(values.iter().map(|s| (*s).to_string()).collect());
+        self.inner.values.remove(&key).is_some()
     }
 
     pub fn get_metric_with_label_values(&self, values: &[&str]) -> Result<IntCounter> {
@@ -490,6 +545,39 @@ impl Collector for CounterVec {
 }
 
 pub type IntCounterVec = CounterVec;
+
+#[derive(Clone)]
+pub struct GaugeHandle(Result<Gauge>);
+
+impl GaugeHandle {
+    fn new(inner: Result<Gauge>) -> Self {
+        Self(inner)
+    }
+
+    fn inner(&self) -> Option<&Gauge> {
+        self.0.as_ref().ok()
+    }
+
+    pub fn into_result(self) -> Result<Gauge> {
+        self.0
+    }
+
+    pub fn set(&self, value: f64) {
+        if let Some(gauge) = self.inner() {
+            gauge.set(value);
+        }
+    }
+
+    pub fn reset(&self) {
+        if let Some(gauge) = self.inner() {
+            gauge.reset();
+        }
+    }
+
+    pub fn get(&self) -> f64 {
+        self.inner().map(|g| g.get()).unwrap_or(0.0)
+    }
+}
 
 #[derive(Clone)]
 pub struct Gauge {
@@ -578,6 +666,14 @@ impl IntGauge {
         self.inner.value.store(value, Ordering::Relaxed);
     }
 
+    pub fn add(&self, value: i64) {
+        self.inner.value.fetch_add(value, Ordering::Relaxed);
+    }
+
+    pub fn sub(&self, value: i64) {
+        self.inner.value.fetch_sub(value, Ordering::Relaxed);
+    }
+
     pub fn reset(&self) {
         self.set(0);
     }
@@ -614,6 +710,55 @@ impl Collector for IntGauge {
 }
 
 #[derive(Clone)]
+pub struct IntGaugeHandle(Result<IntGauge>);
+
+impl IntGaugeHandle {
+    fn new(inner: Result<IntGauge>) -> Self {
+        Self(inner)
+    }
+
+    fn inner(&self) -> Option<&IntGauge> {
+        self.0.as_ref().ok()
+    }
+
+    pub fn into_result(self) -> Result<IntGauge> {
+        self.0
+    }
+
+    pub fn set(&self, value: i64) {
+        if let Some(gauge) = self.inner() {
+            gauge.set(value);
+        }
+    }
+
+    pub fn add(&self, value: i64) {
+        if let Some(gauge) = self.inner() {
+            gauge.add(value);
+        }
+    }
+
+    pub fn sub(&self, value: i64) {
+        if let Some(gauge) = self.inner() {
+            gauge.sub(value);
+        }
+    }
+
+    pub fn reset(&self) {
+        if let Some(gauge) = self.inner() {
+            gauge.reset();
+        }
+    }
+
+    pub fn value(&self) -> i64 {
+        self.inner().map(|g| g.value()).unwrap_or(0)
+    }
+
+    pub fn get(&self) -> i64 {
+        self.value()
+    }
+}
+
+#[derive(Clone)]
 pub struct IntGaugeVec {
     inner: Arc<IntGaugeVecInner>,
 }
@@ -637,7 +782,11 @@ impl IntGaugeVec {
         })
     }
 
-    pub fn with_label_values(&self, values: &[&str]) -> Result<IntGauge> {
+    pub fn with_label_values(&self, values: &[&str]) -> IntGaugeHandle {
+        IntGaugeHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn try_with_label_values(&self, values: &[&str]) -> Result<IntGauge> {
         if values.len() != self.inner.label_names.len() {
             return Err(MetricError::InconsistentCardinality {
                 expected: self.inner.label_names.len(),
@@ -668,6 +817,14 @@ impl IntGaugeVec {
         };
         self.inner.values.insert(key, gauge.inner.clone());
         Ok(gauge)
+    }
+
+    pub fn remove_label_values(&self, values: &[&str]) -> bool {
+        if values.len() != self.inner.label_names.len() {
+            return false;
+        }
+        let key = LabelKey(values.iter().map(|s| (*s).to_string()).collect());
+        self.inner.values.remove(&key).is_some()
     }
 
     pub fn get_metric_with_label_values(&self, values: &[&str]) -> Result<IntGauge> {
@@ -744,7 +901,11 @@ impl GaugeVec {
         }
     }
 
-    pub fn with_label_values(&self, values: &[&str]) -> Result<Gauge> {
+    pub fn with_label_values(&self, values: &[&str]) -> GaugeHandle {
+        GaugeHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn try_with_label_values(&self, values: &[&str]) -> Result<Gauge> {
         if values.len() != self.inner.label_names.len() {
             return Err(MetricError::InconsistentCardinality {
                 expected: self.inner.label_names.len(),
@@ -775,6 +936,14 @@ impl GaugeVec {
         };
         self.inner.values.insert(key, gauge.inner.clone());
         Ok(gauge)
+    }
+
+    pub fn remove_label_values(&self, values: &[&str]) -> bool {
+        if values.len() != self.inner.label_names.len() {
+            return false;
+        }
+        let key = LabelKey(values.iter().map(|s| (*s).to_string()).collect());
+        self.inner.values.remove(&key).is_some()
     }
 
     pub fn reset(&self) {
@@ -964,6 +1133,33 @@ impl Collector for Histogram {
 }
 
 #[derive(Clone)]
+pub struct HistogramHandle(Result<Histogram>);
+
+impl HistogramHandle {
+    fn new(inner: Result<Histogram>) -> Self {
+        Self(inner)
+    }
+
+    fn inner(&self) -> Option<&Histogram> {
+        self.0.as_ref().ok()
+    }
+
+    pub fn into_result(self) -> Result<Histogram> {
+        self.0
+    }
+
+    pub fn observe(&self, value: f64) {
+        if let Some(hist) = self.inner() {
+            hist.observe(value);
+        }
+    }
+
+    pub fn get_sample_count(&self) -> u64 {
+        self.inner().map(|h| h.get_sample_count()).unwrap_or(0)
+    }
+}
+
+#[derive(Clone)]
 pub struct HistogramVec {
     inner: Arc<HistogramVecInner>,
 }
@@ -986,7 +1182,11 @@ impl HistogramVec {
         })
     }
 
-    pub fn with_label_values(&self, values: &[&str]) -> Result<Histogram> {
+    pub fn with_label_values(&self, values: &[&str]) -> HistogramHandle {
+        HistogramHandle::new(self.try_with_label_values(values))
+    }
+
+    pub fn try_with_label_values(&self, values: &[&str]) -> Result<Histogram> {
         if values.len() != self.inner.label_names.len() {
             return Err(MetricError::InconsistentCardinality {
                 expected: self.inner.label_names.len(),
@@ -1010,6 +1210,14 @@ impl HistogramVec {
         let hist = self.inner.base.with_labels(labels);
         self.inner.values.insert(key, hist.inner.clone());
         Ok(hist)
+    }
+
+    pub fn remove_label_values(&self, values: &[&str]) -> bool {
+        if values.len() != self.inner.label_names.len() {
+            return false;
+        }
+        let key = LabelKey(values.iter().map(|s| (*s).to_string()).collect());
+        self.inner.values.remove(&key).is_some()
     }
 }
 
@@ -1134,12 +1342,60 @@ mod tests {
         registry
             .register_counter("dup_total", "first")
             .expect("first registration succeeds");
-        let err = registry
-            .register_counter("dup_total", "second")
-            .expect_err("duplicate registration fails");
+        let err = match registry.register_counter("dup_total", "second") {
+            Ok(_) => panic!("duplicate registration succeeds unexpectedly"),
+            Err(err) => err,
+        };
         assert_eq!(
             err,
             TelemetryError::DuplicateMetric("dup_total".to_string())
         );
+    }
+
+    #[test]
+    fn counter_handle_ignores_cardinality_errors() {
+        let vec = CounterVec::new(Opts::new("sample_total", "Sample counter"), &["label"]).unwrap();
+        let invalid = vec.with_label_values(&[]);
+        invalid.inc();
+        invalid.inc_by(5);
+        assert!(matches!(
+            vec.get_metric_with_label_values(&["ok"]),
+            Err(MetricError::MissingLabelSet)
+        ));
+
+        let valid = vec.with_label_values(&["ok"]);
+        valid.inc();
+        assert_eq!(valid.get(), 1);
+    }
+
+    #[test]
+    fn int_gauge_handle_ignores_cardinality_errors() {
+        let vec = IntGaugeVec::new(Opts::new("sample_gauge", "Sample gauge"), &["label"]).unwrap();
+        let invalid = vec.with_label_values(&[]);
+        invalid.set(10);
+        invalid.add(5);
+        invalid.sub(3);
+        assert!(matches!(
+            vec.get_metric_with_label_values(&["present"]),
+            Err(MetricError::MissingLabelSet)
+        ));
+
+        let valid = vec.with_label_values(&["present"]);
+        valid.set(10);
+        valid.add(5);
+        valid.sub(3);
+        assert_eq!(valid.value(), 12);
+    }
+
+    #[test]
+    fn histogram_handle_ignores_cardinality_errors() {
+        let vec = HistogramVec::new(HistogramOpts::new("latency_seconds", "Latency"), &["label"])
+            .unwrap();
+        let invalid = vec.with_label_values(&[]);
+        invalid.observe(1.0);
+        let valid = vec.with_label_values(&["ok"]);
+        assert_eq!(valid.get_sample_count(), 0);
+        valid.observe(1.0);
+        assert_eq!(valid.get_sample_count(), 1);
     }
 }

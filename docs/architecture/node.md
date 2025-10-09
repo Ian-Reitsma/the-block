@@ -536,28 +536,82 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── serde_derive v1.0.228 (proc-macro) (*)
 │   └── serde_json v1.0.145 (*)
 ├── jurisdiction v0.1.0 (/workspace/the-block/crates/jurisdiction)
-│   ├── base64 v0.22.1
+│   ├── base64_fp v0.1.0 (/workspace/the-block/crates/base64_fp)
 │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
-│   ├── log v0.4.28 (*)
-│   ├── once_cell v1.21.3
-│   ├── serde v1.0.228 (*)
-│   ├── serde_json v1.0.145 (*)
-│   └── ureq v2.12.1
-│       ├── base64 v0.22.1
-│       ├── flate2 v1.1.2 (*)
-│       ├── log v0.4.28 (*)
-│       ├── once_cell v1.21.3
-│       ├── rustls v0.23.32
-│       │   ├── log v0.4.28 (*)
-│       │   ├── once_cell v1.21.3
-│       │   ├── ring v0.17.14
-│       │   │   ├── cfg-if v1.0.3
-│       │   │   ├── getrandom v0.2.16 (*)
-│       │   │   └── untrusted v0.9.0
-│       │   │   [build-dependencies]
-│       │   │   └── cc v1.2.39 (*)
-│       │   ├── rustls-pki-types v1.12.0
-│       │   │   └── zeroize v1.8.2
+│   ├── foundation_lazy v0.1.0 (/workspace/the-block/crates/foundation_lazy)
+│   ├── foundation_serialization v0.1.0 (/workspace/the-block/crates/foundation_serialization) (*)
+│   ├── httpd v0.1.0 (/workspace/the-block/crates/httpd)
+│   │   ├── base64_fp v0.1.0 (/workspace/the-block/crates/base64_fp)
+│   │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
+│   │   ├── diagnostics v0.1.0 (/workspace/the-block/crates/diagnostics)
+│   │   ├── foundation_serialization v0.1.0 (/workspace/the-block/crates/foundation_serialization) (*)
+│   │   ├── rand v0.1.0 (/workspace/the-block/crates/rand)
+│   │   │   └── rand_core v0.1.0 (/workspace/the-block/crates/rand_core)
+│   │   └── runtime v0.1.0 (/workspace/the-block/crates/runtime)
+│   │       ├── base64_fp v0.1.0 (/workspace/the-block/crates/base64_fp)
+│   │       ├── concurrency v0.1.0 (/workspace/the-block/crates/concurrency)
+│   │       ├── crossbeam-deque v0.8.6
+│   │       │   ├── crossbeam-epoch v0.9.18
+│   │       │   │   └── crossbeam-utils v0.8.21
+│   │       │   └── crossbeam-utils v0.8.21
+│   │       ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
+│   │       ├── futures v0.3.31
+│   │       │   ├── futures-channel v0.3.31
+│   │       │   │   ├── futures-core v0.3.31
+│   │       │   │   └── futures-sink v0.3.31
+│   │       │   ├── futures-core v0.3.31
+│   │       │   ├── futures-executor v0.3.31
+│   │       │   │   ├── futures-core v0.3.31
+│   │       │   │   ├── futures-task v0.3.31
+│   │       │   │   └── futures-util v0.3.31
+│   │       │   │       ├── futures-channel v0.3.31 (*)
+│   │       │   │       ├── futures-core v0.3.31
+│   │       │   │       ├── futures-io v0.3.31
+│   │       │   │       ├── futures-macro v0.3.31 (proc-macro)
+│   │       │   │       │   ├── proc-macro2 v1.0.101 (*)
+│   │       │   │       │   ├── quote v1.0.41 (*)
+│   │       │   │       │   └── syn v2.0.106 (*)
+│   │       │   │       ├── futures-sink v0.3.31
+│   │       │   │       ├── futures-task v0.3.31
+│   │       │   │       ├── memchr v2.7.6
+│   │       │   │       ├── pin-project-lite v0.2.16
+│   │       │   │       ├── pin-utils v0.1.0
+│   │       │   │       └── slab v0.4.11
+│   │       │   ├── futures-io v0.3.31
+│   │       │   ├── futures-sink v0.3.31
+│   │       │   ├── futures-task v0.3.31
+│   │       │   └── futures-util v0.3.31 (*)
+│   │       ├── futures-util v0.3.31 (*)
+│   │       ├── libc v0.2.176
+│   │       ├── metrics v0.21.1
+│   │       │   ├── ahash v0.8.12
+│   │       │   │   ├── cfg-if v1.0.3
+│   │       │   │   ├── once_cell v1.21.3
+│   │       │   │   └── zerocopy v0.8.27
+│   │       │   │       [build-dependencies]
+│   │       │   │       └── version_check v0.9.5
+│   │       │   └── metrics-macros v0.7.1 (proc-macro)
+│   │       │       ├── proc-macro2 v1.0.101 (*)
+│   │       │       ├── quote v1.0.41 (*)
+│   │       │       └── syn v2.0.106 (*)
+│   │       ├── mio v0.8.11
+│   │       │   ├── libc v0.2.176
+│   │       │   └── log v0.4.28
+│   │       ├── nix v0.27.1
+│   │       │   ├── bitflags v2.9.4
+│   │       │   ├── cfg-if v1.0.3
+│   │       │   └── libc v0.2.176
+│   │       ├── pin-project v1.1.10
+│   │       │   └── pin-project-internal v1.1.10 (proc-macro)
+│   │       │       ├── proc-macro2 v1.0.101 (*)
+│   │       │       ├── quote v1.0.41 (*)
+│   │       │       └── syn v2.0.106 (*)
+│   │       ├── pin-project-lite v0.2.16
+│   │       ├── rand v0.1.0 (/workspace/the-block/crates/rand) (*)
+│   │       └── socket2 v0.5.10
+│   │           └── libc v0.2.176
+│   ├── log v0.4.28
+│   └── serde v1.0.228 (*)
 │       │   ├── rustls-webpki v0.103.7
 │       │   │   ├── ring v0.17.14 (*)
 │       │   │   ├── rustls-pki-types v1.12.0 (*)

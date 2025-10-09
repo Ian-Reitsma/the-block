@@ -5,6 +5,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use foundation_serialization::Serialize;
 
 pub enum ServiceBadgeCmd {
     /// Verify a badge token via RPC
@@ -99,7 +100,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
                 id: u32,
                 method: &'static str,
                 params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "Option::is_none")]
+                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
                 auth: Option<&'a str>,
             }
             let payload = Payload {
@@ -123,7 +124,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
                 id: u32,
                 method: &'static str,
                 params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "Option::is_none")]
+                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
                 auth: Option<&'a str>,
             }
             let payload = Payload {
@@ -147,7 +148,7 @@ pub fn handle(cmd: ServiceBadgeCmd) {
                 id: u32,
                 method: &'static str,
                 params: foundation_serialization::json::Value,
-                #[serde(skip_serializing_if = "Option::is_none")]
+                #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
                 auth: Option<&'a str>,
             }
             let payload = Payload {

@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 
 /// Simple inflation model tracking total token supply.
 #[derive(Debug, Clone, Serialize, Deserialize)]

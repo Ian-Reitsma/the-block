@@ -8,7 +8,7 @@ use crate::telemetry;
 use concurrency::Lazy;
 #[cfg(all(feature = "telemetry", feature = "quic"))]
 use diagnostics::tracing::warn;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
 #[cfg(feature = "quic")]
@@ -40,17 +40,17 @@ pub struct Hello {
     pub agent: String,
     pub nonce: u64,
     pub transport: Transport,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_addr: Option<std::net::SocketAddr>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_cert: Option<Vec<u8>>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_fingerprint: Option<Vec<u8>>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_fingerprint_previous: Vec<Vec<u8>>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_provider: Option<String>,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_capabilities: Vec<String>,
 }
 

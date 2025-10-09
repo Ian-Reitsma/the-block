@@ -6,13 +6,13 @@ use crypto_suite::{
 };
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json;
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use httpd::{join_path, BlockingClient, Method, Uri};
 use ledger::crypto::remote_tag;
 use metrics::{histogram, increment_counter};
 use native_tls::{Certificate as NativeCertificate, HandshakeError, Identity, TlsConnector};
 use rand::{Rng, RngCore};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, ErrorKind, Read, Write};

@@ -1,8 +1,8 @@
 use crate::{simple_db::names, SimpleDb};
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use foundation_serialization::{Deserialize, Serialize};
 use icu_normalizer::ComposingNormalizerBorrowed;
-use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, Deserialize, Clone)]

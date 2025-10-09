@@ -58,6 +58,7 @@ members = [
   "crates/foundation_serialization",
   "crates/foundation_rpc",
   "crates/foundation_math",
+  "crates/foundation_telemetry",
   "crates/foundation_lazy",
   "crates/dependency_guard",
   "crates/python_bridge",

@@ -2,13 +2,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use foundation_serialization::json;
+use foundation_serialization::{Deserialize, Serialize};
 use hex;
 use httpd::{
     HttpError, Method, Response, Router, ServerConfig, ServerTlsConfig, StatusCode,
     WebSocketResponse,
 };
 use runtime::{self, net::TcpListener, ws::Message};
-use serde::{Deserialize, Serialize};
 use wallet::{Wallet, WalletError, WalletSigner};
 
 #[derive(Clone)]

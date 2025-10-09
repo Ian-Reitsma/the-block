@@ -1,9 +1,9 @@
 #![allow(clippy::module_name_repetitions)]
 
 use foundation_serialization::json::Value;
+use foundation_serialization::{Deserialize, Serialize};
 use httpd::{BlockingClient, ClientError as HttpClientError, ClientResponse, Method};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -125,7 +125,7 @@ impl RpcClient {
             id: u32,
             method: &'static str,
             params: Value,
-            #[serde(skip_serializing_if = "Option::is_none")]
+            #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
             auth: Option<&'a str>,
         }
         #[derive(Deserialize)]
@@ -255,17 +255,17 @@ impl From<HttpClientError> for RpcClientError {
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct MempoolStats {
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub size: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub age_p50: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub age_p95: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_p50: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_p90: u64,
-    #[serde(default)]
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub fee_floor: u64,
 }
 

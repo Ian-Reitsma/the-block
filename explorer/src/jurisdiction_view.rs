@@ -1,5 +1,5 @@
 use crate::Explorer;
-use serde::Serialize;
+use foundation_serialization::Serialize;
 
 #[derive(Serialize)]
 pub struct JurisdictionTxs {

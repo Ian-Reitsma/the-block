@@ -70,6 +70,102 @@ pub mod serde {
 
 pub use serde_bytes;
 
+/// Helpers that provide serde-style default values without depending on
+/// third-party attribute macros.
+pub mod defaults {
+    /// Return [`Default::default()`] for the requested type.  This mirrors
+    /// `#[serde(default)]` behaviour so downstream crates can express defaulted
+    /// fields via the facade.
+    pub fn default<T: Default>() -> T {
+        T::default()
+    }
+
+    /// Return `true`.
+    pub fn true_() -> bool {
+        true
+    }
+
+    /// Return `false`.
+    pub fn false_() -> bool {
+        false
+    }
+}
+
+/// Helpers that mirror `skip_serializing_if` predicates using first-party
+/// functions.  These helpers keep serde derives configured against the facade
+/// while avoiding direct references to standard library implementations.
+pub mod skip {
+    /// Returns `true` when the option is [`None`].
+    pub fn option_is_none<T>(value: &Option<T>) -> bool {
+        value.is_none()
+    }
+
+    /// Generic helper that reports whether the provided collection is empty.
+    pub fn is_empty<T: ?Sized + IsEmpty>(value: &T) -> bool {
+        value.is_empty()
+    }
+
+    /// Trait implemented for collection types that can report emptiness.
+    pub trait IsEmpty {
+        /// Return `true` when the collection contains no elements.
+        fn is_empty(&self) -> bool;
+    }
+
+    impl<T> IsEmpty for [T] {
+        fn is_empty(&self) -> bool {
+            <[T]>::is_empty(self)
+        }
+    }
+
+    impl<T> IsEmpty for Vec<T> {
+        fn is_empty(&self) -> bool {
+            Vec::is_empty(self)
+        }
+    }
+
+    impl<T> IsEmpty for std::collections::VecDeque<T> {
+        fn is_empty(&self) -> bool {
+            std::collections::VecDeque::is_empty(self)
+        }
+    }
+
+    impl<K, V, S> IsEmpty for std::collections::HashMap<K, V, S> {
+        fn is_empty(&self) -> bool {
+            std::collections::HashMap::is_empty(self)
+        }
+    }
+
+    impl<K, V> IsEmpty for std::collections::BTreeMap<K, V> {
+        fn is_empty(&self) -> bool {
+            std::collections::BTreeMap::is_empty(self)
+        }
+    }
+
+    impl<T> IsEmpty for std::collections::BTreeSet<T> {
+        fn is_empty(&self) -> bool {
+            std::collections::BTreeSet::is_empty(self)
+        }
+    }
+
+    impl<T, S> IsEmpty for std::collections::HashSet<T, S> {
+        fn is_empty(&self) -> bool {
+            std::collections::HashSet::is_empty(self)
+        }
+    }
+
+    impl IsEmpty for String {
+        fn is_empty(&self) -> bool {
+            String::is_empty(self)
+        }
+    }
+
+    impl IsEmpty for std::path::Path {
+        fn is_empty(&self) -> bool {
+            self.as_os_str().is_empty()
+        }
+    }
+}
+
 /// JSON helpers backed by the first-party encoder/decoder.
 pub mod json {
     use std::io::{Read, Write};

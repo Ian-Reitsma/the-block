@@ -7,6 +7,7 @@ use cli_core::{
     parse::Matches,
     ConfigReader,
 };
+use foundation_serialization::Serialize;
 use std::{path::PathBuf, process};
 
 pub enum ConfigCmd {
@@ -92,7 +93,7 @@ pub fn reload(url: String) {
         id: u32,
         method: &'static str,
         params: foundation_serialization::json::Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
         auth: Option<&'a str>,
     }
     let payload = Payload {

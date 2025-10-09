@@ -35,6 +35,7 @@ fn upload_sync(bucket: &str, data: Vec<u8>) {
 
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{json, Deserialize, Serialize};
+use foundation_telemetry::{TelemetrySummary, WrapperSummaryEntry};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -65,36 +66,10 @@ pub struct PeerStat {
     pub metrics: Value,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct MemorySnapshotEntry {
-    latest: u64,
-    p50: u64,
-    p90: u64,
-    p99: u64,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct TelemetrySummaryEntry {
-    node_id: String,
-    seq: u64,
-    timestamp: u64,
-    sample_rate_ppm: u64,
-    compaction_secs: u64,
-    memory: HashMap<String, MemorySnapshotEntry>,
-    #[serde(default)]
-    wrappers: WrapperSummaryEntry,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
-struct WrapperMetricEntry {
-    metric: String,
-    labels: HashMap<String, String>,
-    value: f64,
-}
-
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
-struct WrapperSummaryEntry {
-    metrics: Vec<WrapperMetricEntry>,
+#[derive(Serialize)]
+struct TelemetryErrorResponse {
+    error: String,
+    path: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -125,7 +100,7 @@ pub struct AppState {
     wal: Option<Arc<Wal>>,
     correlations: Arc<Mutex<HashMap<String, VecDeque<CorrelationRecord>>>>,
     last_metric_values: Arc<Mutex<HashMap<(String, String), f64>>>,
-    telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummaryEntry>>>>,
+    telemetry: Arc<Mutex<HashMap<String, VecDeque<TelemetrySummary>>>>,
     leader_flag: Arc<AtomicBool>,
     leader_id: Arc<RwLock<Option<String>>>,
     leader_fencing: Arc<AtomicU64>,
@@ -306,7 +281,7 @@ impl AppState {
         );
         spawn_log_dump(record.clone());
     }
-    fn record_telemetry(&self, entry: TelemetrySummaryEntry) {
+    fn record_telemetry(&self, entry: TelemetrySummary) {
         if let Ok(mut map) = self.telemetry.lock() {
             let deque = map
                 .entry(entry.node_id.clone())
@@ -318,7 +293,7 @@ impl AppState {
         }
     }
 
-    fn telemetry_latest(&self) -> HashMap<String, TelemetrySummaryEntry> {
+    fn telemetry_latest(&self) -> HashMap<String, TelemetrySummary> {
         self.telemetry
             .lock()
             .map(|map| {
@@ -331,7 +306,7 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    fn telemetry_history(&self, node: &str) -> Vec<TelemetrySummaryEntry> {
+    fn telemetry_history(&self, node: &str) -> Vec<TelemetrySummary> {
         self.telemetry
             .lock()
             .ok()
@@ -401,6 +376,8 @@ struct AggregatorMetrics {
     active_peers: Gauge,
     replication_lag: Gauge,
     retention_pruned_total: Counter,
+    telemetry_ingest_total: Counter,
+    telemetry_schema_error_total: Counter,
 }
 
 impl AggregatorMetrics {
@@ -435,6 +412,18 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             "Peer metric samples pruned by retention",
         )
         .expect("register aggregator_retention_pruned_total");
+    let telemetry_ingest_total = registry
+        .register_counter(
+            "aggregator_telemetry_ingest_total",
+            "Telemetry summaries accepted by schema guard",
+        )
+        .expect("register aggregator_telemetry_ingest_total");
+    let telemetry_schema_error_total = registry
+        .register_counter(
+            "aggregator_telemetry_schema_error_total",
+            "Telemetry payloads rejected due to schema drift",
+        )
+        .expect("register aggregator_telemetry_schema_error_total");
     AggregatorMetrics {
         registry,
         ingest_total,
@@ -442,6 +431,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         active_peers,
         replication_lag,
         retention_pruned_total,
+        telemetry_ingest_total,
+        telemetry_schema_error_total,
     }
 });
 
@@ -895,9 +886,31 @@ async fn telemetry_post(request: Request<AppState>) -> Result<Response, HttpErro
         return Ok(Response::new(StatusCode::UNAUTHORIZED));
     }
 
-    let entry: TelemetrySummaryEntry = request.json()?;
-    state.record_telemetry(entry);
-    Ok(Response::new(StatusCode::ACCEPTED))
+    let payload: Value = request.json()?;
+    match TelemetrySummary::from_value(payload) {
+        Ok(entry) => {
+            aggregator_metrics().telemetry_ingest_total.inc();
+            state.record_telemetry(entry);
+            Ok(Response::new(StatusCode::ACCEPTED))
+        }
+        Err(err) => {
+            aggregator_metrics().telemetry_schema_error_total.inc();
+            let path = err.path().to_string();
+            let message = err.message().to_string();
+            warn!(
+                target: "aggregator",
+                %path,
+                %message,
+                "telemetry payload rejected by schema guard",
+            );
+            let body = TelemetryErrorResponse {
+                error: message,
+                path,
+            };
+            let response = Response::new(StatusCode::BAD_REQUEST).json(&body)?;
+            Ok(response)
+        }
+    }
 }
 
 async fn telemetry_index(request: Request<AppState>) -> Result<Response, HttpError> {
@@ -985,6 +998,7 @@ mod tests {
         x25519::SecretKey,
     };
     use crypto_suite::hashing::blake3;
+    use foundation_telemetry::WrapperMetricEntry;
     use httpd::{Method, StatusCode};
     use rand::rngs::OsRng;
     use std::collections::HashMap;
@@ -1223,7 +1237,7 @@ mod tests {
         run_async(async {
             let dir = tempfile::tempdir().unwrap();
             let state = AppState::new("t".into(), dir.path().join("m.json"), 60);
-            state.record_telemetry(TelemetrySummaryEntry {
+            state.record_telemetry(TelemetrySummary {
                 node_id: "node-a".into(),
                 seq: 1,
                 timestamp: 123,

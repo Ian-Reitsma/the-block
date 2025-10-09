@@ -1,4 +1,3 @@
-use rayon::prelude::*;
 use std::collections::HashSet;
 
 /// A unit of work with explicit read/write sets.
@@ -59,10 +58,19 @@ impl ParallelExecutor {
                 groups.push(vec![t]);
             }
         }
-        let results = groups
-            .into_iter()
-            .flat_map(|g| g.into_par_iter().map(|t| (t.func)()).collect::<Vec<_>>())
-            .collect();
+        let total_tasks: usize = groups.iter().map(|g| g.len()).sum();
+        let mut results = Vec::with_capacity(total_tasks);
+        for mut group in groups {
+            std::thread::scope(|scope| {
+                let mut handles = Vec::with_capacity(group.len());
+                for task in group.drain(..) {
+                    handles.push(scope.spawn(move || (task.func)()));
+                }
+                for handle in handles {
+                    results.push(handle.join().expect("parallel task panicked"));
+                }
+            });
+        }
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::sampled_observe(
