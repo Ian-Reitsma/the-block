@@ -2,6 +2,7 @@ use std::{collections::HashMap, fs, path::Path};
 
 use diagnostics::anyhow as diag_anyhow;
 use diagnostics::anyhow::{Context, Result};
+use foundation_serialization::json;
 
 use crate::model::{DependencyEntry, DependencyRegistry, ViolationReport};
 
@@ -11,7 +12,8 @@ pub fn write_registry_json(registry: &DependencyRegistry, out_dir: &Path) -> Res
     let path = out_dir.join("dependency-registry.json");
     let file =
         fs::File::create(&path).with_context(|| format!("unable to create {}", path.display()))?;
-    serde_json::to_writer_pretty(file, registry)
+    json::to_writer_pretty(file, registry)
+        .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| format!("unable to serialise registry to {}", path.display()))?;
     Ok(())
 }
@@ -24,12 +26,14 @@ pub fn write_snapshot(registry: &DependencyRegistry, snapshot_path: &Path) -> Re
     let snapshot = registry.comparison_key();
     let file = fs::File::create(snapshot_path)
         .with_context(|| format!("unable to create {}", snapshot_path.display()))?;
-    serde_json::to_writer_pretty(file, &snapshot).with_context(|| {
-        format!(
-            "unable to serialise dependency snapshot to {}",
-            snapshot_path.display()
-        )
-    })?;
+    json::to_writer_pretty(file, &snapshot)
+        .map_err(|err| diag_anyhow::anyhow!(err))
+        .with_context(|| {
+            format!(
+                "unable to serialise dependency snapshot to {}",
+                snapshot_path.display()
+            )
+        })?;
     Ok(())
 }
 
@@ -93,7 +97,8 @@ pub fn write_violations(report: &ViolationReport, out_dir: &Path) -> Result<()> 
     let path = out_dir.join("dependency-violations.json");
     let file =
         fs::File::create(&path).with_context(|| format!("unable to create {}", path.display()))?;
-    serde_json::to_writer_pretty(file, report)
+    json::to_writer_pretty(file, report)
+        .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| format!("unable to serialise violations to {}", path.display()))?;
     Ok(())
 }
@@ -304,7 +309,8 @@ pub fn explain_crate(crate_name: &str, registry_path: &Path) -> Result<()> {
 pub fn load_registry(path: &Path) -> Result<DependencyRegistry> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("unable to read registry at {}", path.display()))?;
-    let registry: DependencyRegistry = serde_json::from_str(&contents)
+    let registry: DependencyRegistry = json::from_slice(contents.as_bytes())
+        .map_err(|err| diag_anyhow::anyhow!(err))
         .with_context(|| format!("unable to parse registry at {}", path.display()))?;
     Ok(registry)
 }

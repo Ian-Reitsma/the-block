@@ -4,15 +4,21 @@ use cli_core::{
     help::HelpGenerator,
     parse::{Matches, ParseError, Parser},
 };
+use foundation_serialization::json::{self, Value};
 use httpd::{serve, serve_tls, ServerConfig, ServerTlsConfig};
 use indexer::{router, BlockRecord, Indexer};
 use runtime::net::TcpListener;
-use serde_json;
-use std::{env, fs::File, net::SocketAddr, path::Path, process};
+use std::{env, fs::File, io::Read, net::SocketAddr, path::Path, process};
 
 enum RunError {
     Usage(String),
-    Failure(anyhow::Error),
+    Failure(String),
+}
+
+impl RunError {
+    fn failure(message: impl Into<String>) -> Self {
+        Self::Failure(message.into())
+    }
 }
 
 fn main() {
@@ -22,8 +28,8 @@ fn main() {
                 eprintln!("{msg}");
                 process::exit(2);
             }
-            RunError::Failure(err) => {
-                eprintln!("{err}");
+            RunError::Failure(msg) => {
+                eprintln!("{msg}");
                 process::exit(1);
             }
         }
@@ -161,13 +167,13 @@ fn handle_matches(matches: Matches) -> Result<(), RunError> {
         "index" => {
             let file = positional(sub_matches, "file")?;
             let db = positional(sub_matches, "db")?;
-            let idx = Indexer::open(&db).map_err(|err| RunError::Failure(err.into()))?;
-            let reader = File::open(&file).map_err(|err| RunError::Failure(err.into()))?;
-            let records: Vec<BlockRecord> =
-                serde_json::from_reader(reader).map_err(|err| RunError::Failure(err.into()))?;
+            let idx = Indexer::open(&db)
+                .map_err(|err| RunError::failure(format!("failed to open database: {err}")))?;
+            let records = load_block_records(&file)?;
             for record in &records {
-                idx.index_block(record)
-                    .map_err(|err| RunError::Failure(err.into()))?;
+                idx.index_block(record).map_err(|err| {
+                    RunError::failure(format!("failed to index block '{}': {err}", record.hash))
+                })?;
             }
         }
         "serve" => {
@@ -178,50 +184,58 @@ fn handle_matches(matches: Matches) -> Result<(), RunError> {
             let addr: SocketAddr = addr
                 .parse()
                 .map_err(|err| RunError::Usage(format!("invalid value for '--addr': {err}")))?;
-            let idx = Indexer::open(&db).map_err(|err| RunError::Failure(err.into()))?;
+            let idx = Indexer::open(&db)
+                .map_err(|err| RunError::failure(format!("failed to open database: {err}")))?;
             runtime::block_on(async move {
                 let listener = TcpListener::bind(addr)
                     .await
-                    .map_err(|err| RunError::Failure(err.into()))?;
+                    .map_err(|err| RunError::failure(format!("failed to bind {addr}: {err}")))?;
                 let config = ServerConfig::default();
                 let app = router(idx);
                 if let (Ok(cert), Ok(key)) = (env::var("INDEXER_CERT"), env::var("INDEXER_KEY")) {
                     let tls = if let Ok(ca) = env::var("INDEXER_CLIENT_CA") {
-                        ServerTlsConfig::from_pem_files_with_client_auth(cert, key, ca)
-                            .map_err(|err| RunError::Failure(err.into()))?
+                        ServerTlsConfig::from_pem_files_with_client_auth(cert, key, ca).map_err(
+                            |err| RunError::failure(format!("invalid TLS configuration: {err}")),
+                        )?
                     } else if let Ok(ca) = env::var("INDEXER_CLIENT_CA_OPTIONAL") {
                         ServerTlsConfig::from_pem_files_with_optional_client_auth(cert, key, ca)
-                            .map_err(|err| RunError::Failure(err.into()))?
+                            .map_err(|err| {
+                                RunError::failure(format!("invalid TLS configuration: {err}"))
+                            })?
                     } else {
-                        ServerTlsConfig::from_pem_files(cert, key)
-                            .map_err(|err| RunError::Failure(err.into()))?
+                        ServerTlsConfig::from_pem_files(cert, key).map_err(|err| {
+                            RunError::failure(format!("invalid TLS configuration: {err}"))
+                        })?
                     };
                     serve_tls(listener, app, config, tls)
                         .await
-                        .map_err(|err| RunError::Failure(err.into()))?;
+                        .map_err(|err| RunError::failure(format!("TLS server error: {err}")))?;
                 } else {
                     serve(listener, app, config)
                         .await
-                        .map_err(|err| RunError::Failure(err.into()))?;
+                        .map_err(|err| RunError::failure(format!("server error: {err}")))?;
                 }
                 Ok(())
             })?;
         }
         "profile" => {
             let db = positional(sub_matches, "db")?;
-            let idx = Indexer::open(&db).map_err(|err| RunError::Failure(err.into()))?;
+            let idx = Indexer::open(&db)
+                .map_err(|err| RunError::failure(format!("failed to open database: {err}")))?;
             let count = idx
                 .all_blocks()
-                .map_err(|err| RunError::Failure(err.into()))?
+                .map_err(|err| RunError::failure(format!("failed to enumerate blocks: {err}")))?
                 .len();
             println!("indexed blocks: {count}");
         }
         "index-receipts" => {
             let dir = positional(sub_matches, "dir")?;
             let db = positional(sub_matches, "db")?;
-            let idx = Indexer::open(&db).map_err(|err| RunError::Failure(err.into()))?;
-            idx.index_receipts_dir(Path::new(&dir))
-                .map_err(|err| RunError::Failure(err.into()))?;
+            let idx = Indexer::open(&db)
+                .map_err(|err| RunError::failure(format!("failed to open database: {err}")))?;
+            idx.index_receipts_dir(Path::new(&dir)).map_err(|err| {
+                RunError::failure(format!("failed to index receipts in '{dir}': {err}"))
+            })?;
         }
         other => return Err(RunError::Usage(format!("unknown subcommand '{other}'"))),
     }
@@ -234,4 +248,41 @@ fn positional(matches: &Matches, name: &str) -> Result<String, RunError> {
         .get_positional(name)
         .and_then(|values| values.first().cloned())
         .ok_or_else(|| RunError::Usage(format!("missing positional '{name}'")))
+}
+
+fn load_block_records(path: &str) -> Result<Vec<BlockRecord>, RunError> {
+    let mut data = Vec::new();
+    File::open(path)
+        .map_err(|err| RunError::failure(format!("failed to open '{path}': {err}")))?
+        .read_to_end(&mut data)
+        .map_err(|err| RunError::failure(format!("failed to read '{path}': {err}")))?;
+
+    let value = json::value_from_slice(&data)
+        .map_err(|err| RunError::failure(format!("failed to parse '{path}' as JSON: {err}")))?;
+    let entries = value.as_array().ok_or_else(|| {
+        RunError::failure(format!(
+            "input must be a JSON array, found {}",
+            describe_value(&value)
+        ))
+    })?;
+
+    let mut records = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let record = BlockRecord::from_value(entry)
+            .map_err(|err| RunError::failure(format!("invalid block at index {index}: {err}")))?;
+        records.push(record);
+    }
+
+    Ok(records)
+}
+
+fn describe_value(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "bool",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }

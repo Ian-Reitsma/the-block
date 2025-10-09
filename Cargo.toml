@@ -32,6 +32,8 @@ members = [
   "tools/remote-signer",
   "tools/provenance_verify",
   "tools/release_notes",
+  "tools/ai_diag",
+  "tools/log_indexer_cli",
   "tools/storage_migrate",
   "tools/release_tests",
   "explorer",

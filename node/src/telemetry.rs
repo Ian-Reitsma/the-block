@@ -10,12 +10,12 @@ use crypto_suite::{self, signatures::ed25519};
 use hex;
 #[cfg(feature = "telemetry")]
 use histogram_fp::Histogram as HdrHistogram;
-use prometheus::{
-    Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
-    IntGaugeVec, Opts, Registry, TextEncoder,
-};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
+use runtime::telemetry::{
+    self, Encoder, GaugeVec, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
+    IntGauge, IntGaugeVec, Opts, Registry, TextEncoder,
+};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
@@ -1746,7 +1746,7 @@ pub static PRICE_WEIGHT_APPLIED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 pub static PARALLEL_EXECUTE_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    let buckets = prometheus::exponential_buckets(0.001, 2.0, 12)
+    let buckets = telemetry::exponential_buckets(0.001, 2.0, 12)
         .unwrap_or_else(|e| panic!("parallel execute buckets: {e}"));
     let opts = HistogramOpts::new(
         "parallel_execute_seconds",
@@ -2413,7 +2413,7 @@ pub static STORAGE_COMPRESSION_RATIO: Lazy<HistogramVec> = Lazy::new(|| {
 });
 
 pub static STORAGE_PUT_OBJECT_SECONDS: Lazy<HistogramVec> = Lazy::new(|| {
-    let buckets = prometheus::exponential_buckets(0.005, 1.8, 12)
+    let buckets = telemetry::exponential_buckets(0.005, 1.8, 12)
         .unwrap_or_else(|e| panic!("storage put object buckets: {e}"));
     let opts = HistogramOpts::new(
         "storage_put_object_seconds",
@@ -3334,8 +3334,7 @@ pub static GOV_DEPENDENCY_POLICY_ALLOWED: Lazy<GaugeVec> = Lazy::new(|| {
             "Governance-approved dependency entries (1 allowed / 0 disallowed)",
         ),
         &["kind", "label"],
-    )
-    .unwrap_or_else(|e| panic!("gauge gov_dependency_policy_allowed: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry gov_dependency_policy_allowed: {e}"));
@@ -3469,7 +3468,7 @@ pub static TX_SUBMITTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 
 pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("tx_rejected_total", "Total rejected transactions"),
+        Opts::new("tx_rejected_total", "Total rejected transactions"),
         &["reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3481,7 +3480,7 @@ pub static TX_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static TX_JURISDICTION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("tx_jurisdiction_total", "Transactions by jurisdiction"),
+        Opts::new("tx_jurisdiction_total", "Transactions by jurisdiction"),
         &["jurisdiction"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3703,7 +3702,7 @@ pub static DROP_NOT_FOUND_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 
 pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("peer_error_total", "Total peer errors grouped by code"),
+        Opts::new("peer_error_total", "Total peer errors grouped by code"),
         &["code"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3715,7 +3714,7 @@ pub static PEER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_REQUEST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("peer_request_total", "Total requests received from peer"),
+        Opts::new("peer_request_total", "Total requests received from peer"),
         &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3727,7 +3726,7 @@ pub static PEER_REQUEST_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_BYTES_SENT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("peer_bytes_sent_total", "Bytes sent to peer"),
+        Opts::new("peer_bytes_sent_total", "Bytes sent to peer"),
         &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3739,7 +3738,7 @@ pub static PEER_BYTES_SENT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("peer_drop_total", "Messages dropped grouped by reason"),
+        Opts::new("peer_drop_total", "Messages dropped grouped by reason"),
         &["peer_id", "reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3751,7 +3750,7 @@ pub static PEER_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static MESH_PEER_CONNECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("mesh_peer_connected_total", "Total mesh peers discovered"),
+        Opts::new("mesh_peer_connected_total", "Total mesh peers discovered"),
         &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -3763,7 +3762,7 @@ pub static MESH_PEER_CONNECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static MESH_PEER_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
-        prometheus::Opts::new("mesh_peer_latency_ms", "Mesh peer latency in milliseconds"),
+        Opts::new("mesh_peer_latency_ms", "Mesh peer latency in milliseconds"),
         &["peer_id"],
     )
     .unwrap_or_else(|e| panic!("gauge_vec: {e}"));
@@ -3775,7 +3774,7 @@ pub static MESH_PEER_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
 
 pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "p2p_request_limit_hits_total",
             "Per-peer hits on the request rate limiter",
         ),
@@ -4014,7 +4013,7 @@ pub static CLUSTER_PEER_ACTIVE_TOTAL: Lazy<IntGauge> = Lazy::new(|| {
 
 pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("peer_rejected_total", "Peers rejected grouped by reason"),
+        Opts::new("peer_rejected_total", "Peers rejected grouped by reason"),
         &["reason"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -4026,7 +4025,7 @@ pub static PEER_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "net_peer_handshake_fail_total",
             "QUIC handshake failures per peer grouped by reason",
         ),
@@ -4041,7 +4040,7 @@ pub static PEER_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_HANDSHAKE_SUCCESS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "net_peer_handshake_success_total",
             "Successful handshakes per peer",
         ),
@@ -4056,7 +4055,7 @@ pub static PEER_HANDSHAKE_SUCCESS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_TLS_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "net_peer_tls_error_total",
             "TLS errors encountered per peer",
         ),
@@ -4071,7 +4070,7 @@ pub static PEER_TLS_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "handshake_fail_total",
             "Handshake failures grouped by reason",
         ),
@@ -4086,7 +4085,7 @@ pub static HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_STATS_RESET_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_stats_reset_total",
             "Peer metric resets grouped by peer",
         ),
@@ -4101,7 +4100,7 @@ pub static PEER_STATS_RESET_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_STATS_QUERY_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_stats_query_total",
             "Peer metric queries grouped by peer",
         ),
@@ -4116,10 +4115,9 @@ pub static PEER_STATS_QUERY_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_REPUTATION_SCORE: Lazy<GaugeVec> = Lazy::new(|| {
     let g = GaugeVec::new(
-        prometheus::Opts::new("peer_reputation_score", "Peer reputation score"),
+        Opts::new("peer_reputation_score", "Peer reputation score"),
         &["peer_id"],
-    )
-    .unwrap_or_else(|e| panic!("gauge_vec: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -4128,7 +4126,7 @@ pub static PEER_REPUTATION_SCORE: Lazy<GaugeVec> = Lazy::new(|| {
 
 pub static PEER_STATS_EXPORT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_stats_export_total",
             "Peer metric export attempts grouped by result",
         ),
@@ -4143,7 +4141,7 @@ pub static PEER_STATS_EXPORT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_STATS_EXPORT_ALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_stats_export_all_total",
             "Bulk peer metric export attempts grouped by result",
         ),
@@ -4158,7 +4156,7 @@ pub static PEER_STATS_EXPORT_ALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_THROTTLE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_throttle_total",
             "Peer throttle events grouped by reason",
         ),
@@ -4173,7 +4171,7 @@ pub static PEER_THROTTLE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_BACKPRESSURE_ACTIVE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_backpressure_active_total",
             "Backpressure activations grouped by reason",
         ),
@@ -4188,7 +4186,7 @@ pub static PEER_BACKPRESSURE_ACTIVE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_BACKPRESSURE_DROPPED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_backpressure_dropped_total",
             "Requests dropped due to backpressure grouped by reason",
         ),
@@ -4203,7 +4201,7 @@ pub static PEER_BACKPRESSURE_DROPPED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static PEER_KEY_ROTATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "peer_key_rotate_total",
             "Peer key rotation attempts grouped by result",
         ),
@@ -4227,7 +4225,7 @@ pub static KEY_ROTATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 
 pub static CONFIG_RELOAD_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "config_reload_total",
             "Configuration reload attempts grouped by result",
         ),
@@ -4254,7 +4252,7 @@ pub static CONFIG_RELOAD_LAST_TS: Lazy<IntGauge> = Lazy::new(|| {
 
 pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "gateway_dns_lookup_total",
             "Gateway DNS verification attempts grouped by status",
         ),
@@ -4301,7 +4299,7 @@ pub static GOSSIP_FANOUT_GAUGE: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 pub static GOSSIP_LATENCY_BUCKETS: Lazy<Histogram> = Lazy::new(|| {
-    let opts = prometheus::HistogramOpts::new(
+    let opts = HistogramOpts::new(
         "gossip_latency_seconds",
         "Observed latency hints used for adaptive gossip fanout",
     )
@@ -4317,7 +4315,7 @@ pub static GOSSIP_LATENCY_BUCKETS: Lazy<Histogram> = Lazy::new(|| {
 
 pub static GOSSIP_PEER_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "gossip_peer_failure_total",
             "Reasons peers were skipped during gossip fanout",
         ),
@@ -4332,7 +4330,7 @@ pub static GOSSIP_PEER_FAILURE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static RPC_CLIENT_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "rpc_client_error_total",
             "Total RPC client errors grouped by code",
         ),
@@ -4358,7 +4356,7 @@ pub static REMOTE_SIGNER_REQUEST_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 });
 
 pub static REMOTE_SIGNER_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
-    let h = Histogram::with_opts(prometheus::HistogramOpts::new(
+    let h = Histogram::with_opts(HistogramOpts::new(
         "remote_signer_latency_seconds",
         "Remote signer latency",
     ))
@@ -4403,7 +4401,7 @@ pub static PRIVACY_SANITIZATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 
 pub static REMOTE_SIGNER_ERROR_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "remote_signer_error_total",
             "Total remote signer errors grouped by reason",
         ),
@@ -4423,8 +4421,7 @@ pub static RPC_TOKENS: Lazy<GaugeVec> = Lazy::new(|| {
             "Current RPC rate limiter tokens per client",
         ),
         &["client"],
-    )
-    .unwrap_or_else(|e| panic!("gauge vec: {e}"));
+    );
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry: {e}"));
@@ -4669,7 +4666,7 @@ pub const LOG_FIELDS: &[&str] = &[
 
 pub static LOG_EMIT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("log_emit_total", "Total emitted log events"),
+        Opts::new("log_emit_total", "Total emitted log events"),
         &["subsystem"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -4681,7 +4678,7 @@ pub static LOG_EMIT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 pub static LOG_DROP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new("log_drop_total", "Logs dropped due to rate limiting"),
+        Opts::new("log_drop_total", "Logs dropped due to rate limiting"),
         &["subsystem"],
     )
     .unwrap_or_else(|e| panic!("counter_vec: {e}"));
@@ -4705,7 +4702,7 @@ pub static LOG_ENTRIES_INDEXED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 
 pub static LOG_CORRELATION_INDEX_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
-        prometheus::Opts::new(
+        Opts::new(
             "log_correlation_index_total",
             "Indexed log entries grouped by correlation id",
         ),
@@ -4733,7 +4730,7 @@ pub static LOG_CORRELATION_FAIL_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
 pub static LOG_SIZE_BYTES: Lazy<Histogram> = Lazy::new(|| {
     let opts = HistogramOpts::new("log_size_bytes", "Size of serialized log events in bytes")
         .buckets(
-            prometheus::exponential_buckets(64.0, 2.0, 8)
+            telemetry::exponential_buckets(64.0, 2.0, 8)
                 .unwrap_or_else(|e| panic!("histogram buckets: {e}")),
         );
     let h = Histogram::with_opts(opts).unwrap_or_else(|e| panic!("histogram: {e}"));

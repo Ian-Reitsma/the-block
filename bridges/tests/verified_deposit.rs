@@ -2,16 +2,15 @@ use bridges::light_client::{header_hash, Header, Proof};
 use bridges::{
     header::PowHeader, relayer::RelayerSet, Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
-use sys::temp;
+use foundation_serialization::hex;
+use sys::tempfile;
 
 #[cfg(feature = "telemetry")]
 use bridges::{PROOF_VERIFY_FAILURE_TOTAL, PROOF_VERIFY_SUCCESS_TOTAL};
 
 fn sample_header() -> PowHeader {
-    let merkle_root: [u8; 32] =
-        hex::decode("bb5a8ac31a71fd564acd5f4614a88ebaf771108e2f40838219f6dbec309ef23d")
-            .unwrap()
-            .try_into()
+    let merkle_root =
+        hex::decode_array::<32>("bb5a8ac31a71fd564acd5f4614a88ebaf771108e2f40838219f6dbec309ef23d")
             .unwrap();
     let mut h = PowHeader {
         chain_id: "ext".to_string(),
@@ -33,26 +32,26 @@ fn sample_header() -> PowHeader {
 
 fn sample_proof_valid() -> Proof {
     Proof {
-        leaf: hex::decode("0000000000000000000000000000000000000000000000000000000000000000")
-            .unwrap()
-            .try_into()
-            .unwrap(),
+        leaf: hex::decode_array::<32>(
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        )
+        .unwrap(),
         path: vec![
-            hex::decode("0101010101010101010101010101010101010101010101010101010101010101")
-                .unwrap()
-                .try_into()
-                .unwrap(),
-            hex::decode("0202020202020202020202020202020202020202020202020202020202020202")
-                .unwrap()
-                .try_into()
-                .unwrap(),
+            hex::decode_array::<32>(
+                "0101010101010101010101010101010101010101010101010101010101010101",
+            )
+            .unwrap(),
+            hex::decode_array::<32>(
+                "0202020202020202020202020202020202020202020202020202020202020202",
+            )
+            .unwrap(),
         ],
     }
 }
 
 #[test]
 fn deposit_valid_proof() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()
@@ -91,7 +90,7 @@ fn deposit_valid_proof() {
 
 #[test]
 fn deposit_invalid_proof() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()
@@ -123,7 +122,7 @@ fn deposit_invalid_proof() {
 
 #[test]
 fn deposit_replay_fails() {
-    let dir = temp::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
     let cfg = BridgeConfig {
         headers_dir: dir.path().to_str().unwrap().into(),
         ..BridgeConfig::default()

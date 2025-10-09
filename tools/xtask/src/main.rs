@@ -1,19 +1,43 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     help::HelpGenerator,
     parse::{ParseError, Parser},
 };
+use foundation_serialization::json;
 use git2::{DiffFormat, Repository};
-use serde::Serialize;
+use std::io::{self, Write};
 use std::process::Command as StdCommand;
 
-#[derive(Serialize, Default)]
+#[derive(Default)]
 struct Summary {
     balance_changed: bool,
     pending_changed: bool,
     title_ok: bool,
+}
+
+impl Summary {
+    fn to_json_value(&self) -> json::Value {
+        let mut map = json::Map::new();
+        map.insert(
+            "balance_changed".to_string(),
+            json::Value::Bool(self.balance_changed),
+        );
+        map.insert(
+            "pending_changed".to_string(),
+            json::Value::Bool(self.pending_changed),
+        );
+        map.insert("title_ok".to_string(), json::Value::Bool(self.title_ok));
+        json::Value::Object(map)
+    }
+
+    fn write_pretty_json(&self, mut writer: impl Write) -> Result<()> {
+        let value = self.to_json_value();
+        json::to_writer_pretty(&mut writer, &value)
+            .map_err(|err| anyhow!(err))
+            .context("failed to write summary output")
+    }
 }
 
 fn main() -> Result<()> {
@@ -177,7 +201,7 @@ fn run_summary(matches: &cli_core::parse::Matches) -> Result<()> {
         }
     }
 
-    serde_json::to_writer_pretty(std::io::stdout(), &summary)?;
+    summary.write_pretty_json(io::stdout())?;
     if !summary.title_ok {
         bail!("PR title does not match modified areas");
     }

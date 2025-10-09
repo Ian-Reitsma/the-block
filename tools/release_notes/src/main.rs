@@ -2,14 +2,16 @@ use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use cli_core::{
-    arg::{ArgSpec, OptionSpec},
+    arg::{ArgSpec, FlagSpec, OptionSpec},
     command::{Command, CommandBuilder, CommandId},
     help::HelpGenerator,
     parse::{Matches, ParseError, Parser},
 };
 
+use foundation_serialization::json;
 use release_notes::{
-    format_allowed, format_change_summary, kind_label, load_history, summarise, Filter, KNOWN_KINDS,
+    format_allowed, format_change_summary, kind_label, load_history, summarise, summary_to_value,
+    Filter, KNOWN_KINDS,
 };
 
 #[derive(Debug)]
@@ -25,6 +27,9 @@ struct Cli {
 
     /// Only include records with proposal_id >= this value.
     since_proposal: Option<u64>,
+
+    /// Render the summary as JSON instead of human readable text.
+    json: bool,
 }
 
 impl Cli {
@@ -54,6 +59,11 @@ impl Cli {
             "since-proposal",
             "Only include records with proposal_id >= this value",
         )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "json",
+            "json",
+            "Emit the summary as JSON instead of human readable text",
+        )))
         .build()
     }
 
@@ -74,6 +84,7 @@ impl Cli {
             history,
             since_epoch,
             since_proposal,
+            json: matches.get_flag("json"),
         })
     }
 
@@ -123,6 +134,12 @@ fn main() -> Result<()> {
             since_proposal: cli.since_proposal,
         },
     );
+
+    if cli.json {
+        let rendered = json::to_string_value_pretty(&summary_to_value(&summary));
+        println!("{rendered}");
+        return Ok(());
+    }
 
     println!("## Governance Dependency Policy Updates\n");
     if summary.updates.is_empty() {

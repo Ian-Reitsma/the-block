@@ -18,7 +18,7 @@ use coding::{
     CHACHA20_POLY1305_KEY_LEN, CHACHA20_POLY1305_NONCE_LEN, XCHACHA20_POLY1305_NONCE_LEN,
 };
 use crypto_suite::hashing::blake3::derive_key;
-use serde::{Deserialize, Serialize};
+use foundation_serialization::{json, Deserialize, Error as SerializationError, Serialize};
 use sled::{self, Db, Tree};
 
 #[cfg(feature = "sqlite-migration")]
@@ -30,6 +30,7 @@ const NEXT_ID_KEY: &str = "next_id";
 const OFFSET_PREFIX: &str = "offset:";
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct LogEntry {
     #[serde(default)]
     pub id: Option<u64>,
@@ -66,6 +67,7 @@ pub struct LogFilter {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(crate = "foundation_serialization::serde")]
 struct StoredEntry {
     id: u64,
     timestamp: u64,
@@ -80,6 +82,7 @@ struct StoredEntry {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 struct IngestState {
     offset: u64,
     updated_at: u64,
@@ -123,7 +126,7 @@ impl LogStore {
         let key = format!("{OFFSET_PREFIX}{source}");
         match self.meta.get(key.as_bytes())? {
             Some(value) => {
-                let state: IngestState = serde_json::from_slice(&value)?;
+                let state: IngestState = json::from_slice(&value)?;
                 Ok(state.offset)
             }
             None => Ok(0),
@@ -137,7 +140,7 @@ impl LogStore {
             updated_at: current_unix_seconds(),
         };
         self.meta
-            .insert(key.as_bytes(), serde_json::to_vec(&state)?)?
+            .insert(key.as_bytes(), json::to_vec(&state)?)?
             .map(|_| ());
         Ok(())
     }
@@ -147,7 +150,7 @@ impl LogStore {
         let key = format!("{OFFSET_PREFIX}{source}");
         let state = IngestState { offset, updated_at };
         self.meta
-            .insert(key.as_bytes(), serde_json::to_vec(&state)?)?
+            .insert(key.as_bytes(), json::to_vec(&state)?)?
             .map(|_| ());
         Ok(())
     }
@@ -155,7 +158,7 @@ impl LogStore {
     fn store_entry(&self, entry: &StoredEntry) -> Result<()> {
         let key = entry_key(entry.id);
         self.entries
-            .insert(key.as_bytes(), serde_json::to_vec(entry)?)?
+            .insert(key.as_bytes(), json::to_vec(entry)?)?
             .map(|_| ());
         Ok(())
     }
@@ -164,7 +167,7 @@ impl LogStore {
         let mut items = Vec::new();
         for result in self.entries.iter() {
             let (_, value) = result?;
-            let entry: StoredEntry = serde_json::from_slice(&value)?;
+            let entry: StoredEntry = json::from_slice(&value)?;
             items.push(entry);
         }
         Ok(items)
@@ -180,7 +183,7 @@ impl LogStore {
 pub enum LogIndexerError {
     Io(io::Error),
     Storage(sled::Error),
-    Json(serde_json::Error),
+    Json(SerializationError),
     Encryption(String),
     MigrationRequired(PathBuf),
     #[cfg(feature = "sqlite-migration")]
@@ -231,8 +234,8 @@ impl From<io::Error> for LogIndexerError {
     }
 }
 
-impl From<serde_json::Error> for LogIndexerError {
-    fn from(err: serde_json::Error) -> Self {
+impl From<SerializationError> for LogIndexerError {
+    fn from(err: SerializationError) -> Self {
         LogIndexerError::Json(err)
     }
 }
@@ -274,7 +277,7 @@ pub fn index_logs_with_options(log_path: &Path, db_path: &Path, opts: IndexOptio
         if line.trim().is_empty() {
             continue;
         }
-        let entry: LogEntry = serde_json::from_str(line.trim_end())?;
+        let entry: LogEntry = json::from_str(line.trim_end())?;
         next_id = next_id.saturating_add(1);
         let (message, encrypted, nonce) = if let Some(key) = key.as_ref() {
             let (cipher, nonce) = encrypt_message(key, &entry.message)?;
@@ -803,6 +806,7 @@ fn parse_option_usize(matches: &Matches, name: &str) -> Result<Option<usize>, Cl
         .transpose()
 }
 
+#[allow(dead_code)]
 fn print_root_help(command: &CliCommand, bin: &str) {
     let generator = HelpGenerator::new(command);
     println!("{}", generator.render());

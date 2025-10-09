@@ -10,13 +10,13 @@ crypto_suite = { path = "../../crates/crypto_suite" }
 cli_core = { path = "../../crates/cli_core" }
 rusqlite = { version = "0.30", features = ["bundled"], optional = true }
 sled = { path = "../../sled" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-coding = { path = "../crates/coding" }
+foundation_serialization = { path = "../../crates/foundation_serialization" }
+coding = { path = "../../crates/coding" }
 
 [features]
 default = []
 sqlite-migration = ["dep:rusqlite"]
+telemetry = []
 
 [build-dependencies]
 dependency_guard = { path = "../../crates/dependency_guard" }

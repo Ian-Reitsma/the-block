@@ -4,17 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+concurrency = { path = "../crates/concurrency", optional = true }
 crypto_suite = { path = "../crates/crypto_suite" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-hex = "0.4"
-once_cell = { version = "1", optional = true }
-prometheus = { version = "0.13", optional = true }
+foundation_serialization = { path = "../crates/foundation_serialization" }
 ledger = { path = "../ledger" }
+runtime = { path = "../crates/runtime", optional = true }
 sys = { path = "../crates/sys" }
 
 [features]
-telemetry = ["once_cell", "prometheus"]
+telemetry = ["concurrency", "runtime"]
 
 [dev-dependencies]
 dex = { path = "../dex" }

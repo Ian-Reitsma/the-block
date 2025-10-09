@@ -34,7 +34,6 @@ cli_core = { path = "../crates/cli_core" }
 serde_bytes = "0.11"
 foundation_serialization = { path = "../crates/foundation_serialization" }
 icu_normalizer = "2"
-prometheus = { version = "0.13", optional = true }
 static_assertions = "1"
 tar = "0.4"
 jsonrpc-core = "18"
@@ -97,7 +96,7 @@ integration-tests = []
 quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 
 fuzzy = []
-telemetry = ["prometheus", "ureq", "bridges/telemetry"]
+telemetry = ["ureq", "bridges/telemetry"]
 telemetry-json = ["telemetry"]
 test-telemetry = ["telemetry"]
 telemetry-verbose = ["telemetry"]

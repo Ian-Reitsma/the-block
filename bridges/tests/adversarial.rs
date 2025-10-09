@@ -4,7 +4,7 @@ use bridges::{
     relayer::RelayerSet,
     Bridge, BridgeConfig, RelayerBundle, RelayerProof,
 };
-use sys::temp;
+use sys::tempfile;
 
 fn sample_bundle(user: &str, amount: u64) -> RelayerBundle {
     RelayerBundle::new(vec![
@@ -41,7 +41,7 @@ fn sample_proof() -> Proof {
 
 #[test]
 fn challenge_reverts_pending_withdrawal() {
-    let tmp = temp::tempdir().expect("tempdir");
+    let tmp = tempfile::tempdir().expect("tempdir");
     let mut cfg = BridgeConfig::default();
     cfg.headers_dir = tmp.path().join("headers").to_str().unwrap().to_string();
     let mut bridge = Bridge::new(cfg);
@@ -66,7 +66,7 @@ fn challenge_reverts_pending_withdrawal() {
 
 #[test]
 fn malformed_proof_triggers_slash() {
-    let tmp = temp::tempdir().expect("tempdir");
+    let tmp = tempfile::tempdir().expect("tempdir");
     let mut cfg = BridgeConfig::default();
     cfg.headers_dir = tmp.path().join("headers").to_str().unwrap().to_string();
     let mut bridge = Bridge::new(cfg);
@@ -94,7 +94,7 @@ fn malformed_proof_triggers_slash() {
 
 #[test]
 fn finalize_respects_challenge_window() {
-    let tmp = temp::tempdir().expect("tempdir");
+    let tmp = tempfile::tempdir().expect("tempdir");
     let mut cfg = BridgeConfig::default();
     cfg.headers_dir = tmp.path().join("headers").to_str().unwrap().to_string();
     let mut bridge = Bridge::new(cfg);
