@@ -1,3 +1,4 @@
+use concurrency::Bytes;
 use crypto_suite::hashing::blake3;
 use std::collections::VecDeque;
 use std::fs;
@@ -86,7 +87,7 @@ pub fn set_handshake_timeout(timeout: StdDuration) {
 
 #[derive(Clone, Debug)]
 pub struct LocalCert {
-    pub cert: Vec<u8>,
+    pub cert: Bytes,
     pub key: Vec<u8>,
     pub fingerprint: [u8; 32],
     pub issued_at: u64,
@@ -124,7 +125,7 @@ impl RemoteKeyPair for SigningRemoteKey {
 
 #[derive(Clone, Debug)]
 pub struct CertAdvertisement {
-    pub cert: Vec<u8>,
+    pub cert: Bytes,
     pub fingerprint: [u8; 32],
     pub previous: Vec<[u8; 32]>,
 }
@@ -137,7 +138,7 @@ struct CertState {
 
 #[derive(Clone, Debug)]
 struct HistoricalCert {
-    cert: Vec<u8>,
+    cert: Bytes,
     fingerprint: [u8; 32],
     issued_at: u64,
 }
@@ -501,7 +502,7 @@ fn generate_local_cert(signing_key: &SigningKey) -> Result<LocalCert> {
     params.alg = &rcgen::PKCS_ED25519;
     params.distinguished_name = {
         let mut dn = DistinguishedName::new();
-        let hex_id = hex::encode(signing_key.verifying_key().to_bytes());
+        let hex_id = crypto_suite::hex::encode(signing_key.verifying_key().to_bytes());
         dn.push(DnType::CommonName, format!("the-block node {hex_id}"));
         dn
     };
@@ -516,8 +517,9 @@ fn generate_local_cert(signing_key: &SigningKey) -> Result<LocalCert> {
     let cert_der = cert.serialize_der().map_err(|err| anyhow!(err))?;
     let mut fp = [0u8; 32];
     fp.copy_from_slice(blake3::hash(&cert_der).as_bytes());
+    let cert_bytes = Bytes::from(cert_der);
     Ok(LocalCert {
-        cert: cert_der,
+        cert: cert_bytes,
         key: signing_key.to_keypair_bytes().to_vec(),
         fingerprint: fp,
         issued_at,
@@ -578,16 +580,17 @@ fn persist_state(state: &CertState) -> Result<()> {
 }
 
 fn stored_to_hist(stored: StoredCert) -> Result<HistoricalCert> {
-    let cert = decode_standard(&stored.cert).map_err(|e| anyhow!("invalid stored cert: {e}"))?;
-    let bytes =
-        hex::decode(stored.fingerprint).map_err(|e| anyhow!("invalid stored fingerprint: {e}"))?;
+    let cert_bytes =
+        decode_standard(&stored.cert).map_err(|e| anyhow!("invalid stored cert: {e}"))?;
+    let bytes = crypto_suite::hex::decode(stored.fingerprint)
+        .map_err(|e| anyhow!("invalid stored fingerprint: {e}"))?;
     if bytes.len() != 32 {
         return Err(anyhow!("invalid fingerprint length"));
     }
     let mut fp = [0u8; 32];
     fp.copy_from_slice(&bytes);
     Ok(HistoricalCert {
-        cert,
+        cert: Bytes::from(cert_bytes),
         fingerprint: fp,
         issued_at: stored.issued_at,
     })
@@ -595,16 +598,16 @@ fn stored_to_hist(stored: StoredCert) -> Result<HistoricalCert> {
 
 fn hist_to_stored(hist: &HistoricalCert) -> StoredCert {
     StoredCert {
-        cert: encode_standard(&hist.cert),
-        fingerprint: hex::encode(hist.fingerprint),
+        cert: encode_standard(hist.cert.as_ref()),
+        fingerprint: crypto_suite::hex::encode(hist.fingerprint),
         issued_at: hist.issued_at,
     }
 }
 
 fn local_to_stored(local: &LocalCert) -> StoredCert {
     StoredCert {
-        cert: encode_standard(&local.cert),
-        fingerprint: hex::encode(local.fingerprint),
+        cert: encode_standard(local.cert.as_ref()),
+        fingerprint: crypto_suite::hex::encode(local.fingerprint),
         issued_at: local.issued_at,
     }
 }

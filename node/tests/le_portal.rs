@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::le_portal::{
     list_evidence, list_requests, record_canary, record_evidence, record_request,
 };

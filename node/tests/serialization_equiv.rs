@@ -7,7 +7,7 @@ use the_block::{canonical_payload_bytes, RawTxPayload};
 fn random_hex(rng: &mut StdRng) -> String {
     let mut bytes = [0u8; 32];
     rng.fill(&mut bytes);
-    hex::encode(bytes)
+    crypto_suite::hex::encode(bytes)
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn serialize_roundtrip_vectors() {
             },
         };
         let bytes = canonical_payload_bytes(&payload);
-        writeln!(file, "{}", hex::encode(bytes)).unwrap();
+        writeln!(file, "{}", crypto_suite::hex::encode(bytes)).unwrap();
     }
     file.flush().unwrap();
     assert!(fs::metadata("../target/serialization_equiv.csv").is_ok());

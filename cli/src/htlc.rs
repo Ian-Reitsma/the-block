@@ -7,7 +7,7 @@ use cli_core::{
     parse::Matches,
 };
 use crypto_suite::hashing::{ripemd160, sha3::Sha3_256};
-use hex::{decode, encode};
+use crypto_suite::hex::{decode, encode};
 use the_block::vm::contracts::htlc::{HashAlgo, Htlc};
 
 pub enum HtlcCmd {

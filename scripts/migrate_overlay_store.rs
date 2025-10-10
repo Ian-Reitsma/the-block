@@ -8,8 +8,6 @@ use foundation_serialization::{
     Serialize,
 };
 
-use hex;
-
 #[derive(Serialize)]
 struct PersistedPeer {
     id: String,
@@ -41,7 +39,7 @@ fn canonical_peer_id(raw: &str) -> String {
     if let Ok(peer) = the_block::net::overlay_peer_from_base58(raw) {
         return the_block::net::overlay_peer_to_base58(&peer);
     }
-    if let Ok(bytes) = hex::decode(raw) {
+    if let Ok(bytes) = crypto_suite::hex::decode(raw) {
         if let Ok(peer) = the_block::net::overlay_peer_from_bytes(&bytes) {
             return the_block::net::overlay_peer_to_base58(&peer);
         }

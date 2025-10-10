@@ -84,7 +84,7 @@ impl From<Sha3Digest> for [u8; OUTPUT_LEN] {
 impl fmt::Debug for Sha3Digest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Sha3Digest")
-            .field(&hex::encode(self.0))
+            .field(&crate::hex::encode(self.0))
             .finish()
     }
 }
@@ -231,7 +231,7 @@ mod tests {
             ),
         ];
         for &(input, expected) in cases {
-            assert_eq!(hex::encode(hash(input)), expected);
+            assert_eq!(crate::hex::encode(hash(input)), expected);
         }
     }
 }

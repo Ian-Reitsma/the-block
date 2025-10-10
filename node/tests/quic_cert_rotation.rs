@@ -1,8 +1,9 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "quic")]
 
+use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{
     record_peer_certificate, transport_quic, verify_peer_fingerprint, HandshakeError, Hello,
     Transport, SUPPORTED_VERSION,
@@ -75,7 +76,7 @@ fn fingerprint_mismatch_rejects_certificate() {
         transport: Transport::Quic,
         quic_addr: None,
         quic_cert: Some(advert.cert.clone()),
-        quic_fingerprint: Some(forged_fp.to_vec()),
+        quic_fingerprint: Some(Bytes::from(forged_fp.to_vec())),
         quic_fingerprint_previous: Vec::new(),
         quic_provider: Some(transport::ProviderKind::S2nQuic.id().to_string()),
         quic_capabilities: vec!["certificate_rotation".into()],

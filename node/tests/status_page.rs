@@ -12,7 +12,7 @@ use the_block::Blockchain;
 #[test]
 fn status_returns_height() {
     runtime::block_on(async {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = sys::tempfile::tempdir().unwrap();
         let mut bc = Blockchain::new(dir.path().to_str().unwrap());
         bc.block_height = 42;
         let bc = Arc::new(Mutex::new(bc));

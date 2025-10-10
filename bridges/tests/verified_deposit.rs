@@ -9,9 +9,10 @@ use sys::tempfile;
 use bridges::{PROOF_VERIFY_FAILURE_TOTAL, PROOF_VERIFY_SUCCESS_TOTAL};
 
 fn sample_header() -> PowHeader {
-    let merkle_root =
-        hex::decode_array::<32>("bb5a8ac31a71fd564acd5f4614a88ebaf771108e2f40838219f6dbec309ef23d")
-            .unwrap();
+    let merkle_root = crypto_suite::hex::decode_array::<32>(
+        "bb5a8ac31a71fd564acd5f4614a88ebaf771108e2f40838219f6dbec309ef23d",
+    )
+    .unwrap();
     let mut h = PowHeader {
         chain_id: "ext".to_string(),
         height: 1,
@@ -32,16 +33,16 @@ fn sample_header() -> PowHeader {
 
 fn sample_proof_valid() -> Proof {
     Proof {
-        leaf: hex::decode_array::<32>(
+        leaf: crypto_suite::hex::decode_array::<32>(
             "0000000000000000000000000000000000000000000000000000000000000000",
         )
         .unwrap(),
         path: vec![
-            hex::decode_array::<32>(
+            crypto_suite::hex::decode_array::<32>(
                 "0101010101010101010101010101010101010101010101010101010101010101",
             )
             .unwrap(),
-            hex::decode_array::<32>(
+            crypto_suite::hex::decode_array::<32>(
                 "0202020202020202020202020202020202020202020202020202020202020202",
             )
             .unwrap(),

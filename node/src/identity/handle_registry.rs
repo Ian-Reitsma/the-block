@@ -83,7 +83,7 @@ impl HandleRegistry {
         if Self::reserved(&handle_norm) {
             return Err(HandleError::Reserved);
         }
-        let address = hex::encode(pubkey);
+        let address = crypto_suite::hex::encode(pubkey);
         // nonce check
         let nonce_key = Self::nonce_key(&address);
         if let Some(raw) = self.db.get(&nonce_key) {
@@ -125,7 +125,8 @@ impl HandleRegistry {
             if rec.address != address {
                 #[cfg(feature = "telemetry")]
                 crate::telemetry::IDENTITY_REGISTRATIONS_TOTAL
-                    .with_label_values(&[HandleError::Duplicate.code()])
+                    .ensure_handle_for_label_values(&[HandleError::Duplicate.code()])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 return Err(HandleError::Duplicate);
             }
@@ -157,7 +158,8 @@ impl HandleRegistry {
         self.db.insert(&nonce_key, nonce_bytes);
         #[cfg(feature = "telemetry")]
         crate::telemetry::IDENTITY_REGISTRATIONS_TOTAL
-            .with_label_values(&["ok"])
+            .ensure_handle_for_label_values(&["ok"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc();
         Ok(address)
     }

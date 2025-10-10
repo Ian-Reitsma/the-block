@@ -1,5 +1,6 @@
 use crate::net::peer::ReputationUpdate;
 use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
+use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
@@ -11,7 +12,7 @@ pub struct Message {
     /// Sender public key.
     pub pubkey: [u8; 32],
     /// Signature over the encoded body.
-    pub signature: Vec<u8>,
+    pub signature: Bytes,
     /// Inner message payload.
     pub body: Payload,
     /// Optional partition marker propagated in gossip headers.
@@ -19,7 +20,7 @@ pub struct Message {
     pub partition: Option<u64>,
     /// Optional certificate fingerprint for QUIC trust validation.
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub cert_fingerprint: Option<Vec<u8>>,
+    pub cert_fingerprint: Option<Bytes>,
 }
 
 impl Message {
@@ -30,14 +31,14 @@ impl Message {
         let sig = sk.sign(&bytes);
         Self {
             pubkey: sk.verifying_key().to_bytes(),
-            signature: sig.to_bytes().to_vec(),
+            signature: Bytes::from(sig.to_bytes().to_vec()),
             body,
             partition: None,
             cert_fingerprint: {
                 #[cfg(feature = "quic")]
                 {
                     crate::net::transport_quic::current_advertisement()
-                        .map(|ad| ad.fingerprint.to_vec())
+                        .map(|ad| Bytes::from(ad.fingerprint.to_vec()))
                 }
                 #[cfg(not(feature = "quic"))]
                 {
@@ -79,7 +80,7 @@ pub struct BlobChunk {
     /// Total number of shards.
     pub total: u32,
     /// Raw shard bytes.
-    pub data: Vec<u8>,
+    pub data: Bytes,
 }
 
 // ReputationUpdate defined in peer.rs

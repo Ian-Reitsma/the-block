@@ -33,13 +33,12 @@ use crate::{
 };
 use base64_fp::{decode_standard, encode_standard};
 use coding::default_encryptor;
-use concurrency::{Lazy, OnceCell};
+use concurrency::{Bytes, Lazy, OnceCell};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
 use foundation_serialization::json::{self, Value};
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use ledger::address::ShardId;
 #[cfg(feature = "telemetry")]
 use p2p_overlay::OverlayDiagnostics;
@@ -120,13 +119,16 @@ fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
     for backend in OVERLAY_BACKENDS {
         let is_active = if backend == snapshot.label { 1 } else { 0 };
         OVERLAY_BACKEND_ACTIVE
-            .with_label_values(&[backend])
+            .ensure_handle_for_label_values(&[backend])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(is_active);
         OVERLAY_PEER_TOTAL
-            .with_label_values(&[backend])
+            .ensure_handle_for_label_values(&[backend])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(if backend == snapshot.label { active } else { 0 });
         OVERLAY_PEER_PERSISTED_TOTAL
-            .with_label_values(&[backend])
+            .ensure_handle_for_label_values(&[backend])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(if backend == snapshot.label {
                 persisted
             } else {
@@ -136,13 +138,16 @@ fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
 
     if !OVERLAY_BACKENDS.contains(&snapshot.label) {
         OVERLAY_BACKEND_ACTIVE
-            .with_label_values(&[snapshot.label])
+            .ensure_handle_for_label_values(&[snapshot.label])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(1);
         OVERLAY_PEER_TOTAL
-            .with_label_values(&[snapshot.label])
+            .ensure_handle_for_label_values(&[snapshot.label])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(active);
         OVERLAY_PEER_PERSISTED_TOTAL
-            .with_label_values(&[snapshot.label])
+            .ensure_handle_for_label_values(&[snapshot.label])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(persisted);
     }
 }
@@ -150,10 +155,17 @@ fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
 #[cfg(feature = "telemetry")]
 fn clear_overlay_metrics() {
     for backend in OVERLAY_BACKENDS {
-        OVERLAY_BACKEND_ACTIVE.with_label_values(&[backend]).set(0);
-        OVERLAY_PEER_TOTAL.with_label_values(&[backend]).set(0);
+        OVERLAY_BACKEND_ACTIVE
+            .ensure_handle_for_label_values(&[backend])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+            .set(0);
+        OVERLAY_PEER_TOTAL
+            .ensure_handle_for_label_values(&[backend])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+            .set(0);
         OVERLAY_PEER_PERSISTED_TOTAL
-            .with_label_values(&[backend])
+            .ensure_handle_for_label_values(&[backend])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(0);
     }
 }
@@ -343,10 +355,12 @@ fn build_transport_callbacks() -> TransportCallbacks {
             #[cfg(feature = "telemetry")]
             {
                 crate::telemetry::TRANSPORT_PROVIDER_CONNECT_TOTAL
-                    .with_label_values(&[provider])
+                    .ensure_handle_for_label_values(&[provider])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 QUIC_PROVIDER_CONNECT_TOTAL
-                    .with_label_values(&[provider])
+                    .ensure_handle_for_label_values(&[provider])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             #[cfg(not(feature = "telemetry"))]
@@ -380,7 +394,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
                 if peer::track_handshake_fail_enabled() {
                     let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
                     QUIC_HANDSHAKE_FAIL_TOTAL
-                        .with_label_values(&[peer_label.as_str(), mapped.as_str()])
+                        .ensure_handle_for_label_values(&[peer_label.as_str(), mapped.as_str()])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                 }
                 diagnostics::tracing::error!(reason = mapped.as_str(), "quic_connect_fail");
@@ -414,7 +429,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
             {
                 let label = reason.label();
                 QUIC_DISCONNECT_TOTAL
-                    .with_label_values(&[label.as_ref()])
+                    .ensure_handle_for_label_values(&[label.as_ref()])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             #[cfg(not(feature = "telemetry"))]
@@ -430,7 +446,10 @@ fn build_transport_callbacks() -> TransportCallbacks {
         }
         s2n.cert_rotated = Some(Arc::new(|label: &'static str| {
             #[cfg(feature = "telemetry")]
-            QUIC_CERT_ROTATION_TOTAL.with_label_values(&[label]).inc();
+            QUIC_CERT_ROTATION_TOTAL
+                .ensure_handle_for_label_values(&[label])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
             #[cfg(not(feature = "telemetry"))]
             let _ = label;
         }));
@@ -440,7 +459,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
             {
                 let peer_label = quic_stats::peer_label(None);
                 QUIC_HANDSHAKE_FAIL_TOTAL
-                    .with_label_values(&[peer_label.as_str(), reason])
+                    .ensure_handle_for_label_values(&[peer_label.as_str(), reason])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             #[cfg(not(feature = "telemetry"))]
@@ -472,7 +492,8 @@ fn build_transport_callbacks() -> TransportCallbacks {
             {
                 let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
                 QUIC_HANDSHAKE_FAIL_TOTAL
-                    .with_label_values(&[peer_label.as_str(), reason])
+                    .ensure_handle_for_label_values(&[peer_label.as_str(), reason])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
         }));
@@ -509,7 +530,7 @@ const DISABLE_PERSIST_ENV: &str = "TB_PEER_CERT_DISABLE_DISK";
 #[derive(Clone)]
 struct CertSnapshot {
     fingerprint: [u8; 32],
-    cert: Vec<u8>,
+    cert: Bytes,
     updated_at: u64,
 }
 
@@ -708,7 +729,7 @@ fn peer_cert_encryption_key() -> Option<[u8; 32]> {
     PEER_CERT_ENC_KEY
         .get_or_init(|| {
             if let Ok(key_hex) = std::env::var("TB_PEER_CERT_KEY_HEX") {
-                if let Ok(bytes) = hex::decode(key_hex.trim()) {
+                if let Ok(bytes) = crypto_suite::hex::decode(key_hex.trim()) {
                     if bytes.len() == 32 {
                         let mut key = [0u8; 32];
                         key.copy_from_slice(&bytes);
@@ -721,7 +742,7 @@ fn peer_cert_encryption_key() -> Option<[u8; 32]> {
                 }
             }
             if let Ok(node_hex) = std::env::var("TB_NODE_KEY_HEX") {
-                if let Ok(bytes) = hex::decode(node_hex.trim()) {
+                if let Ok(bytes) = crypto_suite::hex::decode(node_hex.trim()) {
                     let hash = blake3::hash(&bytes);
                     let mut key = [0u8; 32];
                     key.copy_from_slice(hash.as_bytes());
@@ -786,7 +807,7 @@ fn reload_peer_cert_store_from_path(path: &Path) -> bool {
                 let mut rebuilt = HashMap::new();
                 let legacy_provider = default_legacy_provider_id();
                 for entry in entries {
-                    if let Ok(bytes) = hex::decode(&entry.peer) {
+                    if let Ok(bytes) = crypto_suite::hex::decode(&entry.peer) {
                         if bytes.len() != 32 {
                             continue;
                         }
@@ -950,7 +971,7 @@ fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
                 })
                 .collect();
             PeerCertDiskEntry {
-                peer: hex::encode(peer),
+                peer: crypto_suite::hex::encode(peer),
                 providers: provider_records,
                 current: None,
                 history: Vec::new(),
@@ -964,34 +985,34 @@ fn persist_peer_cert_store(map: &mut HashMap<[u8; 32], ProviderCertStores>) {
 }
 
 fn disk_to_snapshot(record: &CertDiskRecord) -> Option<CertSnapshot> {
-    let fingerprint_bytes = hex::decode(&record.fingerprint).ok()?;
+    let fingerprint_bytes = crypto_suite::hex::decode(&record.fingerprint).ok()?;
     if fingerprint_bytes.len() != 32 {
         return None;
     }
     let mut fingerprint = [0u8; 32];
     fingerprint.copy_from_slice(&fingerprint_bytes);
-    let cert = record
+    let cert_vec = record
         .cert
         .as_ref()
         .and_then(|c| decrypt_cert_blob(c))
         .unwrap_or_default();
-    if !cert.is_empty() {
-        let hash = blake3::hash(&cert);
+    if !cert_vec.is_empty() {
+        let hash = blake3::hash(&cert_vec);
         if hash.as_bytes() != &fingerprint {
             return None;
         }
     }
     Some(CertSnapshot {
         fingerprint,
-        cert,
+        cert: Bytes::from(cert_vec),
         updated_at: record.updated_at,
     })
 }
 
 fn snapshot_to_disk(snapshot: &CertSnapshot) -> CertDiskRecord {
     CertDiskRecord {
-        fingerprint: hex::encode(snapshot.fingerprint),
-        cert: encrypt_cert_blob(&snapshot.cert),
+        fingerprint: crypto_suite::hex::encode(snapshot.fingerprint),
+        cert: encrypt_cert_blob(snapshot.cert.as_ref()),
         updated_at: snapshot.updated_at,
     }
 }
@@ -1003,7 +1024,7 @@ fn append_previous(entry: &mut PeerCertStore, previous: &[[u8; 32]], now: u64) {
         }
         entry.history.push_back(CertSnapshot {
             fingerprint: *fp,
-            cert: Vec::new(),
+            cert: Bytes::new(),
             updated_at: now,
         });
     }
@@ -1012,12 +1033,12 @@ fn append_previous(entry: &mut PeerCertStore, previous: &[[u8; 32]], now: u64) {
 pub fn record_peer_certificate(
     peer: &[u8; 32],
     provider: &str,
-    cert: Vec<u8>,
+    cert: Bytes,
     fingerprint: [u8; 32],
     previous: Vec<[u8; 32]>,
 ) {
     if !cert.is_empty() {
-        let computed = blake3::hash(&cert);
+        let computed = blake3::hash(cert.as_ref());
         if computed.as_bytes() != &fingerprint {
             return;
         }
@@ -1070,9 +1091,10 @@ pub fn record_peer_certificate(
                 append_previous(store, &previous, now);
                 #[cfg(feature = "telemetry")]
                 {
-                    let label = hex::encode(peer);
+                    let label = crypto_suite::hex::encode(peer);
                     crate::telemetry::QUIC_CERT_ROTATION_TOTAL
-                        .with_label_values(&[label.as_str()])
+                        .ensure_handle_for_label_values(&[label.as_str()])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                 }
             } else {
@@ -1156,7 +1178,7 @@ pub fn peer_cert_snapshot() -> Vec<PeerCertSnapshot> {
 
 fn history_record(snapshot: &CertSnapshot, now: u64) -> PeerCertHistoryRecord {
     PeerCertHistoryRecord {
-        fingerprint: hex::encode(snapshot.fingerprint),
+        fingerprint: crypto_suite::hex::encode(snapshot.fingerprint),
         updated_at: snapshot.updated_at,
         age_secs: now.saturating_sub(snapshot.updated_at),
         has_certificate: !snapshot.cert.is_empty(),
@@ -1171,7 +1193,7 @@ pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
     for (peer, stores) in map.iter() {
         for (provider, store) in stores.iter() {
             entries.push(PeerCertHistoryEntry {
-                peer: hex::encode(peer),
+                peer: crypto_suite::hex::encode(peer),
                 provider: provider.clone(),
                 current: history_record(&store.current, now),
                 history: store
@@ -1298,7 +1320,7 @@ pub struct Node {
     #[cfg(feature = "quic")]
     quic_advert: Option<transport_quic::CertAdvertisement>,
     #[cfg(not(feature = "quic"))]
-    quic_cert: Option<Vec<u8>>,
+    quic_cert: Option<Bytes>,
 }
 
 impl Node {
@@ -1311,17 +1333,17 @@ impl Node {
         addr: SocketAddr,
         peers: Vec<SocketAddr>,
         bc: Blockchain,
-        quic: Option<(SocketAddr, Vec<u8>)>,
+        quic: Option<(SocketAddr, Bytes)>,
     ) -> Self {
         let key = load_net_key();
         #[cfg(feature = "quic")]
         let (quic_addr, quic_advert) = match quic {
             Some((addr, cert)) => {
-                let fingerprint = transport_quic::fingerprint(&cert);
+                let fingerprint = transport_quic::fingerprint(cert.as_ref());
                 (
                     Some(addr),
                     Some(transport_quic::CertAdvertisement {
-                        cert,
+                        cert: cert.clone(),
                         fingerprint,
                         previous: Vec::new(),
                     }),
@@ -1453,12 +1475,12 @@ impl Node {
         let (quic_cert, quic_fp, quic_prev) = match &self.quic_advert {
             Some(advert) => (
                 Some(advert.cert.clone()),
-                Some(advert.fingerprint.to_vec()),
+                Some(Bytes::from(advert.fingerprint.to_vec())),
                 advert
                     .previous
                     .iter()
-                    .map(|fp| fp.to_vec())
-                    .collect::<Vec<Vec<u8>>>(),
+                    .map(|fp| Bytes::from(fp.to_vec()))
+                    .collect::<Vec<Bytes>>(),
             ),
             None => (None, None, Vec::new()),
         };
@@ -1558,7 +1580,7 @@ impl Node {
             return;
         }
         if let Payload::Block(shard, _) = &msg.body {
-            let mut map: HashMap<OverlayPeerId, (SocketAddr, Transport, Option<Vec<u8>>)> =
+            let mut map: HashMap<OverlayPeerId, (SocketAddr, Transport, Option<Bytes>)> =
                 HashMap::new();
             for (addr, t, c) in peers {
                 if let Some(pk) = pk_from_addr(&addr) {
@@ -1604,14 +1626,14 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
 #[cfg(feature = "quic")]
 pub(crate) fn send_quic_msg(
     addr: SocketAddr,
-    cert: &[u8],
+    cert: &Bytes,
     msg: &Message,
 ) -> Result<(), quic::ConnectError> {
     use crate::net::quic;
     #[cfg(feature = "telemetry")]
     use crate::telemetry::QUIC_FALLBACK_TCP_TOTAL;
     let bytes = bincode::serialize(msg).unwrap_or_else(|e| panic!("serialize: {e}"));
-    let cert = quic::certificate_from_der(cert.to_vec()).map_err(quic::ConnectError::Other)?;
+    let cert = quic::certificate_from_der(cert.clone()).map_err(quic::ConnectError::Other)?;
     let res = runtime::block_on(async {
         let conn = quic::get_connection(addr, &cert).await?;
         if let Err(e) = quic::send(&conn, &bytes).await {
@@ -1634,7 +1656,7 @@ pub(crate) fn send_quic_msg(
 #[cfg(not(feature = "quic"))]
 pub(crate) fn send_quic_msg(
     _addr: SocketAddr,
-    _cert: &[u8],
+    _cert: &Bytes,
     _msg: &Message,
 ) -> Result<(), quic::ConnectError> {
     Err(quic::ConnectError::Other(anyhow!(

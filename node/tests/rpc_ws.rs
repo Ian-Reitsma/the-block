@@ -41,9 +41,9 @@ async fn read_response_headers(stream: &mut TcpStream) -> Result<String> {
 async fn spawn_rpc_server() -> (
     std::net::SocketAddr,
     runtime::JoinHandle<()>,
-    tempfile::TempDir,
+    sys::tempfile::TempDir,
 ) {
-    let dir = tempfile::tempdir().expect("tempdir");
+    let dir = sys::tempfile::tempdir().expect("tempdir");
     let chain_path = dir.path().join("chain");
     let bc = Arc::new(Mutex::new(Blockchain::new(
         chain_path.to_string_lossy().as_ref(),

@@ -25,10 +25,12 @@ pub fn register_handle(params: &Value, reg: &mut HandleRegistry) -> Result<Value
         .get("nonce")
         .and_then(|v| v.as_u64())
         .ok_or(HandleError::LowNonce)?;
-    let pk_bytes = hex::decode(pubkey).map_err(|_| HandleError::BadSig)?;
-    let sig_bytes = hex::decode(sig).map_err(|_| HandleError::BadSig)?;
+    let pk_bytes = crypto_suite::hex::decode(pubkey).map_err(|_| HandleError::BadSig)?;
+    let sig_bytes = crypto_suite::hex::decode(sig).map_err(|_| HandleError::BadSig)?;
     #[cfg(feature = "pq-crypto")]
-    let pq_bytes = pq_pubkey.map(|s| hex::decode(s).ok()).flatten();
+    let pq_bytes = pq_pubkey
+        .map(|s| crypto_suite::hex::decode(s).ok())
+        .flatten();
     #[cfg(feature = "pq-crypto")]
     let addr = reg.register_handle(handle, &pk_bytes, pq_bytes.as_deref(), &sig_bytes, nonce)?;
     #[cfg(not(feature = "pq-crypto"))]
@@ -52,10 +54,10 @@ fn did_record_json(record: DidRecord) -> Value {
     foundation_serialization::json!({
         "address": record.address,
         "document": record.document,
-        "hash": hex::encode(record.hash),
+        "hash": crypto_suite::hex::encode(record.hash),
         "nonce": record.nonce,
         "updated_at": record.updated_at,
-        "public_key": hex::encode(record.public_key),
+        "public_key": crypto_suite::hex::encode(record.public_key),
         "remote_attestation": record.remote_attestation.map(|att| {
             foundation_serialization::json!({"signer": att.signer, "signature": att.signature})
         }),

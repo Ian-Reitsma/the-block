@@ -70,7 +70,6 @@ dependencies = [
  "crypto_suite",
  "dependency_guard",
  "foundation_serialization",
- "hex",
  "serde",
 ]
 
@@ -490,6 +489,9 @@ dependencies = [
 [[package]]
 name = "concurrency"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "constant_time_eq"
@@ -515,7 +517,6 @@ dependencies = [
  "foundation_lazy",
  "foundation_serialization",
  "governance",
- "hex",
  "httpd",
  "light-client",
  "rand 0.1.0",
@@ -627,7 +628,6 @@ dependencies = [
  "bincode",
  "codec",
  "foundation_lazy",
- "hex",
  "num-bigint",
  "num-traits",
  "rand 0.1.0",
@@ -697,10 +697,10 @@ dependencies = [
  "cargo_metadata",
  "chrono",
  "cli_core",
+ "concurrency",
  "dependency_guard",
  "diagnostics",
  "foundation_serialization",
- "indexmap",
  "runtime",
  "serde",
  "tempfile",
@@ -746,7 +746,6 @@ version = "0.1.0"
 dependencies = [
  "crypto_suite",
  "foundation_serialization",
- "hex",
  "serde",
  "subtle",
  "testkit",
@@ -840,11 +839,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "codec",
+ "concurrency",
  "crypto_suite",
  "foundation_serialization",
- "hex",
  "httpd",
- "lru",
  "rand 0.1.0",
  "runtime",
  "rusqlite",
@@ -956,6 +954,10 @@ version = "0.1.0"
 dependencies = [
  "approx",
 ]
+
+[[package]]
+name = "foundation_regex"
+version = "0.1.0"
 
 [[package]]
 name = "foundation_rpc"
@@ -1208,21 +1210,9 @@ dependencies = [
 
 [[package]]
 name = "hermit-abi"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d231dfb89cfffdbc30e7fc41579ed6066ad03abda9e567ccafae602b97ec5024"
-
-[[package]]
-name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
-
-[[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hidapi"
@@ -1272,6 +1262,7 @@ dependencies = [
  "base64_fp",
  "crypto_suite",
  "diagnostics",
+ "foundation_regex",
  "foundation_serialization",
  "rand 0.1.0",
  "runtime",
@@ -1448,8 +1439,6 @@ checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.0",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -1510,17 +1499,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "io-lifetimes"
-version = "1.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2"
-dependencies = [
- "hermit-abi 0.3.9",
- "libc",
- "windows-sys 0.48.0",
-]
-
-[[package]]
 name = "io-uring"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1537,7 +1515,7 @@ version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
- "hermit-abi 0.5.2",
+ "hermit-abi",
  "libc",
  "windows-sys 0.59.0",
 ]
@@ -1728,12 +1706,6 @@ dependencies = [
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef53942eb7bf7ff43a617b3e2c1c4a5ecf5944a7c1bc12d7ee39bbb15e5c1519"
-
-[[package]]
-name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
@@ -1777,15 +1749,6 @@ dependencies = [
  "foundation_serialization",
  "rusqlite",
  "sled 0.34.0",
-]
-
-[[package]]
-name = "lru"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a83fb7698b3643a0e34f9ae6f2e8f0178c0fd42f8b59d493aa271ff3a5bf21"
-dependencies = [
- "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -2853,20 +2816,6 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.37.28"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "519165d378b97752ca44bbe15047d5d3409e875f39327546b42ac81d7e18c1b6"
-dependencies = [
- "bitflags 1.3.2",
- "errno",
- "io-lifetimes",
- "libc",
- "linux-raw-sys 0.3.8",
- "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "rustix"
 version = "0.38.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
@@ -3123,8 +3072,8 @@ checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 name = "sled"
 version = "0.34.0"
 dependencies = [
+ "crypto_suite",
  "foundation_lazy",
- "hex",
  "sled 0.34.7",
  "storage_engine",
  "tempfile",
@@ -3191,7 +3140,6 @@ version = "0.1.0"
 dependencies = [
  "crypto_suite",
  "dependency_guard",
- "hex",
  "storage_engine",
  "sys",
  "thiserror",
@@ -3210,7 +3158,6 @@ dependencies = [
  "bincode",
  "crypto_suite",
  "foundation_serialization",
- "hex",
  "serde",
  "tempfile",
  "the_block",
@@ -3341,8 +3288,8 @@ name = "tb-debugger"
 version = "0.1.0"
 dependencies = [
  "cli_core",
+ "crypto_suite",
  "dependency_guard",
- "hex",
  "the_block",
 ]
 
@@ -3362,7 +3309,6 @@ dependencies = [
  "explorer",
  "foundation_lazy",
  "foundation_serialization",
- "hex",
  "ledger",
  "light-client",
  "p2p_overlay",
@@ -3388,16 +3334,6 @@ dependencies = [
  "once_cell",
  "rustix 1.1.2",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "terminal_size"
-version = "0.2.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e6bf6f19e9f8ed8d4048dc22981458ebcf406d67e94cd422e5ecd73d63b3237"
-dependencies = [
- "rustix 0.37.28",
- "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3429,7 +3365,6 @@ dependencies = [
  "arbitrary",
  "bincode",
  "crypto_suite",
- "hex",
  "libfuzzer-sys",
  "tempfile",
  "the_block",
@@ -3442,7 +3377,6 @@ dependencies = [
  "base64_fp",
  "bincode",
  "bridges",
- "bytes",
  "cli_core",
  "codec",
  "coding",
@@ -3456,29 +3390,26 @@ dependencies = [
  "dkg",
  "flate2",
  "foundation_math",
+ "foundation_regex",
  "foundation_rpc",
  "foundation_serialization",
  "foundation_telemetry",
  "futures",
  "governance",
- "hex",
  "histogram_fp",
  "httparse",
  "httpd",
  "icu_normalizer",
- "indexmap",
  "inflation",
  "jurisdiction",
  "ledger",
  "light-client",
- "lru",
  "p2p_overlay",
  "pprof 0.13.0",
  "pqcrypto-dilithium",
  "privacy",
  "python_bridge",
  "rand 0.1.0",
- "regex",
  "runtime",
  "rusqlite",
  "serde",
@@ -3492,7 +3423,6 @@ dependencies = [
  "sys",
  "tar",
  "tb-sim",
- "terminal_size",
  "testkit",
  "time",
  "transport",
@@ -3660,12 +3590,12 @@ name = "transport"
 version = "0.1.0"
 dependencies = [
  "base64_fp",
+ "concurrency",
  "crypto_suite",
  "dashmap",
  "diagnostics",
  "foundation_lazy",
  "foundation_serialization",
- "hex",
  "quinn",
  "rand 0.1.0",
  "rcgen 0.12.1",
@@ -3780,7 +3710,6 @@ dependencies = [
  "crypto_suite",
  "foundation_lazy",
  "foundation_serialization",
- "hex",
  "hidapi",
  "httpd",
  "ledger",

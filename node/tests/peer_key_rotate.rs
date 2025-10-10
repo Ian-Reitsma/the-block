@@ -1,11 +1,10 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
-use hex;
 use runtime::{io::read_to_end, net::TcpStream};
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::net::{self, Hello, Message, Payload, PeerSet, Transport, PROTOCOL_VERSION};
 use the_block::{generate_keypair, rpc::run_rpc_server, Blockchain};
@@ -13,7 +12,7 @@ use util::timeout::expect_timeout;
 
 mod util;
 
-fn init_env() -> tempfile::TempDir {
+fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
@@ -97,9 +96,9 @@ fn peer_key_rotate() {
         let sig = sk.sign(&new_pk);
         let body = format!(
         "{{\"method\":\"net.key_rotate\",\"params\":{{\"peer_id\":\"{}\",\"new_key\":\"{}\",\"signature\":\"{}\"}}}}",
-        hex::encode(pk),
-        hex::encode(new_pk),
-        hex::encode(sig.to_bytes()),
+        crypto_suite::hex::encode(pk),
+        crypto_suite::hex::encode(new_pk),
+        crypto_suite::hex::encode(sig.to_bytes()),
     );
         let res = rpc(&addr, &body).await;
         assert_eq!(res["result"]["status"], "ok");
@@ -107,7 +106,7 @@ fn peer_key_rotate() {
         // old key rejected
         let body_old = format!(
             "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
-            hex::encode(pk)
+            crypto_suite::hex::encode(pk)
         );
         let val = rpc(&addr, &body_old).await;
         assert!(val.get("error").is_some());
@@ -115,7 +114,7 @@ fn peer_key_rotate() {
         // new key retains metrics
         let body_new = format!(
             "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
-            hex::encode(new_pk)
+            crypto_suite::hex::encode(new_pk)
         );
         let val = rpc(&addr, &body_new).await;
         assert_eq!(val["result"]["requests"].as_u64().unwrap(), 1);

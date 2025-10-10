@@ -1,5 +1,4 @@
 use concurrency::Lazy;
-use hex;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::RwLock;
@@ -103,9 +102,9 @@ fn refresh_locked(store: &mut Store) {
             } else {
                 super::current_peer_fingerprint(peer)
             }
-            .map(|fp| hex::encode(fp));
+            .map(|fp| crypto_suite::hex::encode(fp));
             super::QuicStatsEntry {
-                peer_id: hex::encode(peer),
+                peer_id: crypto_suite::hex::encode(peer),
                 address: state.address.map(|a| a.to_string()),
                 latency_ms: state.latency_ms,
                 fingerprint,
@@ -141,6 +140,6 @@ fn update_retransmits(entry: &mut PeerState, latest: u64) {
 
 #[cfg(feature = "telemetry")]
 pub(super) fn peer_label(peer: Option<[u8; 32]>) -> String {
-    peer.map(|pk| hex::encode(pk))
+    peer.map(|pk| crypto_suite::hex::encode(pk))
         .unwrap_or_else(|| UNKNOWN_PEER_LABEL.to_string())
 }

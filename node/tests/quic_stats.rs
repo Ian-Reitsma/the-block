@@ -2,12 +2,11 @@
 #![cfg(feature = "quic")]
 
 use crypto_suite::signatures::ed25519::SigningKey;
-use hex;
 use runtime::{io::read_to_end, net::TcpStream};
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::generate_keypair;
 use the_block::net::{self, Message, Payload, PeerSet, Transport, PROTOCOL_VERSION};
@@ -17,7 +16,7 @@ use the_block::Blockchain;
 
 mod util;
 
-fn init_env() -> tempfile::TempDir {
+fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     the_block::net::clear_peer_metrics();
@@ -126,7 +125,7 @@ fn quic_stats_rpc() {
         let response = rpc(&addr, "{\"method\":\"net.quic_stats\",\"params\":{}}").await;
         let result = response["result"].as_array().unwrap();
         assert!(!result.is_empty());
-        let peer_hex = hex::encode(pk);
+        let peer_hex = crypto_suite::hex::encode(pk);
         let entry = result
             .iter()
             .find(|v| v["peer_id"].as_str() == Some(peer_hex.as_str()))

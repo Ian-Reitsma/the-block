@@ -458,7 +458,7 @@ fn handle_deploy(matches: &Matches) -> Result<(), String> {
     }
 
     if let Some(code_hex) = code {
-        let bytes = hex::decode(&code_hex)
+        let bytes = crypto_suite::hex::decode(&code_hex)
             .map_err(|_| "invalid hex code provided to deploy".to_string())?;
         let id = vm.deploy(bytes);
         println!("{id}");
@@ -478,7 +478,7 @@ fn handle_call(matches: &Matches) -> Result<(), String> {
     let path = PathBuf::from(state);
     let mut vm = Vm::new_persistent(VmType::Wasm, path);
     let mut balance = u64::MAX;
-    let bytes = hex::decode(input).map_err(|_| "invalid hex input".to_string())?;
+    let bytes = crypto_suite::hex::decode(input).map_err(|_| "invalid hex input".to_string())?;
     let tx = ContractTx::Call {
         id,
         input: bytes,
@@ -487,7 +487,7 @@ fn handle_call(matches: &Matches) -> Result<(), String> {
     };
     match tx.apply(&mut vm, &mut balance) {
         Ok(out) => {
-            println!("{}", hex::encode(out));
+            println!("{}", crypto_suite::hex::encode(out));
             Ok(())
         }
         Err(err) => {

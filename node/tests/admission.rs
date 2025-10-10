@@ -319,7 +319,7 @@ fn industrial_deferred_when_consumer_fees_high() {
         bc.submit_transaction(tx_i),
         Err(TxAdmissionError::InsufficientBalance)
     );
-    assert_eq!(telemetry::INDUSTRIAL_DEFERRED_TOTAL.get(), 0);
+    assert_eq!(telemetry::INDUSTRIAL_DEFERRED_TOTAL.value(), 0);
 }
 
 #[testkit::tb_serial]
@@ -348,11 +348,12 @@ fn lock_poisoned_error_and_recovery() {
     );
     #[cfg(feature = "telemetry")]
     {
-        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.get());
+        assert_eq!(1, telemetry::LOCK_POISON_TOTAL.value());
         assert_eq!(
             1,
             telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["lock_poison"])
+                .ensure_handle_for_label_values(&["lock_poison"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
     }

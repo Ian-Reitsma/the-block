@@ -127,7 +127,7 @@ fn pipeline_repair_round_trip_with_xor_coder() {
 
     let mut db = SimpleDb::open_named(names::STORAGE_PIPELINE, path_str);
     let shard_id = manifest.chunks[0].id;
-    db.remove(&format!("chunk/{}", hex::encode(shard_id)));
+    db.remove(&format!("chunk/{}", crypto_suite::hex::encode(shard_id)));
 
     let log_dir = dir.path().join("repair_log");
     let log = RepairLog::new(&log_dir);
@@ -138,7 +138,7 @@ fn pipeline_repair_round_trip_with_xor_coder() {
     assert!(summary.failures == 0);
 
     let restored = db
-        .get(&format!("chunk/{}", hex::encode(shard_id)))
+        .get(&format!("chunk/{}", crypto_suite::hex::encode(shard_id)))
         .expect("restored shard");
     assert!(!restored.is_empty());
 }

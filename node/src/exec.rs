@@ -119,7 +119,8 @@ pub fn record(
     {
         SUBSIDY_CPU_MS_TOTAL.inc_by(cpu_ms);
         SUBSIDY_BYTES_TOTAL
-            .with_label_values(&["compute"])
+            .ensure_handle_for_label_values(&["compute"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc_by(bytes_out);
     }
     Ok(())
@@ -147,7 +148,7 @@ pub fn batch(epoch: u64) -> IoResult<[u8; 32]> {
     }
     fs::create_dir_all(&base_dir())?;
     let root_path = base_dir().join(format!("{}.root", epoch));
-    fs::write(&root_path, hex::encode(root.as_bytes()))?;
+    fs::write(&root_path, crypto_suite::hex::encode(root.as_bytes()))?;
     Ok(*root.as_bytes())
 }
 

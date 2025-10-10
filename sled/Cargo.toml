@@ -12,7 +12,7 @@ storage_engine = { path = "../crates/storage_engine" }
 thiserror = "1"
 tempfile = "3"
 foundation_lazy = { path = "../crates/foundation_lazy" }
-hex = "0.4"
+crypto_suite = { path = "../crates/crypto_suite" }
 
 [dependencies.sled-legacy]
 package = "sled"

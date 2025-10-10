@@ -8,7 +8,6 @@ use contract_cli::light_client::{
 use contract_cli::rpc::RpcClient;
 use contract_cli::tx::{generate_keypair, TxDidAnchor};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
-use hex;
 use support::json_rpc::JsonRpcMock;
 
 fn owner_signing_key(bytes: &[u8]) -> SigningKey {
@@ -41,7 +40,7 @@ fn build_anchor_transaction_generates_signatures() {
     let tx = build_anchor_transaction(&document, &material).expect("build anchor");
     let owner_key = owner_signing_key(&owner_secret);
     let owner_vk = owner_key.verifying_key();
-    assert_eq!(tx.address, hex::encode(&owner_public));
+    assert_eq!(tx.address, crypto_suite::hex::encode(&owner_public));
     assert_eq!(tx.public_key, owner_public.clone());
     let parsed_document: foundation_serialization::json::Value =
         foundation_serialization::json::from_str(&tx.document).expect("canonical doc");
@@ -56,8 +55,8 @@ fn build_anchor_transaction_generates_signatures() {
         .as_ref()
         .expect("remote attestation present");
     let remote_vk = VerifyingKey::from_bytes(&remote_public.clone().try_into().unwrap()).unwrap();
-    assert_eq!(att.signer, hex::encode(&remote_public));
-    let remote_sig_bytes = hex::decode(&att.signature).expect("decode remote sig");
+    assert_eq!(att.signer, crypto_suite::hex::encode(&remote_public));
+    let remote_sig_bytes = crypto_suite::hex::decode(&att.signature).expect("decode remote sig");
     let remote_sig = signature_from_vec(&remote_sig_bytes);
     remote_vk
         .verify(tx.remote_digest().as_ref(), &remote_sig)
@@ -80,7 +79,7 @@ fn build_anchor_transaction_rejects_large_documents() {
 }
 
 fn anchor_responses(tx: &TxDidAnchor, updated_at: u64) -> String {
-    let doc_hash = hex::encode(tx.document_hash());
+    let doc_hash = crypto_suite::hex::encode(tx.document_hash());
     foundation_serialization::json!({
         "jsonrpc": "2.0",
         "result": {
@@ -89,7 +88,7 @@ fn anchor_responses(tx: &TxDidAnchor, updated_at: u64) -> String {
             "hash": doc_hash,
             "nonce": tx.nonce,
             "updated_at": updated_at,
-            "public_key": hex::encode(&tx.public_key),
+            "public_key": crypto_suite::hex::encode(&tx.public_key),
             "remote_attestation": tx.remote_attestation.as_ref()
         },
         "id": 1
@@ -126,10 +125,10 @@ fn anchor_submission_and_resolve_flow() {
             "result": {
                 "address": tx.address.clone(),
                 "document": tx.document.clone(),
-                "hash": hex::encode(tx.document_hash()),
+                "hash": crypto_suite::hex::encode(tx.document_hash()),
                 "nonce": tx.nonce,
                 "updated_at": 123,
-                "public_key": hex::encode(&owner_public),
+                "public_key": crypto_suite::hex::encode(&owner_public),
                 "remote_attestation": foundation_serialization::json::Value::Null
             },
             "id": 1
@@ -142,7 +141,7 @@ fn anchor_submission_and_resolve_flow() {
     let record = submit_anchor(&client, server.url(), &tx).expect("anchor RPC succeeds");
     assert_eq!(record.address, tx.address);
     assert_eq!(record.nonce, tx.nonce);
-    assert_eq!(record.hash, hex::encode(tx.document_hash()));
+    assert_eq!(record.hash, crypto_suite::hex::encode(tx.document_hash()));
     assert_eq!(record.document, document);
 
     let header = latest_header(&client, server.url()).expect("latest header");
@@ -151,7 +150,10 @@ fn anchor_submission_and_resolve_flow() {
     let resolved = resolve_did_record(&client, server.url(), &tx.address).expect("resolve");
     assert_eq!(resolved.address, tx.address);
     assert_eq!(resolved.nonce, Some(tx.nonce));
-    assert_eq!(resolved.hash, Some(hex::encode(tx.document_hash())));
+    assert_eq!(
+        resolved.hash,
+        Some(crypto_suite::hex::encode(tx.document_hash()))
+    );
     assert_eq!(resolved.document, Some(document));
 
     let bodies = server.captured();

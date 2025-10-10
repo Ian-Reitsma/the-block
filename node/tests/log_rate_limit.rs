@@ -37,13 +37,15 @@ fn log_sampling_rate_limits() {
     assert_eq!(logged, 2, "expected sampling after limit");
     assert_eq!(
         telemetry::LOG_EMIT_TOTAL
-            .with_label_values(&["mempool"])
+            .ensure_handle_for_label_values(&["mempool"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         telemetry::LOG_LIMIT + logged
     );
     assert_eq!(
         telemetry::LOG_DROP_TOTAL
-            .with_label_values(&["mempool"])
+            .ensure_handle_for_label_values(&["mempool"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         extra - logged
     );

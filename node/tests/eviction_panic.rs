@@ -72,18 +72,20 @@ fn eviction_panic_rolls_back() {
     let tx3 = build_signed_tx(&sk, "a", "b", 1, 1000, 3);
     #[cfg(feature = "telemetry")]
     {
-        let before_lp = telemetry::LOCK_POISON_TOTAL.get();
+        let before_lp = telemetry::LOCK_POISON_TOTAL.value();
         let before_rej = telemetry::TX_REJECTED_TOTAL
-            .with_label_values(&["lock_poison"])
+            .ensure_handle_for_label_values(&["lock_poison"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         assert_eq!(before_lp, before_rej);
         assert_eq!(
             Err(TxAdmissionError::LockPoisoned),
             bc.submit_transaction(tx3)
         );
-        let after_lp = telemetry::LOCK_POISON_TOTAL.get();
+        let after_lp = telemetry::LOCK_POISON_TOTAL.value();
         let after_rej = telemetry::TX_REJECTED_TOTAL
-            .with_label_values(&["lock_poison"])
+            .ensure_handle_for_label_values(&["lock_poison"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         assert_eq!(before_lp + 1, after_lp);
         assert_eq!(before_rej + 1, after_rej);

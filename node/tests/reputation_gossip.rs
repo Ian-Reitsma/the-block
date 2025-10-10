@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::compute_market::scheduler::ReputationStore;
 
 #[test]

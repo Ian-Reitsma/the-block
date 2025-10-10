@@ -143,7 +143,8 @@ pub fn write_telemetry_metrics(report: &ViolationReport, out_dir: &Path) -> Resu
             depth_owned.as_str(),
         ];
         let gauge = gauge_vec
-            .with_label_values(&labels)
+            .ensure_handle_for_label_values(&labels)
+            .expect(runtime::telemetry::LABEL_REGISTRATION_ERR)
             .map_err(|err| diag_anyhow::anyhow!(err))?;
         gauge.set(1);
         total.inc();

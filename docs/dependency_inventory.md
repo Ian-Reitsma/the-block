@@ -96,7 +96,6 @@
 | unclassified | `hashlink` | 0.8.4 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `hermit-abi` | 0.3.9 | crates.io | MIT OR Apache-2.0 | 4 |
 | unclassified | `hermit-abi` | 0.5.2 | crates.io | MIT OR Apache-2.0 | 4 |
-| unclassified | `hex` | 0.4.3 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `hidapi` | 2.6.3 | crates.io | MIT | 2 |
 | unclassified | `histogram_fp` | 0.1.0 | workspace | — | 1 |
 | unclassified | `httparse` | 1.10.1 | crates.io | MIT OR Apache-2.0 | 1 |
@@ -110,7 +109,6 @@
 | unclassified | `icu_provider` | 2.0.0 | crates.io | Unicode-3.0 | 2 |
 | unclassified | `idna` | 1.1.0 | crates.io | MIT OR Apache-2.0 | 3 |
 | unclassified | `idna_adapter` | 1.2.1 | crates.io | Apache-2.0 OR MIT | 4 |
-| unclassified | `indexmap` | 2.11.4 | crates.io | Apache-2.0 OR MIT | 1 |
 | unclassified | `inferno` | 0.11.21 | crates.io | CDDL-1.0 | 2 |
 | unclassified | `inflation` | 0.1.0 | workspace | — | 1 |
 | unclassified | `io-lifetimes` | 1.0.11 | crates.io | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | 3 |
@@ -187,9 +185,6 @@
 | unclassified | `rand_core` | 0.1.0 | workspace | — | 2 |
 | unclassified | `rcgen` | 0.11.3 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `redox_syscall` | 0.5.18 | crates.io | MIT | 4 |
-| unclassified | `regex` | 1.11.3 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `regex-automata` | 0.4.11 | crates.io | MIT OR Apache-2.0 | 2 |
-| unclassified | `regex-syntax` | 0.8.6 | crates.io | MIT OR Apache-2.0 | 2 |
 | unclassified | `rgb` | 0.8.52 | crates.io | MIT | 3 |
 | unclassified | `ring` | 0.16.20 | crates.io | file:LICENSE | 3 |
 | unclassified | `runtime` | 0.1.0 | workspace | — | 1 |
@@ -230,7 +225,6 @@
 | unclassified | `tar` | 0.4.44 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `tb-sim` | 0.1.0 | workspace | — | 1 |
 | unclassified | `tempfile` | 3.23.0 | crates.io | MIT OR Apache-2.0 | 1 |
-| unclassified | `terminal_size` | 0.2.6 | crates.io | MIT OR Apache-2.0 | 1 |
 | unclassified | `termtree` | 0.5.1 | crates.io | MIT | 3 |
 | unclassified | `testkit` | 0.1.0 | workspace | — | 1 |
 | unclassified | `testkit_macros` | 0.1.0 | workspace | — | 2 |

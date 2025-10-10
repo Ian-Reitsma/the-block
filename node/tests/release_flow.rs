@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 
 use the_block::governance::{
     controller, GovStore, ProposalStatus, ReleaseAttestation, ReleaseBallot, ReleaseVote,
@@ -39,23 +39,23 @@ fn release_flow_requires_signature_when_signers_configured() {
     let sk2 = SigningKey::generate(&mut rng);
     let signer_hex = format!(
         "{},{}",
-        hex::encode(sk1.verifying_key().to_bytes()),
-        hex::encode(sk2.verifying_key().to_bytes())
+        crypto_suite::hex::encode(sk1.verifying_key().to_bytes()),
+        crypto_suite::hex::encode(sk2.verifying_key().to_bytes())
     );
     std::env::set_var("TB_RELEASE_SIGNERS", &signer_hex);
     provenance::refresh_release_signers();
 
     let hash = "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd".to_string();
     let msg = format!("release:{hash}");
-    let sig1 = hex::encode(sk1.sign(msg.as_bytes()).to_bytes());
-    let sig2 = hex::encode(sk2.sign(msg.as_bytes()).to_bytes());
+    let sig1 = crypto_suite::hex::encode(sk1.sign(msg.as_bytes()).to_bytes());
+    let sig2 = crypto_suite::hex::encode(sk2.sign(msg.as_bytes()).to_bytes());
     let attestations = vec![
         ReleaseAttestation {
-            signer: hex::encode(sk1.verifying_key().to_bytes()),
+            signer: crypto_suite::hex::encode(sk1.verifying_key().to_bytes()),
             signature: sig1,
         },
         ReleaseAttestation {
-            signer: hex::encode(sk2.verifying_key().to_bytes()),
+            signer: crypto_suite::hex::encode(sk2.verifying_key().to_bytes()),
             signature: sig2,
         },
     ];
@@ -77,17 +77,17 @@ fn release_flow_rejects_missing_signature() {
     let sk2 = SigningKey::generate(&mut rng);
     let signer_hex = format!(
         "{},{}",
-        hex::encode(sk1.verifying_key().to_bytes()),
-        hex::encode(sk2.verifying_key().to_bytes())
+        crypto_suite::hex::encode(sk1.verifying_key().to_bytes()),
+        crypto_suite::hex::encode(sk2.verifying_key().to_bytes())
     );
     std::env::set_var("TB_RELEASE_SIGNERS", &signer_hex);
     provenance::refresh_release_signers();
 
     let hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd".to_string();
     let msg = format!("release:{hash}");
-    let sig = hex::encode(sk1.sign(msg.as_bytes()).to_bytes());
+    let sig = crypto_suite::hex::encode(sk1.sign(msg.as_bytes()).to_bytes());
     let attestation = ReleaseAttestation {
-        signer: hex::encode(sk1.verifying_key().to_bytes()),
+        signer: crypto_suite::hex::encode(sk1.verifying_key().to_bytes()),
         signature: sig,
     };
     let proposal = ReleaseVote::new(hash, vec![attestation], 2, "tester".into(), 0, 0);

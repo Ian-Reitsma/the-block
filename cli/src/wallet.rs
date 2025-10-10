@@ -13,7 +13,6 @@ use cli_core::{
 use crypto::session::SessionKey;
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::{binary, Serialize};
-use hex;
 use std::collections::HashMap;
 #[cfg(feature = "quantum")]
 use std::fs::File;
@@ -308,9 +307,9 @@ pub fn handle(cmd: WalletCmd) {
                 let (pq_pk, pq_sk) = pq_handle.join().expect("dilithium");
                 let mut f = File::create(&out).expect("write");
                 let json = foundation_serialization::json!({
-                    "ed25519_pub": hex::encode(ed.public_key().to_bytes()),
-                    "dilithium_pub": hex::encode(pq_pk.as_bytes()),
-                    "dilithium_sk": hex::encode(pq_sk.as_bytes()),
+                    "ed25519_pub": crypto_suite::hex::encode(ed.public_key().to_bytes()),
+                    "dilithium_pub": crypto_suite::hex::encode(pq_pk.as_bytes()),
+                    "dilithium_sk": crypto_suite::hex::encode(pq_sk.as_bytes()),
                 });
                 f.write_all(json.to_string().as_bytes()).expect("write");
                 println!("exported keystore to {}", out);
@@ -383,7 +382,7 @@ pub fn handle(cmd: WalletCmd) {
             let mut ephemeral_notice = None;
             if ephemeral {
                 let (_, pk_bytes) = generate_keypair();
-                from_addr = hex::encode(&pk_bytes);
+                from_addr = crypto_suite::hex::encode(&pk_bytes);
                 if !json {
                     ephemeral_notice = Some(localizer.ephemeral_notice(&from_addr, amount, &to));
                 }
@@ -480,17 +479,17 @@ pub fn handle(cmd: WalletCmd) {
             };
             println!(
                 "session key issued pk={} expires_at={}",
-                hex::encode(&sk.public_key),
+                crypto_suite::hex::encode(&sk.public_key),
                 sk.expires_at
             );
-            println!("secret={}", hex::encode(sk.secret.to_bytes()));
+            println!("secret={}", crypto_suite::hex::encode(sk.secret.to_bytes()));
         }
         WalletCmd::MetaSend {
             to,
             amount,
             session_sk,
         } => {
-            let sk_bytes = hex::decode(session_sk).expect("hex");
+            let sk_bytes = crypto_suite::hex::decode(session_sk).expect("hex");
             let payload = RawTxPayload {
                 from_: "meta".into(),
                 to,
@@ -504,7 +503,7 @@ pub fn handle(cmd: WalletCmd) {
             if let Some(tx) = sign_tx(&sk_bytes, &payload) {
                 println!(
                     "meta-tx signed {}",
-                    hex::encode(binary::encode(&tx).expect("serialize tx"))
+                    crypto_suite::hex::encode(binary::encode(&tx).expect("serialize tx"))
                 );
             } else {
                 println!("invalid session key");

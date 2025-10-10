@@ -8,7 +8,7 @@ use the_block::identity::handle_registry::HandleRegistry;
 fn pq_key_stored() {
     let kp = dilithium2::keypair();
     let pq_pk = kp.0.as_bytes().to_vec();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let mut reg = HandleRegistry::open(dir.path().join("db").to_str().unwrap());
     // Use dummy ed25519 key for address
     use crypto_suite::signatures::{ed25519::SigningKey, Signer};

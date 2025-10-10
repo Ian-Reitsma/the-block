@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{net::Node, Blockchain, ShutdownFlag};
 
 fn free_addr() -> SocketAddr {
@@ -11,7 +11,7 @@ fn free_addr() -> SocketAddr {
         .unwrap()
 }
 
-fn init_env() -> tempfile::TempDir {
+fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
@@ -49,7 +49,7 @@ fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
 
 struct TestNode {
     addr: SocketAddr,
-    dir: tempfile::TempDir,
+    dir: sys::tempfile::TempDir,
     node: Node,
     flag: ShutdownFlag,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -281,7 +281,8 @@ fn partition_heals_to_majority() {
         #[cfg(feature = "telemetry")]
         {
             let c = the_block::telemetry::FORK_REORG_TOTAL
-                .with_label_values(&["0"])
+                .ensure_handle_for_label_values(&["0"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get();
             assert!(c > 0);
         }

@@ -7,7 +7,7 @@ use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 use std::time::Instant;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{
     generate_keypair,
     net::{self, Message, Node, Payload, LOCAL_FEATURES, PROTOCOL_VERSION},
@@ -30,7 +30,7 @@ fn free_addr() -> SocketAddr {
         .unwrap()
 }
 
-fn init_env() -> tempfile::TempDir {
+fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key_default"));
@@ -40,7 +40,7 @@ fn init_env() -> tempfile::TempDir {
 }
 
 fn make_node(
-    dir: &tempfile::TempDir,
+    dir: &sys::tempfile::TempDir,
     idx: usize,
     addr: SocketAddr,
     peers: Vec<SocketAddr>,

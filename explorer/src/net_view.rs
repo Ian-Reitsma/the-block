@@ -1,5 +1,4 @@
 use foundation_serialization::Serialize;
-use hex;
 
 #[derive(Serialize)]
 pub struct CertRecord {
@@ -22,8 +21,8 @@ pub fn list_peer_certs() -> Vec<CertRecord> {
         .map(|entry| CertRecord {
             peer_id: the_block::net::overlay_peer_from_bytes(&entry.peer)
                 .map(|peer| the_block::net::overlay_peer_to_base58(&peer))
-                .unwrap_or_else(|_| hex::encode(entry.peer)),
-            fingerprint: hex::encode(entry.fingerprint),
+                .unwrap_or_else(|_| crypto_suite::hex::encode(entry.peer)),
+            fingerprint: crypto_suite::hex::encode(entry.fingerprint),
             updated_at: entry.updated_at,
         })
         .collect()

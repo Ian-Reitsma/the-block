@@ -85,9 +85,18 @@ impl PriceBoard {
                 FeeLane::Consumer => "consumer",
                 FeeLane::Industrial => "industrial",
             };
-            PRICE_BAND_P25.with_label_values(&[l]).set(p25 as i64);
-            PRICE_BAND_MEDIAN.with_label_values(&[l]).set(med as i64);
-            PRICE_BAND_P75.with_label_values(&[l]).set(p75 as i64);
+            PRICE_BAND_P25
+                .ensure_handle_for_label_values(&[l])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .set(p25 as i64);
+            PRICE_BAND_MEDIAN
+                .ensure_handle_for_label_values(&[l])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .set(med as i64);
+            PRICE_BAND_P75
+                .ensure_handle_for_label_values(&[l])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .set(p75 as i64);
         }
     }
 
@@ -176,7 +185,10 @@ fn save_with_metrics(path: &Path) {
         Ok(()) => {
             #[cfg(feature = "telemetry")]
             {
-                PRICE_BOARD_SAVE_TOTAL.with_label_values(&["ok"]).inc();
+                PRICE_BOARD_SAVE_TOTAL
+                    .ensure_handle_for_label_values(&["ok"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
                 if let Ok(epoch) = SystemTime::now().duration_since(UNIX_EPOCH) {
                     PRICE_BOARD_LAST_SAVE_EPOCH.set(epoch.as_secs() as i64);
                 }
@@ -186,7 +198,10 @@ fn save_with_metrics(path: &Path) {
             #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
             warn!("failed to write price board {}: {err}", path.display());
             #[cfg(feature = "telemetry")]
-            PRICE_BOARD_SAVE_TOTAL.with_label_values(&["io_err"]).inc();
+            PRICE_BOARD_SAVE_TOTAL
+                .ensure_handle_for_label_values(&["io_err"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
             #[cfg(not(any(feature = "telemetry", feature = "test-telemetry")))]
             let _ = err;
         }
@@ -331,7 +346,10 @@ pub fn init_with_clock<C: Clock>(path: String, window: usize, save_interval_secs
         }
     };
     #[cfg(feature = "telemetry")]
-    PRICE_BOARD_LOAD_TOTAL.with_label_values(&[result]).inc();
+    PRICE_BOARD_LOAD_TOTAL
+        .ensure_handle_for_label_values(&[result])
+        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+        .inc();
     #[cfg(not(feature = "telemetry"))]
     let _ = result;
     spawn_saver(path_buf, Duration::from_secs(save_interval_secs), clock);

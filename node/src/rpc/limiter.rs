@@ -73,7 +73,8 @@ pub fn check_client(
         entry.tokens -= 1.0;
         #[cfg(feature = "telemetry")]
         telemetry::RPC_TOKENS
-            .with_label_values(&[&addr.to_string()])
+            .ensure_handle_for_label_values(&[&addr.to_string()])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(entry.tokens);
         return Ok(());
     }
@@ -81,7 +82,8 @@ pub fn check_client(
     #[cfg(feature = "telemetry")]
     {
         telemetry::RPC_TOKENS
-            .with_label_values(&[&addr.to_string()])
+            .ensure_handle_for_label_values(&[&addr.to_string()])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(entry.tokens);
         telemetry::RPC_BANS_TOTAL.inc();
         telemetry::RPC_RATE_LIMIT_REJECT_TOTAL.inc();

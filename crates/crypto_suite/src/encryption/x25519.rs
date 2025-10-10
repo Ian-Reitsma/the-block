@@ -97,7 +97,7 @@ impl SharedSecret {
 
 impl fmt::Display for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", RECIPIENT_PREFIX, hex::encode(self.bytes))
+        write!(f, "{}{}", RECIPIENT_PREFIX, crate::hex::encode(self.bytes))
     }
 }
 
@@ -109,7 +109,7 @@ impl FromStr for PublicKey {
             return Err(KeyError::InvalidEncoding);
         }
         let rest = &s[RECIPIENT_PREFIX.len()..];
-        let bytes = hex::decode(rest).map_err(|_| KeyError::InvalidEncoding)?;
+        let bytes = crate::hex::decode(rest).map_err(|_| KeyError::InvalidEncoding)?;
         Self::from_bytes(&bytes)
     }
 }

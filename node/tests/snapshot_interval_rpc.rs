@@ -90,7 +90,7 @@ fn snapshot_interval_persist() {
         let cfg = NodeConfig::load(&bc.lock().unwrap().path);
         assert_eq!(cfg.snapshot_interval, 20);
 
-        assert_eq!(telemetry::SNAPSHOT_INTERVAL_CHANGED.get(), 20);
+        assert_eq!(telemetry::SNAPSHOT_INTERVAL_CHANGED.value(), 20);
 
         drop(bc);
         let reopened = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
@@ -138,8 +138,11 @@ fn snapshot_interval_restart_cycle() {
             assert!(cfg_text.contains(&format!("snapshot_interval = {interval}")));
             let reopened = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
             assert_eq!(reopened.config.snapshot_interval, interval);
-            assert_eq!(telemetry::SNAPSHOT_INTERVAL.get(), interval as i64);
-            assert_eq!(telemetry::SNAPSHOT_INTERVAL_CHANGED.get(), interval as i64);
+            assert_eq!(telemetry::SNAPSHOT_INTERVAL.value(), interval as i64);
+            assert_eq!(
+                telemetry::SNAPSHOT_INTERVAL_CHANGED.value(),
+                interval as i64
+            );
             bc = Arc::new(Mutex::new(reopened));
             assert!(logger.any(|r| r.args() == format!("snapshot_interval_changed {interval}")));
         }
@@ -195,11 +198,11 @@ fn snapshot_interval_corrupt_config() {
     let reopened = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(reopened.config.snapshot_interval, DEFAULT_SNAPSHOT_INTERVAL);
     assert_eq!(
-        telemetry::SNAPSHOT_INTERVAL.get(),
+        telemetry::SNAPSHOT_INTERVAL.value(),
         DEFAULT_SNAPSHOT_INTERVAL as i64
     );
     assert_eq!(
-        telemetry::SNAPSHOT_INTERVAL_CHANGED.get(),
+        telemetry::SNAPSHOT_INTERVAL_CHANGED.value(),
         DEFAULT_SNAPSHOT_INTERVAL as i64
     );
 }

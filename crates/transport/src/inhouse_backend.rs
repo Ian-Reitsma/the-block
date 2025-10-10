@@ -7,6 +7,7 @@ use std::result::Result as StdResult;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use concurrency::Bytes;
 use crypto_suite::hashing::blake3::{hash, Hasher};
 use diagnostics::{anyhow, Result as DiagResult, TbError};
 use foundation_serialization::json::{self, Map, Value};
@@ -183,7 +184,7 @@ impl Endpoint {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate {
     pub fingerprint: [u8; 32],
-    pub der: Vec<u8>,
+    pub der: Bytes,
 }
 
 impl Certificate {
@@ -196,7 +197,7 @@ impl Certificate {
         fingerprint.copy_from_slice(hasher.finalize().as_bytes());
         Ok(Self {
             fingerprint,
-            der: random.to_vec(),
+            der: Bytes::from(random.as_slice()),
         })
     }
 }

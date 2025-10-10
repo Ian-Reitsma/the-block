@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::gateway::dns::{gateway_policy, publish_record, reads_since};
 
 #[test]
@@ -20,8 +20,8 @@ fn reads_since_reports_receipts() {
     let params = foundation_serialization::json!({
         "domain":"test.block",
         "txt":txt,
-        "pubkey":hex::encode(pk.to_bytes()),
-        "sig":hex::encode(sig.to_bytes()),
+        "pubkey":crypto_suite::hex::encode(pk.to_bytes()),
+        "sig":crypto_suite::hex::encode(sig.to_bytes()),
     });
     let _ = publish_record(&params);
     let _ = gateway_policy(&foundation_serialization::json!({"domain":"test.block"}));

@@ -45,6 +45,8 @@ without rewrites in gossip or uptime logic.
 Every inbound connection begins with a serialized `Hello` structure:
 
 ```rust
+use concurrency::Bytes;
+
 struct Hello {
     network_id: [u8; 4],
     proto_version: u16,
@@ -53,7 +55,7 @@ struct Hello {
     nonce: u64,
     transport: Transport,
     quic_addr: Option<SocketAddr>,
-    quic_cert: Option<Vec<u8>>,
+    quic_cert: Option<Bytes>,
 }
 ```
 

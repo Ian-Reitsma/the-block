@@ -470,10 +470,11 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
                 Ok(true) => {
                     #[cfg(feature = "telemetry")]
                     crate::telemetry::MATCHES_TOTAL
-                        .with_label_values(&[
+                        .ensure_handle_for_label_values(&[
                             if dry_run { "true" } else { "false" },
                             matched.lane.as_str(),
                         ])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                     #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
                     diagnostics::tracing::info!(
@@ -502,7 +503,8 @@ pub async fn match_loop(store: ReceiptStore, dry_run: bool, stop: CancellationTo
             let elapsed = start.elapsed().as_secs_f64();
             for lane in &touched_lanes {
                 crate::telemetry::MATCH_LOOP_LATENCY_SECONDS
-                    .with_label_values(&[lane.as_str()])
+                    .ensure_handle_for_label_values(&[lane.as_str()])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .observe(elapsed);
             }
         }

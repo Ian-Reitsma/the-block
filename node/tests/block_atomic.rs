@@ -7,7 +7,7 @@ use the_block::{
 
 #[test]
 fn block_application_is_atomic() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.accounts.insert(
         "alice".into(),

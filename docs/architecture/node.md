@@ -56,7 +56,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   │           ├── proc-macro2 v1.0.101 (*)
 │   │   │           ├── quote v1.0.41 (*)
 │   │   │           └── syn v2.0.106 (*)
-│   │   ├── hex v0.4.3
 │   │   ├── num-bigint v0.4.6
 │   │   │   ├── num-integer v0.1.46
 │   │   │   │   └── num-traits v0.2.19
@@ -81,7 +80,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── rand_core v0.6.4 (*)
 │   │   ├── serde v1.0.228 (*)
 │   │   └── thiserror v1.0.69 (*)
-│   ├── hex v0.4.3
 │   ├── ledger v0.1.0 (/workspace/the-block/ledger)
 │   │   ├── bincode v1.3.3 (*)
 │   │   ├── clap v4.5.48
@@ -159,10 +157,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │       │           │   │   └── either v1.15.0
 │   │       │           │   ├── proc-macro2 v1.0.101 (*)
 │   │       │           │   ├── quote v1.0.41 (*)
-│   │       │           │   ├── regex v1.11.3
-│   │       │           │   │   ├── regex-automata v0.4.11
-│   │       │           │   │   │   └── regex-syntax v0.8.6
-│   │       │           │   │   └── regex-syntax v0.8.6
 │   │       │           │   ├── rustc-hash v2.1.1
 │   │       │           │   ├── shlex v1.3.0
 │   │       │           │   └── syn v2.0.106 (*)
@@ -181,7 +175,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │       │       │   │   └── syn v2.0.106 (*)
 │   │       │       │   ├── proc-macro2 v1.0.101 (*)
 │   │       │       │   ├── quote v1.0.41 (*)
-│   │       │       │   ├── regex v1.11.3 (*)
 │   │       │       │   ├── rustc-hash v1.1.0
 │   │       │       │   ├── shlex v1.3.0
 │   │       │       │   └── syn v2.0.106 (*)
@@ -239,7 +232,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       ├── toml_datetime v0.6.11
 │       │   └── serde v1.0.228 (*)
 │       └── toml_edit v0.22.27
-│           ├── indexmap v2.11.4
 │           │   ├── equivalent v1.0.2
 │           │   ├── hashbrown v0.16.0
 │           │   └── serde_core v1.0.228
@@ -272,7 +264,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   └── parking_lot_core v0.9.11 (*)
 ├── dex v0.1.0 (/workspace/the-block/dex)
 │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
-│   ├── hex v0.4.3
 │   ├── serde v1.0.228 (*)
 │   └── subtle v2.6.1
 ├── dirs v5.0.1
@@ -392,7 +383,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── memchr v2.7.6
 │   │   └── minimal-lexical v0.2.1
 │   └── num-traits v0.2.19 (*)
-├── hex v0.4.3
 ├── httparse v1.10.1
 ├── httpd v0.1.0 (/workspace/the-block/crates/httpd)
 │   ├── codec v0.1.0 (/workspace/the-block/crates/codec) (*)
@@ -521,7 +511,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │       │   └── utf8_iter v1.0.4
 │       ├── percent-encoding v2.3.2
 │       └── serde v1.0.228 (*)
-├── indexmap v2.11.4 (*)
 ├── inflation v0.1.0 (/workspace/the-block/inflation)
 │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
 │   ├── rand v0.8.5 (*)
@@ -641,7 +630,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── serde v1.0.228 (*)
 │   ├── state v0.1.0 (/workspace/the-block/state)
 │   │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
-│   │   ├── hex v0.4.3
 │   │   ├── storage_engine v0.1.0 (/workspace/the-block/crates/storage_engine) (*)
 │   │   ├── sys v0.1.0 (/workspace/the-block/crates/sys) (*)
 │   │   └── thiserror v1.0.69 (*)
@@ -671,7 +659,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   └── cc v1.2.39 (*)
 │   ├── inferno v0.11.21
 │   │   ├── ahash v0.8.12 (*)
-│   │   ├── indexmap v2.11.4 (*)
 │   │   ├── is-terminal v0.4.16
 │   │   │   └── libc v0.2.176
 │   │   ├── itoa v1.0.15
@@ -715,7 +702,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── iana-time-zone v0.1.64
 │   │   └── num-traits v0.2.19 (*)
 │   ├── flate2 v1.1.2 (*)
-│   ├── hex v0.4.3
 │   ├── lazy_static v1.5.0
 │   └── rustix v0.36.17
 │       ├── bitflags v1.3.2
@@ -732,15 +718,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   └── rayon-core v1.13.0
 │       ├── crossbeam-deque v0.8.6 (*)
 │       └── crossbeam-utils v0.8.21
-├── regex v1.11.3
-│   ├── aho-corasick v1.1.3
-│   │   └── memchr v2.7.6
-│   ├── memchr v2.7.6
-│   ├── regex-automata v0.4.11
-│   │   ├── aho-corasick v1.1.3 (*)
-│   │   ├── memchr v2.7.6
-│   │   └── regex-syntax v0.8.6
-│   └── regex-syntax v0.8.6
 ├── ripemd v0.1.3
 │   └── digest v0.10.7 (*)
 ├── rocksdb v0.21.0 (/workspace/the-block/vendor/rocksdb-0.21.0/rocksdb-0.21.0) (*)
@@ -784,7 +761,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   └── xattr v1.6.1
 │       └── rustix v1.1.2 (*)
 ├── tempfile v3.23.0 (*)
-├── terminal_size v0.2.6
 │   └── rustix v0.37.28
 │       ├── bitflags v1.3.2
 │       ├── io-lifetimes v1.0.11 (*)
@@ -814,10 +790,8 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   ├── tracing v0.1.41 (*)
 │   └── tracing-subscriber v0.3.20
 │       ├── matchers v0.2.0
-│       │   └── regex-automata v0.4.11 (*)
 │       ├── nu-ansi-term v0.50.1
 │       ├── once_cell v1.21.3
-│       ├── regex-automata v0.4.11 (*)
 │       ├── serde v1.0.228 (*)
 │       ├── serde_json v1.0.145 (*)
 │       ├── sharded-slab v0.1.7
@@ -877,7 +851,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 ├── wallet v0.1.0 (/workspace/the-block/crates/wallet)
 │   ├── base64 v0.22.1
 │   ├── crypto_suite v0.1.0 (/workspace/the-block/crates/crypto_suite) (*)
-│   ├── hex v0.4.3
 │   ├── httpd v0.1.0 (/workspace/the-block/crates/httpd) (*)
 │   ├── ledger v0.1.0 (/workspace/the-block/ledger) (*)
 │   ├── metrics v0.21.1 (*)
@@ -915,7 +888,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 ├── wasmtime v24.0.4
 │   ├── addr2line v0.22.0
 │   │   └── gimli v0.29.0
-│   │       └── indexmap v2.11.4 (*)
 │   ├── anyhow v1.0.100
 │   ├── async-trait v0.1.89 (proc-macro) (*)
 │   ├── bitflags v2.9.4
@@ -931,7 +903,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   └── serde_json v1.0.145 (*)
 │   ├── gimli v0.29.0 (*)
 │   ├── hashbrown v0.14.5 (*)
-│   ├── indexmap v2.11.4 (*)
 │   ├── ittapi v0.4.0
 │   │   ├── anyhow v1.0.100
 │   │   ├── ittapi-sys v0.4.0
@@ -947,7 +918,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── crc32fast v1.5.0 (*)
 │   │   ├── hashbrown v0.15.5
 │   │   │   └── foldhash v0.1.5
-│   │   ├── indexmap v2.11.4 (*)
 │   │   └── memchr v2.7.6
 │   ├── once_cell v1.21.3
 │   ├── paste v1.0.15 (proc-macro)
@@ -977,7 +947,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── ahash v0.8.12 (*)
 │   │   ├── bitflags v2.9.4
 │   │   ├── hashbrown v0.14.5 (*)
-│   │   ├── indexmap v2.11.4 (*)
 │   │   ├── semver v1.0.27 (*)
 │   │   └── serde v1.0.228 (*)
 │   ├── wasmtime-asm-macros v24.0.4
@@ -1011,14 +980,12 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   ├── wasmtime-wit-bindgen v24.0.4
 │   │   │   ├── anyhow v1.0.100
 │   │   │   ├── heck v0.4.1
-│   │   │   ├── indexmap v2.11.4
 │   │   │   │   ├── equivalent v1.0.2
 │   │   │   │   ├── hashbrown v0.16.0
 │   │   │   │   └── serde_core v1.0.228
 │   │   │   └── wit-parser v0.215.0
 │   │   │       ├── anyhow v1.0.100
 │   │   │       ├── id-arena v2.2.1
-│   │   │       ├── indexmap v2.11.4 (*)
 │   │   │       ├── log v0.4.28
 │   │   │       ├── semver v1.0.27
 │   │   │       ├── serde v1.0.228
@@ -1040,7 +1007,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   │           ├── bitflags v2.9.4
 │   │   │           ├── hashbrown v0.14.5
 │   │   │           │   └── ahash v0.8.12 (*)
-│   │   │           ├── indexmap v2.11.4 (*)
 │   │   │           └── semver v1.0.27
 │   │   └── wit-parser v0.215.0 (*)
 │   ├── wasmtime-component-util v24.0.4
@@ -1120,7 +1086,6 @@ the_block v0.1.0 (/workspace/the-block/node)
 │   │   │   ├── cranelift-bitset v0.111.4 (*)
 │   │   │   ├── cranelift-entity v0.111.4 (*)
 │   │   │   ├── gimli v0.29.0 (*)
-│   │   │   ├── indexmap v2.11.4 (*)
 │   │   │   ├── log v0.4.28 (*)
 │   │   │   ├── object v0.36.7 (*)
 │   │   │   ├── postcard v1.1.3 (*)

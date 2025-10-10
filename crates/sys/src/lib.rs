@@ -178,6 +178,35 @@ pub mod random {
     }
 }
 
+pub mod tty {
+    #[cfg(unix)]
+    pub fn dimensions() -> Option<(u16, u16)> {
+        use libc::{ioctl, winsize, STDIN_FILENO, STDOUT_FILENO, TIOCGWINSZ};
+
+        unsafe fn query(fd: libc::c_int) -> Option<(u16, u16)> {
+            let mut ws = winsize {
+                ws_row: 0,
+                ws_col: 0,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            };
+            if ioctl(fd, TIOCGWINSZ, &mut ws) == 0 {
+                if ws.ws_col > 0 && ws.ws_row > 0 {
+                    return Some((ws.ws_col as u16, ws.ws_row as u16));
+                }
+            }
+            None
+        }
+
+        unsafe { query(STDOUT_FILENO).or_else(|| query(STDIN_FILENO)) }
+    }
+
+    #[cfg(not(unix))]
+    pub fn dimensions() -> Option<(u16, u16)> {
+        None
+    }
+}
+
 pub mod signals {
     use crate::error::{Result, SysError};
     use std::vec::IntoIter;

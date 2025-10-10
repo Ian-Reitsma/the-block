@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::gateway::{
     http::{check, RateConfig},
     read_receipt::{append, reads_since},

@@ -50,7 +50,7 @@ fn job_timeout_and_resubmit_penalizes() {
     };
     assert!(market.submit_slice("job1", proof).is_err());
     #[cfg(feature = "telemetry")]
-    assert_eq!(the_block::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.get(), 1);
+    assert_eq!(the_block::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.value(), 1);
     // resubmit
     let offer2 = Offer {
         job_id: "job1".into(),
@@ -84,5 +84,5 @@ fn job_timeout_and_resubmit_penalizes() {
     };
     market.submit_job(job2).unwrap();
     #[cfg(feature = "telemetry")]
-    assert_eq!(the_block::telemetry::JOB_RESUBMITTED_TOTAL.get(), 1);
+    assert_eq!(the_block::telemetry::JOB_RESUBMITTED_TOTAL.value(), 1);
 }

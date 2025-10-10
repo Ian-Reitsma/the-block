@@ -187,7 +187,8 @@ impl<T> ServiceScheduler<T> {
                 }
                 #[cfg(feature = "telemetry")]
                 SCHEDULER_CLASS_WAIT_SECONDS
-                    .with_label_values(&[class.as_str()])
+                    .ensure_handle_for_label_values(&[class.as_str()])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .observe(wait.as_secs_f64());
                 let scheduled = ScheduledTask {
                     class,
@@ -208,7 +209,8 @@ impl<T> ServiceScheduler<T> {
                         let wait = task.enqueued.elapsed();
                         #[cfg(feature = "telemetry")]
                         SCHEDULER_CLASS_WAIT_SECONDS
-                            .with_label_values(&[class.as_str()])
+                            .ensure_handle_for_label_values(&[class.as_str()])
+                            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .observe(wait.as_secs_f64());
                         let scheduled = ScheduledTask {
                             class,

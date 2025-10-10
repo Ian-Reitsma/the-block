@@ -17,7 +17,8 @@ fn cfg() -> HandshakeCfg {
 #[test]
 fn reject_mismatched_network() {
     telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-        .with_label_values(&["bad_network"])
+        .ensure_handle_for_label_values(&["bad_network"])
+        .expect(telemetry::LABEL_REGISTRATION_ERR)
         .reset();
     let hello = Hello {
         network_id: [9, 9, 9, 9],
@@ -48,7 +49,8 @@ fn reject_mismatched_network() {
     assert_eq!(ack.supported_version, SUPPORTED_VERSION);
     assert_eq!(
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-            .with_label_values(&["bad_network"])
+            .ensure_handle_for_label_values(&["bad_network"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         1
     );
@@ -57,7 +59,8 @@ fn reject_mismatched_network() {
 #[test]
 fn reject_old_proto() {
     telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-        .with_label_values(&["old_proto"])
+        .ensure_handle_for_label_values(&["old_proto"])
+        .expect(telemetry::LABEL_REGISTRATION_ERR)
         .reset();
     let hello = Hello {
         network_id: [1, 2, 3, 4],
@@ -88,7 +91,8 @@ fn reject_old_proto() {
     assert_eq!(ack.supported_version, SUPPORTED_VERSION);
     assert_eq!(
         telemetry::P2P_HANDSHAKE_REJECT_TOTAL
-            .with_label_values(&["old_proto"])
+            .ensure_handle_for_label_values(&["old_proto"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         1
     );
@@ -97,7 +101,8 @@ fn reject_old_proto() {
 #[test]
 fn accept_and_record() {
     telemetry::P2P_HANDSHAKE_ACCEPT_TOTAL
-        .with_label_values(&["0x3"])
+        .ensure_handle_for_label_values(&["0x3"])
+        .expect(telemetry::LABEL_REGISTRATION_ERR)
         .reset();
     let hello = Hello {
         network_id: [1, 2, 3, 4],
@@ -128,7 +133,8 @@ fn accept_and_record() {
     assert_eq!(ack.supported_version, SUPPORTED_VERSION);
     assert_eq!(
         telemetry::P2P_HANDSHAKE_ACCEPT_TOTAL
-            .with_label_values(&["0x3"])
+            .ensure_handle_for_label_values(&["0x3"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         1
     );

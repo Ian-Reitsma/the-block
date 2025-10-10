@@ -1,5 +1,13 @@
 #![forbid(unsafe_code)]
 
+pub mod bytes;
+pub mod cache;
+pub mod collections;
+
+pub use bytes::{Bytes, BytesMut};
+pub use cache::LruCache;
+pub use collections::{OrderedMap, OrderedSet};
+
 use std::{
     collections::HashMap,
     hash::Hash,

@@ -65,7 +65,8 @@ pub fn append(
         #[cfg(feature = "telemetry")]
         {
             SUBSIDY_BYTES_TOTAL
-                .with_label_values(&["read"])
+                .ensure_handle_for_label_values(&["read"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc_by(bytes_served);
             crate::telemetry::READ_STATS.record(domain, bytes_served);
         }
@@ -263,7 +264,6 @@ mod tests {
     use super::*;
 
     use foundation_serialization::binary;
-    use sys::tempfile;
 
     #[test]
     fn decode_legacy_read_receipt() {
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn read_receipt_from_binary_file() {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = sys::tempfile::tempdir().expect("tempdir");
         let receipt = ReadReceipt {
             domain: "example.com".into(),
             provider_id: "provider-1".into(),
@@ -325,7 +325,7 @@ mod tests {
             0x67, b'd', b'y', b'n', b'a', b'm', b'i', b'c', 0xF5, // true
             0x67, b'a', b'l', b'l', b'o', b'w', b'e', b'd', 0xF4, // false
         ];
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = sys::tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("legacy.cbor");
         fs::write(&path, &legacy).expect("write legacy");
 

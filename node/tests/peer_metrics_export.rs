@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::net::{export_peer_stats, record_request, set_metrics_export_dir};
 
 #[testkit::tb_serial]

@@ -17,6 +17,7 @@ pub fn execute(code: &[u8], meter: &mut GasMeter) -> Result<Vec<u64>, &'static s
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_suite::hashing::blake3;
 
     #[test]
     fn simple_add() {

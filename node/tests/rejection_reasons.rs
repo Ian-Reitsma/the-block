@@ -62,10 +62,11 @@ fn invalid_selector_rejects_and_counts() {
         assert_eq!(
             1,
             telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["invalid_selector"])
+                .ensure_handle_for_label_values(&["invalid_selector"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
-        assert_eq!(1, telemetry::INVALID_SELECTOR_REJECT_TOTAL.get());
+        assert_eq!(1, telemetry::INVALID_SELECTOR_REJECT_TOTAL.value());
     }
 }
 
@@ -97,10 +98,11 @@ fn balance_overflow_rejects_and_counts() {
         assert_eq!(
             1,
             telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["balance_overflow"])
+                .ensure_handle_for_label_values(&["balance_overflow"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
-        assert_eq!(1, telemetry::BALANCE_OVERFLOW_REJECT_TOTAL.get());
+        assert_eq!(1, telemetry::BALANCE_OVERFLOW_REJECT_TOTAL.value());
     }
 }
 
@@ -124,9 +126,10 @@ fn drop_not_found_rejects_and_counts() {
         assert_eq!(
             1,
             telemetry::TX_REJECTED_TOTAL
-                .with_label_values(&["not_found"])
+                .ensure_handle_for_label_values(&["not_found"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
         );
-        assert_eq!(1, telemetry::DROP_NOT_FOUND_TOTAL.get());
+        assert_eq!(1, telemetry::DROP_NOT_FOUND_TOTAL.value());
     }
 }

@@ -8,5 +8,5 @@ cli_core = { path = "../../crates/cli_core" }
 httpd = { path = "../../crates/httpd" }
 serde = { version = "1", features=["derive"] }
 foundation_serialization = { path = "../../crates/foundation_serialization" }
-hex = "0.4"
 wallet = { path = "../../crates/wallet" }
+crypto_suite = { path = "../../crates/crypto_suite" }

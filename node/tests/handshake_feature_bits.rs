@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{rngs::OsRng, RngCore};
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{
     net::{Message, Payload, PeerSet, COMPUTE_MARKET_V1, PROTOCOL_VERSION, REQUIRED_FEATURES},
     p2p::handshake::{Hello, Transport},

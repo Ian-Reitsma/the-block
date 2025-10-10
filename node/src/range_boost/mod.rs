@@ -60,10 +60,14 @@ fn record_latency(addr: String, latency: u128) {
     #[cfg(feature = "telemetry")]
     {
         if is_new {
-            MESH_PEER_CONNECTED_TOTAL.with_label_values(&[&addr]).inc();
+            MESH_PEER_CONNECTED_TOTAL
+                .ensure_handle_for_label_values(&[&addr])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                .inc();
         }
         MESH_PEER_LATENCY_MS
-            .with_label_values(&[&addr])
+            .ensure_handle_for_label_values(&[&addr])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(latency as i64);
     }
     #[cfg(not(feature = "telemetry"))]

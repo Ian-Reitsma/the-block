@@ -1,7 +1,6 @@
 use crypto_suite::signatures::ed25519::SigningKey;
 use explorer::{did_view, DidDocumentView, Explorer, MetricPoint};
 use foundation_serialization::json;
-use hex;
 use rand::{rngs::StdRng, Rng};
 use std::convert::TryInto;
 use std::fs;
@@ -21,7 +20,7 @@ struct Account {
 impl Account {
     fn new(secret: Vec<u8>, public: Vec<u8>) -> Self {
         let secret_arr: [u8; 32] = secret.try_into().expect("secret length");
-        let address = hex::encode(&public);
+        let address = crypto_suite::hex::encode(&public);
         Self {
             secret: secret_arr,
             public,

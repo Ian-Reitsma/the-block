@@ -147,7 +147,7 @@ pub fn provider_balances() -> foundation_serialization::json::Value {
 pub fn recent_roots(limit: usize) -> foundation_serialization::json::Value {
     let roots: Vec<String> = Settlement::recent_roots(limit)
         .into_iter()
-        .map(|r| hex::encode(r))
+        .map(|r| crypto_suite::hex::encode(r))
         .collect();
     foundation_serialization::json!({ "roots": roots })
 }

@@ -370,7 +370,8 @@ fn increment_indexed_metric(correlation_id: &str) {
         }
     };
     crate::telemetry::LOG_CORRELATION_INDEX_TOTAL
-        .with_label_values(&[label.as_ref()])
+        .ensure_handle_for_label_values(&[label.as_ref()])
+        .expect("telemetry label set not registered")
         .inc();
 }
 

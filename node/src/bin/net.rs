@@ -1,9 +1,8 @@
 use colored::*;
 use crypto_suite::signatures::Signer;
+use foundation_regex::Regex;
 use foundation_serialization::json::{self, Value};
-use hex;
 use httpd::{BlockingClient, ClientError as HttpClientError, Method, Uri};
-use regex::Regex;
 use runtime::net::TcpStream;
 use runtime::{
     self,
@@ -14,7 +13,7 @@ use std::io::Write;
 use std::net::ToSocketAddrs;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use terminal_size::{terminal_size, Width};
+use sys::tty;
 use the_block::net::load_net_key;
 
 use std::process;
@@ -1158,8 +1157,8 @@ fn main() {
                                 println!("{}", json::to_string_pretty(&out).unwrap());
                             }
                             OutputFormat::Table => {
-                                let width = terminal_size()
-                                    .map(|(Width(w), _)| w as usize)
+                                let width = tty::dimensions()
+                                    .map(|(cols, _)| cols as usize)
                                     .unwrap_or(80);
                                 let max_lat =
                                     rows.iter()
@@ -1544,7 +1543,7 @@ fn main() {
                 new_key,
                 rpc,
             } => {
-                if let Ok(bytes) = hex::decode(&new_key) {
+                if let Ok(bytes) = crypto_suite::hex::decode(&new_key) {
                     let sk = load_net_key();
                     let sig = sk.sign(&bytes);
                     let req = foundation_serialization::json!({
@@ -1552,7 +1551,7 @@ fn main() {
                         "params": {
                             "peer_id": peer_id,
                             "new_key": new_key,
-                            "signature": hex::encode(sig.to_bytes()),
+                            "signature": crypto_suite::hex::encode(sig.to_bytes()),
                         }
                     });
                     match post_json(&rpc, req) {

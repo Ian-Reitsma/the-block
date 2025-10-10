@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 use std::thread;
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::range_boost;
 
 #[test]

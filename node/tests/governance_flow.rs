@@ -28,7 +28,7 @@ fn status_reports_timelock() {
 #[test]
 fn rollback_resets_metrics() {
     use std::time::Duration;
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
     use the_block::governance::{
         GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
         ACTIVATION_DELAY,
@@ -80,7 +80,8 @@ fn rollback_resets_metrics() {
         .unwrap();
     assert_eq!(
         PARAM_CHANGE_ACTIVE
-            .with_label_values(&["snapshot_interval_secs"])
+            .ensure_handle_for_label_values(&["snapshot_interval_secs"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         40
     );
@@ -89,7 +90,8 @@ fn rollback_resets_metrics() {
         .unwrap();
     assert_eq!(
         PARAM_CHANGE_ACTIVE
-            .with_label_values(&["snapshot_interval_secs"])
+            .ensure_handle_for_label_values(&["snapshot_interval_secs"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         30
     );

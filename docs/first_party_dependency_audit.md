@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-10 11:20:00Z_
+_Last updated: 2025-10-11 14:05:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -157,6 +157,68 @@ quantiles without local patches.
    and DCT operations. Wire node/governance modules to the replacements and drop
    the third-party crates from manifests, then benchmark the new stacks.
 
+## 4. Stub Backlog for FIRST_PARTY_ONLY Builds
+
+The handle migration eliminated direct collector access across the node and
+ancillary tooling, but several third-party crates still block
+`FIRST_PARTY_ONLY=1` builds. The highest-impact items to stub are:
+
+| Crate | Primary Consumers | Notes |
+| --- | --- | --- |
+| `rusqlite` | `cli`, `explorer`, `tools/{indexer,log_indexer_cli}` | Required for optional SQLite ingestion paths and log backfills. Plan: introduce a `foundation_sqlite` facade with deterministic builds and migrate the CLI/explorer helpers before flipping the guard. |
+| `sled` | `the_block::SimpleDb`, storage tests, log indexer | Runtime already wraps sled; deliver an in-house key-value engine stub (even if backed by sled) so `FIRST_PARTY_ONLY` can compile without linking the crate. |
+| `openssl`/`openssl-sys` | transitive via TLS tooling | QUIC/TLS stacks still pull these in when the bundled providers are enabled. Scope a lightweight first-party crypto shim (or the minimal FFI needed for mutual TLS) so the guard can be satisfied without OpenSSL. |
+
+Each stub should follow the telemetry handle pattern: provide the API surface at
+build time, emit targeted diagnostics when functionality is unavailable, and
+gate the full implementation behind a feature flag so we can ship both
+first-party-only and full-stack builds without code churn.
+
 This audit should unblock targeted migration work by providing a definitive
 reference for remaining third-party dependency usage within the node runtime
 and governance stacks.
+
+## 4. Outstanding First-Party Stub Requirements
+
+The table below captures every third-party dependency that still blocks a
+`FIRST_PARTY_ONLY=1` build. Each entry lists the primary call sites and the
+stub/replacement strategy that should be scheduled next. Owners reflect the
+responsible subsystem leads from the roadmap; timelines assume two-week
+delivery windows unless otherwise specified.
+
+| Dependency | Current Usage (Representative Modules) | Stub / Replacement Plan | Owner & Timeline |
+| --- | --- | --- | --- |
+| `serde` derives (`serde`, `serde_bytes`) | Residual derives across gateway/storage RPCs (`node/src/gateway/read_receipt.rs`, `node/src/rpc/*`) and integration fixtures | Finish porting to `foundation_serialization` proc-macros; add facade shim that exposes `derive(Serialize, Deserialize)` when `FIRST_PARTY_ONLY=1` so crates compile without the external crate. | Serialization Working Group — W45 |
+| `bincode 1.3` | Legacy fixture helpers in `node/tests/*` and certain CLI tools | Route every binary encode/decode through `crates/codec::binary_profile()`, then gate the dependency behind a thin stub that panics if invoked after the migration window. | Codec Strike Team — W44 |
+| `subtle 2` | Constant-time comparisons in the wallet/identity stacks | Inline constant-time primitives inside `crypto_suite` (`ct_equal`, `ct_assign`) and drop the dependency once verification coverage lands. | Crypto Suite — W43 |
+| `time 0.3` | Timestamp formatting inside governance snapshots and CLI UX | Introduce `foundation_time` facade with RFC3339/chrono-format utilities backed by our POSIX shim; keep third-party crate gated until feature parity is reached. | Runtime Platform — W46 |
+| `icu_normalizer 2` | Unicode normalization for DID inputs and governance text | Prototype a cut-down `foundation_unicode` normalizer (NFKC + ASCII fast-path) and switch both node and CLI validation to it. | Governance UX — W47 |
+| `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | Land the in-house `foundation_archive` crate (tarball writer + DEFLATE) with deterministic ordering and streaming support, then flip the stubs. | Ops Tooling — W45 |
+| `colored 2` | CLI colour output for governance/net tools | Replace with a lightweight `foundation_tui::color` helper that wraps ANSI escapes with feature gating for TTY detection. | CLI Team — W43 |
+| `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | Mirror Dilithium inside `crypto_suite::pq` (or stub to panic) and gate the external crate behind `FIRST_PARTY_ONLY=0` until the in-house implementation lands. | Crypto Suite — W48 |
+| `pprof 0.13` | Flamegraph dumps for profiling harnesses | Offer a `foundation_profiler` crate that emits the same file format using our sampling hooks; stub out the external crate when profiling is disabled. | Performance Guild — W46 |
+| `bytes 1` | Buffer utilities in networking/tests (`node/src/net/*`, benches) | `concurrency::bytes::{Bytes, BytesMut}` wrappers now back all gossip payloads and QUIC cert handling; remaining dependency is indirect via `combine` and will be stubbed next. | Networking — W44 |
+| `httparse 1` | Minimal HTTP parsing for inbound probes | Fold the parser into `httpd` (already exporting router primitives) and replace the dependency with the new module. | HTTP Platform — W44 |
+| `xorfilter-rs 0.5` | Probabilistic rate-limit filter in networking | Port xor filter implementation into `concurrency::filters::xor8` with deterministic seeding and dedicated tests, then gate the external crate. | Networking — W45 |
+
+The dependency guard in `node/Cargo.toml` should be updated alongside each
+replacement to error out when the third-party crate is reintroduced. Tracking
+issues for each item have been filed in `docs/roadmap.md` (see the "First-party
+Dependency Migration" milestone) to coordinate the rollout.
+
+### Recent Completions
+
+- ✅ Replaced the third-party `lru` crate with `concurrency::cache::LruCache`
+  and rewired the node/explorer caches to the in-house implementation, removing
+  another blocker for `FIRST_PARTY_ONLY=1` builds.
+- ✅ Eliminated `indexmap` by introducing `concurrency::collections::OrderedMap`
+  and migrating the peer metrics registry and dependency tooling onto the
+  first-party ordered map implementation.
+- ✅ Introduced `foundation_regex` and migrated CLI/net filtering to the
+  deterministic in-house engine, removing the workspace dependency on
+  `regex`/`regex-automata`/`regex-syntax`.
+- ✅ Added `sys::tty::dimensions()` and switched CLI layout heuristics to the
+  first-party helper so the `terminal_size` crate is no longer required.
+- ✅ Replaced the external `hex` crate with `crypto_suite::hex` helpers, updating
+  CLI, node, explorer, wallet, and tooling call sites to the first-party
+  encoder/decoder and removing the dependency from workspace manifests.

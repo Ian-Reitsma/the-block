@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total: u64 = acks.iter().map(|a| a.bytes).sum();
     println!(
         "root:{} total_bytes:{} count:{}",
-        hex::encode(root),
+        crypto_suite::hex::encode(root),
         total,
         acks.len()
     );

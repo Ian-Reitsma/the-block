@@ -8,6 +8,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(any(feature = "quinn", feature = "inhouse"))]
+use concurrency::Bytes;
+
 #[cfg(feature = "s2n-quic")]
 use crypto_suite::signatures::ed25519::SigningKey;
 
@@ -420,10 +423,10 @@ impl QuinnAdapter {
     pub async fn listen_with_cert(
         &self,
         addr: SocketAddr,
-        cert_der: &[u8],
-        key_der: &[u8],
+        cert_der: Bytes,
+        key_der: Bytes,
     ) -> DiagResult<ListenerHandle> {
-        let endpoint = quinn_impl::listen_with_cert(addr, cert_der, key_der).await?;
+        let endpoint = quinn_impl::listen_with_cert(addr, &cert_der, &key_der).await?;
         Ok(ListenerHandle::Quinn(endpoint))
     }
 
@@ -433,7 +436,7 @@ impl QuinnAdapter {
         cert: &CertificateHandle,
     ) -> Result<ConnectionHandle, quinn_impl::ConnectError> {
         let cert = match cert {
-            CertificateHandle::Quinn(cert) => cert.clone(),
+            CertificateHandle::Quinn(cert) => cert,
         };
         let conn = quinn_impl::connect(addr, cert).await?;
         Ok(ConnectionHandle::Quinn(conn))
@@ -445,7 +448,7 @@ impl QuinnAdapter {
         cert: &CertificateHandle,
     ) -> Result<ConnectionHandle, quinn_impl::ConnectError> {
         let cert = match cert {
-            CertificateHandle::Quinn(cert) => cert.clone(),
+            CertificateHandle::Quinn(cert) => cert,
         };
         let conn = quinn_impl::get_connection(addr, cert).await?;
         Ok(ConnectionHandle::Quinn(conn))
@@ -480,8 +483,8 @@ impl QuinnAdapter {
         Ok(ConnectionHandle::Quinn(conn))
     }
 
-    pub fn certificate_from_der(&self, cert: Vec<u8>) -> CertificateHandle {
-        CertificateHandle::Quinn(quinn_impl::Certificate(cert))
+    pub fn certificate_from_der(&self, cert: Bytes) -> CertificateHandle {
+        CertificateHandle::Quinn(quinn_impl::Certificate::from_der(cert))
     }
 }
 
@@ -586,9 +589,9 @@ impl InhouseAdapter {
         Ok(self.0.backend.verify_remote_certificate(peer_key, cert)?)
     }
 
-    pub fn certificate_from_der(&self, cert: Vec<u8>) -> CertificateHandle {
+    pub fn certificate_from_der(&self, cert: Bytes) -> CertificateHandle {
         let mut hasher = blake3::Hasher::new();
-        hasher.update(&cert);
+        hasher.update(cert.as_ref());
         let mut fingerprint = [0u8; 32];
         fingerprint.copy_from_slice(hasher.finalize().as_bytes());
         CertificateHandle::Inhouse(inhouse_impl::Certificate {

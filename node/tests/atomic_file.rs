@@ -7,7 +7,7 @@ use the_block::util::atomic_file::write_atomic;
 
 #[test]
 fn crash_simulated_write_is_atomic() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("state.bin");
     let old = b"old".to_vec();
     write_atomic(&path, &old).unwrap();
@@ -46,7 +46,7 @@ fn crash_simulated_write_is_atomic() {
 
 #[test]
 fn concurrent_writers() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("race.bin");
     let mut rng = rand::thread_rng();
     let a: Vec<u8> = (0..256).map(|_| rng.gen()).collect();

@@ -20,7 +20,8 @@ fn ip_drop_increments_metric() {
         let id = ip.to_string();
         assert_eq!(
             PEER_DROP_TOTAL
-                .with_label_values(&[id.as_str(), "duplicate"])
+                .ensure_handle_for_label_values(&[id.as_str(), "duplicate"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             1
         );
@@ -79,10 +80,11 @@ fn rate_limit_drop_records_reason() {
     #[cfg(feature = "telemetry")]
     {
         use the_block::telemetry::{PEER_DROP_TOTAL, PEER_METRICS_ACTIVE};
-        let id = hex::encode(pk);
+        let id = crypto_suite::hex::encode(pk);
         assert!(
             PEER_DROP_TOTAL
-                .with_label_values(&[id.as_str(), "rate_limit"])
+                .ensure_handle_for_label_values(&[id.as_str(), "rate_limit"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get()
                 >= 1
         );

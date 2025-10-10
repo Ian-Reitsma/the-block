@@ -72,7 +72,8 @@ fn gpu_memory_mismatch_records_failure() {
         use the_block::telemetry::SCHEDULER_MATCH_TOTAL;
         assert_eq!(
             SCHEDULER_MATCH_TOTAL
-                .with_label_values(&["capability_mismatch"])
+                .ensure_handle_for_label_values(&["capability_mismatch"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             1
         );
@@ -113,12 +114,14 @@ fn telemetry_counters_increment() {
     {
         use the_block::telemetry::SCHEDULER_MATCH_TOTAL;
         let before = SCHEDULER_MATCH_TOTAL
-            .with_label_values(&["capability_mismatch"])
+            .ensure_handle_for_label_values(&["capability_mismatch"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get();
         let _ = scheduler::match_offer(&need);
         assert_eq!(
             SCHEDULER_MATCH_TOTAL
-                .with_label_values(&["capability_mismatch"])
+                .ensure_handle_for_label_values(&["capability_mismatch"])
+                .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get(),
             before + 1
         );
@@ -275,7 +278,7 @@ fn offer_triggers_preemption() {
 #[test]
 fn reputation_persists_across_restarts() {
     scheduler::reset_for_test();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("rep.json");
     let mut store = ReputationStore::load(path.clone());
     store.adjust("prov", 5);

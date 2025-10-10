@@ -2,7 +2,7 @@
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::{ed25519::SigningKey, Signer};
 use icu_normalizer::ComposingNormalizerBorrowed;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::generate_keypair;
 use the_block::identity::handle_registry::{HandleError, HandleRegistry};
 
@@ -34,7 +34,10 @@ fn register_persists() {
     }
     {
         let reg = HandleRegistry::open(path);
-        assert_eq!(reg.resolve_handle("alice").unwrap(), hex::encode(pk));
+        assert_eq!(
+            reg.resolve_handle("alice").unwrap(),
+            crypto_suite::hex::encode(pk)
+        );
     }
 }
 

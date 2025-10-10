@@ -7,12 +7,11 @@ use crate::net::{
 };
 use crate::simple_db::{names, SimpleDb};
 use codec::profiles;
-use concurrency::{MutexExt, MutexGuard};
+use concurrency::cache::LruCache;
+use concurrency::{Bytes, MutexExt, MutexGuard};
 use crypto_suite::hashing::blake3::hash;
 use foundation_serialization::Serialize;
-use hex;
 use ledger::address::ShardId;
-use lru::LruCache;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use std::cmp::Ordering;
@@ -21,8 +20,6 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-#[cfg(test)]
-use sys::tempfile;
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -86,7 +83,7 @@ impl ShardStore {
 
     #[cfg(test)]
     fn temporary() -> Self {
-        let dir = tempfile::tempdir().expect("tempdir");
+        let dir = sys::tempfile::tempdir().expect("tempdir");
         let base = dir.into_path();
         let path = base.join("gossip_store");
         let path_str = path.to_string_lossy().to_string();
@@ -203,7 +200,7 @@ pub struct RelayStatus {
 struct PeerCandidate {
     addr: SocketAddr,
     transport: Transport,
-    cert: Option<Vec<u8>>,
+    cert: Option<Bytes>,
     score: f64,
     latency_ms: Option<f64>,
     peer_kind: CandidateKind,
@@ -263,7 +260,8 @@ impl Relay {
             {
                 GOSSIP_DUPLICATE_TOTAL.inc();
                 GOSSIP_PEER_FAILURE_TOTAL
-                    .with_label_values(&["duplicate"])
+                    .ensure_handle_for_label_values(&["duplicate"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             return false;
@@ -310,7 +308,7 @@ impl Relay {
 
     fn gather_candidates(
         &self,
-        peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+        peers: &[(SocketAddr, Transport, Option<Bytes>)],
     ) -> Vec<PeerCandidate> {
         let mut candidates = Vec::with_capacity(peers.len());
         let mut skipped_partition = 0usize;
@@ -321,7 +319,7 @@ impl Relay {
                     .ok()
                     .map(|peer| (peer, metrics.clone()))
                     .or_else(|| {
-                        hex::decode(&id)
+                        crypto_suite::hex::decode(&id)
                             .ok()
                             .and_then(|bytes| overlay_peer_from_bytes(&bytes).ok())
                             .map(|peer| (peer, metrics.clone()))
@@ -359,7 +357,8 @@ impl Relay {
         #[cfg(feature = "telemetry")]
         if skipped_partition > 0 {
             GOSSIP_PEER_FAILURE_TOTAL
-                .with_label_values(&["partition"])
+                .ensure_handle_for_label_values(&["partition"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc_by(skipped_partition as u64);
         }
         #[cfg(not(feature = "telemetry"))]
@@ -432,7 +431,8 @@ impl Relay {
             let skipped_low = deprioritized.len().saturating_sub(used_deprioritized);
             if skipped_low > 0 {
                 GOSSIP_PEER_FAILURE_TOTAL
-                    .with_label_values(&["low_score"])
+                    .ensure_handle_for_label_values(&["low_score"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc_by(skipped_low as u64);
             }
         }
@@ -460,7 +460,7 @@ impl Relay {
     }
 
     /// Broadcast a message to a random subset of peers using default sender.
-    pub fn broadcast(&self, msg: &Message, peers: &[(SocketAddr, Transport, Option<Vec<u8>>)]) {
+    pub fn broadcast(&self, msg: &Message, peers: &[(SocketAddr, Transport, Option<Bytes>)]) {
         let serialized = codec::serialize(profiles::gossip::codec(), msg).unwrap_or_default();
         let large = serialized.len() > 1024;
         self.broadcast_with(msg, peers, |(addr, transport, cert), m| {
@@ -494,10 +494,10 @@ impl Relay {
         &self,
         shard: ShardId,
         msg: &Message,
-        peers: &HashMap<OverlayPeerId, (SocketAddr, Transport, Option<Vec<u8>>)>,
+        peers: &HashMap<OverlayPeerId, (SocketAddr, Transport, Option<Bytes>)>,
     ) {
         let ids = self.shard_store.peers(shard);
-        let targets: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = if ids.is_empty() {
+        let targets: Vec<(SocketAddr, Transport, Option<Bytes>)> = if ids.is_empty() {
             peers.values().cloned().collect()
         } else {
             ids.iter().filter_map(|id| peers.get(id).cloned()).collect()
@@ -509,10 +509,10 @@ impl Relay {
     pub fn broadcast_with<F>(
         &self,
         msg: &Message,
-        peers: &[(SocketAddr, Transport, Option<Vec<u8>>)],
+        peers: &[(SocketAddr, Transport, Option<Bytes>)],
         mut send: F,
     ) where
-        F: FnMut((SocketAddr, Transport, Option<&[u8]>), &Message),
+        F: FnMut((SocketAddr, Transport, Option<&Bytes>), &Message),
     {
         if !self.should_process(msg) {
             return;
@@ -538,7 +538,7 @@ impl Relay {
             }
             #[cfg(not(feature = "telemetry"))]
             let _ = candidate.latency_ms;
-            let cert = candidate.cert.as_deref();
+            let cert = candidate.cert.as_ref();
             send((candidate.addr, candidate.transport, cert), &marked);
         }
     }
@@ -669,7 +669,7 @@ mod tests {
         let relay = relay_for_tests();
         let sk = SigningKey::from_bytes(&[2u8; 32]);
         let msg = Message::new(Payload::Hello(vec![]), &sk);
-        let peers: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = (0..16)
+        let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..16)
             .map(|i| {
                 (
                     format!("127.0.0.1:{}", 10000 + i).parse().unwrap(),
@@ -694,7 +694,7 @@ mod tests {
         let relay = relay_for_tests();
         let sk = SigningKey::from_bytes(&[3u8; 32]);
         let msg = Message::new(Payload::Hello(vec![]), &sk);
-        let peers: Vec<(SocketAddr, Transport, Option<Vec<u8>>)> = (0..8)
+        let peers: Vec<(SocketAddr, Transport, Option<Bytes>)> = (0..8)
             .map(|i| {
                 (
                     format!("127.0.0.1:{}", 12000 + i).parse().unwrap(),

@@ -35,7 +35,6 @@ the_block = { path = "../node" }
 ledger = { path = "../ledger" }
 dkg = { path = "../dkg" }
 explorer = { path = "../explorer" }
-hex = "0.4"
 anyhow = "1"
 cli_core = { path = "../crates/cli_core" }
 coding = { path = "../crates/coding", optional = true }

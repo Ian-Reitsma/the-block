@@ -4,7 +4,7 @@ use crypto_suite::signatures::{
     Signer,
 };
 use std::convert::TryInto;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::generate_keypair;
 use the_block::governance::GovStore;
 use the_block::identity::{DidError, DidRegistry};
@@ -14,7 +14,7 @@ fn build_anchor(doc: &str, nonce: u64, sk: &SigningKey) -> TxDidAnchor {
     let pk = sk.verifying_key();
     let pk_bytes = pk.to_bytes();
     let mut tx = TxDidAnchor {
-        address: hex::encode(pk_bytes),
+        address: crypto_suite::hex::encode(pk_bytes),
         public_key: pk_bytes.to_vec(),
         document: doc.to_string(),
         nonce,
@@ -91,14 +91,14 @@ fn remote_attestation_accepted() {
 
     let (att_sk_bytes, att_pk_bytes) = generate_keypair();
     let att_sk = SigningKey::from_bytes(&att_sk_bytes.try_into().unwrap());
-    let att_signer_hex = hex::encode(att_pk_bytes);
+    let att_signer_hex = crypto_suite::hex::encode(att_pk_bytes);
     std::env::set_var("TB_RELEASE_SIGNERS", &att_signer_hex);
     the_block::provenance::refresh_release_signers();
 
     let att_sig = att_sk.sign(anchor.remote_digest().as_ref());
     anchor.remote_attestation = Some(TxDidAnchorAttestation {
         signer: att_signer_hex.clone(),
-        signature: hex::encode(att_sig.to_bytes()),
+        signature: crypto_suite::hex::encode(att_sig.to_bytes()),
     });
 
     registry

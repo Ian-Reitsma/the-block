@@ -6,4 +6,9 @@ license = "Apache-2.0"
 authors = ["The Block Developers"]
 description = "First-party concurrency primitives"
 
+[features]
+default = []
+serde = ["dep:serde"]
+
 [dependencies]
+serde = { version = "1", optional = true }

@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::{hex, json};
+use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -336,7 +336,7 @@ pub fn is_htlc_output(script: &[u8]) -> bool {
     let mut parts = s.split(':');
     match (parts.next(), parts.next(), parts.next(), parts.next()) {
         (Some("htlc"), Some(hash_hex), Some(timeout), None) => {
-            let hash_bytes = match hex::decode(hash_hex) {
+            let hash_bytes = match crypto_suite::hex::decode(hash_hex) {
                 Ok(b) => b,
                 Err(_) => return false,
             };

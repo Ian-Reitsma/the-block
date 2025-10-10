@@ -654,22 +654,28 @@ impl SimpleDb {
         if let Ok(metrics) = self.engine.metrics() {
             let labels = &[self.name.as_str(), self.engine.backend_name()];
             STORAGE_ENGINE_PENDING_COMPACTIONS
-                .with_label_values(labels)
+                .ensure_handle_for_label_values(labels)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(to_gauge(metrics.pending_compactions));
             STORAGE_ENGINE_RUNNING_COMPACTIONS
-                .with_label_values(labels)
+                .ensure_handle_for_label_values(labels)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(to_gauge(metrics.running_compactions));
             STORAGE_ENGINE_LEVEL0_FILES
-                .with_label_values(labels)
+                .ensure_handle_for_label_values(labels)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(to_gauge(metrics.level0_files));
             STORAGE_ENGINE_SST_BYTES
-                .with_label_values(labels)
+                .ensure_handle_for_label_values(labels)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(to_gauge(metrics.total_sst_bytes));
             STORAGE_ENGINE_MEMTABLE_BYTES
-                .with_label_values(labels)
+                .ensure_handle_for_label_values(labels)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(to_gauge(metrics.memtable_bytes));
             STORAGE_ENGINE_SIZE_BYTES
-                .with_label_values(labels)
+                .ensure_handle_for_label_values(labels)
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(to_gauge(metrics.size_on_disk_bytes));
             for engine in ["memory", "rocksdb", "rocksdb-compat", "inhouse"] {
                 let value = if engine == self.engine.backend_name() {
@@ -678,7 +684,8 @@ impl SimpleDb {
                     0
                 };
                 STORAGE_ENGINE_INFO
-                    .with_label_values(&[self.name.as_str(), engine])
+                    .ensure_handle_for_label_values(&[self.name.as_str(), engine])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(value);
             }
         }

@@ -604,7 +604,10 @@ impl StoragePipeline {
                         let id = *h.finalize().as_bytes();
                         if self
                             .db
-                            .try_insert(&format!("chunk/{}", hex::encode(id)), shard.clone())
+                            .try_insert(
+                                &format!("chunk/{}", crypto_suite::hex::encode(id)),
+                                shard.clone(),
+                            )
                             .is_err()
                         {
                             return Err(DispatchError::InsufficientCapacity);
@@ -642,10 +645,12 @@ impl StoragePipeline {
                         #[cfg(feature = "telemetry")]
                         {
                             STORAGE_PROVIDER_RTT_MS
-                                .with_label_values(&[provider_id.as_str()])
+                                .ensure_handle_for_label_values(&[provider_id.as_str()])
+                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                 .observe(rtt);
                             STORAGE_PROVIDER_LOSS_RATE
-                                .with_label_values(&[provider_id.as_str()])
+                                .ensure_handle_for_label_values(&[provider_id.as_str()])
+                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                 .observe(loss);
                         }
                         assigned = Some(());
@@ -890,7 +895,7 @@ impl StoragePipeline {
             .map_err(|e| e.to_string())?;
         self.db
             .try_insert(
-                &format!("manifest/{}", hex::encode(man_hash)),
+                &format!("manifest/{}", crypto_suite::hex::encode(man_hash)),
                 manifest_bytes,
             )
             .map_err(|e| e.to_string())?;
@@ -908,9 +913,13 @@ impl StoragePipeline {
         let rec_bytes = codec::serialize(profiles::storage_manifest::codec(), &receipt)
             .map_err(|e| e.to_string())?;
         self.db
-            .try_insert(&format!("receipt/{}", hex::encode(man_hash)), rec_bytes)
+            .try_insert(
+                &format!("receipt/{}", crypto_suite::hex::encode(man_hash)),
+                rec_bytes,
+            )
             .map_err(|e| e.to_string())?;
-        self.rent.lock(&hex::encode(man_hash), lane, rent, 0);
+        self.rent
+            .lock(&crypto_suite::hex::encode(man_hash), lane, rent, 0);
         let blob_tx = BlobTx {
             owner: lane.to_string(),
             blob_id,
@@ -921,7 +930,8 @@ impl StoragePipeline {
         };
         #[cfg(feature = "telemetry")]
         SUBSIDY_BYTES_TOTAL
-            .with_label_values(&["storage"])
+            .ensure_handle_for_label_values(&["storage"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc_by(data.len() as u64);
         #[cfg(feature = "telemetry")]
         {
@@ -951,7 +961,7 @@ impl StoragePipeline {
     }
 
     pub fn get_object(&self, manifest_hash: &[u8; 32]) -> Result<Vec<u8>, String> {
-        let key = format!("manifest/{}", hex::encode(manifest_hash));
+        let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
         let manifest_bytes = self.db.get(&key).ok_or("missing manifest")?;
         let manifest: ObjectManifest =
             codec::deserialize(profiles::storage_manifest::codec(), &manifest_bytes)
@@ -964,7 +974,7 @@ impl StoragePipeline {
                 for (idx, ch) in manifest.chunks.iter().enumerate() {
                     let blob = self
                         .db
-                        .get(&format!("chunk/{}", hex::encode(ch.id)))
+                        .get(&format!("chunk/{}", crypto_suite::hex::encode(ch.id)))
                         .ok_or("missing chunk")?;
                     let decrypted = decrypt_chunk(&*encryptor, &blob)?;
                     let mut plain = decompress_chunk(&*compressor, decrypted)?;
@@ -988,7 +998,9 @@ impl StoragePipeline {
                 for (chunk_idx, group) in manifest.chunks.chunks(shards_per_chunk).enumerate() {
                     let mut shards = vec![None; shards_per_chunk];
                     for (slot, r) in group.iter().enumerate() {
-                        let blob = self.db.get(&format!("chunk/{}", hex::encode(r.id)));
+                        let blob = self
+                            .db
+                            .get(&format!("chunk/{}", crypto_suite::hex::encode(r.id)));
                         shards[slot] = blob;
                     }
                     let expected_cipher = manifest.chunk_cipher_len(chunk_idx);
@@ -1007,7 +1019,8 @@ impl StoragePipeline {
         out.truncate(manifest.total_len as usize);
         #[cfg(feature = "telemetry")]
         SUBSIDY_BYTES_TOTAL
-            .with_label_values(&["read"])
+            .ensure_handle_for_label_values(&["read"])
+            .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .inc_by(out.len() as u64);
         Ok(out)
     }
@@ -1023,7 +1036,7 @@ impl StoragePipeline {
             let Some(hex_hash) = key.strip_prefix("manifest/") else {
                 continue;
             };
-            let Ok(raw_hash) = hex::decode(hex_hash) else {
+            let Ok(raw_hash) = crypto_suite::hex::decode(hex_hash) else {
                 continue;
             };
             if raw_hash.len() != 32 {
@@ -1049,7 +1062,7 @@ impl StoragePipeline {
                 .clone()
                 .unwrap_or_else(|| defaults.compression().to_string());
             entries.push(ManifestSummary {
-                manifest: hex::encode(&raw_hash),
+                manifest: crypto_suite::hex::encode(&raw_hash),
                 total_len: manifest.total_len,
                 chunk_count,
                 erasure: erasure.clone(),
@@ -1064,9 +1077,9 @@ impl StoragePipeline {
     }
 
     pub fn delete_object(&mut self, manifest_hash: &[u8; 32]) -> Result<u64, String> {
-        let key = format!("manifest/{}", hex::encode(manifest_hash));
+        let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
         let _ = self.db.remove(&key);
-        let id = hex::encode(manifest_hash);
+        let id = crypto_suite::hex::encode(manifest_hash);
         if let Some((depositor, refund, _burn)) = self.rent.release(&id) {
             Settlement::accrue(&depositor, "rent_refund", refund);
             Ok(refund)
@@ -1082,7 +1095,7 @@ impl StoragePipeline {
     }
 
     pub fn get_manifest(&self, manifest_hash: &[u8; 32]) -> Option<ObjectManifest> {
-        let key = format!("manifest/{}", hex::encode(manifest_hash));
+        let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
         self.db
             .get(&key)
             .and_then(|b| bincode::deserialize(&b).ok())
@@ -1179,7 +1192,7 @@ mod tests {
     }
 
     fn load_manifest(pipeline: &StoragePipeline, hash: &[u8; 32]) -> ObjectManifest {
-        let key = format!("manifest/{}", hex::encode(hash));
+        let key = format!("manifest/{}", crypto_suite::hex::encode(hash));
         let bytes = {
             let db = pipeline.db();
             db.get(&key).expect("manifest present")
@@ -1212,7 +1225,7 @@ mod tests {
         let first_chunk = &manifest.chunks[..shards_per_chunk];
         for idx in [0usize, 3, 17] {
             let shard_id = first_chunk[idx].id;
-            let key = format!("chunk/{}", hex::encode(shard_id));
+            let key = format!("chunk/{}", crypto_suite::hex::encode(shard_id));
             pipeline.db_mut().remove(&key);
             assert!(pipeline.db().get(&key).is_none());
         }
@@ -1245,7 +1258,7 @@ mod tests {
         let mut removed_keys = Vec::new();
         for idx in [0usize, 2, 5, 21] {
             let shard_id = first_chunk[idx].id;
-            let key = format!("chunk/{}", hex::encode(shard_id));
+            let key = format!("chunk/{}", crypto_suite::hex::encode(shard_id));
             pipeline.db_mut().remove(&key);
             removed_keys.push(key);
         }

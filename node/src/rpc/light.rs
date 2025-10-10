@@ -59,7 +59,7 @@ pub fn rebate_status(bc: &Blockchain) -> RebateStatus {
         .relayers
         .into_iter()
         .map(|(id, info)| RebateRelayer {
-            id: hex::encode(id),
+            id: crypto_suite::hex::encode(id),
             pending: info.pending,
             total_proofs: info.total_proofs,
             total_claimed: info.total_claimed,
@@ -89,7 +89,7 @@ pub fn rebate_history(
                 .relayers
                 .into_iter()
                 .map(|relayer| RebateReceiptRelayer {
-                    id: hex::encode(relayer.id),
+                    id: crypto_suite::hex::encode(relayer.id),
                     amount: relayer.amount,
                 })
                 .collect(),

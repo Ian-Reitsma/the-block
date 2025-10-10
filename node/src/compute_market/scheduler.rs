@@ -390,11 +390,13 @@ impl SchedulerState {
                 #[cfg(feature = "telemetry")]
                 {
                     telemetry::SCHEDULER_MATCH_TOTAL
-                        .with_label_values(&["success"])
+                        .ensure_handle_for_label_values(&["success"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                     telemetry::SCHEDULER_ACTIVE_JOBS.set(self.active_jobs as i64);
                     telemetry::SCHEDULER_EFFECTIVE_PRICE
-                        .with_label_values(&[prov])
+                        .ensure_handle_for_label_values(&[prov])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .set(*eff as i64);
                 }
             }
@@ -402,7 +404,8 @@ impl SchedulerState {
             if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                 #[cfg(feature = "telemetry")]
                 telemetry::SCHEDULER_MATCH_TOTAL
-                    .with_label_values(&["capability_mismatch"])
+                    .ensure_handle_for_label_values(&["capability_mismatch"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
             }
             if need.accelerator.is_some() && SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
@@ -416,13 +419,15 @@ impl SchedulerState {
                 if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                     #[cfg(feature = "telemetry")]
                     telemetry::SCHEDULER_MATCH_TOTAL
-                        .with_label_values(&["reputation_failure"])
+                        .ensure_handle_for_label_values(&["reputation_failure"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                         .inc();
                 }
             } else if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                 #[cfg(feature = "telemetry")]
                 telemetry::SCHEDULER_MATCH_TOTAL
-                    .with_label_values(&["capability_mismatch"])
+                    .ensure_handle_for_label_values(&["capability_mismatch"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 if need.accelerator.is_some() {
                     #[cfg(feature = "telemetry")]
@@ -448,10 +453,12 @@ impl SchedulerState {
             #[cfg(feature = "telemetry")]
             {
                 telemetry::REPUTATION_ADJUST_TOTAL
-                    .with_label_values(&["success"])
+                    .ensure_handle_for_label_values(&["success"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 telemetry::PROVIDER_REPUTATION_SCORE
-                    .with_label_values(&[provider])
+                    .ensure_handle_for_label_values(&[provider])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(*rep);
                 telemetry::SCHEDULER_REPUTATION_SCORE.observe(*rep as f64);
             }
@@ -469,10 +476,12 @@ impl SchedulerState {
             #[cfg(feature = "telemetry")]
             {
                 telemetry::REPUTATION_ADJUST_TOTAL
-                    .with_label_values(&["failure"])
+                    .ensure_handle_for_label_values(&["failure"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .inc();
                 telemetry::PROVIDER_REPUTATION_SCORE
-                    .with_label_values(&[provider])
+                    .ensure_handle_for_label_values(&[provider])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                     .set(*rep);
                 telemetry::SCHEDULER_REPUTATION_SCORE.observe(*rep as f64);
             }
@@ -489,10 +498,12 @@ impl SchedulerState {
         #[cfg(feature = "telemetry")]
         {
             telemetry::REPUTATION_ADJUST_TOTAL
-                .with_label_values(&["accelerator_success"])
+                .ensure_handle_for_label_values(&["accelerator_success"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc();
             telemetry::PROVIDER_REPUTATION_SCORE
-                .with_label_values(&[provider])
+                .ensure_handle_for_label_values(&[provider])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(*rep);
             telemetry::SCHEDULER_REPUTATION_SCORE.observe(*rep as f64);
         }
@@ -508,10 +519,12 @@ impl SchedulerState {
         #[cfg(feature = "telemetry")]
         {
             telemetry::REPUTATION_ADJUST_TOTAL
-                .with_label_values(&["accelerator_failure"])
+                .ensure_handle_for_label_values(&["accelerator_failure"])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc();
             telemetry::PROVIDER_REPUTATION_SCORE
-                .with_label_values(&[provider])
+                .ensure_handle_for_label_values(&[provider])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .set(*rep);
             telemetry::SCHEDULER_REPUTATION_SCORE.observe(*rep as f64);
         }
@@ -567,14 +580,16 @@ impl SchedulerState {
                         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                             #[cfg(feature = "telemetry")]
                             telemetry::SCHEDULER_CANCEL_TOTAL
-                                .with_label_values(&["preempted"])
+                                .ensure_handle_for_label_values(&["preempted"])
+                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                 .inc();
                         }
                         self.preempt_total += 1;
                         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                             #[cfg(feature = "telemetry")]
                             telemetry::SCHEDULER_PREEMPT_TOTAL
-                                .with_label_values(&["success"])
+                                .ensure_handle_for_label_values(&["success"])
+                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                 .inc();
                         }
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
@@ -585,7 +600,8 @@ impl SchedulerState {
                         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
                             #[cfg(feature = "telemetry")]
                             telemetry::SCHEDULER_PREEMPT_TOTAL
-                                .with_label_values(&["handoff_failed"])
+                                .ensure_handle_for_label_values(&["handoff_failed"])
+                                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                                 .inc();
                         }
                         #[cfg(any(feature = "telemetry", feature = "test-telemetry"))]
@@ -630,7 +646,8 @@ impl SchedulerState {
         if SCHEDULER_METRICS_ENABLED.load(Ordering::Relaxed) {
             #[cfg(feature = "telemetry")]
             telemetry::SCHEDULER_CANCEL_TOTAL
-                .with_label_values(&[reason.as_str()])
+                .ensure_handle_for_label_values(&[reason.as_str()])
+                .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                 .inc();
         }
         true

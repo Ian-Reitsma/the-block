@@ -1,9 +1,9 @@
 #![deny(warnings)]
 
+use crypto_suite::hex::{decode, encode};
 use crypto_suite::signatures::ed25519::Signature;
 use dex::escrow::{verify_proof, PaymentProof};
 use foundation_serialization::json::{self, Value};
-use hex::{decode, encode};
 use httpd::{BlockingClient, Method};
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
@@ -641,7 +641,7 @@ fn main() {
             let (_receipt, tx) = pipeline
                 .put_object(&data, &owner, &mut catalog)
                 .expect("store blob");
-            println!("{}", hex::encode(tx.blob_root));
+            println!("{}", crypto_suite::hex::encode(tx.blob_root));
         }
         Commands::BlobGet { blob_id, out } => {
             let mut arr = [0u8; 32];

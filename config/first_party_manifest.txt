@@ -88,7 +88,6 @@ governance
 hashbrown
 hashlink
 hermit-abi
-hex
 hidapi
 histogram_fp
 httparse
@@ -102,7 +101,6 @@ icu_properties_data
 icu_provider
 idna
 idna_adapter
-indexmap
 inferno
 inflation
 io-lifetimes
@@ -177,9 +175,6 @@ rand
 rand_core
 rcgen
 redox_syscall
-regex
-regex-automata
-regex-syntax
 rgb
 ring
 runtime
@@ -220,7 +215,6 @@ sys
 tar
 tb-sim
 tempfile
-terminal_size
 termtree
 testkit
 testkit_macros

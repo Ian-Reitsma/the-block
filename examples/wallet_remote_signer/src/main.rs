@@ -46,14 +46,14 @@ fn main() {
             .route(Method::Post, "/sign", |req| async move {
                 let state = req.state().clone();
                 let payload: SignRequest = req.json()?;
-                let msg = hex::decode(payload.msg)
+                let msg = crypto_suite::hex::decode(payload.msg)
                     .map_err(|err| HttpError::Handler(format!("invalid hex payload: {err}")))?;
                 let sig = state
                     .wallet
                     .sign(&msg)
                     .map_err(|err| HttpError::Handler(err.to_string()))?;
                 Response::new(StatusCode::OK).json(&SignResponse {
-                    sig: hex::encode(sig.to_bytes()),
+                    sig: crypto_suite::hex::encode(sig.to_bytes()),
                 })
             });
 
@@ -74,7 +74,7 @@ fn main() {
         .public_key()
         .verify(&remote_tag(message), &sig)
         .unwrap();
-    println!("signature: {}", hex::encode(sig.to_bytes()));
+    println!("signature: {}", crypto_suite::hex::encode(sig.to_bytes()));
 
     server.abort();
 }

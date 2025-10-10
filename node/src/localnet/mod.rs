@@ -4,7 +4,6 @@ use crypto_suite::signatures::ed25519::{
     Signature, VerifyingKey, PUBLIC_KEY_LENGTH, SIGNATURE_LENGTH,
 };
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use std::convert::TryInto;
 
 pub mod proximity;
@@ -46,6 +45,6 @@ impl AssistReceipt {
 
     pub fn hash(&self) -> String {
         let bytes = bincode::serialize(self).unwrap_or_default();
-        hex::encode(blake3::hash(&bytes).as_bytes())
+        crypto_suite::hex::encode(blake3::hash(&bytes).as_bytes())
     }
 }

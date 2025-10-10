@@ -6,13 +6,12 @@ use bridges::{
     RelayerBundle, RelayerProof,
 };
 use concurrency::Lazy;
-use hex;
 use sled::Config;
 use std::path::Path;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::bridge::{Bridge, BridgeError, ChannelConfig};
 
 static GOV_DB_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -60,7 +59,7 @@ fn configure_native_channel(bridge: &mut Bridge, headers_dir: &Path, challenge_p
 }
 
 fn approve_release(gov_path: &Path, asset: &str, commitment: &[u8; 32]) -> String {
-    let release_key = format!("bridge:{asset}:{}", hex::encode(commitment));
+    let release_key = format!("bridge:{asset}:{}", crypto_suite::hex::encode(commitment));
     let approved = the_block::governance::ApprovedRelease {
         build_hash: release_key.clone(),
         activated_epoch: 0,
@@ -266,7 +265,7 @@ fn bridge_rejects_replay_and_persists_state() {
     assert_eq!(bridge.locked_balance("native", "alice"), Some(0));
 
     let pending = bridge.pending_withdrawals(None);
-    let expected_commitment = hex::encode(commitment);
+    let expected_commitment = crypto_suite::hex::encode(commitment);
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0]["asset"].as_str(), Some("native"));
     assert_eq!(

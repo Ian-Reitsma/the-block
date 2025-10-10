@@ -5,7 +5,7 @@ use the_block::net::ban_store::BanStore;
 
 #[test]
 fn ban_persists_across_reopen() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("bans");
     let store = BanStore::open(path.to_str().unwrap());
     let pk = [1u8; 32];
@@ -23,7 +23,7 @@ fn ban_persists_across_reopen() {
 
 #[test]
 fn ban_expires() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let path = dir.path().join("bans");
     let store = BanStore::open(path.to_str().unwrap());
     let pk = [2u8; 32];

@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use httpd::{
     HttpError, Method, Response, Router, ServerConfig, ServerTlsConfig, StatusCode,
     WebSocketResponse,
@@ -42,14 +41,14 @@ struct SignResponse {
 }
 
 fn success_response(state: &SignerState, request: SignRequest) -> Result<Response, HttpError> {
-    let msg = hex::decode(&request.msg)
+    let msg = crypto_suite::hex::decode(&request.msg)
         .map_err(|err| HttpError::Handler(format!("invalid hex payload: {err}")))?;
     let sig = state
         .wallet
         .sign(&msg)
         .map_err(|err: WalletError| HttpError::Handler(err.to_string()))?;
     Response::new(StatusCode::OK).json(&SignResponse {
-        sig: hex::encode(sig.to_bytes()),
+        sig: crypto_suite::hex::encode(sig.to_bytes()),
     })
 }
 

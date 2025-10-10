@@ -15,7 +15,8 @@ fn init() {
 fn metrics_http_exporter_serves_foundation_text() {
     init();
     telemetry::MEMPOOL_SIZE
-        .with_label_values(&["consumer"])
+        .ensure_handle_for_label_values(&["consumer"])
+        .expect(telemetry::LABEL_REGISTRATION_ERR)
         .set(42);
     telemetry::RECORDER.tx_submitted();
     telemetry::RECORDER.tx_rejected("bad_sig");

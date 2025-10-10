@@ -72,7 +72,7 @@ fn handle_stake_role(matches: &Matches) -> Result<(), String> {
         .get_string("url")
         .unwrap_or_else(|| "http://127.0.0.1:8545".to_string());
 
-    let bytes = hex::decode(seed).map_err(|err| err.to_string())?;
+    let bytes = crypto_suite::hex::decode(seed).map_err(|err| err.to_string())?;
     if bytes.len() < 32 {
         return Err("seed too short".into());
     }
@@ -83,7 +83,7 @@ fn handle_stake_role(matches: &Matches) -> Result<(), String> {
     let sig = wallet
         .sign_stake(role_label, amount, withdraw)
         .map_err(|err| err.to_string())?;
-    let sig_hex = hex::encode(sig.to_bytes());
+    let sig_hex = crypto_suite::hex::encode(sig.to_bytes());
     let pk_hex = wallet.public_key_hex();
     let body = foundation_serialization::json!({
         "jsonrpc": "2.0",

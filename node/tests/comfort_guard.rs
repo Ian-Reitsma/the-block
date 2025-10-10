@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "telemetry")]
-use tempfile::tempdir;
+use sys::tempfile::tempdir;
 use the_block::{
     fees::policy,
     generate_keypair, sign_tx,
@@ -43,10 +43,17 @@ fn rejects_industrial_when_consumer_fees_high() {
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "a", "b", 1_000, 1);
     assert_eq!(bc.submit_transaction(tx), Err(TxAdmissionError::FeeTooLow));
-    assert_eq!(ADMISSION_MODE.with_label_values(&["tight"]).get(), 1);
+    assert_eq!(
+        ADMISSION_MODE
+            .ensure_handle_for_label_values(&["tight"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
+            .get(),
+        1
+    );
     assert_eq!(
         INDUSTRIAL_REJECTED_TOTAL
-            .with_label_values(&["comfort_guard"])
+            .ensure_handle_for_label_values(&["comfort_guard"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
             .get(),
         1
     );

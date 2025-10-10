@@ -68,7 +68,9 @@ impl SnapshotManager {
         if snap.engine_backend.is_none() {
             snap.engine_backend = self.engine_backend.clone();
         }
-        let path = self.dir.join(format!("{}.bin", hex::encode(snap.root)));
+        let path = self
+            .dir
+            .join(format!("{}.bin", crypto_suite::hex::encode(snap.root)));
         let mut file = File::create(&path)?;
         let bytes = snap.encode();
         file.write_all(&bytes)?;

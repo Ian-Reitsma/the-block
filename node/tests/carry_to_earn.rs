@@ -3,7 +3,7 @@ use the_block::compute_market::courier::CourierStore;
 
 #[testkit::tb_serial]
 fn courier_receipt_forwarding() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let store = CourierStore::open(dir.path().to_str().unwrap());
     let receipt = store.send(b"bundle", "alice");
     assert!(!receipt.acknowledged);
@@ -15,7 +15,7 @@ fn courier_receipt_forwarding() {
 
 #[testkit::tb_serial]
 fn receipt_validation() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let store = CourierStore::open(dir.path().to_str().unwrap());
     store.send(b"payload", "bob");
     assert_eq!(store.flush(|_| false).unwrap(), 0);
@@ -27,10 +27,10 @@ fn receipt_validation() {
 fn courier_retry_updates_metrics() {
     use the_block::telemetry::{COURIER_FLUSH_ATTEMPT_TOTAL, COURIER_FLUSH_FAILURE_TOTAL};
 
-    let attempts_before = COURIER_FLUSH_ATTEMPT_TOTAL.get();
-    let failures_before = COURIER_FLUSH_FAILURE_TOTAL.get();
+    let attempts_before = COURIER_FLUSH_ATTEMPT_TOTAL.value();
+    let failures_before = COURIER_FLUSH_FAILURE_TOTAL.value();
 
-    let dir = tempfile::tempdir().unwrap();
+    let dir = sys::tempfile::tempdir().unwrap();
     let store = CourierStore::open(dir.path().to_str().unwrap());
     let receipt = store.send(b"bundle", "alice");
     use std::cell::Cell;
@@ -49,8 +49,8 @@ fn courier_retry_updates_metrics() {
     assert_eq!(forwarded, 1);
     let rec = store.get(receipt.id).unwrap();
     assert!(rec.acknowledged);
-    let attempts_delta = COURIER_FLUSH_ATTEMPT_TOTAL.get() - attempts_before;
-    let failures_delta = COURIER_FLUSH_FAILURE_TOTAL.get() - failures_before;
+    let attempts_delta = COURIER_FLUSH_ATTEMPT_TOTAL.value() - attempts_before;
+    let failures_delta = COURIER_FLUSH_FAILURE_TOTAL.value() - failures_before;
     assert_eq!(attempts_delta, 2);
     assert_eq!(failures_delta, 1);
 }

@@ -13,5 +13,5 @@ fn main() {
     };
     let runner = WorkloadRunner::new();
     let out = runtime::block_on(runner.run(0, workload));
-    println!("{}", hex::encode(out));
+    println!("{}", crypto_suite::hex::encode(out));
 }

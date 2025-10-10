@@ -4,7 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crypto_suite::hashing::blake3::hash;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use foundation_serialization::{Deserialize, Serialize};
-use hex;
 use ledger::address;
 
 use crate::{
@@ -125,7 +124,7 @@ impl DidRegistry {
         let verifying_key =
             VerifyingKey::from_bytes(&pk_bytes).map_err(|_| DidError::InvalidKey)?;
         let account_part = address::account(&tx.address);
-        let pk_hex = hex::encode(pk_bytes);
+        let pk_hex = crypto_suite::hex::encode(pk_bytes);
         if tx.address != pk_hex && account_part != pk_hex {
             return Err(DidError::InvalidAddress);
         }
@@ -151,8 +150,8 @@ impl DidRegistry {
         }
         let signer_vk =
             provenance::parse_signer_hex(&signer_hex).ok_or(DidError::InvalidAttestation)?;
-        let sig_bytes =
-            hex::decode(att.signature.trim()).map_err(|_| DidError::InvalidAttestation)?;
+        let sig_bytes = crypto_suite::hex::decode(att.signature.trim())
+            .map_err(|_| DidError::InvalidAttestation)?;
         if sig_bytes.len() != 64 {
             return Err(DidError::InvalidAttestation);
         }

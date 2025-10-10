@@ -105,7 +105,7 @@ impl Wallet {
 
     /// Return the public key encoded as lowercase hex.
     pub fn public_key_hex(&self) -> String {
-        hex::encode(self.public_key().to_bytes())
+        crypto_suite::hex::encode(self.public_key().to_bytes())
     }
 }
 
@@ -229,7 +229,7 @@ mod tests {
         assert_eq!(k1, k2);
         assert!(constant_time_eq(&k1, &k2));
         assert_eq!(
-            hex::encode(k1),
+            crypto_suite::hex::encode(k1),
             "2c853709dfc2ed183862bea523a45bfb03d62ab1e63708e32218a4b69997f2c8"
         );
     }
@@ -244,7 +244,7 @@ mod tests {
         let mut okm = [0u8; 42];
         kdf_inhouse::derive_key_material(Some(&salt), &info, &ikm, &mut okm);
         assert_eq!(
-            hex::encode(okm),
+            crypto_suite::hex::encode(okm),
             "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
         );
     }

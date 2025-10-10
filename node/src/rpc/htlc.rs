@@ -20,7 +20,7 @@ pub fn status(id: u64) -> foundation_serialization::json::Value {
     let store = STORE.lock().unwrap();
     if let Some(h) = store.get(&id) {
         foundation_serialization::json!({
-            "hash": hex::encode(&h.hash),
+            "hash": crypto_suite::hex::encode(&h.hash),
             "timeout": h.timeout,
             "redeemed": h.redeemed,
         })

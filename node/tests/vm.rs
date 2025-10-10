@@ -47,7 +47,7 @@ fn state_isolation() {
 
 #[test]
 fn state_persists_across_restarts() {
-    use tempfile::tempdir;
+    use sys::tempfile::tempdir;
 
     let dir = tempdir().unwrap();
     let path = dir.path().join("contracts.bin");

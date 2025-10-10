@@ -100,7 +100,7 @@ fn price_board_tracks_bands() {
 #[test]
 fn dry_run_receipts_are_idempotent() {
     runtime::block_on(async {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = sys::tempfile::tempdir().unwrap();
         let store_path = dir.path().join("receipts");
         let store = ReceiptStore::open(store_path.to_str().unwrap());
         matcher::seed_orders(vec![LaneSeed {

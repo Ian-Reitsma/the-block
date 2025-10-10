@@ -1,5 +1,5 @@
 #![cfg(feature = "integration-tests")]
-use tempfile::{Builder, TempDir};
+use sys::tempfile::{Builder, TempDir};
 use the_block::Blockchain;
 
 pub fn temp_dir(prefix: &str) -> TempDir {

@@ -24,7 +24,6 @@ quinn = [
 "s2n-quic" = [
     "dep:base64_fp",
     "dep:crypto_suite",
-    "dep:hex",
     "dep:rand",
     "dep:rcgen",
     "dep:runtime",
@@ -41,7 +40,6 @@ base64_fp = { path = "../base64_fp", optional = true }
 dashmap = { version = "5", optional = true }
 sys = { path = "../sys", optional = true }
 crypto_suite = { path = "../crypto_suite", optional = true }
-hex = { version = "0.4", optional = true }
 foundation_lazy = { path = "../foundation_lazy" }
 rand = { path = "../rand", optional = true }
 rcgen = { version = "0.12", optional = true }
@@ -51,4 +49,5 @@ rustls = { version = "0.21", features = ["dangerous_configuration"], optional = 
 time = { version = "0.3", optional = true }
 x509-parser = { version = "0.16", optional = true }
 foundation_serialization = { path = "../foundation_serialization", optional = true }
+concurrency = { path = "../concurrency", features = ["serde"] }
 
