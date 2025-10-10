@@ -1,74 +1,74 @@
 //! Named codec profiles that wrap the canonical configurations used across the
 //! workspace.
 
-use super::{BinaryProfile, BincodeConfig, BincodeProfile, Codec, JsonProfile};
+use super::{BinaryConfig, BinaryProfile, Codec, JsonProfile};
 
 /// Transaction serialization helpers.
 pub mod transaction {
-    use super::{BincodeConfig, BincodeProfile, Codec};
+    use super::{BinaryConfig, BinaryProfile, Codec};
 
     /// Canonical codec wrapper for transaction payloads.
     #[must_use]
     pub fn codec() -> Codec {
-        Codec::Bincode(BincodeProfile::Transaction)
+        Codec::Binary(BinaryProfile::Transaction)
     }
 
-    /// Fetch the canonical bincode configuration for transactions.
+    /// Fetch the canonical binary configuration for transactions.
     #[must_use]
-    pub fn config() -> BincodeConfig {
-        BincodeProfile::Transaction.config()
+    pub fn config() -> BinaryConfig {
+        BinaryProfile::Transaction.config()
     }
 
     /// Return the canonical profile identifier for transactions.
     #[must_use]
-    pub const fn profile() -> BincodeProfile {
-        BincodeProfile::Transaction
+    pub const fn profile() -> BinaryProfile {
+        BinaryProfile::Transaction
     }
 }
 
 /// Gossip serialization helpers.
 pub mod gossip {
-    use super::{BincodeConfig, BincodeProfile, Codec};
+    use super::{BinaryConfig, BinaryProfile, Codec};
 
     /// Canonical codec wrapper for gossip relay persistence.
     #[must_use]
     pub fn codec() -> Codec {
-        Codec::Bincode(BincodeProfile::Gossip)
+        Codec::Binary(BinaryProfile::Gossip)
     }
 
-    /// Fetch the canonical bincode configuration for gossip persistence.
+    /// Fetch the canonical binary configuration for gossip persistence.
     #[must_use]
-    pub fn config() -> BincodeConfig {
-        BincodeProfile::Gossip.config()
+    pub fn config() -> BinaryConfig {
+        BinaryProfile::Gossip.config()
     }
 
     /// Return the canonical profile identifier for gossip payloads.
     #[must_use]
-    pub const fn profile() -> BincodeProfile {
-        BincodeProfile::Gossip
+    pub const fn profile() -> BinaryProfile {
+        BinaryProfile::Gossip
     }
 }
 
 /// Storage manifest serialization helpers.
 pub mod storage_manifest {
-    use super::{BincodeConfig, BincodeProfile, Codec};
+    use super::{BinaryConfig, BinaryProfile, Codec};
 
     /// Canonical codec wrapper for storage manifest persistence.
     #[must_use]
     pub fn codec() -> Codec {
-        Codec::Bincode(BincodeProfile::StorageManifest)
+        Codec::Binary(BinaryProfile::StorageManifest)
     }
 
-    /// Fetch the canonical bincode configuration for storage manifests.
+    /// Fetch the canonical binary configuration for storage manifests.
     #[must_use]
-    pub fn config() -> BincodeConfig {
-        BincodeProfile::StorageManifest.config()
+    pub fn config() -> BinaryConfig {
+        BinaryProfile::StorageManifest.config()
     }
 
     /// Return the canonical profile identifier for storage manifests.
     #[must_use]
-    pub const fn profile() -> BincodeProfile {
-        BincodeProfile::StorageManifest
+    pub const fn profile() -> BinaryProfile {
+        BinaryProfile::StorageManifest
     }
 }
 

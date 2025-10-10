@@ -1,6 +1,6 @@
 # Project Progress Snapshot
-> **Review (2025-10-08):** Captured the first-party serialization rollout across governance, ledger, metrics-aggregator, and overlay persistence while flagging the remaining tooling crates that still depend on `serde_json`/`bincode`.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
+> **Review (2025-10-10):** Retired the legacy bincode profiles across the node and crypto suite, wired telemetry to the new binary profiles, and pulled the simulation harness/CLI defaults onto the first-party codec facade while documenting the remaining tooling cleanup.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-10); node, telemetry, and harness tooling now default to the first-party binary codec.
 
 This document tracks high‑fidelity progress across The‑Block's major work streams.  Each subsection lists the current completion estimate, supporting evidence with canonical file or module references, and the remaining gaps.  Percentages are rough, *engineer-reported* gauges meant to guide prioritization rather than marketing claims.
 

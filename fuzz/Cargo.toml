@@ -8,7 +8,7 @@ publish = false
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
 tempfile = "3"
-bincode = "1"
+foundation_serialization = { path = "../crates/foundation_serialization" }
 
 the_block = { path = "../node", features = ["fuzzy"] }
 crypto_suite = { path = "../crates/crypto_suite" }

@@ -2,6 +2,7 @@
 
 use super::order_book::{Order, OrderBook};
 use crate::simple_db::{names, SimpleDb};
+use crate::util::binary_codec;
 use dex::amm::Pool;
 use dex::escrow::{Escrow, EscrowId, PaymentProof};
 use foundation_serialization::{Deserialize, Serialize};
@@ -29,7 +30,7 @@ impl DexStore {
     }
 
     pub fn save_book(&mut self, book: &OrderBook) {
-        if let Ok(bytes) = bincode::serialize(book) {
+        if let Ok(bytes) = binary_codec::serialize(book) {
             let _ = self.db.insert("book", bytes);
             self.db.flush();
         }
@@ -38,12 +39,12 @@ impl DexStore {
     pub fn load_book(&self) -> OrderBook {
         self.db
             .get("book")
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| binary_codec::deserialize(&b).ok())
             .unwrap_or_default()
     }
 
     pub fn log_trade(&mut self, trade: &(Order, Order, u64), proof: &PaymentProof) {
-        if let Ok(bytes) = bincode::serialize(&TradeLog(
+        if let Ok(bytes) = binary_codec::serialize(&TradeLog(
             trade.0.clone(),
             trade.1.clone(),
             trade.2,
@@ -59,7 +60,7 @@ impl DexStore {
         let mut res = Vec::new();
         for k in self.db.keys_with_prefix("trade:") {
             if let Some(bytes) = self.db.get(&k) {
-                if let Ok(TradeLog(a, b, c, _)) = bincode::deserialize(&bytes) {
+                if let Ok(TradeLog(a, b, c, _)) = binary_codec::deserialize(&bytes) {
                     res.push((a, b, c));
                 }
             }
@@ -68,7 +69,7 @@ impl DexStore {
     }
 
     pub fn save_escrow_state(&mut self, state: &EscrowState) {
-        if let Ok(bytes) = bincode::serialize(state) {
+        if let Ok(bytes) = binary_codec::serialize(state) {
             let _ = self.db.insert("escrow", bytes);
             self.db.flush();
         }
@@ -77,13 +78,13 @@ impl DexStore {
     pub fn load_escrow_state(&self) -> EscrowState {
         self.db
             .get("escrow")
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| binary_codec::deserialize(&b).ok())
             .unwrap_or_default()
     }
 
     /// Persist an AMM pool under `amm/<id>`.
     pub fn save_pool(&mut self, id: &str, pool: &Pool) {
-        if let Ok(bytes) = bincode::serialize(pool) {
+        if let Ok(bytes) = binary_codec::serialize(pool) {
             let key = format!("amm/{}", id);
             let _ = self.db.insert(&key, bytes);
             self.db.flush();
@@ -95,7 +96,7 @@ impl DexStore {
         let key = format!("amm/{}", id);
         self.db
             .get(&key)
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| binary_codec::deserialize(&b).ok())
             .unwrap_or_default()
     }
 }

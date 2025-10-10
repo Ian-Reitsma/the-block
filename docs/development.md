@@ -44,10 +44,10 @@ abstraction.
 
 ## Serialization guardrails
 
-JSON, CBOR, and bincode payloads now route through the shared `codec` crate.
+JSON and binary payloads now route through the shared `codec` crate.
 Pull requests must use `codec::serialize`/`codec::deserialize` (or the helpers
-in `codec::profiles`) instead of calling `serde_json`, `serde_cbor`, or
-`bincode` directly. The crate exposes `serialize_to_string` and
+in `codec::profiles`) instead of calling `serde_json` or legacy `bincode`
+directly. The crate exposes `serialize_to_string` and
 `serialize_json_pretty` for human-readable output, while `deserialize_from_str`
 handles textual inputs. Reviewers should reject changes that introduce new
 direct serde calls; see [`docs/serialization.md`](serialization.md) for the

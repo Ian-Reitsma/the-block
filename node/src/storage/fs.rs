@@ -3,6 +3,7 @@ use crate::simple_db::{names, SimpleDb};
 use crate::telemetry::{
     RENT_ESCROW_BURNED_CT_TOTAL, RENT_ESCROW_LOCKED_CT_TOTAL, RENT_ESCROW_REFUNDED_CT_TOTAL,
 };
+use crate::util::binary_codec;
 use foundation_serialization::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -45,7 +46,7 @@ impl RentEscrow {
             amount,
             expiry,
         };
-        if let Ok(bytes) = bincode::serialize(&e) {
+        if let Ok(bytes) = binary_codec::serialize(&e) {
             let _ = self.db.try_insert(&key, bytes);
             #[cfg(feature = "telemetry")]
             RENT_ESCROW_LOCKED_CT_TOTAL.add(amount as i64);
@@ -54,7 +55,7 @@ impl RentEscrow {
     pub fn release(&mut self, id: &str) -> Option<(String, u64, u64)> {
         let key = format!("escrow/{id}");
         if let Some(bytes) = self.db.get(&key) {
-            if let Ok(e) = bincode::deserialize::<Escrow>(&bytes) {
+            if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
                 #[cfg(feature = "telemetry")]
                 RENT_ESCROW_LOCKED_CT_TOTAL.sub(e.amount as i64);
                 let _ = self.db.remove(&key);
@@ -73,7 +74,7 @@ impl RentEscrow {
     pub fn balance(&self, id: &str) -> u64 {
         let key = format!("escrow/{id}");
         if let Some(bytes) = self.db.get(&key) {
-            if let Ok(e) = bincode::deserialize::<Escrow>(&bytes) {
+            if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
                 return e.amount;
             }
         }
@@ -83,7 +84,7 @@ impl RentEscrow {
         let mut sum = 0;
         for key in self.db.keys_with_prefix("escrow/") {
             if let Some(bytes) = self.db.get(&key) {
-                if let Ok(e) = bincode::deserialize::<Escrow>(&bytes) {
+                if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
                     if e.depositor == account {
                         sum += e.amount;
                     }
@@ -97,7 +98,7 @@ impl RentEscrow {
         let keys = self.db.keys_with_prefix("escrow/");
         for key in keys {
             if let Some(bytes) = self.db.get(&key) {
-                if let Ok(e) = bincode::deserialize::<Escrow>(&bytes) {
+                if let Ok(e) = binary_codec::deserialize::<Escrow>(&bytes) {
                     if e.expiry > 0 && e.expiry <= now {
                         #[cfg(feature = "telemetry")]
                         RENT_ESCROW_LOCKED_CT_TOTAL.sub(e.amount as i64);

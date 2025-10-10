@@ -15,7 +15,7 @@ if [[ $# -eq 0 ]]; then
   args+=("--storage" "inhouse")
   args+=("--coding" "reed-solomon")
   args+=("--crypto" "dalek")
-  args+=("--codec" "bincode")
+  args+=("--codec" "binary")
 fi
 
 args+=("--output-dir" "$OUTPUT_DIR")

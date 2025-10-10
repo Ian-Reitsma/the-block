@@ -2,6 +2,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::needless_range_loop)]
 
+use foundation_serialization::binary;
 use std::fs;
 use std::sync::Once;
 #[cfg(feature = "telemetry")]
@@ -377,15 +378,9 @@ fn comparator_orders_by_fee_expiry_hash() {
     let tx1 = build_signed_tx(&sk, "alice", "bob", 1, 0, 2000, 1);
     let tx2 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 2);
     let tx3 = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 3);
-    let size1 = bincode::serialize(&tx1)
-        .map(|b| b.len() as u64)
-        .unwrap_or(0);
-    let size2 = bincode::serialize(&tx2)
-        .map(|b| b.len() as u64)
-        .unwrap_or(0);
-    let size3 = bincode::serialize(&tx3)
-        .map(|b| b.len() as u64)
-        .unwrap_or(0);
+    let size1 = binary::encode(&tx1).map(|b| b.len() as u64).unwrap_or(0);
+    let size2 = binary::encode(&tx2).map(|b| b.len() as u64).unwrap_or(0);
+    let size3 = binary::encode(&tx3).map(|b| b.len() as u64).unwrap_or(0);
     let e1 = MempoolEntry {
         tx: tx1,
         timestamp_millis: 1,

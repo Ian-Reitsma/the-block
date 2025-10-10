@@ -20,7 +20,7 @@ pub use crypto_suite::transactions::{
     TransactionSigner, TRANSACTION_DOMAIN_PREFIX,
 };
 pub use crypto_suite::{
-    canonical_bincode_config, canonical_payload_bytes, hashing, key_derivation, signatures,
+    canonical_binary_config, canonical_payload_bytes, hashing, key_derivation, signatures,
     transactions, try_canonical_payload_bytes, zk,
 };
 

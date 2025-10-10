@@ -1,6 +1,6 @@
 # Serialization Guardrails
-> **Review (2025-10-08):** Documented the `foundation_serialization` facade adoption across governance, ledger, and the metrics aggregator alongside new JSON `Value` accessor guidance.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08). Governance, ledger, and metrics aggregator now encode exclusively through `foundation_serialization`.
+> **Review (2025-10-10):** Captured the binary profile consolidation across node, crypto suite, telemetry, and harness tooling; the facade section below notes the new `BinaryProfile` identifiers and telemetry labels.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-10). Governance, ledger, metrics aggregator, node runtime, and telemetry now encode exclusively through `foundation_serialization`.
 
 The `foundation_serialization` crate fronts every workspace serialization call so
 binary, JSON, TOML, and base58 payloads all use deterministic, auditable, and
@@ -12,8 +12,9 @@ considered legacy and must be routed through this facade before landing.
 The crate exposes dedicated modules for each supported format:
 
 - `json` – streaming JSON encoder/decoder plus `Value` utilities.
-- `binary` – compact binary encoder/decoder used for snapshot and state
-  persistence.
+- `binary` – compact encoder/decoder used for snapshot and state persistence.
+  Named profiles (`canonical`, `transaction`, `gossip`, `storage_manifest`)
+  surface through `codec::profiles` and are labelled in telemetry.
 - `toml` – configuration loader backing operator- and test-facing config files.
 - `base58` – first-party base58 encoder/decoder reused by the overlay store and
   tooling crates.

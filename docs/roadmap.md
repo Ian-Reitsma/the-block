@@ -1,6 +1,6 @@
 # Status & Roadmap
-> **Review (2025-10-08):** Logged the first-party serialization rollout across governance, ledger, metrics-aggregator, and overlay persistence while highlighting the tooling crates that still depend on serde/bincode.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-08).
+> **Review (2025-10-10):** Documented the binary codec consolidation across node, crypto suite, telemetry, and harness tooling while flagging the remaining serde/bincode usage limited to ancillary tooling.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, codec, and serialization facades are live with governance overrides enforced (2025-10-10).
 
 Mainnet readiness: 98.3/100 · Vision completion: 93.3/100.
 The runtime-backed HTTP client and TCP/UDP reactor now power the node and CLI stacks, and the aggregator, gateway, explorer, and indexer surfaces all serve via the in-house `httpd` router. Tracking that migration, alongside the TLS layer, keeps the dependency-sovereignty
@@ -17,10 +17,10 @@ Known focus areas: finish migrating remaining tooling (monitoring dashboards, re
 - The indexer CLI has moved from Clap/Axum to `cli_core` plus `httpd`, reusing
   the shared router helpers and optional TLS wiring for the serve subcommand
   (`tools/indexer/src/main.rs`, `tools/indexer/src/lib.rs`).
-- Governance, ledger, metrics-aggregator, and overlay peer stores now rely on
-  the `foundation_serialization` facade (JSON/binary/base58); remaining
-  serde_json/bincode usage is isolated to monitoring dashboards, remote signer,
-  and snapshot tooling tracked in `docs/pivot_dependency_strategy.md`.
+- Governance, ledger, metrics-aggregator, overlay peer stores, node telemetry,
+  and crypto helpers now rely on the `foundation_serialization` facade
+  (JSON/binary/base58); remaining serde_json/bincode usage is isolated to
+  auxiliary tooling tracked in `docs/pivot_dependency_strategy.md`.
 - A workspace-local `rand` crate and stubbed `rand_core` now back all
   randomness helpers, allowing node/CLI/runtime components to compile without
   pulling external RNG stacks while the in-house engines are completed.

@@ -19,6 +19,7 @@ use crate::consensus::observer;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
+use crate::util::binary_codec;
 use concurrency::cache::LruCache;
 use concurrency::dashmap::Entry as DashEntry;
 use concurrency::DashMap;
@@ -1269,10 +1270,10 @@ impl Blockchain {
             const SCHEMA_KEY: &str = "__schema_version";
             let current_version = db
                 .get(SCHEMA_KEY)
-                .and_then(|b| bincode::deserialize::<u32>(&b).ok())
+                .and_then(|b| binary_codec::deserialize::<u32>(&b).ok())
                 .unwrap_or(0);
             if current_version < state::schema::SCHEMA_VERSION {
-                if let Ok(bytes) = bincode::serialize(&state::schema::SCHEMA_VERSION) {
+                if let Ok(bytes) = binary_codec::serialize(&state::schema::SCHEMA_VERSION) {
                     let _ = db.insert(SCHEMA_KEY, bytes);
                 }
             }
@@ -1289,7 +1290,7 @@ impl Blockchain {
             base_fee,
             recent_ts,
         ) = if let Some(raw) = db.get(DB_CHAIN) {
-            match bincode::deserialize::<ChainDisk>(&raw) {
+            match binary_codec::deserialize::<ChainDisk>(&raw) {
                 Ok(mut disk) => {
                     if disk.schema_version > 7 {
                         return Err(py_value_err("DB schema too new"));
@@ -1383,7 +1384,7 @@ impl Blockchain {
                         };
                         db.insert(
                             DB_CHAIN,
-                            bincode::serialize(&migrated)
+                            binary_codec::serialize(&migrated)
                                 .unwrap_or_else(|e| panic!("serialize: {e}")),
                         );
                         db.remove(DB_ACCOUNTS);
@@ -1416,7 +1417,7 @@ impl Blockchain {
                             disk.block_height = disk.chain.len() as u64;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1485,7 +1486,7 @@ impl Blockchain {
                             disk.schema_version = 4;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1496,7 +1497,7 @@ impl Blockchain {
                             disk.schema_version = 5;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1504,7 +1505,7 @@ impl Blockchain {
                             disk.schema_version = 6;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1515,7 +1516,7 @@ impl Blockchain {
                             disk.schema_version = 7;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1523,7 +1524,7 @@ impl Blockchain {
                             disk.schema_version = 8;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1531,7 +1532,7 @@ impl Blockchain {
                             disk.schema_version = 9;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1539,7 +1540,7 @@ impl Blockchain {
                             disk.schema_version = 10;
                             db.insert(
                                 DB_CHAIN,
-                                bincode::serialize(&disk)
+                                binary_codec::serialize(&disk)
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
@@ -1558,14 +1559,16 @@ impl Blockchain {
                     }
                 }
                 Err(_) => {
-                    let chain: Vec<Block> = bincode::deserialize(&raw).unwrap_or_default();
+                    let chain: Vec<Block> = binary_codec::deserialize(&raw).unwrap_or_default();
                     let accounts: HashMap<String, Account> = db
                         .get(DB_ACCOUNTS)
-                        .and_then(|iv| bincode::deserialize(&iv).ok())
+                        .and_then(|iv| binary_codec::deserialize(&iv).ok())
                         .unwrap_or_default();
                     let (br_c, br_i): (u64, u64) = db
                         .get(DB_EMISSION)
-                        .and_then(|iv| bincode::deserialize::<(u64, u64, u64, u64, u64)>(&iv).ok())
+                        .and_then(|iv| {
+                            binary_codec::deserialize::<(u64, u64, u64, u64, u64)>(&iv).ok()
+                        })
                         .map(|(_em_c, _em_i, br_c, br_i, _bh)| (br_c, br_i))
                         .unwrap_or((
                             INITIAL_BLOCK_REWARD_CONSUMER,
@@ -1650,7 +1653,8 @@ impl Blockchain {
                     };
                     db.insert(
                         DB_CHAIN,
-                        bincode::serialize(&disk_new).unwrap_or_else(|e| panic!("serialize: {e}")),
+                        binary_codec::serialize(&disk_new)
+                            .unwrap_or_else(|e| panic!("serialize: {e}")),
                     );
                     db.remove(DB_ACCOUNTS);
                     db.remove(DB_EMISSION);
@@ -1991,7 +1995,7 @@ impl Blockchain {
                 break;
             }
             for e in batch {
-                let size = bincode::serialize(&e.tx)
+                let size = binary_codec::serialize(&e.tx)
                     .map(|b| b.len() as u64)
                     .unwrap_or(0);
                 let fpb = if size == 0 { 0 } else { e.tx.tip / size };
@@ -2009,7 +2013,7 @@ impl Blockchain {
                 #[cfg(not(feature = "telemetry"))]
                 let _ = fpb;
                 if bc.accounts.contains_key(&e.sender) {
-                    let size = bincode::serialize(&e.tx)
+                    let size = binary_codec::serialize(&e.tx)
                         .map(|b| b.len() as u64)
                         .unwrap_or(0);
                     let pool = match e.tx.lane {
@@ -2139,7 +2143,7 @@ impl Blockchain {
             epoch_bytes_out: self.epoch_bytes_out,
             recent_timestamps: self.recent_timestamps.iter().copied().collect(),
         };
-        let bytes = bincode::serialize(&disk)
+        let bytes = binary_codec::serialize(&disk)
             .map_err(|e| py_value_err(format!("Serialization error: {e}")))?;
         self.db.insert(DB_CHAIN, bytes);
         // ensure no legacy column families linger on disk
@@ -2191,7 +2195,8 @@ impl Blockchain {
         self.chain.push(g);
         self.recent_timestamps.push_back(0);
         self.block_height = 1;
-        let bytes = bincode::serialize(&self.chain).map_err(|e| py_value_err(e.to_string()))?;
+        let bytes =
+            binary_codec::serialize(&self.chain).map_err(|e| py_value_err(e.to_string()))?;
         self.db.insert(DB_CHAIN, bytes);
         self.db.flush();
         Ok(())
@@ -2296,7 +2301,7 @@ impl Blockchain {
         }
         let sender_addr = tx.payload.from_.clone();
         let nonce = tx.payload.nonce;
-        let size = bincode::serialize(&tx)
+        let size = binary_codec::serialize(&tx)
             .map_err(|_| {
                 #[cfg(feature = "telemetry")]
                 self.record_reject("fee_overflow");

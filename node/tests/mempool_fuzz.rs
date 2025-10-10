@@ -4,6 +4,7 @@ use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use foundation_serialization::binary;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use the_block::{
     generate_keypair, mempool_cmp, sign_tx, Blockchain, RawTxPayload, SignedTransaction,
@@ -89,7 +90,7 @@ fn fuzz_mempool_random_fees_nonces() {
                         .submit_transaction(tx.clone())
                         .is_ok()
                     {
-                        let size = bincode::serialize(&tx).unwrap().len() as u64;
+                        let size = binary::encode(&tx).unwrap().len() as u64;
                         let fpb = if size == 0 { 0 } else { fee / size };
                         rec_cl.lock().unwrap().push((fpb, name.clone(), nonce));
                     }
@@ -128,7 +129,7 @@ fn fuzz_mempool_random_fees_nonces() {
     let min_fee = entries
         .last()
         .map(|e| {
-            let size = bincode::serialize(&e.tx).unwrap().len() as u64;
+            let size = binary::encode(&e.tx).unwrap().len() as u64;
             if size == 0 {
                 0
             } else {

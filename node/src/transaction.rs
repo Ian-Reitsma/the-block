@@ -440,7 +440,7 @@ impl SignedTransaction {
     }
 }
 
-/// Serialize a [`RawTxPayload`] using the project's canonical bincode settings.
+/// Serialize a [`RawTxPayload`] using the project's canonical binary settings.
 pub fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     suite_canonical_payload_bytes(payload)
 }

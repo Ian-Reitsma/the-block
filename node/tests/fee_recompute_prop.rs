@@ -3,6 +3,7 @@
 use crypto_suite::hashing::blake3;
 use std::{collections::HashMap, fs};
 
+use foundation_serialization::binary;
 use testkit::tb_prop_test;
 use the_block::transaction::{TxSignature, TxVersion};
 use the_block::{
@@ -147,9 +148,9 @@ tb_prop_test!(prop_migration_recomputes_randomized_fees, |runner| {
                 recent_timestamps: Vec::new(),
             };
             let mut map: HashMap<String, Vec<u8>> = HashMap::new();
-            map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+            map.insert("chain".to_string(), binary::encode(&disk).unwrap());
             let db_path = dir.path().join("db");
-            fs::write(&db_path, bincode::serialize(&map).unwrap()).unwrap();
+            fs::write(&db_path, binary::encode(&map).unwrap()).unwrap();
 
             let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
             assert_eq!(bc.circulating_supply(), (total_c, total_i));

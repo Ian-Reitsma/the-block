@@ -81,7 +81,6 @@ pub enum CryptoBackendChoice {
 /// Codec implementation toggle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum CodecBackendChoice {
-    Bincode,
     Json,
     Binary,
 }
@@ -150,7 +149,7 @@ impl Default for BackendSelections {
             storage: StorageBackendChoice::LegacyRocksDb,
             coding: CodingBackendChoice::ReedSolomon,
             crypto: CryptoBackendChoice::Dalek,
-            codec: CodecBackendChoice::Bincode,
+            codec: CodecBackendChoice::Binary,
         }
     }
 }
@@ -766,11 +765,8 @@ fn run_codec_probe(
         value: 42,
     };
     let profile = match selections.codec {
-        CodecBackendChoice::Bincode => {
-            CodecProfile::Bincode(codec::profiles::transaction::profile())
-        }
         CodecBackendChoice::Json => CodecProfile::Json(codec::profiles::json::profile()),
-        CodecBackendChoice::Binary => CodecProfile::Binary(codec::profiles::binary::profile()),
+        CodecBackendChoice::Binary => CodecProfile::Binary(codec::profiles::transaction::profile()),
     };
     let fault = injector.get(FaultTarget::Codec);
     if fault == Some(FaultKind::Panic) {
@@ -810,11 +806,7 @@ fn serialize_with_profile<T: Serialize>(
     profile: CodecProfile,
     value: &T,
 ) -> codec::Result<Vec<u8>> {
-    match profile {
-        CodecProfile::Bincode(profile) => profile.serialize(value),
-        CodecProfile::Json(profile) => profile.serialize(value),
-        CodecProfile::Binary(profile) => profile.serialize(value),
-    }
+    codec::serialize(profile, value)
 }
 
 fn run_rpc_probe(
@@ -1414,12 +1406,11 @@ impl CryptoBackendChoice {
 
 impl CodecBackendChoice {
     pub const fn variants() -> &'static [&'static str] {
-        &["bincode", "json", "binary"]
+        &["json", "binary"]
     }
 
     fn as_str(&self) -> &'static str {
         match self {
-            CodecBackendChoice::Bincode => "bincode",
             CodecBackendChoice::Json => "json",
             CodecBackendChoice::Binary => "binary",
         }
@@ -1504,7 +1495,6 @@ impl std::str::FromStr for CodecBackendChoice {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.to_ascii_lowercase().as_str() {
-            "bincode" => Ok(Self::Bincode),
             "json" => Ok(Self::Json),
             "binary" => Ok(Self::Binary),
             other => Err(other.to_string()),

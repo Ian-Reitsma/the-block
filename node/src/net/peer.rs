@@ -10,6 +10,7 @@ use crate::net::Bytes;
 use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::Transport;
 use crate::simple_db::{names, SimpleDb};
+use crate::util::binary_codec;
 use crate::Blockchain;
 use concurrency::{Lazy, MutexExt, OrderedMap};
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
@@ -39,7 +40,8 @@ use sys::fs::{FileLockExt, O_NOFOLLOW};
 
 use sys::paths;
 use sys::tempfile::{Builder as TempBuilder, NamedTempFile};
-use tar::Builder;
+
+use foundation_archive::{gzip, tar};
 
 fn sys_to_io_error(err: sys::error::SysError) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, err)
@@ -76,6 +78,21 @@ fn overlay_peer_label(pk: &[u8; 32]) -> String {
     overlay_peer_from_bytes(pk)
         .map(|peer| overlay_peer_to_base58(&peer))
         .unwrap_or_else(|_| crypto_suite::hex::encode(pk))
+}
+
+fn validate_metrics_archive(path: &Path) -> std::io::Result<()> {
+    let file = fs::File::open(path)?;
+    let decoder = gzip::Decoder::new(file)?;
+    let mut reader = tar::Reader::new(decoder);
+    while let Some(entry) = reader.next()? {
+        if entry.size() as usize != entry.data().len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "archive entry truncated",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Gossiped reputation update.
@@ -394,7 +411,7 @@ impl PeerSet {
         addr: Option<SocketAddr>,
         chain: &Arc<StdMutex<Blockchain>>,
     ) {
-        let bytes = match bincode::serialize(&msg.body) {
+        let bytes = match binary_codec::serialize(&msg.body) {
             Ok(b) => b,
             Err(_) => return,
         };
@@ -1532,49 +1549,49 @@ pub fn export_all_peer_stats(
             let tmp_dir = sys::tempfile::tempdir_in(&base).map_err(sys_to_io_error)?;
             let mut tmp = NamedTempFile::new_in(tmp_dir.path()).map_err(sys_to_io_error)?;
             tmp.as_file().lock_exclusive().map_err(sys_to_io_error)?;
-            {
-                let enc = flate2::write::GzEncoder::new(&mut tmp, flate2::Compression::default());
-                let mut tar = Builder::new(enc);
-                for pk in &keys {
-                    let m = {
-                        let map = peer_metrics_guard();
-                        match map.get(pk) {
-                            Some(v) => v.clone(),
-                            None => {
-                                return Err(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
-                                    "peer list changed",
-                                ))
-                            }
-                        }
-                    };
-                    if let Some(r) = min_rep {
-                        if m.reputation.score < r {
-                            continue;
+
+            let mut tar_builder = tar::Builder::new(Vec::new());
+            for pk in &keys {
+                let m = {
+                    let map = peer_metrics_guard();
+                    match map.get(pk) {
+                        Some(v) => v.clone(),
+                        None => {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                "peer list changed",
+                            ))
                         }
                     }
-                    if let Some(a) = active_within {
-                        let now = now_secs();
-                        if now.saturating_sub(m.last_updated) > a {
-                            continue;
-                        }
+                };
+                if let Some(r) = min_rep {
+                    if m.reputation.score < r {
+                        continue;
                     }
-                    let id = overlay_peer_label(pk);
-                    let data = json::to_vec(&m).map_err(json_to_io_error)?;
-                    total_bytes += data.len() as u64;
-                    if total_bytes > quota {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "quota exceeded",
-                        ));
-                    }
-                    let mut header = tar::Header::new_gnu();
-                    header.set_size(data.len() as u64);
-                    header.set_cksum();
-                    tar.append_data(&mut header, format!("{id}.json"), data.as_slice())?;
                 }
-                tar.finish()?;
+                if let Some(a) = active_within {
+                    let now = now_secs();
+                    if now.saturating_sub(m.last_updated) > a {
+                        continue;
+                    }
+                }
+                let id = overlay_peer_label(pk);
+                let data = json::to_vec(&m).map_err(json_to_io_error)?;
+                total_bytes += data.len() as u64;
+                if total_bytes > quota {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "quota exceeded",
+                    ));
+                }
+                let mut header = tar::Header::new_gnu();
+                header.set_size(data.len() as u64);
+                header.set_cksum();
+                tar_builder.append_data(&mut header, format!("{id}.json"), data.as_slice())?;
             }
+            let tar_bytes = tar_builder.finish()?;
+            let gz_bytes = gzip::encode(&tar_bytes);
+            tmp.write_all(&gz_bytes)?;
             if peer_metrics_guard().len() != initial_len {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -1608,6 +1625,29 @@ pub fn export_all_peer_stats(
                 initial_len,
                 total_bytes
             );
+
+            if let Err(err) = validate_metrics_archive(&path) {
+                #[cfg(feature = "telemetry")]
+                {
+                    crate::telemetry::PEER_STATS_EXPORT_VALIDATE_TOTAL
+                        .ensure_handle_for_label_values(&["error"])
+                        .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                        .inc();
+                    diagnostics::tracing::warn!(
+                        path = %path.display(),
+                        error = ?err,
+                        "peer metrics archive validation failed"
+                    );
+                }
+                return Err(err);
+            }
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::PEER_STATS_EXPORT_VALIDATE_TOTAL
+                    .ensure_handle_for_label_values(&["ok"])
+                    .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
+                    .inc();
+            }
             Ok(overwritten)
         } else {
             let tmp_dir = TempBuilder::new()

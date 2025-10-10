@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![cfg(feature = "quic")]
 use crypto_suite::signatures::ed25519::SigningKey;
+use foundation_serialization::binary;
 use std::io::Read;
 #[cfg(feature = "s2n-quic")]
 use sys::tempfile::tempdir;
@@ -98,10 +99,10 @@ fn quic_handshake_roundtrip() {
             quic_capabilities: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-        let bytes = bincode::serialize(&msg).unwrap();
+        let bytes = binary::encode(&msg).unwrap();
         quic::send(&conn, &bytes).await.unwrap();
         let recv = rx.await.unwrap();
-        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        let parsed: Message = binary::decode(&recv).unwrap();
         assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
         conn.close(0u32.into(), b"done");
         server_ep.wait_idle().await;
@@ -160,18 +161,18 @@ fn quic_gossip_roundtrip() {
             quic_capabilities: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
         let recv = hs_rx.await.unwrap();
-        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        let parsed: Message = binary::decode(&recv).unwrap();
         assert!(matches!(parsed.body, Payload::Handshake(h) if h.transport == Transport::Quic));
         let gossip = Message::new(Payload::Hello(Vec::new()), &sample_sk());
-        quic::send(&conn, &bincode::serialize(&gossip).unwrap())
+        quic::send(&conn, &binary::encode(&gossip).unwrap())
             .await
             .unwrap();
         let recv = msg_rx.await.unwrap();
-        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        let parsed: Message = binary::decode(&recv).unwrap();
         assert!(matches!(parsed.body, Payload::Hello(peers) if peers.is_empty()));
         conn.close(0u32.into(), b"done");
         server_ep.wait_idle().await;
@@ -223,7 +224,7 @@ fn quic_disconnect() {
             quic_capabilities: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
         conn.close(0u32.into(), b"client");
@@ -278,7 +279,7 @@ fn quic_fallback_to_tcp() {
         .await
         .unwrap();
         let recv = rx.await.unwrap();
-        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        let parsed: Message = binary::decode(&recv).unwrap();
         assert!(matches!(parsed.body, Payload::Handshake(_)));
     });
 }
@@ -438,11 +439,11 @@ fn quic_version_mismatch() {
             quic_capabilities: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello.clone()), &sample_sk());
-        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
         let recv = rx.await.unwrap();
-        let parsed: Message = bincode::deserialize(&recv).unwrap();
+        let parsed: Message = binary::decode(&recv).unwrap();
         let peers = PeerSet::new(Vec::new());
         let chain = std::sync::Arc::new(std::sync::Mutex::new(Blockchain::default()));
         net::set_track_handshake_fail(true);
@@ -500,7 +501,7 @@ fn quic_packet_loss_env() {
             quic_capabilities: Vec::new(),
         };
         let msg = Message::new(Payload::Handshake(hello), &sample_sk());
-        quic::send(&conn, &bincode::serialize(&msg).unwrap())
+        quic::send(&conn, &binary::encode(&msg).unwrap())
             .await
             .unwrap();
         assert!(

@@ -32,7 +32,7 @@ call sites outside the module stay unchanged.
 > **2025-11 update.** The first-party serialization stack now handles state
 > snapshots, contract stores, schema markers, and audit appenders directly.
 > These flows emit deterministic binary blobs or escaped JSON without touching
-> `serde`/`bincode`. The remaining crates keep targeting the
+> `serde`. The remaining crates keep targeting the
 > `foundation_serialization` helpers, which still return `Err(Unimplemented)`
 > until their respective codecs are ported.
 
@@ -44,7 +44,7 @@ call sites outside the module stay unchanged.
 - **SSTables.** When the memtable crosses the configured byte limit (default
   8 MiB) it is written to an immutable SST file under
   `<db>/<cf>/sst-<id>.bin`. Files store `(key, sequence, value|tombstone)`
-  tuples serialized with `bincode`.
+  tuples serialized with the shared binary facade.
 - **Compaction.** Background compaction rewrites all SSTs for a column family
   into a single sorted file, dropping superseded entries and persisted
   tombstones. Every compaction resets the WAL and advances the manifest’s file

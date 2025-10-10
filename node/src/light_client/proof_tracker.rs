@@ -1,6 +1,7 @@
 use std::convert::TryInto;
 use std::path::Path;
 
+use crate::util::binary_codec;
 use crate::{simple_db::names, Block, SimpleDb, TokenAmount};
 
 const RELAYER_PREFIX: &str = "relayers/";
@@ -102,12 +103,12 @@ impl ProofTracker {
     fn load_relayer(&self, key: &str) -> StoredRelayer {
         self.db
             .get(key)
-            .and_then(|bytes| bincode::deserialize(&bytes).ok())
+            .and_then(|bytes| binary_codec::deserialize(&bytes).ok())
             .unwrap_or_default()
     }
 
     fn store_relayer(&mut self, key: &str, value: &StoredRelayer) {
-        if let Ok(bytes) = bincode::serialize(value) {
+        if let Ok(bytes) = binary_codec::serialize(value) {
             let _ = self.db.insert(key, bytes);
         }
     }
@@ -122,7 +123,7 @@ impl ProofTracker {
 
     fn load_receipt_by_key(&self, key: &str) -> Option<ClaimReceipt> {
         self.db.get(key).and_then(|bytes| {
-            bincode::deserialize::<ClaimReceipt>(&bytes)
+            binary_codec::deserialize::<ClaimReceipt>(&bytes)
                 .ok()
                 .or_else(|| {
                     if bytes.len() == 8 {
@@ -144,7 +145,7 @@ impl ProofTracker {
     }
 
     fn store_receipt(&mut self, height: u64, receipt: &ClaimReceipt) {
-        if let Ok(bytes) = bincode::serialize(receipt) {
+        if let Ok(bytes) = binary_codec::serialize(receipt) {
             let key = Self::receipt_key(height);
             let _ = self.db.insert(&key, bytes);
         }

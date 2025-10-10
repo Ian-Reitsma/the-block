@@ -5,6 +5,7 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::thread;
 
 use crypto_suite::signatures::ed25519::SECRET_KEY_LENGTH;
+use foundation_serialization::binary;
 use crypto_suite::transactions::TransactionSigner;
 use the_block::identity::DidRegistry;
 use the_block::rpc::{fuzz_runtime_config, handle_conn};
@@ -46,7 +47,7 @@ pub fn run(data: &[u8]) {
 
         // Exercise the canonical serializer with fuzz input to ensure the Python
         // bindings and RPC helpers remain in lock-step with the suite.
-        if let Ok(payload) = bincode::deserialize::<RawTxPayload>(payload_bytes) {
+        if let Ok(payload) = binary::decode::<RawTxPayload>(payload_bytes) {
             let canonical = canonical_payload_bytes(&payload);
             let _ = signer.sign_with_secret(&secret, &canonical);
         }

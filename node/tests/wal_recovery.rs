@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 
 use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::{Deserialize, Serialize};
+use foundation_serialization::{binary, Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use the_block::SimpleDb;
@@ -71,26 +71,26 @@ fn simulate_crash_after_compaction(path: &std::path::Path) {
         id: 1,
     };
     let op = WalOp::Record(rec);
-    let bytes = bincode::serialize(&op).unwrap();
+    let bytes = binary::encode(&op).unwrap();
     let mut h = Hasher::new();
     h.update(&bytes);
     let entry = WalEntry {
         op,
         checksum: *h.finalize().as_bytes(),
     };
-    f.write_all(&bincode::serialize(&entry).unwrap()).unwrap();
+    f.write_all(&binary::encode(&entry).unwrap()).unwrap();
     let end = WalOp::End { last_id: 1 };
-    let bytes = bincode::serialize(&end).unwrap();
+    let bytes = binary::encode(&end).unwrap();
     let mut h = Hasher::new();
     h.update(&bytes);
     let entry = WalEntry {
         op: end,
         checksum: *h.finalize().as_bytes(),
     };
-    f.write_all(&bincode::serialize(&entry).unwrap()).unwrap();
+    f.write_all(&binary::encode(&entry).unwrap()).unwrap();
     let mut map = std::collections::HashMap::new();
     map.insert("k".to_string(), b"v".to_vec());
-    map.insert("__wal_id".into(), bincode::serialize(&1u64).unwrap());
-    let db_bytes = bincode::serialize(&map).unwrap();
+    map.insert("__wal_id".into(), binary::encode(&1u64).unwrap());
+    let db_bytes = binary::encode(&map).unwrap();
     fs::write(path.join("db"), db_bytes).unwrap();
 }

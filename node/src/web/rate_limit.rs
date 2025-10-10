@@ -1,8 +1,8 @@
+use concurrency::Xor8;
 #[cfg(target_arch = "aarch64")]
 use std::arch::is_aarch64_feature_detected;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 use std::arch::is_x86_feature_detected;
-use xorfilter_rs::Xor8;
 
 #[derive(Clone)]
 enum Backend {
@@ -17,7 +17,9 @@ pub struct RateLimitFilter {
 
 impl RateLimitFilter {
     pub fn new() -> Self {
-        // Detect SIMD features at runtime; xorfilter-rs internally optimizes
+        // Detect SIMD features at runtime; the first-party filter currently
+        // exposes a scalar backend but retains the detection scaffolding so we
+        // can wire SIMD specialisations without touching callers.
         #[allow(unused_mut)]
         let mut backend = Backend::Scalar(Xor8::new(&[]));
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]

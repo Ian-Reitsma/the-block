@@ -2,7 +2,7 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
-use foundation_serialization::json::Value;
+use foundation_serialization::{binary, json::Value};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
     config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
@@ -331,7 +331,7 @@ fn rpc_concurrent_controls() {
             memo: Vec::new(),
         };
         let tx = sign_tx(sk.to_vec(), payload).unwrap();
-        let tx_hex = crypto_suite::hex::encode(bincode::serialize(&tx).unwrap());
+        let tx_hex = crypto_suite::hex::encode(binary::encode(&tx).unwrap());
         let tx_arc = Arc::new(tx_hex);
 
         let mut handles = Vec::new();

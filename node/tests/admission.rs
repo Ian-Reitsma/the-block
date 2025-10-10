@@ -1,6 +1,7 @@
 #![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use crypto_suite::hashing::blake3;
+use foundation_serialization::binary;
 use std::fs;
 use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -79,7 +80,7 @@ fn mine_block_skips_nonce_gaps() {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos() as u64,
-            serialized_size: bincode::serialize(&tx).map(|b| b.len() as u64).unwrap_or(0),
+            serialized_size: binary::encode(&tx).map(|b| b.len() as u64).unwrap_or(0),
         },
     );
     let block = bc.mine_block("miner").unwrap();
@@ -262,7 +263,7 @@ fn fee_per_byte_boundary() {
         memo: Vec::new(),
     };
     let tx_tmp = sign_tx(sk.clone(), payload.clone()).unwrap();
-    let size = bincode::serialize(&tx_tmp).unwrap().len() as u64;
+    let size = binary::encode(&tx_tmp).unwrap().len() as u64;
     let mut low = payload.clone();
     low.fee = size * bc.min_fee_per_byte_consumer - 1;
     let tx_low = sign_tx(sk.clone(), low).unwrap();

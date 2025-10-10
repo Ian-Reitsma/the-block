@@ -17,7 +17,7 @@ pub use encoding::hex;
 pub use error::{Error, ErrorKind, Result};
 
 pub use transactions::{
-    canonical_bincode_config, canonical_payload_bytes, domain_separated_message, domain_tag_for,
+    canonical_binary_config, canonical_payload_bytes, domain_separated_message, domain_tag_for,
     try_canonical_payload_bytes, DomainTag, TransactionError, TransactionSigner,
     TRANSACTION_DOMAIN_PREFIX,
 };

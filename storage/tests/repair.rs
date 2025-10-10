@@ -1,4 +1,5 @@
 use crypto_suite::hashing::blake3::Hasher;
+use foundation_serialization::binary;
 use the_block::storage::erasure;
 use the_block::storage::repair::{self, RepairLog, RepairLogStatus, RepairRequest};
 use the_block::storage::settings;
@@ -11,14 +12,14 @@ use the_block::storage::types::{CHACHA20_POLY1305_NONCE_LEN, CHACHA20_POLY1305_T
 fn store_manifest(db: &mut SimpleDb, manifest: &mut ObjectManifest) -> [u8; 32] {
     let mut tmp = manifest.clone();
     tmp.blake3 = [0u8; 32];
-    let bytes = bincode::serialize(&tmp).expect("serialize");
+    let bytes = binary::encode(&tmp).expect("serialize");
     let mut hasher = Hasher::new();
     hasher.update(&bytes);
     let hash = hasher.finalize();
     let mut manifest_hash = [0u8; 32];
     manifest_hash.copy_from_slice(hash.as_bytes());
     manifest.blake3 = manifest_hash;
-    let manifest_bytes = bincode::serialize(manifest).expect("serialize final");
+    let manifest_bytes = binary::encode(manifest).expect("serialize final");
     db.try_insert(
         &format!("manifest/{}", crypto_suite::hex::encode(manifest_hash)),
         manifest_bytes,
