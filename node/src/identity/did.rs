@@ -12,6 +12,7 @@ use crate::{
     simple_db::names,
     to_array_32, to_array_64,
     transaction::{TxDidAnchor, TxDidAnchorAttestation},
+    util::binary_codec,
     SimpleDb,
 };
 use state::{DidState, DidStateError};
@@ -193,7 +194,7 @@ impl DidRegistry {
         let prev = self
             .db
             .get(&did_key(&tx.address))
-            .and_then(|raw| bincode::deserialize::<DidRecord>(&raw).ok());
+            .and_then(|raw| binary_codec::deserialize::<DidRecord>(&raw).ok());
         let mut state = prev
             .as_ref()
             .map(|rec| DidState {
@@ -216,7 +217,7 @@ impl DidRegistry {
             public_key: tx.public_key.clone(),
             remote_attestation,
         };
-        let bytes = bincode::serialize(&record).map_err(|_| DidError::Storage)?;
+        let bytes = binary_codec::serialize(&record).map_err(|_| DidError::Storage)?;
         self.db.insert(&did_key(&record.address), bytes);
 
         #[cfg(feature = "telemetry")]
@@ -228,7 +229,7 @@ impl DidRegistry {
     pub fn resolve(&self, address: &str) -> Option<DidRecord> {
         self.db
             .get(&did_key(address))
-            .and_then(|raw| bincode::deserialize::<DidRecord>(&raw).ok())
+            .and_then(|raw| binary_codec::deserialize::<DidRecord>(&raw).ok())
     }
 }
 

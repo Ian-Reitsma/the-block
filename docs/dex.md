@@ -20,7 +20,9 @@ Trust lines track bilateral credit with three fields:
 
 - When matching, the engine checks that the counter-order price does not exceed the caller's slippage tolerance.
 - Each fill calls `TrustLedger::adjust` to move balances along the settlement path.
-- Trades and order placements persist to `~/.the_block/state/dex/` via a bincode-backed `DexStore`, surviving crashes and restarts.
+- Trades and order placements persist to `~/.the_block/state/dex/` via a
+  `DexStore` that now routes through `crate::util::binary_codec`, preserving
+  crash durability without touching third-party codecs.
 
 ## 2.1 Escrow and Partial Payments
 

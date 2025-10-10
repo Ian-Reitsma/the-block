@@ -2,6 +2,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use foundation_serialization::binary;
 use std::cmp::Ordering;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,7 +31,7 @@ fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
         memo: Vec::new(),
     };
     let tx = sign_tx(sk.to_vec(), payload).expect("valid key");
-    let size = bincode::serialize(&tx).map(|b| b.len() as u64).unwrap_or(0);
+    let size = binary::encode(&tx).map(|b| b.len() as u64).unwrap_or(0);
     MempoolEntry {
         tx,
         timestamp_millis: ts,

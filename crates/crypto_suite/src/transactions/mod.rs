@@ -2,7 +2,7 @@ use core::ops::Deref;
 
 use thiserror::Error;
 
-use codec::{profiles, BincodeConfig};
+use codec::{profiles, BinaryConfig};
 
 use crate::signatures::ed25519::{
     Signature, SignatureError, SigningKey, VerifyingKey, PUBLIC_KEY_LENGTH, SECRET_KEY_LENGTH,
@@ -65,13 +65,13 @@ pub fn domain_tag_for(chain_id: u32) -> DomainTag {
     DomainTag(buf)
 }
 
-/// Canonical bincode configuration shared across transaction serialization helpers.
+/// Canonical binary configuration shared across transaction serialization helpers.
 #[must_use]
-pub fn canonical_bincode_config() -> BincodeConfig {
+pub fn canonical_binary_config() -> BinaryConfig {
     profiles::transaction::config()
 }
 
-/// Serialize a payload using the canonical transaction bincode settings.
+/// Serialize a payload using the canonical transaction binary settings.
 #[must_use]
 pub fn canonical_payload_bytes<T>(payload: &T) -> Vec<u8>
 where
@@ -205,7 +205,6 @@ impl TransactionSigner {
 
 #[cfg(test)]
 mod tests {
-    use bincode::Options;
     use rand::rngs::StdRng;
     use rand::SeedableRng;
 
@@ -224,7 +223,7 @@ mod tests {
             value: 42,
         };
         let via_helper = try_canonical_payload_bytes(&payload).expect("helper serialization");
-        let via_config = canonical_bincode_config()
+        let via_config = canonical_binary_config()
             .serialize(&payload)
             .expect("config serialization");
         assert_eq!(via_helper, via_config);

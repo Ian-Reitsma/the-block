@@ -8,11 +8,12 @@ mechanism suitable for servers or minimal environments.
 ## Packaging
 
 ```
-cargo run --package installer -- package --os linux --out node.zip
+cargo run --package installer -- package --os linux --out node.tar.gz
 ```
 
-This command checks common dependencies, zips the binaries and emits a
-BLAKE3 signature alongside the archive.
+The command now emits a deterministic `.tar.gz` archive backed by the
+first-party compression stack and writes a matching BLAKE3 signature next to
+the bundle.
 
 ## Auto-Update
 

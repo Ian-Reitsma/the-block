@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
+use foundation_archive::{gzip, tar};
 use std::fs;
-use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -38,16 +38,17 @@ fn support_bundle_redacts_tokens() {
     let bundle_name = bundle_line.split_whitespace().last().unwrap();
     let bundle_path = tmp.path().join(bundle_name);
 
-    let file = fs::File::open(bundle_path).unwrap();
-    let gz = flate2::read::GzDecoder::new(file);
-    let mut archive = tar::Archive::new(gz);
-    let mut contents = String::new();
-    for entry in archive.entries().unwrap() {
-        let mut e = entry.unwrap();
-        if e.path().unwrap().ends_with("config.toml") {
-            e.read_to_string(&mut contents).unwrap();
+    let bundle_file = fs::File::open(&bundle_path).expect("open bundle");
+    let decoder = gzip::Decoder::new(bundle_file).expect("gzip decoder");
+    let mut reader = tar::Reader::new(decoder);
+    let mut contents = None;
+    while let Some(entry) = reader.next().expect("read entry") {
+        if entry.name() == "config.toml" {
+            contents = Some(String::from_utf8(entry.data().to_vec()).expect("utf8"));
+            break;
         }
     }
+    let contents = contents.expect("config present");
     assert!(contents.contains("admin_token=\"REDACTED\""));
     assert!(contents.contains("private_key=\"REDACTED\""));
     assert!(!contents.contains("SECRET"));

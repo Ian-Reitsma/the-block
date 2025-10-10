@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 mod util;
 use crypto_suite::signatures::ed25519::SigningKey;
+use foundation_serialization::binary;
 use rand::{OsRng, RngCore};
 use std::fs;
 use std::io::Write;
@@ -19,7 +20,7 @@ use util::fork::inject_fork;
 fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
     let msg = Message::new(body, sk);
     let mut stream = TcpStream::connect(addr).unwrap();
-    let bytes = bincode::serialize(&msg).unwrap();
+    let bytes = binary::encode(&msg).unwrap();
     stream.write_all(&bytes).unwrap();
 }
 

@@ -25,6 +25,7 @@ use sys::process;
 use the_block::config::OverlayBackend;
 #[cfg(feature = "telemetry")]
 use the_block::serve_metrics;
+use the_block::util::binary_codec;
 use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
     generate_keypair,
@@ -1400,7 +1401,7 @@ async fn async_main() -> std::process::ExitCode {
             let sk = load_key(&key_id);
             let payload: RawTxPayload = json::from_str(&tx_json).expect("parse tx payload");
             let signed = sign_tx(sk.to_bytes().to_vec(), payload).expect("sign tx");
-            let bytes = bincode::serialize(&signed).expect("serialize tx");
+            let bytes = binary_codec::serialize(&signed).expect("serialize tx");
             println!("{}", crypto_suite::hex::encode(bytes));
             std::process::ExitCode::SUCCESS
         }

@@ -1,4 +1,5 @@
 use crate::net::peer::ReputationUpdate;
+use crate::util::binary_codec;
 use crate::{p2p::handshake::Hello, BlobTx, Block, SignedTransaction};
 use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
@@ -26,8 +27,8 @@ pub struct Message {
 impl Message {
     /// Sign `body` with `kp` producing an authenticated message.
     pub fn new(body: Payload, sk: &SigningKey) -> Self {
-        let bytes =
-            bincode::serialize(&body).unwrap_or_else(|e| panic!("serialize message body: {e}"));
+        let bytes = binary_codec::serialize(&body)
+            .unwrap_or_else(|e| panic!("serialize message body: {e}"));
         let sig = sk.sign(&bytes);
         Self {
             pubkey: sk.verifying_key().to_bytes(),
@@ -88,6 +89,6 @@ pub struct BlobChunk {
 /// Attempt to decode a [`Message`] from raw bytes.
 #[cfg(feature = "fuzzy")]
 #[allow(dead_code)]
-pub fn decode(bytes: &[u8]) -> bincode::Result<Message> {
-    bincode::deserialize(bytes)
+pub fn decode(bytes: &[u8]) -> Result<Message, codec::Error> {
+    binary_codec::deserialize(bytes)
 }

@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
+use foundation_serialization::binary;
 use std::sync::{Arc, Mutex};
 use sys::temp;
 use testkit::tb_prop_test;
@@ -78,7 +79,7 @@ tb_prop_test!(fuzz_malformed_handshake, |runner| {
             std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
             let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
             let peers = PeerSet::new(vec![]);
-            if let Ok(msg) = bincode::deserialize::<Message>(&raw) {
+            if let Ok(msg) = binary::decode::<Message>(&raw) {
                 peers.handle_message(msg, None, &bc);
             }
         })

@@ -10,6 +10,7 @@ use crate::net::peer::is_throttled_addr;
 use crate::net::peer::ReputationUpdate;
 use crate::net::{record_ip_drop, send_msg, send_quic_msg, Message};
 use crate::p2p::handshake::Transport;
+use crate::util::binary_codec;
 use concurrency::Bytes;
 use crypto_suite::signatures::ed25519::SigningKey;
 
@@ -64,11 +65,9 @@ pub fn broadcast_with<F>(
         Lazy::new(|| Mutex::new((HashSet::new(), VecDeque::new())));
     const MAX_SEEN: usize = 1024;
     let hash = {
-        let size = bincode::serialized_size(msg).unwrap_or(0) as usize;
-        let mut buf = Vec::with_capacity(size);
-        bincode::serialize_into(&mut buf, msg).unwrap_or_default();
+        let encoded = binary_codec::serialize(msg).unwrap_or_default();
         let mut h = Hasher::new();
-        h.update(&buf);
+        h.update(&encoded);
         *h.finalize().as_bytes()
     };
     let mut guard = SEEN.guard();

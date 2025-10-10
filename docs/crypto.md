@@ -12,7 +12,7 @@ paths continue to compile while downstream crates migrate module-by-module.
 The suite exposes the following modules:
 
 - `signatures` — project-specific Ed25519 wrappers with PKCS#8 helpers.
-- `transactions` — canonical bincode serialisation, domain-tag management, and
+- `transactions` — canonical binary serialisation, domain-tag management, and
   signing/verifying utilities shared across binaries.
 - `hashing` — First-party BLAKE3-compatible tree hash plus an in-house SHA3-256
   fallback.

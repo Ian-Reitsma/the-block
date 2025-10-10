@@ -66,9 +66,11 @@ const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
 const KNOWN_STORAGE_ENGINES: [&str; 4] = ["memory", "inhouse", "rocksdb", "rocksdb-compat"];
 #[cfg(feature = "telemetry")]
 const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
-    ("bincode", &["transaction", "gossip", "storage_manifest"]),
+    (
+        "binary",
+        &["canonical", "transaction", "gossip", "storage_manifest"],
+    ),
     ("json", &["none"]),
-    ("binary", &["none"]),
 ];
 #[cfg(all(feature = "quic", feature = "s2n-quic"))]
 const COMPILED_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
@@ -375,16 +377,16 @@ fn set_coding_metric(component: &str, algorithm: &str, mode: &str, value: i64) {
 #[cfg(feature = "telemetry")]
 fn codec_labels(codec: Codec) -> (&'static str, &'static str) {
     match codec {
-        Codec::Bincode(profile) => (
-            "bincode",
+        Codec::Binary(profile) => (
+            "binary",
             match profile {
-                codec::BincodeProfile::Transaction => "transaction",
-                codec::BincodeProfile::Gossip => "gossip",
-                codec::BincodeProfile::StorageManifest => "storage_manifest",
+                codec::BinaryProfile::Canonical => "canonical",
+                codec::BinaryProfile::Transaction => "transaction",
+                codec::BinaryProfile::Gossip => "gossip",
+                codec::BinaryProfile::StorageManifest => "storage_manifest",
             },
         ),
         Codec::Json(_) => ("json", CODEC_NONE_PROFILE),
-        Codec::Binary(_) => ("binary", CODEC_NONE_PROFILE),
     }
 }
 
@@ -1559,15 +1561,15 @@ pub static CRYPTO_BACKEND_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
 #[cfg(all(test, feature = "telemetry"))]
 mod tests {
     use super::*;
-    use codec::{BincodeProfile, JsonProfile};
+    use codec::{BinaryProfile, JsonProfile};
 
     fn reset_wrapper_metrics() {
         for labels in [
             ["json", "serialize", CODEC_NONE_PROFILE, codec::VERSION],
-            ["bincode", "serialize", CODEC_NONE_PROFILE, codec::VERSION],
-            ["bincode", "deserialize", CODEC_NONE_PROFILE, codec::VERSION],
-            ["bincode", "serialize", "transaction", codec::VERSION],
-            ["bincode", "deserialize", "transaction", codec::VERSION],
+            ["binary", "serialize", "canonical", codec::VERSION],
+            ["binary", "deserialize", "canonical", codec::VERSION],
+            ["binary", "serialize", "transaction", codec::VERSION],
+            ["binary", "deserialize", "transaction", codec::VERSION],
         ] {
             CODEC_PAYLOAD_BYTES.remove_label_values(&labels);
         }
@@ -1620,22 +1622,22 @@ mod tests {
         assert_eq!(hist.get_sample_count(), 1);
 
         codec_metrics_hook(
-            Codec::Bincode(BincodeProfile::Transaction),
+            Codec::Binary(BinaryProfile::Transaction),
             Direction::Serialize,
             None,
         );
         let serialize_fail = CODEC_SERIALIZE_FAIL_TOTAL
-            .handle_for_label_values(&["bincode", "transaction", codec::VERSION])
+            .handle_for_label_values(&["binary", "transaction", codec::VERSION])
             .unwrap();
         assert_eq!(serialize_fail.get(), 1);
 
         codec_metrics_hook(
-            Codec::Bincode(BincodeProfile::Transaction),
+            Codec::Binary(BinaryProfile::Transaction),
             Direction::Deserialize,
             None,
         );
         let deserialize_fail = CODEC_DESERIALIZE_FAIL_TOTAL
-            .handle_for_label_values(&["bincode", "transaction", codec::VERSION])
+            .handle_for_label_values(&["binary", "transaction", codec::VERSION])
             .unwrap();
         assert_eq!(deserialize_fail.get(), 1);
     }
@@ -1692,7 +1694,7 @@ mod tests {
             .inc();
         record_coding_algorithms(&crate::storage::settings::algorithms());
         codec_metrics_hook(
-            Codec::Bincode(BincodeProfile::Transaction),
+            Codec::Binary(BinaryProfile::Transaction),
             Direction::Serialize,
             None,
         );
@@ -1716,7 +1718,7 @@ mod tests {
         let codec_failure = metric_value(
             &summary,
             "codec_serialize_fail_total",
-            &[("codec", "bincode"), ("profile", "transaction")],
+            &[("codec", "binary"), ("profile", "transaction")],
         )
         .unwrap();
         assert_eq!(codec_failure, 1.0);
@@ -4214,6 +4216,21 @@ pub static PEER_STATS_EXPORT_ALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         Opts::new(
             "peer_stats_export_all_total",
             "Bulk peer metric export attempts grouped by result",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static PEER_STATS_EXPORT_VALIDATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "peer_stats_export_validate_total",
+            "Validation results for exported peer metric archives",
         ),
         &["result"],
     )

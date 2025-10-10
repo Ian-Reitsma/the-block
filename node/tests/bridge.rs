@@ -6,6 +6,7 @@ use bridges::{
     RelayerBundle, RelayerProof,
 };
 use concurrency::Lazy;
+use foundation_serialization::binary;
 use sled::Config;
 use std::path::Path;
 use std::sync::Mutex;
@@ -77,7 +78,7 @@ fn approve_release(gov_path: &Path, asset: &str, commitment: &[u8; 32]) -> Strin
     let tree = db.open_tree("approved_releases").expect("tree");
     tree.insert(
         release_key.as_bytes(),
-        bincode::serialize(&approved).expect("serialize"),
+        binary::encode(&approved).expect("serialize"),
     )
     .expect("insert");
     tree.flush().expect("flush");

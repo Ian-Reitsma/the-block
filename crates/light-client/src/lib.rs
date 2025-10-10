@@ -5,12 +5,11 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::io::Write;
 use std::time::{Duration, UNIX_EPOCH};
 
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
-use flate2::{write::GzEncoder, Compression};
+use foundation_archive::gzip;
 use foundation_serialization::{Deserialize, Serialize};
 
 mod config;
@@ -334,9 +333,7 @@ pub fn upload_compressed_logs(
     data: &[u8],
     status: Option<&DeviceStatusSnapshot>,
 ) -> AnnotatedLogBundle {
-    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
-    let _ = enc.write_all(data);
-    let payload = enc.finish().unwrap_or_default();
+    let payload = gzip::encode(data);
     let device_status = status.map(|snapshot| {
         let observed = snapshot
             .observed_at

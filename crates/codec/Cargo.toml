@@ -8,7 +8,6 @@ default = []
 telemetry = ["dep:metrics"]
 
 [dependencies]
-bincode = "1.3"
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../foundation_serialization" }
 thiserror = "1"

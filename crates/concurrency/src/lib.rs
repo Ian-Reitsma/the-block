@@ -3,10 +3,12 @@
 pub mod bytes;
 pub mod cache;
 pub mod collections;
+pub mod filters;
 
 pub use bytes::{Bytes, BytesMut};
 pub use cache::LruCache;
 pub use collections::{OrderedMap, OrderedSet};
+pub use filters::xor8::Xor8;
 
 use std::{
     collections::HashMap,

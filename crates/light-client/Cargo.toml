@@ -16,9 +16,9 @@ ios-probe = [
 telemetry = ["dep:foundation_lazy"]
 
 [dependencies]
+foundation_archive = { path = "../foundation_archive" }
 foundation_serialization = { path = "../foundation_serialization" }
 foundation_lazy = { path = "../foundation_lazy", optional = true }
-flate2 = "1"
 futures = "0.3"
 coding = { path = "../coding" }
 crypto_suite = { path = "../crypto_suite" }

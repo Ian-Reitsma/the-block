@@ -14,7 +14,8 @@ The compute market supports a store-and-forward "courier" mode where contributor
 - `timestamp` – UNIX seconds when `send` was called.
 - `acknowledged` – set to `true` once the bundle is confirmed upstream.
 
-Receipts are bincode-serialised and persisted in a sled tree named `courier`.
+Receipts are serialised with the shared binary facade and persisted in a sled
+tree named `courier`.
 
 ## 2. Sending Bundles
 

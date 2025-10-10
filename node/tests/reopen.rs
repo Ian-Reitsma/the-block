@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use base64_fp::decode_standard;
+use foundation_serialization::binary;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -302,9 +303,9 @@ fn startup_missing_account_does_not_increment_startup_ttl_drop_total() {
             recent_timestamps: Vec::new(),
         };
         let mut map: HashMap<String, Vec<u8>> = HashMap::new();
-        map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+        map.insert("chain".to_string(), binary::encode(&disk).unwrap());
         let db_path = dir.path().join("db");
-        fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+        fs::write(db_path, binary::encode(&map).unwrap()).unwrap();
     }
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert!(bc.mempool_consumer.is_empty());
@@ -437,9 +438,9 @@ fn schema_upgrade_compatibility() {
         recent_timestamps: Vec::new(),
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
-    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+    map.insert("chain".to_string(), binary::encode(&disk).unwrap());
     let db_path = dir.path().join("db");
-    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+    fs::write(db_path, binary::encode(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let migrated = bc.mempool_consumer.get(&(String::from("a"), 1)).unwrap();

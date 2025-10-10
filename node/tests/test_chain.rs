@@ -9,6 +9,7 @@
 
 use base64_fp::decode_standard;
 use crypto_suite::hashing::blake3;
+use foundation_serialization::binary;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -70,7 +71,7 @@ fn hash_state(bc: &Blockchain) -> String {
         epoch_bytes_out: bc.epoch_bytes_out,
         recent_timestamps: bc.recent_timestamps.iter().copied().collect(),
     };
-    let bytes = bincode::serialize(&disk).unwrap();
+    let bytes = binary::encode(&disk).unwrap();
     blake3::hash(&bytes).to_hex().to_string()
 }
 
@@ -830,8 +831,8 @@ fn test_schema_upgrade_compatibility() {
     };
     let dir = temp_dir("schema_v3");
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
-    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
-    fs::write(dir.path().join("db"), bincode::serialize(&map).unwrap()).unwrap();
+    map.insert("chain".to_string(), binary::encode(&disk).unwrap());
+    fs::write(dir.path().join("db"), binary::encode(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let post_sum_c: u64 = bc.chain.iter().map(|b| b.coinbase_consumer.get()).sum();

@@ -1,6 +1,21 @@
 # CHANGELOG
-> **Review (2025-10-01):** Recorded first-party Ed25519 backend adoption and kept wrapper telemetry notes current.
-> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-09-25).
+> **Review (2025-10-10):** Finalised the binary codec migration across node, crypto suite, telemetry, and harness tooling; documentation below captures the telemetry and CLI updates accompanying the removal of the legacy bincode profiles.
+> Dependency pivot status: Runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced (2025-10-10).
+
+## 2025-10-10 — Binary Codec Consolidation
+
+### Added
+- `codec` now exposes named binary profiles (`canonical`, `transaction`, `gossip`, `storage_manifest`) alongside JSON; telemetry hooks emit per-profile labels and `BinaryProfile` replaces the legacy `BincodeProfile` everywhere.
+- `node/src/util/binary_codec.rs` wraps the canonical binary profile for network/storage helpers, keeping encode/decode paths local to the node crate.
+- `docs/progress.md`, `docs/pivot_dependency_strategy.md`, and the dependency audit now track the binary codec rollout and note the remaining serde/bincode usage confined to tooling crates.
+
+### Changed
+- `node/src/telemetry.rs` labels codec metrics with `binary` profile identifiers, removes bincode-specific counters, and updates snapshot tests accordingly.
+- `crates/crypto_suite` swaps `canonical_bincode_config` for `canonical_binary_config`, updates transaction signing helpers, and refreshes associated tests.
+- Simulation tooling (`tb-sim`) drops the `--codec bincode` option, defaults to the binary facade, and reuses the shared `codec::serialize` helpers when injecting faults.
+
+### Fixed
+- Prevented `FIRST_PARTY_ONLY=1` builds from panicking when telemetry or harness tooling touches the codec facade by routing every call through the in-house binary implementation.
 
 ## 2025-09-25 — Dependency Wrapper Telemetry Cutover
 

@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
     let storage = parse_choice(&matches, "storage", StorageBackendChoice::RocksDb)?;
     let coding = parse_choice(&matches, "coding", CodingBackendChoice::ReedSolomon)?;
     let crypto = parse_choice(&matches, "crypto", CryptoBackendChoice::Dalek)?;
-    let codec = parse_choice(&matches, "codec", CodecBackendChoice::Bincode)?;
+    let codec = parse_choice(&matches, "codec", CodecBackendChoice::Binary)?;
 
     let faults = matches
         .get_strings("fault")
@@ -154,7 +154,7 @@ fn build_command() -> Command {
     ))
     .arg(ArgSpec::Option(
         OptionSpec::new("codec", "codec", "Codec backend")
-            .default(CodecBackendChoice::Bincode.as_str())
+            .default(CodecBackendChoice::Binary.as_str())
             .value_enum(CodecBackendChoice::variants()),
     ))
     .arg(ArgSpec::Option(

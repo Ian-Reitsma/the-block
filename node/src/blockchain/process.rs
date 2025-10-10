@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    simple_db::DbDelta, transaction::verify_stateless, Account, Block, Blockchain, TokenBalance,
-    TxAdmissionError,
+    simple_db::DbDelta, transaction::verify_stateless, util::binary_codec, Account, Block,
+    Blockchain, TokenBalance, TxAdmissionError,
 };
 use ledger::{address, shard::ShardState};
 use state::MerkleTrie;
@@ -114,7 +114,7 @@ impl<'a> ExecutionContext<'a> {
                 .insert(delta.address.clone(), delta.account.clone());
             self.account_deltas.push((delta.address.clone(), prev));
             let key = format!("acct:{}", delta.address);
-            let bytes = bincode::serialize(&delta.account)
+            let bytes = binary_codec::serialize(&delta.account)
                 .unwrap_or_else(|e| panic!("serialize account: {e}"));
             self.chain
                 .write_shard_state(delta.shard, &key, bytes, &mut self.db_deltas)?;

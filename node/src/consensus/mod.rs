@@ -58,7 +58,7 @@ const fn assert_genesis_hash() {
 }
 const _: () = assert_genesis_hash();
 
-use codec::{profiles, BincodeConfig};
+use codec::{profiles, BinaryConfig};
 use std::sync::LazyLock;
 
 use crypto_suite::transactions::domain_tag_for as suite_domain_tag_for;
@@ -74,7 +74,7 @@ pub fn domain_tag() -> &'static [u8] {
     &*TAG
 }
 
-/// Canonical bincode configuration shared across the codebase.
-pub fn bincode_config() -> BincodeConfig {
+/// Canonical binary configuration shared across the codebase.
+pub fn binary_config() -> BinaryConfig {
     profiles::transaction::config()
 }

@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [dependencies]
-bincode = "1"
+foundation_serialization = { path = "../../crates/foundation_serialization" }
 serde = { version = "1", features = ["derive"] }
 the_block = { path = "../../node" }
 

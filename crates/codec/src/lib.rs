@@ -1,11 +1,10 @@
 use core::fmt;
 
-use bincode::Options;
 use foundation_serialization::{binary, json, Error as SerializationError};
 use serde::{de::DeserializeOwned, Serialize};
+use std::string::FromUtf8Error;
 #[cfg(feature = "telemetry")]
 use std::sync::OnceLock;
-use std::{string::FromUtf8Error, sync::LazyLock};
 use thiserror::Error;
 
 #[cfg(feature = "telemetry")]
@@ -69,17 +68,158 @@ impl Direction {
     }
 }
 
+/// Binary profiles made available to the workspace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BinaryProfile {
+    /// Canonical first-party binary serializer used for general payloads.
+    Canonical,
+    /// Transaction serialization profile.
+    Transaction,
+    /// Gossip relay persistence profile.
+    Gossip,
+    /// Storage manifest persistence profile.
+    StorageManifest,
+}
+
+impl BinaryProfile {
+    const fn as_str(self) -> &'static str {
+        match self {
+            BinaryProfile::Canonical => "canonical",
+            BinaryProfile::Transaction => "transaction",
+            BinaryProfile::Gossip => "gossip",
+            BinaryProfile::StorageManifest => "storage_manifest",
+        }
+    }
+
+    fn encode<T: Serialize>(self, value: &T) -> std::result::Result<Vec<u8>, SerializationError> {
+        binary::encode(value)
+    }
+
+    fn decode<T: DeserializeOwned>(
+        self,
+        bytes: &[u8],
+    ) -> std::result::Result<T, SerializationError> {
+        binary::decode(bytes)
+    }
+
+    /// Fetch the configured profile wrapper for this codec.
+    #[must_use]
+    pub const fn config(self) -> BinaryConfig {
+        BinaryConfig { profile: self }
+    }
+}
+
+impl fmt::Display for BinaryProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Wrapper retaining the public API exposed by `codec` for binary profiles.
+#[derive(Clone, Copy, Debug)]
+pub struct BinaryConfig {
+    profile: BinaryProfile,
+}
+
+impl BinaryConfig {
+    /// Serialize a value using the associated profile.
+    pub fn serialize<T: Serialize>(
+        &self,
+        value: &T,
+    ) -> std::result::Result<Vec<u8>, SerializationError> {
+        self.profile.encode(value)
+    }
+
+    /// Deserialize a value using the associated profile.
+    pub fn deserialize<T: DeserializeOwned>(
+        &self,
+        bytes: &[u8],
+    ) -> std::result::Result<T, SerializationError> {
+        self.profile.decode(bytes)
+    }
+
+    /// Return the underlying profile.
+    pub const fn profile(self) -> BinaryProfile {
+        self.profile
+    }
+}
+
+/// Canonical JSON configuration identifiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JsonProfile {
+    /// Default JSON serializer from the first-party facade.
+    Canonical,
+}
+
+impl fmt::Display for JsonProfile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JsonProfile::Canonical => write!(f, "canonical"),
+        }
+    }
+}
+
+/// Selects the codec implementation to use for serialization or deserialization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Codec {
+    /// Binary serialization using one of the configured profiles.
+    Binary(BinaryProfile),
+    /// JSON serialization using the canonical settings.
+    Json(JsonProfile),
+}
+
+impl Codec {
+    fn codec_label(self) -> &'static str {
+        match self {
+            Codec::Binary(_) => "binary",
+            Codec::Json(_) => "json",
+        }
+    }
+
+    #[cfg(feature = "telemetry")]
+    fn profile_label(self) -> Option<&'static str> {
+        match self {
+            Codec::Binary(profile) => Some(profile.as_str()),
+            Codec::Json(_) => None,
+        }
+    }
+
+    fn encode<T: Serialize>(self, value: &T) -> Result<Vec<u8>> {
+        match self {
+            Codec::Binary(profile) => profile
+                .config()
+                .serialize(value)
+                .map_err(|err| Error::from_binary(err, profile, Direction::Serialize)),
+            Codec::Json(JsonProfile::Canonical) => {
+                json::to_vec(value).map_err(|err| Error::from_json(err, Direction::Serialize))
+            }
+        }
+    }
+
+    fn decode<T: DeserializeOwned>(self, bytes: &[u8]) -> Result<T> {
+        match self {
+            Codec::Binary(profile) => profile
+                .config()
+                .deserialize(bytes)
+                .map_err(|err| Error::from_binary(err, profile, Direction::Deserialize)),
+            Codec::Json(JsonProfile::Canonical) => {
+                json::from_slice(bytes).map_err(|err| Error::from_json(err, Direction::Deserialize))
+            }
+        }
+    }
+}
+
 /// Error raised when a codec operation fails.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// A bincode codec failure.
-    #[error("{direction} using {profile} bincode failed: {source}")]
-    Bincode {
-        /// Underlying error returned by bincode.
+    /// A binary codec failure using the first-party facade.
+    #[error("{direction} using {profile} binary profile failed: {source}")]
+    Binary {
+        /// Underlying error reported by the serialization facade.
         #[source]
-        source: bincode::Error,
+        source: SerializationError,
         /// Named profile describing the configuration that failed.
-        profile: BincodeProfile,
+        profile: BinaryProfile,
         /// Direction of the codec operation.
         direction: Direction,
     },
@@ -87,15 +227,6 @@ pub enum Error {
     #[error("{direction} using JSON codec failed: {source}")]
     Json {
         /// Underlying JSON error reported by the serialization facade.
-        #[source]
-        source: SerializationError,
-        /// Direction of the codec operation.
-        direction: Direction,
-    },
-    /// A binary codec failure using the first-party facade.
-    #[error("{direction} using binary codec failed: {source}")]
-    Binary {
-        /// Underlying error reported by the serialization facade.
         #[source]
         source: SerializationError,
         /// Direction of the codec operation.
@@ -123,8 +254,12 @@ pub enum Error {
 }
 
 impl Error {
-    fn from_bincode(source: bincode::Error, profile: BincodeProfile, direction: Direction) -> Self {
-        Error::Bincode {
+    fn from_binary(
+        source: SerializationError,
+        profile: BinaryProfile,
+        direction: Direction,
+    ) -> Self {
+        Error::Binary {
             source,
             profile,
             direction,
@@ -133,10 +268,6 @@ impl Error {
 
     fn from_json(source: SerializationError, direction: Direction) -> Self {
         Error::Json { source, direction }
-    }
-
-    fn from_binary(source: SerializationError, direction: Direction) -> Self {
-        Error::Binary { source, direction }
     }
 
     fn from_utf8(source: FromUtf8Error, codec: &'static str, direction: Direction) -> Self {
@@ -149,150 +280,6 @@ impl Error {
 
     fn unsupported_text(codec: &'static str, direction: Direction) -> Self {
         Error::UnsupportedTextCodec { codec, direction }
-    }
-}
-
-/// Selects the codec implementation to use for serialization or deserialization.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Codec {
-    /// Bincode serialization using one of the configured profiles.
-    Bincode(BincodeProfile),
-    /// JSON serialization using the canonical settings.
-    Json(JsonProfile),
-    /// Binary serialization using the canonical settings.
-    Binary(BinaryProfile),
-}
-
-/// Bincode profiles made available to the workspace.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BincodeProfile {
-    /// Canonical transaction serialization profile.
-    Transaction,
-    /// Gossip relay persistence profile.
-    Gossip,
-    /// Storage manifest persistence profile.
-    StorageManifest,
-}
-
-impl fmt::Display for BincodeProfile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl BincodeProfile {
-    const fn as_str(self) -> &'static str {
-        match self {
-            BincodeProfile::Transaction => "transaction",
-            BincodeProfile::Gossip => "gossip",
-            BincodeProfile::StorageManifest => "storage_manifest",
-        }
-    }
-}
-
-/// Canonical JSON configuration identifiers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JsonProfile {
-    /// Default JSON serializer from the first-party facade.
-    Canonical,
-}
-
-impl fmt::Display for JsonProfile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            JsonProfile::Canonical => write!(f, "canonical"),
-        }
-    }
-}
-
-/// Canonical binary configuration identifiers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BinaryProfile {
-    /// Default first-party binary serializer.
-    Canonical,
-}
-
-impl fmt::Display for BinaryProfile {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BinaryProfile::Canonical => write!(f, "canonical"),
-        }
-    }
-}
-
-/// Alias for the canonical bincode configuration type used by the project.
-pub type BincodeConfig = bincode::config::WithOtherEndian<
-    bincode::config::WithOtherIntEncoding<bincode::DefaultOptions, bincode::config::FixintEncoding>,
-    bincode::config::LittleEndian,
->;
-
-static CANONICAL_BINCODE: LazyLock<BincodeConfig> = LazyLock::new(|| {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_little_endian()
-});
-
-fn canonical_bincode() -> BincodeConfig {
-    *CANONICAL_BINCODE
-}
-
-impl BincodeProfile {
-    /// Fetch the configured bincode options for this profile.
-    #[must_use]
-    pub fn config(self) -> BincodeConfig {
-        match self {
-            BincodeProfile::Transaction => canonical_bincode(),
-            BincodeProfile::Gossip => canonical_bincode(),
-            BincodeProfile::StorageManifest => canonical_bincode(),
-        }
-    }
-}
-
-impl Codec {
-    fn codec_label(self) -> &'static str {
-        match self {
-            Codec::Bincode(_) => "bincode",
-            Codec::Json(_) => "json",
-            Codec::Binary(_) => "binary",
-        }
-    }
-
-    #[cfg(feature = "telemetry")]
-    fn profile_label(self) -> Option<&'static str> {
-        match self {
-            Codec::Bincode(profile) => Some(profile.as_str()),
-            _ => None,
-        }
-    }
-
-    fn encode<T: Serialize>(self, value: &T) -> Result<Vec<u8>> {
-        match self {
-            Codec::Bincode(profile) => profile
-                .config()
-                .serialize(value)
-                .map_err(|err| Error::from_bincode(err, profile, Direction::Serialize)),
-            Codec::Json(JsonProfile::Canonical) => {
-                json::to_vec(value).map_err(|err| Error::from_json(err, Direction::Serialize))
-            }
-            Codec::Binary(BinaryProfile::Canonical) => {
-                binary::encode(value).map_err(|err| Error::from_binary(err, Direction::Serialize))
-            }
-        }
-    }
-
-    fn decode<T: DeserializeOwned>(self, bytes: &[u8]) -> Result<T> {
-        match self {
-            Codec::Bincode(profile) => profile
-                .config()
-                .deserialize(bytes)
-                .map_err(|err| Error::from_bincode(err, profile, Direction::Deserialize)),
-            Codec::Json(JsonProfile::Canonical) => {
-                json::from_slice(bytes).map_err(|err| Error::from_json(err, Direction::Deserialize))
-            }
-            Codec::Binary(BinaryProfile::Canonical) => {
-                binary::decode(bytes).map_err(|err| Error::from_binary(err, Direction::Deserialize))
-            }
-        }
     }
 }
 
@@ -346,7 +333,7 @@ pub fn serialize_to_string<T: Serialize>(codec: Codec, value: &T) -> Result<Stri
                 }
             })
         }
-        Codec::Bincode(_) | Codec::Binary(_) => Err(Error::unsupported_text(
+        Codec::Binary(_) => Err(Error::unsupported_text(
             codec.codec_label(),
             Direction::Serialize,
         )),
@@ -371,6 +358,19 @@ pub trait CodecMessage: Sized {
     fn encode_with(&self, codec: Codec) -> Result<Vec<u8>>;
     /// Deserialize the message from the supplied codec profile.
     fn decode_with(bytes: &[u8], codec: Codec) -> Result<Self>;
+}
+
+impl<T> CodecMessage for T
+where
+    T: Serialize + DeserializeOwned,
+{
+    fn encode_with(&self, codec: Codec) -> Result<Vec<u8>> {
+        serialize(codec, self)
+    }
+
+    fn decode_with(bytes: &[u8], codec: Codec) -> Result<Self> {
+        deserialize(codec, bytes)
+    }
 }
 
 #[cfg(feature = "telemetry")]
@@ -429,23 +429,9 @@ fn record_failure(codec: Codec, direction: Direction) {
     }
 }
 
-impl<T> CodecMessage for T
-where
-    T: Serialize + DeserializeOwned,
-{
-    fn encode_with(&self, codec: Codec) -> Result<Vec<u8>> {
-        serialize(codec, self)
-    }
-
-    fn decode_with(bytes: &[u8], codec: Codec) -> Result<Self> {
-        deserialize(codec, bytes)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bincode::Options;
     use foundation_serialization::{Deserialize, Serialize};
 
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -454,15 +440,15 @@ mod tests {
     }
 
     #[test]
-    fn bincode_roundtrip_uses_named_profile() {
+    fn binary_roundtrip_uses_named_profile() {
         let sample = Sample { value: 42 };
-        let bytes = serialize(Codec::Bincode(BincodeProfile::Transaction), &sample).unwrap();
+        let bytes = serialize(Codec::Binary(BinaryProfile::Transaction), &sample).unwrap();
         let via_config = profiles::transaction::config()
             .serialize(&sample)
             .expect("transaction profile");
         assert_eq!(bytes, via_config);
         let decoded: Sample =
-            deserialize(Codec::Bincode(BincodeProfile::Transaction), &bytes).unwrap();
+            deserialize(Codec::Binary(BinaryProfile::Transaction), &bytes).unwrap();
         assert_eq!(decoded, sample);
     }
 
@@ -497,11 +483,11 @@ mod tests {
     #[test]
     fn corrupted_payloads_return_errors() {
         let sample = Sample { value: 13 };
-        let mut bytes = serialize(Codec::Bincode(BincodeProfile::Transaction), &sample).unwrap();
+        let mut bytes = serialize(Codec::Binary(BinaryProfile::Transaction), &sample).unwrap();
         bytes.pop();
         let err =
-            deserialize::<Sample>(Codec::Bincode(BincodeProfile::Transaction), &bytes).unwrap_err();
-        assert!(matches!(err, Error::Bincode { .. }));
+            deserialize::<Sample>(Codec::Binary(BinaryProfile::Transaction), &bytes).unwrap_err();
+        assert!(matches!(err, Error::Binary { .. }));
 
         let json_err =
             deserialize::<Sample>(Codec::Json(JsonProfile::Canonical), b"not json").unwrap_err();
@@ -517,11 +503,7 @@ mod tests {
     fn unsupported_text_codec_errors() {
         let sample = Sample { value: 21 };
         let err =
-            serialize_to_string(Codec::Bincode(BincodeProfile::Transaction), &sample).unwrap_err();
-        assert!(matches!(err, Error::UnsupportedTextCodec { .. }));
-
-        let err =
-            serialize_to_string(Codec::Binary(BinaryProfile::Canonical), &sample).unwrap_err();
+            serialize_to_string(Codec::Binary(BinaryProfile::Transaction), &sample).unwrap_err();
         assert!(matches!(err, Error::UnsupportedTextCodec { .. }));
     }
 }

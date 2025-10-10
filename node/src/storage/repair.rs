@@ -6,6 +6,7 @@ use crate::storage::settings;
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
+use crate::util::binary_codec;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
@@ -72,7 +73,7 @@ fn manifest_algorithms(db: &SimpleDb, manifest_hex: &str) -> (String, String) {
     let defaults = settings::algorithms();
     let key = format!("manifest/{manifest_hex}");
     if let Some(bytes) = db.get(&key) {
-        if let Ok(manifest) = bincode::deserialize::<ObjectManifest>(&bytes) {
+        if let Ok(manifest) = binary_codec::deserialize::<ObjectManifest>(&bytes) {
             let erasure = manifest
                 .erasure_alg
                 .clone()
@@ -380,7 +381,7 @@ pub fn run_once(
                 continue;
             }
         };
-        let manifest: ObjectManifest = match bincode::deserialize(&bytes) {
+        let manifest: ObjectManifest = match binary_codec::deserialize(&bytes) {
             Ok(m) => m,
             Err(err) => {
                 summary.failures += 1;
@@ -881,7 +882,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), String> {
 
     let mut copy = manifest.clone();
     copy.blake3 = [0u8; 32];
-    let serialized = bincode::serialize(&copy).map_err(|e| e.to_string())?;
+    let serialized = binary_codec::serialize(&copy).map_err(|e| e.to_string())?;
     let mut hasher = Hasher::new();
     hasher.update(&serialized);
     let computed = hasher.finalize();
@@ -894,7 +895,7 @@ fn validate_manifest(manifest: &ObjectManifest) -> Result<(), String> {
 fn load_failure_record(db: &SimpleDb, key: &str) -> Option<FailureRecord> {
     let store_key = format!("{FAILURE_PREFIX}{key}");
     db.get(&store_key)
-        .and_then(|bytes| bincode::deserialize(&bytes).ok())
+        .and_then(|bytes| binary_codec::deserialize(&bytes).ok())
 }
 
 fn update_failure_record(db: &mut SimpleDb, key: &str, success: bool) {
@@ -910,7 +911,7 @@ fn update_failure_record(db: &mut SimpleDb, key: &str, success: bool) {
     let backoff = FAILURE_BACKOFF_BASE_SECS.saturating_mul(multiplier);
     let capped = backoff.min(FAILURE_BACKOFF_CAP_SECS);
     record.next_retry_at = current_timestamp().saturating_add(capped as i64);
-    if let Ok(bytes) = bincode::serialize(&record) {
+    if let Ok(bytes) = binary_codec::serialize(&record) {
         let _ = db.try_insert(&store_key, bytes);
     }
 }

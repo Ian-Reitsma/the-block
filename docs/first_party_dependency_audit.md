@@ -1,6 +1,6 @@
 # First-Party Dependency Migration Audit
 
-_Last updated: 2025-10-11 14:05:00Z_
+_Last updated: 2025-10-10 18:30:00Z_
 
 This document tracks remaining third-party serialization and math/parallelism
 usage across the production-critical surfaces requested in the umbrella
@@ -68,18 +68,20 @@ third-party codecs:
   serialization for metrics payloads.
 - `node/src/identity/*`, `node/src/le_portal.rs`, `node/src/gossip/*`, and
   transaction/vm modules retain serde derives for persisted state.
-- Integration tests under `node/tests/` perform direct `bincode::serialize`
-  and `bincode::deserialize` calls to construct fixtures. These will need to be
-  swapped to the canonical profiles exposed by `crates/codec` when the facade is
-  widened.
+- Integration fixtures now construct payloads through
+  `crate::util::binary_codec`, keeping the shared helpers in one place and
+  routing encode/decode operations through the facade-backed metrics hooks.
 
-### Tooling & Support Crate Migrations (2025-10-09)
+### Tooling & Support Crate Migrations (2025-10-10)
 
 - ✅ `crates/jurisdiction` now signs, fetches, and diffs policy packs via
   `foundation_serialization::json` and the in-house HTTP client, eliminating the
   `ureq` dependency entirely.
 - ✅ Governance webhook notifications dispatch through `httpd::BlockingClient`
   so telemetry alerts ride first-party HTTP primitives instead of `ureq`.
+- ✅ `tb-sim`'s dependency-fault harness defaults to the first-party binary codec;
+  the CLI no longer advertises `--codec bincode`, keeping harness telemetry in
+  sync with the renamed binary profiles.
 - ✅ Lightweight probes (`tools/probe.rs`, `tools/partition_probe.rs`) fetch
   metrics over raw `TcpStream` requests, dropping their previous reliance on the
   `ureq` crate.
@@ -108,16 +110,25 @@ third-party codecs:
 - ✅ `tools/analytics_audit` decodes read acknowledgement batches with the
   facade’s binary helpers, ensuring telemetry audits stay on first-party
   codecs while retaining the Merkle validation workflow.
+- ✅ `tools/gov_graph` now reads proposal DAG entries via
+  `foundation_serialization::binary::decode`, removing the final `bincode`
+  usage from the governance DOT export helper.
+- ✅ Peer metrics exports, support-bundle smoke tests, and light-client log
+  uploads route through the new `foundation_archive::{tar, gzip}` helpers,
+  which now expose streaming encode/decode paths so large bundles avoid
+  buffering entire payloads while staying compatible with system tooling.
+- ✅ Release installers emit `.tar.gz` bundles using the same
+  `foundation_archive` builders, removing the legacy `zip` dependency from the
+  packaging pipeline and keeping signatures deterministic.
 - ✅ CLI binaries, explorer tooling, log indexer utilities, and runtime RPC
   clients now source `#[serde(default)]`/`skip_serializing_if` behaviour from
   `foundation_serialization::{defaults, skip}`. This keeps workspace derives on
   the facade without referencing standard-library helpers directly.
 
 Remaining tasks before we can flip `FIRST_PARTY_ONLY=1` include replacing the
-residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`), finishing
-the bincode retirement plan for integration fixtures, and landing the last
-telemetry histogram adapters in `runtime::telemetry` so tooling can model
-quantiles without local patches.
+residual `serde_json` usage in deep docs/tooling (`docs/*`, `tools/`) and
+landing the last telemetry histogram adapters in `runtime::telemetry` so
+tooling can model quantiles without local patches.
 
 ## 2. Third-Party Math, FFT, and Parallelism Inventory
 
@@ -135,9 +146,10 @@ quantiles without local patches.
 - Governance standalone crate mirrors the node governance modules, so any
   migration must update both `node/` and `governance/` to keep shared logic in
   sync.
-- `crates/codec` and `crates/crypto_suite` currently wrap canonical bincode
-  configurations; future binary adapters should be added here to preserve API
-  parity while removing the external `bincode` dependency.
+- `crates/codec` and `crates/crypto_suite` now forward their transaction
+  profiles to the first-party binary facade. Keep the panic-on-use guard for
+  `FIRST_PARTY_ONLY=1` until downstream crates migrate to the new
+  `BinaryProfile` aliases.
 
 ## 3. Next Steps Toward Full Migration
 
@@ -193,13 +205,11 @@ delivery windows unless otherwise specified.
 | `subtle 2` | Constant-time comparisons in the wallet/identity stacks | Inline constant-time primitives inside `crypto_suite` (`ct_equal`, `ct_assign`) and drop the dependency once verification coverage lands. | Crypto Suite — W43 |
 | `time 0.3` | Timestamp formatting inside governance snapshots and CLI UX | Introduce `foundation_time` facade with RFC3339/chrono-format utilities backed by our POSIX shim; keep third-party crate gated until feature parity is reached. | Runtime Platform — W46 |
 | `icu_normalizer 2` | Unicode normalization for DID inputs and governance text | Prototype a cut-down `foundation_unicode` normalizer (NFKC + ASCII fast-path) and switch both node and CLI validation to it. | Governance UX — W47 |
-| `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | Land the in-house `foundation_archive` crate (tarball writer + DEFLATE) with deterministic ordering and streaming support, then flip the stubs. | Ops Tooling — W45 |
+| `tar 0.4`, `flate2 1` | Snapshot/export packaging in support bundles and log archival | **Removed.** Replaced by the in-house `foundation_archive` crate (deterministic TAR writer + uncompressed DEFLATE) powering peer metrics exports, support bundles, and light-client log uploads. | Ops Tooling — W45 |
 | `colored 2` | CLI colour output for governance/net tools | Replace with a lightweight `foundation_tui::color` helper that wraps ANSI escapes with feature gating for TTY detection. | CLI Team — W43 |
 | `pqcrypto-dilithium` (optional) | PQ signature experiments behind the `quantum` feature | Mirror Dilithium inside `crypto_suite::pq` (or stub to panic) and gate the external crate behind `FIRST_PARTY_ONLY=0` until the in-house implementation lands. | Crypto Suite — W48 |
 | `pprof 0.13` | Flamegraph dumps for profiling harnesses | Offer a `foundation_profiler` crate that emits the same file format using our sampling hooks; stub out the external crate when profiling is disabled. | Performance Guild — W46 |
 | `bytes 1` | Buffer utilities in networking/tests (`node/src/net/*`, benches) | `concurrency::bytes::{Bytes, BytesMut}` wrappers now back all gossip payloads and QUIC cert handling; remaining dependency is indirect via `combine` and will be stubbed next. | Networking — W44 |
-| `httparse 1` | Minimal HTTP parsing for inbound probes | Fold the parser into `httpd` (already exporting router primitives) and replace the dependency with the new module. | HTTP Platform — W44 |
-| `xorfilter-rs 0.5` | Probabilistic rate-limit filter in networking | Port xor filter implementation into `concurrency::filters::xor8` with deterministic seeding and dedicated tests, then gate the external crate. | Networking — W45 |
 
 The dependency guard in `node/Cargo.toml` should be updated alongside each
 replacement to error out when the third-party crate is reintroduced. Tracking
@@ -222,3 +232,7 @@ Dependency Migration" milestone) to coordinate the rollout.
 - ✅ Replaced the external `hex` crate with `crypto_suite::hex` helpers, updating
   CLI, node, explorer, wallet, and tooling call sites to the first-party
   encoder/decoder and removing the dependency from workspace manifests.
+- ✅ Migrated the gateway fuzz harness onto the first-party HTTP parser and
+  dropped the `httparse` dependency from the workspace.
+- ✅ Implemented `concurrency::filters::xor8::Xor8`, rewired the rate-limit
+  filter, and removed the `xorfilter-rs` crate.

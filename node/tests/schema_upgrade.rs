@@ -1,6 +1,7 @@
 #![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use crypto_suite::hashing::blake3;
+use foundation_serialization::binary;
 use std::{collections::HashMap, fs};
 use the_block::transaction::{TxSignature, TxVersion};
 use the_block::{
@@ -124,9 +125,9 @@ fn migrate_v3_recomputes_supply() {
         recent_timestamps: Vec::new(),
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
-    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+    map.insert("chain".to_string(), binary::encode(&disk).unwrap());
     let db_path = dir.path().join("db");
-    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+    fs::write(db_path, binary::encode(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     let blk = &bc.chain[0];
@@ -167,9 +168,9 @@ fn migrate_v6_adds_recent_timestamps() {
         recent_timestamps: Vec::new(),
     };
     let mut map: HashMap<String, Vec<u8>> = HashMap::new();
-    map.insert("chain".to_string(), bincode::serialize(&disk).unwrap());
+    map.insert("chain".to_string(), binary::encode(&disk).unwrap());
     let db_path = dir.path().join("db");
-    fs::write(db_path, bincode::serialize(&map).unwrap()).unwrap();
+    fs::write(db_path, binary::encode(&map).unwrap()).unwrap();
 
     let bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     assert_eq!(bc.schema_version(), 7);

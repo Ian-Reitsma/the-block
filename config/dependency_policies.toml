@@ -13,7 +13,6 @@ strategic = [
 ]
 replaceable = [
   "serde",
-  "bincode",
 ]
 forbidden = [
 ]

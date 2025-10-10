@@ -1,4 +1,5 @@
-use std::{env, fs, collections::VecDeque};
+use std::{collections::VecDeque, env, fs};
+use foundation_serialization::binary;
 use the_block::util::versioned_blob::{decode_blob, encode_blob, MAGIC_PRICE_BOARD};
 
 #[derive(serde::Deserialize)]
@@ -35,7 +36,7 @@ fn main() {
         eprintln!("unsupported version {ver}");
         std::process::exit(1);
     }
-    let v2: V2 = bincode::deserialize(payload).expect("deserialize v2");
+    let v2: V2 = binary::decode(payload).expect("deserialize v2");
     let conv = |v: VecDeque<V2Entry>| -> VecDeque<V3Entry> {
         v.into_iter()
             .map(|e| V3Entry {
@@ -45,7 +46,7 @@ fn main() {
             .collect()
     };
     let v3 = V3 { window: v2.window, consumer: conv(v2.consumer), industrial: conv(v2.industrial) };
-    let payload_new = bincode::serialize(&v3).expect("serialize v3");
+    let payload_new = binary::encode(&v3).expect("serialize v3");
     let blob = encode_blob(MAGIC_PRICE_BOARD, 3, &payload_new).expect("encode blob");
     fs::write(&path, blob).expect("write migrated board");
 }

@@ -29,7 +29,6 @@ csv = "1"
 serde = { version = "1", features = ["derive"] }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 light-client = { path = "../crates/light-client" }
-bincode = "1.3"
 dex = { path = "../dex" }
 the_block = { path = "../node" }
 ledger = { path = "../ledger" }

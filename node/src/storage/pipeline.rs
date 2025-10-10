@@ -14,6 +14,7 @@ use crate::telemetry::{
     SUBSIDY_BYTES_TOTAL,
 };
 use crate::transaction::BlobTx;
+use crate::util::binary_codec;
 use codec::profiles;
 use coding::{Compressor, EncryptError, Encryptor};
 use crypto_suite::hashing::blake3::Hasher;
@@ -441,7 +442,7 @@ impl StoragePipeline {
         let mut profile = self
             .db
             .get(&key)
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| binary_codec::deserialize(&b).ok())
             .unwrap_or_else(ProviderProfile::new);
         profile.ensure_defaults();
         profile
@@ -449,7 +450,7 @@ impl StoragePipeline {
 
     fn save_profile(&mut self, provider: &str, profile: &ProviderProfile) {
         let key = Self::profile_key(provider);
-        if let Ok(bytes) = bincode::serialize(profile) {
+        if let Ok(bytes) = binary_codec::serialize(profile) {
             let _ = self.db.try_insert(&key, bytes);
         }
     }
@@ -458,7 +459,7 @@ impl StoragePipeline {
         let key = Self::profile_key(provider);
         self.db
             .get(&key)
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| binary_codec::deserialize(&b).ok())
     }
 
     pub fn provider_profile_snapshots(&self) -> Vec<ProviderProfileSnapshot> {
@@ -1098,7 +1099,7 @@ impl StoragePipeline {
         let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
         self.db
             .get(&key)
-            .and_then(|b| bincode::deserialize(&b).ok())
+            .and_then(|b| binary_codec::deserialize(&b).ok())
     }
 
     pub fn db_mut(&mut self) -> &mut SimpleDb {

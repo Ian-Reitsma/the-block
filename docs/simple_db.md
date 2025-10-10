@@ -11,7 +11,7 @@ external dependencies.
 
 ## 1. Column-Family Snapshots
 
-Each column family (CF) is serialized with `bincode` and written to disk as a
+Each column family (CF) is serialized with the shared binary facade and written to disk as a
 single file named `<base64(cf)>.bin`, where the identifier is encoded with
 `URL_SAFE_NO_PAD` base64. Examples:
 

@@ -19,13 +19,14 @@ pub enum WireMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::util::binary_codec;
 
     #[test]
     fn wire_message_roundtrip() {
         let msg = WireMessage::TxBroadcast { tx: vec![1, 2, 3] };
         let bytes =
-            bincode::serialize(&msg).unwrap_or_else(|e| panic!("serialize wire message: {e}"));
-        let decoded: WireMessage = bincode::deserialize(&bytes)
+            binary_codec::serialize(&msg).unwrap_or_else(|e| panic!("serialize wire message: {e}"));
+        let decoded: WireMessage = binary_codec::deserialize(&bytes)
             .unwrap_or_else(|e| panic!("deserialize wire message: {e}"));
         assert_eq!(msg, decoded);
     }
